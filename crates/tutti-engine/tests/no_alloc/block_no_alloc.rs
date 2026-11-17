@@ -216,9 +216,17 @@ fn a_delayed_render_and_the_render_thread_fault_records_are_allocation_free() {
         block.render_delayed_with(&mut out, Some(std::time::Duration::ZERO), |x| x);
     }
     let disconnected = tutti_engine::StreamFaults::new();
-    disconnected.record(tutti_engine::BackendErrorKind::DeviceGone, &"unplugged");
+    disconnected.record(
+        tutti_engine::BackendErrorKind::DeviceGone,
+        &"unplugged",
+        std::time::Instant::now(),
+    );
     let backend = tutti_engine::StreamFaults::new();
-    backend.record(tutti_engine::BackendErrorKind::Other, &"xrun");
+    backend.record(
+        tutti_engine::BackendErrorKind::Other,
+        &"xrun",
+        std::time::Instant::now(),
+    );
     let clean = tutti_engine::StreamFaults::new();
     clean.record_overrun("warm");
 

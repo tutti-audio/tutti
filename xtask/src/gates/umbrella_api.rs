@@ -14,8 +14,7 @@
 //! turn; each is *covered* when `lib.rs` exports:
 //!
 //! - the type at its path (a `pub use` list covers each name in it, not its
-//!   alias; a crate's `Error` is not covered by another crate's, nor by the
-//!   same name at another module);
+//!   alias; a crate's `Error` is not covered by another crate's);
 //! - a module of its crate by name, which covers every path that starts with it;
 //! - the type from a crate that re-exports it: the crate's text holds a `pub use`
 //!   line for the name and no definition at that path, and the type is where the
@@ -24,6 +23,12 @@
 //!   several, or none, are listed as ambiguous and cover nothing. A glob
 //!   re-export appears in the text as one `pub use` line per item, at the path
 //!   `lib.rs` names it at.
+//!
+//! A type a signature names at a path in no public module of its crate and that the
+//! crate's text does not re-export (the path of a private module) is covered by the umbrella's export of
+//! its name from that crate, when the umbrella exports one type of the crate by that
+//! name. The one false cover left: a private-module type that shares its name with a
+//! different exported type of the same crate counts as that type.
 //!
 //! A final segment is a constant when a `pub const` or `pub static` line of the
 //! texts defines that path, whatever its case; an all-capitals type is a type.
@@ -41,9 +46,7 @@
 //! Not asked for: a private `Sealed` trait, which is unnameable on purpose; a
 //! crate's `Result` alias, which expands to std's `Result` and an error type the
 //! umbrella exports; the rows of [`TESTING`], items a crate keeps behind its
-//! `testing` feature, which the all-features text still shows; and the rows of
-//! [`OWNER_PRIVATE`], `pub` items in a private module of their crate, which no
-//! path reaches.
+//! `testing` feature, which the all-features text still shows.
 
 use super::use_tree::{is_word, uses};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -54,50 +57,59 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
     (
+        "tutti_transport",
+        "Transport",
+        "the engine's playback transport; an app drives it through `Session`",
+    ),
+    (
+        "tutti_graph",
+        "Editor",
+        "the graph editor; the session wraps it",
+    ),
+    (
         "tutti_engine",
         "StreamDriver",
-        "a custom device backend's driver",
+        "a device backend's driver; the session runs it",
     ),
-    ("tutti_transport", "Transport", "the engine's transport"),
     (
-        "tutti_transport",
-        "OfflineTransport",
-        "the export render's transport",
+        "tutti_plugin_host",
+        "PluginHandle",
+        "the host's control handle of a plugin; `Plugin` wraps it",
+    ),
+    (
+        "tutti_engine",
+        "HeardTapError",
+        "the payload of session's HeardTapError::Tap, matched through its variants; it shares the name",
     ),
     (
         "tutti_transport",
         "RenderClock",
-        "the export render's clock",
+        "the export render's clock; `ExportClock` wraps it",
+    ),
+    (
+        "tutti_graph",
+        "Executor",
+        "the graph's executor; an app renders through `Session` or `Bounce`",
     ),
     (
         "tutti_transport",
         "OfflineClock",
-        "the export render's clock",
+        "the export render's clock; `ExportClock` wraps it",
     ),
-    ("tutti_graph", "Editor", "the editor the session wraps"),
-    ("tutti_graph", "Topology", "the compiler's view of a graph"),
     (
         "tutti_graph",
-        "GraphInvalid",
-        "the compiler's refusal of a graph",
+        "Topology",
+        "the compiler's view of a graph; the session wraps it",
     ),
-    ("tutti_graph", "CompileError", "the compiler's error"),
-    ("tutti_graph", "VerifyError", "the compiler's error"),
-    ("tutti_graph", "InletNode", "the node behind an inlet"),
-    ("tutti_graph", "InletRing", "the ring behind an inlet"),
-    ("tutti_graph", "ParamMod", "a compiler record"),
-    ("tutti_graph", "ParamRange", "a compiler record"),
-    ("tutti_graph", "TapWriter", "the audio side of a tap"),
-    ("tutti_graph", "Compensation", "a compiler record"),
+    (
+        "tutti_graph",
+        "Compensation",
+        "a compiler record of latency compensation",
+    ),
     (
         "tutti_graph",
         "EventEdge",
         "the compiler's edge; the session's `EventEdge` is another",
-    ),
-    (
-        "tutti_graph",
-        "Edge",
-        "the compiler's edge; the session's `Edge` is another",
     ),
     (
         "tutti_graph",
@@ -110,24 +122,9 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the compiler's port; the session's `OutPort` is another",
     ),
     (
-        "tutti_graph",
-        "Source",
-        "a graph edge's source; the buffers' `Source` is another",
-    ),
-    (
-        "tutti_graph",
-        "Sink",
-        "a graph edge's sink; the buffers' `Sink` is another",
-    ),
-    (
         "tutti_plugin",
         "PluginClient",
-        "the host's client of a served plugin",
-    ),
-    (
-        "tutti_plugin_host",
-        "PluginHandle",
-        "the host's control handle",
+        "the host's client of a served plugin; `Plugin` wraps it",
     ),
     (
         "tutti_midi_protocol",
@@ -156,21 +153,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the compiler's declarations",
     ),
     ("tutti_modulation", "Source", "the compiler's signal source"),
-    (
-        "tutti_cpal",
-        "Error",
-        "the backend's error; the session's `Error` wraps it",
-    ),
-    (
-        "tutti_midi_file",
-        "Error",
-        "the file codec's error; `midi::Error` nests it",
-    ),
-    (
-        "tutti_midi_hardware",
-        "Error",
-        "the hardware error; `midi::Error` nests it",
-    ),
     ("tutti_alsa_ffi", "*", "not a dependency of the umbrella"),
     ("tutti_measure", "*", "not a dependency of the umbrella"),
 ];
@@ -186,25 +168,6 @@ const TESTING: &[(&str, &str)] = &[
     ("tutti_plugin_types", "FakeController"),
     ("tutti_plugin_types", "FakeLoaded"),
     ("tutti_plugin_types", "FakeProcessor"),
-];
-
-/// `(crate, type)` rows that are `pub` in a private module of their crate, so no
-/// path reaches them: the owning crate has to export them first.
-const OWNER_PRIVATE: &[(&str, &str)] = &[
-    ("tutti_nodes", "BrickwallSet"),
-    ("tutti_nodes", "CompressorSet"),
-    ("tutti_nodes", "CrossoverSet"),
-    ("tutti_nodes", "DelaySet"),
-    ("tutti_nodes", "DistortionSet"),
-    ("tutti_nodes", "FdnSet"),
-    ("tutti_nodes", "FreeverbSet"),
-    ("tutti_nodes", "GateSet"),
-    ("tutti_nodes", "HasControl"),
-    ("tutti_nodes", "LadderSet"),
-    ("tutti_nodes", "LimiterSet"),
-    ("tutti_nodes", "ModDelaySet"),
-    ("tutti_nodes", "PhaserSet"),
-    ("tutti_nodes", "SvfSet"),
 ];
 
 /// A type or item a text names: its crate, the modules on its path and its name.
@@ -297,6 +260,14 @@ fn public(line: &str) -> Option<&str> {
         rest = rest[rest.find("] ")? + 2..].trim_start();
     }
     rest.strip_prefix("pub ")
+}
+
+/// The `(crate, modules)` a `pub mod` line of the text declares.
+fn public_module(line: &str) -> Option<(String, Vec<String>)> {
+    let path = public(line)?.strip_prefix("mod ")?.trim();
+    let mut segs = path.split("::").map(str::to_owned);
+    let krate = segs.next()?;
+    krate.starts_with("tutti_").then(|| (krate, segs.collect()))
 }
 
 /// `s` without leading `unsafe`, `const`, `auto`, `async`, `default` and
@@ -425,10 +396,12 @@ struct Covers {
 }
 
 impl Covers {
-    fn new(lib: &str, texts: &[(&str, &str)], consts: &Consts) -> Covers {
+    fn new(lib: &str, texts: &[(&str, &str)], consts: &Consts, named: &BTreeSet<Ty>) -> Covers {
         let mut defined = BTreeSet::new();
         let mut re_exported = BTreeSet::new();
+        let mut public_mods = BTreeSet::new();
         for (_, text) in texts {
+            public_mods.extend(text.lines().filter_map(public_module));
             for item in text.lines().filter_map(Item::read) {
                 defined.extend(item.defines());
                 re_exported.extend(item.re_exports());
@@ -441,7 +414,8 @@ impl Covers {
             decisions: Vec::new(),
             ambiguous: Vec::new(),
         };
-        for e in exports(lib) {
+        let exported = exports(lib);
+        for e in exported.iter().cloned() {
             if e.is_value() {
                 let mut path = e.mods.clone();
                 path.push(e.name.clone());
@@ -480,6 +454,29 @@ impl Covers {
                         "{}: unresolved: no signature of its crate names it",
                         e.show()
                     )),
+                }
+            }
+            if defined.contains(&e)
+                && exported
+                    .iter()
+                    .filter(|x| x.krate == e.krate && x.name == e.name)
+                    .count()
+                    == 1
+            {
+                // A signature names a type at the path it is defined at, which can
+                // be a private module (the text has no `pub mod` for it): that path
+                // is the type the umbrella exports under the name. A path in a
+                // public module, or one the text re-exports, is its own type.
+                for t in named.iter().filter(|t| {
+                    t.krate == e.krate
+                        && t.name == e.name
+                        && **t != e
+                        && !t.mods.is_empty()
+                        && !re_exported.contains(*t)
+                        && !public_mods.contains(&(t.krate.clone(), t.mods.clone()))
+                }) {
+                    c.decisions.push(format!("{} -> {}", t.show(), e.show()));
+                    c.foreign.insert(t.clone());
                 }
             }
             c.items.insert(e);
@@ -553,7 +550,7 @@ fn edges(texts: &[(&str, &str)], consts: &Consts) -> Edges {
 
 fn skip(t: &Ty) -> bool {
     let id = (t.krate.as_str(), t.name.as_str());
-    EXCLUDED.contains(&id.1) || TESTING.contains(&id) || OWNER_PRIVATE.contains(&id)
+    EXCLUDED.contains(&id.1) || TESTING.contains(&id)
 }
 
 fn internal_id(krate: &str, name: &str) -> bool {
@@ -609,15 +606,13 @@ fn list(m: BTreeMap<Ty, BTreeSet<String>>) -> Vec<String> {
 }
 
 /// The rows of the tables that no type in `named` matches, for the crates in
-/// `loaded` (a row of a crate with no text cannot be judged): `INTERNAL`,
-/// `TESTING` and `OWNER_PRIVATE` rows by crate and name, `*` for any name, and
-/// each excluded name.
+/// `loaded` (a row of a crate with no text cannot be judged): `INTERNAL`
+/// and `TESTING` rows by crate and name, `*` for any name, and each excluded name.
 fn stale_rows(
     named: &BTreeSet<Ty>,
     loaded: &BTreeSet<&str>,
     internal: &[(&str, &str, &str)],
     testing: &[(&str, &str)],
-    owner_private: &[(&str, &str)],
     excluded: &[&str],
 ) -> Vec<String> {
     let hit = |krate: &str, name: &str| {
@@ -628,8 +623,7 @@ fn stale_rows(
     let rows = internal
         .iter()
         .map(|(c, n, _)| ("INTERNAL", *c, *n))
-        .chain(testing.iter().map(|(c, n)| ("TESTING", *c, *n)))
-        .chain(owner_private.iter().map(|(c, n)| ("OWNER_PRIVATE", *c, *n)));
+        .chain(testing.iter().map(|(c, n)| ("TESTING", *c, *n)));
     let mut out: Vec<String> = rows
         .filter(|(_, krate, name)| loaded.contains(krate) && !hit(krate, name))
         .map(|(label, krate, name)| format!("{label} {krate}::{name}"))
@@ -646,7 +640,8 @@ fn stale_rows(
 /// and the seeds ranked by how many each pulls in.
 fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     let consts = consts(texts);
-    let covers = Covers::new(lib, texts, &consts);
+    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t, &consts)).collect();
+    let covers = Covers::new(lib, texts, &consts, &named);
     let edges = edges(texts, &consts);
     let loaded: BTreeSet<&str> = texts.iter().map(|(c, _)| *c).collect();
     let mut a = Analysis::default();
@@ -692,10 +687,9 @@ fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     a.leaks = list(leaks);
     a.wanted.sort();
     a.wanted.dedup();
-    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t, &consts)).collect();
     a.decisions = covers.decisions;
     a.ambiguous = covers.ambiguous;
-    a.stale = stale_rows(&named, &loaded, INTERNAL, TESTING, OWNER_PRIVATE, EXCLUDED);
+    a.stale = stale_rows(&named, &loaded, INTERNAL, TESTING, EXCLUDED);
     a
 }
 
@@ -816,14 +810,13 @@ pub use tutti_nodes::SvfType;
     }
 
     #[test]
-    fn an_exported_type_covers_its_path_and_no_other_module_s_namesake() {
+    fn an_exported_type_covers_every_path_of_its_name_in_its_crate_and_no_other_crate_s() {
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Node\n\
                    pub fn tutti_graph::Node::b(&self) -> tutti_graph::deep::Node\n";
-        assert_eq!(
-            missing(api),
-            ["tutti_graph::deep::Node <- tutti_graph::Node"]
-        );
+        assert_eq!(missing(api), none());
+        let api = format!("{api}pub fn tutti_graph::Node::c(&self) -> tutti_nodes::Node\n");
+        assert_eq!(missing(&api), ["tutti_nodes::Node <- tutti_graph::Node"]);
     }
 
     #[test]
@@ -938,8 +931,8 @@ pub use tutti_nodes::SvfType;
 
     #[test]
     fn a_definition_with_a_qualifier_is_a_definition() {
-        // `Raw` is defined at the exported path, so `pub use` re-exports nothing
-        // else under that name and `other::Raw` stays uncovered.
+        // `Raw` is defined at the exported path, so the name is the umbrella's and
+        // `other::Raw`, the same name in the crate, is covered by it.
         for def in [
             "pub unsafe trait tutti_graph::Raw",
             "pub auto trait tutti_graph::Raw",
@@ -949,11 +942,7 @@ pub use tutti_nodes::SvfType;
                  pub fn tutti_graph::Node::a(&self) -> tutti_graph::other::Raw\n"
             );
             let lib = "pub use tutti_graph::{Node, Raw};\n";
-            assert_eq!(
-                run_in(lib, &api).missing,
-                ["tutti_graph::other::Raw <- tutti_graph::Node"],
-                "{def}"
-            );
+            assert_eq!(run_in(lib, &api).missing, none(), "{def}");
         }
     }
 
@@ -979,12 +968,66 @@ pub use tutti_nodes::SvfType;
     }
 
     #[test]
+    fn a_type_named_at_its_private_module_is_the_type_the_umbrella_exports_by_name() {
+        let texts = [
+            (
+                "tutti_graph",
+                "pub struct tutti_graph::Node\n\
+                 pub fn tutti_graph::Node::a(&self, tutti_types::value::samples::Samples)\n",
+            ),
+            (
+                "tutti_types",
+                "pub struct tutti_types::Samples(pub usize)\n",
+            ),
+        ];
+        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        assert_eq!(analyze(&texts, lib).missing, none());
+        let lib = "pub use tutti_graph::Node;\n";
+        assert_eq!(
+            analyze(&texts, lib).missing,
+            ["tutti_types::value::samples::Samples <- tutti_graph::Node"]
+        );
+    }
+
+    #[test]
+    fn a_private_path_is_not_aliased_when_the_name_is_exported_twice_or_the_path_is_published() {
+        let graph = "pub struct tutti_graph::Node\n\
+                     pub fn tutti_graph::Node::a(&self, tutti_types::hidden::Samples)\n";
+        let covered = |types: &'static str, lib: &str| {
+            analyze(&[("tutti_graph", graph), ("tutti_types", types)], lib).missing
+        };
+        let one = "pub struct tutti_types::Samples(pub usize)\n";
+        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        assert_eq!(covered(one, lib), none());
+        // Two exports of the name leave the private path unresolved.
+        let two = "pub struct tutti_types::Samples(pub usize)\n\
+                   pub struct tutti_types::other::Samples(pub usize)\n";
+        let lib2 = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n\
+                    pub use tutti_types::other::Samples as OtherSamples;\n";
+        assert_eq!(
+            covered(two, lib2),
+            ["tutti_types::hidden::Samples <- tutti_graph::Node"]
+        );
+        // A path in a public module, or with its own `pub use`, is its own type.
+        for own in [
+            "pub mod tutti_types::hidden\npub struct tutti_types::hidden::Samples(pub usize)\n",
+            "pub use tutti_types::hidden::Samples\n",
+        ] {
+            let text: &'static str = Box::leak(format!("{one}{own}").into_boxed_str());
+            assert_eq!(
+                covered(text, lib),
+                ["tutti_types::hidden::Samples <- tutti_graph::Node"],
+                "{own}"
+            );
+        }
+    }
+
+    #[test]
     fn sealed_result_and_the_excluded_rows_are_not_asked_for() {
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Result<()>\n\
                    pub trait tutti_graph::Node: tutti_graph::private::Sealed\n\
-                   pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n\
-                   pub fn tutti_graph::Node::c(&self, tutti_nodes::SvfSet)\n";
+                   pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n";
         assert_eq!(missing(api), none());
     }
 
@@ -1138,7 +1181,6 @@ pub use tutti_nodes::SvfType;
                 ("tutti_c", "Elsewhere", "no text for its crate"),
             ],
             &[("tutti_a", "Seen"), ("tutti_a", "Renamed")],
-            &[("tutti_a", "Hidden")],
             &["Seen", "Result"],
         );
         assert_eq!(
@@ -1147,7 +1189,6 @@ pub use tutti_nodes::SvfType;
                 "INTERNAL tutti_a::Gone",
                 "INTERNAL tutti_b::*",
                 "TESTING tutti_a::Renamed",
-                "OWNER_PRIVATE tutti_a::Hidden",
                 "EXCLUDED Result",
             ]
         );

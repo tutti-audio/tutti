@@ -69,7 +69,7 @@ pub trait Curve: Send + Sync {
     /// state something writes after construction (a live-edited trajectory)
     /// returns `Some` of a frozen copy, and one that wraps
     /// another curve forwards the question to it.
-    fn frozen(&self) -> Option<std::sync::Arc<dyn Curve>> {
+    fn frozen(&self) -> Option<alloc::sync::Arc<dyn Curve>> {
         None
     }
 

@@ -17,10 +17,9 @@
 //! line is read before any window or plugin work. A missing plugin is a panic
 //! in the case, never a skip.
 //!
-//! `AuEditor` asks the OS whether it is on the main thread (`pthread_main_np`)
-//! on `open` and `close`, so no token has to be armed here: running on the
-//! process main thread is what makes the OS check pass, and any call that
-//! strays off it is refused or skipped by the editor itself.
+//! `AuEditor`'s entries take a `MainThreadMarker`, which the support's
+//! `on_main()` makes with `MainThreadMarker::new`: running on the process main
+//! thread is what makes it `Some`.
 //!
 //! ## Running
 //!
@@ -127,6 +126,7 @@ fn cases() -> Vec<(&'static str, fn())> {
         repeated_open_close_cycles_stay_balanced,
         an_au_without_a_cocoa_view_is_refused_cleanly,
         dropping_without_closing_is_safe,
+        dropping_off_the_main_thread_leaks_and_counts_the_view,
         two_editors_on_one_unit_are_independent,
     )
 }

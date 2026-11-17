@@ -1,10 +1,11 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
 //! Modulation for the tutti engine, as a **pure compiler**.
 //! A host declares sources, routes and targets; [`compile()`] turns them into one
 //! [`ControlProgram`] per modulated target, a description of each
 //! signal-driven source's node, and the event edges between them. The
-//! `tutti` facade re-exports it as `tutti::modulation` (feature `modulation`).
+//! `tutti` facade re-exports it as `tutti::modulation`.
 //!
 //! ## What is here
 //!
@@ -95,6 +96,8 @@
 //! ## Features
 //!
 //! `default = []`: everything above.
+
+extern crate alloc;
 
 mod compile;
 mod curve;

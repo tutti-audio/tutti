@@ -1,5 +1,7 @@
 use super::*;
 
+use std::time::Instant;
+
 use tutti_buffers::{Interleaved, InterleavedMut, Sink};
 use tutti_engine::{BackendErrorKind, STALL_GRACE};
 
@@ -289,7 +291,8 @@ fn a_disconnect_fails_the_mic_and_a_transient_error_does_not() {
         "a live mic with an empty ring is late, not finished"
     );
 
-    mic.faults().record(BackendErrorKind::Other, &"xrun");
+    mic.faults()
+        .record(BackendErrorKind::Other, &"xrun", Instant::now());
     assert!(mic.faults().is_faulted());
     assert_eq!(
         verdict(&mut mic),
@@ -297,8 +300,11 @@ fn a_disconnect_fails_the_mic_and_a_transient_error_does_not() {
         "a backend error is not a death"
     );
 
-    mic.faults()
-        .record(BackendErrorKind::DeviceGone, &"device not available");
+    mic.faults().record(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     assert_eq!(verdict(&mut mic), Pull::Failed);
 }
 
@@ -319,7 +325,11 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
         .unwrap();
 
     prod.push_interleaved(&[0.5, -0.5]);
-    faults.record(BackendErrorKind::DeviceGone, &"device not available");
+    faults.record(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     // The pump's pass: the frame the ring held is written first.
     let mut scratch = [0.0f32; 8];
     let Pull::Frames(n) = pull_into(&mut mic, &mut scratch) else {
@@ -346,13 +356,12 @@ fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
     let mut mic = mic_without_a_device();
     let faults = mic.faults();
     let err = "`alsa::poll()` returned POLLERR";
-    faults.record(BackendErrorKind::Other, &err);
+    let run_start = Instant::now();
+    faults.record(BackendErrorKind::Other, &err, run_start);
     assert_eq!(verdict(&mut mic), Pull::Starved);
     // The run of errors becomes a disconnect once the grace has passed with no
-    // audio delivered; the faults' own test of the clock injects the time, which
-    // a mic's record cannot, so this waits it out.
-    std::thread::sleep(STALL_GRACE);
-    faults.record(BackendErrorKind::Other, &err);
+    // audio delivered.
+    faults.record(BackendErrorKind::Other, &err, run_start + STALL_GRACE);
     assert_eq!(verdict(&mut mic), Pull::Failed);
 }
 

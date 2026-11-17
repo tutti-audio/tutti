@@ -38,6 +38,7 @@ use crate::{Error, Result};
 /// Array-of-structs on purpose: every consumer reads all three fields
 /// together, both to draw and to serialize.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeakBlock {
     /// Most negative sample in the block. A raw signal excursion, so it is
     /// signed and not an `Amplitude`.
@@ -89,12 +90,55 @@ impl PeakBlock {
 /// contiguous slice, which is exactly the layout a GPU texture upload wants —
 /// one row per channel — so a renderer hands the whole buffer over without
 /// re-packing it.
+///
+/// With the `serde` feature it is stored as its layout, its blocks per channel
+/// and the flat blocks; reading one back refuses blocks that are not
+/// `layout.count() * blocks_per_channel` long, and blocks per channel over no
+/// channels.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "StoredPeakBlocks")
+)]
 pub struct PeakBlocks {
     /// Channel-major: channel `c` occupies `[c * per_channel .. (c+1) * per_channel]`.
     blocks: Vec<PeakBlock>,
     layout: ChannelLayout,
     per_channel: usize,
+}
+
+/// What a stored [`PeakBlocks`] reads back as, before its length is checked.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct StoredPeakBlocks {
+    pub blocks: Vec<PeakBlock>,
+    pub layout: ChannelLayout,
+    pub per_channel: usize,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<StoredPeakBlocks> for PeakBlocks {
+    type Error = String;
+
+    fn try_from(s: StoredPeakBlocks) -> core::result::Result<Self, String> {
+        let want = usize::from(s.layout.count()).checked_mul(s.per_channel);
+        // No channels means no blocks per channel, as the empty summary has.
+        let empty_with_blocks = s.layout.count() == 0 && s.per_channel != 0;
+        if want != Some(s.blocks.len()) || empty_with_blocks {
+            return Err(format!(
+                "{} blocks stored for {} channels of {} blocks each",
+                s.blocks.len(),
+                s.layout.count(),
+                s.per_channel
+            ));
+        }
+        Ok(Self {
+            blocks: s.blocks,
+            layout: s.layout,
+            per_channel: s.per_channel,
+        })
+    }
 }
 
 /// The empty summary: no blocks, and **no channels**.
@@ -790,5 +834,76 @@ mod tests {
         assert_eq!(m.max, 2.0, "the upper of the two maxes");
         // sqrt((0² + 1²) / 2), not (0 + 1) / 2.
         assert!((m.rms.0 - 0.5f32.sqrt()).abs() < 1e-6, "got {}", m.rms.0);
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use tutti_types::{Amplitude, ChannelLayout};
+
+    use super::{PeakBlock, PeakBlocks};
+
+    fn block(v: f32) -> PeakBlock {
+        PeakBlock {
+            min: -v,
+            max: v,
+            rms: Amplitude(v / 2.0),
+        }
+    }
+
+    /// A stereo summary of three blocks per channel reads back equal, each channel in its
+    /// place.
+    #[test]
+    fn peak_blocks_round_trip_through_serde() {
+        let blocks = PeakBlocks {
+            blocks: (1..=6).map(|i| block(i as f32 / 8.0)).collect(),
+            layout: ChannelLayout::STEREO,
+            per_channel: 3,
+        };
+        let text = serde_json::to_string(&blocks).expect("serializes");
+        let back: PeakBlocks = serde_json::from_str(&text).expect("reads back");
+        assert_eq!(back, blocks);
+        assert_eq!(back.channel(1).map(|c| c[0]), Some(block(0.5)));
+    }
+
+    /// Stored blocks that are not channels times blocks per channel long are refused: five
+    /// blocks cannot be two channels of three.
+    #[test]
+    fn stored_blocks_of_the_wrong_length_are_refused() {
+        let blocks = PeakBlocks {
+            blocks: (1..=6).map(|i| block(i as f32 / 8.0)).collect(),
+            layout: ChannelLayout::STEREO,
+            per_channel: 3,
+        };
+        let mut value = serde_json::to_value(&blocks).expect("serializes");
+        value["blocks"]
+            .as_array_mut()
+            .expect("blocks are a list")
+            .pop();
+        assert!(serde_json::from_value::<PeakBlocks>(value).is_err());
+    }
+
+    /// No channels with blocks per channel is refused (the empty summary has none of
+    /// either), and too many blocks for the layout is refused as too few is.
+    #[test]
+    fn stored_blocks_over_no_channels_or_too_many_are_refused() {
+        let over_none = r#"{"blocks":[],"layout":0,"per_channel":5}"#;
+        assert!(serde_json::from_str::<PeakBlocks>(over_none).is_err());
+        let empty = r#"{"blocks":[],"layout":0,"per_channel":0}"#;
+        assert_eq!(
+            serde_json::from_str::<PeakBlocks>(empty).expect("the empty summary"),
+            PeakBlocks::default()
+        );
+        let blocks = PeakBlocks {
+            blocks: vec![block(0.5); 2],
+            layout: ChannelLayout::MONO,
+            per_channel: 2,
+        };
+        let mut value = serde_json::to_value(&blocks).expect("serializes");
+        value["blocks"]
+            .as_array_mut()
+            .expect("blocks are a list")
+            .push(serde_json::to_value(block(0.25)).expect("a block"));
+        assert!(serde_json::from_value::<PeakBlocks>(value).is_err());
     }
 }

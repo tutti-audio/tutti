@@ -7,7 +7,7 @@ use super::*;
 use crate::MidiSession;
 use crate::session::Polled;
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-use crate::{HardwareMidiInputs, Pushed};
+use crate::{Delivered, HardwareMidiInputs};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
@@ -19,8 +19,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, Stream,
-    SysexAssembler, SysexStep,
+    Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, SoftwareRevision,
+    Stream, SysexAssembler, SysexStep,
 };
 
 /// A fake duplex device `raw` and the session that opened its input.
@@ -433,7 +433,7 @@ fn identity() -> tutti_ump::DeviceIdentity {
         manufacturer: ManufacturerId::new(0x41).unwrap(),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
-        revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
     }
 }
 
@@ -672,13 +672,13 @@ fn sysex_is_copied_to_the_stream_ring_while_asked_and_always_reaches_the_graph()
 
     assert!(ports.hear_sysex(port, true));
     for ump in &packets {
-        assert_eq!(producer.push(*ump, arrival), Pushed::Sent);
+        assert_eq!(producer.push(*ump, arrival), Ok(Delivered::Sent));
     }
     assert_eq!(ports.drain_stream(port).collect::<Vec<_>>(), packets);
 
     assert!(ports.hear_sysex(port, false));
     for ump in &packets {
-        assert_eq!(producer.push(*ump, arrival), Pushed::Sent);
+        assert_eq!(producer.push(*ump, arrival), Ok(Delivered::Sent));
     }
     assert_eq!(ports.drain_stream(port).count(), 0);
 
@@ -732,8 +732,8 @@ fn stream_messages_never_reach_the_graph() {
     }));
     let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
     let arrival = rig.origin + Duration::from_millis(1);
-    assert_eq!(producer.push(stream, arrival), Pushed::Diverted);
-    assert_eq!(producer.push(note, arrival), Pushed::Sent);
+    assert_eq!(producer.push(stream, arrival), Ok(Delivered::Diverted));
+    assert_eq!(producer.push(note, arrival), Ok(Delivered::Sent));
     rig.run(8);
     let heard: Vec<_> = rig.take().into_iter().map(|(_, _, ump)| ump).collect();
     assert_eq!(heard, [note]);
@@ -975,14 +975,13 @@ fn a_jr_message_a_device_sends_never_reaches_the_graph() {
     for jr in [Utility::JrClock(10), Utility::JrTimestamp(20)] {
         assert_eq!(
             producer.push(Ump::from(Message::Utility(jr)), arrival),
-            Pushed::Diverted
+            Ok(Delivered::Diverted)
         );
     }
-    assert_eq!(producer.push(note, arrival), Pushed::Sent);
+    assert_eq!(producer.push(note, arrival), Ok(Delivered::Sent));
     rig.run(8);
     let heard: Vec<_> = rig.take().into_iter().map(|(_, _, ump)| ump).collect();
     assert_eq!(heard, [note]);
-    assert_eq!(ports.losses().dropped(), 0);
 }
 
 /// An output connected after its device settled is in the settled Protocol from

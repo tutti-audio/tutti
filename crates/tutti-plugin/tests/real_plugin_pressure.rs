@@ -5,11 +5,9 @@
 //!
 //! Per-plugin waits on the audio thread would *sum*: the graph's serial
 //! executor runs nodes one after another in one callback, so N stalled plugins
-//! would cost N x budget, and 3 is enough to overrun 64 frames at 48 kHz. The
-//! synthetic `stalled_plugins_do_not_stall_the_audio_thread` test proves
-//! nothing waits using mock servers; this proves it with **real plugin
-//! subprocesses**,
-//! which the mock cannot model: real scheduling, real dlopen'd DSP, real
+//! would cost N x budget, and 3 is enough to overrun 64 frames at 48 kHz. This
+//! proves nothing waits with **real plugin subprocesses**,
+//! which a mock server cannot model: real scheduling, real dlopen'd DSP, real
 //! shared-memory traffic, real socket round-trips.
 //!
 //! Only a **stalled** plugin can show a wait. The bridge is pipelined: a block

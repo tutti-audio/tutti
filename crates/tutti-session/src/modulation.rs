@@ -1,4 +1,4 @@
-//! Modulation in the session (feature `modulation`; design 015 §4.4, §4.6):
+//! Modulation in the session (design 015 §4.4, §4.6):
 //! the reconcile loop of doc 014 §8.2, run by [`Phase::Modulation`] and
 //! [`Phase::AfterCommit`](crate::Phase::AfterCommit), over either the
 //! session's own declarations ([`Session::mods_mut`](crate::Session::mods_mut)) or a
@@ -54,7 +54,7 @@ use crate::graph::Graph;
 /// or two for its node's commit, and a plugin's for its values' read; one
 /// still waiting after this long is likely never to resolve (a key no node
 /// is ever bound to).
-pub const UNRESOLVED_WARNING: Duration = Duration::from_secs(4);
+pub(crate) const UNRESOLVED_WARNING: Duration = Duration::from_secs(4);
 
 /// One modulatable parameter of a node in the session's graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -716,25 +716,18 @@ impl ModState {
         self.modulation.lane(target)
     }
 
-    /// Writes `value` into `target`'s knob: a plugin parameter's lane knob,
-    /// from the plugin's own edits. Crate-private: a native param, a mix and
-    /// an edge gain each have one public writer (`Graph::set_param`,
-    /// `Graph::set_mix`, `Edge::set_gain`), and the knob is that writer's cell.
-    /// `false` when `target` has no lane with a knob.
-    #[cfg_attr(
-        not(feature = "plugin"),
-        allow(dead_code, reason = "the plugin mirror is its one caller")
-    )]
-    pub(crate) fn set_knob(&self, target: TargetKey, value: f32) -> bool {
-        self.lane(target)
-            .is_some_and(|(_, controls)| controls.set_knob(value))
-    }
-
-    /// The target of the lane on plugin parameter `id` at `node`, when the
-    /// last apply resolved one.
+    /// The lanes with a knob that drive `node`'s plugin parameters, by id.
     #[cfg(feature = "plugin")]
-    pub(crate) fn plugin_target(&self, node: NodeKey, id: u32) -> Option<TargetKey> {
-        self.plugin_targets.get(&(node, id)).copied()
+    pub(crate) fn plugin_lanes(&self, node: NodeKey) -> crate::plugin_params::Knobs {
+        self.plugin_targets
+            .range((node, 0)..=(node, u32::MAX))
+            .filter_map(|(&(_, id), &target)| {
+                let (_, lane) = self.lane(target)?;
+                lane.knob()
+                    .is_some()
+                    .then(|| (tutti_plugin_types::ParamId::new(id), lane.clone()))
+            })
+            .collect()
     }
 
     /// Signal source `source`'s node (a follower's, a note envelope's).
@@ -1093,7 +1086,12 @@ impl ModSession {
         } else {
             Names::Own(&self.own)
         };
-        self.state.applied(applied, names, now, out)
+        let asked = self.state.applied(applied, names, now, out);
+        // Every lane this apply built or dropped is in `state` now: the
+        // plugins' driven parameters follow it in the same update.
+        #[cfg(feature = "plugin")]
+        graph.refresh_driven(&self.state);
+        asked
     }
 
     /// Whether this phase has a declarer: `false` when a host passed its

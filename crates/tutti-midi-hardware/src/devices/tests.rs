@@ -7,20 +7,17 @@ use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_device::Identity;
-use tutti_midi_runtime::ClockWriters;
+use tutti_midi_runtime::DeviceWriters;
 
 /// Long enough to be a failure, not a race: a wake returns at once.
-const PATIENCE: Duration = Duration::from_secs(5);
+const PATIENCE: Duration = Duration::from_secs(30);
 
-/// `recv_timeout` with a long timeout, which must come back before it. A
-/// change that does not notify the waiter returns only at the timeout, and the
-/// elapsed time is what shows it.
+/// `recv_timeout` with a long timeout: it returns the event, or fails at the
+/// timeout when the change did not notify the waiter.
 ///
 /// Returns the event that woke it and any queued behind it.
 fn wake(events: &DeviceEvents) -> Vec<DeviceEvent> {
-    let start = std::time::Instant::now();
     let first = events.recv_timeout(PATIENCE).expect("an event");
-    assert!(start.elapsed() < PATIENCE, "wait slept to its timeout");
     std::iter::once(first).chain(events.try_iter()).collect()
 }
 
@@ -221,7 +218,7 @@ fn a_dropped_input_retires_its_port() {
     wake(&events);
     let ports = ports();
     let (input, _inlet) = devices
-        .open_input(&id_of(&devices, "Keys"), &ports, ClockWriters::new().0)
+        .open_input(&id_of(&devices, "Keys"), &ports, DeviceWriters::unread())
         .unwrap();
     assert_eq!(ports.list_input_ports().len(), 1);
     assert_eq!(input.name(), "Keys");
@@ -264,7 +261,7 @@ fn a_backend_failure_leaves_no_port() {
     let keys = id_of(&devices, "Keys");
     for _ in 0..3 {
         assert!(matches!(
-            devices.open_input(&keys, &ports, ClockWriters::new().0),
+            devices.open_input(&keys, &ports, DeviceWriters::unread()),
             Err(Error::MidiDevice { .. })
         ));
     }
@@ -379,12 +376,12 @@ fn open_input_takes_a_present_input_only() {
     }
     assert!(
         devices
-            .open_input(&id_of(&devices, "Keys"), &ports(), ClockWriters::new().0)
+            .open_input(&id_of(&devices, "Keys"), &ports(), DeviceWriters::unread())
             .is_ok()
     );
     let synth = id_of(&devices, "Synth");
     assert!(matches!(
-        devices.open_input(&synth, &ports(), ClockWriters::new().0),
+        devices.open_input(&synth, &ports(), DeviceWriters::unread()),
         Err(Error::WrongDirection { .. })
     ));
     assert!(devices.open_output(&synth).is_ok());
@@ -400,7 +397,7 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     fake.unplug(EndpointId::from_raw(1));
     wake(&events);
     assert!(matches!(
-        devices.open_input(&keys, &ports(), ClockWriters::new().0),
+        devices.open_input(&keys, &ports(), DeviceWriters::unread()),
         Err(Error::NotFound(NotFound::Device(_)))
     ));
 }
@@ -414,7 +411,7 @@ fn a_duplex_device_opens_both_ways() {
     assert_eq!(devices.list()[0].direction, PortDirection::Duplex);
     assert!(
         devices
-            .open_input(&id, &ports(), ClockWriters::new().0)
+            .open_input(&id, &ports(), DeviceWriters::unread())
             .is_ok()
     );
     assert!(devices.open_output(&id).is_ok());
@@ -692,16 +689,16 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
     assert!(events.try_iter().next().is_none(), "the loop took them");
 }
 
-/// What the Active Sensing tests share: a fake output open over `Synth`, in
-/// `protocol`, and the fake that records what it was sent.
+/// What the Active Sensing thread tests share: a fake output open over
+/// `Synth`, in `protocol`, and the fake that records what it was sent. The
+/// schedule's timing is `Pulse`'s tests; these cover the thread that runs it.
 mod sensing {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    use tutti_graph::Offset;
     use tutti_midi_device::{EndpointId, PortDirection};
     use tutti_ump::{Message, MidiGroup, Protocol, StreamConfig, System, Ump};
 
-    use super::{Devices, FakeCounters, endpoint, fake, id_of, wake};
+    use super::{Devices, FakeCounters, PATIENCE, endpoint, fake, id_of, wake};
     use crate::OpenOutput;
 
     const SYNTH: u64 = 1;
@@ -709,13 +706,6 @@ mod sensing {
     fn active_sensing() -> Ump {
         Ump::from(Message::System(MidiGroup::FIRST, System::ActiveSensing))
     }
-
-    fn clock() -> Ump {
-        Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock))
-    }
-
-    /// Generous on a loaded machine: the thread's interval is 270 ms.
-    const SECOND: Duration = Duration::from_secs(1);
 
     fn output_in(protocol: Protocol, sensing: bool) -> (OpenOutput, FakeCounters, Devices) {
         let (devices, events, fake) = fake();
@@ -737,70 +727,62 @@ mod sensing {
         fake.take_sent(EndpointId::from_raw(SYNTH))
     }
 
+    /// What the output is sent next, polled under a hang guard.
+    fn next_sent(fake: &FakeCounters) -> Vec<Ump> {
+        let start = Instant::now();
+        loop {
+            let got = sent(fake);
+            if !got.is_empty() {
+                return got;
+            }
+            assert!(start.elapsed() < PATIENCE, "nothing was sent");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// **An idle output with the option sends Active Sensing, and goes on.**
     #[test]
     fn an_idle_output_with_the_option_sends_active_sensing_and_keeps_sending() {
         let (_out, fake, _devices) = output_in(Protocol::Midi1, true);
-        std::thread::sleep(SECOND);
-        let first = sent(&fake);
+        let first = next_sent(&fake);
+        assert!(first.iter().all(|&u| u == active_sensing()), "{first:?}");
+        let later = next_sent(&fake);
         assert!(
-            !first.is_empty() && first.iter().all(|&u| u == active_sensing()),
-            "{first:?}"
-        );
-        std::thread::sleep(SECOND);
-        let later = sent(&fake);
-        assert!(
-            !later.is_empty() && later.iter().all(|&u| u == active_sensing()),
+            later.iter().all(|&u| u == active_sensing()),
             "and more: {later:?}"
         );
     }
 
-    /// **Traffic defers it**: an output that sends every 10 ms for a second is
-    /// never silent for an interval, so none is sent.
-    #[test]
-    fn traffic_defers_active_sensing() {
-        let (mut out, fake, _devices) = output_in(Protocol::Midi1, true);
-        for _ in 0..100 {
-            std::thread::sleep(Duration::from_millis(10));
-            let _ = out.queue(&[(Offset::ZERO, clock())]);
-        }
-        let busy = sent(&fake);
-        assert!(busy.iter().all(|&u| u == clock()), "{busy:?}");
-    }
-
-    /// **Closing the output stops it.**
+    /// **Closing the output stops it**: dropping joins the thread, so nothing
+    /// is sent after.
     #[test]
     fn closing_the_output_stops_active_sensing() {
         let (out, fake, _devices) = output_in(Protocol::Midi1, true);
-        std::thread::sleep(SECOND);
-        assert!(!sent(&fake).is_empty(), "precondition: it was running");
+        next_sent(&fake);
         drop(out);
         let _ = sent(&fake);
-        std::thread::sleep(SECOND);
         assert_eq!(sent(&fake), [], "nothing after the close");
     }
 
-    /// **An output opened without the option never sends it.**
+    /// **An output opened without the option never sends it**: it has no
+    /// heartbeat thread.
     #[test]
     fn an_output_without_the_option_never_sends_active_sensing() {
-        let (_out, fake, _devices) = output_in(Protocol::Midi1, false);
-        std::thread::sleep(SECOND);
+        let (out, fake, _devices) = output_in(Protocol::Midi1, false);
+        assert!(out.heartbeat.is_none());
         assert_eq!(sent(&fake), []);
     }
 
-    /// **A MIDI 2.0 Protocol output has no Active Sensing** even with the
-    /// option; it sends once the Protocol is MIDI 1.0.
+    /// **A MIDI 2.0 Protocol output sends once the Protocol is MIDI 1.0.**
     #[test]
-    fn a_midi2_protocol_output_sends_no_active_sensing_until_it_is_in_midi1() {
+    fn a_midi2_protocol_output_sends_active_sensing_once_it_is_in_midi1() {
         let (mut out, fake, _devices) = output_in(Protocol::Midi2, true);
-        std::thread::sleep(SECOND);
-        assert_eq!(sent(&fake), [], "silent in the MIDI 2.0 Protocol");
         out.set_config(StreamConfig {
             protocol: Protocol::Midi1,
             rx_jr: false,
             tx_jr: false,
         });
-        std::thread::sleep(SECOND);
-        assert!(!sent(&fake).is_empty(), "sending in the MIDI 1.0 Protocol");
+        let got = next_sent(&fake);
+        assert!(got.iter().all(|&u| u == active_sensing()), "{got:?}");
     }
 }

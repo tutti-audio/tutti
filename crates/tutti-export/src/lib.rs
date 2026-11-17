@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! **The OFFLINE edge**: render a Tutti graph to a file, or to buffers, faster (or
-//! slower) than real time. The `tutti` facade re-exports this crate as
-//! `tutti::export` (feature `export`).
+//! slower) than real time. The `tutti` facade's `Bounce` drives it
+//! (feature `export`).
 //!
 //! ## What is here
 //!

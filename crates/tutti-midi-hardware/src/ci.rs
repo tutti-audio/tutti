@@ -123,9 +123,10 @@
 //! room for, the session tells the reader ([`Heard`]), and the assembler drops
 //! its open messages ([`SysexAssembler::lost_tail`]) before the next packets.
 //! What a device sends goes out as SysEx7 on its Group, on the output of the
-//! negotiation, never the session's MIDI output; a refused send is logged, counted
-//! ([`MidiSession::ci_losses`](crate::MidiSession::ci_losses)) and not repeated, since
-//! the protocol is built to tolerate loss.
+//! negotiation, never the session's MIDI output; a refused send is logged,
+//! counted in the `refused` cell that
+//! [`MidiSession::connect_input_with`](crate::MidiSession::connect_input_with)
+//! is given, and not repeated, since the protocol is built to tolerate loss.
 //!
 //! # What it declares
 //!
@@ -161,6 +162,7 @@ use tutti_midi_device::{
     EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessFeatures, ProcessInitiator,
     ProfileAction, ProfileInitiator, ResourceInitiator, ResourceResponder, ResourceStore,
 };
+use tutti_rt::CounterWriter;
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::devices::OpenOutput;
@@ -389,8 +391,9 @@ pub(crate) struct Ci {
     calls: Vec<PropertyAsk>,
     /// What the devices' Responders serve.
     store: Arc<Mutex<ResourceStore>>,
-    /// The CI messages the output has refused, over the input's life.
-    refused: Losses,
+    /// Counts the CI messages the output has refused: a cell of the port that
+    /// owns the conversation, which outlives the connection.
+    refused: CounterWriter<u64>,
 }
 
 /// Group 0, the Group of a MIDI 1.0 port and of an Endpoint that says nothing
@@ -421,7 +424,7 @@ pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
 
 impl Ci {
     /// MIDI-CI for the input `device`, with nothing decided.
-    pub(crate) fn new(device: DeviceId) -> Self {
+    pub(crate) fn new(device: DeviceId, refused: CounterWriter<u64>) -> Self {
         Self {
             device,
             groups: Vec::new(),
@@ -434,7 +437,7 @@ impl Ci {
             property_peers: Arc::default(),
             calls: Vec::new(),
             store: Arc::default(),
-            refused: Losses::NONE,
+            refused,
         }
     }
 
@@ -505,7 +508,7 @@ impl Ci {
         self.queue.clear();
         self.reports.clear();
         self.calls.clear();
-        self.refused += changes.refused;
+        self.refused.add(changes.refused.refused);
         if self.running.as_ref().is_some_and(|r| r.is_idle()) {
             self.running = None;
         }
@@ -568,13 +571,6 @@ impl Ci {
         }
         self.calls.push(ask);
         Ok(())
-    }
-
-    /// The CI messages the output refused (a full or gone output), counted as
-    /// [`refused`](Losses::refused) over the input's life: a refused message is
-    /// not repeated, so the count is how many a peer may never have heard.
-    pub(crate) const fn losses(&self) -> Losses {
-        self.refused
     }
 
     /// Every peer found, by Group then MUID.
@@ -1313,7 +1309,7 @@ mod tests {
     use std::time::Duration;
 
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
-    use tutti_ump::{ManufacturerId, U7};
+    use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
     use super::*;
     use crate::MidiSession;
@@ -1324,7 +1320,7 @@ mod tests {
             manufacturer: ManufacturerId::new(0x41).unwrap(),
             family: [U7::of(1), U7::of(2)],
             model: [U7::of(3), U7::of(4)],
-            revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+            revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
         }
     }
 

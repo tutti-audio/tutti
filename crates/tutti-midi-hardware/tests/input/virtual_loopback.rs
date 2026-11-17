@@ -17,7 +17,7 @@ use tutti_midi_hardware::{
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, Ump};
 
-const PATIENCE: Duration = Duration::from_secs(10);
+const PATIENCE: Duration = Duration::from_secs(30);
 
 fn spec(tag: &str) -> VirtualSpec {
     let name = format!("tutti-loop-{}-{tag}", std::process::id());
@@ -73,8 +73,9 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
         panic!("a new input opens");
     };
     graph.attach(inlet);
-    std::thread::sleep(Duration::from_millis(200));
-    graph.listen(Duration::from_millis(50));
+    // A probe on a key no test asserts on, so a late one is never a test note.
+    let probe = note_on(MidiChannel::of(1), 59, 0x8000);
+    graph.ready(|| source.send(probe).expect("sends"), PATIENCE);
 
     let sent = notes();
     for ump in &sent {
@@ -94,8 +95,12 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
     let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
-    std::thread::sleep(Duration::from_millis(200));
-    graph.listen(Duration::from_millis(50));
+    graph.ready(
+        || {
+            let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8000))]);
+        },
+        PATIENCE,
+    );
 
     let sent = notes();
     for ump in &sent {
@@ -121,8 +126,12 @@ fn a_midi1_destination_delivers_what_the_ingest_node_widens() {
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
-    std::thread::sleep(Duration::from_millis(200));
-    graph.listen(Duration::from_millis(50));
+    graph.ready(
+        || {
+            let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8100))]);
+        },
+        PATIENCE,
+    );
 
     assert_eq!(
         out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 60, 0x8100))])

@@ -277,9 +277,15 @@ impl CoreMidiEndpoints {
     }
 }
 
+/// The UMP Endpoints the OS reports; none where the classes are absent or CoreMIDI
+/// raised (no reachable MIDI server), which leaves each endpoint's MIDI 1.0 view.
+fn os_umps() -> Vec<UmpEndpointInfo> {
+    ump_endpoints().ok().flatten().unwrap_or_default()
+}
+
 /// The sources now, as endpoints.
 fn list_inputs() -> Vec<OsEndpoint> {
-    let umps = ump_endpoints().unwrap_or_default();
+    let umps = os_umps();
     (0..Sources::count())
         .filter_map(Source::from_index)
         .enumerate()
@@ -295,7 +301,7 @@ fn list_inputs() -> Vec<OsEndpoint> {
 }
 
 fn list_outputs() -> Vec<OsEndpoint> {
-    let umps = ump_endpoints().unwrap_or_default();
+    let umps = os_umps();
     (0..Destinations::count())
         .filter_map(coremidi::Destination::from_index)
         .enumerate()
@@ -341,7 +347,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         // fragmented into UMP SysEx7 packets, which `tutti_ump::SysexAssembler`
         // (one layer up) rejoins. `tutti_ump::Midi1Parser` is for a transport
         // that delivers raw `F0 … F7` bytes.
-        let endpoints = ump_endpoints().unwrap_or_default();
+        let endpoints = os_umps();
         let protocol = input_protocol(&source, ump_of(&endpoints, &source, true));
         // CoreMIDI calls this closure from its own thread through a block, so
         // a panic must not leave it: the guard catches it and ends the input.
@@ -358,7 +364,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
                         // One CoreMIDI packet is a packed word stream of several
                         // concatenated UMP messages.
                         for event in split_stream(packet.data()) {
-                            if producer.push(event, arrived) == crate::Pushed::Full {
+                            if producer.push(event, arrived) == Err(tutti_rt::PushError::Full) {
                                 tracing::debug!("MIDI input ring full, dropping event");
                             }
                         }

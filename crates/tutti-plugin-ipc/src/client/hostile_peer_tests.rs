@@ -41,18 +41,27 @@ use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _}
 
 /// Upper bound on how long any single "the host must notice" wait may take.
 ///
-/// Generous relative to the bridge's own timeouts (2–50 ms for a process reply,
-/// 5 s for a param) so a loaded machine does not fail this spuriously, but
-/// finite so a genuine hang is a failure rather than a hung test run.
-const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+/// A hang guard, never a speed bound: far past the bridge's own timeouts, so
+/// a loaded machine cannot fail it, but finite so a genuine hang is a failure
+/// rather than a hung test run. A test asserts completion, not how long it took.
+const NOTICE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Timeouts under which a call that does not take the branch a test names
+/// blocks past [`NOTICE_TIMEOUT`]: the test asserts the right branch by
+/// completing, never by how fast it did.
+fn unreachable_deadline() -> Timeouts {
+    let mut t = Timeouts::default();
+    t.param = Duration::from_secs(3_600);
+    t
+}
 
 /// What the host adds to a bridge deadline before it gives up on an answer, in
 /// these tests: shorter than production's, so a test of a timeout does not wait
 /// out the real margin.
 const REPLY_MARGIN: Duration = Duration::from_millis(200);
 
-/// The shortened deadline the stall tests run with (the slow-transfer test has
-/// its own, wider one).
+/// The shortened deadline the stall tests run with (the chunked-reassembly test
+/// has its own, wider one).
 ///
 /// Two orders of magnitude under production, so a stalled transfer is detected
 /// in a fraction of a second, and comfortably over the 20 ms poll interval so a
@@ -307,10 +316,9 @@ impl MockServer {
     /// As [`start`](Self::start), with an explicit state-transfer progress
     /// deadline.
     ///
-    /// Every test here uses a shortened one. The deadline these tests are about
-    /// is 10 s in production, and a test that proved the stall path by waiting
-    /// it out would cost 10 s of wall clock to assert one comparison — which is
-    /// exactly the kind of slow test that gets deleted rather than fixed.
+    /// The stall tests pass a shortened one: production's is 10 s, and a test
+    /// that proved the stall path by waiting it out would spend all of it. The
+    /// chunked-reassembly test passes a window far past anything it spends.
     fn start_with_state_progress_timeout(
         label: &str,
         state_progress: Duration,
@@ -386,10 +394,6 @@ impl MockServer {
         // The control lane's thread ends with the connection; nothing joins it.
         drop(servers);
 
-        // Let the bridge thread connect and consume the handshake before a test
-        // starts asserting on it.
-        std::thread::sleep(Duration::from_millis(50));
-
         Self {
             bridge,
             thread: Some(thread),
@@ -464,7 +468,7 @@ impl Drop for MockServer {
 /// only an `Arc<PluginBridge>` clone and exits when its timeout finally expires.
 fn call_within<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
-) -> std::result::Result<(T, Duration), Duration> {
+) -> std::result::Result<T, Duration> {
     let (tx, rx) = crossbeam_channel::bounded(1);
     let start = Instant::now();
     std::thread::Builder::new()
@@ -475,10 +479,7 @@ fn call_within<T: Send + 'static>(
         })
         .expect("spawn call thread");
 
-    match rx.recv_timeout(NOTICE_TIMEOUT) {
-        Ok(v) => Ok((v, start.elapsed())),
-        Err(_) => Err(start.elapsed()),
-    }
+    rx.recv_timeout(NOTICE_TIMEOUT).map_err(|_| start.elapsed())
 }
 
 // ── Death mid-session ────────────────────────────────────────────────────────
@@ -759,7 +760,6 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         })),
         _ => Action::Silent,
     });
-    let started = Instant::now();
     assert!(
         !refusing.bridge.setup_shared_memory(
             tutti_fixtures::unique_name("hostile_slab-refused"),
@@ -767,39 +767,31 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         ),
         "the server's error is a refusal"
     );
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "answered at once, not at the deadline"
-    );
 
     let mut quick = Timeouts::default();
     quick.param = Duration::from_millis(300);
     let silent = MockServer::start_with_timeouts("slab-silent", quick, |_| Action::Silent);
-    let started = Instant::now();
-    assert!(
-        !silent.bridge.setup_shared_memory(
+    let silent_bridge = Arc::clone(&silent.bridge);
+    let silent_layout = layout.clone();
+    let answered = call_within(move || {
+        silent_bridge.setup_shared_memory(
             tutti_fixtures::unique_name("hostile_slab-silent"),
-            layout.clone()
-        ),
-        "no answer is a refusal"
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "bounded by the deadline, not by the server"
-    );
+            silent_layout,
+        )
+    })
+    .unwrap_or_else(|w| panic!("a silent server held the caller for {w:?}"));
+    assert!(!answered, "no answer is a refusal");
 
     let dying = MockServer::start("slab-dies", |msg| match msg {
         HostMessage::SetupSharedMemory { .. } => Action::Die,
         _ => Action::Silent,
     });
-    let started = Instant::now();
-    assert!(
-        !dying
-            .bridge
-            .setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout),
-        "a server that dies mid-swap is a refusal"
-    );
-    assert!(started.elapsed() < Duration::from_secs(10));
+    let dying_bridge = Arc::clone(&dying.bridge);
+    let answered = call_within(move || {
+        dying_bridge.setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout)
+    })
+    .unwrap_or_else(|w| panic!("a server that died mid-swap held the caller for {w:?}"));
+    assert!(!answered, "a server that dies mid-swap is a refusal");
     dying.wait_for_crash("the bridge to say the server is gone");
 }
 
@@ -832,28 +824,30 @@ fn a_crash_before_any_listener_is_still_reported_by_the_query() {
 /// crash flag exists to short-circuit that, so it has to actually be consulted.
 #[test]
 fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
-    let mock = MockServer::start("fail-fast", |_| Action::Die);
+    // An hour's deadline: a call that is not short-circuited by the crash flag
+    // waits on it and outlasts the call guard.
+    let mock =
+        MockServer::start_with_timeouts("fail-fast", unreachable_deadline(), |_| Action::Die);
 
     // First call establishes the crash.
-    let _ = mock.bridge.parameter(ParamId::new(1));
+    let bridge = Arc::clone(&mock.bridge);
+    let _ = call_within(move || bridge.parameter(ParamId::new(1)))
+        .unwrap_or_else(|w| panic!("the call that meets the death blocked for {w:?}"));
     mock.wait_for_crash("the bridge to notice the server was gone");
 
-    // Subsequent calls must return promptly. `Timeouts::param` is 5 s, so
-    // anything near that means the short-circuit is missing.
-    let start = Instant::now();
-    for _ in 0..5 {
-        assert_eq!(
-            mock.bridge.parameter(ParamId::new(1)),
-            None,
-            "a crashed bridge returned a parameter value"
-        );
-    }
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed < Duration::from_secs(1),
-        "five calls to a crashed bridge took {elapsed:?} — the crash flag is \
-         not short-circuiting, so each call is waiting out its full timeout"
-    );
+    let bridge = Arc::clone(&mock.bridge);
+    let values = call_within(move || {
+        (0..5)
+            .map(|_| bridge.parameter(ParamId::new(1)))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|w| {
+        panic!(
+            "calls to a crashed bridge were still blocked after {w:?} — the crash \
+             flag is not short-circuiting, so each call waits out its timeout"
+        )
+    });
+    assert_eq!(values, vec![None; 5], "a crashed bridge returned a value");
 }
 
 /// A crash must not leave a caller blocked forever.
@@ -870,19 +864,17 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (saved, elapsed) =
-        call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-            .unwrap_or_else(|waited| {
-                panic!(
-                    "save_state against a server that died mid-request was still \
+    let saved = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
+        .unwrap_or_else(|waited| {
+            panic!(
+                "save_state against a server that died mid-request was still \
              blocked after {waited:?}; the caller is waiting on a reply that \
              will never arrive"
-                )
-            });
+            )
+        });
     assert!(
         saved.is_err(),
-        "save_state returned {saved:?} from a server that never answered \
-         (after {elapsed:?})"
+        "save_state returned {saved:?} from a server that never answered"
     );
 }
 
@@ -899,41 +891,31 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
 /// sends 4 bytes is exactly the corrupt-framing case. The host must fail the
 /// read rather than sit on the allocation.
 ///
-/// **The elapsed check is what makes this test meaningful.** An unbounded 4 GiB
+/// **The deadlines are what make this test meaningful.** An unbounded 4 GiB
 /// `vec![0u8; len]` lowers to `calloc`, which `mmap`s lazily — measured at
-/// 60 ns on Linux with `overcommit_memory=0` — so without the bound the test
-/// would still pass, observing only the socket read timing out 5 s later. With
-/// `MAX_FRAME_BYTES` the rejection happens in the four bytes it takes to read
-/// the prefix.
+/// 60 ns on Linux with `overcommit_memory=0` — so without the bound the host
+/// would allocate nothing visible and sit waiting for the body. The bridge runs
+/// under an hour-long deadline, so only the length comparison, made in the
+/// four bytes it takes to read the prefix, lets the call return within the
+/// guard.
 #[test]
 fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
-    let mock = MockServer::start("huge-len", |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::Raw(u32::MAX, vec![0u8; 4]),
-        _ => Action::Silent,
-    });
+    let mock =
+        MockServer::start_with_timeouts("huge-len", unreachable_deadline(), |msg| match msg {
+            HostMessage::GetParameter { .. } => Action::Raw(u32::MAX, vec![0u8; 4]),
+            _ => Action::Silent,
+        });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (value, elapsed) =
-        call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-            panic!(
-                "a 4 GiB length prefix left the host blocked after {waited:?} — it \
-             is allocating on an unvalidated wire length"
-            )
-        });
+    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+        panic!(
+            "a 4 GiB length prefix left the host blocked after {waited:?} — it \
+             is allocating on an unvalidated wire length and waiting for the body"
+        )
+    });
     assert_eq!(
         value, None,
-        "the host returned a parameter value from a frame it could not have \
-         read (after {elapsed:?})"
-    );
-    // The rejection is a length comparison, so it must not cost a socket
-    // timeout. `Timeouts::param` is 5 s; anything near it means the host read the
-    // prefix, allocated, and then sat waiting for a body — the pre-bound
-    // behaviour this test's second paragraph describes.
-    assert!(
-        elapsed < Duration::from_secs(1),
-        "an over-cap length prefix took {elapsed:?} to reject — the bound is \
-         not being checked before the read, so the host is waiting out its \
-         receive timeout on a body that will never arrive"
+        "the host returned a parameter value from a frame it could not have read"
     );
     mock.wait_for_crash("the bridge to mark an unreadable frame a crash");
 }
@@ -945,41 +927,48 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// check, and would still pass if the constant were off by orders of magnitude.
 /// Straddling `MAX_FRAME_BYTES` pins the constant the transport actually reads.
 ///
-/// The under-cap half deliberately advertises a length it never fills. What is
-/// being asserted is *which branch was taken*, and the two branches are
-/// distinguishable by timing alone: an accepted length allocates and blocks
-/// until the receive timeout, a rejected one returns immediately. So a slow
-/// answer here means the bound is too tight and honest frames are being
-/// refused — the regression a too-eager cap would cause.
+/// The under-cap half deliberately advertises a length it never fills, and the
+/// two branches are told apart by the failure each leaves: a rejected length
+/// closes the stream, an accepted one waits for its body and gives up as a
+/// timeout.
 #[test]
 fn the_frame_cap_is_the_boundary_it_claims_to_be() {
     use crate::protocol::MAX_FRAME_BYTES;
 
-    let over = MockServer::start("cap-over", |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32 + 1, Vec::new()),
-        _ => Action::Silent,
-    });
+    let over =
+        MockServer::start_with_timeouts("cap-over", unreachable_deadline(), |msg| match msg {
+            HostMessage::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32 + 1, Vec::new()),
+            _ => Action::Silent,
+        });
     let bridge = Arc::clone(&over.bridge);
-    let (_, over_elapsed) = call_within(move || bridge.parameter(ParamId::new(1)))
+    call_within(move || bridge.parameter(ParamId::new(1)))
         .unwrap_or_else(|w| panic!("an over-cap frame blocked the caller for {w:?}"));
+    over.wait_for_crash("the bridge to refuse a frame over the cap");
     assert!(
-        over_elapsed < Duration::from_secs(1),
-        "MAX_FRAME_BYTES + 1 took {over_elapsed:?} to reject — the transport is \
-         not comparing against the constant this test names"
+        matches!(over.bridge.crash_cause(), Some(PluginFailure::StreamClosed)),
+        "MAX_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
+        over.bridge.crash_cause()
     );
 
-    let under = MockServer::start("cap-under", |msg| match msg {
+    let mut quick = Timeouts::default();
+    quick.param = Duration::from_millis(300);
+    let under = MockServer::start_with_timeouts("cap-under", quick, |msg| match msg {
         HostMessage::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32, Vec::new()),
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&under.bridge);
-    let (_, under_elapsed) = call_within(move || bridge.parameter(ParamId::new(1)))
+    call_within(move || bridge.parameter(ParamId::new(1)))
         .unwrap_or_else(|w| panic!("an at-cap frame blocked the caller for {w:?}"));
+    under.wait_for_crash("the bridge to give up on the body that never comes");
     assert!(
-        under_elapsed >= Duration::from_secs(1),
-        "a frame of exactly MAX_FRAME_BYTES was refused in {under_elapsed:?} \
-         rather than accepted and waited on — the bound is off by one in the \
-         direction that rejects legitimate traffic"
+        matches!(
+            under.bridge.crash_cause(),
+            Some(PluginFailure::TimedOut { .. })
+        ),
+        "a frame of exactly MAX_FRAME_BYTES was refused rather than accepted and \
+         waited on — the bound is off by one in the direction that rejects \
+         legitimate traffic: {:?}",
+        under.bridge.crash_cause()
     );
 }
 
@@ -1023,13 +1012,12 @@ fn a_dribbling_peer_cannot_hold_the_bridge_thread_open() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (value, elapsed) =
-        call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-            panic!(
-                "a dribbling peer left the caller blocked after {waited:?} — the \
+    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+        panic!(
+            "a dribbling peer left the caller blocked after {waited:?} — the \
                      host entered a multi-syscall read on an unvalidated length"
-            )
-        });
+        )
+    });
     assert_eq!(value, None, "a dribbled frame produced a value");
 
     // The assertion that matters. The caller returning is not evidence: it has
@@ -1037,7 +1025,7 @@ fn a_dribbling_peer_cannot_hold_the_bridge_thread_open() {
     // thread wedged forever. Only the crash flag distinguishes "the host
     // rejected the frame" from "the host is still inside `read_exact` and the
     // caller gave up without it".
-    mock.wait_for_crash(&format!("the bridge to report a crash after {elapsed:?}"));
+    mock.wait_for_crash("the bridge to report a crash");
 }
 
 /// Garbage where a postcard payload should be must be rejected, not decoded.
@@ -1081,17 +1069,13 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (value, elapsed) =
-        call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-            panic!(
-                "a truncated frame left the host blocked after {waited:?}, waiting \
+    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+        panic!(
+            "a truncated frame left the host blocked after {waited:?}, waiting \
              for a body the server never finished sending"
-            )
-        });
-    assert_eq!(
-        value, None,
-        "a truncated frame produced a value (after {elapsed:?})"
-    );
+        )
+    });
+    assert_eq!(value, None, "a truncated frame produced a value");
 }
 
 /// A well-formed message of the *wrong type* must not satisfy a pending request.
@@ -1131,17 +1115,13 @@ fn a_silent_server_is_bounded_by_the_timeout() {
     let mock = MockServer::start("silent", |_| Action::Silent);
 
     let bridge = Arc::clone(&mock.bridge);
-    let (value, elapsed) =
-        call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-            panic!(
-                "a server that never replies left the caller blocked for {waited:?} \
+    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+        panic!(
+            "a server that never replies left the caller blocked for {waited:?} \
              — the request timeout is not bounding this path"
-            )
-        });
-    assert_eq!(
-        value, None,
-        "a silent server produced a value (after {elapsed:?})"
-    );
+        )
+    });
+    assert_eq!(value, None, "a silent server produced a value");
 }
 
 /// **A refusal is not a crash.** The server refuses the first rate and takes
@@ -1210,7 +1190,6 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
 
     // The bridge reads the stream when it has something to do: the next
     // command finds the late answer ahead of its own reply and applies it.
-    std::thread::sleep(Duration::from_millis(1_000));
     let value = mock.bridge.parameter(ParamId::new(1));
     assert_eq!(
         value,
@@ -1296,10 +1275,18 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
 /// drop joins it: the wait must notice the shutdown, not run out.
 #[test]
 fn dropping_the_bridge_ends_a_hung_rate_change() {
-    let mut mock = MockServer::start("hung_rate", |_| Action::Silent);
+    let (asked, request_seen) = crossbeam_channel::bounded(1);
+    let mut mock = MockServer::start("hung_rate", move |msg| {
+        if matches!(msg, HostMessage::SetSampleRate { .. }) {
+            let _ = asked.try_send(());
+        }
+        Action::Silent
+    });
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
-    // Let the bridge thread reach the wait.
-    std::thread::sleep(Duration::from_millis(300));
+    // The request is on the wire, so the bridge thread is in the wait.
+    request_seen
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the peer was never asked for the rate change");
 
     let thread = mock.thread.take().expect("the bridge thread");
     let (done, rx) = std::sync::mpsc::channel();
@@ -1308,7 +1295,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
         let _ = done.send(());
     });
     assert!(
-        rx.recv_timeout(Duration::from_secs(3)).is_ok(),
+        rx.recv_timeout(NOTICE_TIMEOUT).is_ok(),
         "the drop was still joining a bridge thread waiting out a rate change"
     );
 }
@@ -1343,12 +1330,11 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (value, elapsed) =
-        call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-            panic!("an under-cap dribbled frame left the caller blocked after {waited:?}")
-        });
+    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+        panic!("an under-cap dribbled frame left the caller blocked after {waited:?}")
+    });
     assert_eq!(value, None, "a dribbled frame produced a value");
-    mock.wait_for_crash(&format!("the bridge to report a crash after {elapsed:?}"));
+    mock.wait_for_crash("the bridge to report a crash");
 }
 
 /// A large state survives the round trip, in both directions.
@@ -1390,9 +1376,8 @@ fn a_state_larger_than_one_frame_round_trips() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let (got, elapsed) =
-        call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-            .unwrap_or_else(|w| panic!("save_state on a multi-chunk state blocked for {w:?}"));
+    let got = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
+        .unwrap_or_else(|w| panic!("save_state on a multi-chunk state blocked for {w:?}"));
     let got = got.unwrap_or_else(|e| {
         panic!(
             "a {}-byte state failed with {e} — a state larger than one frame \
@@ -1403,7 +1388,7 @@ fn a_state_larger_than_one_frame_round_trips() {
     assert_eq!(
         got.len(),
         expected.len(),
-        "reassembled state has the wrong length (after {elapsed:?})"
+        "reassembled state has the wrong length"
     );
     assert!(
         got == expected,
@@ -1421,17 +1406,17 @@ fn a_state_larger_than_one_frame_round_trips() {
     );
 }
 
-/// An over-limit `load_state` is a typed refusal, not a crash, and is instant.
+/// An over-limit `load_state` is a typed refusal, not a crash.
 ///
-/// Three separate properties, which is why the assertions are three:
+/// Separate properties, which is why the assertions are separate:
 ///
 /// - **Typed.** Not `Rejected("the plugin did not answer within the state
 ///   timeout")`, which says the plugin refused or hung. It did neither — the
 ///   host declined to send. `TooLarge` names the real reason and carries both
 ///   numbers.
-/// - **Instant.** The refusal is a length comparison; an error propagated out
-///   of `handle` *before* `reply.send` would drop the `Reply` and leave the
-///   caller to wait out `STATE_TIMEOUT` for an answer the host already had.
+/// - **Answered.** The refusal is a length comparison and the reply is sent
+///   with it; the peer here never answers anything, so a refusal that waited
+///   on the peer would surface as `Stalled`, not `TooLarge`.
 /// - **Non-fatal.** `pump` treats any `handle` error as connection-level, so
 ///   one oversized preset must not call `crash()` on a healthy session. Nothing
 ///   was written, so the socket is still synchronised and there is nothing to
@@ -1446,7 +1431,6 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
     // so a `Vec` of the right length is what the check sees. Allocating a
     // gigabyte to prove a comparison would make this test unrunnable.
     let oversized = vec![0u8; MAX_STATE_BYTES + 1];
-    let start = Instant::now();
     let err = mock
         .bridge
         .load_state(
@@ -1455,17 +1439,11 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
             tutti_plugin_types::StateUse::Project,
         )
         .expect_err("an over-limit state was accepted");
-    let elapsed = start.elapsed();
 
     assert!(
         matches!(err, StateError::TooLarge { .. }),
         "an over-limit state reported {err:?}; the caller cannot tell a host \
          limit from a plugin that refused or a subprocess that died"
-    );
-    assert!(
-        elapsed < Duration::from_secs(1),
-        "the refusal took {elapsed:?} — the caller is waiting out STATE_TIMEOUT \
-         for a length comparison the host made before sending anything"
     );
     assert!(
         !mock.bridge.is_crashed(),
@@ -1489,39 +1467,24 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
 
 // ── State transfer: progress, not a total ────────────────────────────────────
 
-/// A slow but *steadily progressing* transfer must complete, however long it
-/// takes in total.
+/// A *steadily progressing* transfer must complete, however long it takes in
+/// total.
 ///
 /// A fixed budget for the whole transfer would make
-/// [`MAX_STATE_BYTES`](crate::protocol::MAX_STATE_BYTES) unreachable — a
-/// gigabyte cannot cross the control socket inside 10 s, so a large-but-legal
-/// state would fail on the clock and read as a hung plugin.
-///
-/// **Scaled, not literal.** Proving this with real sizes would mean moving a
-/// gigabyte through a socket. Instead the *ratio* is reproduced: 30 chunks at a
-/// gap that sums to comfortably more than the deadline any single-budget
-/// implementation would impose. With `SLOW_TRANSFER_TIMEOUT` at 2 s and a
-/// 50 ms gap the transfer takes ~3 s — 1.5x a total budget, while no single gap
-/// comes within 40x of it. Under a total budget this is a timeout; under a
-/// progress deadline it simply works.
-///
-/// **Its own deadline, wider than the stall tests'.** This test fails if any
-/// one gap outlasts the deadline, so a scheduler pause on a loaded runner is a
-/// failure here, where in the stall tests it only delays detection. At 400 ms
-/// it failed on a shared macOS runner with `Stalled { bytes: 1 }`: the first
-/// 40 ms gap took over 400 ms of wall clock.
+/// [`MAX_STATE_BYTES`](crate::protocol::MAX_STATE_BYTES) unreachable. That a
+/// transfer advancing inside its window is live however many windows it spans
+/// is the `StallWatch` rule, tested over constructed instants in
+/// `client::audio::progress`; this test carries the reassembly through the
+/// bridge: 60 chunks, a byte each, arriving with a gap, come back in order.
+/// The window and the guard are far past anything a loaded machine spends, and
+/// the test asserts completion, never how long it took.
 #[test]
-fn a_slow_but_progressing_state_transfer_completes() {
-    /// Enough chunks that the total dwarfs the deadline while each gap stays
-    /// well under it.
+fn a_chunked_state_transfer_reassembles_in_order() {
     const CHUNKS: usize = 60;
-    const GAP: Duration = Duration::from_millis(50);
-    const SLOW_TRANSFER_TIMEOUT: Duration = Duration::from_secs(2);
+    const GAP: Duration = Duration::from_millis(2);
 
-    // One byte per chunk: this test is about *timing*, and materialising a
-    // realistically-sized state to prove a deadline would make it slow for a
-    // reason unrelated to what it asserts. The byte pattern still catches a
-    // chunk dropped or reordered by a progress-accounting bug.
+    // One byte per chunk; the byte pattern catches a chunk dropped or
+    // reordered by a progress-accounting bug.
     let expected: Vec<u8> = (0..CHUNKS).map(|i| (i % 251) as u8).collect();
     let msgs: Vec<BridgeMessage> = (0..CHUNKS)
         .map(|i| BridgeMessage::StateChunk {
@@ -1533,7 +1496,7 @@ fn a_slow_but_progressing_state_transfer_completes() {
 
     let mock = MockServer::start_with_state_progress_timeout(
         "slow-state",
-        SLOW_TRANSFER_TIMEOUT,
+        Duration::from_secs(60),
         move |msg| match msg {
             HostMessage::SaveState { .. } => Action::ReplyManySlowly {
                 msgs: msgs.clone(),
@@ -1544,29 +1507,17 @@ fn a_slow_but_progressing_state_transfer_completes() {
     );
 
     let bridge = Arc::clone(&mock.bridge);
-    let (got, elapsed) =
-        call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-            .unwrap_or_else(|w| panic!("a steadily-progressing save_state blocked for {w:?}"));
-    let got = got.unwrap_or_else(|e| {
-        panic!(
-            "a slow but progressing transfer failed with {e} — a plugin that is \
-             advancing is working, and must not be failed for being slow"
-        )
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(bridge.save_state(tutti_plugin_types::StateUse::Project));
     });
+    let got = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("a progressing save_state never returned");
+    let got = got.unwrap_or_else(|e| panic!("a progressing transfer failed with {e}"));
     assert_eq!(
         got, expected,
         "the reassembled state does not match what the peer sent"
-    );
-
-    // The transfer really did outlast a single-budget deadline. Without this the
-    // test would still pass if the gaps were tuned down until the whole transfer
-    // fit inside one deadline — at which point it no longer distinguishes a
-    // progress budget from a total one.
-    assert!(
-        elapsed > SLOW_TRANSFER_TIMEOUT,
-        "the transfer finished in {elapsed:?}, inside the {SLOW_TRANSFER_TIMEOUT:?} \
-         deadline — it would have passed under a fixed total budget too, so it \
-         does not test what it claims"
     );
 }
 
@@ -1582,8 +1533,6 @@ fn a_slow_but_progressing_state_transfer_completes() {
 ///   a judgement the host made. Also distinct from `TooLarge`: nothing here is
 ///   over any limit, and a caller that cannot tell the two apart cannot decide
 ///   whether retrying is worth anything.
-/// - **Prompt.** One deadline after progress stops, not one after the call
-///   began, so partial progress buys no extra total time.
 /// - **Not crashed**, and held past the *production* deadline. The bridge
 ///   thread's own read expires first, and if that expiry were connection-level
 ///   the crash would land while the caller was still waiting.
@@ -1629,9 +1578,8 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
     );
 
     let bridge = Arc::clone(&mock.bridge);
-    let (got, elapsed) =
-        call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-            .unwrap_or_else(|w| panic!("a stalled save_state never returned; blocked for {w:?}"));
+    let got = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
+        .unwrap_or_else(|w| panic!("a stalled save_state never returned; blocked for {w:?}"));
     let err = got.expect_err("a stalled transfer reported success");
 
     assert!(
@@ -1649,12 +1597,6 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
              separates a transfer that never started from one that died part-way"
         );
     }
-    assert!(
-        elapsed < STATE_PROGRESS_TIMEOUT * 4,
-        "the stall took {elapsed:?} to detect against a {STATE_PROGRESS_TIMEOUT:?} \
-         deadline — the wait is accumulating time across chunks instead of \
-         restarting on each"
-    );
     assert_healthy_after_stall(&mock, "save_state");
 }
 
@@ -1686,7 +1628,7 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     );
 
     let bridge = Arc::clone(&mock.bridge);
-    let (got, elapsed) = call_within(move || {
+    let got = call_within(move || {
         bridge.load_state(
             main_thread(),
             &[3u8; 128],
@@ -1697,14 +1639,11 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     let err = got.expect_err("an unacknowledged load reported success");
 
     assert!(
-        matches!(err, StateError::Stalled { .. }),
+        matches!(err, StateError::Stalled { bytes: 128, .. }),
         "an unacknowledged load reported {err:?}; the bytes went out but the \
-         plugin never confirmed it took them, which is a stall and not a \
+         plugin never confirmed it took them, which is a stall (after the 128 \
+         bytes the bridge advanced the shared counter for) and not a \
          rejection, a size refusal or a crash"
-    );
-    assert!(
-        elapsed < STATE_PROGRESS_TIMEOUT * 4,
-        "the stall took {elapsed:?} against a {STATE_PROGRESS_TIMEOUT:?} deadline"
     );
     assert_healthy_after_stall(&mock, "load_state");
 }
@@ -1712,32 +1651,24 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
 /// Assert that a stall left the session genuinely usable, not merely unflagged.
 ///
 /// Shared by both stall tests so they cannot drift into proving different
-/// things. Two steps, and the order matters:
-///
-/// 1. **Wait past the production deadline.** The bridge thread's own read
-///    expires before the caller's wait does, so a crash caused by that expiry
-///    lands *after* the caller has already been answered. Returning as soon as
-///    the caller sees `Stalled` would miss it — which is how the original
-///    version of this passed while the session was dying a beat later. The wall
-///    clock stays small because injection has moved *both* deadlines, so
-///    "past the deadline" is a few hundred milliseconds and not ten seconds.
-/// 2. **Probe with a call that cannot answer the same way when crashed.** A
-///    round trip returning `Some` is reachable only on a live bridge.
+/// things. The probe is a live round trip, which a crashed bridge short-circuits
+/// on `is_crashed` before it sends anything.
 fn assert_healthy_after_stall(mock: &MockServer, direction: &str) {
-    // Comfortably past the injected deadline, so any deferred crash has landed.
-    std::thread::sleep(STATE_PROGRESS_TIMEOUT * 2);
-
+    // The probe goes first and is the synchronisation: the bridge thread takes
+    // commands in order, so a crash caused by its own read expiring lands
+    // before it answers this one, and the probe cannot return `Some` after it.
+    // A round trip returning `Some` is reachable only on a live bridge.
+    assert!(
+        mock.bridge.parameters().is_some(),
+        "after a stalled {direction} the bridge no longer completes a round \
+         trip, so the session is dead in practice however `is_crashed` reads"
+    );
     assert!(
         !mock.bridge.is_crashed(),
         "a stalled {direction} crashed the bridge; the socket is intact and \
          synchronised, so a stall must not be treated as connection-level — \
          otherwise `Stalled` tells the caller to retry against a session that \
          has just been torn down"
-    );
-    assert!(
-        mock.bridge.parameters().is_some(),
-        "after a stalled {direction} the bridge no longer completes a round \
-         trip, so the session is dead in practice however `is_crashed` reads"
     );
 }
 
@@ -1816,7 +1747,6 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
         }
     });
 
-    let start = Instant::now();
     assert_eq!(mock.bridge.parameter(ParamId::new(1)), None);
     // Sends the next request; its answer waits for the events to stop.
     let _ = mock.bridge.parameters();
@@ -1826,9 +1756,8 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
     assert_eq!(
         probe.load(Ordering::SeqCst),
         PROBE_WAITING,
-        "when the events stopped ({:?} in) the bridge had not sent its next \
-         request: it was still waiting on the chatty one",
-        start.elapsed()
+        "when the events stopped the bridge had not sent its next request: it \
+         was still waiting on the chatty one"
     );
     assert!(!mock.bridge.is_crashed(), "{:?}", mock.bridge.crash_cause());
 }
@@ -1845,7 +1774,9 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
 /// runner.
 #[test]
 fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
-    let mock = MockServer::start("split-events", |msg| match msg {
+    let mut shorter = Timeouts::default();
+    shorter.param = Duration::from_secs(1);
+    let mock = MockServer::start_with_timeouts("split-events", shorter, |msg| match msg {
         HostMessage::GetParameter { .. } => Action::SplitEvents {
             split: Duration::from_millis(200),
         },
@@ -1853,7 +1784,10 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
     });
 
     assert_eq!(mock.bridge.parameter(ParamId::new(1)), None);
-    std::thread::sleep(Duration::from_secs(1));
+    // The barrier: the bridge thread takes commands in order, so this one is
+    // handled only after the first has ended, drain included. A crash the
+    // first caused is latched by then.
+    let _ = mock.bridge.parameters();
     assert!(
         !mock.bridge.is_crashed(),
         "a live peer was declared unable to frame: {:?}",

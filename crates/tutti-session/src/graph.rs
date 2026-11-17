@@ -11,7 +11,6 @@
 //! | `set_param` | the node's [`ParamSet`], when it has one |
 //! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
-//! | `latency_plan` | `tutti_graph::latency_plan` over the whole spec: audio edges plus event and param-modulation sources |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
 //! | `insert_plugin`, `replace_plugin` | the bound `PluginClient` itself, a node with its own fork source |
@@ -57,7 +56,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, TapId, Topology,
+    TapAlign, TapId,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -228,7 +227,7 @@ where
 }
 
 #[cfg(feature = "plugin")]
-struct PluginSwap(Box<tutti_plugin::handles::PluginClient>);
+struct PluginSwap(Box<tutti_plugin::PluginClient>);
 
 #[cfg(feature = "plugin")]
 impl ErasedSwap for PluginSwap {
@@ -402,7 +401,7 @@ pub(crate) struct Unwiring {
 /// index (`1..`), before it takes work: see
 /// [`SessionBuilder::render_worker_start`](crate::SessionBuilder::render_worker_start).
 #[derive(Clone)]
-pub struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
+pub(crate) struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
 
 impl RenderWorkerStart {
     /// Wrap `hook`.
@@ -877,18 +876,20 @@ impl Graph {
     /// and declares its latency in its `Shape`. Capture its controls first:
     /// the plugin is out of reach once inserted.
     ///
-    /// The node's rebinder is dropped: a plugin inserted this way is not
-    /// re-inserted when it changes its ports, and a served one is not
-    /// restarted into a new slab unless its owner ticks it (its handle's
-    /// `editor_idle` for an in-process plugin; for a served one only a pooled
-    /// plugin, which the session ticks, restarts). Pool the plugin
-    /// (`Session::add_pooled_plugin`) to have a port change applied.
+    /// The session ticks the plugin's rebinder at each update, as a pooled
+    /// plugin's: when the plugin changes its audio ports, a served one
+    /// restarts into a new slab and the node at this key is replaced by one
+    /// over the new ports.
     #[cfg(feature = "plugin")]
     pub fn insert_plugin(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> Key<crate::PluginNode> {
-        self.insert_plugin_with_rebinder(client).0
+        let (key, rebinder) = self.insert_plugin_with_rebinder(client);
+        if let Some(hosted) = self.plugins.get_mut(&key.erase()) {
+            hosted.set_rebinder(rebinder);
+        }
+        key
     }
 
     /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
@@ -896,14 +897,17 @@ impl Graph {
     #[cfg(feature = "plugin")]
     pub(crate) fn insert_plugin_with_rebinder(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> (
         Key<crate::PluginNode>,
         tutti_plugin::catalog::PluginRebinder,
     ) {
         let node = NodeKey::fresh();
-        let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
-            .with_controls(client.controls());
+        let hosted = crate::plugin::HostedPlugin::served(
+            client.handle(),
+            client.plugin().clone(),
+            client.controls(),
+        );
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
@@ -922,54 +926,11 @@ impl Graph {
         (Key::new(node), rebinder)
     }
 
-    /// Hosts a plugin the host inserted itself (an in-process plugin, a
-    /// wrapper around one): `handle` gets the session's health watch,
-    /// snapshots and render mode at `node`, as
-    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)'s do. Its latency
-    /// is whatever its node's shape declared at insert. Returns the node's
-    /// key as a plugin's, [`Key<PluginNode>`](crate::PluginNode).
-    ///
-    /// `plugin` is which plugin it is, which the handle does not know (the
-    /// file it came from): the one the host opened, and the ref its states
-    /// are saved under ([`Plugin::state`](crate::Plugin::state)).
-    ///
-    /// A host that binds a plugin itself (`PluginClient::bind`) gives it a
-    /// reader of the session's tempo map, `session.transport().settings
-    /// .tempo_reader()`, so the plugin is told the project's tempo; this
-    /// method binds nothing.
-    ///
-    /// # Errors
-    ///
-    /// [`HostPluginError::NoSuchNode`](crate::HostPluginError::NoSuchNode) when
-    /// `node` is not in the graph;
-    /// [`HostPluginError::AlreadyHosted`](crate::HostPluginError::AlreadyHosted)
-    /// when it already hosts a plugin (a plugin's record is freed on the main
-    /// thread, through the graveyard, never replaced where it stands). Nothing
-    /// is hosted on an error.
-    #[cfg(feature = "plugin")]
-    pub fn host_plugin(
-        &mut self,
-        node: impl Into<NodeKey>,
-        handle: tutti_plugin_host::PluginHandle,
-        plugin: tutti_plugin::catalog::PluginRef,
-    ) -> Result<Key<crate::PluginNode>, crate::HostPluginError> {
-        let node = node.into();
-        if !self.nodes.contains_key(&node) {
-            return Err(crate::NoSuchNode::new(node).into());
-        }
-        if self.plugins.contains_key(&node) {
-            return Err(crate::HostPluginError::AlreadyHosted(node));
-        }
-        self.plugins
-            .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
-        self.write_own_bypass(node);
-        Ok(Key::new(node))
-    }
-
     /// Swap the plugin at `node` for `client`, as [`replace`](Self::replace)
     /// swaps any node: crossfading when the running node's shape fits the
     /// bound plugin's, else a plain swap at the same key. Refused, handing
     /// `client` back unbound, while a re-prepare is between its two commits.
+    /// The incoming plugin's rebinder replaces the old one.
     ///
     /// # Errors
     ///
@@ -980,12 +941,16 @@ impl Graph {
     pub fn replace_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
-        self.replace_plugin_with_rebinder(node, client, fade, law)
-            .map(|_| ())
+    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::PluginClient>>> {
+        let node = node.into();
+        let rebinder = self.replace_plugin_with_rebinder(node, client, fade, law)?;
+        if let Some(hosted) = self.plugins.get_mut(&node) {
+            hosted.set_rebinder(rebinder);
+        }
+        Ok(())
     }
 
     /// [`replace_plugin`](Self::replace_plugin), and the builder of the node
@@ -998,12 +963,12 @@ impl Graph {
     pub(crate) fn replace_plugin_with_rebinder(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<
         tutti_plugin::catalog::PluginRebinder,
-        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+        ReplaceRefused<Box<tutti_plugin::PluginClient>>,
     > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
@@ -1035,13 +1000,12 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace(handle, controls, plugin);
-                        self.graveyard.bury_handle(outgoing);
+                        outgoing.retire().settle(&mut self.graveyard);
                     }
                     None => {
                         self.plugins.insert(
                             node,
-                            crate::plugin::HostedPlugin::new(handle, plugin)
-                                .with_controls(controls),
+                            crate::plugin::HostedPlugin::served(handle, plugin, controls),
                         );
                     }
                 }
@@ -1091,12 +1055,13 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
-                        self.graveyard.bury_handle(outgoing);
+                        outgoing.retire().settle(&mut self.graveyard);
                     }
                     None => {
-                        let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
-                        hosted.node = Some(controls);
-                        self.plugins.insert(node, hosted);
+                        self.plugins.insert(
+                            node,
+                            crate::plugin::HostedPlugin::new(handle, plugin_ref, controls),
+                        );
                     }
                 }
                 Ok(rebinder)
@@ -1239,8 +1204,7 @@ impl Graph {
             + self
                 .plugins
                 .values()
-                .filter_map(|hosted| hosted.node.as_ref())
-                .map(|node| node.meter().reclaim())
+                .map(|hosted| hosted.node.meter().reclaim())
                 .sum::<usize>();
         pinned
     }
@@ -1290,7 +1254,7 @@ impl Graph {
         let controls = self.swap_unit(node, incoming, fade, law)?;
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            self.graveyard.bury(record);
+            record.retire().settle(&mut self.graveyard);
         }
         Ok(controls)
     }
@@ -1468,7 +1432,7 @@ impl Graph {
     pub fn crossfade_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<Crossfade<()>, CrossfadeRefused> {
@@ -1887,7 +1851,7 @@ impl Graph {
         }
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            self.graveyard.bury(record);
+            record.retire().settle(&mut self.graveyard);
         }
         // A crossfade waiting on it would only fail at its retry, dropping
         // the incoming node then: drop it here, on the control thread.
@@ -1950,7 +1914,6 @@ impl Graph {
     /// # Errors
     ///
     /// The apply's refusal: the graph keeps what the last apply built.
-    #[cfg(feature = "modulation")]
     pub(crate) fn modulate(
         &mut self,
         m: &mut tutti_nodes::Modulation,
@@ -1971,9 +1934,17 @@ impl Graph {
         Ok((applied, host.plugin_targets.into_inner()))
     }
 
+    /// Points each hosted plugin's driven parameters at the lanes `state` holds:
+    /// where a set of a driven parameter goes.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn refresh_driven(&self, state: &crate::modulation::ModState) {
+        for (&node, hosted) in &self.plugins {
+            hosted.driven.replace(state.plugin_lanes(node));
+        }
+    }
+
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
-    #[cfg(feature = "modulation")]
     pub(crate) fn send_mod_resyncs(&mut self, m: &mut tutti_nodes::Modulation) {
         // A resync refused for now stays owed (the next update retries); one
         // refused for good is counted (`Modulation::resyncs_dropped`).
@@ -2880,7 +2851,7 @@ impl Graph {
     /// node that is [`Bypassed`](NodeMode::Bypassed) or
     /// [`Muted`](NodeMode::Muted) ignores the mix: the mode wins.
     ///
-    /// A modulation route onto the mix (`Mods::route` (feature `modulation`)
+    /// A modulation route onto the mix (`Mods::route`
     /// with a `MixRef`) has this as its base: `set_mix` is the one writer of
     /// the mix, routed or not.
     ///
@@ -2903,7 +2874,7 @@ impl Graph {
     ///
     /// Once the graph has committed the node this reads its live cell, which is
     /// also the knob of a modulation route onto the node's mix (`Mods::route`
-    /// (feature `modulation`) with a `MixRef`): the base the route modulates
+    /// with a `MixRef`): the base the route modulates
     /// around, and what the mix returns to when the route goes. It is the base,
     /// not the lane's value.
     ///
@@ -3254,18 +3225,6 @@ impl Graph {
         self.widen_refusal
     }
 
-    /// The audio wiring as it stands: the nodes, the edges into every input
-    /// port, the root's output sources and its input width, including edits
-    /// no commit has sent yet ([`is_edited`](Self::is_edited)). A read-only
-    /// view of what [`connect`](Self::connect) and its kin write; the
-    /// graph's other declarations (event edges, params, modes) are not part
-    /// of it.
-    ///
-    /// An edge that is fading out stays here until its fade ends.
-    pub fn topology(&self) -> &Topology {
-        &self.editor.spec().topology
-    }
-
     /// The generation of the root the next commit carries
     /// ([`RootId`](tutti_graph::RootId)); a restart names it.
     #[cfg(feature = "device")]
@@ -3552,19 +3511,6 @@ impl Graph {
 
     // --- Latency ---
 
-    /// What compensation this graph needs, folded over the graph as edited
-    /// (committed or not): audio edges plus each node's event and
-    /// param-modulation sources. Mutates nothing.
-    pub fn latency_plan(&self) -> Compensation {
-        // The bus edges as the lanes they commit to; a spec whose bus edges
-        // do not lower has none to fold (the commit will say why).
-        let rate = self.editor.prepare().sample_rate();
-        match self.editor.lowered() {
-            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
-            Err(_) => tutti_graph::latency_plan(self.editor.spec(), rate),
-        }
-    }
-
     /// Whether an edit waits for a commit: what the session's next update
     /// commits on.
     pub fn is_edited(&self) -> bool {
@@ -3793,7 +3739,6 @@ fn render(
 /// and a source by `SourceKey(u64)`; the `u64` is the host's own minting (an
 /// entity's bits, say), and this is how the session's
 /// [`Modulation`](crate::Phase::Modulation) phase reads it ([`ModInput`](crate::ModInput)).
-#[cfg(feature = "modulation")]
 pub trait ModKeys {
     /// The node a target's key names.
     fn node(&self, target: u64) -> Option<NodeKey>;
@@ -3813,22 +3758,19 @@ pub trait ModKeys {
 /// `Param` cell, a plugin target feeds the node's event input 0 and starts at
 /// the plugin's mirrored value (the session's record of it,
 /// `Plugin::param_values`).
-#[cfg(feature = "modulation")]
 struct ModHostOver<'a> {
     nodes: &'a BTreeMap<NodeKey, Entry>,
     #[cfg(feature = "plugin")]
     plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     keys: &'a dyn ModKeys,
-    /// Each plugin target the apply resolved, by node and parameter: where
-    /// `Phase::Plugins` writes a GUI edit (`ModState::plugin_target`).
+    /// Each plugin target the apply resolved, by node and parameter: which
+    /// plugin parameters a lane drives (`ModState::plugin_lanes`).
     plugin_targets: std::cell::RefCell<PluginTargets>,
 }
 
 /// A plugin parameter's modulation target, by its node and parameter id.
-#[cfg(feature = "modulation")]
 pub(crate) type PluginTargets = BTreeMap<(NodeKey, u32), tutti_modulation::TargetKey>;
 
-#[cfg(feature = "modulation")]
 impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn target(&self, target: tutti_modulation::TargetKey) -> Option<tutti_nodes::Target> {
         let tutti_modulation::TargetKey::Param {

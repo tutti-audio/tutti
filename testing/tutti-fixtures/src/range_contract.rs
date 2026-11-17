@@ -6,21 +6,30 @@ use std::fmt::Debug;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// What a type's author states: how to build it and which raws it takes.
+#[derive(Debug)]
 pub struct RangeContract<'a, T, R> {
+    /// The checked constructor.
     pub new: fn(R) -> Option<T>,
+    /// The accessor back to the raw.
     pub get: fn(T) -> R,
     /// Present when the type has `of`.
     pub of: Option<fn(R) -> T>,
+    /// Raws the type accepts.
     pub valid: &'a [R],
+    /// Raws the type refuses.
     pub invalid: &'a [R],
 }
 
-/// Panics, naming the raw, when the type breaks the contract.
+/// Checks that a type keeps the range contract.
 ///
 /// For each valid raw, `new`, `get`, `TryFrom`, `Into` and `of` agree. For each
 /// invalid raw, `new` is `None`, `TryFrom` errs with an error that carries the
 /// raw (its `Debug` shows it) and `of` panics. The serde half is
 /// [`check_range_serde`].
+///
+/// # Panics
+///
+/// Panics, naming the raw, when the type breaks the contract.
 pub fn check_range_contract<T, R>(c: &RangeContract<'_, T, R>)
 where
     T: TryFrom<R> + Into<R> + Copy + PartialEq + Debug,
@@ -53,11 +62,15 @@ where
     }
 }
 
-/// Panics, naming the raw, when the type's serde form is not its range.
+/// Checks that the type's serde form is its range.
 ///
 /// For each valid raw, the value serialises as the bare raw and deserialises
 /// back to itself. For each invalid raw, deserialising refuses. NaN and
 /// infinity reach serde as JSON `null`.
+///
+/// # Panics
+///
+/// Panics, naming the raw, when the type breaks the serde contract.
 pub fn check_range_serde<T, R>(c: &RangeContract<'_, T, R>)
 where
     T: Copy + PartialEq + Debug + Serialize + DeserializeOwned,

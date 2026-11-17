@@ -176,6 +176,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "tutti-session re-exports no crate whole",
     ),
     (
+        "check-umbrella",
+        "",
+        "tutti re-exports no crate whole and offers each item at one path",
+    ),
+    (
         "check-guards",
         "",
         "every plugin host callback runs under the panic guard",
@@ -193,7 +198,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-lints",
         "",
-        "every crate takes the workspace lints and missing_debug_implementations denies",
+        "every workspace member takes the workspace lints and missing_debug_implementations denies",
     ),
     (
         "check-value-traits",
@@ -254,6 +259,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "check-logging",
         "",
         "no `log` dependency, and no print macro outside a main, a test or an example",
+    ),
+    (
+        "check-test-time",
+        "",
+        "a test asserts no wall-clock time and sleeps for no event; a per-file ratchet",
     ),
     (
         "check-conformance",
@@ -321,7 +331,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-no-std",
         "",
-        "build each no_std crate for a bare-metal target (needs `rustup target add thumbv7em-none-eabihf`)",
+        "build each no_std crate for a bare-metal target (needs `rustup target add aarch64-unknown-none`)",
     ),
     (
         "verify-audio",
@@ -575,6 +585,7 @@ impl Planner<'_> {
                 self.lines(&["cargo build --locked --release -p tutti-plugin-server --bin plugin-server"]);
             }
             "check-session" => self.out.push(Step::Gate(Gate::Session)),
+            "check-umbrella" => self.out.push(Step::Gate(Gate::Umbrella)),
             "check-guards" => self.out.push(Step::Gate(Gate::Guards)),
             "check-ffi" => self.out.push(Step::Gate(Gate::Ffi)),
             "check-errors" => self.out.push(Step::Gate(Gate::Errors)),
@@ -592,6 +603,7 @@ impl Planner<'_> {
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
+            "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -719,7 +731,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building", "check-logging",
+                    "check-building", "check-umbrella", "check-logging", "check-test-time",
                 ] {
                     self.dep(d)?;
                 }
@@ -785,17 +797,24 @@ impl Planner<'_> {
 }
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.
-const NO_STD_TARGET: &str = "thumbv7em-none-eabihf";
+const NO_STD_TARGET: &str = "aarch64-unknown-none";
 
-/// The `#![no_std]` crates, each with the features (besides `std`) built on top of
+/// The `#![no_std]` crates in layer order, each with the features built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
-const NO_STD_CRATES: &[(&str, &[&str])] = &[("tutti-ump", &["serde"])];
+const NO_STD_CRATES: &[(&str, &[&str])] = &[
+    ("tutti-types", &["serde"]),
+    ("tutti-ump", &["serde"]),
+    ("tutti-curve", &[]),
+    ("tutti-metering", &[]),
+    ("tutti-tempo", &["serde"]),
+    ("tutti-modulation", &[]),
+];
 
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-export --lib -- -D warnings"#,
@@ -803,7 +822,7 @@ const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-session --lib --features vst3,au -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --features device,soundfont,decode-wav,decode-flac,decode-mp3,decode-ogg,export,encode-flac,encode-aiff,encode-vorbis --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-sampler --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-sampler --lib --features decode-wav,decode-flac,decode-mp3,decode-ogg -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-sampler --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-plugin --features vst3,au,serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-codec --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-codec --features encode-wav --all-targets -- -D warnings"#,
@@ -821,6 +840,7 @@ const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-midi-hardware --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-measure --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-dsp --lib -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings"#,
@@ -840,8 +860,8 @@ const TEST_FEATURES: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-probe"#,
     r#"cargo nextest run --locked -p tutti-cpal --features capture"#,
     r#"cargo nextest run --locked -p tutti-session --features audio-io"#,
-    r#"cargo nextest run --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde"#,
-    r#"cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth"#,
+    r#"cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde"#,
+    r#"cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth"#,
     r#"cargo nextest run --locked -p tutti --features audio-io"#,
     r#"cargo nextest run --locked -p tutti --no-default-features --features io"#,
     r#"cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis"#,
@@ -856,6 +876,7 @@ const TEST_FEATURES: &[&str] = &[
     r#"cargo nextest run --locked -p tutti-midi-device --features serde"#,
     r#"cargo nextest run --locked -p tutti-midi-hardware --features serde"#,
     r#"cargo nextest run --locked -p tutti-tempo --features serde"#,
+    r#"cargo nextest run --locked -p tutti-measure --features serde"#,
     r#"cargo nextest run --locked -p tutti-buffers --features serde"#,
     r#"cargo nextest run --locked -p tutti-midi-hardware --features sequencer-tests"#,
     r#"cargo nextest run --locked -p tutti-plugin-types --features testing"#,

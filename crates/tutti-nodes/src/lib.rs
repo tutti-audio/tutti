@@ -24,7 +24,8 @@
 //!   read per frame when driven.
 //! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode` and
 //!   `LimiterNode` (each a `KernelNode` over a bank of `tutti_dsp`: the compressor and the
-//!   gate read a typed `KeySource`, the limiter reports its lookahead as latency), and
+//!   gate read a typed `KeySource`, through an optional `KeyFilter`; the limiter reports its
+//!   lookahead as latency), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
 //!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
@@ -37,6 +38,8 @@
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
+//! - **DC blocker** — `DcBlockerNode`, a first-order high-pass with a finite tail, from a
+//!   `DcBlockerConfig`.
 //! - **Modulation sources** — `LfoNode`, the per-sample LFO over
 //!   `tutti_modulation::Waveform`, the wave a control lane evaluates: an audio generator, whose output feeds a node's
 //!   audio input. Its `LfoClock` is free (a rate in `Hz`, a param) or synced to the
@@ -69,7 +72,7 @@
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
 //! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
 //! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
-//! `InterpolationMode` and `ShapeKind`.
+//! `InterpolationMode`, `OversamplingFactor` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
 //! to insert the moment it is built.
@@ -264,9 +267,14 @@ pub use tutti_dsp::{
 
 mod distortion;
 pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
-// `ShapeKind` is in `DistortionNode::new`'s signature; the curves behind it are
-// `tutti-dsp`'s.
-pub use tutti_dsp::ShapeKind;
+// `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
+// them is `tutti-dsp`'s.
+pub use tutti_dsp::{OversamplingFactor, ShapeKind};
+
+// A first-order high-pass that removes a constant offset.
+mod dc_blocker;
+pub use dc_blocker::{DcBlockerConfig, DcBlockerKernel, DcBlockerNode, DcBlockerSet};
+pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
@@ -288,7 +296,9 @@ pub use dynamics::{
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
-pub use tutti_dsp::{CompressorControls, GateControls, KeySource, LimiterControls, Lookahead};
+pub use tutti_dsp::{
+    CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
+};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.

@@ -13,7 +13,7 @@
 //! difference to read (the playback before the callback, say), and that is
 //! `None`, "not reported", never zero.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tutti_engine::{BackendErrorKind, StreamFaults};
 
@@ -32,7 +32,7 @@ pub(crate) fn backend_kind(err: &cpal::Error) -> BackendErrorKind {
 
 /// Records cpal's `err` into `faults`: what a stream's error callback calls.
 pub(crate) fn record(faults: &StreamFaults, err: &cpal::Error) {
-    faults.record(backend_kind(err), err);
+    faults.record(backend_kind(err), err, Instant::now());
 }
 
 /// The delay an output callback's timestamp reports: the playback instant

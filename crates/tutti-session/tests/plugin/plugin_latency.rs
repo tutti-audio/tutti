@@ -18,8 +18,8 @@ use tutti_types::MaxBlock;
 
 use support::{clap_probe, plugin_server};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
+use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin::handles::PluginClient;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
     Phase, PhaseCx, Range, Root, Session, SessionEvent,

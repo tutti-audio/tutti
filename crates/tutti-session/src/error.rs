@@ -57,23 +57,6 @@ impl NoSuchNode {
     }
 }
 
-/// [`Graph::host_plugin`](crate::Graph::host_plugin) refused.
-#[cfg(feature = "plugin")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
-#[non_exhaustive]
-pub enum HostPluginError {
-    /// The node is not in the graph.
-    #[error(transparent)]
-    NoSuchNode(#[from] NoSuchNode),
-    /// The node already hosts a plugin (added by
-    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin),
-    /// [`Graph::insert_plugin`](crate::Graph::insert_plugin) or an earlier
-    /// `host_plugin`): a plugin record is freed on the main thread, so a
-    /// second one is never put over the first.
-    #[error("{0:?} already hosts a plugin")]
-    AlreadyHosted(tutti_graph::NodeKey),
-}
-
 impl<E: Into<tutti_transport::TransportCommand> + std::fmt::Debug>
     From<tutti_transport::TimedError<E>> for Error
 {
@@ -196,10 +179,10 @@ pub enum ConnectError {
     Bus(#[from] tutti_graph::BusError),
 }
 
-/// Why a MIDI call of the session failed (design 030, convention 2: one error
-/// for the area, each cause carried as its source). `tutti::midi::Error` in
-/// the umbrella; the session's own [`Error::Midi`] holds it, and every cause
-/// below converts into both with `?`.
+/// Why a MIDI call of the session failed: one error for the area, each cause
+/// carried as its source. `tutti::midi::Error` in the umbrella; the session's
+/// own [`Error::Midi`] holds it, and every cause below converts into both with
+/// `?`.
 #[cfg(feature = "midi")]
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -456,7 +439,6 @@ pub enum Error {
 
     /// A modulation declaration refused when it was made: wraps
     /// [`RouteError`](crate::RouteError).
-    #[cfg(feature = "modulation")]
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
 
@@ -472,9 +454,8 @@ pub enum Error {
     Device(#[from] tutti_cpal::Error),
 
     /// A MIDI failure of any kind: the OS port layer, a file, a send, a
-    /// route, or a target that takes no MIDI. One variant for the area
-    /// (design 030, convention 2); [`MidiError`] says which, each with its
-    /// own error as the source.
+    /// route, or a target that takes no MIDI. One variant for the area;
+    /// [`MidiError`] says which, each with its own error as the source.
     #[cfg(feature = "midi")]
     #[error(transparent)]
     Midi(#[from] MidiError),

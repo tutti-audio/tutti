@@ -79,6 +79,7 @@ fn compressor() -> CompressorNode {
             attack: Seconds(0.0),
             release: Seconds(0.0),
             makeup: Db(0.0),
+            ..CompressorControls::DEFAULT
         },
     )
 }
@@ -93,6 +94,7 @@ fn gate() -> GateNode {
             hold: Seconds(0.0),
             release: Seconds(1.0),
             range: Db(-40.0),
+            ..GateControls::DEFAULT
         },
     )
 }
@@ -225,6 +227,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
                             attack: Seconds(0.002),
                             release: Seconds(0.03),
                             makeup: Db(0.0),
+                            ..CompressorControls::DEFAULT
                         },
                     ),
                     &[&audio[0], &audio[1], &key[0], &key[1]],
@@ -253,6 +256,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
                             hold: Seconds(0.01),
                             release: Seconds(0.03),
                             range: Db(-30.0),
+                            ..GateControls::DEFAULT
                         },
                     ),
                     &[&audio[0], &audio[1], &key[0], &key[1]],

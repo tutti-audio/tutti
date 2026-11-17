@@ -138,7 +138,7 @@ impl DelayBank {
             routing: *layout.routing(),
             linked: layout.times().is_linked(),
             rate,
-            cap,
+            cap: cap.get(),
             max_secs: layout.max_delay().get().to_f32(),
             own_secs,
         }

@@ -47,7 +47,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Through;
-use tutti_plugin::handles::{Bound, PluginClient};
+use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::PluginControls;
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 

@@ -15,6 +15,8 @@ pub use routing::{Routing, RoutingError};
 pub(crate) use taps::{finite_or, ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
+use tutti_types::Samples;
+
 /// How a fractional delay position is turned into a sample.
 ///
 /// The cost/quality ladder for a *modulated* delay: a moving delay time lands
@@ -66,13 +68,14 @@ impl std::fmt::Debug for DelayLine {
 }
 
 impl DelayLine {
-    /// Allocates a line holding up to `max_delay_samples` frames of history.
+    /// Allocates a line holding up to `capacity` frames of history.
     ///
     /// The backing buffer is one frame longer than the maximum delay, so that
-    /// an interpolating read at exactly `max_delay_samples` still has a second
+    /// an interpolating read at exactly `capacity` still has a second
     /// tap to blend toward. Allocates — build before going live.
     #[must_use]
-    pub fn new(max_delay_samples: usize) -> Self {
+    pub fn new(capacity: Samples) -> Self {
+        let max_delay_samples = capacity.get();
         Self {
             buffer: vec![0.0; max_delay_samples + 1],
             write_pos: 0,

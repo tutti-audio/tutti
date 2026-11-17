@@ -57,6 +57,10 @@ impl Drop for ScopedEnv {
 /// one, so a suite whose default is above the nightly figure keeps its own. A
 /// value that is not a `u32` panics, never falls back, so a typo cannot quietly
 /// run the default.
+///
+/// # Panics
+///
+/// Panics when `PROPTEST_CASES` is set and is unreadable or not a `u32`.
 pub fn cases(default: u32) -> u32 {
     match std::env::var("PROPTEST_CASES") {
         Ok(v) => v

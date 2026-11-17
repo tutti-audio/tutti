@@ -9,6 +9,9 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["audio", "wav", "flac", "aiff", "ogg"]
 categories = ["multimedia::audio"]
+# Only so the build script can tell its dependents' build scripts whether a
+# decoder is on.
+links = "tutti-codec"
 
 [lints]
 workspace = true
@@ -38,7 +41,7 @@ decode-ogg = ["dep:symphonia", "symphonia/ogg", "symphonia/vorbis"]
 serde = ["dep:serde"]
 
 [dependencies]
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 # An unfinished file that cannot be removed is logged.
 tracing.workspace = true
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }

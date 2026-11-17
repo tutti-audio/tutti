@@ -96,7 +96,7 @@ impl MidiOut {
         // `MIDIERR_STILLPLAYING`, so the call that releases it is also the
         // wait for it.
         let bound = Duration::from_millis(message.len() as u64 / 3 + 1) + SLACK;
-        let started = Instant::now();
+        let deadline = Instant::now() + bound;
         let released = loop {
             // SAFETY: `header` is the header prepared above (or one whose
             // preparation failed, which unprepare accepts).
@@ -104,7 +104,7 @@ impl MidiOut {
             if code != MIDIERR_STILLPLAYING {
                 break code;
             }
-            if started.elapsed() >= bound {
+            if Instant::now() >= deadline {
                 // The driver may still read the header and the bytes: they
                 // are never freed.
                 return Err(Error::NotReturned {

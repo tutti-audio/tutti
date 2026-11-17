@@ -238,6 +238,9 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
+    /// The edits the fake reports the host did not hear
+    /// (`FakePlugin::drop_reported_edits`).
+    dropped_edits: AtomicU64,
     /// The parameters the fake declares and whether each is read-only. None
     /// until [`FakePlugin::declare`]: the fake refuses a write to an id it does
     /// not declare, as every format does.
@@ -315,6 +318,7 @@ impl FakePlugin {
             resize_request: AtomicU64::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
+            dropped_edits: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
         });
         (
@@ -434,6 +438,12 @@ impl FakePlugin {
             2 => Some(RenderMode::Offline),
             _ => None,
         }
+    }
+
+    /// The plugin reports `n` more parameter edits the host did not hear
+    /// ([`Control::dropped_reported_edits`]).
+    pub fn drop_reported_edits(&self, n: u64) {
+        self.0.dropped_edits.fetch_add(n, Ordering::Relaxed);
     }
 
     /// The output channel count the plugin reports from now on.
@@ -664,9 +674,11 @@ macro_rules! fake_control {
             /// The fake reports no edits outside a block.
             fn take_reported_edits(&mut self, _main: MainThreadMarker, _out: &mut Vec<ParamEdit>) {}
 
-            /// `0`: the fake reports edits in `ProcessOutput`, like CLAP and VST3.
+            /// As [`FakePlugin::drop_reported_edits`] counted them: none until a
+            /// test says so (the fake reports edits in `ProcessOutput`, like
+            /// CLAP and VST3).
             fn dropped_reported_edits(&self) -> u64 {
-                0
+                self.shared.dropped_edits.load(Ordering::Relaxed)
             }
         }
 

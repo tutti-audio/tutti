@@ -8,7 +8,7 @@
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
@@ -143,17 +143,17 @@ impl ManualStream {
     }
 
     /// Delivers a backend error exactly as a driver's error callback would
-    /// ([`StreamFaults::record`]), so a test can exercise the fault path
-    /// without unplugging a device. Does nothing before the stream is first
-    /// opened.
-    pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display) {
+    /// at the instant `now` ([`StreamFaults::record`]), so a test can exercise
+    /// the fault path without unplugging a device. Does nothing before the
+    /// stream is first opened.
+    pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
         if let Some(faults) = self
             .faults
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .as_ref()
         {
-            faults.record(kind, err);
+            faults.record(kind, err, now);
         }
     }
 

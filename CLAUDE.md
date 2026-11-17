@@ -71,6 +71,11 @@ std only. A rule the compiler already enforces is not a gate.
   invariant, and its name says which. Delete a test that cannot fail: one that is always
   true, asserts only that nothing panicked, or compares a value with the function that
   computed it.
+- **A test never asserts wall-clock time.** A timing rule (deadline, stall, timeout,
+  debounce) is a type whose methods take the `now`, and its test passes constructed
+  instants. A real-time limit in a test only guards a hang: generous, asserting
+  completion, never speed. A sleep never stands in for waiting on the event. Speed is a
+  bench.
 - **Never weaken a test to make it pass.** Fix the bug, or report the failure and its
   cause.
 - **Never compare a render against another render.** Pin an analytic figure or an

@@ -16,7 +16,6 @@
 //! The patterns were `grep -E` ones; each is written out below to the same
 //! language:
 //! - chained: `tutti_[a-z0-9_]+::tutti_[a-z0-9_]+::`, anywhere in a line;
-//! - facade: `^\s*pub use tutti_[a-z0-9_]+\s*;`;
 //! - module: `<crate>::(<mod>|<mod>...)::`, the crate and modules literal.
 
 use super::{Report, Tree, under_skipped_dir};
@@ -72,40 +71,6 @@ pub(super) fn check(tree: &dyn Tree, args: &[String]) -> Report {
         r.fail(format!(
             "FAIL: {n} chained path(s). Import from the owning crate's root instead."
         ));
-    }
-
-    // The facade's own rule: every whole-crate re-export in `crates/tutti`
-    // must be aliased.
-    //
-    // A bare `pub use tutti_engine;` there would let a consumer write
-    // `tutti::tutti_engine::Engine`, exactly the redundant path the chained
-    // gate above exists to prevent, in a shape its pattern CANNOT see: it
-    // matches `tutti_x::tutti_y::`, and `tutti::` has no underscore segment.
-    // Aliasing removes the spelling from the language rather than asking
-    // anyone to avoid it.
-    //
-    // `crates/tutti/tests/no_logic.rs` asserts the same thing from inside the
-    // crate; this is here so the rule is visible to someone reading the gates
-    // rather than only to someone running the tests.
-    const FACADE: &str = "crates/tutti/src/lib.rs";
-    if let Some(text) = tree.read(FACADE) {
-        r.say("==> unaliased crate re-exports in the facade");
-        let bare: Vec<String> = text
-            .split('\n')
-            .enumerate()
-            .filter(|(_, l)| bare_reexport(l))
-            .map(|(i, l)| format!("{}:{l}", i + 1))
-            .collect();
-        if bare.is_empty() {
-            r.say("ok");
-        } else {
-            for b in bare {
-                r.fail(b);
-            }
-            r.fail(
-                "FAIL: alias it (`as engine`, `as sampler`, ...) so tutti::tutti_x:: is unspellable.",
-            );
-        }
     }
 
     // Per-module gate.
@@ -168,23 +133,6 @@ fn chained(line: &str) -> bool {
     let b = line.as_bytes();
     line.match_indices("tutti_")
         .any(|(i, _)| crate_then_colons(b, i).is_some_and(|m| crate_then_colons(b, m).is_some()))
-}
-
-/// The C locale's `\s`.
-fn space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
-}
-
-/// `^\s*pub use tutti_[a-z0-9_]+\s*;`
-fn bare_reexport(line: &str) -> bool {
-    let Some(rest) = line
-        .trim_start_matches(space)
-        .strip_prefix("pub use tutti_")
-    else {
-        return false;
-    };
-    let n = run_end(rest.as_bytes(), 0);
-    n > 0 && rest[n..].trim_start_matches(space).starts_with(';')
 }
 
 #[cfg(test)]
@@ -296,64 +244,6 @@ mod tests {
         let mut m = Mem::with(&[("crates/target/x.rs", ""), ("testing/_archive/y.rs", "")]);
         m.files.insert("crates/a/lib.md".into(), "ok".into());
         assert!(run(&m, &[]).passed());
-    }
-
-    #[test]
-    fn a_bare_facade_reexport_is_reported_by_line() {
-        let mut m = base();
-        m.files.insert(
-            "crates/tutti/src/lib.rs".into(),
-            "pub use tutti_a as a;\n  pub use tutti_engine ;\npub use tutti_x::Y;\n".into(),
-        );
-        let r = run(&m, &[]);
-        assert_eq!(
-            r.out,
-            [
-                "==> chained tutti_X::tutti_Y:: paths",
-                "ok",
-                "==> unaliased crate re-exports in the facade",
-                "2:  pub use tutti_engine ;",
-                "FAIL: alias it (`as engine`, `as sampler`, ...) so tutti::tutti_x:: is unspellable.",
-            ]
-        );
-        assert_eq!(r.findings, &r.out[3..]);
-    }
-
-    #[test]
-    fn the_facade_pattern_is_the_greps() {
-        for hit in [
-            "pub use tutti_a;",
-            "\tpub use tutti_a1 ;// c",
-            "   pub use tutti_a_b ;x",
-        ] {
-            assert!(bare_reexport(hit), "{hit}");
-        }
-        for miss in [
-            "pub use tutti_a as b;",
-            "pub use tutti_;",
-            "pub use tutti_a::B;",
-            "pub  use tutti_a;",
-            "pub(crate) use tutti_a;",
-            "// pub use tutti_a;",
-            "pub use midly;",
-        ] {
-            assert!(!bare_reexport(miss), "{miss}");
-        }
-    }
-
-    #[test]
-    fn a_clean_facade_prints_its_heading_and_ok() {
-        let mut m = base();
-        m.files.insert(
-            "crates/tutti/src/lib.rs".into(),
-            "pub use tutti_a as a;\n".into(),
-        );
-        let r = run(&m, &[]);
-        assert!(r.passed());
-        assert_eq!(
-            r.out[2..],
-            ["==> unaliased crate re-exports in the facade", "ok"]
-        );
     }
 
     #[test]

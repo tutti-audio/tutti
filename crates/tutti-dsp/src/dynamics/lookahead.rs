@@ -4,6 +4,8 @@
 use tutti_buffers::{Float, Sample};
 
 use super::window::MonotonicMinDeque;
+use tutti_types::Samples;
+
 use crate::DelayLine;
 
 /// Lookahead ring buffers + sliding-window-minimum tracker for the limiter.
@@ -23,7 +25,9 @@ impl LookaheadRing {
     pub(crate) fn new(channels: usize, lookahead_samples: usize) -> Self {
         let n = lookahead_samples.max(1);
         Self {
-            lines: (0..channels.max(1)).map(|_| DelayLine::new(n)).collect(),
+            lines: (0..channels.max(1))
+                .map(|_| DelayLine::new(Samples(n)))
+                .collect(),
             lookahead: n,
             // n + 1 frames: the one delayed out now and the n after it.
             min_deque: MonotonicMinDeque::new(n + 1),

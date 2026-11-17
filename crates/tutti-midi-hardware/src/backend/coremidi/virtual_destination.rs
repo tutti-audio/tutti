@@ -77,7 +77,7 @@ impl UmpVirtualDestination {
             spec.name().as_str(),
             spec.protocol(),
             move |event, arrived| {
-                if producer.push(event, arrived) == crate::Pushed::Full {
+                if producer.push(event, arrived) == Err(tutti_rt::PushError::Full) {
                     debug!("UMP input ring full, dropping event");
                 }
             },

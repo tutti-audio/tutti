@@ -285,8 +285,8 @@ impl MidiIn {
             let _ = worker.join();
         }
         // Callbacks that found the input before it was removed finish.
-        let started = Instant::now();
-        while self.shared.in_flight.load(Ordering::Acquire) > 0 && started.elapsed() < LEAVE_BOUND {
+        let deadline = Instant::now() + LEAVE_BOUND;
+        while self.shared.in_flight.load(Ordering::Acquire) > 0 && Instant::now() < deadline {
             std::thread::yield_now();
         }
         if self.shared.in_flight.load(Ordering::Acquire) > 0 {

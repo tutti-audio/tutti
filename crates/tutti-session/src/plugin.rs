@@ -15,7 +15,7 @@
 //! # The record
 //!
 //! Each plugin the graph holds (`Graph::insert_plugin`,
-//! [`Session::add_pooled_plugin`], [`Graph::host_plugin`](crate::Graph::host_plugin)) has a record,
+//! [`Session::add_pooled_plugin`]) has a record,
 //! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
@@ -39,11 +39,14 @@
 //! `false`). A host blocking its main thread on such a job (joining it there)
 //! gets the same.
 //!
-//! What retires a record (a removal, a crossfade to another plugin or to a
-//! native node, a reload's dead plugin) parks it in the graveyard instead of
-//! dropping it, since the drop of a plugin's last owner may tear down an
-//! editor. `MainSession::update` empties it; [`Session::retired_plugins`] counts
-//! what waits, and `Phase::Plugins` warns once when more than a handful do.
+//! What retires an in-process record (a removal, a crossfade to another plugin
+//! or to a native node, a reload's dead plugin) parks it in the graveyard
+//! instead of dropping it, since the drop of a plugin's last owner tears down
+//! its library and instance. `MainSession::update` empties it;
+//! [`Session::retired_plugins`] counts what waits, and `Phase::Plugins` warns
+//! once when more than a handful do. A served plugin's record drops where it
+//! is retired, on the control thread; only an editor it left open waits for
+//! the main thread, to be closed.
 //!
 //! # `Phase::Plugins`
 //!
@@ -53,7 +56,7 @@
 //!   `PhaseCx::now`: dead after at least `Liveness::DEATHS` consecutive
 //!   unhealthy observations spanning at least the window. A dead pooled
 //!   plugin's node stays at its key, silent in its place, and the entry reads
-//!   lost; a node of a plugin the host inserted itself ([`Graph::host_plugin`](crate::Graph::host_plugin))
+//!   lost; a node of a plugin the host inserted itself (`Graph::insert_plugin`)
 //!   is removed ([`Session::remove`]). Either is reported once,
 //!   [`PluginChange::Died`].
 //! - **Reports.** What the plugin reported since the last update (its own edit
@@ -72,8 +75,8 @@
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
-//!   [`SNAPSHOT_INTERVAL`] of `now` (`SessionBuilder::snapshot_interval`),
-//!   as a job on the same spawner (a blocking round trip), landed in a later
+//!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
+//!   `now`, as a job on the same spawner (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
 //!   was dropped.
@@ -139,6 +142,8 @@ use tutti_plugin_types::{
 use tutti_types::{SampleRate, Samples};
 
 mod entry;
+#[cfg(test)]
+mod fake_hosting;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
@@ -159,10 +164,10 @@ use crate::{
     WorkerError,
 };
 
-/// How often a healthy plugin's state is captured, by default: 8 s (design 015 §4.4).
+/// How often a healthy plugin's state is captured, by default: 8 s.
 /// [`SessionBuilder::snapshot_interval`](crate::SessionBuilder::snapshot_interval)
 /// sets another.
-pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
+pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
 /// A plugin load: what the pool's plugin entry runs, and what a recovery reload
 /// runs again. [`run`](Self::run) blocks (a `plugin-server` launch, half a
@@ -624,27 +629,101 @@ fn change_of(notice: Notice) -> Option<PluginChange> {
     })
 }
 
+/// Where a hosted plugin runs, which says where its record may drop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// In this process: the record owns the plugin's library and instance,
+    /// whose drop is a main-thread call.
+    InProcess,
+    /// In a plugin server: the record owns an IPC client and its bridge,
+    /// which drop on any thread but the audio thread.
+    Served,
+}
+
 /// A plugin handle a swap replaced, and whether its editor was open.
 pub(crate) struct Outgoing {
     handle: PluginHandle,
     editor_open: bool,
+    placement: Placement,
 }
 
-/// What a removal or a replacement took out of the session, held until the
-/// main thread drops it (`MainSession::update`).
+impl Outgoing {
+    /// The handle, split by where its plugin ran. A served plugin's handle
+    /// drops here, on the calling (control) thread.
+    pub(crate) fn retire(self) -> Retired {
+        let Self {
+            handle,
+            editor_open,
+            placement,
+        } = self;
+        let editor = editor_open.then(|| handle.clone());
+        Retired::of(placement, editor, handle)
+    }
+}
+
+/// What a plugin record or handle hands to the session once it is retired.
+#[must_use = "a retired record goes to the graveyard or drops, through `settle`"]
+pub(crate) enum Retired {
+    /// An in-process plugin's: its drop waits for the main thread.
+    InProcess(InProcessRecord),
+    /// A served plugin's, already dropped; what is left is the handle whose
+    /// editor was open, to close on the main thread.
+    Served { editor: Option<PluginHandle> },
+}
+
+impl Retired {
+    /// `held` split by `placement`: an in-process owner is kept for the main
+    /// thread, a served one drops here.
+    fn of(
+        placement: Placement,
+        editor: Option<PluginHandle>,
+        held: impl std::any::Any + Send,
+    ) -> Self {
+        match placement {
+            Placement::InProcess => Self::InProcess(InProcessRecord {
+                editor,
+                _held: Box::new(held),
+            }),
+            Placement::Served => Self::Served { editor },
+        }
+    }
+
+    /// Parks an in-process record in `yard`; a served one has dropped, and
+    /// only its open editor waits there.
+    pub(crate) fn settle(self, yard: &mut Graveyard) {
+        match self {
+            Self::InProcess(record) => yard.bury(record),
+            Self::Served { editor } => yard.editors.extend(editor),
+        }
+    }
+}
+
+/// What an in-process plugin's retirement holds until the main thread drops
+/// it: the only thing the [`Graveyard`] takes.
+pub(crate) struct InProcessRecord {
+    /// The handle to close the editor through, if it was open.
+    editor: Option<PluginHandle>,
+    /// The owner whose drop waits for the main thread.
+    _held: Box<dyn std::any::Any + Send>,
+}
+
+/// What a removal or a replacement took out of the session for an in-process
+/// plugin, held until the main thread drops it (`MainSession::update`).
 ///
 /// A plugin record owns the plugin's control handle, and dropping the last
-/// owner of an in-process plugin tears its editor down, a main-thread call.
-/// `Session` is `Send` and has no main thread of its own, so whatever
-/// retires a record parks it here instead of dropping it, and the view that
-/// holds the proof empties the yard. A host that never reaches the OS's main
-/// thread (a headless one) never empties it: [`len`](Self::len) is what
-/// `Phase::Plugins` warns on past [`Graveyard::WARN_AT`].
+/// owner of an in-process plugin tears its library and instance down, a
+/// main-thread call. `Session` is `Send` and has no main thread of its own,
+/// so whatever retires such a record parks it here instead of dropping it,
+/// and the view that holds the proof empties the yard. A served plugin's
+/// record is not parked: it drops where it is retired, on a control thread.
+/// A host that never reaches the OS's main thread (a headless one) never
+/// empties the yard: [`len`](Self::len) is what `Phase::Plugins` warns on
+/// past [`Graveyard::WARN_AT`].
 #[derive(Default)]
 pub(crate) struct Graveyard {
-    /// Held to be dropped: a removed plugin's record, or the handle a
-    /// crossfade replaced.
-    retired: Vec<Box<dyn std::any::Any + Send>>,
+    /// Held to be dropped: a removed in-process plugin's record, or the handle
+    /// a crossfade replaced.
+    retired: Vec<InProcessRecord>,
     /// Handles whose editor was open when they were retired: closed by
     /// [`exhume`](Self::exhume) before the drop.
     editors: Vec<PluginHandle>,
@@ -655,21 +734,9 @@ impl Graveyard {
     /// How many retired plugins a session holds before it says so.
     pub(crate) const WARN_AT: usize = 16;
 
-    pub(crate) fn bury(&mut self, mut record: HostedPlugin) {
-        record.gate.end();
-        // The node over a pool entry is gone: the entry is no longer held.
-        record.pooled = None;
-        if record.editor_open {
-            self.editors.push(record.handle.clone());
-        }
-        self.retired.push(Box::new(record));
-    }
-
-    pub(crate) fn bury_handle(&mut self, outgoing: Outgoing) {
-        if outgoing.editor_open {
-            self.editors.push(outgoing.handle.clone());
-        }
-        self.retired.push(Box::new(outgoing.handle));
+    fn bury(&mut self, mut record: InProcessRecord) {
+        self.editors.extend(record.editor.take());
+        self.retired.push(record);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -689,12 +756,13 @@ impl Graveyard {
 
     /// Warns once when the yard has grown past [`WARN_AT`](Self::WARN_AT).
     pub(crate) fn warn_if_piling(&mut self) {
-        if self.retired.len() > Self::WARN_AT && !self.warned {
+        let waiting = self.retired.len() + self.editors.len();
+        if waiting > Self::WARN_AT && !self.warned {
             self.warned = true;
             tracing::warn!(
-                "{} retired plugins are waiting for the main thread: nothing has called \
-                 `Session::main(..).update()` (a host with no main thread never frees them)",
-                self.retired.len()
+                "{waiting} retired plugins and editors are waiting for the main thread: nothing \
+                 has called `Session::main(..).update()` (a host with no main thread never \
+                 frees them)"
             );
         }
     }
@@ -702,6 +770,8 @@ impl Graveyard {
 
 /// What the session keeps for one hosted plugin. See the module docs.
 pub(crate) struct HostedPlugin {
+    /// Where the plugin runs: whether its record may drop off the main thread.
+    placement: Placement,
     /// Whether the editor was opened through the view and not closed since:
     /// what `MainSession::update` services.
     pub(crate) editor_open: bool,
@@ -710,9 +780,13 @@ pub(crate) struct HostedPlugin {
     plugin: PluginRef,
     pub(crate) handle: PluginHandle,
     pub(crate) controls: Option<PluginControls>,
-    /// What the node counts and holds (its meter cell and delivery counters):
-    /// every plugin the session added; `None` for one the host inserted itself.
-    pub(crate) node: Option<NodeControls>,
+    /// What the node counts and holds (its meter cell and delivery counters).
+    /// The project meter is installed only for a plugin the session added.
+    pub(crate) node: NodeControls,
+    /// What the plugins this record held before the current one lost, as
+    /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
+    /// so the record's count only grows.
+    banked: tutti_graph::Losses,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -751,6 +825,9 @@ pub(crate) struct HostedPlugin {
     /// it still declare the parameter. Ended when the record retires or the
     /// plugin is replaced.
     pub(crate) gate: Gate,
+    /// The lane knobs of the parameters a modulation lane drives: where a set
+    /// of one goes.
+    pub(crate) driven: crate::plugin_params::Driven,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
@@ -765,11 +842,11 @@ pub(crate) struct HostedPlugin {
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
     /// What re-inserts this plugin's node when it changes its ports. `None` for
-    /// a plugin no pool entry holds, and for one that reported no ports.
+    /// a plugin that reported no ports.
     pub(crate) rebind: Option<RebindState>,
 }
 
-/// What a pooled plugin's record keeps to re-insert its node when the plugin
+/// What a hosted plugin's record keeps to re-insert its node when the plugin
 /// changes its ports: the builder of the new node and the ports the node at the
 /// key declares, built where those ports are known.
 #[derive(Debug)]
@@ -880,7 +957,7 @@ struct Reload {
 }
 
 struct Ready {
-    client: Box<tutti_plugin::handles::PluginClient>,
+    client: Box<tutti_plugin::PluginClient>,
     restore: StateRestore,
     mirror: Option<Mirror>,
 }
@@ -908,15 +985,39 @@ impl std::fmt::Debug for HostedPlugin {
 }
 
 impl HostedPlugin {
-    pub(crate) fn new(handle: PluginHandle, plugin: PluginRef) -> Self {
+    /// The record of a plugin hosted in this process, whose node counts with
+    /// `node`.
+    pub(crate) fn new(handle: PluginHandle, plugin: PluginRef, node: NodeControls) -> Self {
+        Self::placed(Placement::InProcess, handle, plugin, node)
+    }
+
+    /// The record of a plugin served from a plugin server, with its `controls`.
+    pub(crate) fn served(
+        handle: PluginHandle,
+        plugin: PluginRef,
+        controls: PluginControls,
+    ) -> Self {
+        let mut record = Self::placed(Placement::Served, handle, plugin, (*controls).clone());
+        record.controls = Some(controls);
+        record
+    }
+
+    fn placed(
+        placement: Placement,
+        handle: PluginHandle,
+        plugin: PluginRef,
+        node: NodeControls,
+    ) -> Self {
         let (notices, hearing) = hear(&handle);
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         Self {
+            placement,
             editor_open: false,
             plugin,
             handle,
             controls: None,
-            node: None,
+            node,
+            banked: tutti_graph::Losses::NONE,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -935,6 +1036,7 @@ impl HostedPlugin {
             hearing,
             mirror,
             gate: Gate::default(),
+            driven: crate::plugin_params::Driven::default(),
             param_read: Some(read),
             mirror_token: Arc::new(()),
             silenced: false,
@@ -948,15 +1050,10 @@ impl HostedPlugin {
         matches!(self.status, PluginLiveness::Healthy)
     }
 
-    pub(crate) fn with_controls(mut self, controls: PluginControls) -> Self {
-        self.node = Some((*controls).clone());
-        self.controls = Some(controls);
-        self
-    }
-
     /// The incoming plugin of a crossfade at the same node: its handle and
     /// controls, a fresh debounce, and not yet told the render mode. Nothing
-    /// of the outgoing plugin's state carries over: its last good state is
+    /// of the outgoing plugin's state carries over but what it lost
+    /// ([`Plugin::losses`] stays cumulative): its last good state is
     /// cleared (its bytes would restore the wrong plugin), a fresh snapshot token
     /// makes a job of the outgoing plugin still in flight land nowhere, the
     /// snapshot clock restarts, and its own-bypass state (the episode, the waits
@@ -970,9 +1067,10 @@ impl HostedPlugin {
     /// The outgoing mirror's report callback was on the outgoing handle,
     /// which reports nothing here once it is gone.
     ///
-    /// Returns the outgoing handle, for the graveyard, which closes its editor
-    /// on the main thread if it was open.
-    #[must_use = "the outgoing handle goes to the graveyard"]
+    /// Returns the outgoing handle, to retire through [`Outgoing::retire`]: an
+    /// in-process one waits in the graveyard, and an open editor of either
+    /// kind is closed on the main thread.
+    #[must_use = "the outgoing handle is retired through `Outgoing::retire`"]
     pub(crate) fn replace(
         &mut self,
         handle: PluginHandle,
@@ -980,15 +1078,15 @@ impl HostedPlugin {
         plugin: PluginRef,
     ) -> Outgoing {
         self.plugin = plugin;
-        let outgoing = self.adopt(handle);
-        self.node = Some((*controls).clone());
+        let outgoing = self.adopt(handle, Placement::Served);
+        self.set_node((*controls).clone());
         self.controls = Some(controls);
         outgoing
     }
 
     /// [`replace`](Self::replace) for a plugin hosted in process, which has the
     /// node's controls and no plugin controls.
-    #[must_use = "the outgoing handle goes to the graveyard"]
+    #[must_use = "the outgoing handle is retired through `Outgoing::retire`"]
     pub(crate) fn replace_hosted(
         &mut self,
         handle: PluginHandle,
@@ -996,15 +1094,54 @@ impl HostedPlugin {
         plugin: PluginRef,
     ) -> Outgoing {
         self.plugin = plugin;
-        let outgoing = self.adopt(handle);
-        self.node = Some(node);
+        let outgoing = self.adopt(handle, Placement::InProcess);
+        self.set_node(node);
         self.controls = None;
         outgoing
     }
 
+    /// This record, retired: an in-process plugin's waits for the main
+    /// thread, a served plugin's drops here.
+    pub(crate) fn retire(mut self) -> Retired {
+        self.gate.end();
+        // The node over a pool entry is gone: the entry is no longer held.
+        self.pooled = None;
+        let editor = self.editor_open.then(|| self.handle.clone());
+        Retired::of(self.placement, editor, self)
+    }
+
+    /// The node's controls, `node` in place of the ones held: what the held
+    /// ones counted is banked first.
+    pub(crate) fn set_node(&mut self, node: NodeControls) {
+        self.banked += self.node_losses();
+        self.node = node;
+    }
+
+    /// What the node lost: MIDI past a block's capacity, in a block the plugin
+    /// did not run, or from a SysEx message that lost a packet (all
+    /// [`lost`](tutti_graph::Losses::lost)), and the parameter points it did not
+    /// deliver as they were.
+    fn node_losses(&self) -> tutti_graph::Losses {
+        use tutti_graph::Losses;
+        let points = self.node.param_delivery();
+        Losses::lost(self.node.dropped_midi_in())
+            + Losses::lost(points.grid_points_dropped)
+            + Losses::evicted(points.points_merged)
+            + Losses::refused(points.points_dropped)
+    }
+
+    /// What the plugin lost, over the record's life: what the held handle and
+    /// node counted, and what the ones before them did.
+    pub(crate) fn losses(&self) -> tutti_graph::Losses {
+        self.banked
+            + self.node_losses()
+            + tutti_graph::Losses::lost(self.handle.dropped_parameter_events())
+    }
+
     /// [`replace`](Self::replace)'s handle half: everything but the
     /// controls.
-    fn adopt(&mut self, handle: PluginHandle) -> Outgoing {
+    fn adopt(&mut self, handle: PluginHandle, placement: Placement) -> Outgoing {
+        self.banked += tutti_graph::Losses::lost(self.handle.dropped_parameter_events());
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         self.mirror = mirror;
         self.param_read = Some(read);
@@ -1019,6 +1156,7 @@ impl HostedPlugin {
         let outgoing = Outgoing {
             handle: std::mem::replace(&mut self.handle, handle),
             editor_open: std::mem::replace(&mut self.editor_open, false),
+            placement: std::mem::replace(&mut self.placement, placement),
         };
         self.liveness = Liveness::new();
         self.hang = HangDetector::default();
@@ -1082,7 +1220,6 @@ impl HostedPlugin {
 
     /// Parameter `id`'s value, as a modulation lane's knob starts at it:
     /// `None` while not read, `Some(None)` for one it does not list.
-    #[cfg(any(test, feature = "modulation"))]
     pub(crate) fn param_value(&self, id: u32) -> Option<Option<f32>> {
         self.mirror
             .get(tutti_plugin_types::ParamId::new(id))
@@ -1090,14 +1227,10 @@ impl HostedPlugin {
     }
 
     /// Sets the builder of the node that replaces this plugin's when it
-    /// changes its ports: only a pooled plugin's record keeps one, since
-    /// nothing else re-inserts its node.
+    /// changes its ports, which `Phase::Plugins` ticks and re-inserts. `None`
+    /// for a plugin that reported no ports.
     pub(crate) fn set_rebinder(&mut self, rebinder: tutti_plugin::catalog::PluginRebinder) {
-        self.rebind = self
-            .pooled
-            .is_some()
-            .then(|| RebindState::new(rebinder))
-            .flatten();
+        self.rebind = RebindState::new(rebinder);
     }
 
     /// Queues the announcement that every parameter value changed, as the
@@ -1117,9 +1250,8 @@ impl HostedPlugin {
     }
 }
 
-/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`],
-/// [`Graph::insert_plugin`](crate::Graph::insert_plugin) and
-/// [`Graph::host_plugin`](crate::Graph::host_plugin) return, so a plugin's
+/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`]
+/// and [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
 /// A marker only: no value of it exists, and every plugin format, in or out
@@ -1127,15 +1259,14 @@ impl HostedPlugin {
 /// [`Key::erase`] names none; the view of the plugin is [`Plugin`].
 /// It is the session's name for a hosted plugin's node; the node itself is
 /// `tutti_plugin_host::PluginNode`, below the session.
-/// With `modulation`, `key.param(id)` is a plugin parameter's
+/// `key.param(id)` is a plugin parameter's
 /// `ParamRef` (see `Key::param`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginNode {}
 
-#[cfg(feature = "modulation")]
 impl Key<PluginNode> {
     /// Parameter `id` of the plugin, as the reference a modulation route or an
-    /// automation lane targets (feature `modulation`): the same one
+    /// automation lane targets: the same one
     /// [`Param::target`](crate::Param::target) gives and a native node's param
     /// method does, so a route names a plugin's parameter and a native one
     /// through one type.
@@ -1191,6 +1322,32 @@ impl<'a> Plugin<'a> {
     /// The plugin this is: its file, its format and its id.
     pub fn plugin(&self) -> &'a PluginRef {
         &self.hosted.plugin
+    }
+
+    /// What the plugin did not get or the host did not hear, over the life of
+    /// this node's plugin: cumulative, and carried across a crash reload, a
+    /// swap to another plugin and a rebuild of the node at the same key, so it
+    /// only grows. In events, as the MIDI inlets count theirs
+    /// ([`Losses`](crate::Losses)):
+    ///
+    /// - [`lost`](crate::Losses::lost): MIDI events on the node's event input
+    ///   that never reached the plugin (past the capacity of a block, in a
+    ///   block the plugin did not run, or the rest of a SysEx message that
+    ///   lost a packet); parameter points of a sent grid that a full queue
+    ///   dropped; and parameter edits the plugin made that the host did not
+    ///   hear (a lost edit costs a stale readout, not audio, and the session
+    ///   re-reads the parameters after one).
+    /// - [`evicted`](crate::Losses::evicted): parameter points that replaced
+    ///   the last one of a full queue.
+    /// - [`refused`](crate::Losses::refused): parameter points for a
+    ///   parameter the node has no slot for.
+    ///
+    /// [`late`](crate::Losses::late) stays zero. Audio the plugin's pipeline did
+    /// not answer in time is not an event loss: it is counted in chunks, by
+    /// [`Diagnostics::missed_chunks`].
+    #[must_use]
+    pub fn losses(&self) -> crate::Losses {
+        self.hosted.losses()
     }
 
     /// The plugin's saved states: the last good one, the withheld one, a save
@@ -1360,8 +1517,7 @@ impl<C: crate::Clock> Session<C> {
                 node_controls.set_meter(meter);
                 let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
                 let (node, _) = self.graph.place(bound);
-                let mut hosted = HostedPlugin::new(handle, loaded_ref);
-                hosted.node = Some(node_controls);
+                let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
                 self.graph.write_own_bypass(node.erase());
                 (Key::new(node.erase()), rebinder)
@@ -1469,6 +1625,7 @@ impl<C: crate::Clock> Session<C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 true
             }
@@ -2119,13 +2276,11 @@ impl<C: crate::Clock> Session<C> {
                     },
                 );
             }
-            #[cfg(feature = "modulation")]
-            let state = &self.mods.state;
-            hosted.mirror.drain_edits(|_id, _value| {
-                #[cfg(feature = "modulation")]
-                if let Some(target) = state.plugin_target(node, _id.get()) {
-                    state.set_knob(target, _value.get() as f32);
-                }
+            // A value the plugin reported or the host set goes into the knob
+            // of the lane driving that parameter, if one does.
+            let driven = &hosted.driven;
+            hosted.mirror.drain_edits(|id, value| {
+                driven.write(id, value);
             });
 
             if let Some(tail) = declared_tail {
@@ -2206,6 +2361,11 @@ mod tests {
     use crate::{RecoveryPolicy, Task};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_plugin_types::{Normalized, ParamId, ParameterInfo};
+
+    /// The controls of a plugin's node, counting nothing yet.
+    fn node_controls() -> NodeControls {
+        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K)).clone()
+    }
 
     /// A backend that answers `state` (or declines), counts its saves, and
     /// is dead while `dead` is set.
@@ -2326,14 +2486,12 @@ mod tests {
                 .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
                     0.0,
                 )));
-        session
-            .graph()
-            .host_plugin(
-                node,
-                handle,
-                PluginRef::file("fake.clap").expect("a plugin file"),
-            )
-            .expect("the node is in the graph");
+        super::fake_hosting::host(
+            &mut session,
+            node,
+            handle,
+            PluginRef::file("fake.clap").expect("a plugin file"),
+        );
         let node = node.erase();
         // The load's parameter read is not what these tests count jobs of.
         session
@@ -2522,7 +2680,7 @@ mod tests {
             .plugins
             .get_mut(&rig.node)
             .expect("hosted")
-            .node = Some((*controls).clone());
+            .node = (*controls).clone();
         assert!(meter.has_meter(), "the project's meter is followed");
 
         let mut block = meter.probe_reader();
@@ -2657,11 +2815,15 @@ mod tests {
             let mut record = HostedPlugin::new(
                 outgoing,
                 PluginRef::file("fake.clap").expect("a plugin file"),
+                node_controls(),
             );
             record.editor_open = open;
             let (incoming, _) = fake_handle(None, Vec::new());
             let mut yard = Graveyard::default();
-            yard.bury_handle(record.adopt(incoming));
+            record
+                .adopt(incoming, Placement::InProcess)
+                .retire()
+                .settle(&mut yard);
             assert!(
                 !record.editor_open,
                 "the incoming plugin has no editor open"
@@ -2700,7 +2862,7 @@ mod tests {
             .plugins
             .get_mut(&rig.node)
             .unwrap()
-            .adopt(incoming);
+            .adopt(incoming, Placement::InProcess);
         // The incoming plugin's parameter read is not what this counts jobs of.
         rig.session
             .graph
@@ -2766,7 +2928,7 @@ mod tests {
         assert_eq!(hosted.param_value(3), Some(Some(0.25)), "precondition");
 
         let (incoming, _) = fake_handle(None, vec![(param, 0.75)]);
-        hosted.adopt(incoming);
+        hosted.adopt(incoming, Placement::InProcess);
         assert_eq!(
             hosted.param_value(3),
             None,
@@ -2787,11 +2949,11 @@ mod tests {
         // A read asked for, then a second crossfade: the first lands nowhere.
         let (second, _) = fake_handle(None, vec![(param, 0.5)]);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
-        hosted.adopt(second);
+        hosted.adopt(second, Placement::InProcess);
         let stale = rig.plugins_at(20).pop().expect("its read");
         let (third, _) = fake_handle(None, vec![(param, 0.125)]);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
-        hosted.adopt(third);
+        hosted.adopt(third, Placement::InProcess);
         rig.run_and_land(stale);
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(3),
@@ -2835,7 +2997,7 @@ mod tests {
             Default::default(),
             Default::default(),
         );
-        hosted.adopt(incoming);
+        hosted.adopt(incoming, Placement::InProcess);
 
         let job = rig.plugins_at(0).pop().expect("the read is submitted");
         rig.run_and_land(job);
@@ -3032,6 +3194,7 @@ mod tests {
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
             PluginRef::file("fake.clap").expect("a plugin file"),
+            node_controls(),
         );
         hosted
             .bypass
@@ -3044,7 +3207,7 @@ mod tests {
 
         let (incoming, plugin_b, _) = rig(false);
         plugin_b.accepts.store(false, SeqCst);
-        let _ = hosted.adopt(incoming.clone());
+        let _ = hosted.adopt(incoming.clone(), Placement::InProcess);
         assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
         hosted
             .bypass
@@ -3067,6 +3230,7 @@ mod tests {
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
             PluginRef::file("fake.clap").expect("a plugin file"),
+            node_controls(),
         );
         hosted
             .bypass
@@ -3075,7 +3239,7 @@ mod tests {
 
         let (incoming, plugin_b, _) = rig(false);
         plugin_b.refuses.store(true, SeqCst);
-        let _ = hosted.adopt(incoming.clone());
+        let _ = hosted.adopt(incoming.clone(), Placement::InProcess);
         assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
         hosted
             .bypass

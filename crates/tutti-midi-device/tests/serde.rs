@@ -120,7 +120,7 @@ mod learned {
     use tutti_midi_device::{
         DeviceId, DeviceInfo, Learned, Match, PortDirection, ProductInstanceId, SavedDevice,
     };
-    use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+    use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
     fn said() -> Learned {
         Learned::new()
@@ -128,7 +128,7 @@ mod learned {
                 manufacturer: ManufacturerId::of(0x0042),
                 family: [1, 0].map(U7::of),
                 model: [7, 0].map(U7::of),
-                revision: [1, 2, 3, 4].map(U7::of),
+                revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             })
             .with_instance_id(ProductInstanceId::new("SN-1").unwrap())
     }
@@ -194,14 +194,14 @@ mod saved_state {
     use tutti_midi_device::{
         MediaType, PeJson, PeState, SavedState, StateId, StateRev, UnixSeconds,
     };
-    use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+    use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
     fn device() -> DeviceIdentity {
         DeviceIdentity {
             manufacturer: ManufacturerId::of(0x0042),
             family: [1, 0].map(U7::of),
             model: [7, 0].map(U7::of),
-            revision: [1, 2, 3, 4].map(U7::of),
+            revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
         }
     }
 

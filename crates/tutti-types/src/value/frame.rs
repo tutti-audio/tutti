@@ -46,7 +46,7 @@ use super::units::Beat;
 
 unit! {
     /// An absolute frame position on the engine's clock: frames rendered since it
-    /// started. See the [module docs](self).
+    /// started. See the module docs.
     ///
     /// Two positions do not add, and do not subtract with `-`:
     ///
@@ -126,7 +126,7 @@ impl Frame {
     #[inline]
     #[must_use]
     pub fn nearest(position: f64) -> Frame {
-        Frame::new(position.round() as u64)
+        Frame::new(libm::round(position) as u64)
     }
 
     /// The frame at the same wall-clock time at rate `to`, this one being a

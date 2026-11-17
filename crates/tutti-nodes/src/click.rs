@@ -36,7 +36,7 @@ use tutti_graph::{
 use tutti_rt::Reader;
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF32;
-use tutti_types::value::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
+use tutti_types::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
 use tutti_types::{BusTopology, Tail};
 use tutti_types::{Meter, MeterMap};
 

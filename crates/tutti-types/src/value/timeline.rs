@@ -90,7 +90,7 @@ pub const FRAME_TOLERANCE: f64 = 1e-6;
 /// ```
 #[inline]
 pub fn first_frame_at_or_after(frames_ahead: f64) -> i64 {
-    (frames_ahead - FRAME_TOLERANCE).ceil() as i64
+    libm::ceil(frames_ahead - FRAME_TOLERANCE) as i64
 }
 
 /// Musical time covered by one audio sample at `tempo` and `sample_rate`.
@@ -139,7 +139,7 @@ pub fn frames_per_beat(tempo: Bpm, rate: SampleRate) -> Option<f64> {
 /// frame 128 only to within an ulp, not exactly.
 #[inline]
 pub fn snap_to_whole_frame(position: f64) -> f64 {
-    let whole = position.round();
+    let whole = libm::round(position);
     if (position - whole).abs() < FRAME_TOLERANCE {
         whole
     } else {
@@ -152,7 +152,7 @@ pub fn snap_to_whole_frame(position: f64) -> f64 {
 ///
 /// Holds the frame→beat conversion ([`beat_at`](Self::beat_at)) and its
 /// inverse ([`frame_of`](Self::frame_of)), in one place. See the
-/// [module docs](self).
+/// module docs.
 ///
 /// Frames are counted on whatever clock the owner keeps (an engine's clock
 /// counts frames rolled since it started); `origin_frame` is where this

@@ -141,8 +141,8 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   An application imports from the umbrella's **flat root**
   (`use tutti::{Session, SessionEvent, Root, Samples};`): `tutti` re-exports
   the app-facing items at its root by name, so a user never needs to know
-  which engine crate an item lives in; the per-crate modules (`tutti::graph`,
-  `tutti::session`, ...) stay for the deep, specialised API.
+  which engine crate an item lives in; the curated modules (`tutti::nodes`,
+  `tutti::session`, ...) list the rest by name, each item at one path.
 - **T17. Parameter order is consistent** (`M-PARAMETER-CONSISTENCY`): the same
   kinds of argument come in the same order across a crate (`(spec, target)`
   everywhere, never `(target, spec)` in one place).
@@ -332,9 +332,10 @@ list of such crates is `NO_STD_CRATES` in `xtask/src/recipes.rs`.
 - **S5. No spin locks.** A `no_std` crate takes no lock; shared state goes
   through `tutti-rt` (`CLAUDE.md`).
 - **S6. The build is the check.** `cargo xtask check-no-std` builds each listed
-  crate, bare and with each of its features, for `thumbv7em-none-eabihf`
-  (`rustup target add thumbv7em-none-eabihf`); CI's dark-features job runs it.
+  crate, bare and with each of its features, for `aarch64-unknown-none`
+  (`rustup target add aarch64-unknown-none`); CI's dark-features job runs it.
   A `std` use fails to compile there, so no text gate looks for the attribute.
+  The target is 64-bit because `Param<f64>` and `AtomicF64` need 64-bit atomics.
 
 ---
 

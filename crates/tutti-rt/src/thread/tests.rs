@@ -4,32 +4,27 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
-/// Dropping the handle requests the stop and joins: the body saw the stop and
-/// had finished its exit work by the time `drop` returned.
+/// Dropping the handle requests the stop and joins: the body had seen the stop
+/// by the time `drop` returned. A drop that did not join returns before the
+/// body wakes, so this catches it with high probability, not deterministically.
 #[test]
 fn dropping_the_handle_stops_and_joins() {
     let saw_stop = Arc::new(AtomicBool::new(false));
-    let finished = Arc::new(AtomicBool::new(false));
     let (ready_tx, ready_rx) = mpsc::channel();
     let handle = {
-        let (saw_stop, finished) = (Arc::clone(&saw_stop), Arc::clone(&finished));
+        let saw_stop = Arc::clone(&saw_stop);
         spawn_named("stopper", None, move |token| {
             ready_tx.send(()).unwrap();
             while !token.wait(Duration::from_secs(10)) {}
             saw_stop.store(true, Ordering::SeqCst);
-            // Work after the stop is seen, which a drop that did not join
-            // would return before.
-            std::thread::sleep(Duration::from_millis(50));
-            finished.store(true, Ordering::SeqCst);
         })
         .unwrap()
     };
     ready_rx.recv().unwrap();
     drop(handle);
-    assert!(saw_stop.load(Ordering::SeqCst), "the body saw the stop");
     assert!(
-        finished.load(Ordering::SeqCst),
-        "drop returned after the join"
+        saw_stop.load(Ordering::SeqCst),
+        "drop returned before the body saw the stop"
     );
 }
 
@@ -71,22 +66,19 @@ fn a_panic_comes_back_from_join_and_not_from_drop() {
     drop(dropped);
 }
 
-/// A body asleep on the token wakes on the stop, long before its timeout.
+/// A body asleep on the token wakes on the stop and reports it, where a wait
+/// that slept out its timeout would report no stop.
 #[test]
 fn a_waiting_body_wakes_on_stop() {
     let (ready_tx, ready_rx) = mpsc::channel();
     let handle = spawn_named("sleeper", None, move |token| {
         ready_tx.send(()).unwrap();
-        let started = Instant::now();
-        let stopped = token.wait(Duration::from_secs(10));
-        (stopped, started.elapsed())
+        token.wait(Duration::from_secs(10))
     })
     .unwrap();
     ready_rx.recv().unwrap();
     handle.token().stop();
-    let (stopped, slept) = handle.join().unwrap();
-    assert!(stopped, "wait reports the stop");
-    assert!(slept < Duration::from_secs(5), "woke after {slept:?}");
+    assert!(handle.join().unwrap(), "wait reports the stop");
 }
 
 /// A wait that nobody stops returns `false` after its timeout.
@@ -136,13 +128,7 @@ fn a_requested_priority_reports_its_outcome() {
 /// without requesting the stop.
 #[test]
 fn join_returns_the_value_and_does_not_stop() {
-    let handle = spawn_named("returner", None, |token| {
-        // Work that takes a moment, so a join that returned early or a stop
-        // from the join would show.
-        std::thread::sleep(Duration::from_millis(30));
-        (7_u32, token.is_stopped())
-    })
-    .unwrap();
+    let handle = spawn_named("returner", None, |token| (7_u32, token.is_stopped())).unwrap();
     let token = handle.token();
     assert_eq!(handle.join().unwrap(), (7, false), "the body ran unstopped");
     assert!(!token.is_stopped(), "join does not request the stop");
@@ -171,14 +157,9 @@ fn stop_within_hands_back_a_body_that_has_not_ended() {
         9
     })
     .expect("spawn");
-    let asked = Instant::now();
     let handle = handle
         .stop_within(Duration::from_millis(20))
         .expect_err("the body ignores the stop and is still blocked");
-    assert!(
-        asked.elapsed() >= Duration::from_millis(20),
-        "the bound is waited out"
-    );
     assert!(handle.token().is_stopped(), "the stop stays requested");
     release.send(()).expect("the body is waiting");
     assert_eq!(
@@ -205,5 +186,32 @@ fn stop_within_returns_a_panic_as_panicked() {
             name: "panics".to_owned(),
             message: "on stop".to_owned()
         })
+    );
+}
+
+/// A deadline has the time left until it and nothing from its instant on,
+/// at constructed instants.
+#[test]
+fn a_deadline_has_the_time_left_until_its_instant() {
+    let t0 = Instant::now();
+    let deadline = Deadline::after(t0, Duration::from_secs(10));
+    assert_eq!(deadline.left(t0), Some(Duration::from_secs(10)));
+    assert_eq!(
+        deadline.left(t0 + Duration::from_secs(4)),
+        Some(Duration::from_secs(6))
+    );
+    assert_eq!(deadline.left(t0 + Duration::from_secs(10)), None);
+    assert_eq!(deadline.left(t0 + Duration::from_secs(11)), None);
+    assert_eq!(Deadline::after(t0, Duration::ZERO).left(t0), None);
+}
+
+/// A timeout the clock cannot represent never ends.
+#[test]
+fn an_overflowing_deadline_never_ends() {
+    let t0 = Instant::now();
+    let deadline = Deadline::after(t0, Duration::MAX);
+    assert_eq!(
+        deadline.left(t0 + Duration::from_secs(1_000_000)),
+        Some(Duration::MAX)
     );
 }

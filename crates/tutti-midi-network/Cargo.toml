@@ -14,7 +14,7 @@ categories = ["multimedia::audio", "network-programming"]
 workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 mdns-sd = { workspace = true }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

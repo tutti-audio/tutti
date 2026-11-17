@@ -17,7 +17,7 @@ workspace = true
 default = []
 
 [dependencies]
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false }
 

@@ -54,7 +54,7 @@ impl Seconds {
     /// a span too large for `usize` saturates.
     #[inline]
     pub fn to_samples(self, sample_rate: impl Into<SampleRate>) -> Samples {
-        Self::frames(self.0 * sample_rate.into().get(), f64::round)
+        Self::frames(self.0 * sample_rate.into().get(), libm::round)
     }
 
     /// Frames fully elapsed in this span — rounds **down**.
@@ -62,7 +62,7 @@ impl Seconds {
     /// The *counting* form: how many whole frames have gone by.
     #[inline]
     pub fn to_samples_floor(self, sample_rate: impl Into<SampleRate>) -> Samples {
-        Self::frames(self.0 * sample_rate.into().get(), f64::floor)
+        Self::frames(self.0 * sample_rate.into().get(), libm::floor)
     }
 
     /// Frames needed to hold this span — rounds **up**.
@@ -72,7 +72,7 @@ impl Seconds {
     /// of all inputs.
     #[inline]
     pub fn to_samples_ceil(self, sample_rate: impl Into<SampleRate>) -> Samples {
-        Self::frames(self.0 * sample_rate.into().get(), f64::ceil)
+        Self::frames(self.0 * sample_rate.into().get(), libm::ceil)
     }
 
     /// Signed frames in this span at `sample_rate`, rounded to nearest, half
@@ -86,7 +86,7 @@ impl Seconds {
     ///
     /// It returns a bare `i64` because tutti has no signed frame unit:
     /// [`Frame`](crate::Frame) is a `u64` position. A
-    /// [`std::time::Duration`] is unsigned, so a caller holding one builds a
+    /// [`core::time::Duration`] is unsigned, so a caller holding one builds a
     /// `Seconds` from it and signs it by direction.
     ///
     /// ```
@@ -97,7 +97,11 @@ impl Seconds {
     pub fn to_frame_offset(self, sample_rate: impl Into<SampleRate>) -> i64 {
         let raw = self.0 * sample_rate.into().get();
         // `as` saturates out-of-range and infinite values into `i64`.
-        if raw.is_nan() { 0 } else { raw.round() as i64 }
+        if raw.is_nan() {
+            0
+        } else {
+            libm::round(raw) as i64
+        }
     }
 
     /// The per-sample coefficient of a one-pole smoother with this time

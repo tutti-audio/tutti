@@ -18,7 +18,7 @@
 //!
 //! ```no_run
 //! use tutti_graph::Editor;
-//! use tutti_plugin::handles::PluginClient;
+//! use tutti_plugin::PluginClient;
 //! use tutti_plugin_host::PluginControls;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
@@ -31,7 +31,7 @@
 //!
 //! ```compile_fail,E0277
 //! use tutti_graph::Editor;
-//! use tutti_plugin::handles::PluginClient;
+//! use tutti_plugin::PluginClient;
 //! use tutti_graph::NodeKey;
 //! fn insert(client: PluginClient, editor: &mut Editor) {
 //!     // `PluginClient` is `PluginClient<Unbound>`: not a node.
@@ -43,7 +43,7 @@
 //!
 //! ```compile_fail,E0277
 //! use tutti_graph::Node;
-//! use tutti_plugin::handles::PluginClient;
+//! use tutti_plugin::PluginClient;
 //! fn boxed(client: PluginClient) -> Box<dyn Node> {
 //!     Box::new(client)
 //! }
@@ -178,7 +178,7 @@ impl std::fmt::Debug for Bound {
 ///
 /// ```no_run
 /// use tutti_graph::Editor;
-/// use tutti_plugin::handles::PluginClient;
+/// use tutti_plugin::PluginClient;
 /// use tutti_plugin_host::PluginControls;
 /// use tutti_graph::NodeKey;
 /// use tutti_transport::TempoReader;

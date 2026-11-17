@@ -72,10 +72,10 @@ pub enum LoopRangeError {
     },
 }
 
-impl TryFrom<std::ops::Range<Beat>> for LoopRange {
+impl TryFrom<core::ops::Range<Beat>> for LoopRange {
     type Error = LoopRangeError;
 
-    fn try_from(range: std::ops::Range<Beat>) -> Result<Self, LoopRangeError> {
+    fn try_from(range: core::ops::Range<Beat>) -> Result<Self, LoopRangeError> {
         let (start, end) = (range.start, range.end);
         if !(start.get().is_finite() && end.get().is_finite()) {
             Err(LoopRangeError::NotFinite { start, end })
@@ -216,7 +216,7 @@ pub enum PassEnd {
 /// A playhead kept as a frame count on a [`TimelineSegment`], with its beat
 /// derived in closed form.
 ///
-/// See the [module docs](self) for why the frame, not the beat, is counted.
+/// See the module docs for why the frame, not the beat, is counted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameClock {
     /// The segment the beat is derived from, on this clock's frame count.
@@ -383,7 +383,7 @@ impl FrameClock {
         looping: Option<LoopRange>,
     ) -> impl Iterator<Item = Pass> + '_ {
         let mut start = Samples::ZERO;
-        std::iter::from_fn(move || {
+        core::iter::from_fn(move || {
             let left = frames.remaining_after(start);
             if left.is_zero() {
                 return None;
@@ -455,7 +455,7 @@ impl FrameClock {
             return Some(next);
         }
         let fpb = self.segment.frames_per_beat()?;
-        let ahead = ((end - self.beat()).get() * fpb).ceil();
+        let ahead = libm::ceil((end - self.beat()).get() * fpb);
         // Saturating: a far end is past `limit` anyway.
         let mut f = Frame::new(self.at.get().saturating_add(ahead.max(1.0) as u64)).max(next);
         while f > next && self.segment.beat_at(Frame::new(f.get() - 1)) >= end {

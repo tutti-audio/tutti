@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use crate::common::{MF, blocks, note, play};
+use tutti_graph::Losses;
 use tutti_midi_device::{
     Capabilities, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, Endpoint, EndpointId,
     EndpointName, MaxSysexSize, MidiIdentity, Muid, PortDirection, Supports,
@@ -32,7 +33,7 @@ fn device(model: u8) -> DeviceIdentity {
         manufacturer: ManufacturerId::NON_COMMERCIAL,
         family: [U7::of(1); 2],
         model: [U7::of(model); 2],
-        revision: [U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     }
 }
 
@@ -229,10 +230,13 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
         Stream::EndpointInfo(info),
         Stream::DeviceIdentity(who),
         Stream::EndpointName(_, name),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
         Stream::StreamConfigurationNotification(config),
     ] = sent.as_slice()
     else {
-        panic!("Info, Identity, Name, Configuration: {sent:?}");
+        panic!("Info, Identity, Name, Product Instance Id, Configuration: {sent:?}");
     };
     assert_eq!(
         config.protocol,
@@ -363,6 +367,25 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
         ),
         "{then:?}"
     );
+}
+
+/// **A MIDI-CI message the device's output refuses counts on the input port**:
+/// the input owns the conversation, so the refused Discovery is its `refused`
+/// loss, and the output port, which never carries it, counts nothing.
+#[test]
+fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
+    let (mut s, fake) = wired(0);
+    let mut clock = Clock::new();
+    let _ = clock.run(&mut s, &fake, 100);
+    let input = s.midi_input(&"wire").expect("loaded");
+    let output = s.midi_output(&"out").expect("loaded");
+    assert_eq!(input.losses(), Losses::NONE);
+    fake.refuse_sends(true);
+    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    let _ = clock.run(&mut s, &fake, 400);
+    assert_eq!(input.losses().refused, 1, "the one Discovery");
+    assert_eq!(input.losses().lost, 0);
+    assert_eq!(output.losses(), Losses::NONE);
 }
 
 /// An identity on a session with no OS MIDI layer is refused where it is set,

@@ -395,7 +395,7 @@ pub enum LoadError {
     #[error(transparent)]
     Decode(Arc<tutti_codec::DecodeError>),
     /// A file's header could not be read to stream it.
-    #[cfg(feature = "sampler")]
+    #[cfg(all(feature = "sampler", codec))]
     #[error(transparent)]
     Probe(Arc<tutti_sampler::ProbeError>),
     /// A file declared streamed cannot be streamed by this build: its container

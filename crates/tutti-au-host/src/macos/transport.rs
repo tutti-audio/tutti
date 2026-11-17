@@ -8,7 +8,7 @@
 use tutti_au_ffi::Unit;
 use tutti_au_ffi::property::{PresentationLatency, TailTime};
 use tutti_au_ffi::{Element, Scope};
-use tutti_types::value::units::Seconds;
+use tutti_types::Seconds;
 
 /// Seconds of audio an AU keeps producing after its input goes silent.
 ///

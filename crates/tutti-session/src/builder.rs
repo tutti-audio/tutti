@@ -105,7 +105,7 @@ struct Options {
     /// ([`input_opener`](Self::input_opener)).
     #[cfg(all(feature = "device", feature = "audio-io"))]
     input_opener: Option<Box<dyn crate::InputOpener>>,
-    render_worker_start: Option<crate::RenderWorkerStart>,
+    render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
@@ -117,7 +117,6 @@ struct Options {
     mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
-    #[cfg(feature = "modulation")]
     unresolved_warning: std::time::Duration,
     #[cfg(feature = "plugin")]
     snapshot_interval: std::time::Duration,
@@ -161,10 +160,9 @@ impl Default for Options {
             mpe_mode: tutti_midi_protocol::MpeMode::Disabled,
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
-            #[cfg(feature = "modulation")]
-            unresolved_warning: crate::UNRESOLVED_WARNING,
+            unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             #[cfg(feature = "plugin")]
-            snapshot_interval: crate::SNAPSHOT_INTERVAL,
+            snapshot_interval: crate::plugin::SNAPSHOT_INTERVAL,
             #[cfg(feature = "plugin")]
             recovery: Some(crate::RecoveryPolicy::default()),
             #[cfg(feature = "plugin")]
@@ -667,7 +665,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// documents.
     #[must_use]
     pub fn render_worker_start(mut self, hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
-        self.opts.render_worker_start = Some(crate::RenderWorkerStart::new(hook));
+        self.opts.render_worker_start = Some(crate::graph::RenderWorkerStart::new(hook));
         self
     }
 
@@ -773,8 +771,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// How long a modulation target may stay unresolved, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now), before it is logged and
     /// reported ([`SessionEvent::Modulation`](crate::SessionEvent::Modulation)).
-    /// Default [`UNRESOLVED_WARNING`](crate::UNRESOLVED_WARNING), 4 s.
-    #[cfg(feature = "modulation")]
+    /// Default 4 s.
     #[must_use]
     pub fn unresolved_warning(mut self, after: std::time::Duration) -> Self {
         self.opts.unresolved_warning = after;
@@ -784,7 +781,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// How often a healthy hosted plugin's state is captured, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now)
     /// (a job on the session's spawner, [`spawn_with`](Self::spawn_with)).
-    /// Default [`SNAPSHOT_INTERVAL`](crate::SNAPSHOT_INTERVAL), 8 s.
+    /// Default 8 s.
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn snapshot_interval(mut self, every: std::time::Duration) -> Self {
@@ -805,8 +802,8 @@ impl<C: Clock> SessionBuilder<C> {
     /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
     /// cover an in-process VST2 plugin (its crash takes the process, and a
     /// hang in it is not observed), nor one a host inserted itself with
-    /// `Graph::insert_plugin` or `Graph::host_plugin` (the session does not
-    /// know its path): those are removed or left as before.
+    /// `Graph::insert_plugin` (the session does not know its path): those are
+    /// removed or left as before.
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn plugin_recovery(mut self, policy: Option<crate::RecoveryPolicy>) -> Self {
@@ -965,7 +962,6 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "midi-hardware")]
             midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
                 .with_mpe(self.opts.mpe_mode),
-            #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]
             midi_io: parts.midi_io,

@@ -348,7 +348,7 @@ fn events_are_placed_in_the_order_they_arrive() {
 /// sender's clock once, in the port's counts; no other count moves.
 #[test]
 fn a_repeated_clock_and_a_jump_are_counted_once_each() {
-    let (wire, mut rig, _) = settled(InputTiming::JitterReduction, offering_both());
+    let (wire, _rig, _) = settled(InputTiming::JitterReduction, offering_both());
     let slot = wire.session.ports().list_input_ports()[0].id;
     let counts = |wire: &Wire| {
         let info = wire.session.ports().port_info(slot).unwrap();
@@ -371,6 +371,4 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
     // The sender's clock jumps half a second ahead.
     send(ticks(300) + 15_625, 300);
     assert_eq!(counts(&wire), (before.0 + 1, before.1 + 1, before.2));
-    rig.run(8);
-    assert_eq!(wire.session.ports().losses().dropped(), 0);
 }

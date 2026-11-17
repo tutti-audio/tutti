@@ -6,7 +6,7 @@
 //! process (a server's pid) is `None`, a count that cannot happen in process
 //! (a pipeline's missed chunks) is zero, and everything else reads the same.
 
-use tutti_graph::{BusRef, BusSource, Losses, MAX_BUSES};
+use tutti_graph::{BusRef, BusSource, MAX_BUSES};
 use tutti_plugin_types::{BlockCounts, BusRole, PluginBus, TerminationReason};
 use tutti_types::{Samples, Tail};
 
@@ -23,8 +23,8 @@ pub(crate) struct Figures {
 /// [`Plugin::diagnostics`](crate::Plugin::diagnostics).
 ///
 /// What a host shows in a plugin's corner (its server, its dropouts, its
-/// latency), kept off the main surface. The losses are
-/// [`Losses`], counted in events as the MIDI inlets count theirs.
+/// latency), kept off the main surface. What it lost, in events, is
+/// [`Plugin::losses`](crate::Plugin::losses).
 #[derive(Debug, Clone, Copy)]
 pub struct Diagnostics<'a> {
     hosted: &'a HostedPlugin,
@@ -63,12 +63,37 @@ impl<'a> Diagnostics<'a> {
     /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
     /// pipeline answered after the node had played the silence: a late answer
     /// (an overloaded plugin or machine: raise the buffer size), not a lost
-    /// one. Zero for a plugin that runs in this process.
+    /// one. Every missed chunk ends as exactly one of late,
+    /// [refused](Self::refused_chunks), [skipped](Self::skipped_chunks) or
+    /// [unanswered](Self::unanswered_chunks). Zero for a plugin that runs in
+    /// this process.
     pub fn late_chunks(&self) -> u64 {
         self.hosted
             .controls
             .as_ref()
             .map_or(0, tutti_plugin_host::PluginControls::late_chunks)
+    }
+
+    /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
+    /// server refused: it did not publish the audio (the chunk's ring slot
+    /// recycled before it ran, a block that did not fit, an output channel not
+    /// written, or a refused rate). Zero for a plugin that runs in this
+    /// process.
+    pub fn refused_chunks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::refused_chunks)
+    }
+
+    /// Of the [`missed_chunks`](Self::missed_chunks), those that are neither
+    /// late, refused nor skipped: the server never said what became of them. A
+    /// loss no counter explains. Zero for a plugin that runs in this process.
+    pub fn unanswered_chunks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::unanswered_chunks)
     }
 
     /// Chunks dropped because the plugin fell more than one chunk behind: the
@@ -79,44 +104,6 @@ impl<'a> Diagnostics<'a> {
             .controls
             .as_ref()
             .map_or(0, tutti_plugin_host::PluginControls::skipped_chunks)
-    }
-
-    /// The MIDI events on the node's event input that never reached the plugin,
-    /// since it was bound: past the capacity of a block, in a block the plugin
-    /// did not run, or the rest of a SysEx message that lost a packet. All of
-    /// them are [`lost`](Losses::lost); `refused` stays zero (the plugin node
-    /// has one event input, so no event is addressed to a port it lacks).
-    pub fn midi_in(&self) -> Losses {
-        Losses::lost(
-            self.hosted
-                .node
-                .as_ref()
-                .map_or(0, tutti_plugin_host::NodeControls::dropped_midi_in),
-        )
-    }
-
-    /// The parameter points the host sent that the node did not deliver as
-    /// they were: [`lost`](Losses::lost) are grid points a full queue dropped,
-    /// [`evicted`](Losses::evicted) are points that replaced the last one of a
-    /// full queue, and [`refused`](Losses::refused) are points for a parameter
-    /// the node has no slot for.
-    pub fn parameter_points(&self) -> Losses {
-        let stats = self
-            .hosted
-            .node
-            .as_ref()
-            .map(tutti_plugin_host::NodeControls::param_delivery)
-            .unwrap_or_default();
-        Losses::lost(stats.grid_points_dropped)
-            + Losses::evicted(stats.points_merged)
-            + Losses::refused(stats.points_dropped)
-    }
-
-    /// The parameter edits the plugin made that the host did not hear, over the
-    /// plugin's life, all [`lost`](Losses::lost). A lost edit costs a stale
-    /// readout, not audio, and the session re-reads the parameters after one.
-    pub fn parameter_edits(&self) -> Losses {
-        Losses::lost(self.hosted.handle.dropped_parameter_events())
     }
 
     /// The latency the graph compensates for this plugin's node, as of the last
@@ -162,13 +149,10 @@ impl<'a> Diagnostics<'a> {
     /// Whether the node follows the project's meter (the time signature and bar
     /// it tells the plugin). True for every plugin the session added; false for
     /// one a host inserted itself
-    /// ([`Graph::host_plugin`](crate::Graph::host_plugin)), whose node the
+    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)), whose node the
     /// session did not give a meter.
     pub fn follows_project_meter(&self) -> bool {
-        self.hosted
-            .node
-            .as_ref()
-            .is_some_and(tutti_plugin_host::NodeControls::has_meter)
+        self.hosted.node.has_meter()
     }
 
     /// Ends the plugin's server process: the death follows as it would for any

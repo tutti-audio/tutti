@@ -81,9 +81,11 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-ffi", "gate check-ffi"),
         ("check-errors", "gate check-errors"),
         ("check-logging", "gate check-logging"),
+        ("check-test-time", "gate check-test-time"),
         ("check-guards", "gate check-guards"),
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
+        ("check-umbrella", "gate check-umbrella"),
         ("check-lints", "gate check-lints"),
         ("check-value-traits", "gate check-value-traits"),
         ("check-doc-refs", "gate check-doc-refs"),
@@ -107,9 +109,11 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-ffi",
         "gate check-errors",
         "gate check-logging",
+        "gate check-test-time",
         "gate check-guards",
         "gate check-hosting",
         "gate check-session",
+        "gate check-umbrella",
         "gate check-lints",
         "gate check-value-traits",
         "gate check-doc-refs",
@@ -414,8 +418,15 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
     assert_eq!(
         steps,
         [
-            "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf",
-            "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf --features serde",
+            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-curve --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-metering --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-modulation --no-default-features --target aarch64-unknown-none",
         ]
     );
 }

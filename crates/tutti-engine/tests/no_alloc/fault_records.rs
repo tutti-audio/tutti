@@ -1,5 +1,7 @@
 //! The render-thread fault records under `AllocDisabler`.
 
+use std::time::Instant;
+
 use tutti_engine::{BackendErrorKind, StreamFaultKind, StreamFaults};
 
 /// **The render thread's fault records allocate and free nothing, however
@@ -8,7 +10,7 @@ use tutti_engine::{BackendErrorKind, StreamFaultKind, StreamFaults};
 #[test]
 fn raising_render_side_faults_repeatedly_allocates_nothing_and_is_read_afterwards() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record(BackendErrorKind::Other, &"xrun", Instant::now());
     faults.record_overrun("warm");
     faults.record_panic("warm");
 
@@ -42,13 +44,14 @@ impl std::fmt::Display for Pieces {
 #[test]
 fn recording_a_backend_error_allocates_nothing_and_is_read_afterwards() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Other, &Pieces);
+    let now = Instant::now();
+    faults.record(BackendErrorKind::Other, &Pieces, now);
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..1000 {
-            faults.record(BackendErrorKind::Other, &Pieces);
+            faults.record(BackendErrorKind::Other, &Pieces, now);
         }
-        faults.record(BackendErrorKind::DeviceGone, &Pieces);
-        faults.record(BackendErrorKind::Survivable, &Pieces);
+        faults.record(BackendErrorKind::DeviceGone, &Pieces, now);
+        faults.record(BackendErrorKind::Survivable, &Pieces, now);
     });
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::Disconnected);

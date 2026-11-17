@@ -8,16 +8,17 @@ use std::time::{Duration, Instant};
 
 use super::enumerate::unpack_id;
 use super::poll::ErrorRun;
+use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
 use crate::stamp::Paired;
-use crate::{InputProducerHandle, Pushed};
 use tutti_alsa_ffi::{
     Blocking, CAP_WRITE, Client, Poller, QueueClock, Read, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
     UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
+use tutti_rt::PushError;
 use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_ump::split_stream;
 
@@ -241,8 +242,12 @@ fn pump(
                 PUMP_WAKES.fetch_add(1, Ordering::SeqCst);
                 #[cfg(test)]
                 if let Ok(Wait::Ready) = waited {
+                    // Held for the stall, or until a test clears it.
                     let ms = PUMP_STALL_MS.load(Ordering::SeqCst);
-                    std::thread::sleep(Duration::from_millis(ms));
+                    let end = Instant::now() + Duration::from_millis(ms);
+                    while Instant::now() < end && PUMP_STALL_MS.load(Ordering::SeqCst) != 0 {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
                 }
                 match waited {
                     Ok(Wait::Ready) => continue,
@@ -283,7 +288,7 @@ fn pump(
         // swallowing three words of zeros.
         let decoded = split_stream(&words).next();
         if let Some(event) = decoded
-            && producer.push(event, now) == Pushed::Full
+            && producer.push(event, now) == Err(PushError::Full)
         {
             tracing::debug!("MIDI input ring full, dropping event");
         }
@@ -302,15 +307,21 @@ struct Arrivals {
     latest: Option<Instant>,
 }
 
+/// Whether the held `pairing` must be read again at `now` for an event stamped
+/// `stamped`: there is none, the event came after it, or it is older than
+/// [`PAIRING_AGE`].
+fn pairing_is_stale(pairing: Option<(Paired, Instant)>, stamped: Duration, now: Instant) -> bool {
+    pairing.is_none_or(|(paired, read)| {
+        stamped > paired.clock() || now.saturating_duration_since(read) > PAIRING_AGE
+    })
+}
+
 impl Arrivals {
     /// The OS instant an event stamped `stamped` on the queue arrived at. Reads
     /// a fresh pairing when the held one is older than the event (the event
     /// came after it) or than [`PAIRING_AGE`]; one syscall, not one per event.
     fn at(&mut self, seq: &Client, stamped: Duration) -> Instant {
-        let stale = self
-            .pairing
-            .is_none_or(|(paired, read)| stamped > paired.clock() || read.elapsed() > PAIRING_AGE);
-        if stale {
+        if pairing_is_stale(self.pairing, stamped, Instant::now()) {
             self.pairing = Paired::read(|| self.clock.now(seq))
                 .ok()
                 .map(|paired| (paired, Instant::now()));

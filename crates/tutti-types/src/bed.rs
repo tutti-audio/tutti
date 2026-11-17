@@ -239,7 +239,7 @@ impl Bed {
                 && list.iter().all(|&speaker| {
                     let at = |s: Speaker| rows.iter().position(|r| r.speaker == s);
                     let row = at(speaker).or_else(|| speaker.counterpart().and_then(at));
-                    row.is_some_and(|i| !std::mem::replace(&mut taken[i], true))
+                    row.is_some_and(|i| !core::mem::replace(&mut taken[i], true))
                 })
         })
     }

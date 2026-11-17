@@ -41,7 +41,9 @@ mod sf2_spec;
 mod spec_text;
 mod submodule_pins;
 mod test_paths;
+mod test_time;
 mod toml;
+mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
 mod use_tree;
@@ -123,7 +125,7 @@ pub(crate) enum Gate {
     Hosting,
     /// `tutti-session` reaches no Bevy crate and re-exports no crate whole.
     Session,
-    /// Every crate takes the workspace lints, and `missing_debug_implementations` denies.
+    /// Every workspace member takes the workspace lints, and `missing_debug_implementations` denies.
     Lints,
     /// A fieldless public `Eq` enum is `Hash`.
     ValueTraits,
@@ -148,8 +150,12 @@ pub(crate) enum Gate {
     Buffers,
     /// A configured thing is built one way, bar the rows of the baseline.
     Building,
+    /// The `tutti` umbrella re-exports no crate whole and offers each item at one path.
+    Umbrella,
     /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
     Logging,
+    /// A test asserts no wall-clock time and sleeps for no event (a per-file ratchet).
+    TestTime,
 }
 
 impl Gate {
@@ -177,7 +183,9 @@ impl Gate {
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
+            Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
+            Gate::TestTime => "gate check-test-time".to_owned(),
         }
     }
 
@@ -206,9 +214,11 @@ impl Gate {
             Gate::DocIdents => doc_idents::check(&tree),
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
+            Gate::Umbrella => umbrella::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
+            Gate::TestTime => test_time::check(&tree),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {

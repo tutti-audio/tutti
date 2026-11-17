@@ -78,6 +78,56 @@ use tutti_plugin_types::{
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 
+/// The lane knobs of a plugin's driven parameters: where a set of one goes,
+/// whether the host made it or the plugin reported it. The modulation apply
+/// replaces it (`Graph::refresh_driven`) after every lane it built or dropped,
+/// so within one update a parameter without a lane, or whose lane was removed,
+/// is absent and a set of it goes to the plugin.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Driven {
+    knobs: std::sync::Arc<std::sync::Mutex<Knobs>>,
+}
+
+/// The lanes with a knob, by the parameter they drive.
+pub(crate) type Knobs = std::collections::BTreeMap<ParamId, tutti_nodes::automation::LaneControls>;
+
+impl Driven {
+    /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
+    /// with a knob drives it.
+    pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
+        self.lock()
+            .get(&id)
+            .is_some_and(|lane| lane.set_knob(value.get() as f32))
+    }
+
+    /// Replaces the driven parameters with `knobs`; nothing is touched while
+    /// there were none and there are none.
+    pub(crate) fn replace(&self, knobs: Knobs) {
+        let mut held = self.lock();
+        if held.is_empty() && knobs.is_empty() {
+            return;
+        }
+        *held = knobs;
+    }
+
+    /// Reports each driven parameter's knob into `mirror`: a read of the
+    /// plugin lands the value it plays (the knob plus the lane's routes), and
+    /// the mirror holds the knob.
+    pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
+        for (&id, lane) in self.lock().iter() {
+            if let Some(knob) = lane.knob() {
+                mirror.report(id, Normalized::clamped(f64::from(knob)));
+            }
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Knobs> {
+        self.knobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// Why a call on a plugin's parameters did not do what it was asked.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
@@ -157,7 +207,7 @@ impl<'a> Params<'a> {
 
     /// Whether the plugin's parameters have been read. A plugin loaded through
     /// the session is read at load; one the host inserted itself
-    /// ([`Graph::host_plugin`](crate::Graph::host_plugin)) is read by a job
+    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by a job
     /// on the session's spawner, landed in [`Session::update`](crate::Session::update).
     #[must_use]
     pub fn is_ready(&self) -> bool {
@@ -298,15 +348,21 @@ impl<'a> Param<'a> {
 
     /// The value now: what the plugin last reported or the host last set, else
     /// what was read. From the session's mirror, so it asks the plugin nothing.
+    ///
+    /// A parameter a modulation lane drives reads its base, the lane's knob;
+    /// the value the plugin plays is that plus the lane's routes. The mirror
+    /// is written with the knob: by a set of the parameter, and again when a
+    /// read of the plugin lands (which finds the played value). Nothing reports
+    /// the played value into it: a plugin's report of a value the host just
+    /// gave it is not an edit (`PluginParamValues`).
     #[must_use]
     pub fn normalized(&self) -> Normalized {
         self.params.hosted.mirror.value_at(self.position)
     }
 
-    /// The reference that targets this parameter in a modulation route
-    /// (feature `modulation`): the one a native node's param method gives, so a
-    /// route targets a plugin's parameter and a native one through one type.
-    #[cfg(feature = "modulation")]
+    /// The reference that targets this parameter in a modulation route: the
+    /// one a native node's param method gives, so a route targets a plugin's
+    /// parameter and a native one through one type.
     #[must_use]
     pub fn target(&self) -> crate::ParamRef {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())
@@ -328,12 +384,18 @@ impl<'a> Param<'a> {
     }
 
     /// Sends `value` to the plugin and reads it back at once.
+    ///
+    /// A parameter a modulation lane drives takes the value as the lane's knob
+    /// and sends the plugin nothing: the lane sends the plugin the knob plus
+    /// its routes.
     fn send(&self, value: Normalized) {
         let hosted = self.params.hosted;
-        hosted
-            .handle
-            .any_thread()
-            .set_parameter_value(self.id(), value);
+        if !hosted.driven.write(self.id(), value) {
+            hosted
+                .handle
+                .any_thread()
+                .set_parameter_value(self.id(), value);
+        }
         hosted.mirror.report(self.id(), value);
     }
 
@@ -438,6 +500,7 @@ impl<'a> Param<'a> {
             node: self.params.node,
             id: self.id(),
             gate: hosted.gate.clone(),
+            driven: hosted.driven.clone(),
             handle: hosted.handle.clone(),
             notices: std::sync::Arc::clone(&hosted.notices),
             reporter: hosted.mirror.reporter(),
@@ -467,6 +530,7 @@ pub struct ParamGesture {
     node: NodeKey,
     id: ParamId,
     gate: Gate,
+    driven: Driven,
     handle: PluginHandle,
     notices: Notices,
     reporter: ParamReporter,
@@ -497,7 +561,9 @@ impl ParamGesture {
         if !self.gate.holds(self.id) {
             return Err(PluginParamError::Gone(self.id));
         }
-        self.handle.any_thread().set_parameter_value(self.id, value);
+        if !self.driven.write(self.id, value) {
+            self.handle.any_thread().set_parameter_value(self.id, value);
+        }
         self.reporter.report(self.id, value);
         queue(
             &self.notices,
