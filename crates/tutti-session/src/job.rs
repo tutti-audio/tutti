@@ -34,9 +34,12 @@
 use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use tutti_rt::LockExt;
+use tutti_types::Mint;
 
 use crate::{Clock, Session, SessionEvent};
 
@@ -91,7 +94,7 @@ pub struct Job<J: JobKind> {
 pub struct JobId(u64);
 
 /// The next [`JobId`]'s number, process-wide.
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_ID: Mint = Mint::new();
 
 /// Where a [`Job`] stands. A reading, not a promise: it moves on while the
 /// caller looks.
@@ -262,7 +265,7 @@ impl<J: JobKind> Drop for Job<J> {
         // (a Subscription) whose drop asks its port for something, which can end
         // a job and take this lock.
         let discarded = {
-            let mut queue = lock(&self.queue);
+            let mut queue = self.queue.lock_recover();
             let (gone, kept) = std::mem::take(&mut *queue)
                 .into_iter()
                 .partition(|landed| landed.id == self.id);
@@ -338,7 +341,7 @@ pub(crate) struct Ticket<J: JobKind> {
 
 impl<J: JobKind> Ticket<J> {
     pub(crate) fn new(queue: &LandedQueue) -> (Job<J>, Self) {
-        let id = JobId(NEXT_ID.fetch_add(1, Ordering::Relaxed));
+        let id = JobId(NEXT_ID.mint().get());
         let cell = Arc::new(Cell {
             status: AtomicU8::new(PENDING),
             cancelled: AtomicBool::new(false),
@@ -401,7 +404,7 @@ impl<J: JobKind> Ticket<J> {
     /// Queues the result to land in the next update, unless the job was
     /// dropped.
     pub(crate) fn land(self, result: Result<J::Output, J::Error>) {
-        let mut queue = lock(&self.queue);
+        let mut queue = self.queue.lock_recover();
         // Under the lock the drop's purge takes: a landing is queued before
         // the purge (and purged) or sees the drop here.
         if self.cancelled() {
@@ -413,12 +416,6 @@ impl<J: JobKind> Ticket<J> {
             result: Some(Box::new(result)),
         });
     }
-}
-
-fn lock(queue: &LandedQueue) -> std::sync::MutexGuard<'_, Vec<Landed>> {
-    queue
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl<J: JobKind> Drop for Ticket<J> {

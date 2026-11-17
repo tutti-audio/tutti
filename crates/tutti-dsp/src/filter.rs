@@ -8,6 +8,7 @@ mod ladder;
 mod lanes;
 mod svf;
 
+pub(crate) use biquad::section_l1;
 pub use biquad::{Biquad, DirectForm1};
 pub use crossover::{
     CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel,
