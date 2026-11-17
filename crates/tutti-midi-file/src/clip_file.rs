@@ -14,12 +14,21 @@
 //! messages (no DCS), the DCTPQ, and any UMP messages that configure a
 //! receiver (Bank Select, Program Change, volume, System Exclusive), each
 //! behind its own DCS. It holds at most one Set Tempo and one Set Time
-//! Signature (sections 6.1 to 6.1.2), both at delta 0. The DCS before Start
+//! Signature (sections 6.1 to 6.1.2), both at delta 0. The leading Set Profile
+//! On messages are typed ([`ProfileOn`], section 6.2) and refused when they do
+//! not read. The DCS before Start
 //! of Clip is the header's last gap, and with the others sets the total
 //! time allocated to the Clip Configuration Header (section 6.1): it
 //! is kept ([`ParsedClip::header_end`]). The rest, from Start of Clip to End of
 //! Clip, is the Sequence Data (section 7). No Property Exchange message is in
 //! either (sections 6.4 and 7.2).
+//!
+//! Start of Clip is tick 0 of the sequence, and music begins there: the first
+//! bar starts at Start of Clip (section 7.1), a pickup bar is that first bar
+//! with a Set Time Signature of its own length and the bar after it starts
+//! with a new Set Time Signature (section 7.1.3). The first Set Tempo and the
+//! first Set Time Signature, at tick 0 right after Start of Clip, are written
+//! under the Delta Clockstamp before Start of Clip (sections 7.1.1 and 7.1.2).
 //!
 //! Every UMP is governed by a **Delta Clockstamp** (DCS) giving the ticks since
 //! the previous event: a Delta Clockstamp sets the time of all following
@@ -42,8 +51,11 @@ use tutti_ump::{
     Utility,
 };
 
+mod profile;
 mod read;
 
+pub(crate) use profile::read_all as read_profiles;
+pub use profile::{ProfileOn, ProfileOnError};
 pub(crate) use read::{check_header, leading_profile_len, parse};
 
 /// The 8-byte file header: ASCII "SMF2CLIP" (M2-116 section 5).
@@ -84,6 +96,7 @@ pub(crate) struct ParsedClip {
 /// (sections 6.1 to 6.1.2), [`DctpqDelta`](Self::DctpqDelta) and
 /// [`ProfileOnDelta`](Self::ProfileOnDelta) (sections 3.2.1 and 6),
 /// [`PropertyExchange`](Self::PropertyExchange) (sections 6.4 and 7.2),
+/// [`ProfileOn`](Self::ProfileOn) (section 6.2),
 /// [`DuplicateStartOfClip`](Self::DuplicateStartOfClip) (section 7) and
 /// [`TrailingData`](Self::TrailingData) (section 7.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
@@ -123,6 +136,11 @@ pub enum ClipFileError {
     /// a Set Profile On has none.
     #[error("clip file's Set Profile On has a Delta Clockstamp before it")]
     ProfileOnDelta,
+    /// A Set Profile On message of the header that is not one: MIDI-CI Set
+    /// Profile On (M2-101 section 7.8) is what section 6.2 puts there, and
+    /// [`Track::profiles`](crate::Track::profiles) reads it.
+    #[error("clip header's Set Profile On is malformed")]
+    ProfileOn(#[source] ProfileOnError),
     /// A MIDI-CI Property Exchange message (Universal System Exclusive `7E`,
     /// sub-ID#1 `0D`, sub-ID#2 `30` to `3F`). Section 6.4: Property Data for PE
     /// Resources is not included in a Clip File; section 7.2: the
@@ -235,13 +253,18 @@ pub(crate) fn write(
     push_delta(&mut out, header_end.saturating_sub(at));
     push_words(&mut out, start_of_clip().words());
 
-    // The timed event stream: each UMP preceded by its delta clockstamp(s).
+    // The timed event stream: each UMP preceded by its delta clockstamp(s),
+    // except the first Set Tempo and the first Set Time Signature at the start
+    // of the sequence, which use the one before Start of Clip (sections 7.1.1
+    // and 7.1.2).
     // A DCS field is only 20 bits, so a delta beyond `DCS_MAX` is expressed as
     // DCS*NOOP restarts (M2-116 section 3.2.2): see `push_delta`.
     let mut at = 0u64;
     let mut previous: Option<Ump> = None;
+    let mut lead = Lead::Tempo;
     for &(tick, ump) in events {
-        let shares = tick == at && previous.is_some_and(|p| continues_text(p, ump));
+        let rides = lead.rides_start(tick, ump);
+        let shares = tick == at && (rides || previous.is_some_and(|p| continues_text(p, ump)));
         if !shares {
             push_delta(&mut out, tick.saturating_sub(at));
         }
@@ -254,6 +277,35 @@ pub(crate) fn write(
     push_delta(&mut out, end.saturating_sub(at));
     push_words(&mut out, end_of_clip().words());
     out
+}
+
+/// Which of the two messages that ride the Delta Clockstamp of Start of Clip
+/// (M2-116 sections 7.1.1 and 7.1.2) the writer looks for next: the sequence
+/// data's first Set Tempo, then its first Set Time Signature, each at tick 0
+/// and directly after the one before.
+#[derive(Clone, Copy)]
+enum Lead {
+    Tempo,
+    Signature,
+    Done,
+}
+
+impl Lead {
+    /// Whether `ump` at `tick` is the message looked for, and the look moved on:
+    /// a message that is not it ends the look.
+    fn rides_start(&mut self, tick: u64, ump: Ump) -> bool {
+        let flex = match ump.decode() {
+            Ok(Message::Flex(_, flex)) if tick == 0 => Some(flex),
+            _ => None,
+        };
+        let (rides, next) = match (*self, flex) {
+            (Self::Tempo, Some(Flex::SetTempo(_))) => (true, Self::Signature),
+            (Self::Tempo | Self::Signature, Some(Flex::SetTimeSignature(_))) => (true, Self::Done),
+            _ => (false, Self::Done),
+        };
+        *self = next;
+        rides
+    }
 }
 
 /// Whether `next` is a Lyric or Ruby packet that continues the message `previous`

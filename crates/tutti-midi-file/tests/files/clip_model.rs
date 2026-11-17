@@ -5,9 +5,10 @@
 use crate::common::{track, unsorted};
 
 use tutti_fixtures::midi;
+use tutti_midi_device::{CiDeviceId, ProfileChannels, ProfileId};
 use tutti_midi_file::{
-    ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfDivision, SmfFormat, Tick,
-    Track, Truncated,
+    ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, ProfileOn, ProfileOnError,
+    SmfDivision, SmfFormat, Tick, Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -459,12 +460,31 @@ fn sysex7(status: tutti_ump::SysexStatus, data: &[u8]) -> Ump {
     .into()
 }
 
-/// A Set Profile On: Universal SysEx `7E <device> 0D 22 ...` (MIDI-CI).
-fn set_profile_on() -> Ump {
-    sysex7(
-        tutti_ump::SysexStatus::Complete,
-        &[0x7E, 0x7F, 0x0D, 0x22, 1, 2],
-    )
+/// A Set Profile On (M2-101 section 7.8) of Profile `id`: Universal SysEx
+/// `7E <device> 0D 22 <version 2> <source> <destination> <Profile Id> <channels>`
+/// with both MUIDs Broadcast (M2-116 section 6.2), as the packets it is cut into.
+fn set_profile_on_of(id: [u8; 5]) -> Vec<Ump> {
+    let mut payload = vec![0x7E, 0x7E, 0x0D, 0x22, 0x02];
+    payload.extend([0x7F; 8]);
+    payload.extend(id);
+    payload.extend([0, 0]);
+    tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
+        .unwrap()
+        .collect()
+}
+
+/// The General MIDI 2 Function Block Profile (M2-118 section 3.4).
+const GM2: [u8; 5] = [0x7E, 0x00, 0x00, 0x01, 0x01];
+/// The MPE Profile (M2-120 section 3.2).
+const MPE: [u8; 5] = [0x7E, 0x31, 0x00, 0x01, 0x01];
+
+fn set_profile_on() -> Vec<Ump> {
+    set_profile_on_of(GM2)
+}
+
+/// `parts` one after another.
+fn then(parts: &[&[Ump]]) -> Vec<Ump> {
+    parts.concat()
 }
 
 fn program_change() -> Ump {
@@ -510,29 +530,17 @@ fn with_header(header: &[Ump]) -> Vec<Ump> {
 /// Spec: m2-116/hdr/1, m2-116/hdr/2, m2-116/hdr/3, m2-116/hdr/4, m2-116/hdr/5, m2-116/hdr/6, m2-116/hdr/7, m2-116/hdr/8, m2-116/5#2, m2-116/5#3, m2-116/6#1, m2-116/6#3, m2-116/6#4, m2-116/6#5, m2-116/6#6, m2-116/3.2.1#1, m2-116/3.2.1#2, m2-116/6.2#1
 #[test]
 fn set_profile_on_before_the_dctpq_is_accepted() {
-    let two_packets = [
-        sysex7(
-            tutti_ump::SysexStatus::Start,
-            &[0x7E, 0x7F, 0x0D, 0x22, 1, 2],
-        ),
-        sysex7(tutti_ump::SysexStatus::End, &[3, 4]),
-    ];
-    let mut parts = vec![set_profile_on(), two_packets[0], two_packets[1]];
+    let messages = then(&[&set_profile_on(), &set_profile_on_of(MPE)]);
+    let mut parts = messages.clone();
     parts.extend(with_header(&[]));
     let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
     let header = &file.tracks()[0].header;
-    assert_eq!(header.len(), 3);
+    assert_eq!(header.len(), messages.len());
     assert!(header.iter().all(|(t, _)| *t == Tick(0)));
     // The write puts them before the DCTPQ again, with no DCS between.
     let written = file.to_bytes().unwrap();
     let mut expected = MAGIC.to_vec();
-    for ump in [
-        set_profile_on(),
-        two_packets[0],
-        two_packets[1],
-        dcs(0),
-        dctpq(TPQ),
-    ] {
+    for ump in then(&[&messages, &[dcs(0), dctpq(TPQ)]]) {
         for w in ump.words() {
             expected.extend_from_slice(&w.to_be_bytes());
         }
@@ -781,9 +789,9 @@ fn the_dctpq_has_a_zero_delta_clockstamp_before_it() {
     assert_eq!(clip_error(&with(&[])), ClipFileError::DctpqDelta);
     assert_eq!(clip_error(&with(&[dcs(5)])), ClipFileError::DctpqDelta);
     // It follows the Set Profile On messages, and its DCS is the one after them.
-    assert!(MidiFile::from_bytes(&clip(&with(&[set_profile_on(), dcs(0)]))).is_ok());
+    assert!(MidiFile::from_bytes(&clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
     assert_eq!(
-        clip_error(&with(&[set_profile_on(), dcs(2)])),
+        clip_error(&with(&then(&[&set_profile_on(), &[dcs(2)]]))),
         ClipFileError::DctpqDelta
     );
 }
@@ -799,24 +807,15 @@ fn a_set_profile_on_has_no_delta_clockstamp_before_it() {
         parts.extend_from_slice(&after);
         parts
     };
-    assert!(MidiFile::from_bytes(&clip(&with(&[set_profile_on()]))).is_ok());
+    assert!(MidiFile::from_bytes(&clip(&with(&set_profile_on()))).is_ok());
     assert_eq!(
-        clip_error(&with(&[dcs(0), set_profile_on()])),
+        clip_error(&with(&then(&[&[dcs(0)], &set_profile_on()]))),
         ClipFileError::ProfileOnDelta
     );
     // Nor before a later packet of one message.
-    let two = [
-        sysex7(
-            tutti_ump::SysexStatus::Start,
-            &[0x7E, 0x7F, 0x0D, 0x22, 1, 2],
-        ),
-        sysex7(tutti_ump::SysexStatus::End, &[3, 4]),
-    ];
-    assert!(MidiFile::from_bytes(&clip(&with(&two))).is_ok());
-    assert_eq!(
-        clip_error(&with(&[two[0], dcs(0), two[1]])),
-        ClipFileError::ProfileOnDelta
-    );
+    let parts = set_profile_on();
+    let cut = then(&[&parts[..1], &[dcs(0)], &parts[1..]]);
+    assert_eq!(clip_error(&with(&cut)), ClipFileError::ProfileOnDelta);
 }
 
 /// Section 6.1.2: the header's Set Time Signature uses the Delta
@@ -1269,4 +1268,235 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
     let mut other_kind = composer.clone();
     other_kind[1] = at(20, parts(Arranger).remove(1));
     assert_eq!(interrupted(other_kind), Some(Tick(20)));
+}
+
+/// The header of a clip made of `leading`, the DCTPQ and nothing else, read.
+fn read_with_leading(leading: &[Ump]) -> Result<MidiFile, Error> {
+    let mut parts = leading.to_vec();
+    parts.extend(with_header(&[]));
+    MidiFile::from_bytes(&clip(&parts))
+}
+
+/// A Set Profile On's payload with the fields M2-101 section 7.8 gives it: the
+/// Device ID, the Message Format Version, both MUIDs Broadcast, the Profile Id
+/// and the Number of Channels Requested (version 2 on).
+fn profile_payload(device: u8, version: u8, profile: [u8; 5], channels: &[u8]) -> Vec<Ump> {
+    let mut payload = vec![0x7E, device, 0x0D, 0x22, version];
+    payload.extend([0x7F; 8]);
+    payload.extend(profile);
+    payload.extend(channels);
+    tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
+        .unwrap()
+        .collect()
+}
+
+/// Section 6.2: the header's Set Profile On names the Profile the sequence
+/// data is meant for; a file read gives it typed, with the Device ID it is
+/// addressed to and the Channels it asks for, and a Message Format Version 1
+/// message, which has no Number of Channels field, asks for 0.
+/// Spec: m2-116/6.2#2
+#[test]
+fn the_headers_profile_is_read_typed() {
+    let file = read_with_leading(&then(&[
+        &set_profile_on(),
+        // Channel 3, 15 Channels requested: 0x0F, 0x00 least significant first.
+        &profile_payload(0x02, 2, MPE, &[0x0F, 0x00]),
+        &profile_payload(0x7F, 1, GM2, &[]),
+    ]))
+    .unwrap();
+    assert_eq!(
+        file.tracks()[0].profiles(),
+        [
+            ProfileOn::new(
+                CiDeviceId::Group,
+                ProfileId::GM2_FUNCTION_BLOCK,
+                ProfileChannels::of(0)
+            ),
+            ProfileOn::new(
+                CiDeviceId::new(2).unwrap(),
+                ProfileId::MPE,
+                ProfileChannels::of(15)
+            ),
+            ProfileOn::new(
+                CiDeviceId::FunctionBlock,
+                ProfileId::GM2_FUNCTION_BLOCK,
+                ProfileChannels::of(0)
+            ),
+        ]
+    );
+    // The write keeps them.
+    let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
+    assert_eq!(back.tracks()[0].profiles(), file.tracks()[0].profiles());
+}
+
+/// A header with no Set Profile On has no Profile.
+/// Spec: m2-116/6.2#2
+#[test]
+fn a_header_without_a_set_profile_on_has_no_profile() {
+    let file = read_with_leading(&[]).unwrap();
+    assert!(file.tracks()[0].profiles().is_empty());
+}
+
+/// A Set Profile On that is not one is refused when the file is read, naming
+/// what is wrong: too few bytes for its version, a version of 0, a reserved
+/// Device ID (`10` to `7D`), a Profile Id that is not one (a one-byte
+/// manufacturer id followed by a non-zero byte, M2-101 section 7.3.1).
+/// Spec: m2-116/6.2#2
+#[test]
+fn a_malformed_set_profile_on_is_refused_by_its_fault() {
+    let refused = |leading: &[Ump]| match read_with_leading(leading) {
+        Err(Error::Clip(ClipFileError::ProfileOn(why))) => why,
+        other => panic!("expected a Set Profile On error, got {other:?}"),
+    };
+    let short = sysex7(
+        tutti_ump::SysexStatus::Complete,
+        &[0x7E, 0x7F, 0x0D, 0x22, 2, 0],
+    );
+    assert_eq!(refused(&[short]), ProfileOnError::Short { len: 6 });
+    // Version 2 holds the two bytes of the Number of Channels Requested.
+    assert_eq!(
+        refused(&profile_payload(0x7F, 2, MPE, &[0])),
+        ProfileOnError::Short { len: 19 }
+    );
+    assert_eq!(
+        refused(&profile_payload(0x7F, 0, MPE, &[0, 0])),
+        ProfileOnError::Version(0)
+    );
+    assert_eq!(
+        refused(&profile_payload(0x20, 2, MPE, &[0, 0])),
+        ProfileOnError::DeviceId(0x20)
+    );
+    assert_eq!(
+        refused(&profile_payload(0x7F, 2, [0x40, 1, 0, 0, 0], &[0, 0])),
+        ProfileOnError::Profile
+    );
+}
+
+/// Section 6.2: data meant for a Profile is tagged with a Set Profile On, with
+/// that Profile Id, at the beginning of the header, both MUIDs Broadcast, and
+/// section 6 puts it before the DCTPQ with no Delta Clockstamp. The bytes are
+/// the Table of M2-101 section 7.8: `7E 7E 0D 22 02`, two Broadcast MUIDs
+/// (`7F` four times each), the five Profile Id bytes and the two channel bytes.
+/// Spec: m2-116/6.2#3, m2-116/6.2#2, m2-116/6#3
+#[test]
+fn a_profile_is_written_at_the_start_of_the_header() {
+    let on = ProfileOn::new(CiDeviceId::Group, ProfileId::MPE, ProfileChannels::of(0));
+    let mut track = Track::new();
+    track
+        .header
+        .push((Tick(0), packet(program_change().decode().unwrap())));
+    let track = track.profile_on(on);
+    assert_eq!(track.profiles(), [on]);
+    assert_eq!(track.header.len(), set_profile_on_of(MPE).len() + 1);
+    let file = MidiFile::clip(DIVISION, track).unwrap();
+    let bytes = file.to_bytes().unwrap();
+    let want = clip(&then(&[
+        &set_profile_on_of(MPE),
+        &[dcs(0), dctpq(TPQ), dcs(0)],
+    ]));
+    assert!(bytes.starts_with(&want));
+    assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
+    // A second Profile goes after the first and before the other messages.
+    let second = ProfileOn::new(
+        CiDeviceId::FunctionBlock,
+        ProfileId::GM2_FUNCTION_BLOCK,
+        ProfileChannels::of(0),
+    );
+    let both = file.tracks()[0].clone().profile_on(second);
+    assert_eq!(both.profiles(), [on, second]);
+    assert_eq!(
+        both.header.last().unwrap().1,
+        packet(program_change().decode().unwrap())
+    );
+}
+
+/// A header Set Profile On that does not read is refused when a clip is built,
+/// as it is when one is read.
+/// Spec: m2-116/6.2#2
+#[test]
+fn a_clip_with_a_malformed_profile_is_not_built() {
+    let short = Ump::from(
+        sysex7(
+            tutti_ump::SysexStatus::Complete,
+            &[0x7E, 0x7F, 0x0D, 0x22, 2, 0],
+        )
+        .decode()
+        .unwrap(),
+    );
+    let mut track = Track::new();
+    track
+        .header
+        .push((Tick(0), packet(short.decode().unwrap())));
+    assert!(matches!(
+        MidiFile::clip(DIVISION, track),
+        Err(Error::Clip(ClipFileError::ProfileOn(
+            ProfileOnError::Short { len: 6 }
+        )))
+    ));
+}
+
+/// The events at tick 0 of a clip of `header_end`, as the file writes them.
+fn written_after_start(events: Vec<Ump>, header_end: u64) -> (Vec<Ump>, MidiFile) {
+    let events: Vec<(Tick, FileEvent)> = events
+        .into_iter()
+        .map(|u| (Tick(0), packet(u.decode().unwrap())))
+        .collect();
+    let file = MidiFile::clip(
+        DIVISION,
+        Track {
+            header_end: Tick(header_end),
+            end: Tick(0),
+            events,
+            ..Track::new()
+        },
+    )
+    .unwrap();
+    let packets = packets_of(&file.to_bytes().unwrap());
+    let s = packets.iter().position(|p| *p == start()).unwrap();
+    (packets[s - 1..].to_vec(), file)
+}
+
+/// Sections 7.1.1 and 7.1.2: the first Set Tempo and the first Set Time
+/// Signature follow Start of Clip at its tick, the first bar's, using the
+/// Delta Clockstamp that precedes Start of Clip: a header that asks for 5
+/// ticks has a Delta Clockstamp of 5 before Start of Clip and none between it,
+/// the Set Tempo and the Set Time Signature, and the sequence still reads
+/// them at tick 0, where the first bar starts. What follows has its own.
+/// Spec: m2-116/7.1.1#2, m2-116/7.1.1#3, m2-116/7.1.2#2, m2-116/7.1#2, m2-116/3.2.2#1
+#[test]
+fn the_first_tempo_and_signature_use_the_delta_clockstamp_before_start_of_clip() {
+    let (packets, file) =
+        written_after_start(vec![set_tempo(100.0), time_signature(), on(60, 1)], 5);
+    assert_eq!(
+        packets[..6],
+        [
+            dcs(5),
+            start(),
+            set_tempo(100.0),
+            time_signature(),
+            dcs(0),
+            on(60, 1)
+        ]
+    );
+    let events = &file.tracks()[0].events;
+    assert!(events.iter().all(|(tick, _)| *tick == Tick(0)));
+    assert_eq!(file.tracks()[0].header_end, Tick(5));
+    assert_eq!(
+        MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap(),
+        file
+    );
+}
+
+/// With no Set Tempo the Set Time Signature is the one that follows Start of
+/// Clip; one that is not first at tick 0 has its own Delta Clockstamp.
+/// Spec: m2-116/7.1.2#2
+#[test]
+fn a_signature_with_no_tempo_before_it_uses_the_delta_clockstamp_before_start_of_clip() {
+    let (packets, _) = written_after_start(vec![time_signature(), on(60, 1)], 5);
+    assert_eq!(packets[..4], [dcs(5), start(), time_signature(), dcs(0)]);
+    let (packets, _) = written_after_start(vec![on(60, 1), set_tempo(100.0)], 5);
+    assert_eq!(
+        packets[..6],
+        [dcs(5), start(), dcs(0), on(60, 1), dcs(0), set_tempo(100.0)]
+    );
 }

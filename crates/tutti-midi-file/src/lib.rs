@@ -32,7 +32,16 @@
 //!   most one Set Tempo and one Set Time Signature) are the [`Track`]'s `header`,
 //!   on a clock of their own and not on the sequence's timeline; each ordering
 //!   rule of sections 3.2 to 7.3 is one [`ClipFileError`] variant. A header Set
-//!   Tempo is the tempo from the sequence's first tick.
+//!   Tempo is the tempo from the sequence's first tick. The header's leading Set
+//!   Profile On messages are read typed ([`Track::profiles`], [`ProfileOn`]) and
+//!   written with [`Track::profile_on`]; one that does not read is refused with
+//!   [`ClipFileError::ProfileOn`].
+//! - **A clip's first bar starts at Start of Clip**, tick 0 of the sequence. A
+//!   pickup bar is a first bar with a Set Time Signature of its own length, and
+//!   the bar after it starts with a new one; [`MidiFile::to_clip`] keeps both on
+//!   the bar line the pickup's signature makes. The first Set Tempo and Set Time
+//!   Signature at tick 0 are written under the Delta Clockstamp before Start of
+//!   Clip.
 //! - **Metrical timing only.** An SMPTE division is refused with
 //!   [`Error::MidiUnsupportedTiming`]: it has no beat grid to put a tempo map on.
 //!
@@ -108,7 +117,7 @@ mod kind;
 mod smf;
 mod write;
 
-pub use clip_file::ClipFileError;
+pub use clip_file::{ClipFileError, ProfileOn, ProfileOnError};
 pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{

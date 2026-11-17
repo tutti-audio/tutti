@@ -32,7 +32,7 @@ use tutti_ump::{
 use crate::MidiFileKind;
 use crate::smf::SmfDivision;
 use crate::write::{Existing, WriteOptions};
-use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
+use crate::{ConfigError, Error, OutOfOrder, ProfileOn, Refusal, Result, clip_file, smf};
 
 mod to_clip;
 
@@ -473,6 +473,51 @@ impl Track {
         self.events.push((tick, event.into()));
         self.end = self.end.max(tick);
         Ok(self)
+    }
+
+    /// A Set Profile On for `profile` at the start of the Clip Configuration
+    /// Header, after the ones already there (M2-116 section 6.2: data meant for
+    /// a Profile is tagged with a Set Profile On, with that Profile Id, at the
+    /// beginning of the header). The message is at tick 0 and carries no Delta
+    /// Clockstamp when written (section 6), and its Source and Destination
+    /// MUIDs are Broadcast. A Clip File only: [`MidiFile::clip`] refuses the
+    /// header of an SMF's track.
+    ///
+    /// ```
+    /// use tutti_midi_device::{CiDeviceId, ProfileChannels, ProfileId};
+    /// use tutti_midi_file::{ProfileOn, Track};
+    ///
+    /// let on = ProfileOn::new(CiDeviceId::Group, ProfileId::MPE, ProfileChannels::of(0));
+    /// let track = Track::new().profile_on(on);
+    /// assert_eq!(track.profiles(), [on]);
+    /// ```
+    #[must_use]
+    pub fn profile_on(mut self, profile: ProfileOn) -> Self {
+        let leading = clip_file::leading_profile_len(&header_packets(&self.header));
+        let packets = profile
+            .packets()
+            .into_iter()
+            .map(|ump| (Tick(0), to_clip::event(ump)));
+        self.header.splice(leading..leading, packets);
+        self
+    }
+
+    /// The Set Profile On messages at the head of the header, in order, which
+    /// section 6.2 puts there. A Clip File's header holds only ones that read:
+    /// [`MidiFile::clip`] and [`MidiFile::from_bytes`] refuse another with
+    /// [`crate::ClipFileError::ProfileOn`]; a message of a track that was never built
+    /// into a file and does not read is not in the list.
+    #[must_use]
+    pub fn profiles(&self) -> Vec<ProfileOn> {
+        let packets = header_packets(&self.header);
+        let leading: Vec<Ump> = packets[..clip_file::leading_profile_len(&packets)]
+            .iter()
+            .map(|&(_, ump)| ump)
+            .collect();
+        clip_file::read_profiles(&leading)
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// The track's events as the packets a clip plays, at their beats for a
@@ -1197,6 +1242,18 @@ impl Iterator for EventPackets<'_> {
             Self::Sysex(packets) => packets.next(),
         }
     }
+}
+
+/// The packets of a header, at their ticks: what the clip layer reads.
+fn header_packets(header: &[(Tick, FileEvent)]) -> Vec<(u64, Ump)> {
+    header
+        .iter()
+        .filter_map(|(tick, event)| match event {
+            FileEvent::Message(m) => Some((tick.0, Ump::from(*m))),
+            FileEvent::Unknown(u) => Some((tick.0, u.0)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn packets(event: &FileEvent) -> EventPackets<'_> {

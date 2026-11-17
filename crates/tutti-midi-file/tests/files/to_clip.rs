@@ -242,10 +242,11 @@ fn copyright_and_lyrics_are_flex_text_over_several_packets() {
     assert_eq!(ticks, [0, 0, 10]);
 }
 
-/// M2-116 section 7.1.1: the first Set Tempo follows Start of Clip with a
-/// Delta Clockstamp of the value of the one before Start of Clip. A clip with no
-/// configuration header has a stamp of 0 before Start of Clip, and the Set
-/// Tempo after it has a stamp of 0.
+/// M2-116 section 7.1.1: the first Set Tempo follows Start of Clip and uses the
+/// Delta Clockstamp that precedes it. A clip with no configuration header has
+/// a stamp of 0 before Start of Clip, and the Set Tempo comes right after
+/// Start of Clip with none of its own.
+/// Spec: m2-116/7.1.1#2
 #[test]
 fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
     let smf = format0(vec![
@@ -277,9 +278,8 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         .position(|p| matches!(p, Message::Stream(Stream::StartOfClip)))
         .expect("Start of Clip");
     assert_eq!(stamp(&packets[start - 1]), Some(0));
-    assert_eq!(stamp(&packets[start + 1]), Some(0));
     assert!(matches!(
-        packets[start + 2],
+        packets[start + 1],
         Message::Flex(_, Flex::SetTempo(DEFAULT_TEMPO))
     ));
 }
@@ -1229,4 +1229,44 @@ fn a_lyric_keeps_the_tick_of_its_event() {
             (481, "world".to_owned()),
         ]
     );
+}
+
+/// M2-116 section 7.1.3: a pickup bar has a Set Time Signature that gives its
+/// true length, and the bar after it starts with a new Set Time Signature. A
+/// quarter-note pickup (1/4, 480 ticks) then 4/4: the first bar starts at the
+/// start of the clip, at tick 0 (section 7.1), the second at tick 480 where its
+/// signature is, on the pickup's own bar line, so nothing moves.
+/// Spec: m2-116/7.1.3#1, m2-116/7.1.3#2, m2-116/7.1#2
+#[test]
+fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
+    let smf = format0(vec![
+        (0, signature_meta(1, 2)),
+        (0, note(0, 60)),
+        (480, signature_meta(4, 2)),
+        (480, note(0, 62)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert!(done.moved.is_empty());
+    assert_eq!(at_ticks(&done.clip, is_signature), [0, 480]);
+    let [pickup, _] = signature_events(1, 2, 8, 24);
+    let [bar, _] = signature_events(4, 2, 8, 24);
+    let signatures: Vec<_> = flex_events(&done.clip, is_signature)
+        .into_iter()
+        .map(|(_, e)| e)
+        .collect();
+    assert_eq!(signatures, [pickup, bar]);
+    // The pickup is one beat: the second bar begins a quarter note in.
+    assert_eq!(done.clip.beat_at(Tick(480)), Beat(1.0));
+}
+
+/// Without a signature for the pickup, a 4/4 bar is counted from the start of
+/// the clip, and a signature a quarter in is off its bar line: it moves to the
+/// nearest one, the clip's start, and is listed.
+/// Spec: m2-116/7.1.3#1
+#[test]
+fn a_signature_that_does_not_declare_the_pickup_is_off_the_bar_line() {
+    let smf = format0(vec![(480, signature_meta(3, 2)), (480, note(0, 60))]);
+    let done = smf.to_clip().unwrap();
+    let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
+    assert_eq!(moves, [(480, 0)]);
 }

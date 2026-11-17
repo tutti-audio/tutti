@@ -2833,6 +2833,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-tempo",
  "tutti-types",
