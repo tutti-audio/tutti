@@ -632,10 +632,13 @@ pub(crate) fn step_at(
     } else {
         // The ramp is cut at `beat`: it reaches what the map has there, which
         // is the ramp's `end` where a point of the map sits on `beat`.
-        let reached = points
-            .get(kept)
-            .filter(|p| p.beat == beat)
-            .map_or_else(|| map.tempo_at(beat), TempoPoint::arrival);
+        let reached = match (last.transition, points.get(kept)) {
+            (
+                Transition::RampTime { end: Some(end) } | Transition::RampBeats { end: Some(end) },
+                Some(next),
+            ) if next.beat == beat => end,
+            _ => map.tempo_at(beat),
+        };
         extend(builder, last.transition, &TempoPoint::step(beat, reached)).then_step(tempo)
     };
     builder.build().map(Some)
