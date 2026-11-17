@@ -293,6 +293,7 @@ jobs:
           cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze --all-targets -- -D warnings
           cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings
           cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings
+          cargo clippy --locked -p tutti --features analyze,decode-wav,sampler --all-targets -- -D warnings
           cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-export --lib -- -D warnings
           cargo clippy --locked -p tutti-session --lib --features export,encode-flac,encode-aiff,encode-vorbis -- -D warnings
@@ -344,6 +345,7 @@ jobs:
           cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze
           cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth
           cargo nextest run --locked -p tutti --features audio-io
+          cargo nextest run --locked -p tutti --features analyze,decode-wav,sampler
           cargo nextest run --locked -p tutti --no-default-features --features io
           cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis
           cargo nextest run --locked -p tutti-codec

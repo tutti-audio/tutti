@@ -31,8 +31,8 @@ const CHUNK_FRAMES: usize = 16_384;
 /// The audio an analysis reads: a wave in memory or a file on disk.
 ///
 /// Converts from what the session already holds: an [`Arc<Wave>`](Wave) or a
-/// [`Wave`], and, with a decoder, a path or a pooled
-/// `AudioEntry`. A path, and a streamed entry, are decoded
+/// [`Wave`]; with a decoder, a path; and with a decoder and feature `sampler`,
+/// a pooled `AudioEntry`. A path, and a streamed entry, are decoded
 /// chunk by chunk on the job's worker.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -149,8 +149,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// The job fails with [`AnalyzeError::Measure`] when the meter refuses the
     /// audio or a chunk, `AnalyzeError::Decode` when a file cannot be
-    /// decoded, and [`AnalyzeError::Width`] when a stereo analysis is given
-    /// audio of another width.
+    /// decoded, [`AnalyzeError::Width`] when a stereo analysis is given audio
+    /// of another width, [`AnalyzeError::Fold`] when a mono analysis has no
+    /// fold from the audio's topology, [`AnalyzeError::Buffer`] when a chunk
+    /// is not a valid view, and [`AnalyzeError::Worker`] or
+    /// [`AnalyzeError::Wait`] when the job's worker fails or is dropped.
     pub fn analyze<A>(&mut self, audio: impl Into<Audio>, analysis: A) -> Job<Analyze<A>>
     where
         A: Measure + Send + 'static,

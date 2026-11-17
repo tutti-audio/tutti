@@ -83,6 +83,7 @@ session = ["dep:tutti-session", "dep:tutti-engine"]
 # Everything a headless host can have. Plugin FORMATS stay opt-in — each
 # links an SDK.
 full = [
+    "analyze",
     "device",
     "decode-wav",
     "decode-flac",

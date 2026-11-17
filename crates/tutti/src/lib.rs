@@ -71,7 +71,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
-//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, onsets, pitch, tempo, key | `analyze` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
@@ -507,9 +507,8 @@ pub mod sampler {
 
 /// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
 /// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
-/// a `Measure`, whose meter folds chunks into a result; the one-shot functions
-/// (`summarize`, `detect_onsets`, ...) run the same analysis over a buffer you
-/// hold. Feature `analyze`.
+/// a `Measure`, whose meter folds chunks into a result: loudness, peaks,
+/// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
     pub use tutti_measure::{Error, Measure, Meter};
