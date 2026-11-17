@@ -1,0 +1,186 @@
+//! [`EnvelopeFilterNode`]: a state-variable filter whose cutoff follows the signal's level.
+
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, SvfType};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{
+    BusTopology, ChannelLayout, Hz, MaxBlock, Q, SampleRate, Seconds, Semitones, Tail,
+};
+
+use super::filter_bus;
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
+
+/// What an [`EnvelopeFilterNode`] is made from: its width, its base cutoff and response, and
+/// optionally its depth, resonance and envelope times.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvelopeFilterConfig {
+    width: ChannelLayout,
+    ty: SvfType,
+    controls: EnvelopeFilterControls,
+}
+
+impl EnvelopeFilterConfig {
+    /// A filter of `width` channels and response `ty` whose cutoff is `base` for a silent
+    /// input, at depth 0 (a fixed filter) until [`depth`](Self::depth) opens it, Butterworth,
+    /// with a 10 ms attack and a 100 ms release.
+    #[must_use]
+    pub fn new(width: impl Into<ChannelLayout>, base: Hz, ty: SvfType) -> Self {
+        Self {
+            width: width.into(),
+            ty,
+            controls: EnvelopeFilterControls {
+                base,
+                ..EnvelopeFilterControls::DEFAULT
+            },
+        }
+    }
+
+    /// How far the cutoff moves at a full-scale envelope, in semitones (12 to the octave), up
+    /// when positive. Read within [`EnvelopeFilterControls::MAX_DEPTH`].
+    #[must_use]
+    pub fn depth(mut self, depth: Semitones) -> Self {
+        self.controls.depth = depth;
+        self
+    }
+
+    /// The resonance of the filter.
+    #[must_use]
+    pub fn q(mut self, q: Q) -> Self {
+        self.controls.q = q;
+        self
+    }
+
+    /// The envelope's attack time constant.
+    #[must_use]
+    pub fn attack(mut self, time: Seconds) -> Self {
+        self.controls.attack = time;
+        self
+    }
+
+    /// The envelope's release time constant.
+    #[must_use]
+    pub fn release(mut self, time: Seconds) -> Self {
+        self.controls.release = time;
+        self
+    }
+}
+
+/// An envelope filter of any width: a state-variable filter ([`SvfType`]) on every channel
+/// at one cutoff, `base * 2^(depth / 12 * env)`, where `env` is the level of the loudest
+/// channel followed with an attack and a release, in `[0, 1]` (0 silent, 1 at full scale).
+///
+/// The cutoff is designed once per 16 frames of the stream at the envelope then, and the
+/// coefficients glide to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
+/// SVF at the base.
+///
+/// The base (`UnitParam::Cutoff`), the resonance (`UnitParam::Q`), the envelope's attack and
+/// release (`UnitParam::Attack`, `UnitParam::Release`) and the depth (`UnitParam::Semitones`)
+/// are live cells, sampled at the grid; the response is the node's build. The tail is [`Tail::Unknown`]: a
+/// resonant filter rings for as long as its Q says. No latency. A [`KernelNode`]; made from
+/// an [`EnvelopeFilterConfig`] (`EnvelopeFilterNode::from`).
+///
+/// # Panics
+///
+/// `EnvelopeFilterNode::from` panics past 16 channels: a filter is one bus.
+pub type EnvelopeFilterNode = KernelNode<EnvelopeFilterKernel>;
+
+impl From<EnvelopeFilterConfig> for EnvelopeFilterNode {
+    fn from(config: EnvelopeFilterConfig) -> Self {
+        Self::with_kernel(
+            EnvelopeFilterKernel::new(filter_bus(config.width), config.ty),
+            EnvelopeFilterSet,
+            config.controls,
+        )
+    }
+}
+
+/// The filter's controls: the base cutoff, the resonance, the envelope's two times and the
+/// depth.
+#[derive(Clone, Copy, Debug)]
+pub struct EnvelopeFilterSet;
+
+control_set! {
+    EnvelopeFilterSet(_s): EnvelopeFilterControls = EnvelopeFilterControls::DEFAULT;
+    live: (all);
+    Cutoff => Hz = base { whole },
+    Q => Q = q { whole },
+    Attack => Seconds = attack { whole },
+    Release => Seconds = release { whole },
+    Semitones => Semitones = depth { whole };
+
+    fn defaults(&self) -> EnvelopeFilterControls {
+        EnvelopeFilterControls::DEFAULT
+    }
+}
+
+/// The filter as a [`Kernel`]: an [`EnvelopeFilterBank`] at the prepared rate.
+#[derive(Clone, Debug)]
+pub struct EnvelopeFilterKernel {
+    input: BusTopology,
+    ty: SvfType,
+    /// `None` until [`prepare`](Kernel::prepare).
+    bank: Option<EnvelopeFilterBank>,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl EnvelopeFilterKernel {
+    fn new(input: BusTopology, ty: SvfType) -> Self {
+        Self {
+            input,
+            ty,
+            bank: None,
+            landed: false,
+        }
+    }
+}
+
+impl Kernel for EnvelopeFilterKernel {
+    type Set = EnvelopeFilterSet;
+
+    const GRID: usize = COEFF_INTERVAL;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.bank = Some(EnvelopeFilterBank::new(self.input.layout(), self.ty, rate));
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        if let Some(bank) = &mut self.bank {
+            bank.reset();
+        }
+    }
+
+    fn retarget(&mut self, controls: &EnvelopeFilterControls) {
+        let Some(bank) = &mut self.bank else { return };
+        bank.aim(controls);
+        if !self.landed {
+            bank.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        if let Some(bank) = &mut self.bank {
+            bank.process(input, output);
+        }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::Unknown
+    }
+}

@@ -15,7 +15,8 @@
 //!
 //! - **Filters** — `SvfFilterNode`, `LadderFilterNode` (both any width, one
 //!   coefficient solve shared across the channels), `EqBandNode`, and `CutFilterNode`, a
-//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave.
+//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave, and
+//!   `EnvelopeFilterNode`, an SVF whose cutoff follows the input's level.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
@@ -195,7 +196,8 @@
 //! ## Items
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
-//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]); the coefficient solvers
+//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]),
+//!   [`EnvelopeFilterNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
 //!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
 //!   is `tutti_buffers::Float` with [`Lanes`].
@@ -299,6 +301,10 @@ pub use filter::{
     CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, LadderFilterNode, LadderKernel,
     LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
 };
+pub use filter::{
+    EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
+};
+pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are

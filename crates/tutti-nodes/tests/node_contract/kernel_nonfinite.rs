@@ -15,11 +15,12 @@ use tutti_nodes::{
 };
 use tutti_nodes::{
     BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, EnvelopeFilterConfig,
+    EnvelopeFilterNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
-    Mix, Q, Resonance, SampleRate, Samples, Seconds,
+    Mix, Q, Resonance, SampleRate, Samples, Seconds, Semitones,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -114,6 +115,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 CutResponse::LowPass,
                 CutAlignment::LinkwitzRiley(ButterworthOrder::of(4)),
             ))),
+        ),
+        (
+            "envelope filter",
+            Box::new(EnvelopeFilterNode::from(
+                EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::BandPass)
+                    .depth(Semitones(24.0)),
+            )),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (

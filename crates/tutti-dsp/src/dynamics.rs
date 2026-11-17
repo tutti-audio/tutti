@@ -4,6 +4,7 @@
 mod brickwall;
 mod compressor;
 mod curves;
+mod follower;
 mod gate;
 mod key_filter;
 mod key_source;
@@ -18,6 +19,7 @@ pub use compressor::{CompressorBank, CompressorControls, CompressorLanes};
 pub use curves::{
     LimiterCurve, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
+pub use follower::PeakFollower;
 pub use gate::{GateBank, GateControls, GateLanes};
 pub use key_filter::KeyFilter;
 pub use key_source::KeySource;
@@ -29,3 +31,4 @@ pub use multiband::{
     BandReductions, BandSettings, BankShape, MultibandBank, MultibandLanes, MultibandSettings,
 };
 pub use shared::GAIN_GLIDE;
+pub(crate) use shared::key_levels;

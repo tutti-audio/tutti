@@ -4,6 +4,7 @@
 
 mod crossover;
 mod cut;
+mod envelope;
 pub mod eq_band;
 pub mod ladder;
 pub mod svf;
@@ -13,6 +14,9 @@ pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
 pub use cut::{
     CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
     MIN_CUT_CUTOFF,
+};
+pub use envelope::{
+    EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq_band::EqBandNode;
 pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};

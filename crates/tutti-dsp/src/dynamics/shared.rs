@@ -17,7 +17,7 @@ pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 /// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as the largest
 /// finite level, so a detector never sees a value its dB conversion turns into an infinity.
 #[inline]
-pub(super) fn level(x: f32) -> f32 {
+pub(crate) fn level(x: f32) -> f32 {
     let a = x.abs();
     if a.is_nan() { 0.0 } else { a.min(f32::MAX) }
 }
@@ -25,7 +25,7 @@ pub(super) fn level(x: f32) -> f32 {
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
 /// (as long as `frames`).
 #[inline]
-pub(super) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, out: &mut [f32]) {
+pub(crate) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, out: &mut [f32]) {
     out.fill(0.0);
     for plane in key.iter() {
         for (m, x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {

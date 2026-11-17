@@ -95,7 +95,8 @@
 //! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
 //!   ladder ([`LadderBank`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
 //!   crossover ([`CrossoverBank`], [`CrossoverModel`]), each one filter per channel over
-//!   buffers views; [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
+//!   buffers views, and the envelope filter ([`EnvelopeFilterBank`]: an SVF whose cutoff follows
+//!   the input's level); [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
 //!   section they share.
 //! - **Dynamics** (`dynamics/`): the
 //!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter over
@@ -212,14 +213,16 @@ pub use dynamics::{
     CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
     GateLanes, KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes,
     Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, PeakDetection,
-    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    PeakFollower, TruePeakError, amplitude_to_db, compute_compressor_gain_reduction,
+    compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
-    CrossoverModel, DirectForm1, LadderBank, LadderCoefficients, LadderCoeffs, LadderControls,
-    LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank,
-    SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
+    CrossoverModel, DirectForm1, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank,
+    LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel, LadderType, Lanes,
+    MAX_SPLITS, SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
+    fit_to_rate, ladder_step, svf_step,
 };
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};

@@ -4,6 +4,7 @@
 
 mod biquad;
 mod crossover;
+mod envelope;
 mod ladder;
 mod lanes;
 mod svf;
@@ -14,6 +15,7 @@ pub use crossover::{
     CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel,
     MAX_SPLITS, SOLVE_CEILING, fit_to_rate,
 };
+pub use envelope::{EnvelopeFilterBank, EnvelopeFilterControls};
 pub use ladder::{
     LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
     LadderType, ladder_step,
