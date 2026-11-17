@@ -385,6 +385,11 @@ impl BeatClockFollower {
         // The last tick's beat, and the time since it at the fitted tempo.
         let source = ticked.get() + (now - last).get() * fit.get() / 60.0;
         let error = source - transport.get();
+        // A beat that is not a number leaves nothing to steer by.
+        if !error.is_finite() {
+            self.trim = 0.0;
+            return;
+        }
         self.error = Some(Beat::new(error));
         if error.abs() > ClockFollower::SLIP.get() {
             out(ClockEvent::Slipped {

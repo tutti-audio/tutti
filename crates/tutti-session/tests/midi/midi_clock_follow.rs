@@ -404,8 +404,7 @@ fn the_clock_error_is_none_until_a_locked_rolling_beat_clock_gives_one() {
 /// **A locked, rolling Beat Clock follower reads an error**: a Start and 120
 /// Timing Clocks at 120 bpm, each at `base + k * period` from one captured
 /// instant, roll the transport, and once the follower has locked and the
-/// transport has taken the Start, `clock_error` is a finite reading under
-/// `SLIP`, and the transport's beat is within a beat of the source's.
+/// transport has taken the Start, `clock_error` is a reading under `SLIP`.
 #[test]
 fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
     let (mut s, fake) = rig();

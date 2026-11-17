@@ -339,3 +339,46 @@ fn the_error_is_none_after_a_stop_and_while_the_transport_is_stopped() {
     follower.steer(Some(Beat::new(2.4)), at(now + 0.04), &mut |_| {});
     assert_eq!(follower.error(), None);
 }
+
+/// **A transport beat that is not a number is unreadable**: steering by NaN or
+/// infinity reads no error, and the tempo the follower goes on announcing is the
+/// fit, 120 bpm, untrimmed.
+#[test]
+fn a_non_finite_transport_beat_reads_no_error_and_leaves_the_tempo_untrimmed() {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut follower = ClockFollower::new(ClockKind::BeatClock);
+        let p = 60.0 / (120.0 * 24.0);
+        let mut tempos = Vec::new();
+        follower.step(system(System::Start), at(0.0), &mut |_| {});
+        for k in 1..=60u32 {
+            follower.step(
+                system(System::TimingClock),
+                at(f64::from(k - 1) * p),
+                &mut |e| tempos.push(e),
+            );
+        }
+        let now = 59.0 * p + 0.005;
+        assert!(now > ClockFollower::SETTLE.get());
+        follower.steer(Some(Beat::new(bad)), at(now), &mut |_| {});
+        assert_eq!(follower.error(), None, "{bad}");
+        for k in 61..=200u32 {
+            follower.step(
+                system(System::TimingClock),
+                at(f64::from(k - 1) * p),
+                &mut |e| tempos.push(e),
+            );
+        }
+        let announced: Vec<f64> = tempos
+            .iter()
+            .filter_map(|e| match e {
+                ClockEvent::Tempo(t) => Some(t.get()),
+                _ => None,
+            })
+            .collect();
+        assert!(!announced.is_empty());
+        assert!(
+            announced.iter().all(|t| (t - 120.0).abs() < 1e-6),
+            "{announced:?}"
+        );
+    }
+}
