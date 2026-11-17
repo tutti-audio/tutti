@@ -1,11 +1,11 @@
-//! The two reverbs through the session: their params by address, indexed for the
+//! The reverbs through the session: their params by address, indexed for the
 //! FDN's three decays, and the tail each declares to the graph (the FDN's
 //! unbounded where it can freeze).
 
-use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay};
+use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
 use tutti_session::{ParamError, Session};
 use tutti_types::MaxBlock;
-use tutti_types::{Samples, Seconds, Tail, UnitAddr, UnitParam};
+use tutti_types::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
 fn session() -> Session {
     Session::builder()
@@ -59,4 +59,26 @@ fn the_graph_sees_each_reverbs_ceiling() {
     };
     assert!(n.get() as f64 / 48_000.0 > 8.0);
     assert_eq!(s.graph_ref().node_tail(frozen).unwrap(), Tail::Unbounded);
+}
+
+/// The plate is a session node: `Graph::set_param` reaches its decay and diffusion cells by
+/// the key's typed methods and no other, it has no freeze to address, and the graph sees the
+/// finite ceiling it declares (the longest decay and pre-delay).
+#[test]
+fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
+    let mut s = session();
+    let (node, cells) = s
+        .graph()
+        .add::<PlateReverbNode>(PlateReverbNode::from(PlateReverbConfig::new()));
+    s.graph().set_param(node.decay(), Seconds(5.0)).unwrap();
+    s.graph().set_param(node.diffusion(), Mix(0.25)).unwrap();
+    assert_eq!(cells.get(UnitParam::Decay), Some(5.0));
+    assert_eq!(cells.get(UnitParam::Diffusion), Some(0.25));
+    assert_eq!(cells.get(UnitParam::Damping), Some(0.0005), "untouched");
+    assert_eq!(cells.get(UnitParam::Freeze), None, "no freeze to write");
+    let _ = s.update();
+    let Tail::Finite(n) = s.graph_ref().node_tail(node).unwrap() else {
+        panic!("finite")
+    };
+    assert!(n.get() as f64 / 48_000.0 > 8.0);
 }
