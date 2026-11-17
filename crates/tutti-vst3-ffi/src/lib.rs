@@ -5,8 +5,9 @@
 //! `#![forbid(unsafe_code)]` and holds the logic (the lifecycle, the shell, the
 //! MIDI mapping, the edit ring).
 //!
-//! This crate names nothing of tutti's except the value crates `tutti-types`
-//! and `tutti-plugin-types`.
+//! This crate names nothing of tutti's except the value and plumbing crates
+//! `tutti-types`, `tutti-plugin-types`, `tutti-ump` and `tutti-rt`, and, on
+//! Linux, `tutti-plugin-ipc-ffi` for the run loop's descriptors.
 //!
 //! ## What is here
 //!

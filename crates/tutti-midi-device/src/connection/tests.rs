@@ -57,17 +57,17 @@ fn block(n: u8, first: u8, span: u8, name: &str) -> FunctionBlockBuilder {
 fn device() -> Endpoint {
     let u = |n| U7::new(n).unwrap();
     Endpoint::new(Supports::of(FULL))
-        .with_identity(DeviceIdentity {
+        .identified(DeviceIdentity {
             manufacturer: ManufacturerId::of(0xA109),
             family: [u(1), u(2)],
             model: [u(3), u(4)],
             revision: SoftwareRevision::from([u(5), u(6), u(7), u(8)]),
         })
-        .with_name(EndpointName::new("A long endpoint name of 40 characters!").unwrap())
-        .with_instance_id(ProductInstanceId::new("SERIAL-0123456789-ABCDEFGHIJ").unwrap())
-        .with_static_function_blocks(true)
-        .with_function_block(block(0, 0, 1, "Keys").build().unwrap())
-        .with_function_block(
+        .named(EndpointName::new("A long endpoint name of 40 characters!").unwrap())
+        .instanced(ProductInstanceId::new("SERIAL-0123456789-ABCDEFGHIJ").unwrap())
+        .static_blocks(true)
+        .block(block(0, 0, 1, "Keys").build().unwrap())
+        .block(
             block(1, 1, 2, "A function block name past thirteen bytes")
                 .midi_ci(2, 2)
                 .build()

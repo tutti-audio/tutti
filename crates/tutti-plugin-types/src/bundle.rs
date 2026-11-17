@@ -225,11 +225,7 @@ pub fn native_module_path(path: &Path, kind: ModuleKind) -> crate::PluginResult<
 pub fn bundle_dir_of(path: &Path, kind: ModuleKind) -> Option<&Path> {
     path.ancestors().find(|dir| {
         dir.is_dir()
-            && dir
-                .extension()
-                .and_then(|e| e.to_str())
-                .and_then(|e| PluginFormat::from_extension(e).ok())
-                .is_some_and(|format| format.module_kind() == kind)
+            && PluginFormat::from_path(dir).is_some_and(|format| format.module_kind() == kind)
     })
 }
 

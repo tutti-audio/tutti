@@ -15,7 +15,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crossbeam_channel::{Receiver, TryRecvError};
-use tutti_rt::{ArcLend, PosReader};
+use tutti_rt::{PosReader, Publisher};
 use tutti_types::{ChannelLayout, SamplePosition, SampleRate, Samples};
 
 use super::bell::Bell;
@@ -125,7 +125,7 @@ pub(crate) struct Opened {
     /// What the stream plays, immutable.
     pub(crate) file: Arc<StreamFile>,
     /// The ring's control cell, which the handle reads the applied loop from.
-    pub(crate) control: Arc<ArcLend<RingControl>>,
+    pub(crate) control: Publisher<RingControl>,
     pub(crate) place: Place,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
@@ -236,7 +236,7 @@ impl Opening {
                 Arc::clone(&opened.status),
                 Arc::clone(&opened.cells),
                 Arc::clone(&opened.file),
-                Arc::clone(&opened.control),
+                opened.control.clone(),
             ),
             StreamReader::new(opened),
         )

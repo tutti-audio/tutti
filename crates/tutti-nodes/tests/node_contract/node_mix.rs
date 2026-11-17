@@ -15,6 +15,7 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
+use tutti_buffers::Planes;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
@@ -65,7 +66,7 @@ fn rendered<N: IntoNode>(make: &dyn Fn() -> N, x: &[Vec<f32>], mix: Mix) -> Vec<
     set_mix(&mut s, mix);
     let input = after_silence(x);
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
-    s.render_input(&refs)
+    s.render_input(Planes::new(&refs).unwrap())
         .into_iter()
         .map(|c| c[BLOCK..].to_vec())
         .collect()
@@ -313,14 +314,14 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let wet = {
         let mut s = solo(make());
         let refs: Vec<&[f32]> = x.iter().map(Vec::as_slice).collect();
-        s.render_input(&refs)
+        s.render_input(Planes::new(&refs).unwrap())
     };
     let mut s = solo(make());
     let first: Vec<&[f32]> = x.iter().map(|c| &c[..BLOCK]).collect();
-    s.render_input(&first);
+    s.render_input(Planes::new(&first).unwrap());
     set_mix(&mut s, Mix::DRY);
     let second: Vec<&[f32]> = x.iter().map(|c| &c[BLOCK..]).collect();
-    let got = s.render_input(&second);
+    let got = s.render_input(Planes::new(&second).unwrap());
     for c in 0..6 {
         for i in 0..BLOCK {
             let m = 1.0 + (0.0 - 1.0) * ((i + 1) as f32 / BLOCK as f32);

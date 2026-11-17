@@ -399,6 +399,10 @@ fn the_default_views_are_empty() {
     assert_eq!((planes.channels(), planes.iter().len()), (0, 0));
     assert!(planes.get_plane(0).is_none());
     assert_eq!(planes, Planes::default());
+    let mut out = PlanesMut::<f32>::default();
+    assert!(out.is_empty());
+    assert_eq!((out.channels(), out.iter().len()), (0, 0));
+    assert!(out.get_plane_mut(0).is_none());
     let pair = StereoPlanes::<f32>::default();
     assert!(pair.is_empty());
     assert_eq!(pair.channels(), 2);

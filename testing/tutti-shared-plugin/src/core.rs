@@ -53,6 +53,12 @@
 //!   parameter flagged as the bypass in VST3 and CLAP, `kAudioUnitProperty_BypassEffect`
 //!   in AU and `effSetBypass` in VST2 (neither a parameter). A write reaches the transcript as
 //!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
+//! - **Programs.** VST3 declares the program list [`PROGRAM_LIST`] in the unit
+//!   `Voices`, and selects a program through [`PROGRAM`], a stepped parameter in
+//!   that unit flagged `kIsProgramChange` (two steps for three programs). VST2
+//!   declares the same programs by number (`numPrograms`, the program names and
+//!   the current program, [`Core::program`]), and AU as factory presets numbered
+//!   `0`, `1` and `2`. CLAP declares none.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.
@@ -224,6 +230,12 @@ pub const METER: u32 = 4;
 /// `kAudioUnitProperty_BypassEffect` property and VST2's `effSetBypass`, and a
 /// write to either reaches the plugin as this parameter's point.
 pub const BYPASS: u32 = 5;
+/// The program-change parameter: the normalized position of the selected
+/// program in [`PROGRAM_LIST`] (`index / (programs - 1)`), `0` the first. Only
+/// VST3 lists it, in the unit that owns the list, flagged `kIsProgramChange`:
+/// a host loads a program by writing it. It is not in [`Core::param`]'s set; the
+/// program is [`Core::program`].
+pub const PROGRAM: u32 = 6;
 /// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
 /// (`Voices` > `Oscillator` > `Filter`).
 pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
@@ -231,8 +243,10 @@ pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
 /// `Voices` > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
 pub const UNITS: [(i32, i32, &str); 3] = [(1, 0, "Voices"), (2, 1, "Oscillator"), (3, 2, "Filter")];
 /// The program list VST3 declares: its id, its name and its programs, in
-/// order. The unit `Voices` (id 1) selects it.
+/// order. The unit [`PROGRAM_UNIT`] selects it.
 pub const PROGRAM_LIST: (i32, &str, [&str; 3]) = (1, "Factory", ["Init", "Pad", "Lead"]);
+/// The unit that selects [`PROGRAM_LIST`] and holds [`PROGRAM`]: `Voices`.
+pub const PROGRAM_UNIT: i32 = 1;
 /// The unit `aux` is in.
 pub const AUX_UNIT: i32 = 3;
 /// The parameters VST3's `IParameterFunctionName` answers, `(unit, function
@@ -246,12 +260,15 @@ pub const FUNCTION_NAMES: [(i32, &str, u32); 4] = [
 ];
 /// Number of parameters VST2 and AU list: the four above and the meter.
 pub const PARAMS: u32 = 5;
-/// The ids CLAP and VST3 list, in list order: the five above and [`BYPASS`].
+/// The ids CLAP lists, in list order: the five above and [`BYPASS`]; VST3 lists
+/// them and [`PROGRAM`] ([`VST3_LISTED_IDS`]).
 pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
-/// Number of parameters CLAP and VST3 list.
+/// Number of parameters CLAP lists.
 pub const LISTED: u32 = LISTED_IDS.len() as u32;
+/// The ids VST3 lists, in list order: [`LISTED_IDS`] and [`PROGRAM`].
+pub const VST3_LISTED_IDS: [u32; 7] = [LEVEL, AUX, MODE, TONE, METER, BYPASS, PROGRAM];
 /// Parameter names, by id.
-pub const NAMES: [&str; 6] = ["level", "aux", "mode", "tone", "meter", "bypass"];
+pub const NAMES: [&str; 7] = ["level", "aux", "mode", "tone", "meter", "bypass", "program"];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.
@@ -552,6 +569,7 @@ pub struct Core {
     aux: AtomicU64,
     tone: AtomicU64,
     bypass: AtomicU64,
+    program: AtomicU32,
     mode: AtomicU32,
     fault: AtomicU32,
     editor: AtomicU32,
@@ -636,6 +654,7 @@ impl Core {
             aux: AtomicU64::new(0.25f64.to_bits()),
             tone: AtomicU64::new(0.5f64.to_bits()),
             bypass: AtomicU64::new(0),
+            program: AtomicU32::new(0),
             mode: z(),
             fault: z(),
             editor: z(),
@@ -701,6 +720,35 @@ impl Core {
             MODE => Some(f64::from(self.mode.load(Relaxed)) / f64::from(MODES - 1)),
             METER => Some(0.0),
             _ => None,
+        }
+    }
+
+    /// The selected program, an index into [`PROGRAM_LIST`]. It is not a parameter of
+    /// the set [`param`](Self::param) reads: VST3 alone lists it, as [`PROGRAM`].
+    pub fn program(&self) -> u32 {
+        self.program.load(Relaxed)
+    }
+
+    /// Selects program `index`; one past the list is ignored.
+    pub fn set_program(&self, index: u32) {
+        if (index as usize) < PROGRAM_LIST.2.len() {
+            self.program.store(index, Relaxed);
+        }
+    }
+
+    /// The program-change parameter's normalized value, `index / (programs - 1)`.
+    pub fn program_normalized(&self) -> f64 {
+        f64::from(self.program()) / (PROGRAM_LIST.2.len() - 1) as f64
+    }
+
+    /// A write of the parameter `id` the way VST3 sends it: [`PROGRAM`] selects the
+    /// nearest program, any other id is [`set_param`](Self::set_param).
+    pub fn apply(&self, id: u32, value: f64) {
+        if id == PROGRAM {
+            let last = (PROGRAM_LIST.2.len() - 1) as f64;
+            self.set_program((value.clamp(0.0, 1.0) * last).round() as u32);
+        } else {
+            self.set_param(id, value);
         }
     }
 
@@ -818,7 +866,7 @@ impl Core {
         self.log(7, 0, 0, 0.0);
         dsp.events.retain(|ev| match *ev {
             Ev::Param { id, value, .. } => {
-                self.set_param(id, value);
+                self.apply(id, value);
                 false
             }
             _ => true,
@@ -941,14 +989,14 @@ impl Core {
                     } else {
                         // Only `level` moves linearly: any other parameter
                         // takes the ramp's end value at its start.
-                        self.set_param(id, end);
+                        self.apply(id, end);
                         if id == AUX {
                             dsp.aux = end.clamp(0.0, 1.0);
                         }
                     }
                 }
                 Ev::Param { id, value, .. } => {
-                    self.set_param(id, value);
+                    self.apply(id, value);
                     match id {
                         LEVEL => {
                             dsp.ramp = None;

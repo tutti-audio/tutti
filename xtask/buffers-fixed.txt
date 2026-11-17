@@ -53,12 +53,6 @@ crates/tutti-export/src/rendered.rs::Rendered::interleaved_into  pending
 crates/tutti-export/src/rendered.rs::Rendered::into_planes  pending
 crates/tutti-export/src/rendered.rs::Rendered::new  pending
 crates/tutti-export/src/rendered.rs::Rendered::planes  pending
-crates/tutti-graph/src/builder.rs::Renderer::render  pending
-crates/tutti-graph/src/builder.rs::Renderer::render_input  pending
-crates/tutti-graph/src/builder.rs::Renderer::render_interleaved  pending
-crates/tutti-graph/src/builder.rs::Renderer::render_into  pending
-crates/tutti-graph/src/builder.rs::Solo::render  pending
-crates/tutti-graph/src/builder.rs::Solo::render_input  pending
 crates/tutti-graph/src/contract.rs::BlockRig::inputs_mut  pending
 crates/tutti-graph/src/contract.rs::BlockRig::output  pending
 crates/tutti-graph/src/contract.rs::Detect.Exact  pending
@@ -73,9 +67,9 @@ crates/tutti-graph/src/param.rs::ParamInput.Frames  pending
 crates/tutti-graph/src/param.rs::ParamInput::frames  pending
 crates/tutti-graph/src/reference.rs::Reference::process  pending
 crates/tutti-graph/src/reference.rs::Reference::process_with_changes  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_planes  pending
-crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  pending
+crates/tutti-graph/src/tap.rs::TapReader::pop_into  measured: the op narrows a wider block to its f32 consumers
+crates/tutti-graph/src/tap.rs::TapReader::pop_planes  measured: the op narrows a wider block to its f32 consumers
+crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  measured: the op narrows a wider block to its f32 consumers
 crates/tutti-graph/src/testing.rs::Pair::block  pending
 crates/tutti-graph/src/testing.rs::Pair::block_at  pending
 crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
@@ -117,6 +111,5 @@ crates/tutti-session/src/graph/testing.rs::AudioSide::tick  pending
 crates/tutti-session/src/session.rs::Session::render  pending
 crates/tutti-session/src/session.rs::Session::render_frame  pending
 crates/tutti-session/src/session.rs::Session::render_frame_at  pending
-crates/tutti-transport/src/lib.rs::RenderClock::render_graph  pending
 crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f32  pending
 crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f64  pending

@@ -20,6 +20,7 @@ use crate::gain::EdgeGain;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
 use crate::spec::{EventIn, GraphSpec};
 use crate::wake::Wake;
+use tutti_buffers::Float;
 
 /// Produces a fresh unit for a fork of the graph its node was inserted into:
 /// a per-node capability the [`Editor`] keeps from insert on (see
@@ -29,7 +30,7 @@ use crate::wake::Wake;
 /// the audio thread by the time this is called. (A source may *ask* the live
 /// unit something over a control channel it already has: a hosted plugin's
 /// source asks the live instance for its saved state.)
-pub trait ForkSource: Send {
+pub trait ForkSource<F: Float = f32>: Send {
     /// A fresh unit for `mode`, sharing no state with the live one: severed
     /// from every live input and reset. The editor prepares it.
     ///
@@ -42,7 +43,7 @@ pub trait ForkSource: Send {
     /// # Errors
     ///
     /// [`ForkCause`] when the copy cannot be built.
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause>;
+    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause>;
 
     /// The control-thread half of a fork ([`Editor::fork_gather`]): read
     /// what the fork must take from the live node **now**, and say where the
@@ -68,7 +69,7 @@ pub trait ForkSource: Send {
     ///
     /// [`ForkCause`] when the build cannot start; the default returns what
     /// [`fork`](Self::fork) does.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)
     }
 }
@@ -76,15 +77,15 @@ pub trait ForkSource: Send {
 /// What a [`ForkSource::gather`] hands the editor: the forked unit, or how to
 /// build it, and **on which thread** the rest of the work may run. The
 /// source's declaration; see [`Editor::fork_gather`].
-pub struct ForkBuild(Build);
+pub struct ForkBuild<F: Float = f32>(Build<F>);
 
-enum Build {
-    Pinned(Forked),
-    Ready(Forked),
-    Deferred(Box<dyn FnOnce() -> Result<Forked, ForkCause> + Send>),
+enum Build<F: Float> {
+    Pinned(Forked<F>),
+    Ready(Forked<F>),
+    Deferred(Box<dyn FnOnce() -> Result<Forked<F>, ForkCause> + Send>),
 }
 
-impl ForkBuild {
+impl<F: Float> ForkBuild<F> {
     /// A unit built on the gathering thread whose `prepare` must run there
     /// too: [`Editor::fork_gather`] prepares it before it returns, and
     /// [`PendingFork::build`] places it as it is. For a unit confined to one
@@ -93,14 +94,14 @@ impl ForkBuild {
     /// thread as well. If it is dropped on another thread while that thread
     /// unwinds a panic (a deferred build, a render that panics on a worker),
     /// it is leaked rather than torn down there.
-    pub fn pinned(forked: Forked) -> Self {
+    pub fn pinned(forked: Forked<F>) -> Self {
         Self(Build::Pinned(forked))
     }
 
     /// A unit built on the gathering thread (a template's clone, a
     /// `ParamNode` at the values its cells hold) that the build prepares on
     /// whichever thread runs it.
-    pub fn ready(forked: Forked) -> Self {
+    pub fn ready(forked: Forked<F>) -> Self {
         Self(Build::Ready(forked))
     }
 
@@ -109,12 +110,12 @@ impl ForkBuild {
     /// read of the live node, and `build` reads nothing live. For a slow
     /// build (a hosted plugin's `plugin-server` launch and state load). An
     /// `Err` fails the build as [`ForkError::Source`], naming the key.
-    pub fn deferred(build: impl FnOnce() -> Result<Forked, ForkCause> + Send + 'static) -> Self {
+    pub fn deferred(build: impl FnOnce() -> Result<Forked<F>, ForkCause> + Send + 'static) -> Self {
         Self(Build::Deferred(Box::new(build)))
     }
 }
 
-impl fmt::Debug for ForkBuild {
+impl<F: Float> fmt::Debug for ForkBuild<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.0 {
             Build::Pinned(_) => "ForkBuild::Pinned",
@@ -140,29 +141,29 @@ impl fmt::Debug for ForkBuild {
 /// fork; leaking its pinned units is the price of not closing them on the
 /// wrong thread. Any other drop is an ordinary one, wherever it happens: the
 /// owner's rule is to drop the fork on the gathering thread.
-struct PinnedUnit {
-    node: Option<Box<dyn Node>>,
+struct PinnedUnit<F: Float> {
+    node: Option<Box<dyn Node<F>>>,
     home: std::thread::ThreadId,
 }
 
-impl PinnedUnit {
-    fn here(node: Box<dyn Node>) -> Self {
+impl<F: Float> PinnedUnit<F> {
+    fn here(node: Box<dyn Node<F>>) -> Self {
         Self {
             node: Some(node),
             home: std::thread::current().id(),
         }
     }
 
-    fn get(&self) -> &dyn Node {
+    fn get(&self) -> &dyn Node<F> {
         self.node.as_deref().expect("present until dropped")
     }
 
-    fn get_mut(&mut self) -> &mut dyn Node {
+    fn get_mut(&mut self) -> &mut dyn Node<F> {
         self.node.as_deref_mut().expect("present until dropped")
     }
 }
 
-impl Node for PinnedUnit {
+impl<F: Float> Node<F> for PinnedUnit<F> {
     fn shape(&self) -> crate::Shape {
         self.get().shape()
     }
@@ -172,7 +173,7 @@ impl Node for PinnedUnit {
     fn prepare(&mut self, p: &Prepare) {
         self.get_mut().prepare(p);
     }
-    fn process(&mut self, cx: &crate::Cx<'_>, io: crate::Io<'_>) -> crate::Status {
+    fn process(&mut self, cx: &crate::Cx<'_>, io: crate::Io<'_, F>) -> crate::Status {
         self.get_mut().process(cx, io)
     }
     fn reset(&mut self) {
@@ -186,7 +187,7 @@ impl Node for PinnedUnit {
     }
 }
 
-impl Drop for PinnedUnit {
+impl<F: Float> Drop for PinnedUnit<F> {
     fn drop(&mut self) {
         if std::thread::panicking()
             && std::thread::current().id() != self.home
@@ -198,14 +199,14 @@ impl Drop for PinnedUnit {
 }
 
 /// A unit of a [`PendingFork`], at the stage the gather left it.
-enum Unit {
+enum Unit<F: Float> {
     /// Built and prepared on the gathering thread ([`ForkBuild::pinned`]),
     /// with the fresh [`Wake`] it was prepared with.
-    Prepared(Forked, Wake),
+    Prepared(Forked<F>, Wake),
     /// Built, not prepared ([`ForkBuild::ready`]).
-    Built(Forked),
+    Built(Forked<F>),
     /// Not built ([`ForkBuild::deferred`]).
-    Deferred(Box<dyn FnOnce() -> Result<Forked, ForkCause> + Send>),
+    Deferred(Box<dyn FnOnce() -> Result<Forked<F>, ForkCause> + Send>),
 }
 
 /// A fork gathered on the control thread and not yet built
@@ -216,13 +217,13 @@ enum Unit {
 /// ([`build`](Self::build)) while the control thread goes on, and later edits
 /// of the live editor do not reach it. Dropping it drops every unit it holds,
 /// pinned ones included, so drop it where those belong.
-pub struct PendingFork {
+pub struct PendingFork<F: Float = f32> {
     prepare: Prepare,
     event_capacity: usize,
     /// The fork's spec, but for what the inserts write (each node's shape
     /// figures, generations).
     spec: GraphSpec,
-    units: Vec<(NodeKey, Unit)>,
+    units: Vec<(NodeKey, Unit<F>)>,
 }
 
 /// What a failed [`PendingFork::build`] had built: every unit (pinned ones
@@ -230,12 +231,12 @@ pub struct PendingFork {
 /// to be **dropped where its pinned units belong** (for an in-process VST2
 /// plugin, the main thread), which is why the build hands it back rather than
 /// dropping it on its own thread.
-pub struct ForkRemains {
-    units: Vec<Forked>,
-    graph: Option<Box<(Editor, Executor)>>,
+pub struct ForkRemains<F: Float = f32> {
+    units: Vec<Forked<F>>,
+    graph: Option<Box<(Editor<F>, Executor<F>)>>,
 }
 
-impl ForkRemains {
+impl<F: Float> ForkRemains<F> {
     /// Whether it holds nothing at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -243,7 +244,7 @@ impl ForkRemains {
     }
 }
 
-impl fmt::Debug for ForkRemains {
+impl<F: Float> fmt::Debug for ForkRemains<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ForkRemains")
             .field("units", &self.units.len())
@@ -252,7 +253,7 @@ impl fmt::Debug for ForkRemains {
     }
 }
 
-impl fmt::Debug for PendingFork {
+impl<F: Float> fmt::Debug for PendingFork<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingFork")
             .field(
@@ -264,7 +265,7 @@ impl fmt::Debug for PendingFork {
     }
 }
 
-impl PendingFork {
+impl<F: Float> PendingFork<F> {
     /// How many units the build still has to make ([`ForkBuild::deferred`]).
     pub fn deferred(&self) -> usize {
         self.units
@@ -283,7 +284,7 @@ impl PendingFork {
     /// that fails (no later one runs), or [`ForkError::Commit`]. Either way
     /// nothing is installed, and everything built so far comes back as
     /// [`ForkRemains`], for the caller to drop where its pinned units belong.
-    pub fn build(self) -> Result<(Editor, Executor), (ForkError, ForkRemains)> {
+    pub fn build(self) -> Result<(Editor<F>, Executor<F>), (ForkError, ForkRemains<F>)> {
         let Self {
             prepare,
             event_capacity,
@@ -314,7 +315,7 @@ impl PendingFork {
             return Err((error, ForkRemains { units, graph: None }));
         }
 
-        let (mut editor, mut executor) = Editor::with_event_capacity(prepare, event_capacity);
+        let (mut editor, mut executor) = Editor::<F>::with_event_capacity(prepare, event_capacity);
         for (key, (forked, wake)) in built {
             let kind = &spec.topology.nodes[&key].kind;
             // Not forkable itself (module docs: a fork is not a fork source).
@@ -323,7 +324,17 @@ impl PendingFork {
             let unwired = if let Some(wake) = wake {
                 editor.insert_prepared(key, kind, forked.node, wake)
             } else {
-                editor.insert(key, kind, Unforkable(forked.node)).unwired
+                editor
+                    .insert(
+                        key,
+                        kind,
+                        NodeParts {
+                            node: forked.node,
+                            controls: (),
+                            fork: None,
+                        },
+                    )
+                    .unwired
             };
             debug_assert!(unwired.is_empty());
             if let Some(health) = forked.health {
@@ -356,24 +367,24 @@ impl PendingFork {
 /// What a [`ForkSource`] produces: the unit, and — for a unit that can fail
 /// *while it renders* — a probe the forked editor keeps
 /// ([`Editor::fork_health`]).
-pub struct Forked {
+pub struct Forked<F: Float = f32> {
     /// The fresh unit. The editor prepares it.
-    pub node: Box<dyn Node>,
+    pub node: Box<dyn Node<F>>,
     /// Whether the unit has failed since it was forked. `None` for a unit
     /// that cannot fail at run time (anything in this process).
     pub health: Option<Arc<dyn ForkHealth>>,
 }
 
-impl fmt::Debug for Forked {
+impl<F: Float> fmt::Debug for Forked<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Forked").finish_non_exhaustive()
     }
 }
 
-impl Forked {
+impl<F: Float> Forked<F> {
     /// A unit with no health probe.
     #[must_use]
-    pub fn new(node: Box<dyn Node>) -> Self {
+    pub fn new(node: Box<dyn Node<F>>) -> Self {
         Self { node, health: None }
     }
 
@@ -628,8 +639,8 @@ pub struct ForkByClone<N>(pub N);
 /// [`ForkByClone`]'s source: the node as inserted, never processed.
 struct CloneFork<N>(N);
 
-impl<N: Node + Clone + Send + 'static> ForkSource for CloneFork<N> {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float, N: Node<F> + Clone + Send + 'static> ForkSource<F> for CloneFork<N> {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         let mut node = self.0.clone();
         node.reset();
         Ok(Forked::new(Box::new(node)))
@@ -643,15 +654,15 @@ impl<N: Node + Clone + Send + 'static> ForkSource for CloneFork<N> {
     /// before the fork was split. A node whose controls must be frozen at
     /// the fork is a `ParamNode` ([`ParamFork`](crate::ParamFork) reads the
     /// cells here and detaches its own) or brings its own source.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::ready)
     }
 }
 
-impl<N: Node + Clone + Send + 'static> IntoNode for ForkByClone<N> {
+impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<N> {
     type Controls = ();
 
-    fn into_node(self) -> (Box<dyn Node>, ()) {
+    fn into_node(self) -> (Box<dyn Node<F>>, ()) {
         (Box::new(self.0), ())
     }
 
@@ -659,7 +670,7 @@ impl<N: Node + Clone + Send + 'static> IntoNode for ForkByClone<N> {
         std::any::type_name::<N>()
     }
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         let fork = CloneFork(self.0.clone());
         NodeParts {
             node: Box::new(self.0),
@@ -707,14 +718,14 @@ impl<N: Node + Clone + Send + 'static> IntoNode for ForkByClone<N> {
 #[derive(Clone, Debug)]
 pub struct Unforkable<N>(pub N);
 
-impl<N: Node> IntoNode for Unforkable<N> {
+impl<F: Float, N: Node<F>> IntoNode<F> for Unforkable<N> {
     type Controls = ();
 
     fn kind() -> &'static str {
         std::any::type_name::<N>()
     }
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         NodeParts {
             node: Box::new(self.0),
             controls: (),
@@ -739,7 +750,7 @@ impl IntoNode for Unforkable<Box<dyn Node>> {
     }
 }
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// A new editor/executor pair running a copy of `target` that shares no
     /// state with this graph, prepared for `prepare`, already installed (the
     /// executor is running its plan and the editor has nothing in flight).
@@ -843,7 +854,7 @@ impl Editor {
         target: ForkTarget,
         mode: ForkMode,
         prepare: Prepare,
-    ) -> Result<(Editor, Executor), ForkError> {
+    ) -> Result<(Editor<F>, Executor<F>), ForkError> {
         // Whatever was built is dropped here, on the thread that gathered
         // it, which is where a pinned unit belongs.
         self.fork_gather(target, mode, prepare)?
@@ -904,7 +915,7 @@ impl Editor {
         target: ForkTarget,
         mode: ForkMode,
         prepare: Prepare,
-    ) -> Result<PendingFork, ForkError> {
+    ) -> Result<PendingFork<F>, ForkError> {
         // A bus edge is its lanes in the fork: it forks the lowered spec, so
         // the lanes are edges (and its weights are gains) like any other.
         let lowered = if !self.spec().has_bus_edges() {

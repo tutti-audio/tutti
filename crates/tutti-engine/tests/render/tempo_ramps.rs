@@ -15,6 +15,7 @@
 //! equals offline), and those are also held to the arithmetic.
 
 use std::sync::{Arc, Mutex};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
@@ -24,8 +25,8 @@ use tutti_graph::{
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Then,
-    Transport,
+    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
+    render_graph,
 };
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, LoopRange, SampleRate, Samples, Tail, first_frame_at_or_after,
@@ -407,7 +408,12 @@ fn an_offline_render_is_the_live_render_with_a_ramp() {
             break;
         }
         let n = n.min(total - done);
-        timeline.render_graph(&mut exec, n, &[], &mut [&mut out[..n]]);
+        render_graph(
+            &timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut out[..n]]).unwrap(),
+        );
         done += n;
     }
     let offline = log.lock().expect("log");

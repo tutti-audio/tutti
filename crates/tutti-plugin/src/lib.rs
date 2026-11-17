@@ -27,7 +27,8 @@
 //! use tutti_plugin::catalog::{
 //!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
 //! };
-//! use tutti_plugin_db::{PluginDb, PluginFormat};
+//! use tutti_plugin_db::PluginDb;
+//! use tutti_plugin_types::PluginFormat;
 //! use tutti_types::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
@@ -138,7 +139,7 @@
 //! Without any feature, VST3, CLAP, AU and VST2 plugins all load in the
 //! subprocess, with no editor support.
 //!
-//! - `serde` — `PluginRef`, `PluginState` and `tutti_plugin_db::PluginDb` derive
+//! - `serde` — `PluginRef` and `tutti_plugin_db::PluginDb` derive
 //!   `Serialize` and `Deserialize`: the app picks the file format and where it
 //!   lives. `Catalog::new` takes the `PluginDb` to start from and a closure that
 //!   stores it; a store's failure comes back as a `PersistError`. Deserializing a
@@ -439,10 +440,10 @@ pub mod catalog {
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
     pub use crate::host::loadable::{BindError, Hosting, Loadable, Resolved};
     pub use crate::host::plugin::{BoundPlugin, Commit, Plugin, PluginRebinder, Rebuilt};
-    pub use crate::host::plugin_ref::{PluginRef, PluginState};
+    pub use crate::host::plugin_ref::PluginRef;
     pub use tutti_plugin_db::{
         FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,
-        ScanPoll, ScanResult,
+        ScanError, ScanPoll, ScanResult,
     };
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};

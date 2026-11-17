@@ -69,6 +69,8 @@ members = [
     "testing/tutti-plugin-contract",
     # SOFA to tutti HRIR sphere converter: an offline tool, reads AES69 files.
     "testing/tutti-hrir-convert",
+    # Fuzz targets over the public decoders and parsers (`cargo xtask fuzz`).
+    "testing/tutti-fuzz",
 ]
 
 [workspace.package]

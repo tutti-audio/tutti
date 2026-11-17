@@ -39,12 +39,7 @@ impl Parts {
             return Err(EditorError::NoController);
         }
         let view = self.create_view().ok_or(EditorError::NoView)?;
-        let frame = HostPlugFrame::new(
-            #[cfg(target_os = "linux")]
-            self.module.run_loop(),
-            #[cfg(target_os = "linux")]
-            Some(self.owner),
-        );
+        let frame = HostPlugFrame::new(self.module.run_loop(), Some(self.owner));
         // A plugin registers with the module's own run loop (the factory's host
         // context) while `attached` runs; the scope says whose that is.
         let _scope = self.scoped(main);
@@ -88,7 +83,6 @@ impl Parts {
 
     /// Takes back whatever this plugin left registered with the run loop.
     pub(super) fn purge_run_loop(&self) {
-        #[cfg(target_os = "linux")]
         self.module.run_loop().purge(self.owner);
     }
 
@@ -215,13 +209,8 @@ impl Parts {
     /// descriptors a plugin registered event handlers for and the earliest of its
     /// timers, added to `out`; nothing elsewhere, where the OS has the loop.
     pub fn editor_wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
-        #[cfg(target_os = "linux")]
-        {
-            let _ = main;
-            self.module.run_loop().describe(out);
-        }
-        #[cfg(not(target_os = "linux"))]
-        let _ = (main, out);
+        let _ = main;
+        self.module.run_loop().describe(out);
     }
 
     /// Runs what the host's wait found: the run loop's timers due at `now` and
@@ -232,34 +221,21 @@ impl Parts {
         ready: &[tutti_plugin_types::Ready],
         now: std::time::Instant,
     ) {
-        #[cfg(target_os = "linux")]
         self.module.run_loop().dispatch(main, ready, now);
-        #[cfg(not(target_os = "linux"))]
-        let _ = (main, ready, now);
     }
 
     /// One pass of the run loop without waiting: describes it, looks at its
     /// descriptors and the clock, and runs what is ready. What a host does where
     /// it has no main loop of its own to wait in.
     pub fn run_editor_loop_iteration(&self, main: MainThreadMarker) {
-        #[cfg(target_os = "linux")]
         self.module.run_loop().run_iteration(main);
-        #[cfg(not(target_os = "linux"))]
-        let _ = main;
     }
 
     /// What the run loop has registered and fired.
     #[cfg(feature = "conformance")]
     #[must_use]
     pub fn run_loop_activity(&self) -> crate::RunLoopActivity {
-        #[cfg(target_os = "linux")]
-        {
-            self.module.run_loop().activity()
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            crate::RunLoopActivity::default()
-        }
+        self.module.run_loop().activity()
     }
 
     /// The reference count of the host application, as a plugin holding it

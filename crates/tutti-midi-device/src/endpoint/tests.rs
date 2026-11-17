@@ -58,17 +58,17 @@ const FULL: Capabilities = Capabilities {
 /// MIDI-CI 1.2 block (message version 2) with two SysEx 8 streams.
 fn device() -> Endpoint {
     Endpoint::new(Supports::of(FULL))
-        .with_identity(identity())
-        .with_name(EndpointName::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123").unwrap())
-        .with_instance_id(ProductInstanceId::new("SN-0001").unwrap())
-        .with_static_function_blocks(true)
-        .with_function_block(
+        .identified(identity())
+        .named(EndpointName::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123").unwrap())
+        .instanced(ProductInstanceId::new("SN-0001").unwrap())
+        .static_blocks(true)
+        .block(
             block(0, 0, 1)
                 .name(BlockName::new("Keys").unwrap())
                 .build()
                 .unwrap(),
         )
-        .with_function_block(
+        .block(
             block(3, 4, 2)
                 .ui_hint(UiHint::Both)
                 .midi_ci(2, 2)
@@ -260,8 +260,8 @@ fn function_block_info_and_name_words() {
 
     // The other way round: MIDI-CI version 1, 16 streams, block 7, Groups 5 to 7,
     // so a swapped pair of bytes shows. 0x8000 | 0x0700 | 0b11, then 5, 3, 1, 16.
-    let mut e = Endpoint::new(Supports::of(FULL))
-        .with_function_block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
+    let mut e =
+        Endpoint::new(Supports::of(FULL)).block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(7)), true, false),
@@ -274,8 +274,7 @@ fn function_block_info_and_name_words() {
 #[test]
 fn a_long_block_name_splits_at_thirteen_bytes() {
     let name = BlockName::new("0123456789abcdefghijklmnopqrst").unwrap();
-    let mut e = Endpoint::new(Supports::of(FULL))
-        .with_function_block(block(1, 0, 1).name(name).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL)).block(block(1, 0, 1).name(name).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(1)), false, true),
@@ -527,8 +526,8 @@ fn a_function_block_stays_inside_the_groups() {
 #[test]
 fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
     let e = Endpoint::new(Supports::of(FULL))
-        .with_function_block(block(5, 0, 1).build().unwrap())
-        .with_function_block(block(5, 2, 3).build().unwrap());
+        .block(block(5, 0, 1).build().unwrap())
+        .block(block(5, 2, 3).build().unwrap());
     assert_eq!(e.declared_function_blocks(), 6);
     assert_eq!(e.function_blocks().count(), 1);
     assert_eq!(e.function_block(id(5)).unwrap().first_group().get(), 2);
@@ -711,7 +710,7 @@ fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
 #[test]
 fn a_long_instance_id_is_zero_filled_only_in_its_end() {
     let mut e = Endpoint::new(Supports::of(FULL))
-        .with_instance_id(ProductInstanceId::new("0123456789abcdefghijklmnopqrst").unwrap());
+        .instanced(ProductInstanceId::new("0123456789abcdefghijklmnopqrst").unwrap());
     let out = ask(
         &mut e,
         discovery(DiscoveryFilter {
@@ -739,7 +738,7 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
         (BlockDirection::Input, 0b01),
         (BlockDirection::Output, 0b10),
     ] {
-        let mut e = Endpoint::new(Supports::of(FULL)).with_function_block(
+        let mut e = Endpoint::new(Supports::of(FULL)).block(
             FunctionBlock::builder(
                 id(0),
                 direction,
@@ -760,9 +759,9 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
 #[test]
 fn blocks_may_share_and_overlap_groups() {
     let mut e = Endpoint::new(Supports::of(FULL))
-        .with_function_block(block(0, 0, 4).build().unwrap())
-        .with_function_block(block(1, 2, 1).midi1(Midi1Port::Restricted).build().unwrap())
-        .with_function_block(block(2, 2, 1).build().unwrap());
+        .block(block(0, 0, 4).build().unwrap())
+        .block(block(1, 2, 1).midi1(Midi1Port::Restricted).build().unwrap())
+        .block(block(2, 2, 1).build().unwrap());
     let out = ask(&mut e, block_discovery(BlockSelect::All, true, false));
     assert_eq!(
         out.iter().map(words).collect::<Vec<_>>(),
@@ -787,7 +786,7 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
         rx_jr: true,
         tx_jr: true,
     };
-    let mut e = changeable().with_active(active);
+    let mut e = changeable().in_use(active);
     let m1_only = Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
@@ -817,7 +816,7 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
 
 /// A device whose blocks may change: not static, one named block 0 over Group 0.
 fn changeable() -> Endpoint {
-    Endpoint::new(Supports::of(FULL)).with_function_block(
+    Endpoint::new(Supports::of(FULL)).block(
         block(0, 0, 1)
             .name(BlockName::new("Keys").unwrap())
             .build()

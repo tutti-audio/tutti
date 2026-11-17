@@ -40,6 +40,7 @@
 // the CLAP harness (and its `tutti-clap-test-plugin` dev-dependency) at all.
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
+use tutti_buffers::Planes;
 use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
@@ -147,7 +148,7 @@ fn render_impulse(graph: &mut Renderer) -> Vec<f32> {
     // would have to be a genuine mid-run starvation rather than the cold start
     // every run has.
     for _ in 0..WARMUP_BLOCKS {
-        graph.render_input(&[&silence]);
+        graph.render_input(Planes::new(&[&silence]).unwrap());
         std::thread::sleep(PACE);
     }
 
@@ -157,7 +158,7 @@ fn render_impulse(graph: &mut Renderer) -> Vec<f32> {
         if (base..base + BLOCK).contains(&IMPULSE_AT) {
             input[IMPULSE_AT - base] = IMPULSE;
         }
-        let out = graph.render_input(&[&input]);
+        let out = graph.render_input(Planes::new(&[&input]).unwrap());
         captured.extend_from_slice(&out[0]);
         // Pace to the real block period.
         //

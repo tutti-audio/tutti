@@ -135,3 +135,51 @@ fn an_upgrade_excludes_another_reader() {
         r.join().unwrap();
     });
 }
+
+/// Two views both read one chunk and each tries to upgrade: an upgrade made
+/// while the other still reads is refused and keeps its read claim, every
+/// granted write is counted once and never overlaps a read, and the word is
+/// free once both views drop.
+#[test]
+fn a_refused_upgrade_keeps_its_claim_and_leaves_the_word_free() {
+    loom::model(|| {
+        let data: &'static mut [Elem] = leak([Elem::new()]);
+        let table = leak(ClaimTable::new(1));
+        let split: &'static SplitRw<'static, Elem> = leak(SplitRw::new(data, 1, table));
+        let t = thread::spawn(move || {
+            let held = Held::new(1);
+            let mut v = split.view(&held);
+            if v.try_get(0).is_err() {
+                return 0;
+            }
+            match v.try_get_mut(0) {
+                Ok(c) => {
+                    c[0].bump();
+                    1
+                }
+                Err(_) => {
+                    assert!(v.try_get(0).is_ok(), "the refused upgrade kept its claim");
+                    0
+                }
+            }
+        });
+        let held = Held::new(1);
+        let mine = {
+            let mut v = split.view(&held);
+            if v.try_get(0).is_err() {
+                0
+            } else {
+                match v.try_get_mut(0) {
+                    Ok(c) => {
+                        c[0].bump();
+                        1
+                    }
+                    Err(_) => 0,
+                }
+            }
+        };
+        let theirs = t.join().unwrap();
+        let mut v = split.view(&held);
+        assert_eq!(v.get_mut(0)[0].read(), mine + theirs);
+    });
+}
