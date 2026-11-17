@@ -190,7 +190,7 @@ where
             };
             let state = control
                 .save_state(main, StateUse::Duplicate)
-                .map_err(|e| PluginForkError::SaveState(StateError::Rejected(e.to_string())))?;
+                .map_err(|e| PluginForkError::SaveState(e.into()))?;
             (preset, state, live_mode)
         };
         drop(live);

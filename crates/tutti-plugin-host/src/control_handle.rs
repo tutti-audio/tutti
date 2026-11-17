@@ -555,8 +555,7 @@ impl PluginHandle {
             c.load_state(main, data, tutti_plugin_types::StateUse::Project)
         }) {
             Some(Ok(())) => Ok(()),
-            Some(Err(PluginError::StateFailed(error))) => Err(error),
-            Some(Err(other)) => Err(StateError::Rejected(other.to_string())),
+            Some(Err(error)) => Err(error.into()),
             None => Err(StateError::PluginCrashed),
         }
     }

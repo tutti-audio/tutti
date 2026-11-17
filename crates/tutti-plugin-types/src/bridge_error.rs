@@ -283,11 +283,11 @@ pub enum PluginForkError {
     /// The live instance did not hand over its state — the plugin cannot save
     /// it (no state extension, or it refused), or the live bridge is gone.
     /// Asked before anything is loaded, so this costs no subprocess.
-    #[error("the live instance did not hand over its state: {0}")]
+    #[error("the live instance did not hand over its state")]
     SaveState(#[source] StateError),
 
     /// A fresh instance of the same plugin did not load.
-    #[error("a fresh instance{} did not load: {source}", of_path(.path))]
+    #[error("a fresh instance{} did not load", of_path(.path))]
     Load {
         /// The plugin file the live instance was loaded from; `None` when the
         /// instance has no origin to name.
@@ -311,7 +311,7 @@ pub enum PluginForkError {
     },
 
     /// The fresh instance refused the live instance's state.
-    #[error("the fresh instance refused the live instance's state: {0}")]
+    #[error("the fresh instance refused the live instance's state")]
     LoadState(#[source] StateError),
 
     /// The fork was asked for off the main thread, where an in-process plugin
@@ -375,6 +375,23 @@ impl From<BridgeError> for PluginError {
     }
 }
 
+/// A [`PluginError`] from a state call as the [`StateError`] a state caller
+/// takes: a failure already typed as a state failure keeps its variant, a
+/// dead server is [`StateError::PluginCrashed`], and any other failure is the
+/// plugin's own refusal with its text.
+impl From<PluginError> for StateError {
+    fn from(e: PluginError) -> Self {
+        match e {
+            PluginError::StateFailed(err) => err,
+            PluginError::State(msg) => StateError::Rejected(msg),
+            PluginError::Bridge(b) if matches!(*b, BridgeError::ProcessCrashed) => {
+                StateError::PluginCrashed
+            }
+            other => StateError::Rejected(other.to_string()),
+        }
+    }
+}
+
 impl BridgeError {
     /// Turn a server-reported error message into a `LoadFailed` at the
     /// `Opening` stage. The stage is coarse because the server's own
@@ -434,6 +451,24 @@ mod tests {
             }
             other => panic!("expected LoadFailed, got {other:?}"),
         }
+    }
+
+    /// A state call's `PluginError` becomes the `StateError` it already was, a
+    /// crash stays a crash, and only an untyped failure reads as a refusal.
+    #[test]
+    fn a_state_calls_plugin_error_keeps_its_state_error() {
+        assert_eq!(
+            StateError::from(PluginError::StateFailed(StateError::Busy)),
+            StateError::Busy
+        );
+        assert_eq!(
+            StateError::from(PluginError::Bridge(Box::new(BridgeError::ProcessCrashed))),
+            StateError::PluginCrashed
+        );
+        assert_eq!(
+            StateError::from(PluginError::State("old format".into())),
+            StateError::Rejected("old format".into())
+        );
     }
 
     /// Process, editor and other failures keep their own variant, and the
@@ -525,23 +560,73 @@ mod tests {
     /// reporter that walks the chain print the cause twice.
     #[test]
     fn a_cause_is_printed_once_along_the_source_chain() {
-        use std::error::Error as _;
-        let errors: [BridgeError; 3] = [
-            BridgeError::StateRestore {
-                cause: Box::new(BridgeError::Timeout {
-                    operation: "a reply",
-                    after: Duration::from_secs(5),
-                    partial: false,
+        use crate::PluginFailure;
+        use std::error::Error;
+        let errors: Vec<(Box<dyn Error>, &str)> = vec![
+            (
+                Box::new(BridgeError::StateRestore {
+                    cause: Box::new(BridgeError::Timeout {
+                        operation: "a reply",
+                        after: Duration::from_secs(5),
+                        partial: false,
+                    }),
                 }),
-            },
-            BridgeError::State(StateError::Stalled {
-                bytes: 3,
-                after: Duration::from_secs(2),
-            }),
-            BridgeError::Editor(EditorError::PluginCrashed),
+                "timed out after 5s",
+            ),
+            (
+                Box::new(BridgeError::State(StateError::Stalled {
+                    bytes: 3,
+                    after: Duration::from_secs(2),
+                })),
+                "stalled after 3 bytes",
+            ),
+            (
+                Box::new(BridgeError::Editor(EditorError::PluginCrashed)),
+                "has crashed",
+            ),
+            (
+                Box::new(BridgeError::ExitUnwatched(std::io::Error::other(
+                    "no thread to spare",
+                ))),
+                "no thread to spare",
+            ),
+            (
+                Box::new(BridgeError::Serialization(
+                    postcard::Error::DeserializeUnexpectedEnd,
+                )),
+                "expected more data",
+            ),
+            (
+                Box::new(BridgeError::ServerExited {
+                    cause: PluginFailure::StreamClosed,
+                }),
+                "stream closed",
+            ),
+            (
+                Box::new(BridgeError::AudioConnection {
+                    cause: Arc::new(BridgeError::ProtocolError("a reset on the wrong socket")),
+                }),
+                "a reset on the wrong socket",
+            ),
+            (
+                Box::new(PluginForkError::SaveState(StateError::Busy)),
+                "bridge is busy",
+            ),
+            (
+                Box::new(PluginForkError::Load {
+                    path: None,
+                    source: BridgeError::ProcessCrashed,
+                }),
+                "bridge process crashed",
+            ),
+            (
+                Box::new(PluginForkError::LoadState(StateError::Rejected(
+                    "older format".into(),
+                ))),
+                "older format",
+            ),
         ];
-        let causes = ["timed out after 5s", "stalled after 3 bytes", "has crashed"];
-        for (error, cause) in errors.iter().zip(causes) {
+        for (error, cause) in &errors {
             let mut chain = vec![error.to_string()];
             let mut next = error.source();
             while let Some(e) = next {
