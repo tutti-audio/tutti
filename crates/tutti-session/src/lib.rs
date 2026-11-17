@@ -86,6 +86,8 @@ mod key;
 mod main_session;
 #[cfg(feature = "midi")]
 mod midi;
+#[cfg(feature = "midi-hardware")]
+mod midi_ci;
 #[cfg(feature = "midi")]
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
@@ -114,6 +116,7 @@ mod pool;
 mod recorder;
 #[cfg(feature = "plugin")]
 mod recovery;
+mod rt_log;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
@@ -172,6 +175,12 @@ pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
     Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
+};
+#[cfg(feature = "midi-hardware")]
+pub use midi_ci::{
+    ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
+    RequestReport, ResourcePeer, SetProperty, Subscribe, Subscription, SubscriptionCause,
+    SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};

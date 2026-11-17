@@ -2,32 +2,34 @@
 //! the waiting left to the platform.
 
 use std::fmt::Display;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::schedule::{Next, Outbox};
 use tutti_graph::Losses;
+use tutti_rt::{Counter, CounterWriter, counter};
 
 /// What an output and its sender thread share: the [`Outbox`] behind its lock
 /// and the counts of what the sender could not send.
 #[derive(Debug)]
 pub(in crate::backend) struct Mailbox<T> {
     state: Mutex<Outbox<T>>,
-    /// Sends the device refused.
-    lost: AtomicU64,
-    /// Events dropped when the sender ended.
-    refused: AtomicU64,
+    /// What the sender could not send: sends the device refused are `lost`,
+    /// events dropped when the sender ended are `refused`. The sender's end
+    /// guard holds the one writer.
+    losses: Counter<Losses>,
 }
 
 impl<T> Mailbox<T> {
-    /// A mailbox with a live sender and nothing held.
-    pub(in crate::backend) fn new() -> Self {
-        Self {
+    /// A mailbox with a live sender and nothing held, and the writer of its
+    /// losses, which [`run`] takes.
+    pub(in crate::backend) fn new() -> (Self, CounterWriter<Losses>) {
+        let (writer, losses) = counter();
+        let mailbox = Self {
             state: Mutex::new(Outbox::new()),
-            lost: AtomicU64::new(0),
-            refused: AtomicU64::new(0),
-        }
+            losses,
+        };
+        (mailbox, writer)
     }
 
     /// The outbox, locked. The lock is the sender's too, held for one step.
@@ -38,21 +40,20 @@ impl<T> Mailbox<T> {
     /// What the sender could not send: refused sends are lost, and what was
     /// held when it ended had nowhere to go (refused).
     pub(in crate::backend) fn losses(&self) -> Losses {
-        Losses::lost(self.lost.load(Ordering::Acquire))
-            + Losses::refused(self.refused.load(Ordering::Acquire))
+        self.losses.get()
     }
 }
 
 /// Marks the mailbox's sender dead when its loop ends, however it ends, a panic
 /// included: what it held had nowhere to go.
-struct Ends<'a, T>(&'a Mailbox<T>);
+struct Ends<'a, T>(&'a Mailbox<T>, CounterWriter<Losses>);
 
 impl<T> Drop for Ends<'_, T> {
     fn drop(&mut self) {
         let dropped = self.0.state().end();
         // A count of events held in memory fits `u64` on every platform.
         let dropped = u64::try_from(dropped).unwrap_or(u64::MAX);
-        self.0.refused.fetch_add(dropped, Ordering::AcqRel);
+        self.1.add(Losses::refused(dropped));
     }
 }
 
@@ -63,6 +64,7 @@ impl<T> Drop for Ends<'_, T> {
 /// exists, so a setup that panics ends the sender the same way.
 pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     mailbox: &Mailbox<T>,
+    losses: CounterWriter<Losses>,
     setup: impl FnOnce() -> (Send, Wait),
 ) where
     S: Display,
@@ -70,7 +72,7 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     Send: FnMut(T) -> Result<(), S>,
     Wait: FnMut(Option<Duration>) -> Result<(), W>,
 {
-    let _ends = Ends(mailbox);
+    let mut ends = Ends(mailbox, losses);
     let (mut send, mut wait) = setup();
     loop {
         // The stop is looked at with each event, not once per batch: a long run
@@ -81,7 +83,7 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
             Next::Send(event) => {
                 if let Err(e) = send(event) {
                     tracing::debug!("MIDI send: {e}");
-                    mailbox.lost.fetch_add(1, Ordering::AcqRel);
+                    ends.1.add(Losses::lost(1));
                 }
                 mailbox.state().done();
             }

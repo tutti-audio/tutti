@@ -75,7 +75,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tutti_graph::Offset;
+use tutti_graph::{Losses, Offset};
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
     Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
@@ -89,6 +89,7 @@ use tutti_ump::{
     Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
 };
 
+use crate::answer::Answer;
 use crate::capability::UmpCapability;
 use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
@@ -352,6 +353,8 @@ pub(crate) struct Stepped {
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
     /// The Property Exchange of the peers that changed.
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
+    /// How the requests asked of peers ended.
+    pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The Groups whose MIDI-CI device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
@@ -429,7 +432,7 @@ impl Negotiation {
         os: UmpCapability,
         out: Option<OpenOutput>,
         timing: InputTiming,
-        ci_refused: CounterWriter<u64>,
+        ci_refused: CounterWriter<Losses>,
     ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
@@ -603,6 +606,7 @@ impl Negotiation {
             profiles: changes.profiles,
             process: changes.process,
             properties: changes.properties,
+            answers: changes.answers,
             unstarted: changes.unstarted,
         }
     }

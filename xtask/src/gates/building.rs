@@ -153,6 +153,8 @@ const MEASURES: &str = "a measurement config describes the analysis; the audio's
     with the view it is applied to (`Mono`, `Interleaved`, `StereoPlanes`), so there is no width to choose";
 const TOPOLOGY: &str = "a loudness config holds the channel topology the weights are read from, \
     which is the analysis's channel model, not a width choice; the call checks the view's width against it";
+const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are defined on a \
+    left and right pair, so the width is not a choice and the config takes none";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -304,6 +306,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "opening a file for decoding: the failure is the file's, not a value's",
     ),
     ty(
+        "crates/tutti-dsp/",
+        "Polarity::new",
+        CTOR,
+        "a channel is valid only against the width: the validity depends on the width and the channels together, T5's stated exception",
+    ),
+    ty(
         "crates/tutti-cpal/",
         "DeviceHost::open",
         CTOR,
@@ -406,6 +414,14 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
     ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-nodes/", "MidSideConfig", WIDTH, STEREO_ONLY),
+    ty(
+        "crates/tutti-nodes/",
+        "StereoWidthConfig",
+        WIDTH,
+        STEREO_ONLY,
+    ),
+    ty("crates/tutti-nodes/", "AutoPanConfig", WIDTH, STEREO_ONLY),
     ty("crates/tutti-measure/", "AlignConfig", WIDTH, MEASURES),
     ty("crates/tutti-measure/", "ChordConfig", WIDTH, MEASURES),
     ty("crates/tutti-measure/", "ChromaConfig", WIDTH, MEASURES),

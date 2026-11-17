@@ -2,8 +2,9 @@
 //! string of commands or fields longer than one message goes out as
 //! [`MmcSegment`]s, and arrives through an [`MmcReassembler`].
 
-use std::fmt;
-use std::marker::PhantomData;
+use alloc::vec::Vec;
+use core::fmt;
+use core::marker::PhantomData;
 
 use tutti_ump::first_non_seven_bit;
 
@@ -85,7 +86,7 @@ impl Iterator for MmcSegments<'_> {
         let (now, rest) = self.rest.split_at(self.rest.len().min(MMC_SEGMENT_BYTES));
         self.rest = rest;
         self.left -= 1;
-        let place = if std::mem::take(&mut self.first) {
+        let place = if core::mem::take(&mut self.first) {
             MmcSegmentPlace::First
         } else {
             MmcSegmentPlace::Later

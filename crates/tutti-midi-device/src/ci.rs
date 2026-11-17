@@ -117,11 +117,12 @@ pub use process::{
 pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, ReportRequest};
 pub use profile::{
     ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
-    NotProfileChannels, ProfileChannels, ProfileDataError, ProfileId, ProfileLists, ProfileState,
-    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
-    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
-    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
-    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
+    NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId,
+    ProfileLists, ProfileOnRequest, ProfileState, SUB_ID2_PROFILE_ADDED,
+    SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED,
+    SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED,
+    SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF,
+    SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, Nak};
@@ -338,16 +339,47 @@ impl CiHeader {
     /// Append the preamble bytes to `out`, stamping the given `sub_id2` and
     /// `destination`.
     fn encode(&self, sub_id2: u8, destination: Destination, out: &mut impl Extend<u8>) {
-        out.extend([
-            CI_UNIVERSAL_SYSEX,
-            self.device_id.get(),
-            CI_SUB_ID_1,
+        encode_preamble(
+            self.device_id,
             sub_id2,
-            self.ci_version.get(),
-        ]);
-        out.extend(self.source.to_bytes());
-        out.extend(destination.to_bytes());
+            self.ci_version,
+            self.source.to_bytes(),
+            destination,
+            out,
+        );
     }
+}
+
+/// `payload` as SysEx7 packets on `group`. Every byte a CI message encodes is
+/// 7-bit: the fields are `U7`, the MUIDs and sizes are cut to 7-bit bytes and a
+/// text is ASCII.
+fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> std::vec::IntoIter<Ump> {
+    Sysex7Packets::from_payload(group, payload)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+/// Appends the preamble (§5.2.1): `7E device_id 0D sub_id2 version`, the Source
+/// MUID's four bytes and the Destination MUID.
+fn encode_preamble(
+    device_id: CiDeviceId,
+    sub_id2: u8,
+    version: CiVersion,
+    source: [u8; 4],
+    destination: Destination,
+    out: &mut impl Extend<u8>,
+) {
+    out.extend([
+        CI_UNIVERSAL_SYSEX,
+        device_id.get(),
+        CI_SUB_ID_1,
+        sub_id2,
+        version.get(),
+    ]);
+    out.extend(source);
+    out.extend(destination.to_bytes());
 }
 
 /// A decoded MIDI-CI message: its [`CiHeader`] plus a typed body. Non-exhaustive:
@@ -738,10 +770,7 @@ impl CiMessage {
             CiMessage::ProfileReply { profiles, .. } => profiles.encode_body(out),
             CiMessage::SetProfileOn {
                 profile, channels, ..
-            } => {
-                out.extend(profile.to_bytes());
-                out.extend(channels.to_le7());
-            }
+            } => profile::encode_with_count(*profile, *channels, out),
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
                 out.extend(profile.to_bytes());
@@ -752,10 +781,7 @@ impl CiMessage {
             }
             | CiMessage::ProfileDisabled {
                 profile, channels, ..
-            } => {
-                out.extend(profile.to_bytes());
-                out.extend(channels.to_le7());
-            }
+            } => profile::encode_with_count(*profile, *channels, out),
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
             }
@@ -793,14 +819,7 @@ impl CiMessage {
     /// for the payload; a MIDI 1.0 byte stream frames
     /// [`encode`](Self::encode)'s bytes with `tutti_ump::frame` instead.
     pub fn packets(&self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
-        let payload = self.encode();
-        // Every byte a CI message encodes is 7-bit: the fields are `U7`, the
-        // MUIDs and sizes are cut to 7-bit bytes and a text is ASCII.
-        Sysex7Packets::from_payload(group, &payload)
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .into_iter()
+        sysex7_packets(group, &self.encode())
     }
 
     /// Decodes a CI byte payload (as [`encode`](Self::encode) produces, or a

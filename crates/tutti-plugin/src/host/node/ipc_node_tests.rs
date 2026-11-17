@@ -55,9 +55,14 @@ fn wait_for_chunks(record: &Record, chunks: usize) -> Vec<Sent> {
     loop {
         let all = sent(record);
         let n = all.iter().filter(|s| matches!(s, Sent::Chunk(_))).count();
-        if n >= chunks || start.elapsed() > std::time::Duration::from_secs(5) {
+        if n >= chunks {
             return all;
         }
+        // A hang guard: the chunks arrive, however slowly.
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(60),
+            "the server was sent {n} of {chunks} chunks"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }

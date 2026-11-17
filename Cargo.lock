@@ -2843,6 +2843,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-tempo",
  "tutti-types",
@@ -2892,6 +2893,7 @@ dependencies = [
 name = "tutti-midi-protocol"
 version = "0.0.1"
 dependencies = [
+ "libm",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -3264,6 +3266,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
  "tutti-buffers",
  "tutti-clap-test-plugin",
  "tutti-codec",

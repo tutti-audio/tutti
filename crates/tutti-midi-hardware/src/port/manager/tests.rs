@@ -2,6 +2,7 @@ use super::*;
 use crate::Delivered;
 use crate::testing::{RATE, Rig, ports};
 use std::time::{Duration, Instant};
+use tutti_graph::Losses;
 
 use tutti_fixtures::midi;
 use tutti_midi_runtime::{InputInlets, InputWriters};
@@ -134,9 +135,9 @@ fn an_arrival_past_its_block_is_emitted_late_and_counted() {
     );
     assert_eq!(
         (
-            readers.inlet.late(),
-            readers.lost.get(),
-            readers.inlet.evicted()
+            readers.inlet.get().late,
+            readers.lost.get().lost,
+            readers.inlet.get().evicted
         ),
         (1, 0, 0),
         "late, not lost"
@@ -291,9 +292,13 @@ fn a_full_inlet_counts_what_it_drops() {
         })
         .count();
     assert_eq!(taken, 4);
-    assert_eq!(readers.lost.get(), 6);
+    assert_eq!(readers.lost.get(), Losses::lost(6));
     assert!(manager.remove_input_port(id));
-    assert_eq!(readers.lost.get(), 6, "a removed port's drops stay");
+    assert_eq!(
+        readers.lost.get(),
+        Losses::lost(6),
+        "a removed port's drops stay"
+    );
 }
 
 /// **The stream drain is lazy**: it takes a message per step, so a caller that

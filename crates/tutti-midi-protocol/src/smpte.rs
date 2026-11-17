@@ -382,7 +382,7 @@ impl SmpteTimecode {
     #[must_use]
     pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Self {
         // `max` turns a negative and NaN into 0, and `as` saturates the rest.
-        let frames = frame_rate.frames_at(seconds).round().max(0.0);
+        let frames = libm::round(frame_rate.frames_at(seconds)).max(0.0);
         Self::from_frame_count(frames as u64, frame_rate)
     }
 

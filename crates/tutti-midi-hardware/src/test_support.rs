@@ -564,3 +564,20 @@ impl MidiEndpoints for FakeBackend {
         }))
     }
 }
+
+/// A peer of Property Exchange as the session lists it, for a test that holds no
+/// session of its own.
+#[must_use]
+pub fn property_peer(
+    device: tutti_midi_device::DeviceId,
+    group: tutti_ump::MidiGroup,
+    muid: tutti_midi_device::Muid,
+    resources: tutti_midi_device::PeResourceList,
+) -> crate::PropertyPeer {
+    crate::PropertyPeer {
+        device,
+        group,
+        muid,
+        resources: Arc::new(resources),
+    }
+}

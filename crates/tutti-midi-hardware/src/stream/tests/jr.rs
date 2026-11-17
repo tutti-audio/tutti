@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::testing::{RATE, Rig};
+use tutti_graph::Losses;
+use tutti_types::Resyncs;
 use tutti_ump::Utility;
 
 /// Sender ticks of `ms` milliseconds on a clock of 31 250 ticks a second; the
@@ -352,7 +354,7 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
     let slot = wire.session.ports().list_input_ports()[0].id;
     let counts = |wire: &Wire| {
         let info = wire.session.ports().port_info(slot).unwrap();
-        (info.jr_late, info.jr_restarted, info.stream_lost)
+        (info.losses, info.jr_restarted)
     };
     let before = counts(&wire);
     let send = |ticks: u16, ms: u64| {
@@ -367,8 +369,11 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
     }
     assert_eq!(counts(&wire), before, "clocks in order count nothing");
     send(ticks(200), 205);
-    assert_eq!(counts(&wire), (before.0 + 1, before.1, before.2));
+    assert_eq!(counts(&wire), (before.0 + Losses::late(1), before.1));
     // The sender's clock jumps half a second ahead.
     send(ticks(300) + 15_625, 300);
-    assert_eq!(counts(&wire), (before.0 + 1, before.1 + 1, before.2));
+    assert_eq!(
+        counts(&wire),
+        (before.0 + Losses::late(1), Resyncs::new(before.1.get() + 1))
+    );
 }

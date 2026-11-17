@@ -21,6 +21,7 @@ mod fork;
 mod graph;
 mod instance;
 mod loader;
+mod off_main_wait;
 mod rebind;
 
 pub use client::{InProcClient, PluginNode};

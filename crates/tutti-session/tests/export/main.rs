@@ -17,6 +17,9 @@ mod export_cancel;
 // and where a fork is built and dropped.
 #[cfg(feature = "export")]
 mod export_fork;
+// What a bounce's nodes log on the audio thread, as `tracing` events.
+#[cfg(feature = "export")]
+mod rt_log;
 // A parallel export is bit-identical to the serial one.
 #[cfg(feature = "export")]
 mod export_parallel;

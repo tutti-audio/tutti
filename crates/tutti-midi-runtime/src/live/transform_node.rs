@@ -71,9 +71,9 @@ pub struct MpeTransformNode {
     /// The Groups that were sent the mode in force, one bit each.
     told: u16,
     /// Translated events a block had no room for.
-    dropped: CounterWriter<u64>,
+    dropped: CounterWriter<Losses>,
     /// The reading end of `dropped`, given to the controls.
-    dropped_reader: Counter<u64>,
+    dropped_reader: Counter<Losses>,
 }
 
 impl std::fmt::Debug for MpeTransformNode {
@@ -126,7 +126,7 @@ pub struct MpeTransformControls {
     /// What the node reads; the controls publish to it and read it back with
     /// `ArcLend::current`.
     request: Arc<ArcLend<MpeMode>>,
-    dropped: Counter<u64>,
+    dropped: Counter<Losses>,
 }
 
 impl MpeTransformControls {
@@ -151,7 +151,7 @@ impl MpeTransformControls {
     /// drops whole rather than cut partway.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.dropped.get())
+        self.dropped.get()
     }
 }
 
@@ -222,7 +222,7 @@ impl Node for MpeTransformNode {
         }
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
-            self.dropped.add(dropped);
+            self.dropped.add(Losses::refused(dropped));
             // The executor's too, so an export watching its count sees it.
             io.count_lost(dropped);
         }

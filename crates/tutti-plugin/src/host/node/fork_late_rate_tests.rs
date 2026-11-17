@@ -35,8 +35,8 @@ const LIVE: f32 = INPUT_DC + 1.0;
 /// still renders an offline fork, and the fork is healthy.**
 ///
 /// The fork is prepared at a rate whose `activate` takes 2.5 s; the bridge
-/// waits 400 ms and reports the rate refused; the render starts after that,
-/// with the refusal standing and the answer unread. Every block must be live
+/// waits 400 ms and reports the rate refused; `prepare` settles the rate change
+/// and reads the late answer before the render starts. Every block must be live
 /// and the fork must report no fault.
 #[test]
 fn a_late_rate_answer_does_not_silence_an_offline_fork() {
@@ -92,12 +92,6 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
             MaxBlock::of(Samples(BLOCK)),
         ))
         .expect("a one-plugin graph compiles");
-
-    // The bridge gives up on the rate change, then the render starts.
-    let started = std::time::Instant::now();
-    while started.elapsed() < RATE_TIMEOUT * 2 {
-        std::thread::sleep(Duration::from_millis(50));
-    }
 
     assert_eq!(
         bridge.rate_refusal(),

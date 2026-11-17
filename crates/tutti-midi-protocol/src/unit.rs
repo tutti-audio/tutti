@@ -42,14 +42,14 @@ pub fn bend_to_signed_f32(v: BendValue) -> f32 {
 /// clamps.
 #[inline]
 pub fn unit_f32_to_velocity(v: f32) -> NoteVelocity {
-    NoteVelocity::new((v.clamp(0.0, 1.0) as f64 * u16::MAX as f64).round() as u16)
+    NoteVelocity::new(libm::round(v.clamp(0.0, 1.0) as f64 * u16::MAX as f64) as u16)
 }
 
 /// `[0.0, 1.0]` → a MIDI 2.0 controller value. Inverse of
 /// [`value_to_unit_f32`]; clamps.
 #[inline]
 pub fn unit_f32_to_value(v: f32) -> ControlValue {
-    ControlValue::new((v.clamp(0.0, 1.0) as f64 * u32::MAX as f64).round() as u32)
+    ControlValue::new(libm::round(v.clamp(0.0, 1.0) as f64 * u32::MAX as f64) as u32)
 }
 
 /// `[-1.0, 1.0]` → a MIDI 2.0 pitch bend. Inverse of [`bend_to_signed_f32`];
@@ -57,5 +57,5 @@ pub fn unit_f32_to_value(v: f32) -> ControlValue {
 #[inline]
 pub fn signed_f32_to_bend(v: f32) -> BendValue {
     let centered = 0x8000_0000_u32 as f64 + v.clamp(-1.0, 1.0) as f64 * 0x8000_0000_u32 as f64;
-    BendValue::new(centered.round().clamp(0.0, u32::MAX as f64) as u32)
+    BendValue::new(libm::round(centered).clamp(0.0, u32::MAX as f64) as u32)
 }

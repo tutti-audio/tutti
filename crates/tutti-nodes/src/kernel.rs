@@ -12,7 +12,7 @@ use core::ops::Range;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
-    ParamNode, ParamSet, Prepare, Shape, Status,
+    ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
 use tutti_types::{Latency, MaxBlock, SampleRate, Samples, Tail};
 
@@ -390,12 +390,10 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// Whether the block's output holds a NaN or an infinity.
-    fn wrote_non_finite(&self, io: &mut Io<'_>) -> bool {
+    /// The first NaN or infinity in the block's output, as `(frame, channel)`.
+    fn first_non_finite_output(&self, io: &mut Io<'_>) -> Option<(usize, usize)> {
         let (_, mut outs) = io.split();
-        outs.bus(self.out)
-            .into_channels()
-            .any(|ch| !ch.iter().all(|s| s.is_finite()))
+        first_non_finite(outs.bus(self.out).into_channels())
     }
 
     fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
@@ -403,6 +401,36 @@ impl<K: Kernel> KernelNode<K> {
         if let Some(t) = &mut self.tuned {
             t.applied = Some(controls);
         }
+    }
+}
+
+/// The earliest NaN or infinity across `channels` as `(frame, channel)`, the lowest channel
+/// on a tie, in one pass: a channel is scanned only up to the best frame found so far.
+pub(crate) fn first_non_finite<T: AsRef<[f32]>>(
+    channels: impl Iterator<Item = T>,
+) -> Option<(usize, usize)> {
+    let mut first: Option<(usize, usize)> = None;
+    for (channel, ch) in channels.enumerate() {
+        let ch = ch.as_ref();
+        let end = first.map_or(ch.len(), |(frame, _)| frame.min(ch.len()));
+        if let Some(frame) = ch[..end].iter().position(|s| !s.is_finite()) {
+            first = Some((frame, channel));
+        }
+    }
+    first
+}
+
+/// Logs the reset that follows a non-finite output at `frame` of `channel`.
+pub(crate) fn log_non_finite(io: &Io<'_>, frame: usize, channel: usize) {
+    // `frame` is inside the block (both callers scan channels `io.frames()` long), so the
+    // offset exists; a frame outside it would log nothing rather than a wrong offset.
+    if let Some(at) = io.offset(frame) {
+        io.log(
+            RtLevel::Warn,
+            "non-finite output; the node's state resets",
+            at,
+            &[("channel", channel.into())],
+        );
     }
 }
 
@@ -432,6 +460,37 @@ pub(crate) fn slice_out<'a>(
         n += 1;
     }
     (planes, n)
+}
+
+/// Runs `f` over the main input and output buses of a stateless through node, each cut to
+/// the whole block: the views of `inputs` channels in and `outputs` out. A bus with no
+/// channels has nothing to render.
+pub(crate) fn through_planes(
+    io: &mut Io<'_>,
+    inputs: usize,
+    outputs: usize,
+    f: impl FnOnce(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
+) {
+    debug_assert_eq!(
+        inputs, outputs,
+        "a through node writes every channel it reads"
+    );
+    let frames = 0..io.frames();
+    let (ins, mut outs) = io.split();
+    let (input, _) = slice_in((0..inputs).map(|c| ins.get(c)), &frames);
+    let (mut output, _) = slice_out(outs.iter_mut().take(outputs), &frames);
+    let (n_in, n_out) = (inputs.min(MAX_PORTS), outputs.min(MAX_PORTS));
+    if let Ok(input) = Planes::new(&input[..n_in])
+        && let Ok(output) = PlanesMut::new(&mut output[..n_out])
+    {
+        f(input, output);
+        return;
+    }
+    // No view to render (a bus of no channels): every channel is silence, none is left as the
+    // arena had it.
+    for ch in &mut output[..n_out] {
+        ch.fill(0.0);
+    }
 }
 
 /// Where a block falls on the stream's grid: it has `size` frames, begins at stream frame
@@ -567,7 +626,8 @@ impl<K: Kernel> Node for KernelNode<K> {
                 ch[live..size].fill(0.0);
             }
             self.park();
-        } else if self.wrote_non_finite(&mut io) {
+        } else if let Some((frame, channel)) = self.first_non_finite_output(&mut io) {
+            log_non_finite(&io, frame, channel);
             self.clear();
         }
         Status::Modified
@@ -651,6 +711,30 @@ mod tests {
 
     use super::*;
     use crate::DelayNode;
+
+    /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
+    /// unequal length are each read to their own end.
+    #[test]
+    fn first_non_finite_is_the_earliest_frame_then_the_lowest_channel() {
+        let n = f32::NAN;
+        let clean: [&[f32]; 2] = [&[0.0; 4], &[1.0; 4]];
+        assert_eq!(first_non_finite(clean.into_iter()), None);
+        let later_channel_earlier_frame: [&[f32]; 3] = [
+            &[0.0, 0.0, 0.0, n],
+            &[0.0, n, 0.0, 0.0],
+            &[0.0, 0.0, n, 0.0],
+        ];
+        assert_eq!(
+            first_non_finite(later_channel_earlier_frame.into_iter()),
+            Some((1, 1))
+        );
+        let tie: [&[f32]; 3] = [&[0.0, 0.0, 0.0], &[0.0, 0.0, f32::INFINITY], &[0.0, 0.0, n]];
+        assert_eq!(first_non_finite(tie.into_iter()), Some((2, 1)));
+        let unequal: [&[f32]; 2] = [&[0.0, 0.0, 0.0, 0.0, 0.0, n], &[0.0, 0.0, n]];
+        assert_eq!(first_non_finite(unequal.into_iter()), Some((2, 1)));
+        let short_first: [&[f32]; 2] = [&[n], &[n, n, n]];
+        assert_eq!(first_non_finite(short_first.into_iter()), Some((0, 0)));
+    }
 
     /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
     /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and
