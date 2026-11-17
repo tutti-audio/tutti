@@ -14,13 +14,12 @@
 //! messages (no DCS), the DCTPQ, and any UMP messages that configure a
 //! receiver (Bank Select, Program Change, volume, System Exclusive), each
 //! behind its own DCS. It holds at most one Set Tempo and one Set Time
-//! Signature (sections 6.1 to 6.1.2), both at delta 0. The leading Set Profile
-//! On messages are typed ([`ProfileOn`], section 6.2) and refused when they do
-//! not read. The DCS before Start
-//! of Clip is the header's last gap, and with the others sets the total
-//! time allocated to the Clip Configuration Header (section 6.1): it
-//! is kept ([`ParsedClip::header_end`]). The rest, from Start of Clip to End of
-//! Clip, is the Sequence Data (section 7). No Property Exchange message is in
+//! Signature (sections 6.1 to 6.1.2), both at delta 0. A leading Set Profile
+//! On is a `ProfileOnRequest` (section 6.2), and one that does not read is
+//! refused. The DCS before Start of Clip is the header's last gap, and with
+//! the others sets the total time allocated to the Clip Configuration Header
+//! (section 6.1): it is kept ([`ParsedClip::header_end`]). The rest, from Start
+//! of Clip to End of Clip, is the Sequence Data (section 7). No Property Exchange message is in
 //! either (sections 6.4 and 7.2).
 //!
 //! Start of Clip is tick 0 of the sequence, and music begins there: the first
@@ -46,6 +45,7 @@
 use std::vec::Vec;
 
 use crate::Truncated;
+use tutti_midi_device::NotSetProfileOn;
 use tutti_ump::{
     DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
     Utility,
@@ -54,8 +54,7 @@ use tutti_ump::{
 mod profile;
 mod read;
 
-pub(crate) use profile::read_all as read_profiles;
-pub use profile::{ProfileOn, ProfileOnError};
+pub(crate) use profile::{profile_packets, profiles};
 pub(crate) use read::{check_header, leading_profile_len, parse};
 
 /// The 8-byte file header: ASCII "SMF2CLIP" (M2-116 section 5).
@@ -136,11 +135,10 @@ pub enum ClipFileError {
     /// a Set Profile On has none.
     #[error("clip file's Set Profile On has a Delta Clockstamp before it")]
     ProfileOnDelta,
-    /// A Set Profile On message of the header that is not one: MIDI-CI Set
-    /// Profile On (M2-101 section 7.8) is what section 6.2 puts there, and
-    /// [`Track::profiles`](crate::Track::profiles) reads it.
+    /// A Set Profile On message of the header that is not one: the MIDI-CI
+    /// message of M2-101 section 7.8 is what section 6.2 puts there.
     #[error("clip header's Set Profile On is malformed")]
-    ProfileOn(#[source] ProfileOnError),
+    ProfileOn(#[source] NotSetProfileOn),
     /// A MIDI-CI Property Exchange message (Universal System Exclusive `7E`,
     /// sub-ID#1 `0D`, sub-ID#2 `30` to `3F`). Section 6.4: Property Data for PE
     /// Resources is not included in a Clip File; section 7.2: the

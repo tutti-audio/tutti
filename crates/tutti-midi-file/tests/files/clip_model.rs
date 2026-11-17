@@ -5,10 +5,10 @@
 use crate::common::{track, unsorted};
 
 use tutti_fixtures::midi;
-use tutti_midi_device::{CiDeviceId, ProfileChannels, ProfileId};
+use tutti_midi_device::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest};
 use tutti_midi_file::{
-    ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, ProfileOn, ProfileOnError,
-    SmfDivision, SmfFormat, Tick, Track, Truncated,
+    ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfDivision, SmfFormat, Tick,
+    Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -460,17 +460,22 @@ fn sysex7(status: tutti_ump::SysexStatus, data: &[u8]) -> Ump {
     .into()
 }
 
-/// A Set Profile On (M2-101 section 7.8) of Profile `id`: Universal SysEx
-/// `7E <device> 0D 22 <version 2> <source> <destination> <Profile Id> <channels>`
-/// with both MUIDs Broadcast (M2-116 section 6.2), as the packets it is cut into.
-fn set_profile_on_of(id: [u8; 5]) -> Vec<Ump> {
-    let mut payload = vec![0x7E, 0x7E, 0x0D, 0x22, 0x02];
+/// A Set Profile On (M2-101 section 7.8) as the packets it is cut into: Universal
+/// SysEx `7E <device> 0D 22 <version> <source> <destination> <Profile Id>
+/// <channels>`, both MUIDs Broadcast (M2-116 section 6.2). The channels bytes
+/// are left out of a Version 1 message.
+fn profile_payload(device: u8, version: u8, profile: [u8; 5], channels: &[u8]) -> Vec<Ump> {
+    let mut payload = vec![0x7E, device, 0x0D, 0x22, version];
     payload.extend([0x7F; 8]);
-    payload.extend(id);
-    payload.extend([0, 0]);
+    payload.extend(profile);
+    payload.extend(channels);
     tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
         .unwrap()
         .collect()
+}
+
+fn set_profile_on_of(id: [u8; 5]) -> Vec<Ump> {
+    profile_payload(0x7E, 2, id, &[0, 0])
 }
 
 /// The General MIDI 2 Function Block Profile (M2-118 section 3.4).
@@ -1277,52 +1282,29 @@ fn read_with_leading(leading: &[Ump]) -> Result<MidiFile, Error> {
     MidiFile::from_bytes(&clip(&parts))
 }
 
-/// A Set Profile On's payload with the fields M2-101 section 7.8 gives it: the
-/// Device ID, the Message Format Version, both MUIDs Broadcast, the Profile Id
-/// and the Number of Channels Requested (version 2 on).
-fn profile_payload(device: u8, version: u8, profile: [u8; 5], channels: &[u8]) -> Vec<Ump> {
-    let mut payload = vec![0x7E, device, 0x0D, 0x22, version];
-    payload.extend([0x7F; 8]);
-    payload.extend(profile);
-    payload.extend(channels);
-    tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
-        .unwrap()
-        .collect()
-}
-
 /// Section 6.2: the header's Set Profile On names the Profile the sequence
-/// data is meant for; a file read gives it typed, with the Device ID it is
-/// addressed to and the Channels it asks for, and a Message Format Version 1
-/// message, which has no Number of Channels field, asks for 0.
+/// data is meant for; a file read gives it typed, in order, with the address it
+/// is for.
 /// Spec: m2-116/6.2#2
 #[test]
 fn the_headers_profile_is_read_typed() {
     let file = read_with_leading(&then(&[
         &set_profile_on(),
-        // Channel 3, 15 Channels requested: 0x0F, 0x00 least significant first.
         &profile_payload(0x02, 2, MPE, &[0x0F, 0x00]),
         &profile_payload(0x7F, 1, GM2, &[]),
     ]))
     .unwrap();
     assert_eq!(
         file.tracks()[0].profiles(),
-        [
-            ProfileOn::new(
-                CiDeviceId::Group,
-                ProfileId::GM2_FUNCTION_BLOCK,
-                ProfileChannels::of(0)
-            ),
-            ProfileOn::new(
-                CiDeviceId::new(2).unwrap(),
-                ProfileId::MPE,
-                ProfileChannels::of(15)
-            ),
-            ProfileOn::new(
-                CiDeviceId::FunctionBlock,
-                ProfileId::GM2_FUNCTION_BLOCK,
-                ProfileChannels::of(0)
-            ),
-        ]
+        Ok(vec![
+            ProfileOnRequest::Group(ProfileId::GM2_FUNCTION_BLOCK),
+            ProfileOnRequest::Channel {
+                channel: MidiChannel::of(2),
+                profile: ProfileId::MPE,
+                channels: ProfileChannels::of(15),
+            },
+            ProfileOnRequest::FunctionBlock(ProfileId::GM2_FUNCTION_BLOCK),
+        ])
     );
     // The write keeps them.
     let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
@@ -1334,59 +1316,38 @@ fn the_headers_profile_is_read_typed() {
 #[test]
 fn a_header_without_a_set_profile_on_has_no_profile() {
     let file = read_with_leading(&[]).unwrap();
-    assert!(file.tracks()[0].profiles().is_empty());
+    assert_eq!(file.tracks()[0].profiles(), Ok(vec![]));
 }
 
-/// A Set Profile On that is not one is refused when the file is read, naming
-/// what is wrong: too few bytes for its version, a version of 0, a reserved
-/// Device ID (`10` to `7D`), a Profile Id that is not one (a one-byte
-/// manufacturer id followed by a non-zero byte, M2-101 section 7.3.1).
+/// A Set Profile On that is not one is refused when the file is read, and the
+/// refusal is the codec's own error: here a Group address asking for Channels.
 /// Spec: m2-116/6.2#2
 #[test]
 fn a_malformed_set_profile_on_is_refused_by_its_fault() {
-    let refused = |leading: &[Ump]| match read_with_leading(leading) {
-        Err(Error::Clip(ClipFileError::ProfileOn(why))) => why,
-        other => panic!("expected a Set Profile On error, got {other:?}"),
-    };
-    let short = sysex7(
-        tutti_ump::SysexStatus::Complete,
-        &[0x7E, 0x7F, 0x0D, 0x22, 2, 0],
-    );
-    assert_eq!(refused(&[short]), ProfileOnError::Short { len: 6 });
-    // Version 2 holds the two bytes of the Number of Channels Requested.
-    assert_eq!(
-        refused(&profile_payload(0x7F, 2, MPE, &[0])),
-        ProfileOnError::Short { len: 19 }
-    );
-    assert_eq!(
-        refused(&profile_payload(0x7F, 0, MPE, &[0, 0])),
-        ProfileOnError::Version(0)
-    );
-    assert_eq!(
-        refused(&profile_payload(0x20, 2, MPE, &[0, 0])),
-        ProfileOnError::DeviceId(0x20)
-    );
-    assert_eq!(
-        refused(&profile_payload(0x7F, 2, [0x40, 1, 0, 0, 0], &[0, 0])),
-        ProfileOnError::Profile
-    );
+    let bad = profile_payload(0x7E, 2, MPE, &[3, 0]);
+    assert!(matches!(
+        read_with_leading(&bad),
+        Err(Error::Clip(ClipFileError::ProfileOn(
+            NotSetProfileOn::ChannelsForBlock(3)
+        )))
+    ));
 }
 
 /// Section 6.2: data meant for a Profile is tagged with a Set Profile On, with
-/// that Profile Id, at the beginning of the header, both MUIDs Broadcast, and
-/// section 6 puts it before the DCTPQ with no Delta Clockstamp. The bytes are
-/// the Table of M2-101 section 7.8: `7E 7E 0D 22 02`, two Broadcast MUIDs
-/// (`7F` four times each), the five Profile Id bytes and the two channel bytes.
-/// Spec: m2-116/6.2#3, m2-116/6.2#2, m2-116/6#3
+/// that Profile Id, at the beginning of the header, and section 6 puts it before
+/// the DCTPQ with no Delta Clockstamp. The message is the Table 24 layout, which
+/// the codec's tests pin; here it is the packets, before everything else in the
+/// header.
+/// Spec: m2-116/6.2#3, m2-116/6#3
 #[test]
 fn a_profile_is_written_at_the_start_of_the_header() {
-    let on = ProfileOn::new(CiDeviceId::Group, ProfileId::MPE, ProfileChannels::of(0));
+    let on = ProfileOnRequest::Group(ProfileId::MPE);
     let mut track = Track::new();
     track
         .header
         .push((Tick(0), packet(program_change().decode().unwrap())));
     let track = track.profile_on(on);
-    assert_eq!(track.profiles(), [on]);
+    assert_eq!(track.profiles(), Ok(vec![on]));
     assert_eq!(track.header.len(), set_profile_on_of(MPE).len() + 1);
     let file = MidiFile::clip(DIVISION, track).unwrap();
     let bytes = file.to_bytes().unwrap();
@@ -1397,13 +1358,9 @@ fn a_profile_is_written_at_the_start_of_the_header() {
     assert!(bytes.starts_with(&want));
     assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
     // A second Profile goes after the first and before the other messages.
-    let second = ProfileOn::new(
-        CiDeviceId::FunctionBlock,
-        ProfileId::GM2_FUNCTION_BLOCK,
-        ProfileChannels::of(0),
-    );
+    let second = ProfileOnRequest::FunctionBlock(ProfileId::GM2_FUNCTION_BLOCK);
     let both = file.tracks()[0].clone().profile_on(second);
-    assert_eq!(both.profiles(), [on, second]);
+    assert_eq!(both.profiles(), Ok(vec![on, second]));
     assert_eq!(
         both.header.last().unwrap().1,
         packet(program_change().decode().unwrap())
@@ -1411,26 +1368,23 @@ fn a_profile_is_written_at_the_start_of_the_header() {
 }
 
 /// A header Set Profile On that does not read is refused when a clip is built,
-/// as it is when one is read.
+/// as it is when one is read, and `Track::profiles` of such a track names it.
 /// Spec: m2-116/6.2#2
 #[test]
 fn a_clip_with_a_malformed_profile_is_not_built() {
-    let short = Ump::from(
-        sysex7(
-            tutti_ump::SysexStatus::Complete,
-            &[0x7E, 0x7F, 0x0D, 0x22, 2, 0],
-        )
-        .decode()
-        .unwrap(),
+    let short = sysex7(
+        tutti_ump::SysexStatus::Complete,
+        &[0x7E, 0x7F, 0x0D, 0x22, 2, 0],
     );
     let mut track = Track::new();
     track
         .header
         .push((Tick(0), packet(short.decode().unwrap())));
+    assert_eq!(track.profiles(), Err(NotSetProfileOn::NotThatMessage));
     assert!(matches!(
         MidiFile::clip(DIVISION, track),
         Err(Error::Clip(ClipFileError::ProfileOn(
-            ProfileOnError::Short { len: 6 }
+            NotSetProfileOn::NotThatMessage
         )))
     ));
 }
@@ -1499,4 +1453,28 @@ fn a_signature_with_no_tempo_before_it_uses_the_delta_clockstamp_before_start_of
         packets[..6],
         [dcs(5), start(), dcs(0), on(60, 1), dcs(0), set_tempo(100.0)]
     );
+}
+
+/// A file whose first Set Tempo has a Delta Clockstamp of 0 of its own, where
+/// this crate used to write one, still reads: the tempo is at tick 0, and the
+/// header gap is the one before Start of Clip.
+/// Spec: m2-116/7.1.1#2
+#[test]
+fn a_set_tempo_with_its_own_zero_delta_clockstamp_reads_at_tick_zero() {
+    let parts = [
+        dcs(0),
+        dctpq(TPQ),
+        dcs(5),
+        start(),
+        dcs(0),
+        set_tempo(100.0),
+        dcs(0),
+        on(60, 1),
+        dcs(0),
+        end(),
+    ];
+    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let ticks: Vec<_> = file.tracks()[0].events.iter().map(|e| e.0).collect();
+    assert_eq!(ticks, [Tick(0), Tick(0)]);
+    assert_eq!(file.tracks()[0].header_end, Tick(5));
 }

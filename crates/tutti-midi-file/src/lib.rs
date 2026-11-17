@@ -33,7 +33,7 @@
 //!   on a clock of their own and not on the sequence's timeline; each ordering
 //!   rule of sections 3.2 to 7.3 is one [`ClipFileError`] variant. A header Set
 //!   Tempo is the tempo from the sequence's first tick. The header's leading Set
-//!   Profile On messages are read typed ([`Track::profiles`], [`ProfileOn`]) and
+//!   Profile On messages are read typed ([`Track::profiles`], a `ProfileOnRequest` of `tutti-midi-device`) and
 //!   written with [`Track::profile_on`]; one that does not read is refused with
 //!   [`ClipFileError::ProfileOn`].
 //! - **A clip's first bar starts at Start of Clip**, tick 0 of the sequence. A
@@ -117,7 +117,7 @@ mod kind;
 mod smf;
 mod write;
 
-pub use clip_file::{ClipFileError, ProfileOn, ProfileOnError};
+pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{

@@ -1262,7 +1262,6 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of
 /// the clip, and a signature a quarter in is off its bar line: it moves to the
 /// nearest one, the clip's start, and is listed.
-/// Spec: m2-116/7.1.3#1
 #[test]
 fn a_signature_that_does_not_declare_the_pickup_is_off_the_bar_line() {
     let smf = format0(vec![(480, signature_meta(3, 2)), (480, note(0, 60))]);

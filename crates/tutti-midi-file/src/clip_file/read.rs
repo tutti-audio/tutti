@@ -545,8 +545,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ParsedClip, ClipFileError> {
 /// The [`ClipFileError`] naming the rule broken.
 pub(crate) fn check_header(header: &[(u64, Ump)]) -> Result<(), ClipFileError> {
     let leading = leading_profile_len(header);
-    let profiles: Vec<Ump> = header[..leading].iter().map(|&(_, ump)| ump).collect();
-    for message in super::read_profiles(&profiles) {
+    for message in super::profiles(header[..leading].iter().map(|&(_, ump)| ump)) {
         message.map_err(ClipFileError::ProfileOn)?;
     }
     let mut at = 0;
