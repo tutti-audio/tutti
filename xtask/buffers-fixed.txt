@@ -92,7 +92,6 @@ crates/tutti-plugin-types/src/contract.rs::round_trip  pending
 crates/tutti-plugin-types/src/contract.rs::steps  pending
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_cents  pending
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  pending
-crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::process  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::tick  pending
 crates/tutti-sampler/src/testing.rs::block  pending

@@ -107,11 +107,14 @@ fn request_word_and_ring_are_allocation_free() {
 /// writer's `push` is the disk thread's and stays outside the claim.
 #[test]
 fn pos_ring_reader_is_allocation_free() {
+    use tutti_buffers::Interleaved;
     use tutti_rt::PosRing;
+    use tutti_types::{ChannelLayout, Samples};
 
-    let (mut writer, mut reader) = PosRing::new(64, 2, 8);
+    let (mut writer, mut reader) = PosRing::<f32>::new(64, ChannelLayout::STEREO, 8);
     let data: Vec<f32> = (0..2 * 32).map(|i| i as f32).collect();
-    assert_eq!(writer.push(&data), 32);
+    let frames = Interleaved::new(&data, ChannelLayout::STEREO).unwrap();
+    assert_eq!(writer.push(frames), Ok(Samples(32)));
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u64 {
             let play = round % 8;

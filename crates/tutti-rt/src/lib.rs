@@ -6,7 +6,7 @@
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
 //! engine's lock-free and `unsafe` runtime structures. It names two tutti
 //! crates, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range)
-//! and `tutti-buffers` (the `Sample` formats);
+//! and `tutti-buffers` (the `Sample` formats [`PosRing`] is generic over);
 //! its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
 //! under `--cfg loom`).
 //!
@@ -211,7 +211,7 @@ pub use main_thread::MainThreadMarker;
 pub use packed_atomic::PackedAtomic;
 pub use pos_ring::{
     MAX_POS_RING_FRAMES, MAX_POS_RING_POSITION, PosClaim, PosFrame, PosReader, PosRing, PosWriter,
-    RingWindow,
+    RingSample, RingWindow,
 };
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;

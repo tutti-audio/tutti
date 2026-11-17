@@ -48,6 +48,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tutti_buffers::Interleaved;
 use tutti_codec::Wave;
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
@@ -399,7 +400,11 @@ impl RegionOut {
     /// be written, or where the ring is full ahead of the reader
     /// (`PosRing::push`). A trailing partial frame is ignored.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
-        Samples(self.writer.push(samples))
+        let layout = self.writer.layout();
+        let whole = Samples::from_interleaved_len(samples.len(), layout).interleaved_len(layout);
+        let frames = Interleaved::new(&samples[..whole], layout)
+            .expect("a whole number of frames of the ring's width");
+        self.writer.push(frames).expect("the ring's width")
     }
 }
 
@@ -447,13 +452,12 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut, SharedReader, PosReader) {
         let channels = nonempty(topology.width());
-        let stride = channels.count() as usize;
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),
             None => (Mapping::unbounded(), Arrangement::unbounded()),
         };
-        let (writer, reader) = PosRing::new(frames, stride, HISTORY_FRAMES);
+        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES);
         let ring = Arc::new(Ring {
             region_id,
             file_path,

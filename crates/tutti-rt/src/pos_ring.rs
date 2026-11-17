@@ -28,7 +28,7 @@
 //!
 //! # Why a write never tears a read
 //!
-//! Every sample is an `AtomicU32`, so a slip in the protocol below is a wrong
+//! Every sample is an atomic word of its format's width ([`RingSample`]), so a slip in the protocol below is a wrong
 //! sample, never undefined behaviour; the protocol is what makes it never a
 //! wrong sample. The reader, per block ([`PosReader::claim`]):
 //!
@@ -78,9 +78,12 @@
 //! `tests/pos_ring_loom.rs` checks this code under loom (its atomics become
 //! loom's under `--cfg loom`), with models that fail without each part.
 
+use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 
-use sync::{Arc, AtomicU32, AtomicU64, fence};
+use sync::{Arc, AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence};
+use tutti_buffers::{BufferError, I24, Interleaved, Sample};
+use tutti_types::{ChannelLayout, Samples};
 
 /// The atomics: `std`'s in a real build, `loom`'s under `--cfg loom`, so the
 /// model in `tests/pos_ring_loom.rs` checks this code rather than a replica.
@@ -88,14 +91,71 @@ mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::{
         Arc,
-        atomic::{AtomicU32, AtomicU64, fence},
+        atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence},
     };
     #[cfg(not(loom))]
     pub(super) use std::sync::{
         Arc,
-        atomic::{AtomicU32, AtomicU64, fence},
+        atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence},
     };
 }
+
+mod sealed {
+    /// Keeps [`RingSample`](super::RingSample) to the formats this crate maps
+    /// to an atomic word.
+    pub trait Sealed {}
+}
+
+/// A [`Sample`] format a [`PosRing`] can hold: one with an atomic word of its
+/// width, so a slot is a run of atomics and a slip in the protocol is a wrong
+/// sample, never undefined behaviour.
+///
+/// Implemented for every [`Sample`] format (`i8`, `i16`, [`I24`], `i32`,
+/// `f32`, `f64`) and sealed.
+pub trait RingSample: Sample + sealed::Sealed {
+    /// The atomic word one sample occupies.
+    type Atom: Debug + Send + Sync;
+
+    /// A word holding `v`.
+    fn atom(v: Self) -> Self::Atom;
+
+    /// The sample the word holds, a `Relaxed` load.
+    fn load(word: &Self::Atom) -> Self;
+
+    /// Stores `v` in the word, a `Relaxed` store.
+    fn store(word: &Self::Atom, v: Self);
+}
+
+macro_rules! ring_sample {
+    ($t:ty, $atom:ident, $to:expr, $from:expr) => {
+        impl sealed::Sealed for $t {}
+
+        impl RingSample for $t {
+            type Atom = $atom;
+            #[inline]
+            fn atom(v: Self) -> $atom {
+                $atom::new($to(v))
+            }
+            #[inline]
+            fn load(word: &$atom) -> Self {
+                $from(word.load(Ordering::Relaxed))
+            }
+            #[inline]
+            fn store(word: &$atom, v: Self) {
+                word.store($to(v), Ordering::Relaxed);
+            }
+        }
+    };
+}
+
+ring_sample!(i8, AtomicU8, |v: i8| v as u8, |r: u8| r as i8);
+ring_sample!(i16, AtomicU16, |v: i16| v as u16, |r: u16| r as i16);
+ring_sample!(i32, AtomicU32, |v: i32| v as u32, |r: u32| r as i32);
+ring_sample!(I24, AtomicU32, |v: I24| v.get() as u32, |r: u32| {
+    I24::new(r as i32).unwrap_or(I24::ZERO)
+});
+ring_sample!(f32, AtomicU32, f32::to_bits, f32::from_bits);
+ring_sample!(f64, AtomicU64, f64::to_bits, f64::from_bits);
 
 /// Bits of the packed window word that hold its length; the rest its end.
 const LEN_BITS: u32 = 24;
@@ -179,20 +239,26 @@ impl RingWindow {
 /// # Examples
 ///
 /// ```
+/// use tutti_buffers::Interleaved;
 /// use tutti_rt::PosRing;
+/// use tutti_types::{ChannelLayout, Samples};
 ///
 /// // 8 stereo frames, nothing kept behind the play position.
-/// let (mut writer, mut reader) = PosRing::new(8, 2, 0);
+/// let (mut writer, mut reader) = PosRing::<f32>::new(8, ChannelLayout::STEREO, 0);
 ///
 /// // Streaming thread: frames for positions 0..3.
-/// assert_eq!(writer.push(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), 3);
+/// let data = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+/// let frames = Interleaved::new(&data, ChannelLayout::STEREO)?;
+/// assert_eq!(writer.push(frames)?, Samples(3));
 ///
 /// // Audio thread, once per block: play from 0, may read [0, 3).
 /// let claim = reader.claim(0, [(0, 3), (0, 0)]);
 /// assert!(claim.holds(2));
 /// assert_eq!(claim.sample(1, 1), 0.4);
+/// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
-pub struct PosRing {
+pub struct PosRing<S: RingSample = f32> {
+    layout: ChannelLayout,
     stride: usize,
     frames: usize,
     /// `ceil(2^64 / frames)` (wrapping to 0 for one frame): [`slot`](Self::slot)'s
@@ -200,8 +266,8 @@ pub struct PosRing {
     recip: u64,
     /// Positions the writer keeps behind where the reader plays.
     keep_behind: u64,
-    /// `frames * stride` samples, as `f32` bits.
-    slots: Box<[AtomicU32]>,
+    /// `frames * stride` samples, each an atomic word of its format's width.
+    slots: Box<[S::Atom]>,
     /// The packed [`RingWindow`].
     window: AtomicU64,
     /// Where the reader plays (the reader's claims, or the writer before one).
@@ -214,7 +280,7 @@ pub struct PosRing {
     claimed: AtomicU64,
 }
 
-impl std::fmt::Debug for PosRing {
+impl<S: RingSample> std::fmt::Debug for PosRing<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PosRing")
             .field("frames", &self.frames)
@@ -224,25 +290,32 @@ impl std::fmt::Debug for PosRing {
     }
 }
 
-impl PosRing {
+impl<S: RingSample> PosRing<S> {
     /// Creates an empty ring and returns its one writer and its one reader.
     ///
     /// `frames` is the slot count, clamped to `1..=`[`MAX_POS_RING_FRAMES`];
-    /// `stride` the samples per frame, at least one. The writer never reuses
+    /// `layout` the width of a frame, at least one channel (the empty layout
+    /// makes a mono ring). The writer never reuses
     /// the slot of a position less than `keep_behind` behind where the reader
     /// plays (for a reader that taps positions behind the one it plays).
     /// Allocates the slots, so call it off the audio thread.
     #[allow(clippy::new_ret_no_self)] // the ring is its two ends
     #[must_use]
-    pub fn new(frames: usize, stride: usize, keep_behind: u64) -> (PosWriter, PosReader) {
+    pub fn new(
+        frames: usize,
+        layout: ChannelLayout,
+        keep_behind: u64,
+    ) -> (PosWriter<S>, PosReader<S>) {
         let frames = frames.clamp(1, MAX_POS_RING_FRAMES);
-        let stride = stride.max(1);
+        let layout = ChannelLayout::from_count(layout.count().max(1));
+        let stride = usize::from(layout.count());
         let ring = Arc::new(Self {
+            layout,
             stride,
             frames,
             recip: recip(frames as u64),
             keep_behind,
-            slots: (0..frames * stride).map(|_| AtomicU32::new(0)).collect(),
+            slots: (0..frames * stride).map(|_| S::atom(S::SILENCE)).collect(),
             window: AtomicU64::new(0),
             play: AtomicU64::new(0),
             reads: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -259,6 +332,11 @@ impl PosRing {
     /// Returns the slot count, in frames.
     pub fn frames(&self) -> usize {
         self.frames
+    }
+
+    /// Returns the width of a frame.
+    pub fn layout(&self) -> ChannelLayout {
+        self.layout
     }
 
     /// Returns the samples per frame.
@@ -315,15 +393,15 @@ impl PosRing {
 ///
 /// Not `Clone`. None of its methods is meant for the audio thread: `push`
 /// runs a `SeqCst` fence and a loop over the frames it writes.
-pub struct PosWriter {
-    ring: Arc<PosRing>,
+pub struct PosWriter<S: RingSample = f32> {
+    ring: Arc<PosRing<S>>,
     /// The span of positions shrinks have removed since the reader last
     /// echoed the generation, `[lo, hi)`: what a block that took an older
     /// window may still hold. Writer-local.
     stale: (u64, u64),
 }
 
-impl std::fmt::Debug for PosWriter {
+impl<S: RingSample> std::fmt::Debug for PosWriter<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PosWriter")
             .field("ring", &self.ring)
@@ -332,16 +410,21 @@ impl std::fmt::Debug for PosWriter {
     }
 }
 
-impl PosWriter {
+impl<S: RingSample> PosWriter<S> {
     /// Returns a read-only handle on the shared state, for glances (the window,
     /// the play position, the generation). It reads no sample.
-    pub fn watch(&self) -> Arc<PosRing> {
+    pub fn watch(&self) -> Arc<PosRing<S>> {
         Arc::clone(&self.ring)
     }
 
     /// Returns the slot count, in frames.
     pub fn frames(&self) -> usize {
         self.ring.frames
+    }
+
+    /// Returns the width of a frame.
+    pub fn layout(&self) -> ChannelLayout {
+        self.ring.layout
     }
 
     /// Returns the samples per frame.
@@ -446,17 +529,26 @@ impl PosWriter {
     }
 
     /// Appends interleaved frames at the window's end and returns how many
-    /// **frames** landed.
+    /// frames landed.
     ///
     /// The count is short where the next write would reuse a slot the reader's
     /// block in flight may read, or where the ring is full ahead of where the
-    /// reader plays; push the rest again later. A trailing partial frame is
-    /// ignored.
+    /// reader plays; push the rest again later.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::WidthMismatch`] if the view's width is not the ring's;
+    /// nothing is written.
     #[must_use = "the count is how many frames landed; push the rest again"]
-    pub fn push(&mut self, samples: &[f32]) -> usize {
+    pub fn push(&mut self, view: Interleaved<'_, S>) -> Result<Samples, BufferError> {
         let ring = &*self.ring;
-        let ch = ring.stride;
-        let n = (samples.len() / ch) as u64;
+        if view.layout() != ring.layout {
+            return Err(BufferError::WidthMismatch {
+                src: view.layout(),
+                dst: ring.layout,
+            });
+        }
+        let n = view.frames().get() as u64;
         let frames = ring.frames as u64;
         let RingWindow { from, to } = self.window();
         // Never reuse the slot of a position the reader still stands on.
@@ -500,16 +592,13 @@ impl PosWriter {
                 ring.window
                     .store(RingWindow { from, to }.pack(), Ordering::Release);
             }
-            return 0;
+            return Ok(Samples(0));
         }
-        for (i, frame) in samples
-            .chunks_exact(ch)
-            .take((end - to) as usize)
-            .enumerate()
-        {
-            let slot = ring.slot(to + i as u64);
-            for (c, &s) in frame.iter().enumerate() {
-                ring.slots[slot * ch + c].store(s.to_bits(), Ordering::Relaxed);
+        let landing = Samples((end - to) as usize);
+        for (i, frame) in view.slice(Samples(0)..landing).iter().enumerate() {
+            let at = Samples(ring.slot(to + i as u64)).interleaved_len(ring.layout);
+            for (word, &s) in ring.slots[at..at + frame.len()].iter().zip(frame) {
+                S::store(word, s);
             }
         }
         ring.window.store(
@@ -520,18 +609,18 @@ impl PosWriter {
             .pack(),
             Ordering::Release,
         );
-        (end - to) as usize
+        Ok(landing)
     }
 }
 
 /// The one reader of a [`PosRing`], owned by the audio thread.
 ///
 /// Not `Clone`. Its methods are wait-free and allocation-free.
-pub struct PosReader {
-    ring: Arc<PosRing>,
+pub struct PosReader<S: RingSample = f32> {
+    ring: Arc<PosRing<S>>,
 }
 
-impl std::fmt::Debug for PosReader {
+impl<S: RingSample> std::fmt::Debug for PosReader<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PosReader")
             .field("ring", &self.ring)
@@ -539,7 +628,7 @@ impl std::fmt::Debug for PosReader {
     }
 }
 
-impl PosReader {
+impl<S: RingSample> PosReader<S> {
     /// Returns the samples per frame.
     pub fn stride(&self) -> usize {
         self.ring.stride
@@ -553,7 +642,7 @@ impl PosReader {
     /// reader, so it ends before the next claim starts.
     #[inline]
     #[must_use = "the claim is the only way to read the ring"]
-    pub fn claim(&mut self, play: u64, reads: [(u64, u64); 2]) -> PosClaim<'_> {
+    pub fn claim(&mut self, play: u64, reads: [(u64, u64); 2]) -> PosClaim<'_, S> {
         let ring = &*self.ring;
         ring.play.store(play, Ordering::Relaxed);
         for (i, (a, e)) in reads.into_iter().enumerate() {
@@ -593,13 +682,13 @@ impl PosReader {
 ///
 /// Returned by [`PosReader::claim`].
 #[derive(Debug)]
-pub struct PosClaim<'a> {
-    ring: &'a PosRing,
+pub struct PosClaim<'a, S: RingSample = f32> {
+    ring: &'a PosRing<S>,
     window: RingWindow,
     reads: [(u64, u64); 2],
 }
 
-impl<'a> PosClaim<'a> {
+impl<'a, S: RingSample> PosClaim<'a, S> {
     /// Returns the window this block may read.
     #[inline]
     pub fn window(&self) -> RingWindow {
@@ -620,15 +709,14 @@ impl<'a> PosClaim<'a> {
     /// In debug builds, if `s` is outside the window or the claimed ranges.
     /// A release build reads whatever the slot holds.
     #[inline]
-    pub fn frame(&self, s: u64) -> PosFrame<'a> {
+    pub fn frame(&self, s: u64) -> PosFrame<'a, S> {
         debug_assert!(self.window.holds(s), "position {s} outside the window");
         debug_assert!(
             self.reads.iter().any(|&(a, e)| (a..e).contains(&s)),
             "position {s} outside the claimed ranges"
         );
-        let ch = self.ring.stride;
-        let slot = self.ring.slot(s);
-        PosFrame(&self.ring.slots[slot * ch..(slot + 1) * ch])
+        let at = Samples(self.ring.slot(s)).interleaved_len(self.ring.layout);
+        PosFrame(&self.ring.slots[at..at + self.ring.stride])
     }
 
     /// Returns channel `c` of position `s`.
@@ -638,16 +726,16 @@ impl<'a> PosClaim<'a> {
     /// In debug builds, as [`frame`](Self::frame) does, and if `c` is not
     /// below the stride.
     #[inline]
-    pub fn sample(&self, s: u64, c: usize) -> f32 {
+    pub fn sample(&self, s: u64, c: usize) -> S {
         self.frame(s).get(c)
     }
 }
 
 /// One claimed frame's samples, from [`PosClaim::frame`].
 #[derive(Clone, Copy, Debug)]
-pub struct PosFrame<'a>(&'a [AtomicU32]);
+pub struct PosFrame<'a, S: RingSample = f32>(&'a [S::Atom]);
 
-impl PosFrame<'_> {
+impl<S: RingSample> PosFrame<'_, S> {
     /// Returns channel `c`.
     ///
     /// # Panics
@@ -655,11 +743,9 @@ impl PosFrame<'_> {
     /// In debug builds, if `c` is not below the ring's stride. A release build
     /// returns 0 there.
     #[inline]
-    pub fn get(&self, c: usize) -> f32 {
+    pub fn get(&self, c: usize) -> S {
         debug_assert!(c < self.0.len(), "channel {c} past the stride");
-        self.0
-            .get(c)
-            .map_or(0.0, |s| f32::from_bits(s.load(Ordering::Relaxed)))
+        self.0.get(c).map_or(S::SILENCE, S::load)
     }
 }
 

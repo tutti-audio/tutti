@@ -16,6 +16,10 @@
 //!
 //! # What each model asserts
 //!
+//! Each model runs at `i16`, `f32` and `f64` (`models!` at the foot): the
+//! slot is a 16-, a 32- and a 64-bit atomic word, and the protocol must hold
+//! at each width.
+//!
 //! A ring of 4 slots, 2 channels. (The slot map, `s mod N` by a
 //! reciprocal multiply, is a pure function the protocol only needs both
 //! sides to share; `PosRing`'s unit test
@@ -49,27 +53,40 @@
 #![cfg(loom)]
 
 use loom::thread;
-use tutti_rt::{PosReader, PosRing, PosWriter};
+use tutti_buffers::Interleaved;
+use tutti_rt::{PosReader, PosRing, PosWriter, RingSample};
+use tutti_types::{ChannelLayout, Samples};
 
 const STRIDE: usize = 2;
+const LAYOUT: ChannelLayout = ChannelLayout::STEREO;
 
-fn tag(pos: u64, generation: u64, c: usize) -> f32 {
-    (pos * 100 + generation * 10 + c as u64) as f32
+/// The tag's number, in units of `1 / SCALE` of full scale so that every
+/// format, an integer one included, holds it exactly.
+const SCALE: f64 = 1024.0;
+
+fn tag<S: RingSample>(pos: u64, generation: u64, c: usize) -> S {
+    S::from_f64((pos * 100 + generation * 10 + c as u64) as f64 / SCALE)
 }
 
 /// `n` frames from position `from`, written under `generation`.
-fn frames(from: u64, n: u64, generation: u64) -> Vec<f32> {
+fn frames<S: RingSample>(from: u64, n: u64, generation: u64) -> Vec<S> {
     (from..from + n)
         .flat_map(|p| (0..STRIDE).map(move |c| tag(p, generation, c)))
         .collect()
 }
 
+/// Pushes `data` and returns how many frames landed.
+fn push<S: RingSample>(writer: &mut PosWriter<S>, data: &[S]) -> Samples {
+    let view = Interleaved::new(data, LAYOUT).expect("whole frames");
+    writer.push(view).expect("the ring's width")
+}
+
 /// A ring holding positions `0..4` written under generation 0, keeping
 /// `keep` behind the reader, which the writer says plays at `play`.
-fn full_ring(keep: u64, play: u64) -> (PosWriter, PosReader) {
-    let (mut writer, reader) = PosRing::new(4, STRIDE, keep);
+fn full_ring<S: RingSample>(keep: u64, play: u64) -> (PosWriter<S>, PosReader<S>) {
+    let (mut writer, reader) = PosRing::new(4, LAYOUT, keep);
     writer.set_play(4);
-    assert_eq!(writer.push(&frames(0, 4, 0)), 4);
+    assert_eq!(push(&mut writer, &frames(0, 4, 0)), Samples(4));
     writer.set_play(play);
     (writer, reader)
 }
@@ -78,8 +95,8 @@ type Ranges = [(u64, u64); 2];
 
 /// Claims `(play, ranges)` on a reader thread, checking every held position
 /// (module docs).
-fn read<const N: usize>(
-    mut reader: PosReader,
+fn read<S: RingSample, const N: usize>(
+    mut reader: PosReader<S>,
     claims: [(u64, Ranges); N],
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -90,6 +107,7 @@ fn read<const N: usize>(
                     continue;
                 }
                 let (x0, x1, y0) = (claim.sample(s, 0), claim.sample(s, 1), claim.sample(s, 0));
+                let [x0, x1, y0] = [x0, x1, y0].map(|x| x.to_f64() * SCALE);
                 assert_eq!((x0 as u64) / 100, s, "position {s} held another's frame");
                 assert_eq!(x1, x0 + 1.0, "position {s} torn across channels");
                 assert_eq!(y0, x0, "position {s} rewritten under the claim");
@@ -100,93 +118,85 @@ fn read<const N: usize>(
 
 const NONE: (u64, u64) = (0, 0);
 
-#[test]
-fn a_write_round_the_ring_never_lands_under_a_claim() {
+fn a_write_round_the_ring_never_lands_under_a_claim<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(1, 1);
+        let (mut writer, reader) = full_ring::<S>(1, 1);
         let reading = read(reader, [(4, [(2, 4), NONE]), (4, [(0, 2), NONE])]);
         writer.set_play(4);
-        let _ = writer.push(&frames(4, 3, 0));
+        let _ = push(&mut writer, &frames(4, 3, 0));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn a_second_range_is_kept() {
+fn a_second_range_is_kept<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(0, 3);
+        let (mut writer, reader) = full_ring::<S>(0, 3);
         let reading = read(reader, [(3, [(3, 4), (0, 1)]), (3, [(3, 4), (0, 1)])]);
-        let _ = writer.push(&frames(4, 2, 0));
+        let _ = push(&mut writer, &frames(4, 2, 0));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn retract_then_push() {
+fn retract_then_push<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(1, 1);
+        let (mut writer, reader) = full_ring::<S>(1, 1);
         let reading = read(reader, [(1, [(0, 4), NONE]), (1, [(0, 4), NONE])]);
         writer.retract_to(2);
-        let _ = writer.push(&frames(2, 2, 1));
+        let _ = push(&mut writer, &frames(2, 2, 1));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn reset_then_push() {
+fn reset_then_push<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(1, 1);
+        let (mut writer, reader) = full_ring::<S>(1, 1);
         let reading = read(reader, [(1, [(0, 4), NONE]), (1, [(0, 4), NONE])]);
         writer.reset(1);
-        let _ = writer.push(&frames(1, 3, 1));
+        let _ = push(&mut writer, &frames(1, 3, 1));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn retract_twice_then_push() {
+fn retract_twice_then_push<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(1, 1);
+        let (mut writer, reader) = full_ring::<S>(1, 1);
         let reading = read(reader, [(1, [(1, 3), NONE])]);
         writer.retract_to(3);
         writer.retract_to(1);
-        let _ = writer.push(&frames(1, 2, 1));
+        let _ = push(&mut writer, &frames(1, 2, 1));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn raise_then_reset_then_push() {
+fn raise_then_reset_then_push<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(1, 1);
+        let (mut writer, reader) = full_ring::<S>(1, 1);
         let reading = read(reader, [(1, [(0, 2), NONE])]);
         writer.raise_from(2);
         writer.reset(0);
-        let _ = writer.push(&frames(0, 1, 1));
+        let _ = push(&mut writer, &frames(0, 1, 1));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn reset_then_wrap() {
+fn reset_then_wrap<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(0, 2);
+        let (mut writer, reader) = full_ring::<S>(0, 2);
         let reading = read(reader, [(2, [(1, 3), NONE]), (2, [(1, 3), NONE])]);
         writer.reset(2);
         // 2..6 over four slots: 4 and 5 go round onto 0 and 1.
-        let _ = writer.push(&frames(2, 4, 1));
+        let _ = push(&mut writer, &frames(2, 4, 1));
         reading.join().expect("the reader");
     });
 }
 
-#[test]
-fn a_capped_push_then_reset_keeps_the_claim() {
+fn a_capped_push_then_reset_keeps_the_claim<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(0, 2);
+        let (mut writer, reader) = full_ring::<S>(0, 2);
         let reading = read(reader, [(2, [(2, 3), (0, 1)])]);
-        let _ = writer.push(&frames(4, 2, 0));
+        let _ = push(&mut writer, &frames(4, 2, 0));
         writer.reset(0);
-        let _ = writer.push(&frames(0, 1, 1));
+        let _ = push(&mut writer, &frames(0, 1, 1));
         reading.join().expect("the reader");
     });
 }
@@ -195,14 +205,41 @@ fn a_capped_push_then_reset_keeps_the_claim() {
 /// alias. The window must keep 1..3 — a start left at 3 (the raise, from the
 /// ranges read before the fence) would drop 1, the reset would not count it
 /// stale, and the rewrite would land on it under the claim.
-#[test]
-fn a_partly_capped_push_then_reset_keeps_the_claim() {
+fn a_partly_capped_push_then_reset_keeps_the_claim<S: RingSample>() {
     loom::model(|| {
-        let (mut writer, reader) = full_ring(0, 3);
+        let (mut writer, reader) = full_ring::<S>(0, 3);
         let reading = read(reader, [(3, [(3, 4), (1, 2)])]);
-        let _ = writer.push(&frames(4, 3, 0));
+        let _ = push(&mut writer, &frames(4, 3, 0));
         writer.reset(0);
-        let _ = writer.push(&frames(0, 3, 1));
+        let _ = push(&mut writer, &frames(0, 3, 1));
         reading.join().expect("the reader");
     });
 }
+
+/// Runs each model once per slot width: a 16-bit, a 32-bit and a 64-bit atomic
+/// word.
+macro_rules! models {
+    ($($name:ident),* $(,)?) => {
+        mod i16_slots {
+            $(#[test] fn $name() { super::$name::<i16>() })*
+        }
+        mod f32_slots {
+            $(#[test] fn $name() { super::$name::<f32>() })*
+        }
+        mod f64_slots {
+            $(#[test] fn $name() { super::$name::<f64>() })*
+        }
+    };
+}
+
+models!(
+    a_write_round_the_ring_never_lands_under_a_claim,
+    a_second_range_is_kept,
+    retract_then_push,
+    reset_then_push,
+    retract_twice_then_push,
+    raise_then_reset_then_push,
+    reset_then_wrap,
+    a_capped_push_then_reset_keeps_the_claim,
+    a_partly_capped_push_then_reset_keeps_the_claim,
+);
