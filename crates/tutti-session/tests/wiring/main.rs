@@ -19,6 +19,7 @@ mod root_reopen;
 mod root_topology;
 mod scene_render;
 mod system_clock;
+mod transport_handle;
 mod transport_verbs;
 mod typed_params;
 mod unwired;

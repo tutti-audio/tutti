@@ -3,14 +3,13 @@
 
 use std::any::Any;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, TimedError, Transport};
+use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
 use crate::RootDeclaration;
@@ -523,9 +522,10 @@ pub struct Session<C: Clock = Offline> {
     /// The engine's tap after the fader and the device width it was built
     /// for; `None` detached.
     pub(crate) heard: Option<(tutti_engine::HeardTaps, ChannelLayout)>,
-    /// The engine's block clock, for [`playhead`](Self::playhead); `None`
-    /// detached, where nothing renders.
-    pub(crate) clock: Option<tutti_engine::BlockClockReader>,
+    /// The transport's verbs and the engine's block clock behind
+    /// [`playhead`](Self::playhead); the clock is `None` detached, where
+    /// nothing renders.
+    pub(crate) transport_handle: crate::TransportHandle,
     /// The root topology last asked for
     /// ([`declare_root_topology`](Self::declare_root_topology)), applied or not.
     pub(crate) root_request: Option<ChannelTopology>,
@@ -549,10 +549,6 @@ pub struct Session<C: Clock = Offline> {
     /// the last update read it: the next update reports the rise
     /// ([`SessionEvent::BlocksSilenced`]).
     pub(crate) silenced_seen: u64,
-    /// Whether the last motion this session sent for the next block left the
-    /// transport rolling (a play, a rolling locate) or stopped. The control
-    /// side's own word, which the playhead (one block old) cannot give.
-    pub(crate) rolling_sent: std::sync::atomic::AtomicBool,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
     /// Clips, live inputs, routes and the outputs.
@@ -764,7 +760,7 @@ impl<C: Clock> Session<C> {
             transport,
             load,
             heard,
-            clock,
+            transport_handle,
             root_request,
             root_refusal,
             click,
@@ -773,7 +769,6 @@ impl<C: Clock> Session<C> {
             latency,
             resumed,
             silenced_seen,
-            rolling_sent,
             #[cfg(feature = "midi")]
             midi,
             #[cfg(feature = "midi")]
@@ -829,7 +824,7 @@ impl<C: Clock> Session<C> {
                 transport,
                 load,
                 heard,
-                clock,
+                transport_handle,
                 root_request,
                 root_refusal,
                 click,
@@ -838,7 +833,6 @@ impl<C: Clock> Session<C> {
                 latency,
                 resumed,
                 silenced_seen,
-                rolling_sent,
                 #[cfg(feature = "midi")]
                 midi,
                 #[cfg(feature = "midi")]
@@ -1523,9 +1517,7 @@ impl<C: Clock> Session<C> {
     /// its own timeline and never moves this one.
     #[must_use]
     pub fn playhead(&self) -> Playhead {
-        self.clock
-            .as_ref()
-            .map_or_else(Playhead::default, tutti_engine::BlockClockReader::playhead)
+        self.transport_handle.playhead()
     }
 
     /// The playhead's beat now, extrapolated from the last block by
@@ -1537,16 +1529,15 @@ impl<C: Clock> Session<C> {
     }
 
     /// Starts the transport rolling from where it stands, at the next block.
-    /// A no-op while rolling.
+    /// A no-op while rolling. [`TransportHandle::play`](crate::TransportHandle::play) is the one
+    /// implementation.
     ///
     /// # Errors
     ///
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
     pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
-        self.transport.motion().try_send(MotionEvent::Play)?;
-        self.rolling_sent.store(true, Ordering::Relaxed);
-        Ok(())
+        self.transport_handle.play()
     }
 
     /// Stops the transport where it stands, at the next block, after the
@@ -1556,11 +1547,7 @@ impl<C: Clock> Session<C> {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
-        self.transport
-            .motion()
-            .try_send(MotionEvent::Stop { fade })?;
-        self.rolling_sent.store(false, Ordering::Relaxed);
-        Ok(())
+        self.transport_handle.stop(fade)
     }
 
     /// Jumps to `beat` at the next block, keeping whatever the transport was
@@ -1570,69 +1557,30 @@ impl<C: Clock> Session<C> {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
-        self.transport
-            .motion()
-            .try_send(MotionEvent::locate(beat))?;
-        Ok(())
+        self.transport_handle.locate(beat)
     }
 
-    /// Sends a motion `event` to take effect at `at`: a frame, a beat, or the
-    /// next block (`At`, or a `Beat` or `Frame` as it stands). The one timed verb: `schedule(b, MotionEvent::Play)`
-    /// is play at beat `b`, so the session needs one method for the timed
-    /// form where it would need three (`play_at`, `stop_at`, `locate_at`), and
-    /// every [`MotionEvent`] (a locate that then rolls, a stop that returns
-    /// to a beat) is timed the same way. The untimed verbs are `At::NextBlock`.
-    ///
-    /// A beat is reached by playback: it has a frame only while the transport
-    /// rolls. A command that starts the transport rolling ([`MotionEvent::Play`],
-    /// or a locate that then rolls) timed at a beat while the transport is
-    /// stopped could only fire after the playback it starts, so it is refused
-    /// where it is made. Stopped is the control side's word: the last motion
-    /// this session sent (a `play` just before is rolling), not the playhead,
-    /// which is a block old. A command that does not start playback (a stop, a
-    /// plain locate) waits for the playback to reach its beat, as any beat
-    /// command does.
+    /// Sends a motion `event` to take effect at `at`; see
+    /// [`TransportHandle::schedule`](crate::TransportHandle::schedule), the one implementation.
     ///
     /// # Errors
     ///
     /// [`TimedError::Full`] when the timed-command list is full, and
-    /// [`TimedError::BeatWhileStopped`] for the command above.
+    /// [`TimedError::BeatWhileStopped`] for a command that starts playback at
+    /// a beat while the transport is stopped.
     pub fn schedule(
         &self,
         at: impl Into<At>,
         event: MotionEvent,
     ) -> Result<(), TimedError<MotionEvent>> {
-        let at = at.into();
-        let starts = matches!(
-            event,
-            MotionEvent::Play
-                | MotionEvent::Locate {
-                    then: Then::Roll,
-                    ..
-                }
-        );
-        // Rolling as far as the control side knows: the last motion this
-        // session sent for the next block, or what the engine last rendered
-        // (a transport started through `transport()` directly).
-        let rolling = self.rolling_sent.load(Ordering::Relaxed) || self.playhead().playing();
-        if let At::Beat(_) = at
-            && starts
-            && !rolling
-        {
-            return Err(TimedError::BeatWhileStopped(event));
-        }
-        self.transport.motion().schedule(at, event)?;
-        if at == At::NextBlock {
-            match event {
-                MotionEvent::Play
-                | MotionEvent::Locate {
-                    then: Then::Roll, ..
-                } => self.rolling_sent.store(true, Ordering::Relaxed),
-                MotionEvent::Stop { .. } => self.rolling_sent.store(false, Ordering::Relaxed),
-                _ => {}
-            }
-        }
-        Ok(())
+        self.transport_handle.schedule(at, event)
+    }
+
+    /// A [`TransportHandle`](crate::TransportHandle) on this session's transport: `Send`, so another
+    /// thread drives play, stop, locate and schedule.
+    #[must_use]
+    pub fn transport_handle(&self) -> crate::TransportHandle {
+        self.transport_handle.clone()
     }
 
     /// Sends what a followed MIDI clock asked of the transport, at the next
