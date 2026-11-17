@@ -495,48 +495,38 @@ impl UmpOut {
 /// The writing half of an output's cumulative losses: held by the session beside
 /// the output, written on the session's thread.
 pub(crate) struct LossWriters {
-    lost: tutti_rt::CounterWriter<u64>,
-    refused: tutti_rt::CounterWriter<u64>,
+    losses: tutti_rt::CounterWriter<tutti_graph::Losses>,
 }
 
 /// The reading half of an output's losses, shared with its handle.
 #[derive(Clone, Debug)]
 pub(crate) struct LossReaders {
-    lost: tutti_rt::Counter<u64>,
-    refused: tutti_rt::Counter<u64>,
+    losses: tutti_rt::Counter<tutti_graph::Losses>,
 }
 
 /// A fresh pair of loss cells, at zero.
 pub(crate) fn loss_cells() -> (LossWriters, LossReaders) {
-    let (lost_writer, lost) = tutti_rt::counter();
-    let (refused_writer, refused) = tutti_rt::counter();
-    (
-        LossWriters {
-            lost: lost_writer,
-            refused: refused_writer,
-        },
-        LossReaders { lost, refused },
-    )
+    let (writer, losses) = tutti_rt::counter();
+    (LossWriters { losses: writer }, LossReaders { losses })
 }
 
 impl LossWriters {
     /// Counts `n` events its node's tap had no room for.
     pub(crate) fn lost(&mut self, n: u64) {
-        self.lost.add(n);
+        self.losses.add(tutti_graph::Losses::lost(n));
     }
 
     /// Counts `n` events that did not go: refused by the output, scheduled too
     /// far ahead, or with no output to send to.
     pub(crate) fn refused(&mut self, n: u64) {
-        self.refused.add(n);
+        self.losses.add(tutti_graph::Losses::refused(n));
     }
 }
 
 impl LossReaders {
     /// The losses so far: events the tap lost, events that did not go.
     pub(crate) fn get(&self) -> tutti_graph::Losses {
-        tutti_graph::Losses::lost(self.lost.get())
-            + tutti_graph::Losses::refused(self.refused.get())
+        self.losses.get()
     }
 }
 

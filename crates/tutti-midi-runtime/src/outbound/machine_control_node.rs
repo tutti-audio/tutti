@@ -15,14 +15,12 @@
 //!
 //! Its fork sends nothing: an offline render drives no external gear.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use tutti_graph::{
     Cx, Event, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses, Node, NodeParts,
     Offset, Prepare, Shape, Status,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
+use tutti_rt::{Counter, CounterWriter, counter};
 use tutti_types::Beat;
 use tutti_ump::{MidiGroup, Sysex7Packets};
 
@@ -35,10 +33,9 @@ use super::machine_control_out::MachineControlSender;
 pub const MACHINE_CONTROL_EVENT_CAPACITY: usize = 18;
 
 /// What a [`MachineControlNode`] reports to its owner.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MachineControlControls {
-    refused: Arc<AtomicU64>,
-    lost: Arc<AtomicU64>,
+    losses: Counter<Losses>,
 }
 
 impl MachineControlControls {
@@ -48,8 +45,7 @@ impl MachineControlControls {
     /// port had no room for (or took only part of).
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::lost(self.lost.load(Ordering::Relaxed))
-            + Losses::refused(self.refused.load(Ordering::Relaxed))
+        self.losses.get()
     }
 }
 
@@ -73,6 +69,8 @@ pub struct MachineControlNode {
     sender: MachineControlSender,
     group: MidiGroup,
     controls: MachineControlControls,
+    /// The writer of [`MachineControlControls::losses`].
+    losses: CounterWriter<Losses>,
     /// A fork's node sends nothing.
     silent: bool,
 }
@@ -82,10 +80,12 @@ impl MachineControlNode {
     /// at `rate`.
     #[must_use]
     pub fn new(group: MidiGroup, to: Recipient, rate: MtcRate) -> Self {
+        let (losses, reader) = counter();
         Self {
             sender: MachineControlSender::new(to, rate),
             group,
-            controls: MachineControlControls::default(),
+            controls: MachineControlControls { losses: reader },
+            losses,
             silent: false,
         }
     }
@@ -122,7 +122,7 @@ impl Node for MachineControlNode {
                 Ok(Some(payload)) if !self.silent => payload,
                 Ok(_) => continue,
                 Err(_) => {
-                    self.controls.refused.fetch_add(1, Ordering::Relaxed);
+                    self.losses.add(Losses::refused(1));
                     continue;
                 }
             };
@@ -133,7 +133,7 @@ impl Node for MachineControlNode {
                 // Both losses below are defensive: the declared capacity is nine
                 // segments of two packets, which a block never exceeds.
                 if packets.len() > room {
-                    self.controls.lost.fetch_add(1, Ordering::Relaxed);
+                    self.losses.add(Losses::lost(1));
                     continue;
                 }
                 let mut pushed = true;
@@ -141,7 +141,7 @@ impl Node for MachineControlNode {
                     pushed &= out.push(Event::midi(at, packet)).is_ok();
                 }
                 if !pushed {
-                    self.controls.lost.fetch_add(1, Ordering::Relaxed);
+                    self.losses.add(Losses::lost(1));
                 }
             }
         }

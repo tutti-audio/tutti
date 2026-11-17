@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi;
 use tutti_fixtures::{BlockClock, EventRig};
-use tutti_graph::NodeKey;
+use tutti_graph::{Losses, NodeKey};
 use tutti_midi_runtime::{DeviceInput, InputInlets, InputWriters};
 use tutti_rt::{Counter, Gauge};
 use tutti_types::{Frame, Resyncs, SampleRate, Seconds};
@@ -238,19 +238,31 @@ fn the_lost_count_carries_across_a_reopened_input() {
     let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
     let (writers, readers) = InputWriters::new();
     let (mut device, _node) = inlets.open_with(writers.split().0);
-    assert_eq!(readers.lost.get(), 0);
+    assert_eq!(readers.lost.get(), Losses::NONE);
     for i in 0..4 {
         let _ = device.push(note(60 + i), Instant::now());
     }
-    assert_eq!(readers.lost.get(), 2, "the two pushes the ring refused");
+    assert_eq!(
+        readers.lost.get(),
+        Losses::lost(2),
+        "the two pushes the ring refused"
+    );
     drop(device);
-    assert_eq!(readers.lost.get(), 2, "the count outlives the input");
+    assert_eq!(
+        readers.lost.get(),
+        Losses::lost(2),
+        "the count outlives the input"
+    );
     let again = InputWriters::reopen(&readers).expect("the input dropped");
     let (mut device, _node) = inlets.open_with(again.split().0);
     for i in 0..4 {
         let _ = device.push(note(60 + i), Instant::now());
     }
-    assert_eq!(readers.lost.get(), 4, "the reopened input keeps counting");
+    assert_eq!(
+        readers.lost.get(),
+        Losses::lost(4),
+        "the reopened input keeps counting"
+    );
 }
 
 /// **A push into an inlet whose node is gone is not a loss**: it is refused as
@@ -266,7 +278,7 @@ fn a_push_after_the_node_is_gone_is_disconnected_and_not_lost() {
         device.push(note(60), Instant::now()),
         Err(tutti_rt::PushError::Disconnected)
     );
-    assert_eq!(readers.lost.get(), 0);
+    assert_eq!(readers.lost.get(), Losses::NONE);
 }
 
 /// A device whose clock the test writes, built on the reading "frame 1000 at

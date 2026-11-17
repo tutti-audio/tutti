@@ -204,7 +204,7 @@ fn hardware_input_over_capacity_is_allocation_free() {
         }
     });
     assert!(
-        readers.iter().all(|input| input.lost.get() > 0),
+        readers.iter().all(|input| input.lost.get().lost > 0),
         "the rings were full"
     );
 }
@@ -317,5 +317,8 @@ fn hardware_input_timed_by_jr_is_allocation_free() {
     });
     assert!(rig.carried > 0);
     let info = inputs.port_info(port.port()).unwrap();
-    assert!(info.jr_restarted > 0 && info.jr_late > 0, "{info:?}");
+    assert!(
+        info.jr_restarted.get() > 0 && info.losses.late > 0,
+        "{info:?}"
+    );
 }

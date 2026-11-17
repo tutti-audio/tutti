@@ -10,8 +10,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tutti_graph::EventInletNode;
+use tutti_graph::{EventInletNode, Losses};
 use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
+use tutti_types::Resyncs;
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;
@@ -31,17 +32,17 @@ pub struct PortInfo {
     /// Whether the port delivers. An inactive port's events are discarded at
     /// the driver's thread, not queued.
     pub active: bool,
-    /// How many UMP Stream messages the port's stream ring had no room for,
-    /// since the port opened.
-    pub stream_lost: u64,
+    /// What the port lost since it opened: `lost` counts the UMP Stream
+    /// messages its stream ring had no room for, and `late` the JR Clock
+    /// messages ignored as late (reordered, repeated, or from a clock that
+    /// stepped back), counted only while the port is timed by the device's JR
+    /// Timestamps.
+    pub losses: Losses,
     /// How many JR Clock messages restarted the sender's clock, since the port
     /// opened: each is a jump the clock could not follow, or a silence of a
     /// second. Counted only while the port is timed by the device's JR
     /// Timestamps.
-    pub jr_restarted: u64,
-    /// How many JR Clock messages were ignored as late (reordered, repeated, or
-    /// from a clock that stepped back), under the same condition.
-    pub jr_late: u64,
+    pub jr_restarted: Resyncs,
 }
 
 impl PortInfo {
@@ -50,9 +51,8 @@ impl PortInfo {
             id,
             name: port.name().to_string(),
             active: port.is_active(),
-            stream_lost: port.stream_lost(),
+            losses: port.losses(),
             jr_restarted: port.jr_restarted(),
-            jr_late: port.jr_late(),
         }
     }
 }

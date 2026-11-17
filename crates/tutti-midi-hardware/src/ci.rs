@@ -401,7 +401,7 @@ pub(crate) struct Ci {
     store: Arc<Mutex<ResourceStore>>,
     /// Counts the CI messages the output has refused: a cell of the port that
     /// owns the conversation, which outlives the connection.
-    refused: CounterWriter<u64>,
+    refused: CounterWriter<Losses>,
 }
 
 /// Group 0, the Group of a MIDI 1.0 port and of an Endpoint that says nothing
@@ -432,7 +432,7 @@ pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
 
 impl Ci {
     /// MIDI-CI for the input `device`, with nothing decided.
-    pub(crate) fn new(device: DeviceId, refused: CounterWriter<u64>) -> Self {
+    pub(crate) fn new(device: DeviceId, refused: CounterWriter<Losses>) -> Self {
         Self {
             device,
             groups: Vec::new(),
@@ -516,7 +516,7 @@ impl Ci {
         self.queue.clear();
         self.reports.clear();
         self.calls.clear();
-        self.refused.add(changes.refused.refused);
+        self.refused.add(changes.refused);
         if self.running.as_ref().is_some_and(|r| r.is_idle()) {
             self.running = None;
         }

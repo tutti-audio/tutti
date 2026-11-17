@@ -578,7 +578,7 @@ impl MidiSession {
             // (`Ci::Idle`), and off once nothing listens.
             sync_hearing(ports, held, ci);
             // The ring's loss is read either side of the drain (`Heard`).
-            let lost = || ports.port_info(slot).map_or(0, |p| p.stream_lost);
+            let lost = || ports.port_info(slot).map_or(0, |p| p.losses.lost);
             let before = lost();
             let said: Vec<_> = ports.drain_stream(slot).collect();
             let after = lost();

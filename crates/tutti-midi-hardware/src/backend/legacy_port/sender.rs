@@ -2,22 +2,22 @@
 //! the waiting left to the platform.
 
 use std::fmt::Display;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::schedule::{Next, Outbox};
 use tutti_graph::Losses;
+use tutti_rt::{Tally, TallyWriter, tally};
 
 /// What an output and its sender thread share: the [`Outbox`] behind its lock
 /// and the counts of what the sender could not send.
 #[derive(Debug)]
 pub(in crate::backend) struct Mailbox<T> {
     state: Mutex<Outbox<T>>,
-    /// Sends the device refused.
-    lost: AtomicU64,
-    /// Events dropped when the sender ended.
-    refused: AtomicU64,
+    /// What the sender could not send: sends the device refused are `lost`,
+    /// events dropped when the sender ended are `refused`. The sender thread
+    /// and its end guard each add through their own writer.
+    losses: Tally<Losses>,
 }
 
 impl<T> Mailbox<T> {
@@ -25,8 +25,7 @@ impl<T> Mailbox<T> {
     pub(in crate::backend) fn new() -> Self {
         Self {
             state: Mutex::new(Outbox::new()),
-            lost: AtomicU64::new(0),
-            refused: AtomicU64::new(0),
+            losses: tally(),
         }
     }
 
@@ -38,21 +37,20 @@ impl<T> Mailbox<T> {
     /// What the sender could not send: refused sends are lost, and what was
     /// held when it ended had nowhere to go (refused).
     pub(in crate::backend) fn losses(&self) -> Losses {
-        Losses::lost(self.lost.load(Ordering::Acquire))
-            + Losses::refused(self.refused.load(Ordering::Acquire))
+        self.losses.get()
     }
 }
 
 /// Marks the mailbox's sender dead when its loop ends, however it ends, a panic
 /// included: what it held had nowhere to go.
-struct Ends<'a, T>(&'a Mailbox<T>);
+struct Ends<'a, T>(&'a Mailbox<T>, TallyWriter<Losses>);
 
 impl<T> Drop for Ends<'_, T> {
     fn drop(&mut self) {
         let dropped = self.0.state().end();
         // A count of events held in memory fits `u64` on every platform.
         let dropped = u64::try_from(dropped).unwrap_or(u64::MAX);
-        self.0.refused.fetch_add(dropped, Ordering::AcqRel);
+        self.1.add(Losses::refused(dropped));
     }
 }
 
@@ -70,7 +68,8 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     Send: FnMut(T) -> Result<(), S>,
     Wait: FnMut(Option<Duration>) -> Result<(), W>,
 {
-    let _ends = Ends(mailbox);
+    let _ends = Ends(mailbox, mailbox.losses.writer());
+    let mut losses = mailbox.losses.writer();
     let (mut send, mut wait) = setup();
     loop {
         // The stop is looked at with each event, not once per batch: a long run
@@ -81,7 +80,7 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
             Next::Send(event) => {
                 if let Err(e) = send(event) {
                     tracing::debug!("MIDI send: {e}");
-                    mailbox.lost.fetch_add(1, Ordering::AcqRel);
+                    losses.add(Losses::lost(1));
                 }
                 mailbox.state().done();
             }

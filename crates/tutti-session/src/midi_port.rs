@@ -591,13 +591,10 @@ impl MidiInput {
     /// output never carries it.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::lost(self.shared.cells.lost.get())
+        self.shared.cells.lost.get()
             + self.shared.ingest.losses()
-            + Losses::evicted(self.shared.cells.inlet.evicted())
-            + Losses::late(self.shared.cells.inlet.late())
-            + Losses::refused(
-                self.shared.cells.inlet.refused() + self.shared.cells.ci_refused.get(),
-            )
+            + self.shared.cells.inlet.get()
+            + self.shared.cells.ci_refused.get()
     }
 }
 

@@ -90,11 +90,12 @@
 //! the waiting list: a note-off waiting must still arrive.
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::{Pod, Zeroable};
-use tutti_rt::{Counter, Overflow, PushError, RingReader, RingWriter, SeqReader, SeqWriter, ring};
+use tutti_rt::{
+    Counter, Overflow, PushError, RingReader, RingWriter, SeqReader, SeqWriter, Tally, TallyWriter,
+    ring, tally,
+};
 use tutti_types::{At, Frame, Moment, SampleRate};
 use tutti_ump::Ump;
 
@@ -168,59 +169,11 @@ struct Waiting {
     ump: Ump,
 }
 
-/// The counts the node and the writer share.
-#[derive(Debug, Default)]
-struct Counts {
-    late: Arc<AtomicU64>,
-    evicted: Arc<AtomicU64>,
-    refused: Arc<AtomicU64>,
-}
-
-/// The evicted, refused and late totals of successive inlets of one owner: each
-/// inlet made over them ([`EventInletNode::pair_with`]) adds to the same three
-/// counts, so an owner that replaces its inlet (a device that is unplugged and
-/// plugged again) reads one cumulative figure. The adds are atomic, so an old
-/// inlet still leaving the graph and its successor may count at once.
-#[derive(Clone, Debug, Default)]
-pub struct InletTotals {
-    late: Arc<AtomicU64>,
-    evicted: Arc<AtomicU64>,
-    refused: Arc<AtomicU64>,
-}
-
-impl InletTotals {
-    /// Totals at zero.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Events dropped from the inlets' waiting lists for room, as
-    /// [`Losses::evicted`].
-    #[must_use]
-    pub fn evicted(&self) -> u64 {
-        self.evicted.load(Ordering::Relaxed)
-    }
-
-    /// Events the inlets' ports refused, as [`Losses::refused`].
-    #[must_use]
-    pub fn refused(&self) -> u64 {
-        self.refused.load(Ordering::Relaxed)
-    }
-
-    /// Events the inlets emitted at offset 0 for being past their frame, as
-    /// [`Losses::late`].
-    #[must_use]
-    pub fn late(&self) -> u64 {
-        self.late.load(Ordering::Relaxed)
-    }
-}
-
 /// A cloneable view of an inlet's counts, for a thread that does not hold the
 /// writer (the control side, while a driver thread pushes).
 #[derive(Clone, Debug)]
 pub struct InletCounts {
-    counts: Arc<Counts>,
+    totals: Tally<Losses>,
     lost: Counter<u64>,
 }
 
@@ -232,13 +185,7 @@ impl InletCounts {
     /// refused; `late`: events emitted at offset 0 for being past their frame.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        let c = &*self.counts;
-        Losses {
-            lost: self.lost.get(),
-            evicted: c.evicted.load(Ordering::Relaxed),
-            refused: c.refused.load(Ordering::Relaxed),
-            late: c.late.load(Ordering::Relaxed),
-        }
+        self.totals.get() + Losses::lost(self.lost.get())
     }
 }
 
@@ -250,7 +197,7 @@ impl InletCounts {
 pub struct EventInletWriter {
     ring: RingWriter<Pushed>,
     clock: SeqReader<Reading>,
-    counts: Arc<Counts>,
+    totals: Tally<Losses>,
 }
 
 impl std::fmt::Debug for EventInletWriter {
@@ -329,7 +276,7 @@ impl EventInletWriter {
     #[must_use]
     pub fn counts(&self) -> InletCounts {
         InletCounts {
-            counts: Arc::clone(&self.counts),
+            totals: self.totals.clone(),
             lost: self.ring.losses(),
         }
     }
@@ -427,7 +374,8 @@ impl From<EventCapacity> for u32 {
 /// ```
 pub struct EventInletNode {
     ring: RingReader<Pushed>,
-    counts: Arc<Counts>,
+    /// The writer of the owner's evicted, refused and late totals.
+    losses: TallyWriter<Losses>,
     clock: SeqWriter<Reading>,
     capacity: EventCapacity,
     /// The rate the node is prepared at, and every frame below is counted at;
@@ -453,28 +401,27 @@ impl EventInletNode {
     /// capacity are all `capacity` events. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(capacity: EventCapacity) -> (Self, EventInletWriter) {
-        Self::pair_with(capacity, &InletTotals::new())
+        Self::pair_with(capacity, &tally())
     }
 
-    /// [`pair`](Self::pair), the node counting its evicted and refused events on
-    /// `totals`, which outlive it. Allocates; control side.
+    /// [`pair`](Self::pair), the node counting its evicted, refused and late
+    /// events on `totals`, which outlive it. An owner that replaces its inlet (a
+    /// device unplugged and plugged again) passes the same tally to each, so it
+    /// reads one cumulative figure; the tally takes the adds of an old inlet
+    /// still leaving the graph and its successor at once. Allocates; control
+    /// side.
     #[must_use = "the writer is the only way to fill the ring"]
-    pub fn pair_with(capacity: EventCapacity, totals: &InletTotals) -> (Self, EventInletWriter) {
+    pub fn pair_with(capacity: EventCapacity, totals: &Tally<Losses>) -> (Self, EventInletWriter) {
         let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
-        let counts = Arc::new(Counts {
-            late: Arc::clone(&totals.late),
-            evicted: Arc::clone(&totals.evicted),
-            refused: Arc::clone(&totals.refused),
-        });
         let clock = SeqWriter::new();
         let writer = EventInletWriter {
             ring: producer,
             clock: clock.reader(),
-            counts: Arc::clone(&counts),
+            totals: totals.clone(),
         };
         let node = Self {
             ring: consumer,
-            counts,
+            losses: totals.writer(),
             clock,
             capacity,
             rate: 0.0,
@@ -512,7 +459,7 @@ impl EventInletNode {
     ///   takes a full list of note-offs and panics waiting at once.
     fn keep(&mut self, ump: Ump, frame: u64) {
         if self.waiting.len() == self.capacity.slots() {
-            self.counts.evicted.fetch_add(1, Ordering::Relaxed);
+            self.losses.add(Losses::evicted(1));
             let lost = self.waiting.iter().rposition(|w| !must_arrive(w.ump));
             match lost {
                 Some(i) if must_arrive(ump) || self.waiting[i].frame > frame => {
@@ -579,7 +526,7 @@ impl Node for EventInletNode {
                 break;
             }
             w.frame = start.get();
-            self.counts.late.fetch_add(1, Ordering::Relaxed);
+            self.losses.add(Losses::late(1));
         }
         // Everything the ring holds joins the list, in due order. One already
         // due (late, or `NextBlock`) is due at this block's first frame, so it
@@ -594,7 +541,7 @@ impl Node for EventInletNode {
                 When::NextBlock => start.get(),
                 When::Frame(frame) => {
                     if env.due(At::Frame(Frame::new(frame))) == Due::Late {
-                        self.counts.late.fetch_add(1, Ordering::Relaxed);
+                        self.losses.add(Losses::late(1));
                         start.get()
                     } else {
                         frame
@@ -608,7 +555,7 @@ impl Node for EventInletNode {
                         _ => frame,
                     };
                     if env.due(At::Frame(Frame::new(frame))) == Due::Late {
-                        self.counts.late.fetch_add(1, Ordering::Relaxed);
+                        self.losses.add(Losses::late(1));
                         start.get()
                     } else {
                         frame
@@ -633,7 +580,7 @@ impl Node for EventInletNode {
         }
         self.waiting.drain(..sent);
         if refused > 0 {
-            self.counts.refused.fetch_add(refused, Ordering::Relaxed);
+            self.losses.add(Losses::refused(refused));
         }
         self.next = start.get() + env.block_len.get() as u64;
         self.publish();
