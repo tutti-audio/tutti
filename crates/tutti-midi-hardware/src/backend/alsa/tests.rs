@@ -803,29 +803,30 @@ const EIO: i32 = 5;
 /// Dropping an input does not wait for ever on a pump that will not stop: here
 /// one held in its first read, which `JOIN_BOUND` cuts short, so the drop
 /// returns and detaches it. The test waits for the pump to be held (the hook
-/// says so), drops, checks the hook has not been released (so the drop did not
-/// wait for the pump), then lets the pump go.
+/// says so), drops on another thread, and requires that drop to complete while
+/// the pump is still held; `PATIENCE` only guards the hang a waiting drop is.
 #[test]
 fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
     let device = plug(&unique("stuck"));
     let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
     let (held, held_rx) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel::<()>();
-    let freed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let flag = std::sync::Arc::clone(&freed);
     let mut pumped = Pumped::hooked(device, id, move || {
         let _ = held.send(());
         // Held until the sender drops.
         let _ = released.recv();
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     });
     held_rx.recv_timeout(PATIENCE).expect("the pump to be held");
-    drop(pumped.connection.take());
-    assert!(
-        !freed.load(std::sync::atomic::Ordering::SeqCst),
-        "the drop returned while the pump was still held"
-    );
+    let connection = pumped.connection.take();
+    let (dropped, dropped_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(connection);
+        let _ = dropped.send(());
+    });
+    dropped_rx
+        .recv_timeout(PATIENCE)
+        .expect("the drop to return while the pump is still held");
     drop(release);
 }
 
