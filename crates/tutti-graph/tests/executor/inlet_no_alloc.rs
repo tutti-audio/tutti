@@ -32,5 +32,9 @@ fn inlet_process_is_allocation_free() {
             node.block();
         }
     });
-    assert_eq!(node.output(0), [0.0; 64], "ran dry inside the gate");
+    assert_eq!(
+        node.output().plane(0).samples(),
+        [0.0; 64],
+        "ran dry inside the gate"
+    );
 }
