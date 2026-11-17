@@ -258,14 +258,13 @@ fn open_size_close_is_idempotent_and_reports_zero_after() {
 }
 
 gui_test! {
-/// `view_ptr()` must be non-null exactly while the editor is open.
+/// `is_open()` must be true exactly while the editor holds its view.
 ///
-/// This is the pointer a host embeds in its own window hierarchy. Null while
-/// open means the host has nothing to parent and the GUI never appears;
-/// non-null after close is a dangling `NSView*` that the host would happily
-/// add as a subview — a use-after-free at the exact moment a user reopens a
-/// plugin window.
-fn view_ptr_is_non_null_only_while_open() {
+/// A host that sees `false` while the editor is open has nothing to parent and
+/// the GUI never appears; one that sees `true` after close would treat a
+/// released `NSView` as live — a use-after-free at the exact moment a user
+/// reopens a plugin window.
+fn is_open_only_until_closed() {
     let _g = lock();
     for (unit, _, _) in WITH_COCOA_VIEW {
         let au = ready(unit);
@@ -274,8 +273,8 @@ fn view_ptr_is_non_null_only_while_open() {
             .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
 
         assert!(
-            !editor.view_ptr().is_null(),
-            "{}: view_ptr() is null while the editor is open — a host would \
+            editor.is_open(),
+            "{}: is_open() is false while the editor is open — a host would \
              have nothing to parent the GUI into",
             unit.label
         );
@@ -289,8 +288,8 @@ fn view_ptr_is_non_null_only_while_open() {
 
         editor.close(on_main());
         assert!(
-            editor.view_ptr().is_null(),
-            "{}: view_ptr() still points at the released NSView after close — \
+            !editor.is_open(),
+            "{}: is_open() still holds the released NSView after close — \
              a host re-parenting it would use freed memory",
             unit.label
         );
@@ -334,7 +333,7 @@ fn repeated_open_close_cycles_stay_balanced() {
                 size.width,
                 size.height
             );
-            assert!(!editor.view_ptr().is_null());
+            assert!(editor.is_open());
 
             // Observe the retain count, not only the pointer. Without this the
             // test's own name is a claim it never checks: adding a second
@@ -457,10 +456,11 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
 }
 
 gui_test! {
-/// An editor dropped off the main thread gives up its view without touching
-/// AppKit: exactly one view is counted in `leaked_editor_views`, and the unit
-/// is still usable (a new editor opens on it) afterwards.
-fn dropping_off_the_main_thread_leaks_and_counts_the_view() {
+/// An editor dropped off the main thread does not touch AppKit: its close is
+/// handed to the main thread's collector, counted once in
+/// `MainWork::deferred_drops`, and the unit is still usable (a new editor opens
+/// on it) afterwards.
+fn dropping_off_the_main_thread_defers_and_counts_the_close() {
     let _g = lock();
     let (unit, _, _) = &WITH_COCOA_VIEW[0];
     let au = ready(unit);
@@ -468,21 +468,21 @@ fn dropping_off_the_main_thread_leaks_and_counts_the_view() {
     let editor = unsafe { open_headless(&au) }
         .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
 
-    let before = tutti_au_ffi::leaked_editor_views();
+    let before = tutti_plugin_types::MainWork::deferred_drops();
     std::thread::spawn(move || drop(editor))
         .join()
         .expect("the drop off the main thread must not panic");
     assert_eq!(
-        tutti_au_ffi::leaked_editor_views(),
+        tutti_plugin_types::MainWork::deferred_drops(),
         before + 1,
-        "{}: a drop off the main thread leaks its view and counts it once",
+        "{}: a drop off the main thread defers its close and counts it once",
         unit.label
     );
 
     // SAFETY: as above.
     let mut again = unsafe { open_headless(&au) }
-        .unwrap_or_else(|e| panic!("{}: reopen after the leak failed: {e:?}", unit.label));
-    assert!(!again.view_ptr().is_null());
+        .unwrap_or_else(|e| panic!("{}: reopen after the deferred close failed: {e:?}", unit.label));
+    assert!(again.is_open());
     again.close(on_main());
 }
 }
@@ -510,7 +510,7 @@ fn dropping_without_closing_is_safe() {
             // SAFETY: as above.
             let editor = unsafe { open_headless(&au) }
                 .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
-            assert!(!editor.view_ptr().is_null());
+            assert!(editor.is_open());
         }
 
         // Dropped after an explicit close: `Drop` must not release again.
@@ -519,7 +519,7 @@ fn dropping_without_closing_is_safe() {
             let mut editor = unsafe { open_headless(&au) }
                 .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
             editor.close(on_main());
-            assert!(editor.view_ptr().is_null());
+            assert!(!editor.is_open());
         }
 
         // And the unit is still usable afterwards — the editor teardown must
@@ -550,8 +550,8 @@ fn two_editors_on_one_unit_are_independent() {
     // SAFETY: as above.
     let mut second = unsafe { open_headless(&au) }.expect("AUDelay opens a second editor");
 
-    assert!(!first.view_ptr().is_null());
-    assert!(!second.view_ptr().is_null());
+    assert!(first.is_open());
+    assert!(second.is_open());
     assert_ne!(
         first.view_ptr(),
         second.view_ptr(),
@@ -562,9 +562,9 @@ fn two_editors_on_one_unit_are_independent() {
     // Closing one must leave the other entirely untouched.
     let second_size = second.editor_size(on_main());
     first.close(on_main());
-    assert!(first.view_ptr().is_null());
+    assert!(!first.is_open());
     assert!(
-        !second.view_ptr().is_null(),
+        second.is_open(),
         "closing the first editor released the second's view"
     );
     assert_eq!(

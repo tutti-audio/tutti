@@ -644,8 +644,7 @@ impl AuProcessor {
     /// the silence-flag read.
     ///
     /// Split out so the f32 and f64 entry points cannot drift on any of it:
-    /// notably the `LastRenderStatus` enrichment and the `OutputIsSilence`
-    /// handling. Allocation-free on the success path.
+    /// notably the `OutputIsSilence` handling. Allocation-free on the success path.
     fn render_frames(&mut self, num_frames: u32) -> Result<Silence> {
         if num_frames > self.block_size {
             return Err(AuError::InvalidBuffer(format!(
@@ -656,8 +655,9 @@ impl AuProcessor {
         // The render callback is installed ONCE at activation off the renderer's
         // stable heap scratch, deliberately NOT here: re-installing per block is
         // an `AudioUnitSetProperty` on the render thread every call. On failure
-        // the renderer attaches the AU's last render error (an advisory
-        // global-scope read, made only when the render itself failed).
+        // a failed render carries only its status: the unit's
+        // last render error is a property read, left to the control side
+        // (`Unit::last_render_error`).
         let silent = self.rendering.renderer.render(num_frames)?;
         // When the AU declares the block silent its output buffers are not
         // guaranteed to be zeroed, so the caller forces the destination to

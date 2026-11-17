@@ -232,13 +232,14 @@ pub use tutti_au_ffi::{PushScratch, output_byte_sizes};
 ///
 /// # Errors
 /// [`AuError::InvalidBuffer`] if `frames` exceeds the scratch's block size, or
-/// [`AuError::RenderFailed`] with the unit's `LastRenderStatus` attached.
+/// [`AuError::RenderFailed`] with the unit's last render error attached (read
+/// here, on the control side, after the failed call).
 pub fn process_push(
     unit: &Unit,
     scratch: &mut PushScratch,
     frames: u32,
 ) -> Result<AudioUnitRenderActionFlags> {
-    Ok(tutti_au_ffi::process_push(unit, scratch, frames)?)
+    tutti_au_ffi::process_push(unit, scratch, frames).map_err(|e| with_last_render_error(unit, e))
 }
 
 /// As [`process_push`], through `AudioUnitProcessMultiple`: every input and
@@ -251,5 +252,17 @@ pub fn process_push_multiple(
     scratch: &mut PushScratch,
     frames: u32,
 ) -> Result<AudioUnitRenderActionFlags> {
-    Ok(tutti_au_ffi::process_push_multiple(unit, scratch, frames)?)
+    tutti_au_ffi::process_push_multiple(unit, scratch, frames)
+        .map_err(|e| with_last_render_error(unit, e))
+}
+
+/// `e` as an [`AuError`], with the unit's last render error read in when a
+/// render failed.
+fn with_last_render_error(unit: &Unit, e: tutti_au_ffi::Error) -> AuError {
+    match e {
+        tutti_au_ffi::Error::RenderFailed { function, status } => {
+            AuError::render_failed(function, status, unit.last_render_error())
+        }
+        other => other.into(),
+    }
 }

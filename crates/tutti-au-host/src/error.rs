@@ -144,8 +144,9 @@ pub enum AuError {
     /// `AudioUnitRender` returned a non-`noErr` status. `code` is the render
     /// call's own OSStatus; `last_render_error` is the AU's
     /// `kAudioUnitProperty_LastRenderError` at failure time, when it could be
-    /// read and was itself non-`noErr` — diagnostics only, enriching the render
-    /// status with the underlying error the AU recorded internally.
+    /// read and was itself non-`noErr` — diagnostics only. An offline render
+    /// reads it on the control side after the failure; a render on the audio
+    /// thread leaves it `None`.
     #[error(
         "AudioUnit error in {function}: OSStatus {code} ({}){}",
         os_status_message(*.code),
