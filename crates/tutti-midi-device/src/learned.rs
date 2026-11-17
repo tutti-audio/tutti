@@ -44,14 +44,14 @@ impl Learned {
 
     /// Returns `self` with the Device Identity the device declared.
     #[must_use]
-    pub const fn with_identity(mut self, identity: DeviceIdentity) -> Self {
+    pub const fn identified(mut self, identity: DeviceIdentity) -> Self {
         self.identity = Some(identity);
         self
     }
 
     /// Returns `self` with the Product Instance Id the device declared.
     #[must_use]
-    pub const fn with_instance_id(mut self, id: ProductInstanceId) -> Self {
+    pub const fn instanced(mut self, id: ProductInstanceId) -> Self {
         self.instance_id = Some(id);
         self
     }

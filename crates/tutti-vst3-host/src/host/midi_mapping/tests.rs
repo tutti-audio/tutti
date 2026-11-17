@@ -368,9 +368,9 @@ fn cc_route_reserves_only_while_mapped() {
 /// block; the scratch was reserved at activation.
 #[test]
 fn a_following_route_uses_the_published_mapping() {
-    use tutti_rt::ArcLend;
+    use tutti_rt::Publisher;
 
-    let cell = std::sync::Arc::new(ArcLend::new(MidiCcCell(MidiCcMapping::empty())));
+    let cell = Publisher::new(MidiCcCell(MidiCcMapping::empty()));
     let mut route = CcRoute::following(cell.reader(), true, 4, 4);
     let events = [(
         at(3),

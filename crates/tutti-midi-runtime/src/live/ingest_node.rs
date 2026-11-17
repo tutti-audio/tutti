@@ -71,7 +71,6 @@
 //!
 //! Its fork is silent: an offline render reads no wire.
 
-use std::sync::Arc;
 use tutti_graph::{Losses, UmpAt};
 
 use tutti_graph::{
@@ -80,7 +79,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
-use tutti_rt::{ArcLend, Counter, CounterWriter, Reader, counter};
+use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
 
@@ -260,9 +259,11 @@ pub struct MidiIngestNode {
     ports: MidiInputPorts,
     /// The MPE mode in force.
     mpe_mode: MpeMode,
-    /// What a host asked for, read once per block. The reader owns its cell
-    /// (`Reader::cell`), which the controls publish to.
+    /// What a host asked for, read once per block.
     mpe_request: Reader<Requests>,
+    /// The cell `mpe_request` reads, which the controls publish to; the node
+    /// never touches it.
+    mpe_request_cell: Publisher<Requests>,
     /// The Profile zones in force on the device's Groups: what the requests
     /// last read set.
     profiles: GroupProfiles,
@@ -425,10 +426,11 @@ impl MidiIngestNode {
     /// A node with its one event input, with MPE ingestion off.
     #[must_use]
     pub fn new() -> Self {
-        let cell = Arc::new(ArcLend::new(Requests::new()));
+        let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
         Self {
             mpe_request: cell.reader(),
+            mpe_request_cell: cell,
             device: Device::new(MpeMode::Disabled),
             profiles: NO_PROFILES,
             profiles_generation: 0,
@@ -504,8 +506,8 @@ impl MidiIngestNode {
 #[derive(Clone, Debug)]
 pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
-    /// `ArcLend::current`.
-    request: Arc<ArcLend<Requests>>,
+    /// `Publisher::current`.
+    request: Publisher<Requests>,
     dropped: Counter<Losses>,
 }
 
@@ -814,7 +816,7 @@ impl IntoNode for MidiIngestNode {
     fn into_parts(self) -> NodeParts<MidiIngestControls> {
         let fork = SilentInput { ports: self.ports };
         let controls = MidiIngestControls {
-            request: Arc::clone(self.mpe_request.cell()),
+            request: self.mpe_request_cell.clone(),
             dropped: self.dropped_reader.clone(),
         };
         NodeParts {

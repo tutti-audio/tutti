@@ -15,6 +15,8 @@ mod file_in;
 mod placement;
 #[cfg(decode)]
 mod read;
+#[cfg(decode)]
+mod riff_guard;
 
 pub use extensions::{can_decode, decodable_extensions};
 #[cfg(decode)]

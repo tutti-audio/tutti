@@ -2,6 +2,7 @@ use super::*;
 use crate::ClockSends;
 use tutti_graph::contract::Direct;
 use tutti_graph::{EventKind, TransportPosition};
+use tutti_rt::Publisher;
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{Message, System};
 
@@ -9,7 +10,7 @@ const BLOCK: usize = 64;
 
 /// A clock node sending the Beat Clock, driven block by block.
 fn rig() -> Direct<ClockNode> {
-    let meter = Arc::new(ArcLend::new(MeterMap::default())).reader();
+    let meter = Publisher::new(MeterMap::default()).reader();
     let node = ClockNode::new(MidiGroup::FIRST, SampleRate::SR_48K, meter);
     node.controls.set_sends(ClockSends {
         timing: true,
