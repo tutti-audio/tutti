@@ -23,7 +23,8 @@
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
@@ -198,11 +199,7 @@ impl HarmonyControls {
     /// beat order) change nothing. Control thread.
     pub fn set(&self, changes: impl IntoIterator<Item = TimedHarmony>) {
         let next = lanes(0, changes);
-        let _serial = self
-            .shared
-            .publish
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _serial = self.shared.publish.lock_recover();
         let current = self.shared.current();
         if current.changes == next.changes {
             return;

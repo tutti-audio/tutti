@@ -20,7 +20,8 @@
 //! input does, so its events are stamped on the same clock and reach the graph
 //! through the same inlets.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
+use tutti_rt::LockExt;
 
 use tutti_midi_device::{EndpointName, FunctionBlock};
 use tutti_midi_protocol::{Narrower, Translator, narrow_message};
@@ -192,7 +193,7 @@ impl VirtualSource {
                 };
                 // The packets go in order under the lock: the narrower assumes
                 // that what it emitted was sent before the next message.
-                let mut narrower = narrower.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut narrower = narrower.lock_recover();
                 let mut sent = Ok(());
                 let count = narrow_voice(&mut narrower, message, |packet| {
                     if sent.is_ok() {
@@ -213,10 +214,7 @@ impl VirtualSource {
                 return sent;
             }
             Conversion::Widen(translator) => {
-                let widened = translator
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .translate(ump);
+                let widened = translator.lock_recover().translate(ump);
                 match widened {
                     Some(ump) => ump,
                     None => return Ok(()),

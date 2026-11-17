@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tutti_graph::{Losses, UmpAt};
+use tutti_rt::LockExt;
 
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{
@@ -108,7 +109,7 @@ struct Inbox {
 
 impl Queue {
     fn inbox(&self) -> MutexGuard<'_, Inbox> {
-        self.inbox.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inbox.lock_recover()
     }
 
     fn push(&self, event: DeviceEvent) {
@@ -124,7 +125,7 @@ impl Queue {
 
 impl Shared {
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_recover()
     }
 }
 
