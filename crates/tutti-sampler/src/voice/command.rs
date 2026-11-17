@@ -22,7 +22,7 @@ use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
 use tutti_codec::Wave;
 use tutti_graph::ParamSet;
-use tutti_rt::{ArcLend, LockExt, PushError, RingReader, RingWriter};
+use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
 use tutti_types::{
     Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
     StretchFactor,
@@ -438,7 +438,7 @@ pub struct VoiceNodeHandle {
 ///
 /// The handle publishes (control thread); the node lends the cell once per
 /// block, and applies what differs from what it last applied; the fork
-/// source reads [`ArcLend::current`] when a fork is taken, so a clip moved
+/// source reads [`Publisher::current`] when a fork is taken, so a clip moved
 /// after the insert exports where it was moved to.
 ///
 /// Latest-wins loses nothing a queue would have delivered: applying each
@@ -455,7 +455,7 @@ pub(crate) struct Steering {
     pub(crate) stopped: bool,
 }
 
-pub(crate) type SteeringCell = Arc<ArcLend<Steering>>;
+pub(crate) type SteeringCell = Publisher<Steering>;
 
 impl VoiceNodeHandle {
     pub(crate) fn new(

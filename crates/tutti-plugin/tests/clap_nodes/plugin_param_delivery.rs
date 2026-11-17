@@ -18,6 +18,7 @@
 use crate::clap_probe;
 use crate::param_probe;
 use crate::param_reads::ParamReads as _;
+use tutti_buffers::{Planes, PlanesMut};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +31,7 @@ use tutti_graph::{ForkMode, ForkTarget, Prepare, TransportPosition};
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::ParamId;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -320,7 +321,12 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let mut out = vec![vec![0.0f32; FORK_BLOCK]; live.outputs()];
     for _ in 0..8 {
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-        timeline.render_graph(&mut fork_exec, FORK_BLOCK, &inputs, &mut outs);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::new(&inputs).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
     }
     assert!(
         near(&out, -15.0),

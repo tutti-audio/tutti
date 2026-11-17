@@ -27,6 +27,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// # Examples
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_types::{Hz, Q, UnitParam};
 /// use tutti_graph::{Prepare, Solo};
@@ -35,7 +36,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(0.707));
 /// let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-/// let out = solo.render_input(&[&[1.0; 64]]);
+/// let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
 /// // Move the cutoff on the running node; it glides over the next block.

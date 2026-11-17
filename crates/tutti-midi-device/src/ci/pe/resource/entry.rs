@@ -64,22 +64,10 @@ pub struct ResourceEntry {
 }
 
 impl ResourceEntry {
-    /// An entry for `resource` with every default.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::ListsItself`] for `ResourceList`, and
-    /// [`EntryError::SchemaWithoutTitle`] for a manufacturer-specific Resource,
-    /// which has no schema here: make it with [`custom`](Self::custom).
-    pub fn new(resource: PeResource) -> Result<Self, EntryError> {
-        match &resource {
-            PeResource::ResourceList => return Err(EntryError::ListsItself),
-            PeResource::Custom(c) => {
-                return Err(EntryError::SchemaWithoutTitle(c.as_str().to_owned()));
-            }
-            _ => {}
-        }
-        Ok(Self::bare(resource))
+    /// A builder of the entry for `resource`, every property its default.
+    #[must_use]
+    pub fn builder(resource: PeResource) -> ResourceEntryBuilder {
+        ResourceEntryBuilder(Self::bare(resource))
     }
 
     fn bare(resource: PeResource) -> Self {
@@ -101,15 +89,11 @@ impl ResourceEntry {
         }
     }
 
-    /// An entry for a manufacturer-specific Resource, which gives a JSON
-    /// Schema (M2-103 §14.4).
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::SchemaWithoutTitle`] unless `schema` is an object with a
-    /// `title` string.
-    pub fn custom(resource: PeResource, schema: PeJson) -> Result<Self, EntryError> {
-        Self::bare(resource).with_schema(schema)
+    /// The entry with `canSubscribe` false: what a store of a device with no way
+    /// to tell its subscribers declares.
+    pub(super) fn not_subscribable(mut self) -> Self {
+        self.can_subscribe = false;
+        self
     }
 
     /// The Resource.
@@ -193,193 +177,6 @@ impl ResourceEntry {
         &self.extensions
     }
 
-    /// Takes the manufacturer-specific properties.
-    #[must_use]
-    pub fn with_extensions(mut self, extensions: PeExtensions) -> Self {
-        self.extensions = extensions;
-        self
-    }
-
-    fn refuse_override(&self, property: &'static str) -> EntryError {
-        EntryError::NotOverridable {
-            resource: self.resource.as_str().to_owned(),
-            property,
-        }
-    }
-
-    /// Declares `canGet`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotOverridable`] for a value other than the default of a
-    /// Resource a specification defines.
-    pub fn with_can_get(mut self, can_get: bool) -> Result<Self, EntryError> {
-        if !self.resource.is_overridable() && can_get != self.resource.defaults().can_get {
-            return Err(self.refuse_override("canGet"));
-        }
-        self.can_get = can_get;
-        self.checked()
-    }
-
-    /// Declares `canSet`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotOverridable`] as for [`with_can_get`](Self::with_can_get).
-    pub fn with_can_set(mut self, can_set: CanSet) -> Result<Self, EntryError> {
-        if !self.resource.is_overridable() && can_set != self.resource.defaults().can_set {
-            return Err(self.refuse_override("canSet"));
-        }
-        self.can_set = can_set;
-        self.checked()
-    }
-
-    /// Declares `requireResId`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotOverridable`] as for [`with_can_get`](Self::with_can_get).
-    pub fn with_require_res_id(mut self, require: bool) -> Result<Self, EntryError> {
-        if !self.resource.is_overridable() && require != self.resource.defaults().require_res_id {
-            return Err(self.refuse_override("requireResId"));
-        }
-        self.require_res_id = require;
-        Ok(self)
-    }
-
-    /// Declares `canPaginate`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotOverridable`] as for [`with_can_get`](Self::with_can_get), and
-    /// [`EntryError::NotAList`] for a Resource that is no List Resource.
-    pub fn with_can_paginate(mut self, paginate: bool) -> Result<Self, EntryError> {
-        if !self.resource.is_overridable() && paginate != self.resource.defaults().can_paginate {
-            return Err(self.refuse_override("canPaginate"));
-        }
-        if paginate && !self.resource.is_list() {
-            return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
-        }
-        self.can_paginate = paginate;
-        Ok(self)
-    }
-
-    /// Declares `canSubscribe`.
-    #[must_use]
-    pub fn with_can_subscribe(mut self, subscribe: bool) -> Self {
-        self.can_subscribe = subscribe;
-        self
-    }
-
-    /// Declares `fcOnGet`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::FlowControlWithoutTransaction`] when the Resource cannot be got.
-    pub fn with_fc_on_get(mut self, flow: bool) -> Result<Self, EntryError> {
-        self.fc_on_get = flow;
-        self.checked()
-    }
-
-    /// Declares `fcOnSet`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::FlowControlWithoutTransaction`] when the Resource cannot be set.
-    pub fn with_fc_on_set(mut self, flow: bool) -> Result<Self, EntryError> {
-        self.fc_on_set = flow;
-        self.checked()
-    }
-
-    /// Declares `encodings`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::Empty`] for none and [`EntryError::Duplicate`] for one twice.
-    pub fn with_encodings(mut self, encodings: Vec<PeEncoding>) -> Result<Self, EntryError> {
-        if encodings.is_empty() {
-            return Err(EntryError::Empty("encodings"));
-        }
-        if let Some(twice) = encodings
-            .iter()
-            .enumerate()
-            .find(|(at, e)| encodings[..*at].contains(e))
-        {
-            return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
-        }
-        self.encodings = Some(encodings);
-        Ok(self)
-    }
-
-    /// Declares `mediaTypes`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::Empty`] for none and [`EntryError::Duplicate`] for one twice.
-    pub fn with_media_types(mut self, media_types: Vec<MediaType>) -> Result<Self, EntryError> {
-        if media_types.is_empty() {
-            return Err(EntryError::Empty("media types"));
-        }
-        if let Some(twice) = media_types
-            .iter()
-            .enumerate()
-            .find(|(at, m)| media_types[..*at].contains(m))
-        {
-            return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
-        }
-        self.media_types = Some(media_types);
-        Ok(self)
-    }
-
-    /// Declares `columns`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotAList`] for a Resource that is no List Resource.
-    pub fn with_columns(mut self, columns: Vec<PeColumn>) -> Result<Self, EntryError> {
-        if !columns.is_empty() && !self.resource.is_list() {
-            return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
-        }
-        self.columns = columns;
-        Ok(self)
-    }
-
-    /// Declares `schema`.
-    ///
-    /// # Errors
-    ///
-    /// [`EntryError::NotOverridable`] for a Resource a specification defines,
-    /// whose schema is the specification's, and [`EntryError::SchemaWithoutTitle`]
-    /// unless the schema is an object with a `title` string.
-    pub fn with_schema(mut self, schema: PeJson) -> Result<Self, EntryError> {
-        if !self.resource.is_overridable() {
-            return Err(self.refuse_override("schema"));
-        }
-        let titled = schema
-            .as_object()
-            .and_then(|o| o.get("title"))
-            .and_then(PeJson::as_str)
-            .is_some();
-        if !titled {
-            return Err(EntryError::SchemaWithoutTitle(
-                self.resource.as_str().to_owned(),
-            ));
-        }
-        self.schema = Some(schema);
-        Ok(self)
-    }
-
-    fn checked(self) -> Result<Self, EntryError> {
-        let flow_without =
-            (self.fc_on_get && !self.can_get) || (self.fc_on_set && self.can_set == CanSet::None);
-        if flow_without {
-            return Err(EntryError::FlowControlWithoutTransaction(
-                self.resource.as_str().to_owned(),
-            ));
-        }
-        Ok(self)
-    }
-
     pub(super) fn to_json(&self) -> PeJson {
         let d = self.resource.defaults();
         let mut o = PeObject::new();
@@ -434,54 +231,30 @@ impl ResourceEntry {
         let resource = ResourceName::new(&name)
             .map(|n| PeResource::from_name(&n))
             .ok_or_else(|| f.fail("resource", PeDataFault::NotValid("resource name")))?;
-        let refused = |f: &Fields<'_>, name: &'static str, e: EntryError| {
-            f.fail(name, PeDataFault::NotValid(entry_what(&e)))
-        };
-        let mut entry = Self::bare(resource);
-        let can_get = flag(&mut f, "canGet", entry.can_get)?;
-        entry = entry
-            .with_can_get(can_get)
-            .map_err(|e| refused(&f, "canGet", e))?;
-        let can_set = f
-            .optional("canSet", "a string", text)?
-            .map(|t| {
-                CanSet::new(t).ok_or_else(|| f.fail("canSet", PeDataFault::NotValid("canSet")))
-            })
-            .transpose()?
-            .unwrap_or(entry.can_set);
-        entry = entry
-            .with_can_set(can_set)
-            .map_err(|e| refused(&f, "canSet", e))?;
-        let fc_get = flag(&mut f, "fcOnGet", false)?;
-        entry = entry
-            .with_fc_on_get(fc_get)
-            .map_err(|e| refused(&f, "fcOnGet", e))?;
-        let fc_set = flag(&mut f, "fcOnSet", false)?;
-        entry = entry
-            .with_fc_on_set(fc_set)
-            .map_err(|e| refused(&f, "fcOnSet", e))?;
-        entry.can_subscribe = flag(&mut f, "canSubscribe", entry.can_subscribe)?;
-        let require = flag(&mut f, "requireResId", entry.require_res_id)?;
-        entry = entry
-            .with_require_res_id(require)
-            .map_err(|e| refused(&f, "requireResId", e))?;
-        let paginate = flag(&mut f, "canPaginate", entry.can_paginate)?;
-        entry = entry
-            .with_can_paginate(paginate)
-            .map_err(|e| refused(&f, "canPaginate", e))?;
-        entry.read_rest(f)
-    }
-
-    fn read_rest(mut self, mut f: Fields<'_>) -> Result<Self, PeDataError> {
+        let defaults = Self::bare(resource.clone());
+        let mut builder = Self::builder(resource)
+            .can_get(flag(&mut f, "canGet", defaults.can_get)?)
+            .can_set(
+                f.optional("canSet", "a string", text)?
+                    .map(|t| {
+                        CanSet::new(t)
+                            .ok_or_else(|| f.fail("canSet", PeDataFault::NotValid("canSet")))
+                    })
+                    .transpose()?
+                    .unwrap_or(defaults.can_set),
+            )
+            .fc_on_get(flag(&mut f, "fcOnGet", false)?)
+            .fc_on_set(flag(&mut f, "fcOnSet", false)?)
+            .can_subscribe(flag(&mut f, "canSubscribe", defaults.can_subscribe)?)
+            .require_res_id(flag(&mut f, "requireResId", defaults.require_res_id)?)
+            .can_paginate(flag(&mut f, "canPaginate", defaults.can_paginate)?);
         let types = list(&mut f, "mediaTypes", |j| {
             j.as_str()
                 .and_then(MediaType::new)
                 .ok_or(PeDataFault::NotValid("media type"))
         })?;
         if !types.is_empty() {
-            self = self
-                .with_media_types(types)
-                .map_err(|e| f.fail("mediaTypes", PeDataFault::NotValid(entry_what(&e))))?;
+            builder = builder.media_types(types);
         }
         let encodings = list(&mut f, "encodings", |j| {
             j.as_str()
@@ -489,25 +262,254 @@ impl ResourceEntry {
                 .ok_or(PeDataFault::NotValid("encoding"))
         })?;
         if !encodings.is_empty() {
-            self = self
-                .with_encodings(encodings)
-                .map_err(|e| f.fail("encodings", PeDataFault::NotValid(entry_what(&e))))?;
+            builder = builder.encodings(encodings);
         }
         if let Some(schema) =
             f.optional("schema", "an object", |j| j.as_object().map(|_| j.clone()))?
         {
-            self = self
-                .with_schema(schema)
-                .map_err(|e| f.fail("schema", PeDataFault::NotValid(entry_what(&e))))?;
+            builder = builder.schema(schema);
         }
         let columns = list(&mut f, "columns", |j| {
             PeColumn::from_json(j).map_err(|e| e.fault)
         })?;
-        self = self
-            .with_columns(columns)
-            .map_err(|e| f.fail("columns", PeDataFault::NotValid(entry_what(&e))))?;
-        self.extensions = f.finish()?;
-        Ok(self)
+        let entry = builder
+            .columns(columns)
+            .build_received()
+            .map_err(|(e, field)| f.fail(field, PeDataFault::NotValid(entry_what(&e))))?;
+        Ok(Self {
+            extensions: f.finish()?,
+            ..entry
+        })
+    }
+}
+
+/// The properties of a [`ResourceEntry`] as a device declares them: each option
+/// takes what the entry says, and [`build`](Self::build) checks them against
+/// the Resource and against each other (M2-103 §14).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResourceEntryBuilder(ResourceEntry);
+
+impl ResourceEntryBuilder {
+    /// Declares `canGet`.
+    #[must_use]
+    pub fn can_get(mut self, can_get: bool) -> Self {
+        self.0.can_get = can_get;
+        self
+    }
+
+    /// Declares `canSet`.
+    #[must_use]
+    pub fn can_set(mut self, can_set: CanSet) -> Self {
+        self.0.can_set = can_set;
+        self
+    }
+
+    /// Declares `canSubscribe`.
+    #[must_use]
+    pub fn can_subscribe(mut self, subscribe: bool) -> Self {
+        self.0.can_subscribe = subscribe;
+        self
+    }
+
+    /// Declares `fcOnGet`.
+    #[must_use]
+    pub fn fc_on_get(mut self, flow: bool) -> Self {
+        self.0.fc_on_get = flow;
+        self
+    }
+
+    /// Declares `fcOnSet`.
+    #[must_use]
+    pub fn fc_on_set(mut self, flow: bool) -> Self {
+        self.0.fc_on_set = flow;
+        self
+    }
+
+    /// Declares `requireResId`.
+    #[must_use]
+    pub fn require_res_id(mut self, require: bool) -> Self {
+        self.0.require_res_id = require;
+        self
+    }
+
+    /// Declares `canPaginate`.
+    #[must_use]
+    pub fn can_paginate(mut self, paginate: bool) -> Self {
+        self.0.can_paginate = paginate;
+        self
+    }
+
+    /// Declares `mediaTypes`.
+    #[must_use]
+    pub fn media_types(mut self, media_types: Vec<MediaType>) -> Self {
+        self.0.media_types = Some(media_types);
+        self
+    }
+
+    /// Declares `encodings`.
+    #[must_use]
+    pub fn encodings(mut self, encodings: Vec<PeEncoding>) -> Self {
+        self.0.encodings = Some(encodings);
+        self
+    }
+
+    /// Declares `schema`.
+    #[must_use]
+    pub fn schema(mut self, schema: PeJson) -> Self {
+        self.0.schema = Some(schema);
+        self
+    }
+
+    /// Declares `columns`.
+    #[must_use]
+    pub fn columns(mut self, columns: Vec<PeColumn>) -> Self {
+        self.0.columns = columns;
+        self
+    }
+
+    /// Takes the manufacturer-specific properties.
+    #[must_use]
+    pub fn extensions(mut self, extensions: PeExtensions) -> Self {
+        self.0.extensions = extensions;
+        self
+    }
+
+    /// The entry the options declare.
+    ///
+    /// # Errors
+    ///
+    /// The [`EntryError`] that names what the Resource or the other properties
+    /// refuse: [`EntryError::ListsItself`] for `ResourceList`;
+    /// [`EntryError::NotOverridable`] for a value other than the default of a
+    /// Resource a specification defines, and for a schema of one;
+    /// [`EntryError::SchemaWithoutTitle`] unless a manufacturer-specific
+    /// Resource gives a schema that is an object with a `title` string;
+    /// [`EntryError::NotAList`] for pagination or Columns of a Resource that is
+    /// no List Resource; [`EntryError::FlowControlWithoutTransaction`] for Flow
+    /// Control on a transaction the Resource does not take;
+    /// [`EntryError::Empty`] for no encoding or no media type, and
+    /// [`EntryError::Duplicate`] for one twice.
+    pub fn build(self) -> Result<ResourceEntry, EntryError> {
+        let entry = self.0;
+        if entry.resource == PeResource::ResourceList {
+            return Err(EntryError::ListsItself);
+        }
+        if entry.schema.is_none() && matches!(entry.resource, PeResource::Custom(_)) {
+            return Err(EntryError::SchemaWithoutTitle(
+                entry.resource.as_str().to_owned(),
+            ));
+        }
+        entry.checked()?;
+        Ok(entry)
+    }
+
+    /// As [`build`](Self::build), for an entry a peer sent: a manufacturer-specific
+    /// Resource without a schema is taken as it is, and a refusal names the
+    /// property it is of.
+    pub(super) fn build_received(self) -> Result<ResourceEntry, (EntryError, &'static str)> {
+        match self.0.checked() {
+            Ok(()) => Ok(self.0),
+            Err(error) => {
+                let field = self.0.field_of(&error);
+                Err((error, field))
+            }
+        }
+    }
+}
+
+impl ResourceEntry {
+    fn refuse_override(&self, property: &'static str) -> EntryError {
+        EntryError::NotOverridable {
+            resource: self.resource.as_str().to_owned(),
+            property,
+        }
+    }
+
+    /// The property of the entry that `error` refuses.
+    fn field_of(&self, error: &EntryError) -> &'static str {
+        match error {
+            EntryError::ListsItself => "resource",
+            EntryError::NotOverridable { property, .. } => property,
+            EntryError::NotAList(_) if self.can_paginate => "canPaginate",
+            EntryError::NotAList(_) => "columns",
+            EntryError::SchemaWithoutTitle(_) => "schema",
+            EntryError::FlowControlWithoutTransaction(_) if self.fc_on_get && !self.can_get => {
+                "fcOnGet"
+            }
+            EntryError::FlowControlWithoutTransaction(_) => "fcOnSet",
+            EntryError::Empty("encodings") => "encodings",
+            EntryError::Empty(_) => "mediaTypes",
+            EntryError::Duplicate(twice)
+                if self
+                    .encodings
+                    .as_ref()
+                    .is_some_and(|e| e.iter().any(|e| e.as_str() == twice)) =>
+            {
+                "encodings"
+            }
+            EntryError::Duplicate(_) => "mediaTypes",
+        }
+    }
+
+    fn checked(&self) -> Result<(), EntryError> {
+        let d = self.resource.defaults();
+        if !self.resource.is_overridable() {
+            let differs = [
+                ("canGet", self.can_get != d.can_get),
+                ("canSet", self.can_set != d.can_set),
+                ("requireResId", self.require_res_id != d.require_res_id),
+                ("canPaginate", self.can_paginate != d.can_paginate),
+                ("schema", self.schema.is_some()),
+            ];
+            if let Some((property, _)) = differs.into_iter().find(|(_, differs)| *differs) {
+                return Err(self.refuse_override(property));
+            }
+        }
+        if (self.can_paginate || !self.columns.is_empty()) && !self.resource.is_list() {
+            return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
+        }
+        if let Some(schema) = &self.schema {
+            let titled = schema
+                .as_object()
+                .and_then(|o| o.get("title"))
+                .and_then(PeJson::as_str)
+                .is_some();
+            if !titled {
+                return Err(EntryError::SchemaWithoutTitle(
+                    self.resource.as_str().to_owned(),
+                ));
+            }
+        }
+        if (self.fc_on_get && !self.can_get) || (self.fc_on_set && self.can_set == CanSet::None) {
+            return Err(EntryError::FlowControlWithoutTransaction(
+                self.resource.as_str().to_owned(),
+            ));
+        }
+        if let Some(encodings) = &self.encodings {
+            if encodings.is_empty() {
+                return Err(EntryError::Empty("encodings"));
+            }
+            if let Some(twice) = encodings
+                .iter()
+                .enumerate()
+                .find(|(at, e)| encodings[..*at].contains(e))
+            {
+                return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
+            }
+        }
+        if let Some(media_types) = &self.media_types {
+            if media_types.is_empty() {
+                return Err(EntryError::Empty("media types"));
+            }
+            if let Some(twice) = media_types
+                .iter()
+                .enumerate()
+                .find(|(at, m)| media_types[..*at].contains(m))
+            {
+                return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
+            }
+        }
+        Ok(())
     }
 }
 

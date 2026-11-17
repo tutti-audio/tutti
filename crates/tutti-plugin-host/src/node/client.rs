@@ -18,13 +18,13 @@
 //! `assert_no_alloc` test in `tests/`).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginTail, ProcessContext,
     ProcessOutput, Processor, process_block, sanitize,
 };
-use tutti_rt::Rt;
+use tutti_rt::{Rt, Tally, TallyWriter, tally};
 
 use arrayvec::ArrayVec;
 use parking_lot::Mutex;
@@ -126,10 +126,14 @@ pub struct InProcClient<F: Loaded> {
     pub(super) pending_sample_rate: Arc<ParkedSampleRate>,
     /// Blocks rendered silent because the realtime end held no Processor.
     /// Shared with the loader's handle side.
-    pub(super) unlent: Arc<AtomicU64>,
+    pub(super) unlent: Tally<u64>,
+    /// The audio thread's writer of `unlent`, minted in `new`.
+    pub(super) unlent_writer: TallyWriter<u64>,
     /// Blocks rendered silent because the Processor failed them
     /// ([`Processor::process`] returned an error).
-    pub(super) failed: Arc<AtomicU64>,
+    pub(super) failed: Tally<u64>,
+    /// The audio thread's writer of `failed`, minted in `new`.
+    pub(super) failed_writer: TallyWriter<u64>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -326,7 +330,7 @@ pub(super) enum RateDelivery {
 /// the cell `audioMasterGetTime` reads), then calls the plugin.
 ///
 /// A clone shares the meter slot and reads it through a reader of its own
-/// (`Reader::clone` registers one on the same cell), and carries the counter
+/// (`Publisher::reader` registers one on the same cell), and carries the counter
 /// and the last snapshot as they stand. Only a test clones a feed.
 #[derive(Clone, Debug)]
 pub(super) struct TransportFeed {
@@ -502,7 +506,7 @@ impl<F: Loaded> InProcClient<F> {
         features: Features,
         sample_rate: SampleRate,
         pending_sample_rate: Arc<ParkedSampleRate>,
-        unlent: Arc<AtomicU64>,
+        unlent: Tally<u64>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
         controls: Option<PluginControls>,
@@ -535,6 +539,7 @@ impl<F: Loaded> InProcClient<F> {
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
         let lost = inner.lock().lost_flag();
+        let failed = tally();
         Self {
             inner,
             rt,
@@ -553,8 +558,10 @@ impl<F: Loaded> InProcClient<F> {
             features,
             sample_rate,
             pending_sample_rate,
+            unlent_writer: unlent.writer(),
             unlent,
-            failed: Arc::default(),
+            failed_writer: failed.writer(),
+            failed,
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
@@ -627,7 +634,7 @@ impl<F: Loaded> InProcClient<F> {
     ///
     /// Intended for diagnostics.
     pub fn unlent_blocks(&self) -> u64 {
-        self.unlent.load(Ordering::Relaxed)
+        self.unlent.get()
     }
 
     /// Returns how many blocks the node rendered silent because the plugin
@@ -636,7 +643,7 @@ impl<F: Loaded> InProcClient<F> {
     ///
     /// Intended for diagnostics.
     pub fn failed_blocks(&self) -> u64 {
-        self.failed.load(Ordering::Relaxed)
+        self.failed.get()
     }
 }
 
@@ -823,7 +830,7 @@ pub(super) struct Inputs<'a> {
 /// the silence.
 pub(super) fn render_with<P: Processor>(
     processor: Option<&mut P>,
-    counters: (&AtomicU64, &AtomicU64),
+    counters: (&TallyWriter<u64>, &TallyWriter<u64>),
     params: &ParamDelivery,
     midi: &mut MidiEventVec,
     out: &mut ProcessOutput,
@@ -848,7 +855,7 @@ pub(super) fn render_with<P: Processor>(
         .map(|e| (Offset::clamped(e.offset, block), e.ump))
         .collect();
     let Some(processor) = processor else {
-        unlent.fetch_add(1, Ordering::Relaxed);
+        unlent.add(1);
         return Rendered::Unlent;
     };
     out.clear();
@@ -867,7 +874,7 @@ pub(super) fn render_with<P: Processor>(
             Rendered::Ran
         }
         Err(_) => {
-            failed.fetch_add(1, Ordering::Relaxed);
+            failed.add(1);
             Rendered::Failed
         }
     }
@@ -1157,7 +1164,7 @@ mod render_tests {
     /// their quiet values.
     fn block(
         rt: &mut Rt<Scripted>,
-        counters: &(AtomicU64, AtomicU64),
+        counters: &(TallyWriter<u64>, TallyWriter<u64>),
         out: &mut ProcessOutput,
     ) -> Rendered {
         let params = ParamDelivery::closed([], Arc::default());
@@ -1187,12 +1194,13 @@ mod render_tests {
     /// block runs.
     #[test]
     fn a_failed_block_is_counted_apart_from_an_unlent_one() {
-        let counters = (AtomicU64::new(0), AtomicU64::new(0));
+        let (unlent, failed) = (tally(), tally());
+        let counters = (unlent.writer(), failed.writer());
         let mut out = ProcessOutput::default();
         let (mut hand, mut rt) = tutti_rt::handoff();
         assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Unlent);
-        assert_eq!(counters.0.load(Ordering::Relaxed), 1, "unlent");
-        assert_eq!(counters.1.load(Ordering::Relaxed), 0, "failed");
+        assert_eq!(unlent.get(), 1, "unlent");
+        assert_eq!(failed.get(), 0, "failed");
 
         assert!(
             hand.lend(Scripted {
@@ -1202,12 +1210,12 @@ mod render_tests {
             .is_ok()
         );
         assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Failed);
-        assert_eq!(counters.0.load(Ordering::Relaxed), 1, "unlent");
-        assert_eq!(counters.1.load(Ordering::Relaxed), 1, "failed");
+        assert_eq!(unlent.get(), 1, "unlent");
+        assert_eq!(failed.get(), 1, "failed");
 
         rt.held().expect("still in hand").fail = false;
         assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Ran);
-        assert_eq!(counters.1.load(Ordering::Relaxed), 1, "failed, once");
+        assert_eq!(failed.get(), 1, "failed, once");
     }
 
     /// **The plugin's MIDI out is what it emitted in this block**: the block
@@ -1215,7 +1223,8 @@ mod render_tests {
     /// head of every block.
     #[test]
     fn a_blocks_midi_out_is_what_the_plugin_emitted_in_it() {
-        let counters = (AtomicU64::new(0), AtomicU64::new(0));
+        let (unlent, failed) = (tally(), tally());
+        let counters = (unlent.writer(), failed.writer());
         let mut out = ProcessOutput::default();
         let (mut hand, mut rt) = tutti_rt::handoff();
         assert!(
@@ -1264,7 +1273,8 @@ mod sanitize_tests {
     /// before a block leaves its process.
     #[test]
     fn an_in_process_plugins_non_finite_output_is_zeroed_and_finite_output_kept() {
-        let counters = (AtomicU64::new(0), AtomicU64::new(0));
+        let (unlent, failed) = (tally(), tally());
+        let counters = (unlent.writer(), failed.writer());
         let params = ParamDelivery::closed([], Arc::default());
         let mut midi = MidiEventVec::new();
         let mut out = ProcessOutput::default();

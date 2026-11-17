@@ -382,7 +382,7 @@ fn a_reader_dropped_is_reaped_and_its_cells_freed_off_the_audio_thread() {
 /// panic, as for a unit.
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "a meter reader dropped on the audio thread")]
+#[should_panic(expected = "MeterReader dropped on the audio thread")]
 fn a_reader_dropped_on_the_audio_thread_panics() {
     let mut r = rig(1, false);
     let m =

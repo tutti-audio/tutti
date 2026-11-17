@@ -8,8 +8,8 @@
 //! (`Graph::taps().open_event`) for a hardware pump to drain.
 //!
 //! The node owns the [`ClockMaster`]; its controls are the
-//! [`ClockControls`] of that master, through which a control thread enables
-//! it and picks MTC. `prepare` gives the master the graph's rate.
+//! [`ClockControls`] of that master, through which a control thread chooses what it sends
+//! ([`ClockSends`](super::ClockSends)). `prepare` gives the master the graph's rate.
 //!
 //! Its fork sends nothing: an offline render drives no external gear.
 
@@ -19,8 +19,9 @@ use tutti_graph::{
     Cx, Event, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset,
     Prepare, Shape, Status,
 };
-use tutti_rt::RtVec;
-use tutti_types::SampleRate;
+
+use tutti_rt::{Publisher, Reader, RtVec};
+use tutti_types::{MeterMap, SampleRate};
 use tutti_ump::MidiGroup;
 
 use super::clock_master::{ClockControls, ClockMaster};
@@ -49,10 +50,12 @@ pub const CLOCK_EVENT_CAPACITY: usize = 256;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_midi_runtime::ClockNode;
 /// use tutti_ump::MidiGroup;
+/// use tutti_rt::Publisher;
+/// use tutti_types::MeterMap;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-/// let clock = editor.insert(NodeKey(1), "clock", ClockNode::new(MidiGroup::FIRST, SampleRate::SR_48K)).controls;
-/// clock.set_enabled(true);
+/// let clock = editor.insert(NodeKey(1), "clock", ClockNode::new(MidiGroup::FIRST, SampleRate::SR_48K, Publisher::new(MeterMap::default()).reader())).controls;
+/// clock.set_sends(tutti_midi_runtime::ClockSends { timing: true, ..Default::default() });
 /// ```
 #[derive(Debug)]
 pub struct ClockNode {
@@ -66,10 +69,13 @@ pub struct ClockNode {
 
 impl ClockNode {
     /// A node with a disabled master that sends its clock on `group`, placing
-    /// events at `sample_rate` until `prepare` gives it the graph's.
+    /// events at `sample_rate` until `prepare` gives it the graph's, and
+    /// stating the meter `meter` reads (a reader of the project meter,
+    /// registered on the control side) when
+    /// [`ClockSends::flex`](super::ClockSends::flex) is on.
     #[must_use]
-    pub fn new(group: MidiGroup, sample_rate: SampleRate) -> Self {
-        let (master, controls) = ClockMaster::new(group, sample_rate);
+    pub fn new(group: MidiGroup, sample_rate: SampleRate, meter: Reader<MeterMap>) -> Self {
+        let (master, controls) = ClockMaster::new(group, sample_rate, meter);
         Self {
             master,
             controls,
@@ -135,9 +141,12 @@ struct SilentClock {
 
 impl ForkSource for SilentClock {
     fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+        // Silent, so the meter it reads is never stated: a constant one.
+        let meter = Publisher::new(MeterMap::default()).reader();
         Ok(Forked::new(Box::new(ClockNode::new(
             self.group,
             self.sample_rate,
+            meter,
         ))))
     }
 }

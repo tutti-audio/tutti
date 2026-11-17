@@ -182,6 +182,9 @@ constexpr const char* kXml =
 
 // The unit `aux` is in (core.rs, AUX_UNIT): the innermost of Voices > Oscillator > Filter.
 constexpr UnitID kAuxUnit = 3;
+// The unit that selects the program list (core.rs, PROGRAM_UNIT), and the list's id (PROGRAM_LIST).
+constexpr UnitID kProgramUnit = 1;
+constexpr ProgramListID kProgramList = 1;
 
 class SharedController : public EditControllerEx1,
                          public IMidiMapping,
@@ -309,7 +312,9 @@ public:
 		mainThread = std::this_thread::get_id ();
 		// A unit tree three levels deep under the implicit root; `aux` is in the innermost unit, the
 		// others in the root.
-		addUnit (new Unit (STR16 ("Voices"), 1, kRootUnitId));
+		// The unit `Voices` selects the program list `Factory` (core.rs, PROGRAM_LIST), whose three programs
+		// are chosen by the parameter `program` below.
+		addUnit (new Unit (STR16 ("Voices"), kProgramUnit, kRootUnitId, kProgramList));
 		addUnit (new Unit (STR16 ("Oscillator"), 2, 1));
 		addUnit (new Unit (STR16 ("Filter"), 3, 2));
 		parameters.addParameter (STR16 ("level"), nullptr, 0, 0.5, ParameterInfo::kCanAutomate, shared::kLevel);
@@ -319,6 +324,16 @@ public:
 		parameters.addParameter (STR16 ("meter"), nullptr, 0, 0.0, ParameterInfo::kIsReadOnly, shared::kMeter);
 		// The bypass switch (core.rs, BYPASS): two positions, flagged as the plugin's own bypass.
 		parameters.addParameter (STR16 ("bypass"), nullptr, 1, 0.0, ParameterInfo::kCanAutomate | ParameterInfo::kIsBypass, shared::kBypass);
+		// The program list and its program-change parameter (core.rs, PROGRAM, PROGRAM_UNIT). The SDK's own
+		// `ProgramList::getParameter` would take the list's id as the parameter's, which `aux` has.
+		auto* factory = new ProgramList (STR16 ("Factory"), kProgramList, kProgramUnit);
+		factory->addProgram (STR16 ("Init"));
+		factory->addProgram (STR16 ("Pad"));
+		factory->addProgram (STR16 ("Lead"));
+		addProgramList (factory);
+		parameters.addParameter (STR16 ("program"), nullptr, 2, 0.0,
+		                         ParameterInfo::kCanAutomate | ParameterInfo::kIsList | ParameterInfo::kIsProgramChange,
+		                         shared::kProgram, kProgramUnit);
 		return kResultOk;
 	}
 	// `tone` is the one parameter with a plain domain of its own (core.rs, "Spec").

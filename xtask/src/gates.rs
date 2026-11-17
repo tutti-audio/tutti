@@ -37,6 +37,7 @@ mod prose;
 mod range_types;
 mod ratchet;
 mod session;
+mod session_api;
 mod sf2_spec;
 mod spec_text;
 mod submodule_pins;
@@ -125,6 +126,8 @@ pub(crate) enum Gate {
     Hosting,
     /// `tutti-session` reaches no Bevy crate and re-exports no crate whole.
     Session,
+    /// The session's public API has no `run` or `*_blocking`, and the main-thread proof stays in its rows.
+    SessionApi,
     /// Every workspace member takes the workspace lints, and `missing_debug_implementations` denies.
     Lints,
     /// A fieldless public `Eq` enum is `Hash`.
@@ -171,6 +174,7 @@ impl Gate {
             Gate::Guards => "gate check-guards".to_owned(),
             Gate::Hosting => "gate check-hosting".to_owned(),
             Gate::Session => "gate check-session".to_owned(),
+            Gate::SessionApi => "gate check-session-api".to_owned(),
             Gate::Lints => "gate check-lints".to_owned(),
             Gate::ValueTraits => "gate check-value-traits".to_owned(),
             Gate::DocRefs => "gate check-doc-refs".to_owned(),
@@ -205,6 +209,7 @@ impl Gate {
             Gate::Guards => guards::check(&tree, guards::MIN_SEEN),
             Gate::Hosting => hosting::check(&tree),
             Gate::Session => session::check(&tree, &RealCargo(root.to_path_buf())),
+            Gate::SessionApi => session_api::check(&tree, session_api::MIN_FILES),
             Gate::Lints => lints::check(&tree, lints::UNLINTED),
             Gate::ValueTraits => {
                 value_traits::check(&tree, value_traits::ALLOW, value_traits::MIN_FILES)

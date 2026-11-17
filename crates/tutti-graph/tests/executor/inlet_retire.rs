@@ -102,7 +102,7 @@ impl tutti_graph::IntoNode for DropsInBlock {
 /// the test above would see a drop on the audio thread.
 #[test]
 #[cfg(debug_assertions)]
-#[should_panic(expected = "tap reader")]
+#[should_panic(expected = "TapReader dropped on the audio thread")]
 fn a_reader_dropped_in_a_block_panics() {
     let (reader, _writer) = TapReader::pair(2, Samples(8));
     let (mut ed, mut exec) =

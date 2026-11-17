@@ -1592,8 +1592,8 @@ pub trait Node<F: Float = f32>: Send + 'static {
 /// // Forkable or not? Unsaid, so refused: `Silence: IntoNode` is not satisfied.
 /// editor.insert(NodeKey(1), "silence", Silence);
 /// ```
-pub trait IntoNode {
-    /// What the caller keeps: `Param<U>` handles, `ArcLend` cells, or `()`.
+pub trait IntoNode<F: Float = f32> {
+    /// What the caller keeps: `Param<U>` handles, `Publisher` cells, or `()`.
     type Controls;
 
     /// Splits the value into the unit the executor will own, the handles the caller
@@ -1604,12 +1604,12 @@ pub trait IntoNode {
     /// Required, so an implementor always writes the `fork` field: a type
     /// that wraps another `IntoNode` forwards the inner one's parts rather
     /// than dropping its source by default.
-    fn into_parts(self) -> NodeParts<Self::Controls>;
+    fn into_parts(self) -> NodeParts<Self::Controls, F>;
 
     /// [`into_parts`](Self::into_parts) without the fork source: the unit
     /// and its controls, for a caller that runs the unit outside an editor
     /// (a bench, a fork source building its fork's unit).
-    fn into_node(self) -> (Box<dyn Node>, Self::Controls)
+    fn into_node(self) -> (Box<dyn Node<F>>, Self::Controls)
     where
         Self: Sized,
     {
@@ -1635,16 +1635,16 @@ pub trait IntoNode {
 /// [`IntoNode`], so a caller that had to split a node early (to read its
 /// shape, as [`GraphBuilder`](crate::GraphBuilder) does) can still insert it
 /// with its fork source.
-pub struct NodeParts<C> {
+pub struct NodeParts<C, F: Float = f32> {
     /// The unit the executor will own.
-    pub node: Box<dyn Node>,
+    pub node: Box<dyn Node<F>>,
     /// The handles the caller keeps.
     pub controls: C,
     /// Where a fork of this node comes from; `None` if it cannot be forked.
-    pub fork: Option<Box<dyn ForkSource>>,
+    pub fork: Option<Box<dyn ForkSource<F>>>,
 }
 
-impl<C> std::fmt::Debug for NodeParts<C> {
+impl<C, F: Float> std::fmt::Debug for NodeParts<C, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeParts")
             .field("forkable", &self.fork.is_some())
@@ -1652,10 +1652,10 @@ impl<C> std::fmt::Debug for NodeParts<C> {
     }
 }
 
-impl<C> IntoNode for NodeParts<C> {
+impl<C, F: Float> IntoNode<F> for NodeParts<C, F> {
     type Controls = C;
 
-    fn into_parts(self) -> NodeParts<C> {
+    fn into_parts(self) -> NodeParts<C, F> {
         self
     }
 }

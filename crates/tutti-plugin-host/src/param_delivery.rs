@@ -121,6 +121,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{Normalized, ParamId, ParameterChanges, ParameterQueue};
+use tutti_rt::{Tally, TallyWriter, tally};
 
 /// A slot with no queue in the chunk being filled.
 const NO_QUEUE: u32 = u32::MAX;
@@ -176,20 +177,28 @@ pub struct ParamDeliveryStats {
 /// read anywhere.
 ///
 /// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DeliveryCounters {
     sent: AtomicU64,
     deferred: AtomicU64,
-    dropped: AtomicU64,
+    dropped: Tally<u64>,
+    /// The audio thread's writer of `dropped`, minted with it in `default`.
+    dropped_writer: TallyWriter<u64>,
     merged: AtomicU64,
-    grid_dropped: AtomicU64,
+    grid_dropped: Tally<u64>,
+    /// The audio thread's writer of `grid_dropped`.
+    grid_dropped_writer: TallyWriter<u64>,
     /// MIDI events the node did not deliver (`midi_intake`).
-    pub(super) midi_dropped: AtomicU64,
+    pub(super) midi_dropped: Tally<u64>,
+    /// The audio thread's writer of `midi_dropped`.
+    midi_dropped_writer: TallyWriter<u64>,
     /// Transport changes past the chunk's room (`transport_walk`).
-    transport_dropped: AtomicU64,
+    transport_dropped: Tally<u64>,
+    /// The audio thread's writer of `transport_dropped`.
+    transport_dropped_writer: TallyWriter<u64>,
     /// The bridge thread's count of the MIDI events it did not send, set
     /// once at bind (an out-of-process node only).
-    pub(super) bridge_midi_dropped: OnceLock<Arc<AtomicU64>>,
+    pub(super) bridge_midi_dropped: OnceLock<Tally<u64>>,
     /// Set once, at bind ([`ParamDelivery::new`]).
     record: OnceLock<Arc<DeliveredRecord>>,
 }
@@ -239,6 +248,30 @@ impl DeliveredRecord {
     }
 }
 
+impl Default for DeliveryCounters {
+    fn default() -> Self {
+        let dropped = tally();
+        let grid_dropped = tally();
+        let midi_dropped = tally();
+        let transport_dropped = tally();
+        Self {
+            sent: AtomicU64::default(),
+            deferred: AtomicU64::default(),
+            dropped_writer: dropped.writer(),
+            dropped,
+            merged: AtomicU64::default(),
+            grid_dropped_writer: grid_dropped.writer(),
+            grid_dropped,
+            midi_dropped_writer: midi_dropped.writer(),
+            midi_dropped,
+            transport_dropped_writer: transport_dropped.writer(),
+            transport_dropped,
+            bridge_midi_dropped: OnceLock::new(),
+            record: OnceLock::new(),
+        }
+    }
+}
+
 impl DeliveryCounters {
     /// What the node has delivered so far, per listed parameter: empty
     /// before bind. Control thread: allocates.
@@ -250,9 +283,9 @@ impl DeliveryCounters {
         ParamDeliveryStats {
             points_sent: self.sent.load(Ordering::Relaxed),
             chunks_deferred: self.deferred.load(Ordering::Relaxed),
-            points_dropped: self.dropped.load(Ordering::Relaxed),
+            points_dropped: self.dropped.get(),
             points_merged: self.merged.load(Ordering::Relaxed),
-            grid_points_dropped: self.grid_dropped.load(Ordering::Relaxed),
+            grid_points_dropped: self.grid_dropped.get(),
         }
     }
 }
@@ -610,7 +643,7 @@ impl ParamDelivery {
     /// counted dropped. Allocation-free.
     pub(crate) fn refused(&self, n: u64) {
         if n > 0 {
-            self.counters.dropped.fetch_add(n, Ordering::Relaxed);
+            self.counters.dropped_writer.add(n);
         }
     }
 
@@ -639,7 +672,7 @@ impl ParamDelivery {
     pub(crate) fn knows(&mut self, address: ParamId) -> bool {
         let known = self.slot(address).is_some();
         if !known {
-            self.counters.dropped.fetch_add(1, Ordering::Relaxed);
+            self.counters.dropped_writer.add(1);
         }
         known
     }
@@ -716,7 +749,7 @@ impl ParamDelivery {
 
     fn point_kind(&mut self, address: ParamId, offset: i32, value: f32, grid: bool) -> bool {
         let Some(i) = self.slot(address) else {
-            self.counters.dropped.fetch_add(1, Ordering::Relaxed);
+            self.counters.dropped_writer.add(1);
             return false;
         };
         self.place(i, offset, Normalized::clamped(f64::from(value)).get(), grid);
@@ -738,7 +771,7 @@ impl ParamDelivery {
                     // Impossible by construction: a queue per slot, and the
                     // chunk has room for every slot. Refused rather than
                     // grown.
-                    self.counters.dropped.fetch_add(1, Ordering::Relaxed);
+                    self.counters.dropped_writer.add(1);
                     return;
                 }
                 self.slots[i].queue = queue;
@@ -766,7 +799,7 @@ impl ParamDelivery {
             // Full: at its room, or at its floor with the pool spent. Grid
             // points go first.
             if grid {
-                self.counters.grid_dropped.fetch_add(1, Ordering::Relaxed);
+                self.counters.grid_dropped_writer.add(1);
                 return;
             }
             let len = self.changes.queues[q].points.len();
@@ -774,7 +807,7 @@ impl ParamDelivery {
                 Some(k) => {
                     self.changes.queues[q].points.remove(k);
                     self.grid.remove(q, k, len);
-                    self.counters.grid_dropped.fetch_add(1, Ordering::Relaxed);
+                    self.counters.grid_dropped_writer.add(1);
                 }
                 None => {
                     // A queue of corners: the latest value replaces the
@@ -868,10 +901,11 @@ impl ParamDelivery {
 }
 
 impl DeliveryCounters {
-    /// `n` MIDI events the node did not deliver. RT-safe: one relaxed add.
+    /// `n` MIDI events the node did not deliver. RT-safe: one relaxed add
+    /// through the stored writer.
     pub(crate) fn count_midi_dropped(&self, n: u64) {
         if n > 0 {
-            self.midi_dropped.fetch_add(n, Ordering::Relaxed);
+            self.midi_dropped_writer.add(n);
         }
     }
 
@@ -879,7 +913,7 @@ impl DeliveryCounters {
     /// add.
     pub(crate) fn count_transport_dropped(&self, n: u64) {
         if n > 0 {
-            self.transport_dropped.fetch_add(n, Ordering::Relaxed);
+            self.transport_dropped_writer.add(n);
         }
     }
 
@@ -888,13 +922,13 @@ impl DeliveryCounters {
     /// [`NodeControls::dropped_transport_changes`](super::NodeControls::dropped_transport_changes).
     /// RT-safe: one relaxed load.
     pub fn dropped_transport_changes(&self) -> u64 {
-        self.transport_dropped.load(Ordering::Relaxed)
+        self.transport_dropped.get()
     }
 
     /// Add the bridge thread's count to
     /// [`dropped_midi_in`](Self::dropped_midi_in). Once, at bind;
     /// a second call is ignored.
-    pub fn attach_bridge_midi(&self, cell: std::sync::Arc<std::sync::atomic::AtomicU64>) {
+    pub fn attach_bridge_midi(&self, cell: Tally<u64>) {
         let _ = self.bridge_midi_dropped.set(cell);
     }
 
@@ -903,11 +937,8 @@ impl DeliveryCounters {
     /// [`NodeControls::dropped_midi_in`](super::NodeControls::dropped_midi_in).
     /// RT-safe: two relaxed loads.
     pub fn dropped_midi_in(&self) -> u64 {
-        let bridge = self
-            .bridge_midi_dropped
-            .get()
-            .map_or(0, |c| c.load(Ordering::Relaxed));
-        self.midi_dropped.load(Ordering::Relaxed) + bridge
+        let bridge = self.bridge_midi_dropped.get().map_or(0, Tally::get);
+        self.midi_dropped.get() + bridge
     }
 }
 

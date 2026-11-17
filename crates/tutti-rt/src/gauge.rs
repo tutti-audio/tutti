@@ -50,6 +50,8 @@ pub use tally::{Tally, TallyWriter, tally};
 use sync::{Arc, AtomicBool, AtomicU64, Ordering};
 use tutti_types::Unit;
 
+use crate::ControlDrop;
+
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::Arc;
@@ -390,6 +392,7 @@ impl<U: Reading> Gauge<U> {
     /// ```
     pub fn reopen(&self) -> Option<GaugeWriter<U>> {
         self.cell.reopen().then(|| GaugeWriter {
+            _control: ControlDrop::new(),
             cell: Arc::clone(&self.cell),
             _reading: PhantomData,
         })
@@ -399,6 +402,7 @@ impl<U: Reading> Gauge<U> {
 /// The writing end of a [`Gauge`]. Not `Clone`: one writer.
 #[must_use]
 pub struct GaugeWriter<U: Reading> {
+    _control: ControlDrop<Self>,
     cell: Arc<Shared>,
     _reading: PhantomData<fn(U)>,
 }
@@ -424,6 +428,7 @@ pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
     let cell = Shared::new(initial.to_bits(), 0);
     (
         GaugeWriter {
+            _control: ControlDrop::new(),
             cell: Arc::clone(&cell),
             _reading: PhantomData,
         },
@@ -521,6 +526,7 @@ impl<U: Count> Counter<U> {
     /// ```
     pub fn reopen(&self) -> Option<CounterWriter<U>> {
         self.cell.reopen().then(|| CounterWriter {
+            _control: ControlDrop::new(),
             cell: Arc::clone(&self.cell),
             _count: PhantomData,
         })
@@ -530,6 +536,7 @@ impl<U: Count> Counter<U> {
 /// The writing end of a [`Counter`]. Not `Clone`: one writer.
 #[must_use]
 pub struct CounterWriter<U: Count> {
+    _control: ControlDrop<Self>,
     cell: Arc<Shared>,
     _count: PhantomData<fn(U)>,
 }
@@ -564,6 +571,7 @@ pub fn counter<U: Count>() -> (CounterWriter<U>, Counter<U>) {
     let cell = Shared::new(0, <U::Words as Words>::LEN - 1);
     (
         CounterWriter {
+            _control: ControlDrop::new(),
             cell: Arc::clone(&cell),
             _count: PhantomData,
         },

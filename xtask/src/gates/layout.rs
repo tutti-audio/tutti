@@ -124,7 +124,13 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-transport",
-        &["tutti-types", "tutti-rt", "tutti-graph", "tutti-tempo"],
+        &[
+            "tutti-types",
+            "tutti-buffers",
+            "tutti-rt",
+            "tutti-graph",
+            "tutti-tempo",
+        ],
     ),
     (
         "tutti-plugin-db",
@@ -134,6 +140,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-plugin-ipc",
         &[
             "tutti-types",
+            "tutti-buffers",
             "tutti-rt",
             "tutti-ump",
             "tutti-plugin-types",
@@ -159,6 +166,7 @@ const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-plugin-server",
         &[
+            "tutti-buffers",
             "tutti-plugin-ipc",
             "tutti-plugin-ipc-ffi",
             "tutti-plugin-types",
@@ -171,14 +179,12 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
     // The probe reads one file as a format host would: the hosts, the descriptor
-    // types, the experiment's units, and the catalog's extension table
-    // (`format_from_path`) for a path with no `--as`.
+    // types and the experiment's units.
     // No hosting (`tutti-plugin-ipc`, `tutti-plugin-host`, `tutti-plugin`).
     (
         "tutti-plugin-probe",
         &[
             "tutti-plugin-types",
-            "tutti-plugin-db",
             "tutti-types",
             "tutti-graph",
             "tutti-ump",

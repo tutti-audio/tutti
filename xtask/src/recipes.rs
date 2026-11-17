@@ -54,6 +54,15 @@ pub(crate) enum Step {
     /// `cargo package --no-verify` over every crate under `crates/`, listed
     /// when the step runs.
     Package,
+    /// `fuzz` with no target: the targets, one per line.
+    FuzzList,
+    /// `fuzz <target>` (or every target for `None`) for `secs` seconds each,
+    /// under cargo-fuzz; the targets are the corpus directories, read when the
+    /// step runs.
+    Fuzz {
+        target: Option<String>,
+        secs: u32,
+    },
 }
 
 impl Step {
@@ -82,6 +91,15 @@ impl Step {
             Step::Package => {
                 "cargo package --locked --no-verify -p <each crate under crates/>".to_owned()
             }
+            Step::FuzzList => format!("list the directories of {FUZZ_CORPUS}"),
+            Step::Fuzz {
+                target: Some(t),
+                secs,
+            } => format!("fuzz {t}: {}", fuzz_cmd(t, *secs).display()),
+            Step::Fuzz { target: None, secs } => format!(
+                "fuzz all: {} for each directory of {FUZZ_CORPUS}",
+                fuzz_cmd("<target>", *secs).display()
+            ),
             Step::Release(v) => format!(
                 "release {}: set the workspace version and path pins, write the changelog section",
                 v.display()
@@ -123,6 +141,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "run the suites a workspace run leaves dark (see check-features)",
     ),
     ("miri", "", "miri over tutti-rt (needs nightly + miri)"),
+    (
+        "fuzz",
+        "[<target>|all] [--secs N]",
+        "list the fuzz targets, or run one (or all) under cargo-fuzz for N seconds (default 60; needs cargo-fuzz)",
+    ),
     (
         "loom",
         "[<model>...]",
@@ -249,6 +272,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "check-buffers",
         "",
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt",
+    ),
+    (
+        "check-session-api",
+        "",
+        "tutti-session's public API has no `run` or `*_blocking`, and only the rows of xtask/session-api-allow.txt hold a MainThreadMarker",
     ),
     (
         "check-building",
@@ -419,6 +447,26 @@ const TARGET: &str = "x86_64-pc-windows-msvc";
 /// JSON from the same one.
 const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
 
+/// The fuzz package's corpus directory: one subdirectory of seeds per target.
+pub(crate) const FUZZ_CORPUS: &str = "testing/tutti-fuzz/corpus";
+
+/// Where cargo-fuzz keeps the inputs a run finds, one subdirectory per target;
+/// ignored by git.
+pub(crate) const FUZZ_WORK: &str = "testing/tutti-fuzz/fuzz/corpus";
+
+/// The seconds `fuzz` runs a target for when `--secs` is absent.
+const FUZZ_SECS: u32 = 60;
+
+/// The cargo-fuzz run of `target`: new inputs go to the ignored
+/// `fuzz/corpus/<target>`, the committed seeds are read beside them, and a crash
+/// lands in `fuzz/artifacts/<target>`.
+pub(crate) fn fuzz_cmd(target: &str, secs: u32) -> Cmd {
+    Cmd::sh(&format!(
+        "cargo +{DOCS_NIGHTLY} fuzz run --fuzz-dir testing/tutti-fuzz/fuzz {target} \
+         {FUZZ_WORK}/{target} {FUZZ_CORPUS}/{target} -- -max_total_time={secs}"
+    ))
+}
+
 /// The command that lists `package`'s public API with all its features on, for
 /// the `public-api` and `umbrella-api` recipes.
 pub(crate) fn public_api_cmd(package: &str) -> String {
@@ -502,6 +550,7 @@ impl Planner<'_> {
                 | "coverage"
                 | "public-api"
                 | "umbrella-api"
+                | "fuzz"
         );
         if !takes_args && !args.is_empty() {
             return Err(format!(
@@ -530,6 +579,30 @@ impl Planner<'_> {
             "check-features" => self.lines(CHECK_FEATURES),
             "test-features" => self.lines(TEST_FEATURES),
             "miri" => self.lines(MIRI),
+            "fuzz" => {
+                let (target, rest) = match args.split_first() {
+                    Some((t, rest)) if !t.starts_with("--") => (Some(t.as_str()), rest),
+                    _ => (None, args),
+                };
+                let o = options(name, rest, &["--secs"])?;
+                let secs = match o.get("--secs") {
+                    Some(n) => n
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|n| *n > 0)
+                        .ok_or_else(|| format!("`fuzz`: `--secs` is a positive whole number, got `{n}`"))?,
+                    None => FUZZ_SECS,
+                };
+                match target {
+                    None if o.is_empty() => self.out.push(Step::FuzzList),
+                    None => return Err("`fuzz --secs` needs a target or `all`".into()),
+                    Some(t) if !t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') => {
+                        return Err(format!("`fuzz`: `{t}` is not a target name"));
+                    }
+                    Some("all") => self.out.push(Step::Fuzz { target: None, secs }),
+                    Some(t) => self.out.push(Step::Fuzz { target: Some(t.to_owned()), secs }),
+                }
+            }
             "loom" if args.is_empty() => self.lines(LOOM),
             "loom" => {
                 // The whole name: `--test pos_ring_loom` names no `pos_ring`.
@@ -601,6 +674,7 @@ impl Planner<'_> {
             "check-comments" => self.out.push(Step::Gate(Gate::Comments)),
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
+            "check-session-api" => self.out.push(Step::Gate(Gate::SessionApi)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
@@ -733,6 +807,7 @@ impl Planner<'_> {
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
+                    "check-session-api",
                 ] {
                     self.dep(d)?;
                 }
@@ -897,6 +972,7 @@ const MIRI: &[&str] = &[
 const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=4 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test pos_ring_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test packed_atomic_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test setting_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture"#,
@@ -905,6 +981,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test doorbell_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_word_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test ring_loom"#,

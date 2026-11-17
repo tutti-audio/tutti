@@ -12,6 +12,7 @@ mod by_hand;
 mod chase;
 mod contract;
 mod executor;
+mod f64_render;
 mod inlet_no_alloc;
 mod inlet_retire;
 mod meter;

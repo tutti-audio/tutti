@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
-use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
+use tutti_plugin_db::{PluginDb, ScanPoll};
+use tutti_plugin_types::PluginFormat;
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
@@ -435,7 +436,9 @@ fn restore_round_trip(hosting: Hosting) {
 
     set(&s, 0.9);
     blocks(&mut s);
-    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    let saving = s
+        .save_state(&"verb", tutti_plugin_types::StateUse::Project)
+        .expect("a node holds the plugin");
     let state = saving.wait(&mut s).expect("a state");
 
     set(&s, 0.1);

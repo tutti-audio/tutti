@@ -50,7 +50,13 @@ fn rig(wire: &Wire) -> Session {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
     let _ = s.update();
@@ -223,7 +229,10 @@ fn reopening_one_tap_leaves_the_others_fed() {
 fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     let wire = Wire::default();
     let mut s = rig(&wire);
-    s.midi_nodes().unwrap().clock_master.set_enabled(false);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends::default());
     let out = s.midi_sink(&"out").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,

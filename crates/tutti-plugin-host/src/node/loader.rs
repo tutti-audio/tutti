@@ -3,7 +3,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_types::ParkedSampleRate;
 
@@ -190,7 +189,7 @@ where
     // over it.
     let declared = Declared::of(&loaded).map_err(|e| (LoadStage::Activation, e.to_string()))?;
     let inner = Arc::new(Mutex::new(inner));
-    let unlent = Arc::new(AtomicU64::new(0));
+    let unlent = tutti_rt::tally();
     // Built here rather than inside the node so the node's producer end and the
     // backend's drain end are the same cell: the audio thread parks a rate in
     // it, `editor_idle` dispatches from it.
@@ -274,7 +273,7 @@ where
         wiring.features,
         prepare.rate(),
         Arc::new(ParkedSampleRate::new()),
-        Arc::new(AtomicU64::new(0)),
+        tutti_rt::tally(),
         parameters,
         spares,
         controls,

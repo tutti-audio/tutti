@@ -217,7 +217,7 @@ mod tests {
                 config.cache_max_bytes,
             )),
             metrics: Arc::new(Metrics::new()),
-            bell: Bell::new(),
+            bell: Bell::new().0,
             session_rate: SessionRate::new(SampleRate::SR_48K),
             seams: Seams::default(),
         };
@@ -255,7 +255,7 @@ mod tests {
                 config.cache_max_bytes,
             )),
             metrics: Arc::new(Metrics::new()),
-            bell: Bell::new(),
+            bell: Bell::new().0,
             session_rate: SessionRate::new(SampleRate::SR_48K),
             seams: Seams::default(),
         };
@@ -296,7 +296,7 @@ mod tests {
                 config.cache_max_bytes,
             )),
             metrics: Arc::new(Metrics::new()),
-            bell: Bell::new(),
+            bell: Bell::new().0,
             session_rate: SessionRate::new(SampleRate::SR_48K),
             seams: Seams::default(),
         };
