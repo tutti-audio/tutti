@@ -42,23 +42,35 @@
 //! `tutti_midi_runtime::ClockFollower` with each event's arrival on the graph's
 //! frame clock: seconds since graph frame 0 (the tap's frame over its rate). A tempo it fits goes through the
 //! overlay above, as a Flex Set Tempo does. Play, stop and locate go to the
-//! transport as commands at `At::NextBlock`.
+//! transport as commands at `At::Frame`.
 //!
-//! **A locate is placed where the source is by then.** The message arrived at
-//! some frame; the transport takes the command at the first frame of the next
-//! block. While the source is rolling it has moved on by the difference, so the
-//! position is advanced by it: seconds for MTC, and for Beat Clock beats at the
-//! tempo in force. A locate while the source is stopped is not advanced. The
-//! lag is at most a block and one update's interval; the placement of a
-//! command at a frame inside a block is not done, so it is not removed.
+//! **A command is placed on the frame its message arrived on.** The tap stamps
+//! each message with its frame; the command takes effect at that frame plus
+//! `CLOCK_LEAD` (20 ms), or at the first frame of the next block when the audio
+//! thread is already past it (`At::Frame` in the past would land there as late
+//! anyway). A tempo is placed on the beat the transport reaches at that same
+//! frame, through the map in force. While the source is rolling it moves on by
+//! the time between the arrival and the frame, so a locate's position is
+//! advanced by it: seconds for MTC, and for Beat Clock beats at the tempo in
+//! force. A locate while the source is stopped is not advanced. The position
+//! is off only when a poll is later than the lead, by the delay. The Machine
+//! Control follower carries no arrival and places at `At::NextBlock`.
 //!
-//! **Drift.** Once per poll, while the transport rolls, a Beat Clock follower
-//! is given the beat the transport is at on the first frame of the next block
-//! (`ClockFollower::steer`): the error against the source's beat is closed by a
-//! trim of the tempo published through the overlay, and an error past
-//! `ClockFollower::SLIP` locates to the source and is reported
-//! ([`MidiReport::ClockSlipped`]). The latest error is
-//! [`Midi::clock_error`](crate::Midi::clock_error).
+//! **Drift.** Once per poll, while the transport rolls, the follower is given
+//! where the transport is on the first frame of the next block
+//! (`ClockFollower::steer`): a beat for Beat Clock, a time for MTC. For Beat
+//! Clock the error against the source's beat is closed by a trim of the tempo
+//! published through the overlay; for either kind an error past
+//! `ClockFollower::SLIP` (Beat Clock) or `ClockFollower::MTC_SLIP_FRAMES` (MTC)
+//! locates to the source and is reported ([`MidiReport::ClockSlipped`]). The
+//! latest error is [`Midi::clock_error`](crate::Midi::clock_error).
+//!
+//! **MTC running backward** is reported ([`MidiReport::ClockReversed`]) and the
+//! transport is stopped: it has no negative rate, so a reverse source cannot be
+//! followed, and the session takes no position from it until its Quarter Frames
+//! ascend again. **A source off its nominal speed** is followed by locates alone
+//! (no rate control exists on the transport); the bound is in
+//! `tutti_midi_runtime::ClockFollower`'s MTC rules.
 //!
 //! MTC `00:00:00:00` is beat 0 of the project's tempo map: a position in time
 //! is a beat through the map in force.
@@ -69,12 +81,12 @@ use tutti_engine::Playhead;
 use tutti_graph::EventTapReader;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_midi_runtime::{
-    ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
+    ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
     MachineControlFollower, TempoFollower,
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
-use tutti_types::{Beat, Frame, MeterMap, Seconds};
+use tutti_types::{At, Beat, Frame, MeterMap, Seconds};
 use tutti_ump::MidiGroup;
 
 use crate::MidiReport;
@@ -280,8 +292,19 @@ impl Overlay {
         if heard.is_empty() {
             return;
         }
-        let (tempo_before, meter_before) = (Arc::clone(&self.tempo), Arc::clone(&self.meter));
         let beat = next_block_beat(&cx.playhead, &self.tempo);
+        self.apply_at(heard, beat, cx, out);
+    }
+
+    /// As [`apply`](Self::apply), placing each change at `beat`.
+    fn apply_at(
+        &mut self,
+        heard: &[Followed],
+        beat: Beat,
+        cx: &FollowCx<'_>,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
+        let (tempo_before, meter_before) = (Arc::clone(&self.tempo), Arc::clone(&self.meter));
         for change in heard {
             match *change {
                 Followed::Tempo(tempo) => match self.tempo.stepped_to(beat, tempo) {
@@ -322,6 +345,13 @@ impl Overlay {
     }
 }
 
+/// A transport command and where it takes effect.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Placed {
+    pub(crate) action: ClockAction,
+    pub(crate) at: At,
+}
+
 /// What a followed clock asks of the transport, placed on the project's beats.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ClockAction {
@@ -333,6 +363,33 @@ pub(crate) enum ClockAction {
     Locate(Beat),
     /// Jump to the beat and roll from it.
     PlayFrom(Beat),
+}
+
+impl ClockAction {
+    /// The command at the first frame of the next block, for a source that
+    /// carries no arrival.
+    pub(crate) fn at_next_block(self) -> Placed {
+        Placed {
+            action: self,
+            at: At::NextBlock,
+        }
+    }
+}
+
+/// How long after a message arrived a command for it takes effect, at the
+/// soonest: 20 ms (tutti's choice), a few blocks and a poll, so a command is
+/// placed ahead of the audio thread on a frame it has not rendered, and the
+/// engine fades the old position out to it (a command with no lead is late,
+/// and lands at a block's first frame with no fade). A command is placed at its
+/// message's arrival frame plus this, and the position it carries is advanced by
+/// the same time, so the lead is latency in no position.
+pub(crate) const CLOCK_LEAD: Seconds = Seconds::new(0.020);
+
+/// The frame a command for a message that arrived at `at` takes effect on:
+/// `CLOCK_LEAD` after the arrival, or `next`, the first frame of the next block,
+/// when that is already behind it.
+pub(crate) fn placed_frame(at: Seconds, rate: tutti_types::SampleRate, next: Frame) -> Frame {
+    Frame::nearest((at + CLOCK_LEAD).get() * rate.get()).max(next)
 }
 
 /// The one clock follower a session has: its core, its tap and, for Beat Clock,
@@ -377,9 +434,9 @@ impl ClockFollow {
         self.overlay.as_ref().map_or((None, None), Overlay::restore)
     }
 
-    /// The beat error the follower read at the last poll
+    /// The error the follower read at the last poll
     /// ([`ClockFollower::error`]).
-    pub(crate) fn error(&self) -> Option<Beat> {
+    pub(crate) fn error(&self) -> Option<ClockError> {
         self.core.error()
     }
 
@@ -404,7 +461,7 @@ impl ClockFollow {
         &mut self,
         cx: &FollowCx<'_>,
         out: &mut Vec<crate::SessionEvent>,
-    ) -> Vec<ClockAction> {
+    ) -> Vec<Placed> {
         let rate = self.tap.rate();
         let instant = |frame: Frame| frame.to_seconds(rate);
         let mut events = Vec::new();
@@ -419,15 +476,18 @@ impl ClockFollow {
         self.core
             .poll(instant(cx.playhead.frame()), &mut |e| events.push(e));
 
-        // The first frame of the next block: where a command lands.
+        // The first frame of the next block: the soonest a command lands.
         let next = cx.playhead.frame() + cx.playhead.span();
         let lands = instant(next);
+        // The frame a command for a message that arrived at `at` takes effect
+        // on: the arrival and `CLOCK_LEAD`, or the next block when that is gone.
+        let placed = |at: Seconds| placed_frame(at, rate, next);
         let rolling = events
             .iter()
             .rev()
             .find_map(|e| match e {
                 ClockEvent::Play => Some(true),
-                ClockEvent::Stop => Some(false),
+                ClockEvent::Stop { .. } => Some(false),
                 _ => None,
             })
             .unwrap_or(self.rolling);
@@ -436,12 +496,16 @@ impl ClockFollow {
         let tempo = cx.settings.tempo_in_force();
         // The drift between the source and the transport, read at the frame a
         // command lands on; a transport that is not rolling has none.
-        let steered =
-            (rolling && cx.playhead.playing()).then(|| next_block_beat(&cx.playhead, &map));
+        let steered = (rolling && cx.playhead.playing()).then(|| match self.core.kind() {
+            ClockKind::BeatClock => ClockPosition::Beat(next_block_beat(&cx.playhead, &map)),
+            ClockKind::Mtc => ClockPosition::Time(next_block_seconds(&cx.playhead)),
+        });
         self.core.steer(steered, lands, &mut |e| events.push(e));
+        // Where the source is on the frame `at` is placed on, and a source
+        // that is stopped does not move.
         let beat_of = |position: ClockPosition, at: Seconds| {
             let lag = if rolling {
-                (lands - at).get().max(0.0)
+                (instant(placed(at)) - at).get().max(0.0)
             } else {
                 0.0
             };
@@ -453,30 +517,54 @@ impl ClockFollow {
 
         let kind = self.core.kind();
         let mut tempos = Vec::new();
-        let mut actions = Vec::new();
+        let mut actions: Vec<Placed> = Vec::new();
+        // A bare Play lands where the command before it did.
+        let mut last = At::Frame(next);
         let mut events = events.into_iter().peekable();
         while let Some(event) = events.next() {
             match event {
                 ClockEvent::Locate { position, at } => {
                     let beat = beat_of(position, at);
+                    last = At::Frame(placed(at));
                     if events.next_if(|e| *e == ClockEvent::Play).is_some() {
-                        actions.push(ClockAction::PlayFrom(beat));
+                        actions.push(Placed {
+                            action: ClockAction::PlayFrom(beat),
+                            at: last,
+                        });
                     } else {
-                        actions.push(ClockAction::Locate(beat));
+                        actions.push(Placed {
+                            action: ClockAction::Locate(beat),
+                            at: last,
+                        });
                     }
                 }
-                ClockEvent::Play => actions.push(ClockAction::Play),
-                ClockEvent::Stop => actions.push(ClockAction::Stop),
-                ClockEvent::Tempo(tempo) => tempos.push(Followed::Tempo(tempo)),
+                ClockEvent::Play => actions.push(Placed {
+                    action: ClockAction::Play,
+                    at: last,
+                }),
+                ClockEvent::Stop { at } => {
+                    last = At::Frame(placed(at));
+                    actions.push(Placed {
+                        action: ClockAction::Stop,
+                        at: last,
+                    });
+                }
+                ClockEvent::Tempo { tempo, at } => tempos.push((tempo, placed(at))),
                 ClockEvent::Locked => out.push(MidiReport::ClockLocked { kind }.into()),
                 ClockEvent::Unlocked => out.push(MidiReport::ClockUnlocked { kind }.into()),
                 ClockEvent::Slipped { error } => {
                     out.push(MidiReport::ClockSlipped { kind, error }.into());
                 }
+                ClockEvent::Reversed => out.push(MidiReport::ClockReversed { kind }.into()),
+                // An event this session has no counterpart for.
+                _ => {}
             }
         }
         if let Some(overlay) = &mut self.overlay {
-            overlay.apply(&tempos, cx, out);
+            for (tempo, frame) in tempos {
+                let beat = beat_at_frame(&cx.playhead, &overlay.tempo, frame);
+                overlay.apply_at(&[Followed::Tempo(tempo)], beat, cx, out);
+            }
         }
         actions
     }
@@ -568,10 +656,32 @@ impl MachineFollow {
 /// A stopped transport does not advance: its next block starts where it is.
 pub(crate) fn next_block_beat(playhead: &Playhead, map: &TempoMap) -> Beat {
     let rate = playhead.rate();
+    let frame = Frame::new(next_block_seconds(playhead).to_samples(rate).get() as u64);
+    map.view(rate).beat_at_frame(frame)
+}
+
+/// The transport's time on the first frame of the next block: what
+/// [`next_block_beat`] reads, as seconds on the map's timeline.
+pub(crate) fn next_block_seconds(playhead: &Playhead) -> Seconds {
     let mut at = playhead.seconds();
     if playhead.playing() {
-        at += playhead.span().to_seconds(rate);
+        at += playhead.span().to_seconds(playhead.rate());
+    }
+    at
+}
+
+/// The beat the transport is at on graph frame `frame`, a frame not before the
+/// next block: the transport advances one second a second while it rolls, and
+/// stands where it is while it does not.
+pub(crate) fn beat_at_frame(playhead: &Playhead, map: &TempoMap, frame: Frame) -> Beat {
+    let rate = playhead.rate();
+    let mut at = playhead.seconds();
+    if playhead.playing() {
+        at += frame.to_seconds(rate) - playhead.frame().to_seconds(rate);
     }
     let frame = Frame::new(at.to_samples(rate).get() as u64);
     map.view(rate).beat_at_frame(frame)
 }
+
+#[cfg(test)]
+mod tests;

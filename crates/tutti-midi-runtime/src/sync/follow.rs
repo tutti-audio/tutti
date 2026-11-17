@@ -62,7 +62,8 @@
 //!   [`ClockEvent::Slipped`] and locates to the source's beat, once, and holds off
 //!   for [`SETTLE`](ClockFollower::SETTLE) while the command lands (as it does after any locate).
 //!
-//! MTC has no tempo to trim; [`steer`](ClockFollower::steer) does nothing for it.
+//! MTC has no tempo to trim and the transport has no rate to follow a source's
+//! speed by: [`steer`](ClockFollower::steer) only locates it (below).
 //!
 //! # MIDI Time Code
 //!
@@ -71,10 +72,16 @@
 //! `tutti-midi-protocol`'s reader. MTC has no Start and no Stop: time is running
 //! once Quarter Frames arrive after a Full Message, and stopped when they stop.
 //!
-//! - A completed cycle of eight Quarter Frames is a position, two frames after
-//!   the last. A cycle is **consistent** when it is two frames after the one
-//!   before at the same rate, which is what a generator running forward sends
-//!   and needs no arrival time to judge.
+//! - A completed cycle of eight Quarter Frames names a frame: the one that
+//!   started at the arrival of its piece 0 (M1 MTC, Quarter Frame Message
+//!   Implementation: piece 0 "must be sent on a frame boundary"). By the last
+//!   piece the source is 1.75 frames on, which the spec rounds to the receiver's
+//!   +2 frame offset; the follower keeps the frame and the arrival of piece 0
+//!   instead, so a [`Locate`](ClockEvent::Locate) says where the source was at
+//!   that arrival and whoever applies it advances by the time since, as for any
+//!   locate. A cycle is **consistent** when it names the frame two after the
+//!   one before at the same rate, which is what a generator running forward
+//!   sends and needs no arrival time to judge.
 //! - The follower is **locked** after [`MTC_LOCK_CYCLES`](ClockFollower::MTC_LOCK_CYCLES)
 //!   consistent cycles, and plays, locating to the position first. A cycle that
 //!   is not consistent while it plays is a jump of the source, and locates.
@@ -83,12 +90,37 @@
 //!   Frames. The next cycle after it is taken as a first one, not a jump.
 //! - **Unlocked** when [`MTC_DROPOUT`](ClockFollower::MTC_DROPOUT) passes with no
 //!   Quarter Frame or Full Message, which also stops the transport.
+//! - **Slip.** [`steer`](ClockFollower::steer) is given the transport's time. The
+//!   error is the source's time (the last cycle's frame, plus the time since its
+//!   piece 0) less the transport's. Past
+//!   [`MTC_SLIP_FRAMES`](ClockFollower::MTC_SLIP_FRAMES) it says
+//!   [`ClockEvent::Slipped`] and locates to the source's time, once, and holds
+//!   off for [`SETTLE`](ClockFollower::SETTLE) as Beat Clock does.
+//! - **Varispeed.** A source off its nominal speed shows in the spacing of its
+//!   Quarter Frames. The transport has no rate to follow it with, so it is
+//!   followed by locates alone: for a source `d` (a fraction) fast or slow of
+//!   nominal, the error grows by `|d|` a second from each locate, so it is
+//!   located back each `max(SETTLE, T / |d|)` seconds, `T` the threshold
+//!   `MTC_SLIP_FRAMES / fps` (80 ms at 25 fps, 83 ms at 24 and 67 ms at 30).
+//!   The error is read at most `max(T, |d| * SETTLE)` plus `|d|` times a cycle
+//!   and a control tick (the last cycle's extrapolation falls short by `|d|`
+//!   times its age): at 25 fps and a 10 ms tick, a source 2% off is 80 ms off at
+//!   the worst and located every 4 s, and one 10% off is 100 ms off and located
+//!   every second.
+//! - **Reverse.** Quarter Frames in descending piece order (`7` to `0`) mean the
+//!   source runs backward. It is read from two consecutive pieces
+//!   ([`MtcDecoder::direction`]) and said once as [`ClockEvent::Reversed`]. The
+//!   transport has no negative rate, so the follower stops it, unlocks, and takes
+//!   no position until the pieces ascend again, when it locks afresh.
 
-use tutti_midi_protocol::{Addressed, Read, SmpteTimecode, Universal, read};
+use tutti_midi_protocol::{Addressed, Read, SmpteFrameRate, SmpteTimecode, Universal, read};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{Message, SysexAssembler, SysexStep, System, Ump};
 
-use super::{ClockTransportState, MidiClockDecoder, MtcDecoder};
+use super::{ClockTransportState, MidiClockDecoder, MtcDecoder, MtcDirection};
+
+/// Frames in one Quarter Frame cycle: the step between two consistent cycles.
+const CYCLE_FRAMES: u64 = 2;
 
 /// Which outside clock a [`ClockFollower`] reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,13 +145,23 @@ pub enum ClockPosition {
 /// What a source asks of the transport, or says of its own state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClockEvent {
-    /// The tempo the source's clock fits, in beats per minute.
-    Tempo(Bpm),
+    /// The tempo the source's clock fits, in beats per minute, as of the
+    /// Timing Clock that announced it.
+    Tempo {
+        /// The tempo.
+        tempo: Bpm,
+        /// When that Timing Clock arrived, on the follower's clock.
+        at: Seconds,
+    },
     /// Roll from the position (a [`Locate`](Self::Locate) comes first when the
     /// source says where).
     Play,
-    /// Stop where the transport stands.
-    Stop,
+    /// Stop where the transport stands, as of `at`: the arrival of the message
+    /// that said so, or the poll that found the source silent.
+    Stop {
+        /// When the source stopped, on the follower's clock.
+        at: Seconds,
+    },
     /// The source is at `position` as of `at`, the arrival of the message that
     /// said so. A transport that applies it later is `later - at` behind a
     /// source that kept rolling.
@@ -133,13 +175,30 @@ pub enum ClockEvent {
     Locked,
     /// The follower lost the source: a gap, or silence for the kind's dropout.
     Unlocked,
-    /// The transport was further than [`ClockFollower::SLIP`] from the source
+    /// The transport was further than [`ClockFollower::SLIP`] (Beat Clock) or
+    /// [`ClockFollower::MTC_SLIP_FRAMES`] (MTC) from the source
     /// ([`ClockFollower::steer`]): a [`Locate`](Self::Locate) to the source's
-    /// beat follows at once.
+    /// position follows at once.
     Slipped {
-        /// The source's beat less the transport's, when it was found.
-        error: Beat,
+        /// The source's position less the transport's, when it was found.
+        error: ClockError,
     },
+    /// The source's time code runs backward: its Quarter Frames arrive in
+    /// descending piece order (MTC, Quarter Frame Message Implementation). The
+    /// transport has no negative rate, so the follower stops it and unlocks (a
+    /// [`Stop`](Self::Stop) and an [`Unlocked`](Self::Unlocked) follow when the
+    /// source was locked) and takes no position until the source runs forward
+    /// again.
+    Reversed,
+}
+
+/// How far the transport is from the source, in the unit the source counts in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClockError {
+    /// Beat Clock: the source's beat less the transport's.
+    Beat(Beat),
+    /// MTC: the source's time less the transport's.
+    Time(Seconds),
 }
 
 /// Follows one outside MIDI clock; the rules are in the module docs.
@@ -197,12 +256,32 @@ struct MtcFollower {
     sysex: SysexAssembler<[u8; SYSEX_ROOM]>,
     /// The position of the last completed cycle.
     last_cycle: Option<SmpteTimecode>,
+    /// Where the source was and when: the last cycle's frame at the arrival of
+    /// its piece 0, or a Full Message's position at its arrival.
+    origin: Option<Origin>,
+    /// The arrival of the last piece 0.
+    piece0_at: Option<Seconds>,
     /// Consecutive consistent cycles.
     run: usize,
     locked: bool,
     /// Whether a play was announced and no stop since.
     running: bool,
+    /// Whether the source's pieces are descending.
+    reversed: bool,
     last_heard: Option<Seconds>,
+    /// The latest time error `steer` found.
+    error: Option<Seconds>,
+    /// No steering until `now` reaches this: a locate was sent and the
+    /// transport has not taken it yet.
+    held_until: Option<Seconds>,
+}
+
+/// A position of the source, as of an arrival.
+#[derive(Clone, Copy, Debug)]
+struct Origin {
+    time: Seconds,
+    at: Seconds,
+    rate: SmpteFrameRate,
 }
 
 /// Longest Universal message read: the Full Message is ten bytes with its
@@ -239,6 +318,14 @@ impl ClockFollower {
     /// quarter frames by rate (tutti's choice; the spec gives none, and says a
     /// reader needs a full cycle of eight messages to know the time).
     pub const MTC_LOCK_CYCLES: usize = 3;
+
+    /// The time error past which [`steer`](Self::steer) locates an MTC
+    /// follower instead of leaving it: 2 SMPTE frames (tutti's choice), one
+    /// cycle of eight Quarter Frames, the resolution at which the source names
+    /// its position (MTC, Quarter Frame Messages): 83 ms at 24 fps, 67 ms at 30.
+    /// A smaller error is the extrapolation between cycles and the placement of a
+    /// block, which a locate would only repeat.
+    pub const MTC_SLIP_FRAMES: u64 = 2;
 
     /// How long MTC may be silent before the follower unlocks and stops: a
     /// quarter of a second (tutti's choice), three cycles at 24 frames per
@@ -304,23 +391,29 @@ impl ClockFollower {
     /// nothing for MTC. Allocates nothing.
     pub fn steer(
         &mut self,
-        transport: Option<Beat>,
+        transport: Option<ClockPosition>,
         now: Seconds,
         out: &mut impl FnMut(ClockEvent),
     ) {
-        if let Follower::BeatClock(f) = &mut self.0 {
-            f.steer(transport, now, out);
+        match (&mut self.0, transport) {
+            (Follower::BeatClock(f), Some(ClockPosition::Beat(beat))) => {
+                f.steer(Some(beat), now, out);
+            }
+            (Follower::BeatClock(f), _) => f.steer(None, now, out),
+            (Follower::Mtc(f), Some(ClockPosition::Time(time))) => f.steer(Some(time), now, out),
+            (Follower::Mtc(f), _) => f.steer(None, now, out),
         }
     }
 
-    /// The beat error [`steer`](Self::steer) found last, the source's beat less
-    /// the transport's: positive when the transport is behind. `None` until it
+    /// The error [`steer`](Self::steer) found last, the source's position less
+    /// the transport's, in beats or in seconds by the kind: positive when the
+    /// transport is behind. `None` until it
     /// has read one, and while the follower cannot (see `steer`).
     #[must_use]
-    pub fn error(&self) -> Option<Beat> {
+    pub fn error(&self) -> Option<ClockError> {
         match &self.0 {
-            Follower::BeatClock(f) => f.error,
-            Follower::Mtc(_) => None,
+            Follower::BeatClock(f) => f.error.map(ClockError::Beat),
+            Follower::Mtc(f) => f.error.map(ClockError::Time),
         }
     }
 
@@ -393,7 +486,7 @@ impl BeatClockFollower {
         self.error = Some(Beat::new(error));
         if error.abs() > ClockFollower::SLIP.get() {
             out(ClockEvent::Slipped {
-                error: Beat::new(error),
+                error: ClockError::Beat(Beat::new(error)),
             });
             self.locate(Beat::new(source), now, out);
             return;
@@ -413,7 +506,7 @@ impl BeatClockFollower {
             }
             if self.decoder.transport_state() == ClockTransportState::Playing {
                 self.decoder.stop_msg();
-                out(ClockEvent::Stop);
+                out(ClockEvent::Stop { at: now });
             }
         }
     }
@@ -440,7 +533,7 @@ impl BeatClockFollower {
                 if self.last_tick.is_none_or(|last| at > last) {
                     self.last_tick = Some(at);
                 }
-                self.after_tick(out);
+                self.after_tick(at, out);
             }
             System::Start => {
                 self.decoder.start_msg();
@@ -456,7 +549,7 @@ impl BeatClockFollower {
                 self.decoder.stop_msg();
                 self.trim = 0.0;
                 self.error = None;
-                out(ClockEvent::Stop);
+                out(ClockEvent::Stop { at });
             }
             System::SongPosition(position) => {
                 self.decoder.song_position_msg(position);
@@ -466,7 +559,7 @@ impl BeatClockFollower {
         }
     }
 
-    fn after_tick(&mut self, out: &mut impl FnMut(ClockEvent)) {
+    fn after_tick(&mut self, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
         let locked = self.decoder.locked();
         if locked != self.locked {
             self.locked = locked;
@@ -501,7 +594,7 @@ impl BeatClockFollower {
         if due {
             self.announced = Some(tempo);
             self.ticks_since_announce = 0;
-            out(ClockEvent::Tempo(tempo));
+            out(ClockEvent::Tempo { tempo, at });
         }
     }
 }
@@ -512,10 +605,15 @@ impl MtcFollower {
             decoder: MtcDecoder::new(),
             sysex: SysexAssembler::new([0; SYSEX_ROOM], SYSEX_MAX, 1),
             last_cycle: None,
+            origin: None,
+            piece0_at: None,
             run: 0,
             locked: false,
             running: false,
+            reversed: false,
             last_heard: None,
+            error: None,
+            held_until: None,
         }
     }
 
@@ -525,7 +623,7 @@ impl MtcFollower {
             .is_some_and(|at| now - at > ClockFollower::MTC_DROPOUT);
         if silent {
             if std::mem::take(&mut self.running) {
-                out(ClockEvent::Stop);
+                out(ClockEvent::Stop { at: now });
             }
             if std::mem::take(&mut self.locked) {
                 out(ClockEvent::Unlocked);
@@ -544,8 +642,76 @@ impl MtcFollower {
         self.decoder.reset();
         self.sysex.reset();
         self.last_cycle = None;
+        self.origin = None;
+        self.piece0_at = None;
         self.run = 0;
+        self.reversed = false;
         self.last_heard = None;
+        self.error = None;
+        self.held_until = None;
+    }
+
+    /// A locate to `time` as of `at`, which the transport takes as new: the
+    /// error is not read until it has landed.
+    fn locate(&mut self, time: Seconds, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        self.error = None;
+        self.held_until = Some(at + ClockFollower::SETTLE);
+        out(ClockEvent::Locate {
+            position: ClockPosition::Time(time),
+            at,
+        });
+    }
+
+    fn steer(
+        &mut self,
+        transport: Option<Seconds>,
+        now: Seconds,
+        out: &mut impl FnMut(ClockEvent),
+    ) {
+        self.error = None;
+        let Some(transport) = transport else {
+            return;
+        };
+        if self.held_until.is_some_and(|until| now < until) {
+            return;
+        }
+        let (true, true, Some(origin)) = (self.locked, self.running, self.origin) else {
+            return;
+        };
+        // The source's time at `now`: the cycle's frame, and the time since its
+        // piece 0 at the nominal rate. The source is taken to run at the rate
+        // it names; a source off that speed shows as an error that grows.
+        let source = origin.time.get() + (now - origin.at).get();
+        let error = source - transport.get();
+        // A time that is not a number leaves nothing to steer by.
+        if !error.is_finite() {
+            return;
+        }
+        self.error = Some(Seconds::new(error));
+        let frames = origin.rate.frames_at(Seconds::new(error)).abs();
+        if frames > ClockFollower::MTC_SLIP_FRAMES as f64 {
+            out(ClockEvent::Slipped {
+                error: ClockError::Time(Seconds::new(error)),
+            });
+            self.locate(Seconds::new(source), now, out);
+        }
+    }
+
+    /// A source running backward: report it once, and stop what the transport
+    /// was doing for the source.
+    fn reverse(&mut self, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        self.reversed = true;
+        out(ClockEvent::Reversed);
+        if std::mem::take(&mut self.running) {
+            out(ClockEvent::Stop { at });
+        }
+        if std::mem::take(&mut self.locked) {
+            out(ClockEvent::Unlocked);
+        }
+        self.last_cycle = None;
+        self.origin = None;
+        self.run = 0;
+        self.error = None;
     }
 
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
@@ -561,42 +727,64 @@ impl MtcFollower {
                 self.decoder.reset();
                 self.last_cycle = None;
                 self.run = 0;
-                out(ClockEvent::Locate {
-                    position: ClockPosition::Time(full.time_code().timecode().to_seconds()),
+                self.reversed = false;
+                let time = full.time_code().timecode();
+                self.origin = Some(Origin {
+                    time: time.to_seconds(),
                     at,
+                    rate: time.frame_rate(),
                 });
+                self.locate(time.to_seconds(), at, out);
             }
             return;
         }
-        let before = self.decoder.timecode();
         if !self.decoder.feed(&ump) {
             return;
         }
         self.last_heard = Some(at);
-        let after = self.decoder.timecode();
-        if after != before
-            && let Some(code) = after
-        {
-            self.cycle(code, at, out);
+        if self.decoder.last_piece() == Some(0) {
+            self.piece0_at = Some(at);
         }
+        match self.decoder.direction() {
+            Some(MtcDirection::Reverse) if !self.reversed => self.reverse(at, out),
+            Some(MtcDirection::Forward) if self.reversed => self.reversed = false,
+            _ => {}
+        }
+        let Some(cycle) = self.decoder.take_cycle() else {
+            return;
+        };
+        if self.reversed || cycle.direction == MtcDirection::Reverse {
+            return;
+        }
+        // Piece 0 began the cycle (a cycle is only assembled from one), so its
+        // arrival is when `frame` started.
+        self.cycle(cycle.frame, self.piece0_at.unwrap_or(at), out);
     }
 
-    fn cycle(&mut self, code: SmpteTimecode, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
+    /// A forward cycle: `frame` started at `origin`, the arrival of its piece 0.
+    /// The source is two frames on by the time the last piece arrives (MTC,
+    /// Quarter Frame Message Implementation), and a locate says where it was
+    /// at `origin`, so the transport that applies it later advances by the
+    /// difference as for any locate.
+    fn cycle(&mut self, frame: SmpteTimecode, origin: Seconds, out: &mut impl FnMut(ClockEvent)) {
         let consistent = self.last_cycle.is_some_and(|last| {
-            last.frame_rate() == code.frame_rate() && code.frame_count() == last.frame_count() + 2
+            last.frame_rate() == frame.frame_rate()
+                && frame.frame_count() == last.frame_count() + CYCLE_FRAMES
         });
         let first = self.last_cycle.is_none();
-        self.last_cycle = Some(code);
-        let here = ClockEvent::Locate {
-            position: ClockPosition::Time(code.to_seconds()),
-            at,
-        };
+        self.last_cycle = Some(frame);
+        let time = frame.to_seconds();
+        self.origin = Some(Origin {
+            time,
+            at: origin,
+            rate: frame.frame_rate(),
+        });
         if consistent {
             self.run += 1;
         } else {
             self.run = 1;
             if self.running && !first {
-                out(here);
+                self.locate(time, origin, out);
             }
         }
         if self.run >= ClockFollower::MTC_LOCK_CYCLES {
@@ -606,7 +794,7 @@ impl MtcFollower {
             }
             if !self.running {
                 self.running = true;
-                out(here);
+                self.locate(time, origin, out);
                 out(ClockEvent::Play);
             }
         }

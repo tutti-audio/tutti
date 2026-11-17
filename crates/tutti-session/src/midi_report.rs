@@ -113,15 +113,25 @@ pub enum MidiReport {
         /// The clock followed.
         kind: tutti_midi_runtime::ClockKind,
     },
-    /// The transport was further from the Beat Clock the session follows than
-    /// `ClockFollower::SLIP` (a quarter of a beat), more than a tempo trim is
-    /// asked to close: the transport locates to the source's beat at the next
-    /// block.
+    /// The transport was further from the clock the session follows than
+    /// `ClockFollower::SLIP` (a quarter of a beat, Beat Clock) or
+    /// `ClockFollower::MTC_SLIP_FRAMES` (two frames, MTC), more than a tempo trim
+    /// is asked to close or a source's speed leaves: the transport locates to
+    /// the source's position.
     ClockSlipped {
         /// The clock followed.
         kind: tutti_midi_runtime::ClockKind,
-        /// The source's beat less the transport's, when found.
-        error: tutti_types::Beat,
+        /// The source's position less the transport's, when found: beats for
+        /// Beat Clock, seconds for MTC.
+        error: tutti_midi_runtime::ClockError,
+    },
+    /// The MTC the session follows runs backward: its Quarter Frames arrive in
+    /// descending piece order. The transport has no negative rate, so the
+    /// session stops it and unlocks until the Quarter Frames ascend again,
+    /// when it locks afresh.
+    ClockReversed {
+        /// The clock followed.
+        kind: tutti_midi_runtime::ClockKind,
     },
     /// The session stopped following its MIDI clock
     /// ([`Midi::unfollow_clock`](crate::Midi::unfollow_clock)); the transport

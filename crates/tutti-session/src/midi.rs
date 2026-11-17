@@ -35,7 +35,7 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
 use crate::{EventOutPort, Key, MidiError, MidiNodes, MidiReport};
 use crate::{FollowClock, FollowMachineControl, FollowTempo};
@@ -893,7 +893,7 @@ impl MidiState {
         cx: &FollowCx<'_>,
         graph: &mut Graph,
         out: &mut Vec<crate::SessionEvent>,
-    ) -> (Vec<ClockAction>, bool) {
+    ) -> (Vec<Placed>, bool) {
         let Some(clock) = self.clock.as_mut() else {
             return (Vec::new(), false);
         };
@@ -917,11 +917,15 @@ impl MidiState {
         cx: &FollowCx<'_>,
         graph: &mut Graph,
         out: &mut Vec<crate::SessionEvent>,
-    ) -> (Vec<ClockAction>, bool) {
+    ) -> (Vec<Placed>, bool) {
         let Some(machine) = self.machine.as_mut() else {
             return (Vec::new(), false);
         };
-        let actions = machine.heard(cx, out);
+        let actions = machine
+            .heard(cx, out)
+            .into_iter()
+            .map(ClockAction::at_next_block)
+            .collect();
         let mut edited = false;
         if machine.tap_rate() != graph.prepared().sample_rate() {
             edited = true;
@@ -1841,9 +1845,10 @@ impl Midi<'_> {
     /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
-    /// A command lands at the next block (`At::NextBlock`) with the source's
+    /// A command is placed on the frame its message arrived on, 20 ms on (`At::Frame`;
+    /// the next block when the audio thread is past it), with the source's
     /// position advanced by the time since the message arrived, so a source that
-    /// kept rolling is not trailed by more than a block's placement. **A Beat
+    /// kept rolling is not trailed. **A Beat
     /// Clock follower owns the tempo map** as `follow_tempo` does: the map found
     /// now is the one [`unfollow_clock`](Self::unfollow_clock) restores, and
     /// `Session::set_tempo` refuses while it follows.
@@ -1857,7 +1862,10 @@ impl Midi<'_> {
     /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
     /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
     /// quarter of a beat) locates to the source's beat once and is reported as
-    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim.
+    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim, and the same slip rule
+    /// reads its time against the transport's at `ClockFollower::MTC_SLIP_FRAMES` (2
+    /// frames). A source off nominal speed is followed by those locates alone; MTC
+    /// running backward stops the transport ([`MidiReport::ClockReversed`]).
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
@@ -1888,13 +1896,14 @@ impl Midi<'_> {
         Ok(())
     }
 
-    /// The beat error of the Beat Clock the session follows: the source's beat
-    /// less the transport's, read at the last [`Poll`](crate::Phase::Poll) phase
-    /// (positive when the transport is behind). `None` when no clock is followed,
-    /// or the follower could not read one: not locked, not rolling, an MTC
-    /// follower, or a locate that has not landed yet.
+    /// The error of the clock the session follows: the source's position less
+    /// the transport's, read at the last [`Poll`](crate::Phase::Poll) phase
+    /// (positive when the transport is behind), in beats for Beat Clock and in
+    /// seconds for MTC. `None` when no clock is followed, or the follower could
+    /// not read one: not locked, not rolling, or a locate that has not landed
+    /// yet.
     #[must_use]
-    pub fn clock_error(&self) -> Option<tutti_types::Beat> {
+    pub fn clock_error(&self) -> Option<tutti_midi_runtime::ClockError> {
         self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 

@@ -425,5 +425,48 @@ fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
         }
     }
     let error = error.expect("a locked, rolling follower reads an error");
+    let tutti_midi_runtime::ClockError::Beat(error) = error else {
+        panic!("a Beat Clock follower reads beats: {error:?}");
+    };
     assert!(error.get().abs() < tutti_midi_runtime::ClockFollower::SLIP.get());
+}
+
+/// **MTC running backward is reported and stops the transport.** Four forward
+/// cycles lock and roll it (as above); Quarter Frames then arrive in descending
+/// piece order (`7` down to `0`, M1 MTC, Quarter Frame Message Implementation).
+/// The transport has no negative rate, so the session reports
+/// [`MidiReport::ClockReversed`] once and the transport stops.
+#[test]
+fn mtc_running_backward_is_reported_and_stops_the_transport() {
+    let (mut s, fake) = rig();
+    follow(&mut s, ClockKind::Mtc);
+    let start = Instant::now();
+    for c in 0..4u8 {
+        send_cycle(
+            &fake,
+            10,
+            2 * c,
+            start + Duration::from_millis(80 * u64::from(c)),
+        );
+    }
+    until_rolling(&mut s, true, 400);
+    // Descending from frame 8 (`00:00:10:08`), 40 ms a quarter-frame-pair on.
+    let back = start + Duration::from_millis(400);
+    for cycle in 0..2u64 {
+        let nibbles = [8u8 - 2 * cycle as u8, 0, 10, 0, 0, 0, 0, 1 << 1];
+        for (i, piece) in (0..8u8).rev().enumerate() {
+            let at = back + Duration::from_millis(80 * cycle + 10 * i as u64);
+            send(&fake, quarter(piece, nibbles[piece as usize]), at);
+        }
+    }
+    let events = until(&mut s, 400, |e| {
+        e.iter()
+            .any(|e| matches!(e, MidiReport::ClockReversed { .. }))
+    });
+    let reversed = events
+        .iter()
+        .filter(|e| matches!(e, MidiReport::ClockReversed { .. }))
+        .count();
+    assert_eq!(reversed, 1, "{events:?}");
+    until_rolling(&mut s, false, 100);
 }

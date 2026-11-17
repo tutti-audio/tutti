@@ -22,6 +22,6 @@ mod mtc;
 mod period;
 
 pub use clock::{ClockTransportState, MidiClockDecoder};
-pub use follow::{ClockEvent, ClockFollower, ClockKind, ClockPosition};
+pub use follow::{ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition};
 pub use machine_control::{MachineControlEvent, MachineControlFollower, SegmentFault};
-pub use mtc::MtcDecoder;
+pub use mtc::{MtcCycle, MtcDecoder, MtcDirection};
