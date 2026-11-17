@@ -4,11 +4,23 @@
 //! spec's fields as well as against the writer.
 
 use tutti_ump::{
-    Data128, Message, MidiChannel, MidiGroup, Sysex7Packet, Sysex8Assembler, Sysex8Message,
-    Sysex8Step, SysexStatus, Ump, Voice1,
+    Data128, Message, MidiChannel, MidiGroup, Sysex7Packet, Sysex8Assembler, Sysex8Step,
+    Sysex8StreamIds, SysexStatus, Ump, Voice1,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
+
+/// The packets of `payload` on stream `id`, from a receiver that takes every
+/// stream: the streams below `id` are held open meanwhile.
+fn written(id: u8, group: MidiGroup, payload: &[u8]) -> Vec<Ump> {
+    let ids = Sysex8StreamIds::discovered(255);
+    let held: Vec<_> = (0..id)
+        .map(|_| ids.open().unwrap().packets(group, &[]))
+        .collect();
+    let umps = ids.open().unwrap().packets(group, payload).collect();
+    drop(held);
+    umps
+}
 
 fn assembler(lanes: usize) -> Sysex8Assembler<Vec<u8>> {
     Sysex8Assembler::new(vec![0; 64 * lanes], 64, lanes)
@@ -80,13 +92,9 @@ fn packets_follow_table_19_at_boundary_sizes() {
     ];
     for (len, statuses, counts) in cases {
         let data = payload(len);
-        let message = Sysex8Message {
-            group: MidiGroup::of(3),
-            stream_id: 9,
-            payload: &data,
-        };
-        let umps: Vec<Ump> = message.packets().collect();
-        assert_eq!(message.packets().len(), umps.len(), "{len}");
+        let (group, id, data) = (MidiGroup::of(3), 9, &data);
+        let umps = written(id, group, data);
+
         let words: Vec<(u32, u32, u32)> = umps
             .iter()
             .map(|u| {
@@ -111,12 +119,12 @@ fn a_written_message_reads_back_whole() {
     let mut a = assembler(1);
     for len in [0, 1, 12, 13, 14, 15, 26, 27, 28, 63, 64] {
         let data = payload(len);
-        let message = Sysex8Message {
-            group: MidiGroup::of(5),
-            stream_id: 200,
-            payload: &data,
-        };
-        assert_eq!(feed(&mut a, message.packets()), [(5, 200, data)], "{len}");
+        let (group, id, data) = (MidiGroup::of(5), 200, &data);
+        assert_eq!(
+            feed(&mut a, written(id, group, data)),
+            [(5, 200, data.clone())],
+            "{len}"
+        );
     }
     assert_eq!(a.dropped(), 0);
 }
@@ -323,21 +331,16 @@ fn packets_with_no_start_are_dropped_and_counted_once() {
 fn an_over_long_message_is_dropped_whole_and_counted_once() {
     let mut a = Sysex8Assembler::new(vec![0; 20], 20, 1);
     let data = payload(21);
-    let message = Sysex8Message {
-        group: G0,
-        stream_id: 0,
-        payload: &data,
-    };
-    assert!(feed_any(&mut a, message.packets()).is_empty());
+    let (group, id, data) = (G0, 0, &data);
+    assert!(feed_any(&mut a, written(id, group, data)).is_empty());
     assert_eq!(a.dropped(), 1);
     // The limit itself fits.
     let fits = payload(20);
-    let message = Sysex8Message {
-        group: G0,
-        stream_id: 0,
-        payload: &fits,
-    };
-    assert_eq!(feed_any(&mut a, message.packets()), [fits]);
+    let (group, id, data) = (G0, 0, &fits);
+    assert_eq!(
+        feed_any(&mut a, written(id, group, data)),
+        std::slice::from_ref(&fits)
+    );
     assert_eq!(a.dropped(), 1);
 }
 
@@ -399,12 +402,8 @@ fn only_sysex8_packets_are_taken() {
 fn unused_bytes_of_a_packet_are_zero() {
     for len in 0..=40 {
         let data = vec![0xFF; len];
-        let message = Sysex8Message {
-            group: G0,
-            stream_id: 0x55,
-            payload: &data,
-        };
-        for ump in message.packets() {
+        let (group, id, data) = (G0, 0x55, &data);
+        for ump in written(id, group, data) {
             let count = ((ump.0[0] >> 16) & 0xF) as usize;
             let mut bytes = Vec::new();
             bytes.extend([ump.0[0] >> 8, ump.0[0]].map(|w| w as u8));
@@ -417,4 +416,130 @@ fn unused_bytes_of_a_packet_are_zero() {
             assert!(bytes[count..].iter().all(|b| *b == 0), "{len}");
         }
     }
+}
+
+/// The Stream ID in the first word of a packet (Figure 85, byte 3).
+fn wire_id(ump: Ump) -> u8 {
+    ((ump.0[0] >> 8) & 0xFF) as u8
+}
+
+/// The first packet of `payload` on a freshly opened stream of `ids`, the
+/// message left open.
+fn start<'a>(
+    ids: &'a Sysex8StreamIds,
+    payload: &'a [u8],
+) -> Option<(Ump, tutti_ump::Sysex8Packets<'a>)> {
+    let mut packets = ids.open()?.packets(G0, payload);
+    Some((packets.next().unwrap(), packets))
+}
+
+/// Section 7.8, Stream id: a device with only one stream uses Stream ID 0,
+/// whether it declared one stream or has not been discovered.
+/// Spec: m2-104/7.8#5
+#[test]
+fn a_one_stream_device_uses_stream_id_0() {
+    for ids in [
+        Sysex8StreamIds::undiscovered(),
+        Sysex8StreamIds::discovered(1),
+    ] {
+        assert_eq!(ids.count(), 1);
+        for ump in ids.open().unwrap().packets(G0, &[0x80; 40]) {
+            assert_eq!(wire_id(ump), 0);
+        }
+    }
+}
+
+/// Section 7.8, Stream id: without discovery of multi-stream support only one
+/// stream is sent at a time: a second is refused while the first message is
+/// open, never interleaved, and is available once the first is written.
+/// Spec: m2-104/7.8#6
+#[test]
+fn without_discovery_a_second_concurrent_stream_is_refused() {
+    let ids = Sysex8StreamIds::undiscovered();
+    let (_, first) = start(&ids, &[0x80; 40]).unwrap();
+    assert!(ids.open().is_none());
+    drop(first.collect::<Vec<_>>());
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 0);
+}
+
+/// Section 7.8, Stream id: a receiver of N streams takes Stream IDs 0 to N-1
+/// only, and a stream beyond N waits until a message is written.
+/// Spec: m2-104/7.8#7
+#[test]
+fn n_streams_use_only_stream_ids_0_to_n_minus_1() {
+    let ids = Sysex8StreamIds::discovered(3);
+    let open: Vec<_> = (0..3).map(|_| start(&ids, &[0x80; 40]).unwrap()).collect();
+    assert_eq!(
+        open.iter().map(|(u, _)| wire_id(*u)).collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert!(ids.open().is_none(), "a fourth waits");
+    let mut open = open;
+    let (_, middle) = open.remove(1);
+    drop(middle.collect::<Vec<_>>());
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 1);
+    let all = Sysex8StreamIds::discovered(255);
+    let streams: Vec<_> = std::iter::from_fn(|| all.open()).collect();
+    assert_eq!(streams.len(), 255);
+}
+
+/// Function Block Info: `Max Number of SysEx 8 Streams` 0 is a receiver that
+/// takes no System Exclusive 8, so it hands out no stream.
+#[test]
+fn a_receiver_declaring_zero_streams_gets_none() {
+    assert!(Sysex8StreamIds::discovered(0).open().is_none());
+}
+
+/// Section 7.8.1: the abort is an End with `# of bytes` 0xF and zero data on
+/// the message's Stream ID, and it frees the ID.
+/// Spec: m2-104/7.8.1#1
+#[test]
+fn an_abort_ends_the_message_and_frees_its_id() {
+    let ids = Sysex8StreamIds::discovered(2);
+    let (_, _held) = start(&ids, &[0x80; 40]).unwrap();
+    let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
+    assert_eq!(packets.abort(), Ump([0x503F_0100, 0, 0, 0]));
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 1);
+}
+
+/// Section 7.8.1: a message dropped part-way is open on the receiver, so its
+/// Stream ID is not reopened; the abort it owes (an End with `# of bytes` 0xF
+/// on the message's Group) is taken, and the ID is free again.
+/// Spec: m2-104/7.8.1#1
+#[test]
+fn an_unfinished_message_keeps_its_id_until_its_abort_is_taken() {
+    let ids = Sysex8StreamIds::discovered(2);
+    let g5 = MidiGroup::of(5);
+    let mut packets = ids.open().unwrap().packets(g5, &[0x80; 40]);
+    packets.next().unwrap();
+    drop(packets);
+    // ID 0 is owed an abort: the next open is ID 1.
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 1);
+    assert_eq!(ids.take_abort(), Some(Ump([0x553F_0000, 0, 0, 0])));
+    assert_eq!(ids.take_abort(), None);
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 0);
+}
+
+/// An opened stream dropped without writing frees its ID: nothing was sent.
+#[test]
+fn an_unused_stream_frees_its_id() {
+    let ids = Sysex8StreamIds::undiscovered();
+    drop(ids.open().unwrap());
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 0);
+    drop(ids.open().unwrap().packets(G0, &[1]));
+    assert!(ids.open().is_some());
+}
+
+/// Section 7.8.1: a sender out of data ends the message with an End of zero
+/// data and `# of bytes` 0x1 (the data so far is valid) or 0xF (incomplete or
+/// unknown); either frees the ID.
+/// Spec: m2-104/7.8.1#1
+#[test]
+fn an_early_end_is_an_end_of_one_or_f_bytes_and_frees_the_id() {
+    let ids = Sysex8StreamIds::undiscovered();
+    let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
+    assert_eq!(packets.end_early(), Ump([0x5031_0000, 0, 0, 0]));
+    let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
+    assert_eq!(packets.abort(), Ump([0x503F_0000, 0, 0, 0]));
+    assert!(ids.open().is_some());
 }

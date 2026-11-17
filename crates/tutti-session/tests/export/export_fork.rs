@@ -14,11 +14,11 @@
 //! `export_fork_plugin.rs`.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
-
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -27,6 +27,7 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_rt::LockExt;
 use tutti_session::BufferMaster;
 use tutti_session::SessionNode;
 use tutti_session::{
@@ -977,9 +978,7 @@ struct Threads {
 }
 
 fn here(at: &Mutex<Vec<ThreadId>>) {
-    at.lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .push(std::thread::current().id());
+    at.lock_recover().push(std::thread::current().id());
 }
 
 /// A unit confined to the main thread, as an in-process VST2 fork is:

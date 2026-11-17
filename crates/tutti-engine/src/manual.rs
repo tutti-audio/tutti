@@ -10,6 +10,8 @@ use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_rt::LockExt;
+
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
 use crate::stream::{OutputSpec, RunningStream, StreamDriver};
@@ -91,7 +93,7 @@ impl ManualStreamDriver {
 
 impl ManualStream {
     fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock) -> R) -> Option<R> {
-        let mut guard = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = self.slot.lock_recover();
         guard.as_mut().map(f)
     }
 
@@ -120,12 +122,7 @@ impl ManualStream {
         let channels = self.with_block(|b| b.channels())?;
         let mut out = vec![0.0f32; frames * channels];
         self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
-        if let Some(faults) = self
-            .faults
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
+        if let Some(faults) = self.faults.lock_recover().as_ref() {
             faults.delivered();
         }
         Some(out)
@@ -147,12 +144,7 @@ impl ManualStream {
     /// the fault path without unplugging a device. Does nothing before the
     /// stream is first opened.
     pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
-        if let Some(faults) = self
-            .faults
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
+        if let Some(faults) = self.faults.lock_recover().as_ref() {
             faults.record(kind, err, now);
         }
     }
@@ -160,10 +152,7 @@ impl ManualStream {
     /// Returns whether a stream is currently open on this handle.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.slot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
+        self.slot.lock_recover().is_some()
     }
 }
 
@@ -182,7 +171,7 @@ impl RunningStream for ManualRunning {
 
 impl Drop for ManualRunning {
     fn drop(&mut self) {
-        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.slot.lock_recover() = None;
     }
 }
 
@@ -200,8 +189,8 @@ impl StreamDriver for ManualStreamDriver {
         // separate wiring call: `open` is the one place both the driver and
         // the sink are in scope, and a generic `start_with` cannot know it is
         // holding a manual driver.
-        *self.faults.lock().unwrap_or_else(|p| p.into_inner()) = Some(faults);
-        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(block);
+        *self.faults.lock_recover() = Some(faults);
+        *self.slot.lock_recover() = Some(block);
         Ok(ManualRunning { slot: self.slot })
     }
 }

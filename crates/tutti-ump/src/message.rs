@@ -373,9 +373,11 @@ pub struct Sysex8Packet {
 }
 
 impl Sysex8Packet {
-    /// The packet, or `None` for more than 13 data bytes.
+    /// The packet, or `None` for more than 13 data bytes. Only a
+    /// [`Sysex8Stream`](crate::Sysex8Stream) writes packets; the others are
+    /// decoded.
     #[must_use]
-    pub fn new(status: SysexStatus, stream_id: u8, data: &[u8]) -> Option<Self> {
+    pub(crate) fn new(status: SysexStatus, stream_id: u8, data: &[u8]) -> Option<Self> {
         if data.len() > 13 {
             return None;
         }
@@ -413,7 +415,10 @@ impl Sysex8Packet {
 pub enum Data128 {
     /// A System Exclusive 8 packet.
     Sysex8(Sysex8Packet),
-    /// An End packet with `# of bytes` `0xF`: the sender ran out of data and
+    /// What a decoder returns for an End packet with `# of bytes` `0xF`; the one
+    /// SysEx 8 variant constructible with a raw Stream ID. A sender aborts with
+    /// [`Sysex8Packets::abort`](crate::Sysex8Packets::abort) or
+    /// [`Sysex8StreamIds::take_abort`](crate::Sysex8StreamIds::take_abort). It is an End packet with `# of bytes` `0xF`: the sender ran out of data and
     /// the earlier data of this stream is incomplete (§7.8.1).
     /// The stream id is read from byte 3; §7.8.1 does not say it is kept, so a
     /// sender that zeroes it aborts stream 0.

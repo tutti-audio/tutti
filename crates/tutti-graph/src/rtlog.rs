@@ -35,12 +35,12 @@
 //! executor's gate is off.
 
 use std::cell::Cell;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{
-    ClaimTable, Counter, CounterWriter, Overflow, PackedAtomic, RingReader, RingWriter, counter,
-    ring,
+    ClaimTable, Counter, CounterWriter, LockExt, Overflow, PackedAtomic, RingReader, RingWriter,
+    counter, ring,
 };
 use tutti_types::{Frame, Samples};
 
@@ -550,7 +550,7 @@ impl RtLogReaders {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_recover()
     }
 
     /// Takes the readers `exec` built since the last call (after a

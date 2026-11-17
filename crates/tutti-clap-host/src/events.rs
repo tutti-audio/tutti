@@ -2220,7 +2220,7 @@ mod tests {
     use tutti_graph::Offset;
     use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY};
     use tutti_types::Samples;
-    use tutti_ump::{CCNumber, Data128, Sysex8Packet, SysexStatus, System};
+    use tutti_ump::{CCNumber, Sysex8StreamIds, System};
 
     /// The per-note bend range a plugin's emitted tuning is put at: the MPE
     /// default, ±48 semitones (RP-053).
@@ -2575,11 +2575,13 @@ mod tests {
     /// SysEx7, SysEx8, Flex, Stream, and a packet `decode` cannot frame.
     #[test]
     fn every_message_kind_converts_without_allocating() {
-        let sysex8 = Ump::from(Message::Data128(
-            MidiGroup::FIRST,
-            Data128::Sysex8(Sysex8Packet::new(SysexStatus::Complete, 1, &[1, 2, 3]).unwrap()),
-        ))
-        .0;
+        let sysex8 = Sysex8StreamIds::undiscovered()
+            .open()
+            .unwrap()
+            .packets(MidiGroup::FIRST, &[1, 2, 3])
+            .next()
+            .unwrap()
+            .0;
         let table: Vec<(&str, [u32; 4])> = vec![
             ("utility", [0x0000_0000, 0, 0, 0]),
             ("system", [0x10F8_0000, 0, 0, 0]),

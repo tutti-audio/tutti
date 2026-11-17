@@ -9,14 +9,15 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
 };
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
+use tutti_rt::LockExt;
 use tutti_session::{Key, LoadError, PluginNode, PoolEvent, Session, SessionEvent};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
@@ -140,7 +141,7 @@ static PRIMED: Mutex<Vec<Primed>> = Mutex::new(Vec::new());
 /// Probes `plugin`'s file for the loads of this process. A test that sets a
 /// `TUTTI_CLAP_PROBE_*` variable calls it first, before the variable.
 pub fn prime(plugin: &PluginRef) {
-    let mut primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut primed = PRIMED.lock_recover();
     let file = tutti_plugin_db::canonical_path(plugin.path());
     let id = plugin.id().map(str::to_owned);
     if !primed.iter().any(|p| p.file == file && p.id == id) {
@@ -163,7 +164,7 @@ impl<C: tutti_session::Clock> LoadPlugin for Session<C> {
     ) -> Result<Key<PluginNode>, LoadError> {
         prime(&spec.plugin);
         let key = {
-            let primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
+            let primed = PRIMED.lock_recover();
             let file = tutti_plugin_db::canonical_path(spec.plugin.path());
             let id = spec.plugin.id().map(str::to_owned);
             let found = primed
