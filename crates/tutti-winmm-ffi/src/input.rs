@@ -188,15 +188,16 @@ impl MidiIn {
     ///
     /// winmm answers the device interface query for a device id and refuses a
     /// handle, so the open cannot ask the open handle which device it is. It
-    /// reads the port's position again after `midiInOpen` and closes the port
-    /// unless the device there is the one listed: a shift of the list before
-    /// the open is refused, and only a second shift, between the open and that
-    /// read, which puts the listed device back at the position, goes unseen.
+    /// reads the port's position before `midiInOpen`, and opens only if the
+    /// device there is the one listed, then reads it again once open and
+    /// closes the port (with no reset) unless it still is. Only a shift
+    /// between those two reads that puts the listed device back at the position
+    /// goes unseen.
     ///
     /// # Errors
     ///
     /// [`Error::PortMoved`] when the device at the position is not the one
-    /// listed; otherwise the failing call: `midiInOpen`
+    /// listed (checked before and after the open); otherwise the failing call: `midiInOpen`
     /// ([`MmResult::Allocated`](crate::MmResult::Allocated) when another
     /// application holds the port exclusively,
     /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is
@@ -206,6 +207,7 @@ impl MidiIn {
         port: &InputPort,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
+        port.verify()?;
         let (wake, wait) = waitable_timer()?;
         let shared = Arc::new(Shared {
             handler: Mutex::new(Box::new(handler)),
@@ -242,6 +244,15 @@ impl MidiIn {
             unregister(id);
             return Err(e);
         }
+        if let Err(moved) = port.verify() {
+            // Not confirmed: nothing was queued or started, so the port is
+            // only closed, never reset or touched by a worker.
+            unregister(id);
+            // SAFETY: `handle` is the input just opened, closed once; no
+            // buffer was prepared and no worker exists.
+            unsafe { midiInClose(handle) };
+            return Err(moved);
+        }
         shared.handle.store(handle, Ordering::Release);
         // The port is open: from here `input` owns it, and a failure drops
         // `input`, which closes the port (once, in `Drop`).
@@ -251,7 +262,6 @@ impl MidiIn {
             shared,
             worker: None,
         };
-        port.confirm()?;
         let worker = {
             let shared = Arc::clone(&input.shared);
             std::thread::Builder::new()

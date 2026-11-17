@@ -1,9 +1,9 @@
 use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
-use tutti_winmm_ffi::{MidiOut, OutputPort, output_ports};
+use tutti_winmm_ffi::{MidiOut, Output, OutputPort, ports};
 
 /// The built-in synth, or a failure that lists what is there.
 fn synth() -> OutputPort {
-    let ports = output_ports();
+    let ports = ports::<Output>();
     let names: Vec<String> = ports.iter().map(|p| p.caps().name.clone()).collect();
     let Some(port) = ports
         .into_iter()

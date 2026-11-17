@@ -194,10 +194,10 @@ pub enum Error {
         /// What the operating system said.
         source: std::io::Error,
     },
-    /// The device at a listed port's position is no longer the one listed:
-    /// the list shifted between the listing and the open, so the port was
-    /// closed again.
-    #[error("winmm error: the {direction} port listed is no longer at its position")]
+    /// The device at a listed port's position is no longer the one listed (or
+    /// the driver reports none there): the list shifted between the listing
+    /// and the open.
+    #[error("winmm error: the {direction} port changed since it was listed")]
     PortMoved {
         /// Which list shifted.
         direction: Direction,
