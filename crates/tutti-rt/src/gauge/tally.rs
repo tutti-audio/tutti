@@ -3,8 +3,9 @@
 //! A [`Counter`](super::Counter) has one writer, by type, and a `reopen` that
 //! fails while the old writer lives. A tally is for a count whose writers
 //! overlap (two inlets of one port while a device is replugged): every
-//! [`TallyWriter`] is `Clone` and adds with one `fetch_add` per word, so each
-//! add is wait-free and none is lost to another writer.
+//! [`TallyWriter`] is `Clone` and adds through `&self` with one `fetch_add` per
+//! word, so one writer may also be shared by reference across threads. Each add
+//! is wait-free and none is lost to another writer.
 //!
 //! - **Not saturating.** A saturating add over many writers is a compare-and-swap
 //!   loop, which is not wait-free. A word wraps after 2^64 events: 584 years at
@@ -53,7 +54,8 @@ pub struct Tally<U: Count> {
     _count: PhantomData<fn() -> U>,
 }
 
-/// A writing end of a [`Tally`]: `Clone`, one per adding thread or owner.
+/// A writing end of a [`Tally`]: `Clone`, one per owner, shared by reference
+/// among the threads that add through it.
 #[must_use]
 pub struct TallyWriter<U: Count> {
     cells: Arc<Cells>,

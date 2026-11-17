@@ -306,7 +306,7 @@ fn a_tally_adds_each_tally_of_a_two_tally_count() {
 #[test]
 fn a_tally_reader_never_sees_a_tally_go_back() {
     let total = tally::<Two>();
-    let mut writers = [total.writer(), total.writer()];
+    let writers = [total.writer(), total.writer()];
     let reader = std::thread::spawn({
         let total = total.clone();
         move || {
@@ -319,7 +319,7 @@ fn a_tally_reader_never_sees_a_tally_go_back() {
         }
     });
     for _ in 0..10_000 {
-        for w in &mut writers {
+        for w in &writers {
             w.add(Two { lost: 1, late: 2 });
         }
     }
