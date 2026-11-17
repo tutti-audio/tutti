@@ -311,7 +311,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// [`RenderGraph::prepare`]), the audible span, the
 /// latency trimmed from the head of every output, the tail kept past the end
 /// and what to do about a dropped event. `clock` is advanced once per block,
-/// after the graph processes ([`RenderClock::render_graph`]); pass
+/// after the graph processes ([`render_graph`](tutti_transport::render_graph)); pass
 /// [`FrozenClock`](tutti_transport::FrozenClock) for a graph with no time-dependent nodes. `graph` is
 /// borrowed, so a graph holding a unit whose teardown is main-thread-only (an
 /// in-process VST2 plugin's fork) and rendered on a worker is brought back and

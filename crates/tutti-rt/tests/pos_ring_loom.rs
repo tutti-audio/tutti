@@ -12,7 +12,7 @@
 //! (tutti-sampler, which wraps the ring, cannot build under the flag:
 //! `event-listener`, under its async channels, reacts to `cfg(loom)` without
 //! depending on loom. That is why the protocol lives here, beside
-//! `ArcLend`.)
+//! `Publisher`.)
 //!
 //! # What each model asserts
 //!

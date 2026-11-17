@@ -37,6 +37,8 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 
 [dev-dependencies]
+# The buffer views `render_graph` takes.
+tutti-buffers = { path = "../tutti-buffers" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # `fake`: the plugin that implements `Loaded` with no format behind it, which
 # the block-status tests drive through `client_over`.

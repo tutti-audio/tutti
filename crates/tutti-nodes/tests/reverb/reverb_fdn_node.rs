@@ -5,6 +5,7 @@
 //! another reverb's render.
 
 use std::sync::Arc;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
@@ -62,7 +63,13 @@ impl Rig {
             play: PlayClock::ZERO,
         };
         self.frame += input.len() as u64;
-        drive_input(&mut self.node, &env, &[input], params, &[])
+        drive_input(
+            &mut self.node,
+            &env,
+            Planes::new(&[input]).unwrap(),
+            params,
+            &[],
+        )
     }
 
     fn silent(&mut self) -> Driven {
@@ -292,7 +299,7 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         let frames = 96_000;
         let mut x = noise(8, 4_800);
         x.resize(frames, 0.0);
-        let out = r.render_input(&[&x]);
+        let out = r.render_input(Planes::new(&[&x]).unwrap());
         let energy = |from: usize, to: usize| -> f64 {
             out.iter()
                 .flat_map(|c| &c[from..to])
@@ -369,7 +376,10 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
                 assert!(set.set(UnitParam::RoomSize, 0.9));
                 assert!(set.set(UnitParam::Diffusion, 0.2));
             }
-            for (o, y) in out.iter_mut().zip(drive(&mut n, SR, &[chunk], &[])) {
+            for (o, y) in out
+                .iter_mut()
+                .zip(drive(&mut n, SR, Planes::new(&[chunk]).unwrap(), &[]))
+            {
                 o.extend(y);
             }
         }
@@ -400,7 +410,10 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
             let at = i * block;
             let l = &lane[at..at + chunk.len()];
             let params = [driven.then_some(l)];
-            for (o, y) in out.iter_mut().zip(drive(&mut n, SR, &[chunk], &params)) {
+            for (o, y) in
+                out.iter_mut()
+                    .zip(drive(&mut n, SR, Planes::new(&[chunk]).unwrap(), &params))
+            {
                 o.extend(y);
             }
         }
@@ -423,7 +436,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
     };
     let mut used = node(plain(), c);
     for chunk in noise(5, 5_000).chunks(BLOCK) {
-        drive(&mut used, SR, &[chunk], &[]);
+        drive(&mut used, SR, Planes::new(&[chunk]).unwrap(), &[]);
     }
     used.reset();
     let mut fresh = node(plain(), c);
@@ -432,8 +445,8 @@ fn a_reset_node_renders_as_a_fresh_one() {
     x[0] = 1.0;
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for chunk in x.chunks(BLOCK) {
-        a.push(drive(&mut used, SR, &[chunk], &[]));
-        b.push(drive(&mut fresh, SR, &[chunk], &[]));
+        a.push(drive(&mut used, SR, Planes::new(&[chunk]).unwrap(), &[]));
+        b.push(drive(&mut fresh, SR, Planes::new(&[chunk]).unwrap(), &[]));
     }
     assert_eq!(a, b);
     assert!(a.iter().flatten().flatten().any(|&s| s != 0.0));
@@ -479,7 +492,7 @@ fn a_parked_node_wakes_as_a_fresh_one() {
 fn a_clone_starts_silent_and_shares_the_cells() {
     let mut used = node(plain(), FdnControls::DEFAULT);
     for chunk in noise(6, 6_000).chunks(BLOCK) {
-        drive(&mut used, SR, &[chunk], &[]);
+        drive(&mut used, SR, Planes::new(&[chunk]).unwrap(), &[]);
     }
     let mut clone = used.clone();
     let mut fresh = node(plain(), FdnControls::DEFAULT);
@@ -489,8 +502,8 @@ fn a_clone_starts_silent_and_shares_the_cells() {
     let mut heard = false;
     for chunk in x.chunks(BLOCK) {
         let (a, b) = (
-            drive(&mut clone, SR, &[chunk], &[]),
-            drive(&mut fresh, SR, &[chunk], &[]),
+            drive(&mut clone, SR, Planes::new(&[chunk]).unwrap(), &[]),
+            drive(&mut fresh, SR, Planes::new(&[chunk]).unwrap(), &[]),
         );
         heard |= a.iter().flatten().any(|&s| s != 0.0);
         assert_eq!(a, b);

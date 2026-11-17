@@ -407,6 +407,8 @@ impl<'a, S> MutTable<'_, 'a, S> {
 /// every plane to a frame range, and [`as_planes`](Self::as_planes) reads the
 /// current contents of every channel, for a kernel that writes in place.
 ///
+/// `default` is the view of no channels and no frames.
+///
 /// Two lifetimes: `'s` borrows the table of channel slices and `'a` is the
 /// slices' own, so a sub-view can borrow the table for less time than the
 /// audio. There is no `split_at_mut`: two disjoint views of one table of
@@ -631,6 +633,19 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
             layout: self.layout,
             start: self.start + r.start,
             frames: r.end - r.start,
+        }
+    }
+}
+
+impl<S: Sample> Default for PlanesMut<'_, '_, S> {
+    /// No planes, no frames: the empty view, the write side of
+    /// [`Planes::default`]. [`new`](PlanesMut::new) would refuse it.
+    fn default() -> Self {
+        Self {
+            planes: MutTable::Slices(&mut []),
+            layout: ChannelLayout::EMPTY,
+            start: 0,
+            frames: 0,
         }
     }
 }

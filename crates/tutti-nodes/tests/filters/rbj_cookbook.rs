@@ -26,6 +26,7 @@
 //! window, so its noise floor is far below that, while a 1% cutoff error moves
 //! the response by more than the bound at the probes near the corner.
 
+use tutti_buffers::Planes;
 use tutti_nodes::{SvfFilterNode, SvfType};
 
 const SR: f64 = 48_000.0;
@@ -61,7 +62,9 @@ fn svf_gain_db(kind: SvfType, cutoff: f32, freq: f32) -> f64 {
         1,
     );
     measured_gain_db(
-        move |x| tutti_graph::contract::drive(&mut node, rate, &[&[x]], &[])[0][0],
+        move |x| {
+            tutti_graph::contract::drive(&mut node, rate, Planes::new(&[&[x]]).unwrap(), &[])[0][0]
+        },
         freq,
     )
 }

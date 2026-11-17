@@ -27,6 +27,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// # Examples
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_types::{Hz, Q, UnitParam};
 /// use tutti_graph::{Prepare, Solo};
@@ -35,7 +36,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(0.707));
 /// let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-/// let out = solo.render_input(&[&[1.0; 64]]);
+/// let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
 /// // Move the cutoff on the running node; it glides over the next block.
@@ -257,7 +258,7 @@ mod tests {
     fn render(node: SvfFilterNode, input: &[f32]) -> Vec<f32> {
         let rate = SampleRate::SR_44K1;
         let mut node = tutti_graph::contract::prepared(node, rate, input.len());
-        drive(&mut node, rate, &[input], &[]).remove(0)
+        drive(&mut node, rate, Planes::new(&[input]).unwrap(), &[]).remove(0)
     }
 
     /// `node`, prepared at 44.1 kHz, over `inputs` (one slice per channel)
@@ -265,7 +266,7 @@ mod tests {
     fn render_wide(node: SvfFilterNode, inputs: &[&[f32]]) -> Vec<Vec<f32>> {
         let rate = SampleRate::SR_44K1;
         let mut node = tutti_graph::contract::prepared(node, rate, inputs[0].len());
-        drive(&mut node, rate, inputs, &[])
+        drive(&mut node, rate, Planes::new(inputs).unwrap(), &[])
     }
 
     /// A fork starts from the values last set through the node's
@@ -446,8 +447,8 @@ mod tests {
             rate,
             2048,
         );
-        let out_f64 = drive(&mut f64_node, rate, &[&input], &[]).remove(0);
-        let out_f32 = drive(&mut f32_node, rate, &[&input], &[]).remove(0);
+        let out_f64 = drive(&mut f64_node, rate, Planes::new(&[&input]).unwrap(), &[]).remove(0);
+        let out_f32 = drive(&mut f32_node, rate, Planes::new(&[&input]).unwrap(), &[]).remove(0);
         let rms_f64 = rms(&out_f64[512..]);
         let rms_f32 = rms(&out_f32[512..]);
         let rel_diff = (rms_f64 - rms_f32).abs() / rms_f64.max(1e-6);
@@ -605,7 +606,12 @@ mod tests {
                 Q::new(0.707),
             ));
             let held = vec![cutoff; noise.len()];
-            let out = drive(&mut f, RATE, &[&noise, &noise], &[Some(&held), None]);
+            let out = drive(
+                &mut f,
+                RATE,
+                Planes::new(&[&noise, &noise]).unwrap(),
+                &[Some(&held), None],
+            );
             rms(&out[0][256..])
         };
         let low = run(200.0);
@@ -632,7 +638,12 @@ mod tests {
         };
         let plain = drive_block(&mut make(), &[&signal, &signal]);
         let held = vec![1000.0f32; signal.len()];
-        let modn = drive(&mut make(), RATE, &[&signal, &signal], &[Some(&held), None]);
+        let modn = drive(
+            &mut make(),
+            RATE,
+            Planes::new(&[&signal, &signal]).unwrap(),
+            &[Some(&held), None],
+        );
         for i in 0..signal.len() {
             assert!(
                 (plain[0][i] - modn[0][i]).abs() < 1e-5,
@@ -717,7 +728,9 @@ mod tests {
             64,
         );
         let x = sine(1_500.0, 48_000.0, 64);
-        let block = |n: &mut SvfFilterNode<f64>| rms(&drive(n, rate, &[&x], &[]).remove(0));
+        let block = |n: &mut SvfFilterNode<f64>| {
+            rms(&drive(n, rate, Planes::new(&[&x]).unwrap(), &[]).remove(0))
+        };
         block(&mut node);
         assert!(node.param_set().set(UnitParam::Cutoff, 6_000.0));
         let source = block(&mut node);

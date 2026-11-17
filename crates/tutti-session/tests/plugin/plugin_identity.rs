@@ -5,12 +5,20 @@
 
 use crate::pooled::{LoadPlugin, Spec, catalog_of};
 use crate::support::{clap_probe, plugin_server};
-use tutti_plugin::catalog::{PluginId, PluginRef, PluginState};
-use tutti_plugin::error::StateError;
-use tutti_plugin_db::{PluginEntry, PluginFormat};
-use tutti_plugin_types::{PluginClass, PluginDescriptor};
-use tutti_session::Session;
+use tutti_plugin::catalog::{PluginId, PluginRef};
+use tutti_plugin_db::PluginEntry;
+use tutti_plugin_types::PluginFormat;
+use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
+use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
 use tutti_types::{MaxBlock, Samples};
+
+/// The plugin a state names.
+fn plugin_of(state: &PeerState) -> &PluginRef {
+    match state.peer() {
+        SavedPeer::Plugin(plugin) => plugin,
+        other => panic!("a plugin's state names a plugin: {other:?}"),
+    }
+}
 
 fn first_id() -> &'static str {
     tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8")
@@ -76,7 +84,7 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
 
 /// **A state saved from one plugin is refused by an entry for the other, and
 /// by the other's hosted plugin; its own takes it.** The refusal comes before
-/// the plugin is asked: `OtherPlugin` names both.
+/// the plugin is asked: `OtherPeer` names both.
 #[test]
 fn a_state_is_refused_by_another_plugin() {
     let path = clap_probe();
@@ -91,15 +99,20 @@ fn a_state_is_refused_by_another_plugin() {
         .load_plugin_blocking(main, Spec::new(second_ref.clone()))
         .expect("loads");
 
-    let from_first = s.plugin_view(first).unwrap().state().save().expect("saves");
+    let from_first = s
+        .plugin_view(first)
+        .unwrap()
+        .state()
+        .save(StateUse::Project)
+        .expect("saves");
     // The catalog names a plugin by its file's canonical path.
     assert_eq!(
-        from_first.plugin().id(),
+        plugin_of(&from_first).id(),
         first_ref.id(),
         "the state names its owner"
     );
     assert_eq!(
-        tutti_plugin_db::canonical_path(from_first.plugin().path()),
+        tutti_plugin_db::canonical_path(plugin_of(&from_first).path()),
         tutti_plugin_db::canonical_path(first_ref.path()),
         "in its own file"
     );
@@ -107,7 +120,7 @@ fn a_state_is_refused_by_another_plugin() {
         .plugin_view(second)
         .unwrap()
         .state()
-        .save()
+        .save(StateUse::Project)
         .expect("saves");
 
     // The entry's declaration. The key an entry is declared under is never
@@ -119,12 +132,14 @@ fn a_state_is_refused_by_another_plugin() {
         .plugin_entry(UNPOOLED, &id_of(second_id()), &catalog)
         .initial_state(from_first.clone())
         .expect_err("the first plugin's state is not the second's");
-    assert_eq!(
-        refused,
-        StateError::OtherPlugin {
-            expected: second_id().into(),
-            found: first_id().into(),
-        }
+    let SavedPeer::Plugin(expected) = refused.expected() else {
+        panic!("a plugin: {:?}", refused.expected());
+    };
+    assert_eq!(expected.id(), Some(second_id()));
+    assert_eq!(refused.found(), from_first.peer());
+    assert!(
+        refused.to_string().contains(first_id()) && refused.to_string().contains(second_id()),
+        "the text names both: {refused}"
     );
     assert!(
         s.plugin_entry(UNPOOLED, &id_of(first_id()), &catalog)
@@ -139,13 +154,14 @@ fn a_state_is_refused_by_another_plugin() {
         .state()
         .restore(main, &from_first)
         .expect_err("a hosted plugin refuses another's state");
-    assert!(
-        matches!(refused, StateError::OtherPlugin { .. }),
-        "{refused:?}"
-    );
+    assert!(matches!(refused, RestoreError::OtherPeer(_)), "{refused:?}");
     hosted
         .state()
         .restore(main, &from_second)
         .expect("and takes its own");
-    let _: &PluginState = &from_second;
+    assert_eq!(
+        from_first.media_type().as_str(),
+        "application/x-clap-state",
+        "a CLAP plugin's state carries CLAP's media type"
+    );
 }

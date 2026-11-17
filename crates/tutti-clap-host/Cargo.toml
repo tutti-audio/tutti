@@ -23,6 +23,8 @@ tracing.workspace = true
 tutti-clap-ffi = { version = "0.0.1", path = "../tutti-clap-ffi" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
+# `FdId`, `Interest` and `Ready`: the typed values of a wait on a plugin's descriptors.
+tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
@@ -36,6 +38,8 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # The README's editor example takes any `raw-window-handle` window.
 raw-window-handle = "0.6"
 tutti-clap-ffi = { path = "../tutti-clap-ffi", features = ["testing"] }
+# The sample width the suites name (`Float`).
+tutti-buffers = { path = "../tutti-buffers" }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 # The integration tests re-open the reference plugin's library themselves (the

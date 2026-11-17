@@ -32,6 +32,7 @@
 //! which is the whole `Owed` mechanism in one number.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
@@ -165,7 +166,7 @@ fn drive_block(unit: &mut Renderer, midi_out: &mut tutti_plugin_types::MidiEvent
     let out = if inputs == 0 {
         unit.render(BLOCK)
     } else {
-        unit.render_input(&chans)
+        unit.render_input(Planes::new(&chans).unwrap())
     };
     out.into_iter().next().expect("the probe has outputs")
 }
@@ -575,8 +576,6 @@ fn a_reprepare_drops_the_pending_midi_and_keeps_its_sysex_cut() {
 /// `two_stale_blocks`'s job.
 #[test]
 fn the_controls_count_the_bridges_dropped_midi_too() {
-    use std::sync::atomic::Ordering;
-
     let _lock = machine_lock();
     let mut env = ScopedEnv::new();
     let (client, _handle) = load_probe(&mut env, 1);
@@ -585,6 +584,6 @@ fn the_controls_count_the_bridges_dropped_midi_too() {
     let (_, note) = dump_and_note();
     feed(&mut unit, &[note, note]);
     unit.node.reset();
-    bridge.dropped_midi_cell().fetch_add(5, Ordering::Relaxed);
+    bridge.dropped_midi_cell().writer().add(5);
     assert_eq!(controls.dropped_midi_in(), 2 + 5);
 }

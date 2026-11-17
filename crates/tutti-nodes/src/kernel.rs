@@ -765,7 +765,7 @@ mod tests {
                 play: PlayClock::ZERO,
             };
             x[0] = if block == 0 { 1.0 } else { 0.0 };
-            let d = drive_input(&mut node, &env, &[&x], &[], &[]);
+            let d = drive_input(&mut node, &env, Planes::new(&[&x]).unwrap(), &[], &[]);
             assert_eq!(d.status, Some(Status::Modified), "block {block}");
             assert_eq!(d.reported_tail, None, "block {block}");
             heard |= d.audio[0].iter().any(|&s| s != 0.0);
@@ -838,13 +838,14 @@ mod tests {
             let node =
                 KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db(0.0) });
             let mut d = Direct::new(node, SampleRate::SR_48K, 64);
-            for c in d.inputs_mut() {
+            for c in d.inputs_mut().iter_mut() {
+                let c = c.into_samples_mut();
                 c.fill(0.5);
             }
-            d.outputs_mut()[0].fill(7.0);
+            d.outputs_mut().plane_mut(0).samples_mut().fill(7.0);
             d.block();
             assert!(
-                d.output(0).iter().all(|&s| s == 0.0),
+                d.output().plane(0).iter().all(|&s| s == 0.0),
                 "{main:?}, key {key:?}"
             );
         }

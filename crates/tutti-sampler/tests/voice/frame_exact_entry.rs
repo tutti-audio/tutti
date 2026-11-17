@@ -21,12 +21,13 @@
 //! A clip at beat 3, a constant wave: its first non-zero frame is exactly
 //! 96 000 on every path a voice is driven by — live, the engine
 //! (`Engine::new`) in 441-frame device blocks; offline, a graph rendered by
-//! `RenderClock::render_graph` in 1023-frame blocks; and a node driven
+//! `render_graph` in 1023-frame blocks; and a node driven
 //! by hand in 77-frame blocks. On none is 96 000 the first frame of a block
 //! (a voice renders each block in one piece, seated at its first frame),
 //! nor of a 64-frame piece of one, which voices rendered before their
 //! scratch was sized from `Prepare::max_block`.
 
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_sampler::VoiceWindow;
 
 use std::sync::{Arc, Mutex};
@@ -41,7 +42,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, SlotId, VoicePool};
 use tutti_tempo::TempoMap;
 use tutti_transport::{
-    MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Transport,
+    MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
 use tutti_types::{Beat, Bpm, ChannelLayout, Frame, FrameClock, SampleRate, Samples};
 
@@ -158,7 +159,12 @@ fn offline_graph(start: Beat) -> Run {
     let mut left = Vec::with_capacity(FRAMES);
     let (mut l, mut r) = (vec![0.0f32; OFFLINE], vec![0.0f32; OFFLINE]);
     while left.len() < FRAMES {
-        timeline.render_graph(&mut exec, OFFLINE, &[], &mut [&mut l[..], &mut r[..]]);
+        render_graph(
+            &timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+        );
         left.extend_from_slice(&l);
     }
     let read = *probe.lock().expect("probe");
@@ -181,8 +187,10 @@ fn by_hand(start: Beat) -> Run {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        left.extend_from_slice(&contract::drive_input(&mut node, &env, &[], &[], &[]).audio[0]);
-        contract::drive_input(&mut probe, &env, &[], &[], &[]);
+        left.extend_from_slice(
+            &contract::drive_input(&mut node, &env, Planes::default(), &[], &[]).audio[0],
+        );
+        contract::drive_input(&mut probe, &env, Planes::default(), &[], &[]);
         host.advance(Samples(HAND), None);
     }
     let read = *probe.0.lock().expect("probe");

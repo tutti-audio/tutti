@@ -65,10 +65,10 @@
 //!
 
 use crate::protocol::{BusChannels, ChannelLayout, SampleFormat, SlabLayout};
-use bytemuck::Pod;
 use std::sync::Arc;
+use tutti_buffers::Float;
+use tutti_plugin_types::MAX_BLOCK_CHANNELS;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{MAX_BLOCK_CHANNELS, Sample};
 
 use tutti_plugin_ipc_ffi::{
     Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, SlabError, slot_for,
@@ -180,7 +180,7 @@ impl AudioSlab {
     /// # Errors
     ///
     /// Returns an error if `channel` is out of range.
-    pub fn read_input_into<T: Sample + Pod>(
+    pub fn read_input_into<T: Float>(
         &self,
         seq: u64,
         channel: usize,
@@ -199,7 +199,7 @@ impl AudioSlab {
     /// # Errors
     ///
     /// Returns an error if `channel` is out of range.
-    pub fn read_output_into<T: Sample + Pod>(
+    pub fn read_output_into<T: Float>(
         &self,
         seq: u64,
         channel: usize,
@@ -244,7 +244,7 @@ impl AudioSlab {
     // ---- Internal helpers ----
 
     /// Only [`SlabWriter`] calls this, with the mapping's one writer.
-    fn write_region<T: Sample + Pod>(
+    fn write_region<T: Float>(
         &self,
         writer: &mut MappingWriter,
         direction: Direction,
@@ -261,7 +261,7 @@ impl AudioSlab {
         Ok(())
     }
 
-    fn read_region<T: Sample + Pod>(
+    fn read_region<T: Float>(
         &self,
         direction: Direction,
         seq: u64,
@@ -275,7 +275,7 @@ impl AudioSlab {
     /// and before the recheck: the window a peer's rewrite of the slot falls
     /// in. Production passes nothing; a test republishes there, which is how
     /// the recheck is pinned without a race.
-    fn read_region_then<T: Sample + Pod>(
+    fn read_region_then<T: Float>(
         &self,
         direction: Direction,
         seq: u64,
@@ -311,7 +311,7 @@ impl AudioSlab {
     /// at: the layout's stride is in `sample_size()` bytes, so a wider type
     /// would write past its channel and a narrower one would read the wrong
     /// samples.
-    fn check_width<T: Sample>(&self) -> Result<(), SlabAccessError> {
+    fn check_width<T: Float>(&self) -> Result<(), SlabAccessError> {
         if std::mem::size_of::<T>() != self.layout.sample_size() {
             return Err(SlabAccessError::SampleWidth);
         }
@@ -404,7 +404,7 @@ impl SlabWriter {
     ///
     /// Returns an error if `channel` is out of range, `data` is longer than the
     /// channel's capacity, or `T` is not the slab's sample width.
-    pub fn write<T: Sample + Pod>(
+    pub fn write<T: Float>(
         &mut self,
         seq: u64,
         channel: usize,
@@ -1031,14 +1031,10 @@ mod tests {
         }
 
         // The data region at its absolute offsets; the header's bytes (and the
-        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check.
+        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check. The read ends
+        // at the layout's last byte, so a mapping shorter than the layout panics.
         let mapping = &host.slab().mapping;
-        assert_eq!(
-            mapping.len(),
-            check_layout(&l).unwrap(),
-            "mapping is not the sized length"
-        );
-        let mut bytes = vec![0u8; mapping.len()];
+        let mut bytes = vec![0u8; check_layout(&l).unwrap()];
         mapping.read(SLAB_HEADER_BYTES, &mut bytes[SLAB_HEADER_BYTES..]);
 
         // 1. Audio starts after the header, and the two rings are disjoint.

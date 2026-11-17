@@ -151,11 +151,18 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
         .insert(
             NodeKey(1),
             "clock",
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                tutti_types::SampleRate::SR_48K,
+                tutti_transport::ProjectMeter::default().reader(),
+            ),
         )
         .controls;
-    master.set_enabled(true);
-    master.set_send_mtc(mtc);
+    master.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        mtc,
+        ..Default::default()
+    });
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");
     let transport = Transport::new(SampleRate::of(SR));

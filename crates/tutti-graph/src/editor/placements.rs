@@ -9,27 +9,27 @@ use crate::fade::Fade;
 use crate::fork::ForkSource;
 use crate::node::Node;
 use crate::wake::Wake;
+use tutti_buffers::Float;
 
 /// One record per key that was ever placed.
 ///
 /// A record outlives its node: the generation a key's next unit gets keeps
 /// counting across a removal, so a unit placed after it is never taken for
 /// one before. [`forget`](Self::forget) clears everything else at once.
-pub(super) struct Placements(BTreeMap<NodeKey, Placement>);
+pub(super) struct Placements<F: Float>(BTreeMap<NodeKey, Placement<F>>);
 
-#[derive(Default)]
-struct Placement {
+struct Placement<F: Float> {
     /// The generation the next unit placed here gets.
     next_gen: u32,
     /// The unit placed since the last commit, which the next one sends.
-    unit: Option<Box<dyn Node>>,
+    unit: Option<Box<dyn Node<F>>>,
     /// The [`Wake`] the latest placed unit was prepared with. A commit hands
     /// the executor a clone with the unit, and a re-prepare hands the unit
     /// this same one again.
     wake: Option<Wake>,
     /// Where the key's forks come from, with the generation of the unit
     /// that handed it over. `None`: the key is not forkable.
-    fork: Option<(u32, Box<dyn ForkSource>)>,
+    fork: Option<(u32, Box<dyn ForkSource<F>>)>,
     /// The crossfade a `replace` asked for, carried by the next commit.
     fade: Option<Fade>,
     /// Whether `set_latency` changed the key since the last commit: a
@@ -39,7 +39,21 @@ struct Placement {
     leaving: bool,
 }
 
-impl Placements {
+impl<F: Float> Default for Placement<F> {
+    fn default() -> Self {
+        Self {
+            next_gen: 0,
+            unit: None,
+            wake: None,
+            fork: None,
+            fade: None,
+            latency_cut: false,
+            leaving: false,
+        }
+    }
+}
+
+impl<F: Float> Placements<F> {
     pub(super) fn new() -> Self {
         Self(BTreeMap::new())
     }
@@ -51,9 +65,9 @@ impl Placements {
     pub(super) fn place(
         &mut self,
         key: NodeKey,
-        unit: Box<dyn Node>,
+        unit: Box<dyn Node<F>>,
         wake: Wake,
-        fork: Option<Box<dyn ForkSource>>,
+        fork: Option<Box<dyn ForkSource<F>>>,
     ) -> u32 {
         let p = self.0.entry(key).or_default();
         let generation = p.next_gen;
@@ -124,7 +138,7 @@ impl Placements {
 
     /// Where `key`'s forks come from, and the generation of the unit that
     /// handed it over.
-    pub(super) fn fork_source(&self, key: NodeKey) -> Option<(u32, &dyn ForkSource)> {
+    pub(super) fn fork_source(&self, key: NodeKey) -> Option<(u32, &dyn ForkSource<F>)> {
         self.0
             .get(&key)
             .and_then(|p| p.fork.as_ref())
@@ -137,12 +151,12 @@ impl Placements {
     }
 
     /// Takes the unit waiting at `key`.
-    pub(super) fn take_unit(&mut self, key: NodeKey) -> Option<Box<dyn Node>> {
+    pub(super) fn take_unit(&mut self, key: NodeKey) -> Option<Box<dyn Node<F>>> {
         self.0.get_mut(&key).and_then(|p| p.unit.take())
     }
 
     /// Takes every unit waiting for a commit.
-    pub(super) fn take_units(&mut self) -> BTreeMap<NodeKey, Box<dyn Node>> {
+    pub(super) fn take_units(&mut self) -> BTreeMap<NodeKey, Box<dyn Node<F>>> {
         self.0
             .iter_mut()
             .filter_map(|(&k, p)| p.unit.take().map(|u| (k, u)))
@@ -180,7 +194,7 @@ impl Placements {
     }
 }
 
-impl std::fmt::Debug for Placements {
+impl<F: Float> std::fmt::Debug for Placements<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map()
             .entries(self.0.iter().map(|(k, p)| {

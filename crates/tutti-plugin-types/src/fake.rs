@@ -18,11 +18,12 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize,
 use tutti_rt::LockExt;
 
 use dpi::{PhysicalSize, Size};
+use tutti_plugin_ipc_ffi::FdId;
 use tutti_rt::RequestWord;
 
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
-    EditorError, EditorWindow, FdId, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
+    EditorError, EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
     ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
     PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
     Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
@@ -106,7 +107,7 @@ impl Call {
             }
             Self::RunMainThread => [14, 0, 0],
             Self::RunTimer(id) => [15, u64::from(id.0), 0],
-            Self::ServiceFd(id) => [16, u64::from(id.0 as u32), 0],
+            Self::ServiceFd(id) => [16, u64::from(id.get() as u32), 0],
             Self::RebuildMidiMapping => [17, 0, 0],
             Self::Reset => [18, 0, 0],
             Self::OpenEditor => [19, 0, 0],
@@ -136,7 +137,7 @@ impl Call {
             13 => Self::RescanParameters(SCOPES[a as usize]),
             14 => Self::RunMainThread,
             15 => Self::RunTimer(TimerId(a as u32)),
-            16 => Self::ServiceFd(FdId(a as u32 as i32)),
+            16 => Self::ServiceFd(FdId::new(a as u32 as i32)),
             17 => Self::RebuildMidiMapping,
             18 => Self::Reset,
             19 => Self::OpenEditor,

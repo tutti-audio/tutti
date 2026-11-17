@@ -13,6 +13,7 @@ use tutti_midi_protocol::Translator;
 use tutti_plugin_types::BusChannels;
 use tutti_plugin_types::RtMidiEvents;
 use tutti_plugin_types::{SampleFormat, SampleRate};
+use tutti_types::MaxBlock;
 
 /// How many converted note expressions one block can carry; reserved at
 /// activation so converting never grows the buffer.
@@ -22,7 +23,7 @@ pub(crate) const INPUT_NOTE_EXPRESSIONS: usize = 256;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AudioConfig {
     pub sample_rate: SampleRate,
-    pub max_frames: u32,
+    pub max_block: MaxBlock,
     pub supports_f64: bool,
     /// Whether the current activation hands the plugin 64-bit buffers.
     pub f64_active: bool,
@@ -82,7 +83,7 @@ pub(crate) struct AudioScratch {
     /// Atomic so the audio thread's `Relaxed` store is readable off-thread
     /// through
     /// [`ClapProcessor::last_process_status`](super::ClapProcessor::last_process_status).
-    /// A plain `AtomicI32` rather than `ArcLend` because this is a scalar:
+    /// A plain `AtomicI32` rather than `Publisher` because this is a scalar:
     /// nothing here can be freed on the audio thread.
     pub last_process_status: AtomicI32,
 }
@@ -113,7 +114,7 @@ impl AudioScratch {
 /// CLAP parameter events carry the plugin's **plain** value (CLAP has no
 /// normalization), but host-side automation authors values normalized `0..1`,
 /// so incoming points are denormalized `min + v·(max-min)` against this table.
-/// The Controller publishes it through an [`ArcLend`](tutti_rt::ArcLend) at
+/// The Controller publishes it through a [`Publisher`](tutti_rt::Publisher) at
 /// activation and again after a rescan that changed the parameters; the
 /// Processor lends it once per block.
 #[derive(Debug, Default)]

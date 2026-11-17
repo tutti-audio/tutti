@@ -772,7 +772,10 @@ mod tests {
         let mut out = vec![Vec::new(); 6];
         for at in (0..len).step_by(128) {
             let chunk: Vec<&[f32]> = ins.iter().map(|c| &c[at..at + 128]).collect();
-            for (o, b) in out.iter_mut().zip(drive(&mut node, RATE, &chunk, &[])) {
+            for (o, b) in
+                out.iter_mut()
+                    .zip(drive(&mut node, RATE, Planes::new(&chunk).unwrap(), &[]))
+            {
                 o.extend(b);
             }
         }
@@ -826,7 +829,7 @@ mod tests {
         let blocks = |node: &mut ModDelayNode, from: usize| -> Vec<f32> {
             let mut out = Vec::new();
             for chunk in x[from..].chunks(37) {
-                out.extend(drive(node, RATE, &[chunk, chunk], &[]).remove(0));
+                out.extend(drive(node, RATE, Planes::new(&[chunk, chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
@@ -865,7 +868,7 @@ mod tests {
                     assert!(set.set(UnitParam::Depth, 0.002));
                     assert!(set.set(UnitParam::Feedback, 0.6));
                 }
-                out.extend(drive(&mut node, RATE, &[chunk], &[]).remove(0));
+                out.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
@@ -883,13 +886,13 @@ mod tests {
         let loud: Vec<f32> = (0..256).map(|n| ((n * 7) % 13) as f32 - 6.0).collect();
         let mut a = prepared(a, RATE, 64);
         for chunk in loud.chunks(64) {
-            drive(&mut a, RATE, &[chunk], &[]);
+            drive(&mut a, RATE, Planes::new(&[chunk]).unwrap(), &[]);
         }
         let mut b = a.clone();
         let silence = vec![0.0f32; 64];
-        let out = drive(&mut b, RATE, &[&silence], &[]);
+        let out = drive(&mut b, RATE, Planes::new(&[&silence]).unwrap(), &[]);
         assert!(out[0].iter().all(|&s| s == 0.0), "a clone starts silent");
-        let out = drive(&mut a, RATE, &[&silence], &[]);
+        let out = drive(&mut a, RATE, Planes::new(&[&silence]).unwrap(), &[]);
         assert!(out[0].iter().any(|&s| s != 0.0), "the original rings on");
         // The cells are shared by a clone (it is the same param set) but a fork is not.
         let fork = a.fork_fresh();
@@ -911,7 +914,7 @@ mod tests {
             for chunk in x.chunks(64) {
                 let rate = lane.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
-                y.extend(drive(&mut node, RATE, &[chunk], &params).remove(0));
+                y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
             y.iter()
                 .enumerate()
@@ -958,7 +961,9 @@ mod tests {
                 let at = n * block;
                 let l = &lane[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
-                out.extend(drive(&mut node, RATE, &[chunk], &params).remove(0));
+                out.extend(
+                    drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
+                );
             }
             out
         };
@@ -1006,7 +1011,7 @@ mod tests {
         };
         let blocks = |node: &mut ModDelayNode| -> Vec<f32> {
             x.chunks(64)
-                .flat_map(|c| drive(node, RATE, &[c], &[]).remove(0))
+                .flat_map(|c| drive(node, RATE, Planes::new(&[c]).unwrap(), &[]).remove(0))
                 .collect()
         };
         let mut used = prepared(ModDelayNode::chorus(BusTopology::MONO), RATE, 64);

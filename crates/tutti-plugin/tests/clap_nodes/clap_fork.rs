@@ -19,6 +19,7 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
+use tutti_buffers::{Planes, PlanesMut};
 // The live side is paced to `PACE`; the fork is *not*: it waits for each
 // block, which is the property under test.
 use clap_probe::{BLOCK, PACE, ProbeEnv, Rig, SAMPLE_RATE, load_probe, load_probe_with, render};
@@ -40,7 +41,7 @@ use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::{SampleRate, Samples};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
 
@@ -185,7 +186,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
             tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    let state_at_fork = handle.save_state().expect("the probe saves");
+    let state_at_fork = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
 
     // After the fork: the live instance moves to -15 dB.
     probe.client.set_parameter(GAIN, gain_at(-15.0));
@@ -246,7 +249,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // handle, the path a host has once the node is in a graph.
     handle.send_parameter(GAIN, gain_at(-6.0));
     assert_eq!(
-        handle.save_state().expect("the probe saves"),
+        handle
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .expect("the probe saves"),
         state_at_fork,
         "rendering the fork changed the live instance's state"
     );
@@ -320,7 +325,10 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
 
     // The probe stamps the context after its 4-byte magic.
     const CONTEXT_BYTE: usize = 4;
-    let project = probe.handle.save_state().expect("the project save");
+    let project = probe
+        .handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the project save");
     assert_eq!(project[CONTEXT_BYTE], 3, "a project save is FOR_PROJECT");
 
     probe
@@ -950,7 +958,12 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             let mut done = 0;
             while done < BLOCK {
                 let n = pass.min(BLOCK - done);
-                timeline.render_graph(&mut fork_exec, n, &[], &mut [&mut block[done..done + n]]);
+                render_graph(
+                    &*timeline,
+                    &mut fork_exec,
+                    Planes::default(),
+                    PlanesMut::new(&mut [&mut block[done..done + n]]).unwrap(),
+                );
                 done += n;
             }
             out.extend_from_slice(&block);
@@ -1027,7 +1040,12 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK];
     while out.len() < NOTE_FRAME + 2 * CHUNK {
-        timeline.render_graph(&mut fork_exec, BLOCK, &[], &mut [&mut block[..]]);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut block[..]]).unwrap(),
+        );
         out.extend_from_slice(&block);
     }
     assert_eq!(
@@ -1144,11 +1162,11 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
         let mut out = Vec::new();
         let (mut block, mut silent) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
         while out.len() < NOTE_FRAME + 2 * CHUNK {
-            timeline.render_graph(
+            render_graph(
+                &*timeline,
                 &mut fork_exec,
-                BLOCK,
-                &[],
-                &mut [&mut block[..], &mut silent[..]],
+                Planes::default(),
+                PlanesMut::new(&mut [&mut block[..], &mut silent[..]]).unwrap(),
             );
             out.extend_from_slice(&block);
         }

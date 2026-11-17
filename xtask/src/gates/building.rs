@@ -209,6 +209,12 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[],
         reason: "an FFI crate's raw types mirror a C ABI or an OS call, not an app's configuration",
     },
+    ty(
+        "crates/tutti-buffers/src/input_output.rs",
+        "InputOutput::new",
+        CTOR,
+        "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
+    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",
@@ -497,6 +503,18 @@ pub(super) const ALLOW: &[Allow] = &[
         "PosWriter",
         SETTER,
         "the one writer of a position ring: a writer handle, not a node, source, spec or config",
+    ),
+    ty(
+        "crates/tutti-midi-device/src/ci/initiator.rs",
+        "ProfileInitiator::set_on",
+        SETTER,
+        "the spec's Set Profile On message (M2-102): a request to the peer, not a setter of the initiator",
+    ),
+    ty(
+        "crates/tutti-midi-device/src/ci/initiator.rs",
+        "ProfileInitiator::set_off",
+        SETTER,
+        "the spec's Set Profile Off message (M2-102): a request to the peer, not a setter of the initiator",
     ),
 ];
 

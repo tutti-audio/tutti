@@ -26,19 +26,21 @@ use std::num::NonZeroUsize;
 use std::time::Instant;
 
 use dpi::Size;
+use tutti_buffers::Float;
 
 use crate::{
     AudioBuffer, AudioBufferMut, AutomationMode, BypassWrite, ChannelTable, ContentScale,
     EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId,
     ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, Sample, SampleRate, Samples,
+    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, SampleRate, Samples,
     WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
-    FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
-    RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
+    MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
+    StateUse, TimerId, TrackInfo, Wakeups,
 };
+use tutti_plugin_ipc_ffi::{FdId, Ready};
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so
@@ -866,7 +868,7 @@ pub struct Stuck<P, C> {
 ///
 /// [`PluginError::Process`] when the plugin failed the block.
 #[allow(clippy::too_many_arguments)]
-pub fn process_block<P: Processor, T: Sample>(
+pub fn process_block<P: Processor, T: Float>(
     processor: &mut P,
     inputs: &[&[T]],
     outputs: &mut [&mut [T]],

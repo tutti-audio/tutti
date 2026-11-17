@@ -19,7 +19,7 @@
 //! by [`HARMONY_EVENT_DENSITY`] (a loop of a few frames with a change in it
 //! sends one a pass); past it the port refuses, and the executor counts it.
 //!
-//! The lanes are published to the node with [`ArcLend`]
+//! The lanes are published to the node with [`Publisher`]
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,7 +31,7 @@ use tutti_graph::{
     HarmonyKind, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape,
     Status,
 };
-use tutti_rt::{ArcLend, Reader};
+use tutti_rt::{Publisher, Reader};
 use tutti_types::Beat;
 
 use super::walk::{Beated, Visit, Walk, lands_on_first_frame};
@@ -93,11 +93,11 @@ fn lanes(generation: u64, changes: impl IntoIterator<Item = TimedHarmony>) -> La
 struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
-    cell: Arc<ArcLend<Lanes>>,
-    /// Serializes `set`'s compare, generation and publish (`ArcLend` has no
+    cell: Publisher<Lanes>,
+    /// Serializes `set`'s compare, generation and publish (`Publisher` has no
     /// compare-and-publish), so two control threads cannot each publish
     /// against a stale read. The value is the cell's own: the control side
-    /// reads it with `ArcLend::current`. The node never takes it.
+    /// reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
     next_generation: AtomicU64,
 }
@@ -106,7 +106,7 @@ impl Shared {
     fn new(changes: impl IntoIterator<Item = TimedHarmony>) -> Arc<Self> {
         let first = Arc::new(lanes(0, changes));
         Arc::new(Self {
-            cell: Arc::new(ArcLend::from_arc(Arc::clone(&first))),
+            cell: Publisher::from_arc(Arc::clone(&first)),
             publish: Mutex::new(()),
             next_generation: AtomicU64::new(1),
         })

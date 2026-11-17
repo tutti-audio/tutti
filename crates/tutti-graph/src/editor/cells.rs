@@ -18,6 +18,7 @@ use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeReader, ParamRange
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
 use crate::{EdgeId, NodeKey};
+use tutti_buffers::Float;
 use tutti_types::{Amplitude, Mix};
 
 /// Every live cell, by kind. The kinds are separate fields so a commit can
@@ -198,13 +199,13 @@ impl ModeCells {
     /// The mode state of the unit `plan` places at `key`: the key's cell,
     /// kept for a key that stays, written from `spec`; a unit placed now
     /// starts steady in the spec's mode.
-    pub(super) fn state(
+    pub(super) fn state<F: Float>(
         &mut self,
         key: NodeKey,
         plan: &Plan,
         spec: &GraphSpec,
         committed: Option<&GraphSpec>,
-    ) -> ModeState<f32> {
+    ) -> ModeState<F> {
         let cell = self
             .0
             .entry(key)

@@ -32,6 +32,7 @@
 //! conventional impulse and recovers the encoded IR at unity gain.
 
 use approx::assert_abs_diff_eq;
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::peak as peak_value;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;
@@ -181,7 +182,7 @@ fn ir_of(
     input[lead] = 1.0;
     let (mut left, mut right) = (Vec::new(), Vec::new());
     for chunk in input.chunks(64) {
-        let out = drive(node, RATE, &[chunk, chunk], &[]);
+        let out = drive(node, RATE, Planes::new(&[chunk, chunk]).unwrap(), &[]);
         left.extend_from_slice(&out[0]);
         right.extend_from_slice(&out[1]);
     }
@@ -487,7 +488,7 @@ fn a_direction_change_crossfades_without_a_jump() {
     let ones = vec![1.0f32; 64];
     // Fill the history with the constant.
     for _ in 0..8 {
-        drive(&mut node, RATE, &[&ones, &ones], &[]);
+        drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
     }
 
     let sums: Vec<(f32, f32)> = equator_azimuths()
@@ -514,7 +515,7 @@ fn a_direction_change_crossfades_without_a_jump() {
     let (mut l, mut r) = (Vec::new(), Vec::new());
     // Half a second: ten time constants of the 50 ms glide.
     for _ in 0..(SAMPLE_RATE as usize / 2 / 64) {
-        let out = drive(&mut node, RATE, &[&ones, &ones], &[]);
+        let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
         l.extend_from_slice(&out[0]);
         r.extend_from_slice(&out[1]);
     }

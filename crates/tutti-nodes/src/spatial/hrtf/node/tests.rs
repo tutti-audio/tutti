@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::aim;
+use tutti_buffers::Planes;
 use tutti_dsp::HRTF_STEP;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
@@ -10,7 +11,12 @@ const BLOCK: usize = 64;
 
 /// One block of one frame.
 fn tick(node: &mut HrtfBinauralNode, input: [f32; 2]) -> [f32; 2] {
-    let out = drive(node, RATE, &[&input[..1], &input[1..]], &[]);
+    let out = drive(
+        node,
+        RATE,
+        Planes::new(&[&input[..1], &input[1..]]).unwrap(),
+        &[],
+    );
     [out[0][0], out[1][0]]
 }
 
@@ -81,7 +87,7 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
     let mut node = make_node();
     let block = |node: &mut HrtfBinauralNode| {
         let input: Vec<f32> = (0..BLOCK).map(|i| ((i as f32) * 0.05).sin()).collect();
-        drive(node, RATE, &[&input, &input], &[])
+        drive(node, RATE, Planes::new(&[&input, &input]).unwrap(), &[])
     };
     // 0.5 s: ten 50 ms time constants, so the aim settles to well
     // within the tolerance below.
@@ -200,7 +206,7 @@ fn impulse_response(node: &mut HrtfBinauralNode, at: usize, frames: usize) -> (V
         let input: Vec<f32> = (0..n)
             .map(|i| if done + i == at { 1.0 } else { 0.0 })
             .collect();
-        let out = drive(node, RATE, &[&input, &input], &[]);
+        let out = drive(node, RATE, Planes::new(&[&input, &input]).unwrap(), &[]);
         l.extend_from_slice(&out[0]);
         r.extend_from_slice(&out[1]);
         done += n;
@@ -268,7 +274,7 @@ fn pdc_compensates_the_other_path_by_the_binaural_latency() {
         .expect("builds");
     let mut impulse = vec![0.0f32; 2 * LATENCY];
     impulse[0] = 1.0;
-    let out = r.render_input(&[&impulse]);
+    let out = r.render_input(Planes::new(&[&impulse]).unwrap());
     for (o, ch) in out.iter().enumerate() {
         assert_eq!(onsets(ch), vec![LATENCY], "output {o}");
     }
@@ -485,7 +491,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
         // Ten 50 ms time constants of blocks.
         let mut last = Vec::new();
         for _ in 0..(RATE.get() as usize / 2).div_ceil(BLOCK) {
-            last = drive(node, RATE, &[&input, &input], &params);
+            last = drive(node, RATE, Planes::new(&[&input, &input]).unwrap(), &params);
         }
         last.iter().map(|c| c[BLOCK - 1]).collect::<Vec<f32>>()
     };

@@ -303,13 +303,13 @@ impl AudioBridge {
     /// The count of MIDI events the bridge thread did not send (a block it
     /// skipped as stale, and the rest of every SysEx open in it), shared:
     /// the plugin node's controls read it beside the node's own.
-    pub(crate) fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub(crate) fn dropped_midi_cell(&self) -> tutti_rt::Tally<u64> {
         self.channels.dropped_midi_cell()
     }
 
     /// The count of chunks the bridge thread skipped as stale, shared: the
     /// pipeline's counters read it beside the batcher's own.
-    pub(crate) fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub(crate) fn skipped_cell(&self) -> tutti_rt::Tally<u64> {
         self.channels.skipped_cell()
     }
 
@@ -584,10 +584,10 @@ impl AudioBridge {
         // copying a gigabyte into a command that is only going to be rejected,
         // and it answers on the calling thread rather than after a round trip
         // through the bridge.
-        if data.len() > crate::protocol::MAX_STATE_BYTES {
+        if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
             return Err(StateError::TooLarge {
                 bytes: data.len(),
-                limit: crate::protocol::MAX_STATE_BYTES,
+                limit: tutti_plugin_types::MAX_STATE_BYTES,
             });
         }
         let (ask_resp, reply) = ask::<std::result::Result<(), StateError>>();

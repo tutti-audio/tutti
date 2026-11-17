@@ -7,36 +7,51 @@ use clap_sys::ext::gui::{
 };
 use clap_sys::plugin::clap_plugin;
 use dpi::Size;
-use tutti_plugin_types::{ContentScale, EditorUnit, MainThreadMarker, WindowHandle};
+use tutti_plugin_types::{
+    AspectRatio, ContentScale, EditorCapabilities, EditorUnit, MainThreadMarker, ResizeHints,
+    WindowHandle,
+};
 
 use crate::plugin::Plugin;
+
+/// Which editor a `clap.gui` step was asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EditorKind {
+    /// An editor embedded in a host window.
+    Embedded,
+    /// An editor in a window of its own.
+    Floating,
+}
+
+impl std::fmt::Display for EditorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Embedded => "embedded",
+            Self::Floating => "floating",
+        })
+    }
+}
 
 /// A `clap.gui` step that did not succeed. `Display` is the text a host shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum GuiError {
     /// The plugin has no `clap.gui`.
-    #[error("No GUI extension")]
+    #[error("no gui extension")]
     NoExtension,
-    /// The plugin does not support this host's window API (embedded).
-    #[error("GUI embedded window API not supported")]
-    EmbeddedUnsupported,
-    /// The plugin does not support this host's window API (floating).
-    #[error("GUI floating window API not supported")]
-    FloatingUnsupported,
-    /// `create` answered `false` (embedded).
-    #[error("GUI create failed")]
-    CreateFailed,
-    /// `create` answered `false` (floating).
-    #[error("GUI create (floating) failed")]
-    CreateFloatingFailed,
+    /// The plugin does not support this host's window API for the editor kind.
+    #[error("the {0} gui window api is not supported")]
+    Unsupported(EditorKind),
+    /// `create` answered `false` for the editor kind.
+    #[error("creating the {0} gui failed")]
+    CreateFailed(EditorKind),
     /// `set_parent` answered `false`.
-    #[error("Set parent failed")]
+    #[error("set_parent failed")]
     SetParentFailed,
     /// `adjust_size` found no usable size.
     #[error("adjust_size: no usable size fits the request")]
     AdjustRefused,
     /// The plugin has no `set_size`.
-    #[error("set_size unsupported")]
+    #[error("set_size is unsupported")]
     SetSizeMissing,
     /// `set_size` answered `false`.
     #[error("set_size refused")]
@@ -61,45 +76,46 @@ pub struct EmbedOutcome {
     pub did_create: bool,
 }
 
-/// What the plugin said about resizing its editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GuiHints {
-    /// `can_resize`.
-    pub resizable: bool,
-    /// Whether the width can change.
-    pub can_resize_horizontally: bool,
-    /// Whether the height can change.
-    pub can_resize_vertically: bool,
-    /// Whether the aspect ratio is to be kept.
-    pub preserve_aspect_ratio: bool,
-    /// The aspect ratio (width, height) when the plugin gave a usable one.
-    pub aspect_ratio: Option<(u32, u32)>,
-}
-
+/// The window API this platform embeds editors with, and the handle of a
+/// parent window in it.
 #[cfg(target_os = "macos")]
-fn platform_window_handle(parent: *mut std::ffi::c_void) -> (*const c_char, clap_window_handle) {
-    (
-        CLAP_WINDOW_API_COCOA.as_ptr(),
-        clap_window_handle { cocoa: parent },
-    )
+mod platform {
+    use clap_sys::ext::gui::{CLAP_WINDOW_API_COCOA, clap_window_handle};
+    use std::ffi::{CStr, c_void};
+
+    pub(super) const WINDOW_API: &CStr = CLAP_WINDOW_API_COCOA;
+
+    pub(super) fn handle(parent: *mut c_void) -> clap_window_handle {
+        clap_window_handle { cocoa: parent }
+    }
 }
 
+/// The window API this platform embeds editors with, and the handle of a
+/// parent window in it.
 #[cfg(target_os = "windows")]
-fn platform_window_handle(parent: *mut std::ffi::c_void) -> (*const c_char, clap_window_handle) {
-    use clap_sys::ext::gui::CLAP_WINDOW_API_WIN32;
-    (
-        CLAP_WINDOW_API_WIN32.as_ptr(),
-        clap_window_handle { win32: parent },
-    )
+mod platform {
+    use clap_sys::ext::gui::{CLAP_WINDOW_API_WIN32, clap_window_handle};
+    use std::ffi::{CStr, c_void};
+
+    pub(super) const WINDOW_API: &CStr = CLAP_WINDOW_API_WIN32;
+
+    pub(super) fn handle(parent: *mut c_void) -> clap_window_handle {
+        clap_window_handle { win32: parent }
+    }
 }
 
+/// The window API this platform embeds editors with, and the handle of a
+/// parent window in it.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn platform_window_handle(parent: *mut std::ffi::c_void) -> (*const c_char, clap_window_handle) {
-    use clap_sys::ext::gui::CLAP_WINDOW_API_X11;
-    (
-        CLAP_WINDOW_API_X11.as_ptr(),
-        clap_window_handle { x11: parent as u64 },
-    )
+mod platform {
+    use clap_sys::ext::gui::{CLAP_WINDOW_API_X11, clap_window_handle};
+    use std::ffi::{CStr, c_void};
+
+    pub(super) const WINDOW_API: &CStr = CLAP_WINDOW_API_X11;
+
+    pub(super) fn handle(parent: *mut c_void) -> clap_window_handle {
+        clap_window_handle { x11: parent as u64 }
+    }
 }
 
 /// The unit `api`'s sizes are in: logical points where the plugin scales itself
@@ -124,7 +140,7 @@ fn unit_of(api: *const c_char) -> EditorUnit {
 /// it.
 #[must_use]
 pub fn gui_size(width: u32, height: u32) -> Size {
-    unit_of(platform_window_handle(std::ptr::null_mut()).0).size(width, height)
+    unit_of(platform::WINDOW_API.as_ptr()).size(width, height)
 }
 
 /// One instance's `clap.gui` entries, called with the instance and window API
@@ -274,10 +290,10 @@ unsafe fn embed_editor_sequence(
     // SAFETY: this function's contract.
     let call = unsafe { GuiCall::new(gui, plugin, api) };
     if call.is_api_supported(false) == Some(false) {
-        return Err(GuiError::EmbeddedUnsupported);
+        return Err(GuiError::Unsupported(EditorKind::Embedded));
     }
     let did_create = match call.create(false) {
-        Some(false) => return Err(GuiError::CreateFailed),
+        Some(false) => return Err(GuiError::CreateFailed(EditorKind::Embedded)),
         Some(true) => true,
         None => false,
     };
@@ -311,10 +327,10 @@ unsafe fn floating_editor_sequence(
     // SAFETY: this function's contract.
     let call = unsafe { GuiCall::new(gui, plugin, api) };
     if call.is_api_supported(true) == Some(false) {
-        return Err(GuiError::FloatingUnsupported);
+        return Err(GuiError::Unsupported(EditorKind::Floating));
     }
     let did_create = match call.create(true) {
-        Some(false) => return Err(GuiError::CreateFloatingFailed),
+        Some(false) => return Err(GuiError::CreateFailed(EditorKind::Floating)),
         Some(true) => true,
         None => false,
     };
@@ -330,26 +346,31 @@ unsafe fn floating_editor_sequence(
 ///
 /// # Safety
 /// As [`embed_editor_sequence`], after the editor was created.
-unsafe fn query_editor_capabilities(gui: &clap_plugin_gui, plugin: *const clap_plugin) -> GuiHints {
+unsafe fn query_editor_capabilities(
+    gui: &clap_plugin_gui,
+    plugin: *const clap_plugin,
+) -> EditorCapabilities {
     // SAFETY: this function's contract; no entry here takes the window API.
     let call = unsafe { GuiCall::new(gui, plugin, std::ptr::null()) };
     let resizable = call.can_resize().unwrap_or(false);
-    let mut hints = GuiHints {
-        resizable,
-        can_resize_horizontally: resizable,
-        can_resize_vertically: resizable,
-        preserve_aspect_ratio: false,
-        aspect_ratio: None,
+    let mut caps = EditorCapabilities {
+        resize: ResizeHints {
+            resizable,
+            can_resize_horizontally: resizable,
+            can_resize_vertically: resizable,
+        },
+        aspect: AspectRatio::default(),
+        appkit_autoresize_friendly: false,
     };
     if let Some(raw) = call.get_resize_hints() {
-        hints.can_resize_horizontally = raw.can_resize_horizontally;
-        hints.can_resize_vertically = raw.can_resize_vertically;
-        hints.preserve_aspect_ratio = raw.preserve_aspect_ratio;
+        caps.resize.can_resize_horizontally = raw.can_resize_horizontally;
+        caps.resize.can_resize_vertically = raw.can_resize_vertically;
+        caps.aspect.preserve = raw.preserve_aspect_ratio;
         if raw.preserve_aspect_ratio && raw.aspect_ratio_width > 0 && raw.aspect_ratio_height > 0 {
-            hints.aspect_ratio = Some((raw.aspect_ratio_width, raw.aspect_ratio_height));
+            caps.aspect.ratio = Some((raw.aspect_ratio_width, raw.aspect_ratio_height));
         }
     }
-    hints
+    caps
 }
 
 impl Plugin {
@@ -378,7 +399,7 @@ impl Plugin {
         if gui.create.is_none() {
             return false;
         }
-        let (api, _) = platform_window_handle(std::ptr::null_mut());
+        let api = platform::WINDOW_API.as_ptr();
         match gui.is_api_supported {
             // SAFETY: the plugin's own `is_api_supported` with the instance
             // and this platform's API constant.
@@ -417,7 +438,10 @@ impl Plugin {
         if self.gui_created {
             return Err(GuiError::AlreadyCreated);
         }
-        let (api, handle) = platform_window_handle(parent.as_ptr());
+        let (api, handle) = (
+            platform::WINDOW_API.as_ptr(),
+            platform::handle(parent.as_ptr()),
+        );
         // SAFETY: `&mut self` is the main-thread half of a live instance, `gui`
         // is its `clap.gui`, and `parent` is a valid window by its constructor.
         let outcome = unsafe { embed_editor_sequence(gui, self.raw(), api, handle, scale) };
@@ -456,8 +480,8 @@ impl Plugin {
         if self.gui_created {
             return Err(GuiError::AlreadyCreated);
         }
-        let (api, _) = platform_window_handle(std::ptr::null_mut());
-        let transient = transient.map(|w| platform_window_handle(w.as_ptr()).1);
+        let api = platform::WINDOW_API.as_ptr();
+        let transient = transient.map(|w| platform::handle(w.as_ptr()));
         // SAFETY: as `open_embedded`; `title` is nul-terminated.
         let created = unsafe { floating_editor_sequence(gui, self.raw(), api, transient, title) }?;
         self.gui_created = created;
@@ -467,7 +491,7 @@ impl Plugin {
     /// `can_resize` and `get_resize_hints`, `None` without a `clap.gui` or
     /// before `create` (CLAP orders every `clap.gui` method after it).
     #[must_use]
-    pub fn gui_hints(&self, _main: MainThreadMarker) -> Option<GuiHints> {
+    pub fn gui_hints(&self, _main: MainThreadMarker) -> Option<EditorCapabilities> {
         let gui = self.gui_ext().filter(|_| self.gui_created)?;
         // SAFETY: the instance is live and `gui` is its `clap.gui`; a
         // `[main-thread]` call on the main-thread half.
@@ -494,7 +518,7 @@ impl Plugin {
         // SAFETY: `&mut self` is the main-thread half of a live instance and
         // `gui` its `clap.gui`; these entries take no window API.
         let call = unsafe { GuiCall::new(gui, self.raw(), std::ptr::null()) };
-        let unit = unit_of(platform_window_handle(std::ptr::null_mut()).0);
+        let unit = unit_of(platform::WINDOW_API.as_ptr());
         let (mut w, mut h) = unit.native(requested, self.gui_scale);
         if call.adjust_size(&mut w, &mut h) == Some(false) {
             return Err(GuiError::AdjustRefused);
@@ -523,7 +547,7 @@ impl Plugin {
         if !self.gui_created {
             return Err(GuiError::NotCreated);
         }
-        let (api, _) = platform_window_handle(std::ptr::null_mut());
+        let api = platform::WINDOW_API.as_ptr();
         // The scale is kept on every api: a logical-pixel editor is not told, but
         // a request in device pixels is still converted at the window's scale.
         let taken = if unit_of(api) == EditorUnit::Logical {
@@ -869,9 +893,9 @@ mod embed_sequence_tests {
             vec!["can_resize", "get_resize_hints"],
             "hints must refine can_resize, not replace it"
         );
-        assert!(caps.resizable);
-        assert!(caps.can_resize_horizontally);
-        assert!(caps.can_resize_vertically);
+        assert!(caps.resize.resizable);
+        assert!(caps.resize.can_resize_horizontally);
+        assert!(caps.resize.can_resize_vertically);
     }
 
     /// A plugin advertising `gui` but exposing neither resize fn is reported as
@@ -888,8 +912,8 @@ mod embed_sequence_tests {
         let caps = unsafe { query_editor_capabilities(&gui, &plugin as *const clap_plugin) };
 
         assert!(order.is_empty(), "nothing to call");
-        assert!(!caps.resizable);
-        assert!(!caps.preserve_aspect_ratio);
-        assert!(caps.aspect_ratio.is_none());
+        assert!(!caps.resize.resizable);
+        assert!(!caps.aspect.preserve);
+        assert!(caps.aspect.ratio.is_none());
     }
 }

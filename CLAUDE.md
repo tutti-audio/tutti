@@ -125,6 +125,7 @@ std only. A rule the compiler already enforces is not a gate.
   renders a session wire for another reason wires `.hard()`.
 - An inlet whose rate is not the graph's is refused, never resampled.
 - An app reads the playhead through `Session::playhead()`.
+- A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, and no `pub fn` is named `run` or `*_blocking`, bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).
 
 ### The audio thread
 
@@ -133,7 +134,7 @@ std only. A rule the compiler already enforces is not a gate.
 - The audio thread never calls `tracing`, `log` or a print macro: a subscriber may
   allocate, lock or write a file. What it reports is a count an app can act on, and what
   it logs goes only through `Io::log`.
-- Non-scalar state reaches the audio thread through `tutti_rt::{ArcLend, Reader, Loan}`;
+- Non-scalar state reaches the audio thread through `tutti_rt::{Publisher, Reader, Loan}`;
   scalars use `Param<U>`. Nothing the audio thread reads is an `ArcSwap`.
 - The audio thread never holds an owning handle to published state and never frees it.
   `publish` and `reclaim` are control-thread only.

@@ -19,12 +19,12 @@
 //! and neither node renders.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 use parking_lot::Mutex;
 use tutti_plugin_types::{
     Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor, Successor,
 };
+use tutti_rt::Tally;
 use tutti_transport::TempoReader;
 use tutti_types::{ParkedSampleRate, Samples};
 
@@ -62,7 +62,7 @@ pub struct Rebinder<F: Loaded> {
     features: Features,
     sample_rate: tutti_types::SampleRate,
     pending_sample_rate: Arc<ParkedSampleRate>,
-    unlent: Arc<AtomicU64>,
+    unlent: Tally<u64>,
     parameters: Vec<ParamId>,
     spares: usize,
     controls: Option<PluginControls>,
@@ -83,7 +83,7 @@ impl<F: Loaded> Clone for Rebinder<F> {
             features: self.features,
             sample_rate: self.sample_rate,
             pending_sample_rate: Arc::clone(&self.pending_sample_rate),
-            unlent: Arc::clone(&self.unlent),
+            unlent: self.unlent.clone(),
             parameters: self.parameters.clone(),
             spares: self.spares,
             controls: self.controls.clone(),
@@ -151,7 +151,7 @@ where
             Arc::clone(&self.pending_sample_rate),
             // Its own: the node it replaces keeps counting its silent blocks
             // into the old cell, which nothing reads once it is replaced.
-            Arc::default(),
+            tutti_rt::tally(),
             self.parameters.iter().copied(),
             self.spares,
             self.controls.clone(),
@@ -274,7 +274,7 @@ impl<F: Loaded> InProcClient<F> {
             features: self.features,
             sample_rate: self.sample_rate,
             pending_sample_rate: Arc::clone(&self.pending_sample_rate),
-            unlent: Arc::clone(&self.unlent),
+            unlent: self.unlent.clone(),
             parameters: self.parameters.clone(),
             spares: self.spares,
             controls: self.controls.clone(),
@@ -288,6 +288,7 @@ impl<F: Loaded> InProcClient<F> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use tutti_buffers::Planes;
 
     use tutti_fixtures::main_thread;
     use tutti_graph::contract::{self, Driven, drive_input};
@@ -384,7 +385,7 @@ mod tests {
     fn block(node: &mut PluginNode<FakeLoaded>, frame: u64) -> Driven {
         let mut x = vec![0.0f32; BLOCK];
         x[0] = 1.0;
-        drive_input(node, &env(frame), &[&x, &x], &[], &[])
+        drive_input(node, &env(frame), Planes::new(&[&x, &x]).unwrap(), &[], &[])
     }
 
     /// The plugin changes its ports to `outputs` channels and the pump reads

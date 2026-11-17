@@ -15,7 +15,7 @@ use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tutti_rt::{Doorbell, LockExt, Sleeper, doorbell};
+use tutti_rt::{Doorbell, LockExt, Sleeper, Tally, TallyWriter, doorbell, tally};
 use tutti_types::{AtomicSampleRate, SampleRate};
 
 /// How many commands the audio thread can queue before `push_command` fails.
@@ -78,16 +78,22 @@ pub(super) struct Channels {
     /// How many unsolicited parameter events the bridge thread dropped
     /// because more arrived during one command than its inbox holds, ever.
     /// Each drop also raises a `Resync(ParamValues)`, so the host re-reads.
-    dropped_param_events: Arc<AtomicU64>,
+    dropped_param_events: Tally<u64>,
+    /// The bridge thread's writer of `dropped_param_events`, minted in `new`.
+    param_events_writer: TallyWriter<u64>,
     /// MIDI events the bridge thread did not send, ever: a stale block's,
     /// and the rest of a SysEx that lost packets with it. Shared with the
     /// plugin node's controls, which add it to the node's own count.
-    dropped_midi: Arc<AtomicU64>,
+    dropped_midi: Tally<u64>,
+    /// The bridge thread's writer of `dropped_midi`, minted in `new`.
+    midi_writer: TallyWriter<u64>,
     /// Chunks the bridge thread skipped as stale, ever: more than
     /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
     /// host's again. Shared with the pipeline's counters
     /// (`ChunkCounters::attach_skipped`).
-    skipped: Arc<AtomicU64>,
+    skipped: Tally<u64>,
+    /// The bridge thread's writer of `skipped`, minted in `new`.
+    skipped_writer: TallyWriter<u64>,
     /// What became of each of the last [`FATES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
     fates: Arc<Fates>,
@@ -167,6 +173,7 @@ impl Channels {
     /// which that thread alone waits on.
     pub(super) fn new(sample_rate: SampleRate) -> (Self, Sleeper) {
         let (bell, sleeper) = doorbell();
+        let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let channels = Self {
             commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             audio_responses: Arc::new(ArrayQueue::new(RESPONSE_QUEUE_SIZE)),
@@ -177,9 +184,12 @@ impl Channels {
             settled: Arc::new(AtomicU64::new(0)),
             abandoned: Arc::new(AtomicU64::new(0)),
             replies: Arc::new(AtomicU64::new(0)),
-            dropped_param_events: Arc::new(AtomicU64::new(0)),
-            dropped_midi: Arc::new(AtomicU64::new(0)),
-            skipped: Arc::new(AtomicU64::new(0)),
+            param_events_writer: dropped_param_events.writer(),
+            dropped_param_events,
+            midi_writer: dropped_midi.writer(),
+            dropped_midi,
+            skipped_writer: skipped.writer(),
+            skipped,
             fates: Arc::new(Fates::new()),
             news: Arc::default(),
             probe: Arc::default(),
@@ -334,26 +344,26 @@ impl Channels {
         self.abandoned.load(Ordering::Relaxed)
     }
 
-    /// Record `n` dropped unsolicited parameter events. Bridge thread only;
-    /// `Relaxed`: a count nothing branches on.
+    /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
+    /// count nothing branches on.
     pub(super) fn note_dropped_param_events(&self, n: u64) {
         if n > 0 {
-            self.dropped_param_events.fetch_add(n, Ordering::Relaxed);
+            self.param_events_writer.add(n);
         }
     }
 
-    /// Record `n` MIDI events not sent. Bridge thread only; `Relaxed`: a
-    /// count nothing branches on.
+    /// Record `n` MIDI events not sent. Bridge thread only; a count nothing
+    /// branches on.
     pub(super) fn note_dropped_midi(&self, n: u64) {
         if n > 0 {
-            self.dropped_midi.fetch_add(n, Ordering::Relaxed);
+            self.midi_writer.add(n);
         }
     }
 
-    /// Record a chunk skipped as stale. Bridge thread only; `Relaxed`: a count
-    /// nothing branches on.
+    /// Record a chunk skipped as stale. Bridge thread only; a count nothing
+    /// branches on.
     pub(super) fn note_skipped(&self) {
-        self.skipped.fetch_add(1, Ordering::Relaxed);
+        self.skipped_writer.add(1);
     }
 
     /// Record what became of chunk `seq`. Bridge thread only.
@@ -367,19 +377,19 @@ impl Channels {
     }
 
     /// The cell [`note_skipped`](Self::note_skipped) counts into.
-    pub(super) fn skipped_cell(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.skipped)
+    pub(super) fn skipped_cell(&self) -> Tally<u64> {
+        self.skipped.clone()
     }
 
     /// The cell [`note_dropped_midi`](Self::note_dropped_midi) counts into.
-    pub(super) fn dropped_midi_cell(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.dropped_midi)
+    pub(super) fn dropped_midi_cell(&self) -> Tally<u64> {
+        self.dropped_midi.clone()
     }
 
     /// How many unsolicited parameter events were dropped, over the life of
     /// the bridge.
     pub(super) fn dropped_param_events(&self) -> u64 {
-        self.dropped_param_events.load(Ordering::Relaxed)
+        self.dropped_param_events.get()
     }
 
     /// Pushes, then rings the bridge thread's doorbell, so the socket

@@ -66,11 +66,15 @@ impl From<tutti_au_ffi::Error> for AuError {
         match e {
             tutti_au_ffi::Error::Os(e) => e.into(),
             tutti_au_ffi::Error::Invalid(why) => AuError::InvalidBuffer(why),
-            tutti_au_ffi::Error::RenderFailed {
-                function,
-                status,
-                last,
-            } => AuError::render_failed(function, status, last),
+            tutti_au_ffi::Error::RenderFailed { function, status } => {
+                AuError::render_failed(function, status, None)
+            }
+            tutti_au_ffi::Error::BlockTooLarge { frames, max } => {
+                AuError::BlockTooLarge { frames, max }
+            }
+            tutti_au_ffi::Error::MissingBus { function, needs } => {
+                AuError::MissingBus { function, needs }
+            }
             other => AuError::InvalidBuffer(other.to_string()),
         }
     }

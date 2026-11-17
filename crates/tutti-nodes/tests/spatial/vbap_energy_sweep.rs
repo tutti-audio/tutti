@@ -6,6 +6,7 @@
 //! branches (the two-source width path and the mono fold) both reach
 //! `apply_spread`.
 
+use tutti_buffers::Planes;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::drive;
@@ -18,7 +19,12 @@ use tutti_types::{Azimuth, Elevation, SampleRate, UnitParam};
 /// The node is not prepared: it runs at the 48 kHz it is built at, which is
 /// the rate this drives it at, and a one-frame block needs no sizing.
 fn tick(node: &mut VbapPannerNode, input: [f32; 2], out: &mut [f32]) {
-    let rendered = drive(node, SampleRate::SR_48K, &[&input[..1], &input[1..]], &[]);
+    let rendered = drive(
+        node,
+        SampleRate::SR_48K,
+        Planes::new(&[&input[..1], &input[1..]]).unwrap(),
+        &[],
+    );
     for (o, c) in out.iter_mut().zip(rendered) {
         *o = c[0];
     }

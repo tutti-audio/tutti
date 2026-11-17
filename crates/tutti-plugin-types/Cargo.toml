@@ -44,10 +44,14 @@ bitflags = "2"
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The engine's unit vocabulary (`Samples`, `Tail`).
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
+# The sample width of a plugin port (`Float`).
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Offset`: where a block's MIDI sits (`ProcessContext::midi_events`, `WireMidi::at`).
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+# `FdId`, `Interest`, `Watch` and `Ready`: the typed values of a wait on a plugin's descriptors.
+tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 serde = { version = "1", features = ["derive"], optional = true }
 raw-window-handle = "0.6"
 # The result file's payload encoding, with `probe-wire`.

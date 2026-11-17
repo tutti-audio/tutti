@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Track};
 use tutti::session::{Master, PoolEvent};
 use tutti::{
-    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PluginRef, PluginState, Range, Root,
+    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PeerState, PluginRef, Range, Root,
     SampleRate, Samples, Session, SessionEvent, Written,
 };
 
@@ -83,7 +83,7 @@ fn load(
     let plugin = PluginRef::from(&entry);
     let mut declared = s.plugin_entry("synth", &id, &catalog);
     if let Some(bytes) = state {
-        declared = declared.initial_state(PluginState::new(plugin, bytes))?;
+        declared = declared.initial_state(PeerState::of_plugin(plugin, bytes))?;
     }
     s.pool(declared)?;
     loop {

@@ -158,44 +158,6 @@ tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
 # tutti-midi-device
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_subscribe
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_extensions
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::with_flow_control
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_rev
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_timestamp
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_active
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_function_block
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_identity
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_instance_id
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_name
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_static_function_blocks
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_identity
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_instance_id
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/partial.rs::PartialUpdate::with
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::paged
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/initiator.rs::ProfileInitiator::set_off
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/initiator.rs::ProfileInitiator::set_on
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/pe/resource/server.rs::ResourceResponder::set_state_device
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::ArticulationDetails::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::CustomSounds::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/chunk.rs::PeChunk::new
@@ -207,8 +169,6 @@ tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/cont
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/controllers.rs::PeChCtrlList::checked
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/data.rs::PeData::decode
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/data.rs::PeData::decode_bytes
-tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::custom
-tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::new
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::from_selection
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::from_simple_action
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::full
@@ -232,7 +192,6 @@ tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::smf
 
 # tutti-midi-hardware
-tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_function_block
 tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_protocol
 tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/devices.rs::OpenOutput::set_config
 tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_input_timing
@@ -275,9 +234,8 @@ tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_mode
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_profile
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformControls::set_mode
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/outbound/clock_master.rs::ClockControls::set_enabled
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/outbound/clock_master.rs::ClockControls::set_mtc_fps
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/outbound/clock_master.rs::ClockControls::set_send_mtc
+tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/outbound/clock_master.rs::ClockControls::set_sends
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/outbound/clock_master.rs::ClockMaster::set_sample_rate
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
@@ -301,7 +259,6 @@ tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneCont
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_mode
 tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_meter
-tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_mode
 tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_volume
 tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency

@@ -1,13 +1,13 @@
 use super::*;
 
 /// Folds `block` into `writer` as the op would.
-fn fold(writer: &LevelWriter, block: &[f32]) {
+fn fold(writer: &mut LevelWriter, block: &[f32]) {
     let stats = block_stats(block);
     writer.fold(stats.peak, f64::from(stats.sum_sq), block.len() as u32);
 }
 
 /// Constant `v` over `frames`.
-fn feed(writer: &LevelWriter, v: f32, frames: usize) {
+fn feed(writer: &mut LevelWriter, v: f32, frames: usize) {
     fold(writer, &vec![v; frames]);
 }
 
@@ -16,8 +16,8 @@ fn take(reader: &mut LevelReader) -> Level {
 }
 
 fn read(samples: &[f32]) -> Level {
-    let (w, mut r) = level_cell();
-    fold(&w, samples);
+    let (mut w, mut r) = level_cell();
+    fold(&mut w, samples);
     take(&mut r)
 }
 
@@ -31,8 +31,8 @@ fn sine(a: f32, frames: usize) -> Vec<f32> {
 /// A constant block reads its analytic peak and RMS, exactly.
 #[test]
 fn a_constant_reads_exactly() {
-    let (w, mut r) = level_cell();
-    feed(&w, -0.5, 100);
+    let (mut w, mut r) = level_cell();
+    feed(&mut w, -0.5, 100);
     let l = take(&mut r);
     assert_eq!(l.peak.get(), 0.5);
     assert_eq!(l.rms.get(), 0.5);
@@ -57,8 +57,8 @@ fn every_length_is_measured_whole() {
 /// block between, are empty, whichever slot the cell reads (it alternates).
 #[test]
 fn a_read_takes_what_was_held() {
-    let (w, mut r) = level_cell();
-    feed(&w, 0.25, 64);
+    let (mut w, mut r) = level_cell();
+    feed(&mut w, 0.25, 64);
     assert_eq!(take(&mut r).peak.get(), 0.25);
     for _ in 0..3 {
         assert_eq!(take(&mut r), Level::default());
@@ -69,9 +69,9 @@ fn a_read_takes_what_was_held() {
 /// the frames, whatever the block size.
 #[test]
 fn blocks_between_reads_fold() {
-    let (w, mut r) = level_cell();
-    feed(&w, 1.0, 64);
-    feed(&w, 0.5, 192);
+    let (mut w, mut r) = level_cell();
+    feed(&mut w, 1.0, 64);
+    feed(&mut w, 0.5, 192);
     let l = take(&mut r);
     assert_eq!(l.peak.get(), 1.0);
     assert_eq!(l.frames, Samples(256));
@@ -109,10 +109,10 @@ fn nan_does_not_set_the_peak() {
 fn a_block_in_pieces_reads_as_the_whole_block() {
     let block = sine(0.8, 300);
     let whole = read(&block);
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     for _ in 0..2 {
         for piece in block.chunks(77) {
-            fold(&w, piece);
+            fold(&mut w, piece);
         }
         let l = take(&mut r);
         assert_eq!(l.peak, whole.peak);
@@ -161,9 +161,9 @@ fn silence_reads_zero() {
 /// leaks into its neighbour.
 #[test]
 fn a_one_sided_signal_reads_on_its_own_lane() {
-    let ((quiet, mut quiet_r), (loud, mut loud_r)) = (level_cell(), level_cell());
-    fold(&quiet, &[0.0; 16]);
-    fold(&loud, &[-0.75; 16]);
+    let ((mut quiet, mut quiet_r), (mut loud, mut loud_r)) = (level_cell(), level_cell());
+    fold(&mut quiet, &[0.0; 16]);
+    fold(&mut loud, &[-0.75; 16]);
     let (q, l) = (take(&mut quiet_r), take(&mut loud_r));
     assert_eq!((q.peak.get(), q.rms.get()), (0.0, 0.0));
     assert_eq!((l.peak.get(), l.rms.get()), (0.75, 0.75));
@@ -172,9 +172,9 @@ fn a_one_sided_signal_reads_on_its_own_lane() {
 /// An empty block adds nothing: what was held reads as it was.
 #[test]
 fn an_empty_block_changes_nothing() {
-    let (w, mut r) = level_cell();
-    fold(&w, &[0.5, 0.5]);
-    fold(&w, &[]);
+    let (mut w, mut r) = level_cell();
+    fold(&mut w, &[0.5, 0.5]);
+    fold(&mut w, &[]);
     assert_eq!(take(&mut r), read(&[0.5, 0.5]));
 }
 
@@ -182,7 +182,7 @@ fn an_empty_block_changes_nothing() {
 /// taken once, has the analytic RMS (an `f32` energy sum stalls past 2^24).
 #[test]
 fn an_hour_unread_reads_the_analytic_rms() {
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     // 0.25 for 512 frames sums to 128 per block, 0.3 to a figure no
     // power-of-two sum hides.
     let block = vec![0.3f32; 512];
@@ -226,9 +226,9 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     for (i, x) in arena.slot_mut(0, FRAMES).iter_mut().enumerate() {
         *x = ((i % 7) as f64 - 3.0) / 4.0;
     }
-    let (mut reader, writer) = MeterReader::pair(MeterId::of(1), 1, 1);
+    let (mut reader, mut writer) = MeterReader::pair(MeterId::of(1), 1, 1);
     reader.enable();
-    meter_op::<f64, _, _>(&writer, &arena, &[0u8][..], &[0], FRAMES);
+    meter_op::<f64, _, _>(&mut writer, &arena, &[0u8][..], &[0], FRAMES);
     let level = reader.read()[0];
     let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
     let rms = (sum_sq / FRAMES as f64).sqrt() as f32;

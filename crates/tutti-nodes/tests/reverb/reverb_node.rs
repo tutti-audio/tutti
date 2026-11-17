@@ -6,6 +6,7 @@
 //! render.
 
 use std::sync::Arc;
+use tutti_buffers::Planes;
 
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbBank, FreeverbControls};
 use tutti_fixtures::Noise;
@@ -61,7 +62,13 @@ impl<N: Node> Rig<N> {
             play: tutti_graph::PlayClock::ZERO,
         };
         self.frame += input.len() as u64;
-        drive_input(&mut self.node, &env, &[input], params, &[])
+        drive_input(
+            &mut self.node,
+            &env,
+            Planes::new(&[input]).unwrap(),
+            params,
+            &[],
+        )
     }
 
     fn silent(&mut self) -> tutti_graph::contract::Driven {
@@ -508,7 +515,7 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         let frames = 60_000;
         let mut x = noise(8, 4_800);
         x.resize(frames, 0.0);
-        let out = r.render_input(&[&x]);
+        let out = r.render_input(Planes::new(&[&x]).unwrap());
         let energy = |from: usize, to: usize| -> f64 {
             out.iter()
                 .flat_map(|c| &c[from..to])

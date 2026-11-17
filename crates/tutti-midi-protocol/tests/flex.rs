@@ -1,7 +1,9 @@
 //! Flex Set Tempo and Set Time Signature as unit values (M2-104 sections
 //! 7.5.3 and 7.5.4).
 
-use tutti_midi_protocol::{flex_tempo, flex_tempo_field, flex_time_signature};
+use tutti_midi_protocol::{
+    flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
+};
 use tutti_types::{Bpm, TimeSignature};
 use tutti_ump::FlexTimeSignature as Wire;
 
@@ -106,4 +108,28 @@ fn the_tempo_field_is_read_to_the_unit() {
         let slower = flex_tempo(field + 1).unwrap().get();
         assert!(slower < bpm, "{field}: {slower}");
     }
+}
+
+/// Section 7.5.4: 7/8 writes as numerator 7, denominator exponent 3 (an eighth
+/// note) and 8 thirty-seconds in 24 clocks; every signature but a whole-note
+/// denominator reads back as itself.
+/// Spec: m2-104/msg/d/00.01
+#[test]
+fn a_time_signature_writes_its_numerator_and_exponent() {
+    let wire = flex_time_signature_wire(TimeSignature::of(7, 8)).unwrap();
+    assert_eq!(
+        (wire.numerator, wire.denominator, wire.thirty_seconds),
+        (7, 3, 8)
+    );
+    for beats in 1..=64 {
+        for exponent in 1..=6 {
+            let signature = TimeSignature::of(beats, 1 << exponent);
+            let wire = flex_time_signature_wire(signature).unwrap();
+            assert_eq!(u32::from(wire.numerator), beats);
+            assert_eq!(u32::from(wire.denominator), exponent);
+            assert_eq!(flex_time_signature(wire), Some(signature));
+        }
+    }
+    // A whole-note denominator would be exponent 0, non-standard: no message.
+    assert_eq!(flex_time_signature_wire(TimeSignature::of(4, 1)), None);
 }

@@ -515,7 +515,13 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
     let mut s = offline();
     s.pool(midi_sink("out", sink)).expect("declares");
     let _ = s.update(); // the sink's node, loaded and committed
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     roll(&s, 24_000);
     s
 }
@@ -1032,7 +1038,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let data = DiscoveryData::new(
@@ -1151,7 +1157,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let profile = ProfileId::Standard(StandardProfile::new(
@@ -1420,7 +1426,7 @@ impl MpePeer {
                 midi2: true,
                 ..Capabilities::default()
             }))
-            .with_function_block(block),
+            .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
             muid: tutti_midi_device::Muid::of(0x0012_3456),
             switch: Reply::Answer,
@@ -1824,7 +1830,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let at = |device_id| CiHeader {
@@ -2043,7 +2049,13 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     let raw = EndpointId::from_raw(7);
     declare_dev(&mut s);
     let out = s.midi_output(&"dev out").expect("loaded");
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
 
     let start = settle(&mut s, &fake, raw);
     assert!(!out.info().config().rx_jr, "asked for JR off");
@@ -2092,7 +2104,13 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
     declare_dev(&mut s);
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     let start = settle(&mut s, &fake, raw);
     let on = Ump::from(Message::Stream(Stream::StreamConfigurationNotification(
         StreamConfig {

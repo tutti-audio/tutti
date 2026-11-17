@@ -24,7 +24,7 @@ use tutti_plugin_types::{
     Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 
 /// Heap reservation for pooled per-call event scratch on a `ClapProcessor`,
 /// beyond the parameter points each list also has room for.
@@ -82,7 +82,7 @@ impl ClapLoaded {
     /// [`crate::ClapError::BlockTooLarge`]. A placeholder until the first
     /// activation.
     pub fn block_size(&self) -> u32 {
-        self.audio.max_frames
+        self.audio.max_block.get_u32()
     }
 
     /// The format an activation runs at when `requested` is asked of this
@@ -144,13 +144,11 @@ impl ClapLoaded {
             reason: plugin_error(error),
         };
 
-        // CLAP's `max_frames_count` is a `u32`, the bound `MaxBlock` holds.
-        let max_frames = prepare.max_block().get_u32();
         // The rate and block size are fixed by `activate`; a refusal below
         // leaves the previous ones in place.
         let previous = self.audio;
         self.audio.sample_rate = prepare.rate();
-        self.audio.max_frames = max_frames;
+        self.audio.max_block = prepare.max_block();
         // CLAP's render mode is `[main-thread]` and carries no activation
         // constraint; a plugin without the extension has declined, which is
         // not a failure.
@@ -179,7 +177,7 @@ impl ClapLoaded {
         self.audio.f64_active = wide;
 
         let table = self.read_param_ranges(main);
-        let max_frames = self.audio.max_frames as usize;
+        let max_frames = self.audio.max_block.get();
         let mut scratch = AudioScratch::new(prepare.format());
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
@@ -227,8 +225,8 @@ impl ClapLoaded {
             .in_note_expressions
             .reserve_exact(super::config::INPUT_NOTE_EXPRESSIONS);
 
-        let ranges = Arc::new(ArcLend::new(table));
-        let pools = Arc::new(ArcLend::new(PoolCell(self.pool_snapshot())));
+        let ranges = Publisher::new(table);
+        let pools = Publisher::new(PoolCell(self.pool_snapshot()));
         let channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
         };
@@ -246,7 +244,7 @@ impl ClapLoaded {
             pool: pools.reader(),
             input_ports,
             output_ports,
-            max_frames: max_frames as u32,
+            max_frames: self.audio.max_block.get_u32(),
             scratch,
             ranges: ranges.reader(),
             drain,
@@ -295,10 +293,9 @@ impl ClapLoaded {
     /// Calls the plugin's `activate` FFI. Shared by `activate_now` and the
     /// transitions built on it.
     pub(crate) fn activate_plugin(&mut self, main: MainThreadMarker) -> Result<()> {
-        // `clap_plugin.activate` takes a bare `f64`: the unit stops at the C ABI.
-        if let Err(e) =
-            self.plugin
-                .activate(main, self.audio.sample_rate.get(), 1, self.audio.max_frames)
+        if let Err(e) = self
+            .plugin
+            .activate(main, self.audio.sample_rate, self.audio.max_block)
         {
             return Err(ClapError::LoadFailed {
                 path: PathBuf::new(),
@@ -308,9 +305,6 @@ impl ClapLoaded {
                         "the audio half of the previous activation is still alive".to_string()
                     }
                     ActivateError::AlreadyActive => "the plugin is already active".to_string(),
-                    ActivateError::BadConfig => {
-                        "the sample rate or block range is one CLAP forbids".to_string()
-                    }
                     ActivateError::Refused => "Activate failed".to_string(),
                 },
             });

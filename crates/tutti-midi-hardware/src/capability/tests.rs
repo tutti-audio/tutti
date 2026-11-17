@@ -23,7 +23,7 @@ fn a_capability_is_the_active_protocol_and_the_blocks_of_an_endpoint() {
         rx_jr: true,
         tx_jr: true,
     }))
-    .with_function_block(block());
+    .block(block());
     let cap = UmpCapability::of(&offers_both);
     assert_eq!(cap.protocol, Protocol::Midi1, "active, not offered");
     assert_eq!(cap.blocks, [block()]);

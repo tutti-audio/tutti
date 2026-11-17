@@ -85,6 +85,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-guards", "gate check-guards"),
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
+        ("check-session-api", "gate check-session-api"),
         ("check-umbrella", "gate check-umbrella"),
         ("check-lints", "gate check-lints"),
         ("check-value-traits", "gate check-value-traits"),
@@ -113,6 +114,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-guards",
         "gate check-hosting",
         "gate check-session",
+        "gate check-session-api",
         "gate check-umbrella",
         "gate check-lints",
         "gate check-value-traits",
@@ -505,4 +507,39 @@ fn public_api_refuses_no_crate_and_a_third_argument() {
         plan("public-api", &three, &ctx()).unwrap_err(),
         "`public-api` takes at most 2 argument(s), got 3"
     );
+}
+
+#[test]
+fn fuzz_lists_runs_one_target_or_all_on_the_pinned_nightly() {
+    assert_eq!(
+        dry("fuzz", &[]),
+        ["list the directories of testing/tutti-fuzz/corpus"]
+    );
+    let one = format!(
+        "fuzz wav_decode: cargo +{DOCS_NIGHTLY} fuzz run --fuzz-dir testing/tutti-fuzz/fuzz wav_decode testing/tutti-fuzz/fuzz/corpus/wav_decode testing/tutti-fuzz/corpus/wav_decode -- -max_total_time=60"
+    );
+    assert_eq!(dry("fuzz", &["wav_decode"]), [one.as_str()]);
+    assert_eq!(
+        dry("fuzz", &["wav_decode", "--secs", "30"]),
+        [one.replace("=60", "=30")]
+    );
+    let all = dry("fuzz", &["all", "--secs", "5"]);
+    assert_eq!(all.len(), 1);
+    assert!(all[0].starts_with("fuzz all: cargo +"), "{all:?}");
+    assert!(all[0].ends_with("-max_total_time=5 for each directory of testing/tutti-fuzz/corpus"));
+}
+
+#[test]
+fn fuzz_refuses_a_bad_target_or_duration() {
+    for bad in [
+        &["--secs", "5"][..],
+        &["wav_decode", "--secs", "0"],
+        &["wav_decode", "--secs", "x"],
+        &["wav_decode", "--secs"],
+        &["../x"],
+        &["wav_decode", "--time", "5"],
+    ] {
+        let args: Vec<String> = bad.iter().map(|s| (*s).to_owned()).collect();
+        assert!(plan("fuzz", &args, &ctx()).is_err(), "{bad:?}");
+    }
 }

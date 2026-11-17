@@ -51,7 +51,10 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
         None
     }
-    fn save_state(&self) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
+    fn save_state(
+        &self,
+        _: tutti_plugin_types::StateUse,
+    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
         Err(tutti_plugin::error::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {

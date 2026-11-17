@@ -10,6 +10,7 @@
 //! of that command's reply. This pins it.
 
 use std::time::Duration;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{ForkMode, GraphBuilder, Prepare, Renderer};
@@ -103,7 +104,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     let mut blocks = Vec::new();
     for _ in 0..8 {
         let chans: Vec<&[f32]> = (0..inputs).map(|_| &dc[..]).collect();
-        let out = renderer.render_input(&chans);
+        let out = renderer.render_input(Planes::new(&chans).unwrap());
         blocks.push(out.into_iter().next().expect("the probe has outputs"));
     }
     // The first block is the pipeline's one block of latency.

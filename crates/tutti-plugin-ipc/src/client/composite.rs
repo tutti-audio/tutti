@@ -382,7 +382,7 @@ impl PluginBridge {
 
     /// The bridge thread's count of chunks it skipped as stale. See
     /// `AudioBridge::skipped_cell`.
-    pub fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub(crate) fn skipped_cell(&self) -> tutti_rt::Tally<u64> {
         self.audio.skipped_cell()
     }
 
@@ -394,7 +394,7 @@ impl PluginBridge {
 
     /// The bridge thread's count of MIDI events it did not send. See
     /// `AudioBridge::dropped_midi_cell`.
-    pub fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub fn dropped_midi_cell(&self) -> tutti_rt::Tally<u64> {
         self.audio.dropped_midi_cell()
     }
 
@@ -701,7 +701,7 @@ impl PluginBridge {
     pub fn wake(
         &self,
         main: MainThreadMarker,
-        ready: &[tutti_plugin_types::Ready],
+        ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
         if self.load_editor.is_none() {
