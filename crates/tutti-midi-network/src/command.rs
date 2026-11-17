@@ -809,21 +809,24 @@ impl Command {
         finish(out, at);
     }
 
-    /// The command a header and its payload make. `payload` is exactly the
-    /// header's payload length, in bytes.
+    /// The command a header and its payload make. `payload` is the bytes that
+    /// follow the header, as many as its payload length counts in words.
     ///
     /// # Errors
     ///
-    /// A [`ParseError`] naming what is wrong. Reserved bytes and bits are not
-    /// read, and payload words past the defined fields are ignored (M2-124
-    /// section 5.3).
+    /// A [`ParseError`] naming what is wrong: [`ParseError::Length`] when
+    /// `payload` is not the header's payload length in bytes. Reserved bytes
+    /// and bits are not read, and payload words past the defined fields are
+    /// ignored (M2-124 section 5.3).
     pub fn parse(header: Header, payload: &[u8]) -> Result<Self, ParseError> {
         let words = usize::from(header.payload_words());
-        debug_assert_eq!(payload.len(), words * 4);
         let bad_length = || ParseError::Length {
             code: header.code(),
             words: header.payload_words(),
         };
+        if payload.len() != words * 4 {
+            return Err(bad_length());
+        }
         match header.code() {
             code::INVITATION => {
                 let (name, id) =
