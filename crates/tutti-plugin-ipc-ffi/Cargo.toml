@@ -34,3 +34,14 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Pipes",
   "Win32_System_Threading",
 ] }
+
+# The header's atomics become loom's under the loom cfg flag, so
+# `tests/header_loom.rs` models the shipped code. Only that flag pulls this in.
+#
+#     cargo test -p tutti-plugin-ipc-ffi --release --test header_loom   (with the loom cfg flag set)
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[[test]]
+name = "header_loom"
+path = "tests/header_loom.rs"

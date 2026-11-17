@@ -125,9 +125,6 @@ testing/            never shipped
   tutti-clap-test-plugin, tutti-vst2-test-plugin, tutti-fixtures
   tutti-shared-plugin    # test plugin: core + a shell per format
   tutti-plugin-contract  # the same cases against every format's host
-  tutti-shm-model   # Test-only loom model of tutti-plugin's shm header
-                    #   protocol. A separate crate because `--cfg loom` is
-                    #   global and reaches every dep of tutti-plugin.
 vendor/             third-party code we never edit
   vst3-sdk          # The three Steinberg submodules
 ```
