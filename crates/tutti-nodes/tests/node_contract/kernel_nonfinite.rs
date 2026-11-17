@@ -6,10 +6,11 @@ use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind,
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    BrickwallLimiterNode, CompressorControls, CompressorNode, CrossoverNode, DelayControls,
-    DelayNode, DistortionNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PhaserControls,
-    PhaserNode, SvfFilterNode,
+    AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls, CompressorNode,
+    CrossoverNode, DelayControls, DelayNode, DistortionNode, FdnNode, FreeverbNode, GateControls,
+    GateNode, LadderFilterNode, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
+    MultibandCompressorNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
 use tutti_types::{
@@ -103,6 +104,20 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 room: Mix(0.9),
                 damp: Mix(0.2),
             })),
+        ),
+        // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
+        // heard at its own frame and nowhere else.
+        (
+            "tremolo",
+            Box::new(TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO))),
+        ),
+        (
+            "auto-pan",
+            Box::new(AutoPanNode::from(AutoPanConfig::new())),
+        ),
+        (
+            "ring mod",
+            Box::new(RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))),
         ),
         (
             "multiband",
