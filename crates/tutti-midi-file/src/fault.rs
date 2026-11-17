@@ -2,7 +2,7 @@
 //! well formed or end too soon.
 
 /// Why Standard MIDI File bytes are not a well-formed file. A file that is cut
-/// off is refused with one of the `CutOff` variants and never read as a
+/// off is refused with one of the cut-off variants and never read as a
 /// shorter file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]

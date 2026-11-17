@@ -757,7 +757,7 @@ impl Container {
 ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
 /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 ///
-/// let again = MidiFile::from_bytes(&file.to_bytes()?)?;
+/// let again = MidiFile::from_bytes(&file.to_bytes())?;
 /// assert_eq!(again, file);
 /// assert_eq!(again.seconds_at(Beat(1.0)), Seconds(0.5));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -969,6 +969,12 @@ impl MidiFile {
     ///
     /// The constructors have checked everything the writer needs, so this
     /// cannot fail.
+    ///
+    /// # Panics
+    ///
+    /// Never: every file is built by a constructor that ran the SMF writer
+    /// over its tracks (a Clip File's writer holds no limit past the
+    /// constructor's).
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self.container {

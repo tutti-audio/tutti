@@ -17,7 +17,7 @@
 //! A chunk that runs past the end of the file, fewer track chunks than the
 //! header declares, or a track that ends mid-event is a
 //! [`ReadError::Smf`](crate::ReadError::Smf) whose cause is one of the
-//! [`SmfParseError`](crate::SmfParseError) `CutOff` variants, with the track
+//! [`SmfParseError`](crate::SmfParseError) cut-off variants, with the track
 //! and byte offset it was found at. A write the fields cannot hold is
 //! [`TracksError::TooLarge`](crate::TracksError::TooLarge), refused when the
 //! file is built.

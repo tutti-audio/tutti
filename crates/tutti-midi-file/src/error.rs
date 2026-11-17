@@ -33,7 +33,7 @@ pub enum ReadError {
     /// The bytes are not a well-formed SMF, or are cut off.
     #[error("SMF{} at byte {offset}: {cause}", track.map_or_else(String::new, |t| format!(" track {t}")))]
     Smf {
-        /// The `MTrk` chunk (counted from 0, alien chunks not counted) the
+        /// The track chunk (counted from 0, alien chunks not counted) the
         /// event is in; `None` for the header and the chunk framing.
         track: Option<usize>,
         /// The byte offset in the file where the header, chunk or event that
