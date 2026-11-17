@@ -5,7 +5,7 @@
 //! short buffer deserves better than a panic on the audio path.
 
 use tutti_dsp::FrameCount;
-use tutti_types::{Bpm, ChannelLayout, Db, Hz, MAX_CHANNELS, SampleRate, Samples};
+use tutti_types::{Bpm, ChannelLayout, Db, Hz, SampleRate, Samples};
 
 /// Everything that can go wrong constructing or feeding an analysis.
 ///
@@ -27,13 +27,6 @@ pub enum Error {
     /// A zero hop: frames would never advance.
     #[error("hop size is zero: frames would not advance")]
     ZeroHop,
-    /// A layout wider than a bus, whose channels no [`ChannelIndex`](tutti_types::ChannelIndex)
-    /// can name.
-    #[error("{width:?} is wider than a bus ({MAX_CHANNELS} channels)")]
-    TooWide {
-        /// The layout refused.
-        width: ChannelLayout,
-    },
     /// A waveform block of zero samples.
     #[error("block size is zero: a block would summarize nothing")]
     ZeroBlock,

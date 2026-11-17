@@ -28,7 +28,7 @@
 //! semantics of folding first.
 
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, MAX_CHANNELS, Samples};
+use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, Samples};
 
 use core::marker::PhantomData;
 
@@ -272,14 +272,10 @@ impl<S: Sample> Measure<S> for PeakConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroBlock`] for a block of zero samples, [`Error::TooWide`] for a layout past
-    /// [`MAX_CHANNELS`].
+    /// [`Error::ZeroBlock`] for a block of zero samples.
     fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
         if self.samples_per_block.is_zero() {
             return Err(Error::ZeroBlock);
-        }
-        if usize::from(layout.count()) > MAX_CHANNELS {
-            return Err(Error::TooWide { width: layout });
         }
         let channels = layout.count() as usize;
         Ok(PeakMeter {
@@ -350,6 +346,7 @@ impl<S: Sample> PeakMeter<S> {
         }
         let split = PlanesMut::from_vecs(&mut self.planes).and_then(|out| deinterleave(chunk, out));
         debug_assert!(split.is_ok(), "the chunk is the meter's width: {split:?}");
+        let layout = self.layout;
         for (channel, ((pending, plane), run)) in self
             .pending
             .iter_mut()
@@ -361,7 +358,9 @@ impl<S: Sample> PeakMeter<S> {
             cut_blocks(pending, self.block, plane, run);
             for (i, &block) in run[done..].iter().enumerate() {
                 emit(ChannelBlock {
-                    channel: ChannelIndex::new(channel).expect("a meter is at most a bus wide"),
+                    channel: layout
+                        .index(channel)
+                        .expect("a meter has a plane per channel of its layout"),
                     frame: Samples((done + i) * self.block),
                     block,
                 });
@@ -477,8 +476,7 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
 ///
 /// # Errors
 ///
-/// [`Error::ZeroBlock`] for a block of zero samples, [`Error::TooWide`] for a layout past
-/// [`MAX_CHANNELS`].
+/// [`Error::ZeroBlock`] for a block of zero samples.
 pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
     let mut meter = Measure::<S>::measure(cfg, buffer.layout())?;
     meter.push(buffer, &mut Discard)?;
@@ -490,16 +488,17 @@ mod tests {
     use super::*;
     use crate::fold_uneven;
 
-    /// A layout wider than a bus has channels no `ChannelIndex` names, so it is refused rather
-    /// than truncated; a bus-wide one is accepted.
+    /// A layout wider than a bus is metered whole: every channel of a 24-channel buffer has
+    /// its blocks, indexed by its position.
     #[test]
-    fn a_layout_wider_than_a_bus_is_refused() {
-        let wide = ChannelLayout::from(17u16);
-        assert_eq!(
-            Measure::<f32>::measure(&mono(8), wide).err(),
-            Some(Error::TooWide { width: wide })
-        );
-        assert!(Measure::<f32>::measure(&mono(8), ChannelLayout::from(16u16)).is_ok());
+    fn a_layout_wider_than_a_bus_meters_every_channel() {
+        let wide = ChannelLayout::from(24u16);
+        let samples: Vec<f32> = (0..4 * 24).map(|i| (i % 24) as f32 / 24.0).collect();
+        let blocks = summarize(&mono(4), Interleaved::new(&samples, wide).unwrap());
+        for c in 0..24 {
+            assert_eq!(ch(&blocks, c).len(), 1, "channel {c}");
+            assert_eq!(ch(&blocks, c)[0].max, c as f32 / 24.0, "channel {c}");
+        }
     }
 
     /// `summarize` of a buffer that is valid for its config.
