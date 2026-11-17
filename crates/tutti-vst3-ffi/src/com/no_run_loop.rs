@@ -57,7 +57,7 @@ impl RunLoop {
     /// Adds no wakeup: the OS owns the loop.
     pub(crate) fn describe(&self, _out: &mut Wakeups) {}
 
-    /// Waits for and runs nothing.
+    /// Does nothing.
     pub(crate) fn run_iteration(&self, _main: MainThreadMarker) {}
 
     /// Runs nothing.
