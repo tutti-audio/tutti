@@ -221,7 +221,6 @@ tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::smf
 
 # tutti-midi-hardware
-tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_function_block
 tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_protocol
 tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/devices.rs::OpenOutput::set_config
 tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_input_timing
