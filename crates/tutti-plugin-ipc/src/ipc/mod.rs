@@ -883,8 +883,7 @@ impl Ipc {
             // death) stays on the live bound: the batcher collects at once, and
             // the bridge must not hold one budget per chunk for a server that
             // did not answer.
-            link.bridge
-                .set_reply_wait((!wait.stopped_waiting()).then(|| wait.budget()));
+            link.bridge.set_reply_wait(wait.reply_wait());
             batcher.set_offline_wait(wait);
         } else {
             link.bridge.set_reply_wait(None);
