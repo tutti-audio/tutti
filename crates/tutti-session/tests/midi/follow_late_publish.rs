@@ -4,7 +4,6 @@
 use tutti_buffers::InterleavedMut;
 use tutti_session::Session;
 use tutti_tempo::{TempoMap, TempoPoint};
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -30,10 +29,7 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
         s.playhead().beat().get()
     };
 
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     // 120 bpm: a block is 512 / 48000 * 2 beats.
     let old_block = BLOCK as f64 / RATE * 2.0;
     let mut beats = vec![block(&s)];

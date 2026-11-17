@@ -3,7 +3,7 @@
 use tutti_buffers::InterleavedMut;
 use tutti_session::{Session, TransportHandle};
 use tutti_transport::{FadeOut, MotionEvent, TimedError};
-use tutti_types::{Beat, Bpm, ChannelLayout, MaxBlock, Samples};
+use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, MaxBlock, Samples};
 
 fn offline() -> Session {
     Session::builder()
@@ -89,4 +89,70 @@ fn the_session_and_its_handles_share_the_rolling_record() {
         s.schedule(Beat(4.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(_))
     ));
+}
+
+/// **A play scheduled for the next block is a play the record knows**: a beat
+/// play after it is accepted, and a next-block stop makes the same beat play
+/// refused.
+#[test]
+fn a_next_block_schedule_updates_the_rolling_record() {
+    let s = offline();
+    let handle = s.transport_handle();
+    handle.schedule(At::NextBlock, MotionEvent::Play).unwrap();
+    assert!(handle.schedule(Beat(4.0), MotionEvent::Play).is_ok());
+    handle
+        .schedule(At::NextBlock, MotionEvent::stop_unfaded())
+        .unwrap();
+    assert!(matches!(
+        handle.schedule(Beat(5.0), MotionEvent::Play),
+        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+    ));
+}
+
+/// **The rendered playhead stands in for the record**: a stop sent after a
+/// block rendered rolling leaves the record stopped while the playhead still
+/// rolls, and the handle takes a beat play on the playhead's word.
+#[test]
+fn a_handle_accepts_a_beat_play_while_the_playhead_rolls() {
+    let s = offline();
+    s.play().unwrap();
+    render(&s, 2);
+    assert!(s.playhead().playing());
+    let handle = s.transport_handle();
+    handle.stop(FadeOut::Immediate).unwrap();
+    // Stopped as sent, rolling as rendered: the rendered state is enough.
+    assert!(handle.schedule(Beat(8.0), MotionEvent::Play).is_ok());
+}
+
+/// **A handle reads and cancels the timed commands in flight.**
+#[test]
+fn a_handle_counts_and_cancels_scheduled_commands() {
+    let s = offline();
+    let handle = s.transport_handle();
+    handle
+        .schedule(Frame::new(48_000), MotionEvent::Play)
+        .unwrap();
+    assert_eq!(handle.scheduled_outstanding(), 1);
+    handle.cancel_scheduled();
+    render(&s, 1);
+    assert_eq!(handle.scheduled_outstanding(), 0);
+    assert!(!s.playhead().playing(), "the cancelled play never fires");
+}
+
+/// **A handle reads the loop region the session sets and clears.**
+#[test]
+fn a_handle_reads_the_loop_region() {
+    let s = offline();
+    let handle = s.transport_handle();
+    let range = LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap();
+    s.set_loop(range).unwrap();
+    render(&s, 1);
+    let region = handle.loop_region();
+    assert_eq!(region.bounds(), range);
+    assert!(region.is_armed());
+    s.clear_loop().unwrap();
+    render(&s, 1);
+    let region = handle.loop_region();
+    assert_eq!(region.bounds(), range, "the bounds are kept");
+    assert!(!region.is_armed());
 }

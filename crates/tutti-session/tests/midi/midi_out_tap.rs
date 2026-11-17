@@ -12,7 +12,6 @@ use crate::common::{MF, note};
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{EventCapacity, Losses, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 use tutti_ump::{MidiGroup, Ump};
 
@@ -55,10 +54,7 @@ fn rig(wire: &Wire) -> Session {
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
     let _ = s.update();
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     s
 }
 
@@ -356,10 +352,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");
     let _ = s.update();
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     render(&s, 50_000);
     let _ = s.update();
 

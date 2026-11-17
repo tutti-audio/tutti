@@ -2,7 +2,6 @@ use super::*;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, Frame};
 
 fn render(s: &Session, blocks: usize) {
@@ -54,10 +53,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
             tx_jr: false,
         });
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     render(&s, 8);
     let _ = s.update();
     let before = s.midi_state.ports.stream_origin();

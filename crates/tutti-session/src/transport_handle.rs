@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tutti_engine::BlockClockReader;
-use tutti_transport::{FadeOut, MotionEvent, Then, TimedError, Transport};
+use tutti_transport::{FadeOut, LoopRegion, MotionEvent, Then, TimedError, Transport};
 use tutti_types::{At, Beat};
 
 use crate::Playhead;
@@ -151,5 +151,24 @@ impl TransportHandle {
             }
         }
         Ok(())
+    }
+
+    /// The loop region the engine last published: its bounds and whether it is
+    /// armed.
+    #[must_use]
+    pub fn loop_region(&self) -> LoopRegion {
+        self.transport.motion().loop_region()
+    }
+
+    /// Drops every timed command not yet fired, from the next block. The
+    /// rolling record is unchanged: a cancelled play leaves it as it was sent.
+    pub fn cancel_scheduled(&self) {
+        self.transport.motion().cancel_scheduled();
+    }
+
+    /// How many timed commands are waiting to fire.
+    #[must_use]
+    pub fn scheduled_outstanding(&self) -> usize {
+        self.transport.motion().scheduled_outstanding()
     }
 }

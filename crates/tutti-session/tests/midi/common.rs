@@ -7,7 +7,6 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_session::{Session, SessionNode};
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, BeatDuration, ChannelLayout};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 
@@ -94,10 +93,7 @@ pub fn note(number: u8, velocity: u16, start: Beat, duration: BeatDuration) -> [
 
 /// Starts the transport.
 pub fn play(s: &Session) {
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
 }
 
 /// A session over a fake OS with one device, `Keys`, declared as the input port

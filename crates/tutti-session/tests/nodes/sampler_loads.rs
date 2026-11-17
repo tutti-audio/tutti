@@ -12,7 +12,6 @@ use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
     SessionEvent, audio_file,
 };
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, ChannelLayout, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -166,10 +165,7 @@ fn play(clip: tutti_sampler::Clip, frames: usize) -> Vec<f32> {
         assert!(Instant::now() < deadline, "the stream was not primed");
         std::thread::sleep(Duration::from_millis(1));
     }
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK * 2];
     while out.len() < frames {

@@ -10,7 +10,7 @@ use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
+use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, SampleRate, Samples};
 
 use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
@@ -1497,9 +1497,16 @@ impl<C: Clock> Session<C> {
         lost
     }
 
-    /// The transport: its rate follows the device's.
-    pub fn transport(&self) -> &Transport {
-        &self.transport
+    /// The rate the graph is prepared at; it follows the device's.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.transport.sample_rate()
+    }
+
+    /// The project's tempo map as last published.
+    #[must_use]
+    pub fn tempo_map(&self) -> Arc<TempoMap> {
+        self.transport.settings().tempo_map()
     }
 
     /// The playhead, in one read: its beat, the graph frame, the transport

@@ -97,7 +97,7 @@ fn until_followed(s: &mut Session) -> Found {
     for _ in 0..LIMIT {
         blocks(s, 1);
         let playhead = s.playhead();
-        let before = s.transport().settings().tempo_map();
+        let before = s.tempo_map();
         let events: Vec<MidiReport> = s
             .update()
             .into_iter()
@@ -152,7 +152,7 @@ fn approx(a: Beat, b: Beat) -> bool {
 #[test]
 fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     let (mut s, fake) = rig();
-    let project = s.transport().settings().tempo_map();
+    let project = s.tempo_map();
     assert_eq!(project.constant_tempo(), Some(Bpm::of(120.0)));
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
@@ -173,7 +173,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
         "ahead of the block the playhead was read in"
     );
 
-    let map = s.transport().settings().tempo_map();
+    let map = s.tempo_map();
     assert_eq!(
         map.points(),
         [
@@ -204,7 +204,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
             .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoUnfollowed))),
         "the update reports it"
     );
-    let restored = s.transport().settings().tempo_map();
+    let restored = s.tempo_map();
     assert!(Arc::ptr_eq(&restored, &project), "the project's own map");
     let before = s.playhead().beat();
     blocks(&s, 4);
@@ -217,7 +217,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
 #[test]
 fn without_a_follow_a_flex_tempo_changes_nothing() {
     let (mut s, fake) = rig();
-    let project = s.transport().settings().tempo_map();
+    let project = s.tempo_map();
     play(&s);
     blocks(&s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
@@ -231,7 +231,7 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
             "{events:?}"
         );
     }
-    assert!(Arc::ptr_eq(&s.transport().settings().tempo_map(), &project));
+    assert!(Arc::ptr_eq(&s.tempo_map(), &project));
     assert_eq!(s.playhead().tempo(), Bpm::of(120.0));
 
     // The silence was the follow's: the same message, sent once the session
@@ -270,7 +270,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     let expected = next_block_beat(&found);
     assert!(approx(beat, expected), "{beat:?} vs {expected:?}");
 
-    let map = s.transport().settings().tempo_map();
+    let map = s.tempo_map();
     let points = map.points();
     assert_eq!(points.len(), 3, "{points:?}");
     assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), Bpm::of(60.0)));
@@ -300,7 +300,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
 #[test]
 fn a_set_time_signature_lands_on_the_next_bar_line() {
     let (mut s, fake) = rig();
-    let project_tempo = s.transport().settings().tempo_map();
+    let project_tempo = s.tempo_map();
     let project_meter = s.click_settings().project_meter();
     assert_eq!(project_meter.current().changes().len(), 1);
     follow(&mut s, MidiGroup::FIRST, true);
@@ -332,7 +332,7 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
         ]
     );
     assert!(
-        Arc::ptr_eq(&s.transport().settings().tempo_map(), &project_tempo),
+        Arc::ptr_eq(&s.tempo_map(), &project_tempo),
         "a meter change is no tempo change"
     );
 
@@ -366,7 +366,7 @@ fn the_meter_is_followed_only_when_asked() {
 #[test]
 fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
     let (mut s, fake) = rig_with(Some(MidiGroup::of(1)));
-    let project = s.transport().settings().tempo_map();
+    let project = s.tempo_map();
     follow(&mut s, MidiGroup::of(1), false);
     play(&s);
     blocks(&s, 4);
@@ -398,7 +398,7 @@ fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
         "one follower: one unfollow ends it"
     );
     assert!(
-        Arc::ptr_eq(&s.transport().settings().tempo_map(), &project),
+        Arc::ptr_eq(&s.tempo_map(), &project),
         "the project's map from before the first follow"
     );
 }
@@ -413,7 +413,7 @@ fn a_repeated_tempo_adds_no_point() {
     blocks(&s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let _ = until_followed(&mut s);
-    let map = s.transport().settings().tempo_map();
+    let map = s.tempo_map();
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     for _ in 0..40 {
         blocks(&s, 1);
@@ -425,7 +425,7 @@ fn a_repeated_tempo_adds_no_point() {
             "{events:?}"
         );
     }
-    assert!(Arc::ptr_eq(&s.transport().settings().tempo_map(), &map));
+    assert!(Arc::ptr_eq(&s.tempo_map(), &map));
 }
 
 /// **The refusals name what was wrong and change nothing**: a Group the input
@@ -464,13 +464,13 @@ fn follow_refusals() {
 #[test]
 fn the_apps_tempo_is_refused_while_following() {
     let (mut s, _fake) = rig();
-    let project = s.transport().settings().tempo_map();
+    let project = s.tempo_map();
     follow(&mut s, MidiGroup::FIRST, false);
     assert_eq!(s.set_tempo(Bpm::of(90.0)), Err(TempoError::Following));
     let map = TempoMap::constant(Bpm::of(90.0)).unwrap();
     assert_eq!(s.set_tempo_map(map), Err(TempoError::Following));
     assert!(
-        Arc::ptr_eq(&s.transport().settings().tempo_map(), &project),
+        Arc::ptr_eq(&s.tempo_map(), &project),
         "a refusal publishes nothing"
     );
     s.midi().unfollow_tempo().expect("was following");
