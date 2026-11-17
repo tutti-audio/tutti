@@ -2,6 +2,7 @@
 //! can be written through, shared by the session, its graph and every
 //! [`Knobs`].
 
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,6 +21,9 @@ use crate::AppKey;
 /// What one node's params are written through, and what they were declared at.
 #[derive(Debug)]
 struct NodeParams {
+    /// The node type the params were addressed as (`Graph::add::<N>`): the
+    /// type a typed key names.
+    owner: TypeId,
     set: ParamSet,
     /// Each param's value when the node was addressed: the declaration's seed.
     seeds: Vec<(UnitAddr, f64)>,
@@ -32,14 +36,16 @@ pub struct Params {
 }
 
 impl Params {
-    /// `addr`'s cell on `node`.
-    pub fn cell(&self, node: NodeKey, addr: UnitAddr) -> Option<ParamCell> {
-        self.nodes.get(&node)?.set.cell(addr)
+    /// `addr`'s cell on `node`, when the node is of the type `owner` names.
+    pub fn cell(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<ParamCell> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
+        node.set.cell(addr)
     }
 
-    /// `addr`'s value on `node` when the node was addressed.
-    pub fn seed(&self, node: NodeKey, addr: UnitAddr) -> Option<f64> {
-        let node = self.nodes.get(&node)?;
+    /// `addr`'s value on `node` when the node was last addressed, when the
+    /// node is of the type `owner` names.
+    pub fn seed(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<f64> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.seeds.iter().find(|(a, _)| *a == addr).map(|(_, v)| *v)
     }
 }
@@ -99,7 +105,7 @@ impl ValueTable {
     }
 
     /// Addresses `node`'s params, replacing any it had. Control thread.
-    pub(crate) fn address(&self, node: NodeKey, set: ParamSet) {
+    pub(crate) fn address(&self, node: NodeKey, owner: TypeId, set: ParamSet) {
         let seeds = set
             .params()
             .filter_map(|addr| {
@@ -110,10 +116,12 @@ impl ValueTable {
                 ))
             })
             .collect();
-        self.params
+        let old = self
+            .params
             .lock_recover()
             .nodes
-            .insert(node, NodeParams { set, seeds });
+            .insert(node, NodeParams { owner, set, seeds });
+        drop(old);
     }
 
     /// Forgets `node`'s params: its targets are gone.
@@ -122,9 +130,9 @@ impl ValueTable {
         drop(gone);
     }
 
-    /// `addr`'s cell on `node`, for the graph's own use.
+    /// `addr`'s cell on `node`, whatever its type, for the graph's own use.
     pub(crate) fn cell(&self, node: NodeKey, addr: UnitAddr) -> Option<ParamCell> {
-        self.params.lock_recover().cell(node, addr)
+        self.params.lock_recover().nodes.get(&node)?.set.cell(addr)
     }
 }
 

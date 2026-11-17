@@ -1,5 +1,6 @@
 //! [`ParamTarget`]: a native param of a node, what `key.cutoff()` returns.
 
+use std::any::TypeId;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
@@ -27,18 +28,22 @@ use super::target::{Info, Moved, ScalarTarget, Target, TargetId, sealed, target_
 pub struct ParamTarget<U> {
     node: NodeKey,
     addr: UnitAddr,
+    /// The node type the key named, which declares the unit `U`.
+    owner: TypeId,
     unit: PhantomData<fn() -> U>,
 }
 
 impl<U> ParamTarget<U> {
-    /// `addr` on `node`, whose value is in `U`. Only a [`Key`](crate::Key)'s
-    /// param methods make one, so the unit is always the one the node
-    /// declares.
+    /// `addr` on `node` of the type `owner`, whose value is in `U`. Only a
+    /// [`Key`](crate::Key)'s param methods make one, so the unit is always the
+    /// one the node type declares; the target is `NoSuchTarget` once the node
+    /// is another type (`Graph::replace`).
     #[must_use]
-    pub(crate) fn new(node: impl Into<NodeKey>, addr: UnitAddr) -> Self {
+    pub(crate) fn new(node: impl Into<NodeKey>, addr: UnitAddr, owner: TypeId) -> Self {
         Self {
             node: node.into(),
             addr,
+            owner,
             unit: PhantomData,
         }
     }
@@ -102,7 +107,7 @@ impl<U> From<ParamTarget<U>> for crate::ParamRef {
 
 impl<U: ParamUnit> sealed::Sealed for ParamTarget<U> {
     fn id(self) -> TargetId {
-        TargetId::Param(self.node, self.addr)
+        TargetId::Param(self.node, self.addr, self.owner)
     }
 }
 impl<U: ParamUnit> Target for ParamTarget<U> {
@@ -117,17 +122,22 @@ impl<U: ParamUnit> sealed::Land for ParamTarget<U> {
     type Cell = ParamCell;
 
     fn resolve(self, params: &Params) -> Option<(ParamCell, U)> {
-        let cell = params.cell(self.node, self.addr)?;
+        let cell = params.cell(self.node, self.addr, self.owner)?;
         let base = U::from_wide(cell.load_wide(Ordering::Acquire));
         Some((cell, base))
     }
 
-    fn check(value: &U) -> Result<(), SetRefusal> {
-        if value.to_wide().is_finite() {
-            Ok(())
-        } else {
-            Err(SetRefusal::NotFinite)
+    fn check(cell: &ParamCell, value: &U) -> Result<(), SetRefusal> {
+        let wide = value.to_wide();
+        if !wide.is_finite() {
+            return Err(SetRefusal::NotFinite);
         }
+        // An `f32` cell holds what an `f32` does: a finite figure that rounds
+        // to infinity there is not stored.
+        if matches!(cell, ParamCell::F32(_)) && !(wide as f32).is_finite() {
+            return Err(SetRefusal::OutOfRange);
+        }
+        Ok(())
     }
 
     fn land(cell: &ParamCell, value: &U) {
@@ -142,8 +152,8 @@ target_builders!(moved [U: ParamUnit] ParamTarget<U>);
 pub struct TargetInfo<V> {
     /// The param's address on its node.
     pub param: UnitAddr,
-    /// The value the param had when its node was added: the declaration's
-    /// seed.
+    /// The value the param had when its node was last addressed (added, or
+    /// replaced): the declaration's seed.
     pub default: V,
 }
 
@@ -154,7 +164,7 @@ impl<U: ParamUnit> Describe for Info<ParamTarget<U>> {
         let target = self.target;
         let id = sealed::Sealed::id(target);
         params
-            .seed(target.node, target.addr)
+            .seed(target.node, target.addr, target.owner)
             .map(|seed| TargetInfo {
                 param: target.addr,
                 default: U::from_wide(seed),
