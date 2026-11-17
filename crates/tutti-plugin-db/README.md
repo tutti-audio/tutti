@@ -1,8 +1,8 @@
 # tutti-plugin-db
 
-Finds audio plugins installed on a machine and remembers what it found in a database file.
+Finds the audio plugins installed on a machine and remembers what it found.
 
-It walks plugin folders, records each plugin file's details, and notes files that crashed while being scanned so they are skipped next time. It only depends on tutti's plugin type definitions, so it can be used on its own to build a plugin list; saving to a file needs the `json` feature.
+It walks plugin folders, records each plugin file's details, and notes files that crashed while being scanned so they are skipped next time. It depends only on tutti's plugin type definitions, so it can be used on its own to build a plugin list. With the `serde` feature the list can be saved: you pick the file format and where it lives.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

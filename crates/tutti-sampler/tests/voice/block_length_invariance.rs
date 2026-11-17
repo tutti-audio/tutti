@@ -41,6 +41,7 @@
 //! pin the sizing; `rt_no_alloc`'s ragged 512-frame gates pin that it costs
 //! no allocation.
 
+use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
@@ -114,7 +115,7 @@ fn render<N: Node>(node: N, max_block: usize, schedule: &[usize]) -> [Vec<f32>; 
         let len = len.min(FRAMES - frame);
         d.block_in(&env_at(frame, len));
         for (c, o) in out.iter_mut().enumerate() {
-            o.extend_from_slice(d.output(c));
+            o.extend_from_slice(d.output().plane(c).samples());
         }
         frame += len;
     }
@@ -139,7 +140,9 @@ fn render_by_hand<N: Node>(
             break;
         }
         let len = len.min(FRAMES - frame);
-        let audio = contract::drive_input(&mut node, &env_at(frame, len), &[], &[], &[]).audio;
+        let audio =
+            contract::drive_input(&mut node, &env_at(frame, len), Planes::default(), &[], &[])
+                .audio;
         for (c, o) in out.iter_mut().enumerate() {
             o.extend_from_slice(&audio[c]);
         }

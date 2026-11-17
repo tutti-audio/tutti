@@ -23,17 +23,16 @@ serde = ["dep:serde", "tutti-plugin-types/serde"]
 
 [dependencies]
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
-# `Mint`, which numbers the temp files a save writes beside its target.
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
-# `spawn_named`: the scan's worker thread.
+# `spawn_named` and `StopToken`: the scan's worker thread and its stop request.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
-# The scan's progress and delta channels.
+# The scan's progress and change channels.
 crossbeam-channel = "0.5"
 
 [dev-dependencies]
+tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tempfile = "3"
 # The format the serde round trip runs through.
 serde_json = "1"

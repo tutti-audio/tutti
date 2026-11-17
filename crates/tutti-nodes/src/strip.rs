@@ -490,6 +490,7 @@ impl IntoNode for BusStripNode {
 mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
+    use tutti_buffers::Planes;
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
 
@@ -651,16 +652,21 @@ mod tests {
         let mut s = BusStripNode::stereo();
         s.set_volume(Amplitude(0.5));
         let x = [1.0f32; 16];
-        let steady = drive(&mut s, RATE, &[&x, &x], &[None, None]);
+        let steady = drive(&mut s, RATE, Planes::new(&[&x, &x]).unwrap(), &[None, None]);
         assert!(steady[0].iter().all(|&y| y == 0.5));
         let held = [0.5f32; 16];
-        let fed = drive(&mut s, RATE, &[&x, &x], &[Some(&held), None]);
+        let fed = drive(
+            &mut s,
+            RATE,
+            Planes::new(&[&x, &x]).unwrap(),
+            &[Some(&held), None],
+        );
         assert!(
             fed[0].iter().all(|&y| y == 0.5),
             "the fed volume alone, from its first frame: {:?}",
             fed[0]
         );
-        let back = drive(&mut s, RATE, &[&x, &x], &[None, None]);
+        let back = drive(&mut s, RATE, Planes::new(&[&x, &x]).unwrap(), &[None, None]);
         assert!(back[0].iter().all(|&y| y == 0.5), "and the control again");
     }
 
@@ -720,7 +726,7 @@ mod tests {
         // One block over the same input.
         let l: Vec<f32> = samples.iter().map(|s| s.0).collect();
         let r: Vec<f32> = samples.iter().map(|s| s.1).collect();
-        let out = drive(&mut block, RATE, &[&l, &r], &[]);
+        let out = drive(&mut block, RATE, Planes::new(&[&l, &r]).unwrap(), &[]);
         for (i, frame) in ticked.iter().enumerate() {
             assert!((out[0][i] - frame[0]).abs() < 1e-6, "L @ {i}");
             assert!((out[1][i] - frame[1]).abs() < 1e-6, "R @ {i}");
@@ -733,7 +739,7 @@ mod tests {
     /// is a step of the same size in the waveform.
     fn process_dc(strip: &mut BusStripNode, size: usize, l: f32, r: f32) -> Vec<[f32; 2]> {
         let (lv, rv) = (vec![l; size], vec![r; size]);
-        let out = drive(strip, RATE, &[&lv, &rv], &[]);
+        let out = drive(strip, RATE, Planes::new(&[&lv, &rv]).unwrap(), &[]);
         (0..size).map(|i| [out[0][i], out[1][i]]).collect()
     }
 
@@ -852,9 +858,19 @@ mod tests {
         let mut s = BusStripNode::new(lcr());
         set_balance(&s, -0.5);
         let ones = [1.0f32; N];
-        let _ = drive(&mut s, RATE, &[&ones, &ones, &ones], &[]);
+        let _ = drive(
+            &mut s,
+            RATE,
+            Planes::new(&[&ones, &ones, &ones]).unwrap(),
+            &[],
+        );
         s.set_volume(Amplitude(0.5));
-        let out = drive(&mut s, RATE, &[&ones, &ones, &ones], &[]);
+        let out = drive(
+            &mut s,
+            RATE,
+            Planes::new(&[&ones, &ones, &ones]).unwrap(),
+            &[],
+        );
         // Balance at -0.5: left takes the fader, right half of it, the rest
         // the fader.
         let (from, to) = ([1.0f32, 0.5, 1.0], [0.5f32, 0.25, 0.5]);
@@ -880,9 +896,19 @@ mod tests {
         let ones = [1.0f32; N];
         let fed_balance = [0.5f32; N];
         let fed = [None, Some(&fed_balance[..])];
-        let _ = drive(&mut s, RATE, &[&ones, &ones, &ones], &fed);
+        let _ = drive(
+            &mut s,
+            RATE,
+            Planes::new(&[&ones, &ones, &ones]).unwrap(),
+            &fed,
+        );
         s.set_volume(Amplitude(0.5));
-        let out = drive(&mut s, RATE, &[&ones, &ones, &ones], &fed);
+        let out = drive(
+            &mut s,
+            RATE,
+            Planes::new(&[&ones, &ones, &ones]).unwrap(),
+            &fed,
+        );
         // Balance at 0.5: left halved, right at unity, the rest unbalanced.
         let balance = [0.5f32, 1.0, 1.0];
         for (c, (y, &bal)) in out.iter().zip(&balance).enumerate() {
@@ -1086,9 +1112,9 @@ mod tests {
         let mut s = BusStripNode::new(BusTopology::from(Bed::Surround51));
         let ones = [1.0f32; N];
         let ins: Vec<&[f32]> = vec![&ones; 6];
-        let _ = drive(&mut s, RATE, &ins, &[]);
+        let _ = drive(&mut s, RATE, Planes::new(&ins).unwrap(), &[]);
         set_balance(&s, 0.5);
-        let out = drive(&mut s, RATE, &ins, &[]);
+        let out = drive(&mut s, RATE, Planes::new(&ins).unwrap(), &[]);
         // 5.1 order: FL FR FC LFE SL SR. The left sides fall from 1 to 0.5.
         for c in [0usize, 4] {
             for (i, &y) in out[c].iter().enumerate() {

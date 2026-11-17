@@ -70,7 +70,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
 fn render_click(frames: usize) -> Vec<f32> {
     let mut s = offline();
     let settings = Arc::clone(s.click_settings());
-    settings.set_mode(MetronomeMode::Always);
+    settings.mode().set(MetronomeMode::Always);
     settings.set_volume(Amplitude::new(1.0)).unwrap();
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {

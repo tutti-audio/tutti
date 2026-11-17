@@ -15,11 +15,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use dpi::Size;
+use tutti_plugin_ipc_ffi::Ready;
 
 use crate::{
     AutomationMode, ContentScale, EditorCapabilities, EditorError, KeyEvent, KeyUse, Loaded,
     MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId, PluginError, PluginResult,
-    Ready, Request, Wakeups, WindowHandle,
+    Request, Wakeups, WindowHandle,
 };
 
 /// What to load from a plugin file: which plugin, when the file exports

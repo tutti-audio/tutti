@@ -8,6 +8,7 @@
 //! cycles of a settled sine is the curve at the sine's peak, `amplitude * |H(f)|`.
 
 use core::f64::consts::PI;
+use tutti_buffers::Planes;
 
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
@@ -71,7 +72,7 @@ fn run<N: Node>(node: &mut N, key: &[f32]) -> Vec<f32> {
     let mut out = Vec::new();
     for block in key.chunks(BLOCK) {
         let audio = vec![AUDIO; block.len()];
-        out.extend(drive(node, SR, &[&audio, block], &[]).remove(0));
+        out.extend(drive(node, SR, Planes::new(&[&audio, block]).unwrap(), &[]).remove(0));
     }
     out
 }
@@ -277,7 +278,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
         .collect();
     let mut out = Vec::new();
     for (x, k) in audio.chunks(BLOCK).zip(key.chunks(BLOCK)) {
-        out.extend(drive(&mut node, SR, &[x, k], &[]).remove(0));
+        out.extend(drive(&mut node, SR, Planes::new(&[x, k]).unwrap(), &[]).remove(0));
     }
     for (i, (&y, &x)) in out.iter().zip(&audio).enumerate().skip(1_000) {
         let want = f64::from(x) * gain;
@@ -382,7 +383,7 @@ fn the_gate_applies_its_gain_to_the_unfiltered_audio() {
         );
         let mut out = Vec::new();
         for (x, k) in audio.chunks(BLOCK).zip(key.chunks(BLOCK)) {
-            out.extend(drive(&mut node, SR, &[x, k], &[]).remove(0));
+            out.extend(drive(&mut node, SR, Planes::new(&[x, k]).unwrap(), &[]).remove(0));
         }
         for (i, (&y, &x)) in out.iter().zip(&audio).enumerate().skip(1_000) {
             let want = f64::from(x) * gain;

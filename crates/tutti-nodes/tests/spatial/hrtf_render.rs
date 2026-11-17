@@ -14,6 +14,7 @@
 //!   whose rate or response length would make preparing it unbounded; the
 //!   rate it is prepared at is held to a ceiling.
 
+use tutti_buffers::Planes;
 use tutti_dsp::{HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE};
 use tutti_fixtures::Noise;
 use tutti_graph::ParamNode;
@@ -188,7 +189,12 @@ fn ir_of(
     input[lead] = 1.0;
     let (mut left, mut right) = (Vec::new(), Vec::new());
     for chunk in input.chunks(64) {
-        let out = drive(node, SampleRate::of(f64::from(rate)), &[chunk, chunk], &[]);
+        let out = drive(
+            node,
+            SampleRate::of(f64::from(rate)),
+            Planes::new(&[chunk, chunk]).unwrap(),
+            &[],
+        );
         left.extend_from_slice(&out[0]);
         right.extend_from_slice(&out[1]);
     }
@@ -369,7 +375,7 @@ fn resampling_the_sphere_keeps_its_dc_gain() {
         let out = drive(
             &mut node,
             SampleRate::of(f64::from(TO)),
-            &[&ones, &ones],
+            Planes::new(&[&ones, &ones]).unwrap(),
             &[],
         );
         last = [out[0][63], out[1][63]];
@@ -431,7 +437,7 @@ fn downsampling_low_passes_below_the_new_nyquist() {
         let out = drive(
             &mut node,
             SampleRate::of(f64::from(TO)),
-            &[&ones, &ones],
+            Planes::new(&[&ones, &ones]).unwrap(),
             &[],
         );
         last = [out[0][63], out[1][63]];
@@ -505,7 +511,7 @@ fn the_tail_is_the_ring_out_after_the_latency() {
             let out = drive(
                 &mut node,
                 SampleRate::of(f64::from(RATE)),
-                &[chunk, chunk],
+                Planes::new(&[chunk, chunk]).unwrap(),
                 &[],
             );
             for (i, (l, r)) in out[0].iter().zip(&out[1]).enumerate() {
@@ -627,7 +633,12 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
     ));
     let mut impulse = vec![0.0f32; 1024];
     impulse[0] = 1.0;
-    let out = drive(&mut node2, SampleRate::of(1e10), &[&impulse, &impulse], &[]);
+    let out = drive(
+        &mut node2,
+        SampleRate::of(1e10),
+        Planes::new(&[&impulse, &impulse]).unwrap(),
+        &[],
+    );
     assert!(out[0].iter().all(|s| s.is_finite()));
     assert!(
         out[0].iter().any(|s| s.abs() > 1e-3),
@@ -834,7 +845,7 @@ fn render_in_blocks(
         let out = drive(
             &mut node,
             SampleRate::of(f64::from(RATE)),
-            &[chunk, chunk],
+            Planes::new(&[chunk, chunk]).unwrap(),
             &[],
         );
         left.extend_from_slice(&out[0]);
@@ -920,7 +931,7 @@ fn the_panner_takes_the_mean_of_a_stereo_pair() {
         Node::reset(&mut node);
         let mut out = Vec::new();
         for (cl, cr) in l.chunks(64).zip(r.chunks(64)) {
-            for plane in drive(&mut node, rate, &[cl, cr], &[]) {
+            for plane in drive(&mut node, rate, Planes::new(&[cl, cr]).unwrap(), &[]) {
                 out.extend_from_slice(&plane);
             }
         }
