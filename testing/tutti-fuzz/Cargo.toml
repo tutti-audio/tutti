@@ -15,6 +15,12 @@ workspace = true
 # The decoder `wav_decode` feeds; the feature is on here so the replay suite
 # always runs.
 tutti-codec = { path = "../../crates/tutti-codec", features = ["decode-wav"] }
+# The parsers the MIDI targets feed.
+tutti-midi-device = { path = "../../crates/tutti-midi-device" }
+tutti-midi-file = { path = "../../crates/tutti-midi-file" }
+tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
+tutti-ump = { path = "../../crates/tutti-ump" }
+tutti-types = { path = "../../crates/tutti-types" }
 
 [dev-dependencies]
 tutti-fixtures = { path = "../tutti-fixtures" }
