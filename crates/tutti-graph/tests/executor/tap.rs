@@ -3,6 +3,7 @@
 //! the parallel executor, and allocation-free on every participant. A closed
 //! tap compiles to no op, and a render is the same with a tap open or closed.
 
+use tutti_buffers::{Interleaved, PlanesMut};
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -162,7 +163,9 @@ fn block(r: &mut Rig, n: usize, frame: u64) -> Vec<Vec<f32>> {
 fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
     let mut buf = vec![0.0f32; tap.width() * 4096];
     loop {
-        let n = tap.pop_into(&mut buf).get();
+        let n = tap
+            .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .get();
         if n == 0 {
             break;
         }
@@ -416,7 +419,11 @@ fn next_frame_is_the_graph_frame_of_the_next_frame_read() {
     }
     assert_eq!(tap.next_frame(), Frame::new(0), "nothing was read yet");
     let mut buf = vec![0.0f32; 2 * 150];
-    assert_eq!(tap.pop_into(&mut buf).get(), 150);
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .get(),
+        150
+    );
     assert_eq!(
         tap.next_frame(),
         Frame::new(150),
@@ -424,7 +431,11 @@ fn next_frame_is_the_graph_frame_of_the_next_frame_read() {
     );
     assert_eq!(tap.contiguous().get(), 150, "no gap in the rest");
     let mut buf = vec![0.0f32; 2 * 1000];
-    assert_eq!(tap.pop_into(&mut buf).get(), 150);
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .get(),
+        150
+    );
     assert_eq!(tap.next_frame(), Frame::new(300));
 }
 
@@ -455,7 +466,10 @@ fn a_lost_block_advances_next_frame_and_a_contiguous_read_stops_at_it() {
     let mut buf = vec![0.0f32; 2 * 1000];
     assert_eq!(tap.contiguous().get(), 150);
     assert_eq!(
-        tap.pop_into(&mut buf[..2 * tap.contiguous().get()]).get(),
+        tap.pop_into(
+            InterleavedMut::new(&mut buf[..2 * tap.contiguous().get()], tap.layout()).unwrap()
+        )
+        .get(),
         150
     );
     // The ring is empty again: the fourth block (frames 300..400) is whole.
@@ -466,12 +480,16 @@ fn a_lost_block_advances_next_frame_and_a_contiguous_read_stops_at_it() {
         "the gap 150..300 is skipped over"
     );
     assert_eq!(tap.contiguous().get(), 100);
-    assert_eq!(tap.pop_into(&mut buf).get(), 100);
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .get(),
+        100
+    );
     assert_eq!(tap.next_frame(), Frame::new(400));
 }
 
-/// A read is whole frames: a buffer that ends mid-frame leaves its tail as it
-/// was, and the reader says how wide it is.
+/// A read is whole frames: a buffer that ends mid-frame is no view, and the
+/// reader says how wide it is.
 #[test]
 fn a_read_is_whole_frames() {
     let mut r = rig(1, false);
@@ -489,8 +507,10 @@ fn a_read_is_whole_frames() {
     assert_eq!(tap.layout(), ChannelLayout::from_count(3));
     assert_eq!(tap.available().get(), 100);
     let mut out = [f32::MAX; 8];
-    assert_eq!(tap.pop_into(&mut out).get(), 2, "two whole frames of three");
-    assert_eq!(out[6..], [f32::MAX; 2], "the partial tail is untouched");
+    assert!(InterleavedMut::new(&mut out, tap.layout()).is_err());
+    let view = InterleavedMut::new(&mut out[..6], tap.layout()).unwrap();
+    assert_eq!(tap.pop_into(view).get(), 2, "two whole frames of three");
+    assert_eq!(out[6..], [f32::MAX; 2], "the rest is untouched");
     assert_eq!(tap.available().get(), 98);
 }
 
@@ -781,7 +801,9 @@ fn concurrent_drain(workers: usize, width: usize, align: TapAlign) {
             let mut got = Vec::new();
             let mut buf = vec![0.0f32; width * 5];
             loop {
-                let n = tap.pop_into(&mut buf).get();
+                let n = tap
+                    .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+                    .get();
                 got.extend_from_slice(&buf[..n * width]);
                 if n == 0 {
                     if done.load(std::sync::atomic::Ordering::Acquire) && tap.available().get() == 0
@@ -917,30 +939,39 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
     block(&mut r, 100, 0);
     assert_eq!(narrow.width(), 1);
     let mut got = vec![f32::NAN; 100];
-    assert_eq!(narrow.pop_into(&mut got).get(), 100);
+    assert_eq!(
+        narrow
+            .pop_into(InterleavedMut::new(&mut got, narrow.layout()).unwrap())
+            .get(),
+        100
+    );
     let want: Vec<f32> = (0..100).map(|t| chain_at(2, 10, t)).collect();
     assert_eq!(got, want);
 }
 
 /// `pop_planes` is `pop_into` without the interleave: the frames written
-/// together come out of each lane in order, up to what was asked and what is
-/// there, and a lane with no plane still drops the frames so the lanes stay
-/// level.
+/// together come out of each lane in order, up to what the planes hold and what
+/// is there, and a view of another width pops nothing, so the lanes stay level.
 #[test]
-fn pop_planes_reads_whole_frames_and_keeps_the_lanes_level() {
+fn pop_planes_reads_whole_frames_and_refuses_another_width() {
     let (mut reader, mut writer) = TapReader::pair(3, Samples(8));
-    writer.push_interleaved(&[1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0]);
-    let (mut a, mut b) = ([9.0f32; 4], [9.0f32; 4]);
-    // Two planes for three lanes, two frames wanted of three there.
-    let n = reader.pop_planes([&mut a[..], &mut b[..]], Samples(2));
+    let block = [1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0];
+    writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
+    // Two planes for three lanes: refused, nothing popped.
+    let mut two = [vec![9.0f32; 2], vec![9.0f32; 2]];
+    let n = reader.pop_planes(PlanesMut::from_vecs(&mut two).unwrap());
+    assert_eq!((n.get(), reader.available().get()), (0, 3));
+    assert_eq!(two, [[9.0; 2], [9.0; 2]], "untouched");
+    // Planes of two frames for three there: the first two of each lane.
+    let mut planes = [vec![9.0f32; 2], vec![9.0f32; 2], vec![9.0f32; 2]];
+    let n = reader.pop_planes(PlanesMut::from_vecs(&mut planes).unwrap());
     assert_eq!(n.get(), 2);
-    assert_eq!((a, b), ([1.0, 2.0, 9.0, 9.0], [10.0, 20.0, 9.0, 9.0]));
-    // The third lane dropped its two frames with the others: the next frame
-    // is the third of every lane.
-    let (mut a, mut b, mut c) = ([0.0f32; 1], [0.0f32; 1], [0.0f32; 1]);
-    let n = reader.pop_planes([&mut a[..], &mut b[..], &mut c[..]], Samples(8));
+    assert_eq!(planes, [[1.0, 2.0], [10.0, 20.0], [100.0, 200.0]]);
+    // The next frame is the third of every lane.
+    let mut last = [vec![0.0f32; 4], vec![0.0f32; 4], vec![0.0f32; 4]];
+    let n = reader.pop_planes(PlanesMut::from_vecs(&mut last).unwrap());
     assert_eq!(n.get(), 1);
-    assert_eq!((a[0], b[0], c[0]), (3.0, 30.0, 300.0));
+    assert_eq!((last[0][0], last[1][0], last[2][0]), (3.0, 30.0, 300.0));
 }
 
 /// A wide `Const` node (key 1, two outputs of `value`) outside the outputs.

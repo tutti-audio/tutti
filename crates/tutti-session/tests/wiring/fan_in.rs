@@ -340,7 +340,10 @@ fn the_output_tap_hears_the_sum() {
     assert!(left(&mut r.s).iter().all(|&x| x == A + B + C));
 
     let mut got = vec![f32::NAN; 128 * 2];
-    assert_eq!(tap.pop_into(&mut got), Samples(128));
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        Samples(128)
+    );
     let lane: Vec<f32> = got.iter().step_by(2).copied().collect();
     assert!(lane[..64].iter().all(|&x| x == A + B), "{lane:?}");
     assert!(lane[64..].iter().all(|&x| x == A + B + C), "{lane:?}");

@@ -168,7 +168,7 @@
 //! use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
-//! use tutti_buffers::StereoPlanes;
+//! use tutti_buffers::{PlanesMut, StereoPlanes};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{TapAlign, TapId};
 //!
@@ -202,10 +202,10 @@
 //! let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
 //! executor.process(2, &transport, &[], &mut [&mut l[..], &mut r[..]]);
 //!
-//! // The analysis side: two interleaved frames, deinterleaved.
-//! let mut drained = [0.0f32; 4];
-//! assert_eq!(tap.pop_into(&mut drained), Samples(2));
-//! let (left, right) = ([drained[0], drained[2]], [drained[1], drained[3]]);
+//! // The analysis side: two frames, popped a plane to a lane.
+//! let (mut left, mut right) = ([0.0f32; 2], [0.0f32; 2]);
+//! let mut lanes = [&mut left[..], &mut right[..]];
+//! assert_eq!(tap.pop_planes(PlanesMut::new(&mut lanes).expect("two planes")), Samples(2));
 //! let planes = StereoPlanes::new(&left, &right).expect("drained in lockstep");
 //!
 //! // `Correlation` is a MEASUREMENT type, deliberately distinct from the control

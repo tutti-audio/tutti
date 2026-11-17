@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
+use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
@@ -328,9 +328,10 @@ fn reserve_planes(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<f3
 /// Drains the `n` frames the block just rendered from a tap's rings into its
 /// planes, every block, whether or not the gate keeps them.
 fn drain_tap(output: usize, tap: &mut TapFeed, n: usize) -> Result<()> {
+    let mut planes = PlanesMut::from_vecs(&mut tap.planes)?;
     let got = tap
         .reader
-        .pop_planes(tap.planes.iter_mut().map(|p| &mut p[..n]), Samples(n));
+        .pop_planes(planes.slice_mut(Samples::ZERO..Samples(n)));
     let lost = tap.reader.take_lost();
     if lost.get() > 0 {
         return Err(Error::TapOverrun { output, lost });

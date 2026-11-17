@@ -447,7 +447,7 @@ impl Source for MicIn {
         }
         let tap = &mut self.tap;
         match self.faults.drain(|| {
-            let n = tap.pop_into(out.samples_mut());
+            let n = tap.pop_into(out.reborrow());
             (!n.is_zero()).then_some(n)
         }) {
             Drained::Item(n) => Pull::Frames(n),
@@ -520,7 +520,9 @@ impl Capture {
                 self.select.fold(src, dst)
             });
             debug_assert!(folded.is_ok(), "the capture chunks are sized to the run");
-            let pushed = &*pushed;
+            let Ok(pushed) = Interleaved::new(pushed, selected) else {
+                continue;
+            };
             self.rec.push_interleaved(pushed);
             // The monitor ring is shallow (~10ms) so it never builds a backlog
             // of latency, and a full one drops this chunk (the graph consumer

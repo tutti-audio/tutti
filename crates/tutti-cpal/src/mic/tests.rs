@@ -150,7 +150,7 @@ fn mic_with_ring(width: u16, frames: usize) -> (MicIn, TapWriter) {
 fn a_full_ring_counts_the_frames_the_callback_dropped() {
     let (mut mic, mut writer) = mic_with_ring(2, 2);
     for i in 0..5 {
-        writer.push_interleaved(&[i as f32, 0.0]);
+        writer.push_interleaved(Interleaved::new(&[i as f32, 0.0], writer.layout()).unwrap());
     }
     assert_eq!(Source::take_lost(&mut mic), Samples(3));
     assert_eq!(Source::take_lost(&mut mic), Samples(0), "reading clears");
@@ -326,7 +326,7 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
         .matching_sink(&path, Format::Wav(tutti_codec::Pcm::Float32))
         .unwrap();
 
-    prod.push_interleaved(&[0.5, -0.5]);
+    prod.push_interleaved(Interleaved::new(&[0.5, -0.5], prod.layout()).unwrap());
     faults.record(
         BackendErrorKind::DeviceGone,
         &"device not available",

@@ -2711,7 +2711,11 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         "what was written before the commit"
     );
     let mut frames = vec![0.0f32; 4 * 64 * 3];
-    assert_eq!(wide.pop_into(&mut frames).get(), 4 * 64);
+    assert_eq!(
+        wide.pop_into(InterleavedMut::new(&mut frames, wide.layout()).unwrap())
+            .get(),
+        4 * 64
+    );
     assert!(frames.iter().all(|&x| x == 0.25));
     let mut empty = vec![0.0f32; 3];
     assert!(matches!(
@@ -2724,7 +2728,12 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         "the new tap is fed from the commit's block"
     );
     let mut one = vec![0.0f32; 4 * 64];
-    assert_eq!(narrow.pop_into(&mut one).get(), 4 * 64);
+    assert_eq!(
+        narrow
+            .pop_into(InterleavedMut::new(&mut one, narrow.layout()).unwrap())
+            .get(),
+        4 * 64
+    );
     assert!(one.iter().all(|&x| x == 0.25));
     assert_eq!(wide.take_lost().get() + narrow.take_lost().get(), 0);
 }

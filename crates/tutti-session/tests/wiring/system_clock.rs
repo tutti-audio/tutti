@@ -2,6 +2,7 @@
 //! no device and no host pulling blocks.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::InterleavedMut;
 
 use tutti_engine::StreamFaultKind;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
@@ -52,7 +53,9 @@ fn a_system_session_renders_its_graph_with_no_device() {
     let mut heard = vec![0.0f32; 2 * BLOCK];
     loop {
         let _ = s.update();
-        let frames = tap.pop_into(&mut heard).0;
+        let frames = tap
+            .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+            .0;
         if frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25) {
             break;
         }
