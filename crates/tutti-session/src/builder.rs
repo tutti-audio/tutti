@@ -905,20 +905,21 @@ impl<C: Clock> SessionBuilder<C> {
         // declaration, like every other node's.
         let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
 
-        // The engine's MIDI as graph nodes: the clock (off until a host enables
-        // it). An input port's ingest node and an output's node are made when
-        // their pool entries load, and the clock feeds each output.
+        // The engine's MIDI as graph nodes: the sync node (sends nothing until a
+        // host sets its messages). An input port's ingest node and an output's
+        // node are made when their pool entries load, and the sync node feeds
+        // each output.
         #[cfg(feature = "midi")]
         let midi = {
-            let (clock, clock_master) = graph.add(tutti_midi_runtime::ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                rate,
-                click_settings.project_meter().reader(),
-            ));
+            let meter = click_settings.project_meter();
+            let (sync, sync_controls) = graph.add(
+                tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
+                    .meter(move || meter.reader()),
+            );
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,
-                clock: clock.erase(),
-                clock_master,
+                sync: sync.erase(),
+                sync_controls,
             })
         };
 

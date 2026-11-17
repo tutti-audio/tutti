@@ -906,7 +906,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
-        let transport = ctx.transport.cloned().unwrap_or_default();
+        let transport = ctx
+            .transport
+            .cloned()
+            .unwrap_or_else(|| tutti_plugin_types::TransportInfo::new(buffer.sample_rate));
         // The shared and VST3 note-expression values are one type, so this is a
         // borrow, not a conversion.
         let note_expressions = ctx

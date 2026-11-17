@@ -135,6 +135,73 @@ impl TempoMap {
         Self::new(pts)
     }
 
+    /// This map with `tempo` taking over at `beat`: the map up to `beat` as it
+    /// stands, then a step to `tempo`, and nothing after. `Ok(None)` when that
+    /// changes nothing (the map already holds `tempo` from `beat` on, with no
+    /// point after it).
+    ///
+    /// A ramp `beat` lands in is cut there: the ramp is kept up to `beat` (it
+    /// reaches the tempo this map has at `beat`, so every beat before `beat`
+    /// keeps its time), and the tempo steps at that same beat
+    /// ([`TempoMapBuilder::then_step`]): the tempo just below `beat` is the
+    /// ramp's, at `beat` it is `tempo`. A
+    /// `beat` before 0 is treated as the origin, which is what a pre-roll beat
+    /// wants. The old map is untouched.
+    ///
+    /// # Errors
+    ///
+    /// A [`TempoError`] when the result cannot be held (a tempo so small that a
+    /// segment's duration overflows).
+    pub fn stepped_to(&self, beat: Beat, tempo: Bpm) -> Result<Option<Self>, TempoError> {
+        let beat = Beat(beat.get().max(0.0));
+        let points = self.points();
+        if points
+            .last()
+            .is_some_and(|last| last.beat <= beat && last.tempo == tempo)
+        {
+            return Ok(None);
+        }
+        let kept = points.partition_point(|p| p.beat < beat);
+        let Some(first) = points[..kept].first() else {
+            return Self::constant(tempo).map(Some);
+        };
+        let mut builder = Self::builder(first.tempo);
+        for pair in points[..kept].windows(2) {
+            builder = builder.transition_to(pair[0].transition, pair[1].beat, pair[1].tempo);
+        }
+        let last = &points[kept - 1];
+        // A ramp is cut at `beat`: it reaches what the map has there (its own
+        // `end` when a point sits on `beat`), and the tempo steps there.
+        let at_point = points.get(kept).filter(|p| p.beat == beat);
+        builder = match last.transition {
+            Transition::Step => builder.step_to(beat, tempo),
+            Transition::RampTime { end } => builder
+                .transition_to(
+                    Transition::RampTime { end: None },
+                    beat,
+                    self.cut_tempo(end, at_point, beat),
+                )
+                .then_step(tempo),
+            Transition::RampBeats { end } => builder
+                .transition_to(
+                    Transition::RampBeats { end: None },
+                    beat,
+                    self.cut_tempo(end, at_point, beat),
+                )
+                .then_step(tempo),
+        };
+        builder.build().map(Some)
+    }
+
+    /// The tempo a ramp cut at `beat` reaches: its own `end` where a point sits
+    /// on `beat`, else the map's tempo there.
+    fn cut_tempo(&self, end: Option<Bpm>, at_point: Option<&TempoPoint>, beat: Beat) -> Bpm {
+        match (end, at_point) {
+            (Some(end), Some(_)) => end,
+            _ => self.tempo_at(beat),
+        }
+    }
+
     /// A [`TempoView`] over this map at `rate`: the frame queries, with a
     /// lookup hint, for a reader that walks the map in order.
     #[must_use]

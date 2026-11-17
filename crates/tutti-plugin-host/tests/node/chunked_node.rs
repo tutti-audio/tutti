@@ -331,12 +331,12 @@ impl Processor for RecProcessor {
             let transport = ctx.transport.expect("a transport is attached");
             self.rig.seen.lock().unwrap().push(Seen {
                 frames,
-                quarters: transport.position.quarters,
-                tempo: transport.timing.tempo,
+                quarters: transport.position.beat.get(),
+                tempo: transport.timing.tempo.get(),
                 changes: ctx
                     .transport_changes
                     .iter()
-                    .map(|c| (c.offset, c.transport.timing.tempo))
+                    .map(|c| (c.offset, c.transport.timing.tempo.get()))
                     .collect(),
                 moves: ctx
                     .transport_changes
@@ -345,7 +345,7 @@ impl Processor for RecProcessor {
                         (
                             c.offset,
                             c.transport.state.playing,
-                            c.transport.position.quarters,
+                            c.transport.position.beat.get(),
                         )
                     })
                     .collect(),

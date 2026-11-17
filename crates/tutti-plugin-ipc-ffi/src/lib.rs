@@ -1,9 +1,9 @@
 #![doc = include_str!("../README.md")]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 //! The `unsafe` of Tutti's plugin process edge, each piece behind a safe call,
-//! so `tutti-plugin-ipc` and `tutti-plugin-server` forbid `unsafe` (the owner's
-//! rule: `unsafe` lives in one self-contained place behind a safe wrapper; the
-//! per-format `-ffi` crates are the model).
+//! so `tutti-plugin-ipc` and `tutti-plugin-server` forbid `unsafe`: it lives in
+//! one self-contained place behind a safe wrapper, as in the per-format `-ffi`
+//! crates.
 //!
 //! - **The audio slab's shared memory** ([`MappingWriter`], [`SharedMapping`],
 //!   [`SlabHeader`]): the file, the mapping, the header both processes map (its

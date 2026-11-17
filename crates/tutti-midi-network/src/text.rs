@@ -1,5 +1,5 @@
 //! The UTF-8 strings a command carries outside the endpoint names:
-//! [`Text`] (a Bye or NAK message) and [`Username`].
+//! [`ByeText`] and [`NakText`] (a Bye's and a NAK's message) and [`Username`].
 
 use std::fmt;
 
@@ -31,8 +31,13 @@ pub enum TextError {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct BoundedText<const MIN: usize, const MAX: usize>(String);
 
-/// A Bye or NAK message: up to 1016 bytes, the most a NAK carries.
-pub type Text = BoundedText<0, 1016>;
+/// A Bye message: up to 1020 bytes, the most a Bye's payload of 255 words
+/// holds (M2-124 Table 26).
+pub type ByeText = BoundedText<0, 1020>;
+
+/// A NAK message: up to 1016 bytes, the most 255 payload words hold beside the
+/// refused command's header word (M2-124 Table 24).
+pub type NakText = BoundedText<0, 1016>;
 
 /// A user name for an Invitation with User Authentication: 1 to 988 bytes, the
 /// payload that is left beside the 32-byte digest.

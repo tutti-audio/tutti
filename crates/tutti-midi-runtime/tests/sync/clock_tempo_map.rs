@@ -1,5 +1,5 @@
 //! The MIDI clock follows the published `TempoMap`: a real
-//! render of a `ClockNode` under an event tap through the live engine, the
+//! render of a `SyncOut` under an event tap through the live engine, the
 //! events read out of the tap's ring with their frame on the graph's
 //! clock.
 //!
@@ -29,7 +29,7 @@ use crate::common;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
-use tutti_midi_runtime::ClockNode;
+use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{FadeOut, MotionEvent, Then, Transport};
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
@@ -147,22 +147,15 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
         SampleRate::of(SR),
         MaxBlock::of(Samples(MAX_BLOCK)),
     ));
-    let master = ed
-        .insert(
-            NodeKey(1),
-            "clock",
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                tutti_transport::ProjectMeter::default().reader(),
-            ),
-        )
-        .controls;
-    master.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        mtc,
-        ..Default::default()
-    });
+    ed.insert(
+        NodeKey(1),
+        "clock",
+        SyncOut::new(tutti_ump::MidiGroup::FIRST).messages(SyncMessages {
+            clock: true,
+            mtc,
+            ..SyncMessages::OFF
+        }),
+    );
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");
     let transport = Transport::new(SampleRate::of(SR));

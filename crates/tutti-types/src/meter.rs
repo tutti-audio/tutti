@@ -870,6 +870,31 @@ impl MeterMap {
         }
     }
 
+    /// The first bar line at or after `beat` (a downbeat, within the bar
+    /// arithmetic's tolerance, is its own bar line).
+    #[must_use]
+    pub fn next_bar_line(&self, beat: Beat) -> Beat {
+        let position = self.bar_at(beat);
+        if position.is_downbeat() {
+            position.bar_start
+        } else {
+            self.bar_start(position.bar + BarCount(1))
+        }
+    }
+
+    /// This map with `signature` from the bar line `at`: the meter before `at`
+    /// as it stands, then the change, and nothing after. `None` when that
+    /// changes nothing (`signature` is already in force at `at` and no change
+    /// follows).
+    #[must_use]
+    pub fn with_change_at(&self, at: Beat, signature: TimeSignature) -> Option<Self> {
+        if self.at(at) == signature && self.changes.last().is_some_and(|c| c.beat <= at) {
+            return None;
+        }
+        let kept = self.changes.iter().filter(|c| c.beat < at).copied();
+        Some(Self::new(kept.chain([MeterChange::new(at, signature)])))
+    }
+
     /// Returns the changes in force, in timeline order. Never empty.
     #[inline]
     pub fn changes(&self) -> &[MeterChange] {
@@ -1585,5 +1610,96 @@ mod tests {
             sig.bar_length().get().is_finite(),
             "a NaN bar length would reach the metronome on the audio thread"
         );
+    }
+
+    /// With a 4/4 change then 3/4 from beat 7/3 (bar 2 starts there, the short
+    /// first bar counting), the next bar line from any beat is `7/3 + 3k` or
+    /// 7/3, the same beat `bar_start` gives for the next bar, and a bar line
+    /// is its own next bar line at a change beat that is not dyadic.
+    #[test]
+    fn next_bar_line_agrees_with_bar_at_and_bar_start_after_a_change_at_seven_thirds() {
+        let at = 7.0 / 3.0;
+        let map = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat(at), TimeSignature::of(3, 4)),
+        ]);
+        assert_eq!(map.next_bar_line(Beat(0.0)), Beat(0.0));
+        assert_eq!(map.next_bar_line(Beat(0.5)), Beat(at));
+        assert_eq!(
+            map.next_bar_line(Beat(at)),
+            Beat(at),
+            "the change's own bar"
+        );
+        for k in 0..200u32 {
+            let line = Beat(at + 3.0 * f64::from(k));
+            assert_eq!(map.bar_start(BarNumber(2 + i64::from(k))), line);
+            assert_eq!(map.next_bar_line(line), line, "bar line {k}");
+            let mid = Beat(line.get() + 1.5);
+            let next = Beat(at + 3.0 * f64::from(k + 1));
+            assert_eq!(map.next_bar_line(mid), next, "mid-bar {k}");
+            let position = map.bar_at(mid);
+            assert_eq!(map.bar_start(position.bar + BarCount(1)), next);
+        }
+    }
+
+    /// 4/4: mid-bar goes to the next bar line, a downbeat is its own.
+    #[test]
+    fn next_bar_line_is_at_or_after_the_beat() {
+        let m = MeterMap::default();
+        assert_eq!(m.next_bar_line(Beat(1.3)), Beat(4.0));
+        assert_eq!(m.next_bar_line(Beat(4.0)), Beat(4.0));
+        assert_eq!(m.next_bar_line(Beat(7.99)), Beat(8.0));
+        let three_four = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
+        ]);
+        assert_eq!(three_four.next_bar_line(Beat(5.0)), Beat(7.0));
+    }
+
+    /// A change keeps the meter before its bar line, drops what came after,
+    /// and a repeat of the meter in force is no change.
+    #[test]
+    fn with_change_at_truncates_and_a_repeat_is_nothing() {
+        let project = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat(16.0), TimeSignature::of(5, 4)),
+        ]);
+        let new = project
+            .with_change_at(Beat(8.0), TimeSignature::of(3, 4))
+            .unwrap();
+        assert_eq!(
+            new.changes(),
+            [
+                MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+                MeterChange::new(Beat(8.0), TimeSignature::of(3, 4)),
+            ]
+        );
+        assert!(
+            MeterMap::default()
+                .with_change_at(Beat(8.0), TimeSignature::of(4, 4))
+                .is_none()
+        );
+        assert!(
+            project
+                .with_change_at(Beat(8.0), TimeSignature::of(4, 4))
+                .is_some(),
+            "the change after it is dropped"
+        );
+    }
+
+    /// A change at a bar line replaces the change already there, and bar 2
+    /// stays where the old meter put it.
+    #[test]
+    fn with_change_at_a_change_beat_replaces_it() {
+        let project = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
+        ]);
+        let new = project
+            .with_change_at(Beat(4.0), TimeSignature::of(5, 4))
+            .unwrap();
+        assert_eq!(new.at(Beat(4.0)), TimeSignature::of(5, 4));
+        assert_eq!(new.bar_start(BarNumber(2)), Beat(4.0));
+        assert_eq!(new.bar_start(BarNumber(3)), Beat(9.0));
     }
 }

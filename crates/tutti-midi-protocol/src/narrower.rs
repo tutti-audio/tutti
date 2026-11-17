@@ -6,31 +6,9 @@ use crate::scale;
 use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1};
 use alloc::boxed::Box;
 use members::Members;
-use tutti_ump::{
-    Address, Bank, CCNumber, ControlValue, Message, Midi1Bytes, MidiChannel, MidiGroup, U7, Ump,
-    Voice1, Voice2,
-};
+use tutti_ump::{Address, CCNumber, ControlValue, Message, Midi1Bytes, U7, Ump, Voice1, Voice2};
 
 mod members;
-
-/// Every channel of every group.
-const SLOTS: usize = MidiGroup::COUNT as usize * MidiChannel::COUNT as usize;
-
-/// The parameter a channel's receiver has selected, as this narrower last left
-/// it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Selected {
-    Registered { bank: U7, index: U7 },
-    Assignable { bank: U7, index: U7 },
-}
-
-/// One channel's output state. `None` is not known: the receiver may have
-/// anything, so the next message sends the select or the bank in full.
-#[derive(Clone, Copy, Debug, Default)]
-struct Channel {
-    selected: Option<Selected>,
-    bank: Option<Bank>,
-}
 
 /// MIDI 2.0 in, MIDI 1.0 out: the translation an output edge runs, per group
 /// and channel (M2-104 Appendix D.2). The inverse of [`Translator`](crate::Translator).
@@ -38,13 +16,11 @@ struct Channel {
 /// - **A Registered or Assignable Controller** is the four Control Changes of
 ///   D.2.3: each message generates a sequence of four MIDI 1.0 Protocol
 ///   messages, CC 101 and 100 (RPN) or CC 99 and 98 (NRPN) selecting the
-///   parameter, then CC 6 and CC 38, the top 14 bits of the 32-bit value. The
-///   select is **skipped when the same parameter is already selected** on that
-///   group and channel (MIDI 1.0 rule 6: a selected parameter stays selected
-///   until a new Parameter Number is chosen), so a stream of values for one
-///   parameter is a CC 6 and a CC 38 each.
+///   parameter, then CC 6 and CC 38, the top 14 bits of the 32-bit value. All
+///   four are sent for every message, even for the parameter the previous one
+///   selected.
 /// - **The data narrows** by the rule the [`Translator`](crate::Translator) widened with. A
-///   Registered Controller of bank 0 and index 0 to 31 is a fixed-point number
+///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, widened by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
 ///   0 to 31), and narrows **with rounding** (section 4.4: fixed-point values
@@ -54,14 +30,10 @@ struct Channel {
 ///   (`narrow_value`), which returns the value it was widened from.
 /// - **Null Function is not sent after a run.** D.2.3 gives four messages, not
 ///   five, and D.3.3 says the Null Function is not translated; the select
-///   stays until the next one, which is what lets the select be skipped. A
-///   Reset All Controllers (CC 121, RP-015) that passes through nulls the
-///   receiver's selection, and this narrower forgets it on seeing one.
+///   stays until the next message selects again.
 /// - **A Program Change with a bank** is CC 0, CC 32, then the Program Change
-///   (D.2.4), but the bank is **kept across Program Changes**: the two Bank
-///   Select messages are sent only when the bank differs from the one last
-///   sent on the channel (MIDI 1.0 bank state is the receiver's, and a later
-///   Program Change without a bank keeps it).
+///   (D.2.4): three messages every time the Bank Valid bit is 1, and the
+///   Program Change alone when it is 0.
 /// - **Every other message** is [`midi1()`](fn@midi1)'s: a Note On whose velocity narrows
 ///   to 0 is 1 (D.2.1), pressure and Control Change shift, and the messages
 ///   with no MIDI 1.0 form (D.2.8: relative and per-note controllers) send
@@ -75,15 +47,9 @@ struct Channel {
 /// when all play; a per-note message for a note that does not sound sends
 /// nothing, and every message that is not per-note goes on the zone's Manager Channel.  A MIDI 1.0 message passes unchanged.
 ///
-/// A Control Change that passes through and moves what this narrower tracks
-/// (CC 101, 100, 99, 98, CC 0 or 32, or CC 121) makes it forget that state, so
-/// the next controller selects in full. A receiver this narrower does not own
-/// the whole stream of (a plugin that was reset, a device just opened) needs
-/// [`reset`](Self::reset) too.
-///
-/// It allocates nothing and holds no clock. One narrower serves one output
-/// for its life: two outputs through one would skip a select the second
-/// receiver never saw.
+/// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
+/// same whatever went before. It allocates nothing after construction and holds
+/// no clock.
 ///
 /// ```
 /// use tutti_midi_protocol::Narrower;
@@ -104,7 +70,6 @@ struct Channel {
 /// ```
 #[derive(Clone, Debug)]
 pub struct Narrower {
-    channels: [Channel; SLOTS],
     mode: TranslationMode,
     /// The note allocation of the MPE mode; none in any other.
     members: Option<Box<Members>>,
@@ -117,15 +82,10 @@ impl Default for Narrower {
 }
 
 impl Narrower {
-    /// A narrower that knows nothing of any receiver: the first controller or
-    /// bank on each channel is sent in full.
+    /// A narrower that translates by the Default Translation.
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            channels: [Channel {
-                selected: None,
-                bank: None,
-            }; SLOTS],
             mode: TranslationMode {
                 extremes: ExtremeValues::Scaled,
                 per_note: PerNoteTranslation::Dropped,
@@ -142,11 +102,7 @@ impl Narrower {
     pub fn with_mode(mode: TranslationMode) -> Self {
         let members =
             matches!(mode.per_note, PerNoteTranslation::Mpe(_)).then(|| Box::new(Members::new()));
-        Self {
-            mode,
-            members,
-            ..Self::new()
-        }
+        Self { mode, members }
     }
 
     /// The mode this narrower translates by.
@@ -155,10 +111,8 @@ impl Narrower {
         self.mode
     }
 
-    /// Forgets every selection and bank, as at [`new`](Self::new): the next
-    /// controller or bank sends its select or Bank Select again. Call it when
-    /// the receiver may have lost its state (it was reset, or reopened). In the
-    /// MPE mode the notes it holds are forgotten without a Note Off.
+    /// Forgets the notes the MPE mode holds, without a Note Off, as at
+    /// [`new`](Self::new). The Default Translation holds nothing to forget.
     pub fn reset(&mut self) {
         *self = Self::with_mode(self.mode);
     }
@@ -174,8 +128,7 @@ impl Narrower {
         };
         let (address, voice) = match message {
             Message::Midi2(address, voice) => (address, voice),
-            Message::Midi1(address, voice) => {
-                self.observe(address, voice);
+            Message::Midi1(..) => {
                 midi1(message).for_each(&mut out);
                 return;
             }
@@ -202,7 +155,6 @@ impl Narrower {
             },
             PerNoteTranslation::Dropped => address,
         };
-        let channel = &mut self.channels[address.index()];
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
             if let Ok(voice) = extremes.narrow(voice) {
                 out(voice.bytes(address.channel));
@@ -213,74 +165,49 @@ impl Narrower {
         };
         match voice {
             Voice2::Registered { bank, index, value } => {
-                let selected = Selected::Registered { bank, index };
-                let data = if scale::zero_extended(bank, index) {
+                let data = if scale::zero_extended(index) {
                     narrow_rounded(value.get())
                 } else {
                     narrow_data(extremes, value)
                 };
-                run(channel, selected, data, &mut cc);
+                run(
+                    (CCNumber::RPN_MSB, bank),
+                    (CCNumber::RPN_LSB, index),
+                    data,
+                    &mut cc,
+                );
             }
             Voice2::Assignable { bank, index, value } => {
-                let selected = Selected::Assignable { bank, index };
-                run(channel, selected, narrow_data(extremes, value), &mut cc);
+                run(
+                    (CCNumber::NRPN_MSB, bank),
+                    (CCNumber::NRPN_LSB, index),
+                    narrow_data(extremes, value),
+                    &mut cc,
+                );
             }
             Voice2::ProgramChange {
                 program,
                 bank: Some(bank),
             } => {
-                if channel.bank != Some(bank) {
-                    channel.bank = Some(bank);
-                    cc(CCNumber::BANK_SELECT, bank.msb);
-                    cc(CCNumber::BANK_SELECT_LSB, bank.lsb);
-                }
+                cc(CCNumber::BANK_SELECT, bank.msb);
+                cc(CCNumber::BANK_SELECT_LSB, bank.lsb);
                 out(Voice1::ProgramChange(program).bytes(address.channel));
-            }
-            Voice2::ControlChange { controller, .. } => {
-                forget(channel, controller);
-                plain(&mut out);
             }
             _ => plain(&mut out),
         }
     }
-
-    /// A MIDI 1.0 Control Change that goes by moves the receiver's state.
-    fn observe(&mut self, address: Address, voice: Voice1) {
-        if let Voice1::ControlChange { controller, .. } = voice {
-            forget(&mut self.channels[address.index()], controller);
-        }
-    }
 }
 
-/// A Control Change that moved the select or the bank behind this narrower's
-/// back: the next controller or bank is sent in full.
-fn forget(channel: &mut Channel, controller: CCNumber) {
-    match controller {
-        CCNumber::RPN_MSB
-        | CCNumber::RPN_LSB
-        | CCNumber::NRPN_MSB
-        | CCNumber::NRPN_LSB
-        | CCNumber::RESET_ALL => channel.selected = None,
-        CCNumber::BANK_SELECT | CCNumber::BANK_SELECT_LSB => channel.bank = None,
-        _ => {}
-    }
-}
-
-/// One controller: the select unless it is already selected, then the data.
-fn run(channel: &mut Channel, selected: Selected, data: u16, cc: &mut impl FnMut(CCNumber, U7)) {
-    if channel.selected != Some(selected) {
-        channel.selected = Some(selected);
-        let (bank, index, msb, lsb) = match selected {
-            Selected::Registered { bank, index } => {
-                (bank, index, CCNumber::RPN_MSB, CCNumber::RPN_LSB)
-            }
-            Selected::Assignable { bank, index } => {
-                (bank, index, CCNumber::NRPN_MSB, CCNumber::NRPN_LSB)
-            }
-        };
-        cc(msb, bank);
-        cc(lsb, index);
-    }
+/// One controller as D.2.3's four Control Changes: the two selects, then the
+/// data's MSB and LSB.
+fn run(
+    (msb_select, msb): (CCNumber, U7),
+    (lsb_select, lsb): (CCNumber, U7),
+    data: u16,
+    cc: &mut impl FnMut(CCNumber, U7),
+) {
+    cc(msb_select, msb);
+    cc(lsb_select, lsb);
     cc(CCNumber::DATA_ENTRY, U7::masked((data >> 7) as u8));
     cc(CCNumber::DATA_ENTRY_LSB, U7::masked((data & 0x7F) as u8));
 }

@@ -563,7 +563,7 @@ mod tests {
         let block = HostMessage::ProcessAudio(ProcessAudioData {
             seq: 1,
             num_samples: 64,
-            ..Default::default()
+            ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         });
         let reply = BridgeMessage::AudioProcessed {
             latency_us: 0,

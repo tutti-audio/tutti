@@ -23,8 +23,6 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
-use std::time::Duration;
-
 use tutti_graph::{Env, ForkMode, LoopRange, Offset, TransportChanges, TransportPosition};
 use tutti_types::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
@@ -142,7 +140,7 @@ fn render_scenes(
     rig: &mut Rig,
     blocks: usize,
     block: usize,
-    pace: Duration,
+    await_answers: bool,
 ) -> Vec<(Env, Vec<f32>)> {
     let ins = rig.inputs();
     let silence = vec![0.0f32; block];
@@ -165,7 +163,9 @@ fn render_scenes(
             .process_with_changes(block, &transport, &changes, &inputs, &mut outs);
         r.editor_mut().collect();
         seen.push((env, out[0].clone()));
-        std::thread::sleep(pace);
+        if await_answers {
+            clap_probe::await_answer(&rig.controls);
+        }
     }
     seen
 }
@@ -174,7 +174,7 @@ fn offset(i: usize, block: usize) -> Offset {
     Offset::of(Samples(i), Samples(block))
 }
 
-/// **Live**: blocks of one chunk, paced to the device. The echo of block
+/// **Live**: blocks of one chunk, each answered before the next. The echo of block
 /// `b - 1` is in block `b`, and wherever the pipeline collected it, it is
 /// exactly what that block's `Env` said at its first frame. Every kind of
 /// scene is collected at least once.
@@ -186,8 +186,7 @@ fn the_transport_a_live_plugin_sees_is_env_at_every_block() {
     let mut rig = Rig::new(probe.client.bind(scene_tempo()), SAMPLE_RATE, CHUNK);
 
     const BLOCKS: usize = 60;
-    let period = Duration::from_nanos((CHUNK as f64 / SAMPLE_RATE * 1e9) as u64);
-    let seen = render_scenes(&mut rig, BLOCKS, CHUNK, period.saturating_mul(20));
+    let seen = render_scenes(&mut rig, BLOCKS, CHUNK, true);
 
     let mut kinds = [0usize; 6];
     for b in 1..BLOCKS {
@@ -230,7 +229,7 @@ fn the_transport_an_offline_fork_sees_is_env_at_every_chunk() {
     let mut rig = Rig::prepared(fork, prepare);
 
     const BLOCKS: usize = 24;
-    let seen = render_scenes(&mut rig, BLOCKS, BLOCK, Duration::ZERO);
+    let seen = render_scenes(&mut rig, BLOCKS, BLOCK, false);
 
     let mut checked = 0;
     for b in 0..BLOCKS {
@@ -309,7 +308,7 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
     let mut rig = Rig::behind(fork, prepare, Latency::new(Samples(ARRIVAL)));
 
     const BLOCKS: usize = 24;
-    let seen = render_scenes(&mut rig, BLOCKS, BLOCK, Duration::ZERO);
+    let seen = render_scenes(&mut rig, BLOCKS, BLOCK, false);
 
     let heard = |b: usize, o: usize| (b * BLOCK + o).checked_sub(ARRIVAL).map(|f| f as u64);
     let mut differs = 0;

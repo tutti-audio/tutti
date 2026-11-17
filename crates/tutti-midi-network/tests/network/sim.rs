@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use tutti_midi_device::{EndpointName, EntropyError, ProductInstanceId};
 use tutti_midi_network::{
-    Client, Command, Credentials, Endpoint, EndpointIdentity, Event, Host, HostConfig, Nonce,
-    SessionConfig, Transmit, parse,
+    Client, Command, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
+    Nonce, SessionConfig, Transmit, parse,
 };
 use tutti_ump::Ump;
 

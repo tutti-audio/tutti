@@ -146,8 +146,9 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 // Units, channels, buffers and the musical meter.
 pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_types::{
-    Amplitude, At, BarNumber, Beat, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth, Frame,
-    Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones, TimeSignature,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth,
+    Frame, Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones,
+    TimeSignature,
 };
 
 // The device handle and a device's identity.
@@ -236,34 +237,36 @@ pub mod nodes {
         TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
-        BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickConfig,
-        ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
-        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
-        CutFilterConfig, CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig,
-        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFollowerNode,
-        EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls,
-        GateNode, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
-        LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls,
-        LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode,
-        MultibandControls, NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls,
-        PhaserNode, PortSide, Routing as FeedbackRouting, RoutingError as FeedbackRoutingError,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange,
-        SweepRangeError, VbapError, VbapPannerNode, VolumeOutOfRange,
+        BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
+        ChannelTimes, ChannelTimesError, ClickConfig, ClickSettings, ClickState,
+        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls,
+        DynamicEqNode, DynamicMode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout,
+        FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
+        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
+        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
+        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
+        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
+        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
+        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
+        TiltFilterConfig, TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
-        BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
-        ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
-        DistortionKernel, DynamicEqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel,
-        KernelNode, LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError,
-        SvfKernel,
+        BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
+        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
+        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
+        LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
-        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
-        DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet,
-        LimiterSet, ModDelaySet, PhaserSet, SvfSet,
+        BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
+        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
+        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet, TiltFilterSet,
     };
 }
 
@@ -288,18 +291,18 @@ pub mod types {
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
         AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, BarCount, BarPosition,
-        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BitDepth,
-        BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange, CompressionRatio,
-        Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation, FRAME_TOLERANCE,
-        Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar, InvalidMaxBlock,
-        InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError, MAX_CHANNELS,
-        MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange, NoteValue, Pan,
-        Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd, PhaseIncrement,
-        PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin, Speaker, Speakers,
-        Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimelineSegment,
-        TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity, beats_per_sample,
-        first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BipolarOutOfRange,
+        BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange,
+        CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation,
+        FRAME_TOLERANCE, Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar,
+        InvalidMaxBlock, InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError,
+        MAX_CHANNELS, MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange,
+        NoteValue, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd,
+        PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance,
+        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin,
+        Speaker, Speakers, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        TimelineSegment, TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_types::{Mint, Phase, Placement, Resyncs};
 }
@@ -593,8 +596,8 @@ pub mod plugin {
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
-/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`,
-/// `SendMachineControl`), a host's own output (`midi_sink`, `MidiSink`,
+/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
 /// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
@@ -649,8 +652,8 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockControls, ClockKind, ClockSends, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
@@ -688,8 +691,7 @@ pub mod midi {
     pub use tutti_session::{
         AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
         Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SendMachineControl, SinkLoaded, SinkOptions, Stamping,
-        TakePlacement, midi_sink,
+        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

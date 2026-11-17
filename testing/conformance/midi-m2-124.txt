@@ -255,3 +255,5 @@ m2-124/8#4 | both |  | recommended | M2-124 §8 | the two roles use their own UD
 m2-124/9#1 | both |  | permitted | M2-124 §9 | a device can have several UMP Endpoints |  |  |
 m2-124/9#2 | host |  | required | M2-124 §9 | each exposed Endpoint is its own Host with its own port and name |  |  |
 m2-124/a.3#1 | both |  | permitted | M2-124 §A.3 | example: a Sender can send further packets with Zero Length UMP Data while idle |  |  |
+m2-124/6.14#4 | both |  | required | M2-124 §6.14 | a Ping Reply carries the Ping Id of the Ping it answers | cell=1 |  |
+m2-124/6.15#4 | both |  | required | M2-124 §6.15 | a NAK carries the header word of the Command it answers | cell=1 |  |
