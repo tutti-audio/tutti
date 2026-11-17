@@ -2,7 +2,7 @@
 //! change and not by a poll.
 
 use std::sync::{Condvar, Mutex, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tutti_rt::LockExt;
 
 /// A gate a thread waits on until a condition holds, and that the threads which
@@ -10,26 +10,37 @@ use tutti_rt::LockExt;
 ///
 /// A notifier changes the state first and then calls [`notify`](Self::notify),
 /// which takes the gate: a waiter that checked the condition before the change
-/// is parked on the condvar by then, so the notification cannot be missed. The
-/// condition runs under the gate: it only reads the state.
+/// is parked on the condvar by then, so the notification cannot be missed.
+///
+/// **The condition runs under the gate**, on the waiting thread, so it must not
+/// wait or notify; it may change state that only the waiter owns (a drain of a
+/// queue the waiter alone pops, as `take_replies` does).
 ///
 /// Off the audio thread only: [`notify`](Self::notify) takes a lock.
 #[derive(Debug, Default)]
-pub struct Wake {
+pub(crate) struct Wake {
     gate: Mutex<()>,
     changed: Condvar,
 }
 
 impl Wake {
     /// Tells every waiter to check its condition again.
-    pub fn notify(&self) {
+    pub(crate) fn notify(&self) {
         drop(self.gate.lock_recover());
         self.changed.notify_all();
     }
 
+    /// The deadline `timeout` after now; a timeout the clock cannot hold is a
+    /// year, which no wait here outlasts.
+    pub(crate) fn deadline_in(timeout: Duration) -> Instant {
+        let now = Instant::now();
+        now.checked_add(timeout)
+            .unwrap_or_else(|| now + Duration::from_secs(60 * 60 * 24 * 365))
+    }
+
     /// Waits until `done` is true or `deadline` passes, checking `done` first
     /// and after each [`notify`](Self::notify). `true` when `done` held.
-    pub fn wait_until(&self, deadline: Instant, mut done: impl FnMut() -> bool) -> bool {
+    pub(crate) fn wait_until(&self, deadline: Instant, mut done: impl FnMut() -> bool) -> bool {
         let gate = self.gate.lock_recover();
         let left = deadline.saturating_duration_since(Instant::now());
         let (_gate, timeout) = self
@@ -45,7 +56,6 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
 
     /// A change made before the wait is seen at once, and one made during it
     /// ends it, whichever thread runs first.

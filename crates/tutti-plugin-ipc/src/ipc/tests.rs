@@ -29,18 +29,18 @@ const MOCK_EDITOR: dpi::Size = dpi::Size::Physical(dpi::PhysicalSize::new(640, 4
 /// What the mock server was sent, in order.
 type Received = Arc<Log<HostMessage>>;
 
-/// A record that a thread appends to and another waits on: an append wakes
-/// every waiter, so a test waits for the event it needs and never polls.
+/// A record that a thread appends to and another waits on: an append notifies
+/// the [`Wake`], so a test waits for the event it needs and never polls.
 struct Log<T> {
     items: Mutex<Vec<T>>,
-    appended: std::sync::Condvar,
+    appended: crate::Wake,
 }
 
 impl<T> Default for Log<T> {
     fn default() -> Self {
         Self {
             items: Mutex::new(Vec::new()),
-            appended: std::sync::Condvar::new(),
+            appended: crate::Wake::default(),
         }
     }
 }
@@ -48,7 +48,7 @@ impl<T> Default for Log<T> {
 impl<T> Log<T> {
     fn push(&self, item: T) {
         self.items.lock().unwrap().push(item);
-        self.appended.notify_all();
+        self.appended.notify();
     }
 
     fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Vec<T>>> {
@@ -63,13 +63,8 @@ impl<T> Log<T> {
     /// Waits until the record satisfies `found`. `false` when [`POLL_GUARD`],
     /// a hang guard far past anything the OS takes, ran out first.
     fn wait_for(&self, found: impl Fn(&[T]) -> bool) -> bool {
-        let (_items, timeout) = self
-            .appended
-            .wait_timeout_while(self.items.lock().unwrap(), POLL_GUARD, |items| {
-                !found(items)
-            })
-            .unwrap();
-        !timeout.timed_out()
+        self.appended
+            .wait_until(crate::Wake::deadline_in(POLL_GUARD), || self.holds(&found))
     }
 }
 

@@ -17,7 +17,7 @@
 use crate::Wake;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
 use tutti_rt::LockExt;
 
@@ -62,16 +62,14 @@ impl ServerWatch {
     /// notifies it, and a thread waiting on the server's end or on its replies
     /// shares it.
     #[must_use]
-    pub fn wake(&self) -> &Arc<Wake> {
+    pub(crate) fn wake(&self) -> &Arc<Wake> {
         &self.wake
     }
 
     /// Waits up to `timeout` for the server to be gone, and wakes at the
     /// declaration. `true` when it is gone.
     pub fn wait_dead(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .unwrap_or_else(far_future);
+        let deadline = Wake::deadline_in(timeout);
         self.wake.wait_until(deadline, || self.is_dead())
     }
 
@@ -87,11 +85,6 @@ impl ServerWatch {
     pub fn cause(&self) -> Option<PluginFailure> {
         self.cause.lock_recover().clone()
     }
-}
-
-/// An instant far enough away to be a wait without an end.
-fn far_future() -> Instant {
-    Instant::now() + Duration::from_secs(60 * 60 * 24 * 365)
 }
 
 #[cfg(test)]

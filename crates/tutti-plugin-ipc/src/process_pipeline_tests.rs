@@ -275,6 +275,7 @@ fn bridge_with_server_mode(
     accept_control(&listener);
 
     let path_cleanup = path;
+    let published = Arc::clone(bridge.progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-doubling-server".to_string())
         .spawn(move || {
@@ -323,6 +324,9 @@ fn bridge_with_server_mode(
                             // Exactly once, after the last channel. This store is
                             // the host's evidence that the slot holds this block.
                             server_slab.publish(seq);
+                            // The publisher is in this process, so the waiters on
+                            // the bridge's progress are told.
+                            published.notify();
                         }
                         BridgeMessage::AudioProcessed {
                             latency_us: 0,
@@ -1444,6 +1448,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     accept_control(&listener);
 
     let path_cleanup = path;
+    let published = Arc::clone(bridge.progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-stamped-server".to_string())
         .spawn(move || {
@@ -1482,6 +1487,9 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
                                 server_slab.write(seq, ch, &scratch[..got]).unwrap();
                             }
                             server_slab.publish(seq);
+                            // The publisher is in this process, so the waiters on
+                            // the bridge's progress are told.
+                            published.notify();
                         }
                         let midi_out = [tutti_plugin_types::WireMidi {
                             offset: 0,

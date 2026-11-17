@@ -43,6 +43,7 @@ pub(crate) use client::audio::BridgeListener;
 pub use client::audio::{BridgeEvent, BridgeThread, HarmonyInputs, Submitted};
 pub(crate) use client::audio::{FATES, Fate};
 pub use client::{EditorLoader, PluginBridge};
+pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.
 #[doc(hidden)]
@@ -63,7 +64,7 @@ pub use server_watch::ServerWatch;
 pub use subprocess::{LaunchedServer, Reaped, launch};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabAccessError, SlabLayoutError, SlabWriter};
-pub use wake::Wake;
+
 // Splitting and reassembling plugin state across frames: both ends must chunk
 // identically, so the server uses this one.
 pub use transport::state_chunk;

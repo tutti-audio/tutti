@@ -207,9 +207,7 @@ impl AudioBridge {
     /// or the bridge is dead. When nothing is pending this is an atomic load
     /// and a `poll` without a wait.
     pub fn news_settled(&self, within: std::time::Duration) -> bool {
-        let deadline = std::time::Instant::now()
-            .checked_add(within)
-            .unwrap_or_else(|| std::time::Instant::now() + std::time::Duration::from_secs(86_400));
+        let deadline = crate::Wake::deadline_in(within);
         self.channels.progress().wait_until(deadline, || {
             self.lifecycle.is_crashed()
                 || !(self.channels.news_pending() || self.channels.bytes_waiting())

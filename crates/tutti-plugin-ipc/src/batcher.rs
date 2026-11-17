@@ -400,6 +400,14 @@ impl Batcher {
     /// bridge's crash latch is the server's [`ServerWatch`](crate::ServerWatch),
     /// which the process's end sets as well as the stream's, so a wait that
     /// sends no command (and so never reads the socket) still sees it.
+    ///
+    /// **The wait ends at the reply, not at the publish.** The publisher is the
+    /// server, another process, so nothing in this one can ring at the moment it
+    /// writes the chunk into the slab; what wakes the wait is the bridge thread
+    /// reading the server's reply, or the server's end. A server that publishes
+    /// and then stalls before replying is therefore seen at its reply or at the
+    /// budget, where a poll of the slab saw it at the publish. An export that
+    /// waits for a block's MIDI waits for the reply anyway.
     fn await_output(&mut self, bridge: &PluginBridge) {
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;

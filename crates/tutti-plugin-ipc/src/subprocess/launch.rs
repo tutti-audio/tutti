@@ -254,18 +254,9 @@ fn connect_when_listening(
     server: &ProcessGuard,
     patience: Duration,
 ) -> BridgeResult<ControlStream> {
-    connect_with(|| ipc::connect(socket), server, patience)
-}
-
-/// [`connect_when_listening`] over the attempt it makes.
-fn connect_with(
-    mut attempt: impl FnMut() -> BridgeResult<ControlStream>,
-    server: &ProcessGuard,
-    patience: Duration,
-) -> BridgeResult<ControlStream> {
     let deadline = Instant::now() + patience;
     loop {
-        match attempt() {
+        match ipc::connect(socket) {
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if let Some(cause) = server.watch().cause() {
@@ -526,6 +517,7 @@ mod tests {
     use super::*;
     use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
+    use std::path::PathBuf;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -695,83 +687,98 @@ mod tests {
         drop(server);
     }
 
-    /// **A restore that returns when the plugin is done is a load**, however long
-    /// that is: the plugin blocks in its state restore until the test releases
-    /// it, after the server has said it began restoring, and the launch waits
-    /// for it and completes. Both windows are hang guards here, so no clock
-    /// decides the outcome: a launch that gave up on the restore would fail with
-    /// the state's timeout. That a restore is waited on for `state_restore`
-    /// and not `call` is
-    /// `a_restore_is_waited_on_for_its_own_window` (the window per phase) and
-    /// `a_restore_that_outlasts_its_window_is_blamed_on_the_state` (the restore
-    /// window ends the wait while the call window is far longer).
-    ///
-    /// Needs `cargo build -p tutti-plugin-server` first.
-    #[test]
+    /// Launches against the reference plugin with its restore held on a fifo the
+    /// test owns: the plugin is in its restore when it opens the fifo for
+    /// reading, and the restore returns when the last writer closes it.
+    /// `releaser` is given the fifo's path and runs on its own thread.
     #[cfg(unix)]
-    fn a_restore_that_returns_when_released_completes_the_launch_as_a_load() {
-        // The plugin holds its restore on this fifo: it is in the restore when it
-        // opens it for reading, and the restore ends when the writer closes it.
-        let dir = tempfile::tempdir().expect("a private temp dir");
-        let fifo = dir.path().join("restore-hold");
-        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
-        assert!(made.success(), "mkfifo {}", fifo.display());
-        let releaser = {
-            let fifo = fifo.clone();
-            std::thread::spawn(move || {
-                // Opening for writing returns when the plugin opens for reading:
-                // the plugin is in its restore. Closing it ends the restore.
+    mod held_restore {
+        use super::*;
+
+        fn launch_held(
+            call: Duration,
+            state_restore: Duration,
+            releaser: Option<fn(&Path)>,
+        ) -> BridgeResult<LaunchedServer> {
+            let dir = tempfile::tempdir().expect("a private temp dir");
+            let fifo = dir.path().join("restore-hold");
+            let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+            assert!(made.success(), "mkfifo {}", fifo.display());
+            let release = releaser.map(|release| {
+                let fifo = fifo.clone();
+                std::thread::spawn(move || release(&fifo))
+            });
+            let launched = stateful_launch(
+                &[(
+                    "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
+                    fifo.to_str().expect("a utf-8 path"),
+                )],
+                call,
+                state_restore,
+            );
+            if let Some(release) = release {
+                // A launch that failed before the plugin opened the fifo leaves
+                // the releaser blocked opening it for writing. Opening it for
+                // reading and writing never blocks and pairs with that open, so
+                // the releaser ends whenever the launch did.
                 drop(
                     std::fs::OpenOptions::new()
+                        .read(true)
                         .write(true)
                         .open(&fifo)
-                        .expect("the plugin opens the fifo"),
+                        .expect("the fifo opens"),
                 );
-            })
-        };
-        let launched = stateful_launch(
-            &[(
-                "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
-                fifo.to_str().expect("a utf-8 path"),
-            )],
-            Duration::from_secs(60),
-            Duration::from_secs(60),
-        );
-        let server = launched.expect("a restore that returns is not a failure");
-        assert!(server.state_restore.is_some(), "a restore was attempted");
-        releaser.join().expect("the releaser ends");
-        reap(Ok(server));
-    }
+                release.join().expect("the releaser ends");
+            }
+            launched
+        }
 
-    /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`, and the call window,
-    /// which is a hang guard here, is not what ended the wait. The plugin holds
-    /// the restore on a fifo no one writes to, so the restore outlasts its
-    /// 200 ms window in every run. `a_restore_is_waited_on_for_its_own_window`
-    /// pins that the window is `Timeouts::state_restore` once the server says it
-    /// is restoring.
-    #[test]
-    #[cfg(unix)]
-    fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
-        // The plugin holds its restore on this fifo: it is in the restore when it
-        // opens it for reading, and the restore ends when the writer closes it.
-        let dir = tempfile::tempdir().expect("a private temp dir");
-        let fifo = dir.path().join("restore-hold");
-        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
-        assert!(made.success(), "mkfifo {}", fifo.display());
-        let launched = stateful_launch(
-            &[(
-                "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
-                fifo.to_str().expect("a utf-8 path"),
-            )],
-            Duration::from_secs(60),
-            Duration::from_millis(200),
-        );
-        assert!(
-            matches!(&launched, Err(BridgeError::StateRestoreError(_))),
-            "{:?}",
-            launched.as_ref().err()
-        );
+        /// **A restore that returns when the plugin is done is a load**, however
+        /// long that is: the plugin blocks in its state restore until the test
+        /// releases it, after the server has said it began restoring, and the
+        /// launch waits for it and completes. Both windows are hang guards, so no
+        /// clock decides the outcome.
+        ///
+        /// This does not pin "call window short, restore long, succeeds": that
+        /// needs a call window the opening finishes inside and a restore that
+        /// outlasts it, and nothing here can say the call window has passed
+        /// without a clock the launch does not take (on the Mac the opening alone
+        /// outlasts a 1 s call window). The window limit is pinned by
+        /// `a_restore_is_waited_on_for_its_own_window` (the window each phase
+        /// waits under) and `a_restore_that_outlasts_its_window_is_blamed_on_the_state`
+        /// (the restore window ends a held restore while the call window is far
+        /// longer).
+        ///
+        /// Needs `cargo build -p tutti-plugin-server` first.
+        #[test]
+        fn a_restore_that_returns_when_released_completes_the_launch_as_a_load() {
+            let launched = launch_held(
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                Some(|fifo| {
+                    // Opening for writing returns when the plugin opens for
+                    // reading, and closing it ends the restore.
+                    drop(std::fs::OpenOptions::new().write(true).open(fifo));
+                }),
+            );
+            let server = launched.expect("a restore that returns is not a failure");
+            assert!(server.state_restore.is_some(), "a restore was attempted");
+            reap(Ok(server));
+        }
+
+        /// **A restore that never returns is the state's to answer for**: past
+        /// its window the launch fails as `StateRestoreError`, and the call
+        /// window, a hang guard here, is not what ended the wait. No one writes
+        /// to the fifo, so the restore outlasts its 200 ms window in every run.
+        #[test]
+        fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
+            let launched = launch_held(Duration::from_secs(60), Duration::from_millis(200), None);
+            assert!(
+                matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+                "{:?}",
+                launched.as_ref().err()
+            );
+        }
     }
 
     /// **A plugin that dies in its state restore is blamed on the state.** The
@@ -1190,44 +1197,35 @@ mod tests {
         }
     }
 
-    /// The connect waits for a socket that is not bound yet, instead of failing.
-    ///
-    /// The first attempt is made while nothing is bound and fails; the socket is
-    /// bound before the next one, so a connect that gave up at its first
-    /// failure cannot pass.
+    /// **A late bind still connects.** The stand-in server binds its socket only
+    /// when the test writes a byte to its stdin, which the test does once the
+    /// connect is running on its own thread, so the connect is retrying when the
+    /// socket appears. A connect that gave up at its first failure fails here
+    /// whenever its first attempt came before the bind.
     #[test]
-    fn the_connect_waits_for_a_socket_that_is_not_bound_yet() {
-        use interprocess::local_socket::ListenerOptions;
+    fn a_late_bind_still_connects() {
+        use std::io::Write as _;
 
         let path = std::env::temp_dir().join(format!("tutti_late_bind_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
 
-        let stand_in = ProcessGuard::launched(
-            Reaped::new(spawn_stand_in(StandIn::Lingers)),
-            BridgeConfig::at(path.clone()),
-        )
-        .expect("the exit thread starts");
-        let mut listener = None;
-        let mut attempts = 0;
-        let result = connect_with(
-            || {
-                attempts += 1;
-                let outcome = ipc::connect(&path);
-                if listener.is_none() {
-                    assert!(outcome.is_err(), "nothing is bound at the first attempt");
-                    let name = crate::transport::control::socket_name(&path).expect("socket name");
-                    listener = Some(
-                        ListenerOptions::new()
-                            .name(name)
-                            .create_sync()
-                            .expect("bind the late listener"),
-                    );
-                }
-                outcome
-            },
-            &stand_in,
-            Timeouts::default().connect,
-        );
+        let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
+        let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
+        let stand_in = ProcessGuard::launched(Reaped::new(child), BridgeConfig::at(path.clone()))
+            .expect("the exit thread starts");
+
+        let (running, is_running) = std::sync::mpsc::channel();
+        let result = std::thread::scope(|scope| {
+            let connect = scope.spawn(|| {
+                running.send(()).expect("the test waits");
+                connect_when_listening(&path, &stand_in, Timeouts::default().connect)
+            });
+            is_running.recv().expect("the connect thread starts");
+            release
+                .write_all(&[1])
+                .expect("the stand-in reads its stdin");
+            connect.join().expect("the connect thread ends")
+        });
         drop(stand_in);
 
         assert!(
@@ -1235,7 +1233,6 @@ mod tests {
             "the connect must retry until the server binds, got: {:?}",
             result.err()
         );
-        assert_eq!(attempts, 2, "one failed attempt, then the one that bound");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1276,11 +1273,17 @@ mod tests {
         Exits,
         /// Stays alive, binding nothing, until the test kills it.
         Lingers,
+        /// Binds the socket at this path once its stdin has a byte, accepts a
+        /// connection, and stays until its stdin closes.
+        BindsOnByte(PathBuf),
     }
 
     /// Set only in a [`StandIn::Lingers`] child, so that [`stand_in_lingers`]
     /// waits there and is an instant no-op in an ordinary test run.
     const STAND_IN_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN";
+
+    /// Set only in a [`StandIn::BindsOnByte`] child: the path it binds.
+    const STAND_IN_BIND_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN_BIND";
 
     /// Spawns a stand-in by re-running **this test binary**, never a program
     /// looked up on `PATH`.
@@ -1303,16 +1306,20 @@ mod tests {
     fn spawn_stand_in(kind: StandIn) -> Child {
         let exe = std::env::current_exe().expect("the test binary's own path");
         let mut cmd = Command::new(exe);
+        // libtest names a unit test by its path *within* the crate, so drop the
+        // leading `tutti_plugin_ipc::` from `module_path!()`.
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
         match kind {
+            StandIn::BindsOnByte(path) => {
+                cmd.args(["--exact", &format!("{module}::stand_in_binds_late")])
+                    .env(STAND_IN_BIND_ENV, path);
+            }
             StandIn::Exits => {
                 cmd.args(["--exact", "no test in this binary has this name"]);
             }
             StandIn::Lingers => {
-                // libtest names a unit test by its path *within* the crate, so
-                // drop the leading `tutti_plugin_ipc::` from `module_path!()`.
-                let module = module_path!()
-                    .split_once("::")
-                    .map_or(module_path!(), |(_, rest)| rest);
                 cmd.args(["--exact", &format!("{module}::stand_in_lingers")])
                     .env(STAND_IN_ENV, "1");
             }
@@ -1333,6 +1340,26 @@ mod tests {
         if std::env::var_os(STAND_IN_ENV).is_some() {
             let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
         }
+    }
+
+    /// The body of a [`StandIn::BindsOnByte`] child; a no-op anywhere else.
+    #[test]
+    fn stand_in_binds_late() {
+        use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
+        use std::io::Read as _;
+
+        let Some(path) = std::env::var_os(STAND_IN_BIND_ENV) else {
+            return;
+        };
+        let mut stdin = std::io::stdin();
+        stdin.read_exact(&mut [0u8]).expect("the parent's byte");
+        let name = crate::transport::control::socket_name(Path::new(&path)).expect("socket name");
+        let listener = ListenerOptions::new()
+            .name(name)
+            .create_sync()
+            .expect("bind the late listener");
+        let _connection = listener.accept();
+        let _ = std::io::copy(&mut stdin, &mut std::io::sink());
     }
 
     /// **A real plugin-server that is ended is declared dead by its process's
