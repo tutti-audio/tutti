@@ -454,9 +454,9 @@ impl Script {
             self.playing,
             tutti_types::Bpm::of(self.tempo),
             tutti_types::Beat(self.beat),
-            self.looping.map(|(start, end)| tutti_graph::LoopRange {
-                start: tutti_types::Beat(start),
-                end: tutti_types::Beat(end),
+            self.looping.map(|(start, end)| {
+                tutti_types::LoopRange::new(tutti_types::Beat(start), tutti_types::Beat(end))
+                    .expect("a loop")
             }),
         );
         // Half the changes ramp linearly across the block; half step at a

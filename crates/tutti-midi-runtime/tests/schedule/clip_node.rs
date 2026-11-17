@@ -13,10 +13,10 @@ use tutti_fixtures::midi::key_of;
 use tutti_fixtures::{EventRig, Seen, heard};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, Executor, IntoNode, LoopRange, Offset, TransportChanges, TransportPosition, Unforkable,
+    Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
-use tutti_types::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_types::{Beat, BeatDuration, Bpm, LoopRange, SampleRate, Samples};
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
 use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, Voice2};
@@ -95,10 +95,7 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
 fn a_loop_that_wraps_inside_a_block_plays_its_start() {
     let clip = MidiClipNode::new([at(48, on(62)), at(23_850, on(60)), at(23_950, on(64))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
@@ -171,10 +168,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
 fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
     let clip = MidiClipNode::new([at(23_850, on(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(100, &looping(23_900), &[], &mut []);
@@ -278,10 +272,7 @@ fn a_note_lands_on_its_frame_at_ninety_bpm() {
 fn a_loop_shorter_than_a_block_plays_every_pass() {
     let clip = MidiClipNode::new([at(10, on(60)), at(60, off(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: beat_of(100),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), beat_of(100)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(512, &looping(0), &[], &mut []);
     exec.process(512, &looping(12), &[], &mut []);
@@ -430,7 +421,12 @@ fn a_keys_owner_starts_over_at_a_loop_wrap() {
 
 /// A loop of `[start, end)` beats under `tempo`, rolling from `beat`.
 fn looping_at(tempo: f64, beat: Beat, start: Beat, end: Beat) -> TransportPosition {
-    TransportPosition::new(true, Bpm::of(tempo), beat, Some(LoopRange { start, end }))
+    TransportPosition::new(
+        true,
+        Bpm::of(tempo),
+        beat,
+        Some(LoopRange::new(start, end).expect("a loop")),
+    )
 }
 
 /// **A pass that ends exactly on a block's edge ends what it held at the
@@ -753,10 +749,7 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
         at(23_851, pedal(0, CCNumber::SUSTAIN, DOWN)),
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);

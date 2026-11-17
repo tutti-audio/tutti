@@ -4,15 +4,15 @@
 //! inlet into the event tap's ring, and the clock's ticks.
 
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, LoopRange,
-    Prepare, TransportPosition,
+    Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, Prepare,
+    TransportPosition,
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
     ClockNode, DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode,
     MidiKeys, MidiOutNode, MpeTransformNode, TimedHarmony, TimedMidiEvent,
 };
-use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, Frame, FrameClock, LoopRange, Moment, SampleRate, Samples};
 use tutti_types::{MaxBlock, MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
@@ -433,7 +433,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();
     let region = tutti_types::LoopRange::new(start, end).unwrap();
-    let looping = Some(LoopRange { start, end });
+    let looping = Some(LoopRange::new(start, end).expect("a loop"));
     let mut clock = FrameClock::new(start, Bpm::of(120.0), SampleRate::of(RATE));
     let mut drain = [(0, Ump([0; 4])); 256];
     let mut block = |exec: &mut tutti_graph::Executor, clock: &mut FrameClock| {

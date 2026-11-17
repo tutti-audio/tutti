@@ -20,8 +20,8 @@
 use std::num::NonZeroU32;
 
 use tutti_types::{
-    Beat, Bpm, BusTopology, ChannelLayout, Frame, FrameClock, Latency, MaxBlock, SampleRate,
-    Samples, SegmentOrigin, Tail, UnitAddr, UnitParam,
+    Beat, Bpm, BusTopology, ChannelLayout, Frame, FrameClock, Latency, LoopRange, MaxBlock,
+    SampleRate, Samples, SegmentOrigin, Tail, UnitAddr, UnitParam,
 };
 
 use crate::bus::{Buses, PortSpan};
@@ -965,15 +965,6 @@ pub enum Status {
     /// The node wrote nothing; output `c` is input `c` (zero past the input
     /// width). The executor copies.
     Bypass,
-}
-
-/// Loop points of the transport, when looping.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LoopRange {
-    /// Where the loop starts.
-    pub start: Beat,
-    /// Where it wraps back to `start`.
-    pub end: Beat,
 }
 
 /// The transport as the executor saw it at the start of a block.

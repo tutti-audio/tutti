@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_graph::{Losses, Offset, TransportPosition, UmpAt};
 use tutti_rt::{Counter, CounterWriter, Reader, counter};
 use tutti_types::{
-    AtomicSampleRate, BarCount, Beat, BeatDuration, Bpm, LoopRange, Meter, MeterMap, Pass, PassEnd,
+    AtomicSampleRate, BarCount, Beat, BeatDuration, Bpm, Meter, MeterMap, Pass, PassEnd,
     SampleRate, Samples, Seconds, TimeSignature, first_frame_at_or_after,
 };
 use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
@@ -586,9 +586,7 @@ impl ClockState {
             // state is left as it was.
             if transport.playing {
                 let beats_per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
-                let region = transport
-                    .looping
-                    .and_then(|l| LoopRange::new(l.start, l.end));
+                let region = transport.looping;
                 let mut clock = transport.clock(sample_rate);
                 let loan = meter.lend();
                 for pass in clock.passes(Samples(block_size), region) {
@@ -689,9 +687,7 @@ impl ClockState {
         // follow the wrapped playhead instead of running on past the loop's
         // end. A wrap is a locate on its own frame: a Song Position there, and
         // the MTC grid restarts on it.
-        let region = transport
-            .looping
-            .and_then(|l| LoopRange::new(l.start, l.end));
+        let region = transport.looping;
         let mut clock = transport.clock(sample_rate);
         // Lent once, held across every pass of the block.
         let loan = settings.sends.flex.then(|| meter.lend());
