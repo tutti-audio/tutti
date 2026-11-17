@@ -60,32 +60,43 @@ impl WinMmEndpoints {
     }
 }
 
-/// What names a port: the interface path where the driver gives one, else its
-/// product name and ids; and the name shown, which is the friendly name where
-/// the device has one.
-fn info<D: PortKind>(port: &Port<D>) -> PortInfo {
-    let caps = port.caps();
-    let device = match port.interface() {
+/// What names a port's device: the interface path where the driver gives one,
+/// else its product name and ids. Never the friendly name.
+fn device_of<D: PortKind>(port: &Port<D>) -> WinMmDevice {
+    match port.interface() {
         Some(path) => WinMmDevice::Interface(path.to_owned()),
-        None => WinMmDevice::Named {
-            name: caps.name.clone(),
-            manufacturer: caps.manufacturer,
-            product: caps.product,
-        },
-    };
-    PortInfo {
-        name: port.name().to_owned(),
-        device,
+        None => {
+            let caps = port.caps();
+            WinMmDevice::Named {
+                name: caps.name.clone(),
+                manufacturer: caps.manufacturer,
+                product: caps.product,
+            }
+        }
     }
 }
 
-/// Every port of direction `D` now, with what names it.
-fn described<D: PortKind>() -> Vec<(Port<D>, PortInfo)> {
+/// Every port of direction `D` now, with what names its device: what a
+/// resolve needs, and no display name.
+fn identified<D: PortKind>() -> Vec<(Port<D>, WinMmDevice)> {
     ports::<D>()
         .into_iter()
         .map(|port| {
-            let described = info(&port);
-            (port, described)
+            let device = device_of(&port);
+            (port, device)
+        })
+        .collect()
+}
+
+/// Every port of direction `D` now, as a listing shows it: the display name
+/// (the friendly name where the device has one, read here and nowhere else) and
+/// what names the device.
+fn shown<D: PortKind>() -> Vec<PortInfo> {
+    ports::<D>()
+        .iter()
+        .map(|port| PortInfo {
+            name: port.name().to_owned(),
+            device: device_of(port),
         })
         .collect()
 }
@@ -98,8 +109,8 @@ fn devices() -> Vec<OsDevice> {
 /// The endpoints of `side` now.
 fn list(side: Side) -> Vec<OsEndpoint> {
     match side {
-        Side::Input => endpoints(side, described::<Input>().into_iter().map(|(_, i)| i)),
-        Side::Output => endpoints(side, described::<Output>().into_iter().map(|(_, i)| i)),
+        Side::Input => endpoints(side, shown::<Input>()),
+        Side::Output => endpoints(side, shown::<Output>()),
     }
 }
 
@@ -110,7 +121,7 @@ fn resolve_input(id: EndpointId) -> Result<InputPort> {
     if slot.side != Side::Input {
         return Err(NotFound::Endpoint(id).into());
     }
-    Ok(locate(slot, described::<Input>()).ok_or(NotFound::Endpoint(id))?)
+    Ok(locate(slot, identified::<Input>()).ok_or(NotFound::Endpoint(id))?)
 }
 
 /// The output port `id` names now; see [`resolve_input`].
@@ -119,7 +130,7 @@ fn resolve_output(id: EndpointId) -> Result<OutputPort> {
     if slot.side != Side::Output {
         return Err(NotFound::Endpoint(id).into());
     }
-    Ok(locate(slot, described::<Output>()).ok_or(NotFound::Endpoint(id))?)
+    Ok(locate(slot, identified::<Output>()).ok_or(NotFound::Endpoint(id))?)
 }
 
 impl MidiEndpoints for WinMmEndpoints {

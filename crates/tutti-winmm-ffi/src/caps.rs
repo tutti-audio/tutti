@@ -95,27 +95,31 @@ fn name_of(field: &[u16]) -> String {
 const MAX_INTERFACE_BYTES: u32 = 4096;
 
 mod sealed {
-    pub trait Sealed {}
+    use crate::Caps;
+    use crate::error::Error;
+
+    /// The winmm calls of one direction. Nameable only in this crate, so no
+    /// other crate can call them by a position.
+    pub trait Sealed {
+        /// How many ports winmm lists now.
+        fn count() -> u32;
+
+        /// What the driver reports of position `index`.
+        fn caps(index: u32) -> Result<Caps, Error>;
+
+        /// The device interface path (a `\\?\usb#vid_...` string) of
+        /// position `index`, which names the device across a replug where the
+        /// position does not; `None` when the driver gives none.
+        fn interface(index: u32) -> Option<String>;
+    }
 }
 
+use sealed::Sealed;
+
 /// Which way a [`Port`] goes: [`Input`] or [`Output`]. Sealed.
-pub trait PortKind: sealed::Sealed {
+pub trait PortKind: Sealed {
     /// The direction this marks.
     const DIRECTION: Direction;
-
-    /// How many ports winmm lists now.
-    #[doc(hidden)]
-    fn count() -> u32;
-
-    /// What the driver reports of position `index`.
-    #[doc(hidden)]
-    fn caps(index: u32) -> Result<Caps, Error>;
-
-    /// The device interface path (a `\\?\usb#vid_...` string) of position
-    /// `index`, which names the device across a replug where the position does
-    /// not; `None` when the driver gives none.
-    #[doc(hidden)]
-    fn interface(index: u32) -> Option<String>;
 }
 
 /// The marker of an input port.
@@ -126,12 +130,15 @@ pub struct Input;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Output;
 
-impl sealed::Sealed for Input {}
-impl sealed::Sealed for Output {}
-
 impl PortKind for Input {
     const DIRECTION: Direction = Direction::Input;
+}
 
+impl PortKind for Output {
+    const DIRECTION: Direction = Direction::Output;
+}
+
+impl Sealed for Input {
     fn count() -> u32 {
         // SAFETY: takes no arguments and touches no memory of ours.
         unsafe { midiInGetNumDevs() }
@@ -160,9 +167,7 @@ impl PortKind for Input {
     }
 }
 
-impl PortKind for Output {
-    const DIRECTION: Direction = Direction::Output;
-
+impl Sealed for Output {
     fn count() -> u32 {
         // SAFETY: takes no arguments and touches no memory of ours.
         unsafe { midiOutGetNumDevs() }
@@ -325,6 +330,16 @@ pub struct Port<D: PortKind> {
     friendly: OnceLock<Option<String>>,
     side: PhantomData<D>,
 }
+
+/// Two ports are equal when they are the same position holding the same
+/// device; the friendly name, which is only a cache, is not compared.
+impl<D: PortKind> PartialEq for Port<D> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.device == other.device
+    }
+}
+
+impl<D: PortKind> Eq for Port<D> {}
 
 /// A listed input port.
 pub type InputPort = Port<Input>;

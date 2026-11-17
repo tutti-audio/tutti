@@ -244,15 +244,11 @@ impl MidiIn {
             unregister(id);
             return Err(e);
         }
-        if let Err(moved) = port.verify() {
-            // Not confirmed: nothing was queued or started, so the port is
-            // only closed, never reset or touched by a worker.
-            unregister(id);
-            // SAFETY: `handle` is the input just opened, closed once; no
-            // buffer was prepared and no worker exists.
-            unsafe { midiInClose(handle) };
-            return Err(moved);
-        }
+        // Until confirmed the open is a `Pending`, which unregisters and only
+        // closes: nothing was queued or started, so no reset is sent.
+        let pending = Pending { id, handle };
+        port.verify()?;
+        pending.disarm();
         shared.handle.store(handle, Ordering::Release);
         // The port is open: from here `input` owns it, and a failure drops
         // `input`, which closes the port (once, in `Drop`).
@@ -349,6 +345,29 @@ impl Drop for MidiIn {
         if closed != 0 && closed != MMSYSERR_INVALHANDLE {
             std::mem::forget(Arc::clone(&self.shared));
         }
+    }
+}
+
+/// An input opened but not yet known to be the listed device: dropping it
+/// removes it from the registry and closes the port, with no reset (no buffer
+/// was prepared and no worker exists).
+struct Pending {
+    id: usize,
+    handle: HMIDIIN,
+}
+
+impl Pending {
+    /// The open input is the listed device: leave it open.
+    fn disarm(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        unregister(self.id);
+        // SAFETY: `handle` is the input just opened, closed once.
+        unsafe { midiInClose(self.handle) };
     }
 }
 
