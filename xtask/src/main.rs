@@ -418,7 +418,7 @@ fn fuzz(target: Option<&str>, secs: u32, ctx: &Ctx) -> Result<(), u8> {
     };
     let mut failed = Vec::new();
     for t in &chosen {
-        let work = ctx.root.join("testing/tutti-fuzz/fuzz/corpus").join(t);
+        let work = ctx.root.join(recipes::FUZZ_WORK).join(t);
         if let Err(e) = std::fs::create_dir_all(&work) {
             eprintln!("xtask: cannot create {}: {e}", work.display());
             return Err(1);

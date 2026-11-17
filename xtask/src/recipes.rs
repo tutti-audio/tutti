@@ -450,6 +450,10 @@ const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
 /// The fuzz package's corpus directory: one subdirectory of seeds per target.
 pub(crate) const FUZZ_CORPUS: &str = "testing/tutti-fuzz/corpus";
 
+/// Where cargo-fuzz keeps the inputs a run finds, one subdirectory per target;
+/// ignored by git.
+pub(crate) const FUZZ_WORK: &str = "testing/tutti-fuzz/fuzz/corpus";
+
 /// The seconds `fuzz` runs a target for when `--secs` is absent.
 const FUZZ_SECS: u32 = 60;
 
@@ -459,7 +463,7 @@ const FUZZ_SECS: u32 = 60;
 pub(crate) fn fuzz_cmd(target: &str, secs: u32) -> Cmd {
     Cmd::sh(&format!(
         "cargo +{DOCS_NIGHTLY} fuzz run --fuzz-dir testing/tutti-fuzz/fuzz {target} \
-         testing/tutti-fuzz/fuzz/corpus/{target} {FUZZ_CORPUS}/{target} -- -max_total_time={secs}"
+         {FUZZ_WORK}/{target} {FUZZ_CORPUS}/{target} -- -max_total_time={secs}"
     ))
 }
 

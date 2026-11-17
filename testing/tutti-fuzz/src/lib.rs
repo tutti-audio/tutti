@@ -23,6 +23,9 @@
 //! inputs go to `fuzz/corpus/<name>/`; a crash writes its input under
 //! `fuzz/artifacts/<name>/` and the recipe exits non-zero.
 //!
+//! The fuzz project's lockfile is not committed, so a local fuzz build takes the
+//! latest compatible `libfuzzer-sys`.
+//!
 //! Once a crash is fixed, its input is copied into `corpus/<name>/` as a
 //! regression seed, and the replay test keeps it fixed.
 
