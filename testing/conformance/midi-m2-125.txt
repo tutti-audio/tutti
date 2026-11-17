@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-125/<section>#<n>          the nth sentence under the numbered section
@@ -21,45 +24,45 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-125/1.2.1#1 | both |  | permitted | M2-125 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-125/1.2.1#2 | both |  | permitted | M2-125 §1.2.1 | either device can start a Transaction at any time |  |  |
-m2-125/1.2.1#3 | both |  | permitted | M2-125 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-125/1.2.1#4 | both |  | permitted | M2-125 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-125/1.2.1#5 | both |  | permitted | M2-125 §1.2.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
-m2-125/1.2.1#6 | both |  | permitted | M2-125 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
-m2-125/1.3.1#1 | both |  | permitted | M2-125 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |
-m2-125/1.3.2#1 | both |  | permitted | M2-125 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |
-m2-125/4#1 | receiver |  | required | M2-125 §4 | a conforming device uses the Note Number mapping of Table 5 |  |  |
-m2-125/4.1#1 | receiver |  | required | M2-125 §4.1 | a device maps the sounds it can play to the Table 5 note numbers |  |  |
-m2-125/4.1#2 | receiver |  | permitted | M2-125 §4.1 | a device can offer only some of the listed sounds |  |  |
-m2-125/4.1#3 | receiver |  | permitted | M2-125 §4.1 | a device can add sounds on Note Numbers 0 to 26 and 89 to 127 |  |  |
-m2-125/4.1#4 | receiver |  | permitted | M2-125 §4.1 | a designer freely chooses the sound for each named drum |  |  |
-m2-125/4.1#5 | receiver |  | permitted | M2-125 §4.1 | a device can substitute a sound of a similar role for a named sound |  |  |
-m2-125/4.1#6 | receiver |  | permitted | M2-125 §4.1 | example: an electronic kick on 0x24 and a longer one on 0x23 |  |  |
-m2-125/4.1#7 | receiver |  | required | M2-125 §4.1 | a sound that starts mutes the others in its Mutually Exclusive Set |  |  |
-m2-125/4.1#8 | receiver |  | permitted | M2-125 §4.1 | a stereo mix can place each sound at its recommended pan position |  |  |
-m2-125/4.1#9 | sender |  | permitted | M2-125 §4.1 | a Registered Per-Note Controller can set a sound's pan position |  |  |
-m2-125/4.2#1 | sender |  | required | M2-125 §4.2 | every Note On is followed by a matching Note Off |  |  |
-m2-125/4.2#2 | sender |  | permitted | M2-125 §4.2 | the Sender decides when the Note Off comes |  |  |
-m2-125/4.2#3 | receiver |  | recommended | M2-125 §4.2 | a receiver plays most sounds through their whole life, whenever the Note Off comes |  |  |
-m2-125/5#1 | receiver |  | recommended | M2-125 §5 | a device responds to the listed Control Change messages on its Channel |  |  |
-m2-125/5.2#1 | receiver |  | required | M2-125 §5.2 | the value curve for this Control Change is linear in amplitude |  |  |
-m2-125/5.3.1#1 | receiver |  | required | M2-125 §5.3.1 | All Sound Off releases every sounding note and mutes quickly without a click |  |  |
-m2-125/5.3.2#1 | receiver |  | required | M2-125 §5.3.2 | Reset All Controllers returns controls, pressure and Pitch Bend to defaults |  |  |
-m2-125/5.3.2#2 | receiver |  | required | M2-125 §5.3.2 | Reset All Controllers leaves Program, Bank, Volume, Pan and Expression alone | neg=1 |  |
-m2-125/5.3.3#1 | receiver |  | required | M2-125 §5.3.3 | All Notes Off turns off every sounding note |  |  |
-m2-125/6.1#1 | receiver |  | permitted | M2-125 §6.1 | a MIDI 2.0 device can implement the Registered Per-Note Controllers of this section |  |  |
-m2-125/6.1#2 | receiver |  | required | M2-125 §6.1 | a receiver keeps these Per-Note Controller values for all later notes |  |  |
-m2-125/6.1#3 | sender |  | permitted | M2-125 §6.1 | Per Note Management resets them or detaches them from a sounding note |  |  |
-m2-125/6.1#4 | receiver |  | permitted | M2-125 §6.1 | a receiver picks its own default for a controller with none defined |  |  |
-m2-125/6.1.1#1 | receiver |  | recommended | M2-125 §6.1.1 | example: a per-note volume adds to the Channel volume |  |  |
-m2-125/6.1.3#1 | receiver |  | required | M2-125 §6.1.3 | the timbre controller is relative, with its null point at 0x80000000 |  |  |
-m2-125/6.1.8#1 | receiver |  | required | M2-125 §6.1.8 | the value curve for this controller is linear in amplitude |  |  |
-m2-125/6.1.8#2 | receiver |  | recommended | M2-125 §6.1.8 | example: a per-note reverb send overrides the Channel reverb for that note |  |  |
-m2-125/6.2#1 | receiver |  | permitted | M2-125 §6.2 | a MIDI 1.0 device can implement the Key-Based Instrument Controllers of this section |  |  |
-m2-125/7#1 | both |  | permitted | M2-125 §7 | Profile Details Inquiry can discover a receiver's implementation details |  |  |
-m2-125/7#2 | receiver |  | permitted | M2-125 §7 | a device can report a configuration change with a Profile Details reply |  |  |
-m2-125/7.1.1#1 | sender |  | permitted | M2-125 §7.1.1 | an Initiator can send the Profile Details Inquiry |  |  |
-m2-125/7.1.2#1 | receiver |  | required | M2-125 §7.1.2 | a Responder answers a Profile Details Inquiry with a reply |  |  |
-m2-125/7.1.2#2 | receiver |  | recommended | M2-125 §7.1.2 | a device also sends the reply unasked when its data changes |  |  |
-m2-125/7.1.2#3 | receiver |  | recommended | M2-125 §7.1.2 | example: a program change that alters which notes have sounds triggers a new reply |  |  |
+m2-125/1.2.1#1 | both |  | permitted | M2-125 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-125/1.2.1#2 | both |  | permitted | M2-125 §1.2.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-125/1.2.1#3 | both |  | permitted | M2-125 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-125/1.2.1#4 | both |  | permitted | M2-125 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-125/1.2.1#5 | both |  | permitted | M2-125 §1.2.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |  | bbe806d164dfe0e4
+m2-125/1.2.1#6 | both |  | permitted | M2-125 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |  | 7feaf7f9d052ffeb
+m2-125/1.3.1#1 | both |  | permitted | M2-125 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |  | 01ca9efce119747f
+m2-125/1.3.2#1 | both |  | permitted | M2-125 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |  | 61692000ea7fbed0
+m2-125/4#1 | receiver |  | required | M2-125 §4 | a conforming device uses the Note Number mapping of Table 5 |  |  |  | ae6b9b77b8177591
+m2-125/4.1#1 | receiver |  | required | M2-125 §4.1 | a device maps the sounds it can play to the Table 5 note numbers |  |  |  | 83c6d57799d83bcd
+m2-125/4.1#2 | receiver |  | permitted | M2-125 §4.1 | a device can offer only some of the listed sounds |  |  |  | ccf97a766944c4c3
+m2-125/4.1#3 | receiver |  | permitted | M2-125 §4.1 | a device can add sounds on Note Numbers 0 to 26 and 89 to 127 |  |  |  | d802d6691c5956f6
+m2-125/4.1#4 | receiver |  | permitted | M2-125 §4.1 | a designer freely chooses the sound for each named drum |  |  |  | 0b62a92ec10b0c28
+m2-125/4.1#5 | receiver |  | permitted | M2-125 §4.1 | a device can substitute a sound of a similar role for a named sound |  |  |  | 2a2a7299a93dc3fa
+m2-125/4.1#6 | receiver |  | permitted | M2-125 §4.1 | example: an electronic kick on 0x24 and a longer one on 0x23 |  |  |  | e5add2e00d7b2bc6
+m2-125/4.1#7 | receiver |  | required | M2-125 §4.1 | a sound that starts mutes the others in its Mutually Exclusive Set |  |  |  | 3cc0de81c3ddfcc5
+m2-125/4.1#8 | receiver |  | permitted | M2-125 §4.1 | a stereo mix can place each sound at its recommended pan position |  |  |  | 64f6246cd2c32adc
+m2-125/4.1#9 | sender |  | permitted | M2-125 §4.1 | a Registered Per-Note Controller can set a sound's pan position |  |  |  | 8af176be38dbf3af
+m2-125/4.2#1 | sender |  | required | M2-125 §4.2 | every Note On is followed by a matching Note Off |  |  |  | 1d19d160fe0457fe
+m2-125/4.2#2 | sender |  | permitted | M2-125 §4.2 | the Sender decides when the Note Off comes |  |  |  | 40ea919f87c4cd36
+m2-125/4.2#3 | receiver |  | recommended | M2-125 §4.2 | a receiver plays most sounds through their whole life, whenever the Note Off comes |  |  |  | 8be0b2bba026fc73
+m2-125/5#1 | receiver |  | recommended | M2-125 §5 | a device responds to the listed Control Change messages on its Channel |  |  |  | 4fab5cd34d7d4246
+m2-125/5.2#1 | receiver |  | required | M2-125 §5.2 | the value curve for this Control Change is linear in amplitude |  |  |  | db2178371f9adb63
+m2-125/5.3.1#1 | receiver |  | required | M2-125 §5.3.1 | All Sound Off releases every sounding note and mutes quickly without a click |  |  |  | e57e0db83a6b4712
+m2-125/5.3.2#1 | receiver |  | required | M2-125 §5.3.2 | Reset All Controllers returns controls, pressure and Pitch Bend to defaults |  |  |  | 38ce9be6da80de11
+m2-125/5.3.2#2 | receiver |  | required | M2-125 §5.3.2 | Reset All Controllers leaves Program, Bank, Volume, Pan and Expression alone | neg=1 |  |  | 4b5928eb9f286607
+m2-125/5.3.3#1 | receiver |  | required | M2-125 §5.3.3 | All Notes Off turns off every sounding note |  |  |  | 52a59bff765f7f50
+m2-125/6.1#1 | receiver |  | permitted | M2-125 §6.1 | a MIDI 2.0 device can implement the Registered Per-Note Controllers of this section |  |  |  | 4b036be62b7adf73
+m2-125/6.1#2 | receiver |  | required | M2-125 §6.1 | a receiver keeps these Per-Note Controller values for all later notes |  |  |  | fd715c7c5f021df4
+m2-125/6.1#3 | sender |  | permitted | M2-125 §6.1 | Per Note Management resets them or detaches them from a sounding note |  |  |  | 3774a359e0137743
+m2-125/6.1#4 | receiver |  | permitted | M2-125 §6.1 | a receiver picks its own default for a controller with none defined |  |  |  | def605c7f0e2edf8
+m2-125/6.1.1#1 | receiver |  | recommended | M2-125 §6.1.1 | example: a per-note volume adds to the Channel volume |  |  |  | f1674eddbbf7bd78
+m2-125/6.1.3#1 | receiver |  | required | M2-125 §6.1.3 | the timbre controller is relative, with its null point at 0x80000000 |  |  |  | b88009023117c4ee
+m2-125/6.1.8#1 | receiver |  | required | M2-125 §6.1.8 | the value curve for this controller is linear in amplitude |  |  |  | db2178371f9adb63
+m2-125/6.1.8#2 | receiver |  | recommended | M2-125 §6.1.8 | example: a per-note reverb send overrides the Channel reverb for that note |  |  |  | 933538bd56aa6e47
+m2-125/6.2#1 | receiver |  | permitted | M2-125 §6.2 | a MIDI 1.0 device can implement the Key-Based Instrument Controllers of this section |  |  |  | b4bd73aa67cec392
+m2-125/7#1 | both |  | permitted | M2-125 §7 | Profile Details Inquiry can discover a receiver's implementation details |  |  |  | 1fa220549455ca9b
+m2-125/7#2 | receiver |  | permitted | M2-125 §7 | a device can report a configuration change with a Profile Details reply |  |  |  | 2595c0fb241579db
+m2-125/7.1.1#1 | sender |  | permitted | M2-125 §7.1.1 | an Initiator can send the Profile Details Inquiry |  |  |  | a383fdd0257c6aef
+m2-125/7.1.2#1 | receiver |  | required | M2-125 §7.1.2 | a Responder answers a Profile Details Inquiry with a reply |  |  |  | a90711b1d34c6644
+m2-125/7.1.2#2 | receiver |  | recommended | M2-125 §7.1.2 | a device also sends the reply unasked when its data changes |  |  |  | fc1045bdbd568c5b
+m2-125/7.1.2#3 | receiver |  | recommended | M2-125 §7.1.2 | example: a program change that alters which notes have sounds triggers a new reply |  |  |  | 2f109095f54de8e9

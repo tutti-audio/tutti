@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-109/<section>#<n>          the nth sentence under the numbered section
@@ -21,7 +24,7 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-109/1.3#1 | both |  | permitted | M2-109 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-109/2.1#1 | responder |  | permitted | M2-109 §2.1 | a device can have a Local On/Off switch joining its local input to its tone generator |  |  |
-m2-109/2.2#1 | initiator |  | permitted | M2-109 §2.2 | an Initiator can read LocalOn with a Get |  |  |
-m2-109/2.3#1 | initiator |  | permitted | M2-109 §2.3 | an Initiator can write LocalOn with a Set |  |  |
+m2-109/1.3#1 | both |  | permitted | M2-109 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | ab84069d7a4b5f42
+m2-109/2.1#1 | responder |  | permitted | M2-109 §2.1 | a device can have a Local On/Off switch joining its local input to its tone generator |  |  |  | dc3b8985ef73d007
+m2-109/2.2#1 | initiator |  | permitted | M2-109 §2.2 | an Initiator can read LocalOn with a Get |  |  |  | 00ac17a27e6f9ea3
+m2-109/2.3#1 | initiator |  | permitted | M2-109 §2.3 | an Initiator can write LocalOn with a Set |  |  |  | ce837c31ea3dff00
