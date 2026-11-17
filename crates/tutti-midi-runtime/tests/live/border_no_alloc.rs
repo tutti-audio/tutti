@@ -18,7 +18,7 @@ use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
 use crate::common;
 use tutti_fixtures::midi;
-use tutti_ump::{Address, BendValue, ControlValue, KeyEvent, Message, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, KeyEvent, Message, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -90,6 +90,7 @@ fn the_border_nodes_process_without_allocating() {
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
+    let (mut tempos, mut meters) = (0usize, 0usize);
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
             busy(&mut dev, u64::from(b));
@@ -122,10 +123,20 @@ fn the_border_nodes_process_without_allocating() {
                 &[],
                 &mut [],
             );
-            let _ = out.poll_into(&mut drain);
+            let n = out.poll_into(&mut drain);
+            for (_, ump) in &drain[..n] {
+                match ump.decode() {
+                    Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
+                    Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
+                    _ => {}
+                }
+            }
         }
     });
     assert_eq!(out.dropped(), 0);
+    // The emit paths ran under the gate: a Set Tempo for the changing tempo, a
+    // Set Time Signature for the published meters.
+    assert!(tempos > 0 && meters > 0, "{tempos} tempos, {meters} meters");
 }
 
 /// **A device's departure and arrival process without allocating**: the ingest

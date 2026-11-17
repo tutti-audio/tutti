@@ -263,6 +263,15 @@ impl ClockControls {
 /// (a request in effect, never a store from the control side).
 #[derive(Debug)]
 pub struct ClockMaster {
+    /// The project meter, lent once per tick when Flex is on. A field of its
+    /// own, so the loan and the clock's other state are borrowed apart.
+    meter: Reader<MeterMap>,
+    state: ClockState,
+}
+
+/// Everything a [`ClockMaster`] holds but the meter's reader.
+#[derive(Debug)]
+struct ClockState {
     shared: Arc<Shared>,
     /// The writer of [`ClockControls::losses`].
     losses: CounterWriter<Losses>,
@@ -276,8 +285,6 @@ pub struct ClockMaster {
     prev: PrevTick,
     /// The MTC quarter-frame grid.
     mtc: MtcGrid,
-    /// The project meter, lent once per pass when Flex is on.
-    meter: Reader<MeterMap>,
     /// What the Flex messages last stated.
     flex: FlexOut,
 }
@@ -367,11 +374,6 @@ impl MtcGrid {
 }
 
 impl ClockMaster {
-    /// A System message on this master's group.
-    fn system(&self, message: System) -> Ump {
-        Message::System(self.group, message).into()
-    }
-
     /// A clock sending on `group` (every event it emits is addressed to it: a
     /// clock is the Group's, M2-104 section 7.6) and placing events at
     /// `sample_rate`: the audio half, and the controls that configure it.
@@ -383,6 +385,65 @@ impl ClockMaster {
         sample_rate: SampleRate,
         meter: Reader<MeterMap>,
     ) -> (Self, ClockControls) {
+        let (state, controls) = ClockState::new(group, sample_rate);
+        (Self { meter, state }, controls)
+    }
+
+    /// Adds `n` to [`ClockControls::losses`].
+    pub(crate) fn count_dropped(&mut self, n: u64) {
+        self.state.count_dropped(n);
+    }
+
+    /// Move the master to a device running at `sample_rate`: what a device
+    /// restart at a new rate does, with no callback running.
+    ///
+    /// The 24-PPQN ticks are placed from the transport's beat, so from the
+    /// next block they land on the new rate's frames: at 120 BPM a tick
+    /// every 1 000 frames at 48 kHz, not the 918.75 of 44.1 kHz, which would
+    /// run the receiving gear about 8.8% fast. The MTC quarter-frame grid is
+    /// counted in frames, so it starts a new segment at the next
+    /// quarter-frame due, rescaled to the same wall-clock time: that
+    /// quarter-frame stays where it was due.
+    pub fn set_sample_rate(&mut self, sample_rate: SampleRate) {
+        self.state.set_sample_rate(sample_rate);
+    }
+
+    /// The rate [`tick`](Self::tick) places events at.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.state.sample_rate()
+    }
+
+    /// The Group every event is sent on.
+    #[must_use]
+    pub fn group(&self) -> MidiGroup {
+        self.state.group()
+    }
+
+    /// Generate the clock/timecode of `block` frames starting with the
+    /// transport at `transport`, handing each event (its [`Offset`] from
+    /// the first of those frames) to `emit`. Call once per stretch of
+    /// unchanging transport: a block, or each of its segments.
+    ///
+    /// Events come out in the order generated, not by offset: in each pass
+    /// (the block cut at a loop wrap) the MTC quarter-frames follow its ticks.
+    pub fn tick(
+        &mut self,
+        transport: &TransportPosition,
+        block: Samples,
+        emit: &mut impl FnMut(UmpAt),
+    ) {
+        self.state.tick(&mut self.meter, transport, block, emit);
+    }
+}
+
+impl ClockState {
+    /// A System message on this master's group.
+    fn system(&self, message: System) -> Ump {
+        Message::System(self.group, message).into()
+    }
+
+    fn new(group: MidiGroup, sample_rate: SampleRate) -> (Self, ClockControls) {
         let (losses_writer, losses) = counter();
         let shared = Arc::new(Shared {
             settings: AtomicU32::new(Settings::OFF.bits()),
@@ -406,30 +467,18 @@ impl ClockMaster {
                 cued: None,
             },
             mtc: MtcGrid::RESTARTED,
-            meter,
             flex: FlexOut::SILENT,
         };
         (master, controls)
     }
 
-    /// Adds `n` to [`ClockControls::losses`].
-    pub(crate) fn count_dropped(&mut self, n: u64) {
+    fn count_dropped(&mut self, n: u64) {
         if n > 0 {
             self.losses.add(Losses::refused(n));
         }
     }
 
-    /// Move the master to a device running at `sample_rate`: what a device
-    /// restart at a new rate does, with no callback running.
-    ///
-    /// The 24-PPQN ticks are placed from the transport's beat, so from the
-    /// next block they land on the new rate's frames: at 120 BPM a tick
-    /// every 1 000 frames at 48 kHz, not the 918.75 of 44.1 kHz, which would
-    /// run the receiving gear about 8.8% fast. The MTC quarter-frame grid is
-    /// counted in frames, so it starts a new segment at the next
-    /// quarter-frame due, rescaled to the same wall-clock time: that
-    /// quarter-frame stays where it was due.
-    pub fn set_sample_rate(&mut self, sample_rate: SampleRate) {
+    fn set_sample_rate(&mut self, sample_rate: SampleRate) {
         let old = std::mem::replace(&mut self.sample_rate, sample_rate);
         self.rebase_mtc(old, self.fps, sample_rate);
         self.shared
@@ -481,15 +530,9 @@ impl ClockMaster {
         };
     }
 
-    /// Generate the clock/timecode of `block` frames starting with the
-    /// transport at `transport`, handing each event (its [`Offset`] from
-    /// the first of those frames) to `emit`. Call once per stretch of
-    /// unchanging transport: a block, or each of its segments.
-    ///
-    /// Events come out in the order generated, not by offset: in each pass
-    /// (the block cut at a loop wrap) the MTC quarter-frames follow its ticks.
-    pub fn tick(
+    fn tick(
         &mut self,
+        meter: &mut Reader<MeterMap>,
         transport: &TransportPosition,
         block: Samples,
         emit: &mut impl FnMut(UmpAt),
@@ -527,8 +570,16 @@ impl ClockMaster {
                     .looping
                     .and_then(|l| LoopRange::new(l.start, l.end));
                 let mut clock = transport.clock(sample_rate);
+                let loan = meter.lend();
                 for pass in clock.passes(Samples(block_size), region) {
-                    self.send_flex(&pass, block_size, beats_per_sample, transport.tempo, emit);
+                    self.send_flex(
+                        &loan,
+                        &pass,
+                        block_size,
+                        beats_per_sample,
+                        transport.tempo,
+                        emit,
+                    );
                 }
             }
             self.prev.playing = transport.playing;
@@ -622,6 +673,8 @@ impl ClockMaster {
             .looping
             .and_then(|l| LoopRange::new(l.start, l.end));
         let mut clock = transport.clock(sample_rate);
+        // Lent once, held across every pass of the block.
+        let loan = settings.send_flex.then(|| meter.lend());
         let mut ends_on_wrap = false;
         for pass in clock.passes(Samples(block_size), region) {
             ends_on_wrap = pass.end == PassEnd::Wrap;
@@ -642,8 +695,8 @@ impl ClockMaster {
                 self.restart_mtc();
             }
             self.tick_clock(&pass, block_size, beats_per_sample, emit);
-            if settings.send_flex {
-                self.send_flex(&pass, block_size, beats_per_sample, tempo, emit);
+            if let Some(loan) = &loan {
+                self.send_flex(loan, &pass, block_size, beats_per_sample, tempo, emit);
             }
             if settings.send_mtc {
                 self.tick_mtc(&pass, block_size, sample_rate, beats_per_sample, emit);
@@ -681,7 +734,7 @@ impl ClockMaster {
     }
 
     /// Emit a 0xF8 at every 1/24-beat boundary playback reaches inside `pass`,
-    /// on its frame. `tick_beats` is the clock-tick spacing in beats (1/24).
+    /// on its frame.
     ///
     /// Placed by the engine's one beat→frame rule
     /// (`first_frame_at_or_after`) and compared as integer
@@ -719,11 +772,11 @@ impl ClockMaster {
     /// `tempo` is not what was last stated, and a Set Time Signature on each
     /// bar boundary whose meter is not. The tempo is the segment's, constant
     /// over the pass, so a change waits for the first tick at or after the
-    /// segment's start, in this pass or a later one. The meter is lent once
-    /// for the pass (a loan borrows the master's reader, which the clock's
-    /// other `&self` helpers cannot share across the whole tick).
+    /// segment's start, in this pass or a later one. `meter` is the project
+    /// meter, lent once by [`tick`](Self::tick) for every pass of the block.
     fn send_flex(
         &mut self,
+        meter: &MeterMap,
         pass: &Pass,
         block_size: usize,
         beats_per_sample: BeatDuration,
@@ -740,7 +793,6 @@ impl ClockMaster {
             ));
             self.flex.tempo = Some(field);
         }
-        let meter = self.meter.lend();
         // The frame of a bar line in the pass: the first at or after it, so a
         // line before the pass is negative. Bars are counted by number, never
         // re-derived from a beat (`bar_at` of a line can name the bar before).

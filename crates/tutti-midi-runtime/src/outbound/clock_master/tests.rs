@@ -1419,15 +1419,25 @@ fn a_tick_and_a_bar_line_on_a_block_edge_are_sent_once() {
     play(&mut cm, &out, 120.0, 0.0, 96_000);
     let first = drain_all(&out);
     assert_eq!(meters(&first), [(0, time_signature(4, 2))]);
+    // 96 ticks, the last on frame 95 000: beat 4's tick is the next block's.
+    let clocks = offsets(&first, 0xF8);
+    assert_eq!((clocks.len(), clocks.last()), (96, Some(&95_000)));
     play(&mut cm, &out, 120.0, 4.0, 48_000);
-    assert_eq!(meters(&drain_all(&out)), [(0, time_signature(3, 2))]);
+    let second = drain_all(&out);
+    assert_eq!(meters(&second), [(0, time_signature(3, 2))]);
+    assert_eq!(offsets(&second, 0xF8)[..2], [0, 1_000]);
 
     // Tempo 150 from the block that starts on tick 1 (frame 1 000 of 120).
     let (mut cm, _meter, out) = flex_master(true);
     play(&mut cm, &out, 120.0, 0.0, 1_000);
-    assert_eq!(tempos(&drain_all(&out)), [(0, Flex::SetTempo(50_000_000))]);
+    let block = drain_all(&out);
+    assert_eq!(tempos(&block), [(0, Flex::SetTempo(50_000_000))]);
+    assert_eq!(offsets(&block, 0xF8), [0]);
     play(&mut cm, &out, 150.0, 1_000.0 / 24_000.0, 1_000);
-    assert_eq!(tempos(&drain_all(&out)), [(0, Flex::SetTempo(40_000_000))]);
+    let block = drain_all(&out);
+    assert_eq!(tempos(&block), [(0, Flex::SetTempo(40_000_000))]);
+    // 800 frames a tick at 150 bpm.
+    assert_eq!(offsets(&block, 0xF8), [0, 800]);
     play(
         &mut cm,
         &out,
@@ -1435,7 +1445,10 @@ fn a_tick_and_a_bar_line_on_a_block_edge_are_sent_once() {
         1_000.0 / 24_000.0 + 1_000.0 / 19_200.0,
         1_000,
     );
-    assert!(tempos(&drain_all(&out)).is_empty());
+    let block = drain_all(&out);
+    assert!(tempos(&block).is_empty());
+    // Tick 3 (beat 0.125) is (0.125 - 0.09375) x 19 200 = 600 frames in.
+    assert_eq!(offsets(&block, 0xF8), [600]);
 }
 
 /// A locate while playing restates nothing that did not change, and the new
@@ -1501,7 +1514,7 @@ fn a_meter_change_inside_the_block_is_stated_on_its_bar_line() {
 /// lines (beats 4 and 20 of 24).
 /// Spec: m2-104/7.5.4#1
 #[test]
-fn a_whole_note_meter_is_stated_by_nothing_and_not_resent() {
+fn a_whole_note_meter_sends_nothing_and_4_4_is_sent_once() {
     let (mut cm, meter, out) = flex_master(true);
     meter.set_meter(map(&[(0.0, 4, 4), (4.0, 4, 1)]));
     play(&mut cm, &out, 120.0, 0.0, 576_000);
