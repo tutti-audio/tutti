@@ -64,6 +64,43 @@ impl Param {
 /// the plugin as this parameter's point in the next block.
 pub const BYPASS_ID: ParamId = ParamId::new(5);
 
+/// The parameter VST3 lists after [`BYPASS_ID`] to select a program: flagged
+/// `kIsProgramChange`, in the unit that owns [`PROGRAMS`], `index / 2` normalized.
+/// Only VST3 lists it.
+pub const PROGRAM_ID: ParamId = ParamId::new(6);
+
+/// The programs the plugin offers, in order: a list `Factory` (id 1) of `Init`,
+/// `Pad` and `Lead`. VST3 declares it as a program list, VST2 as programs and AU as
+/// factory presets, numbered from 0; CLAP declares none.
+#[derive(Debug)]
+pub struct Programs {
+    /// The list's id.
+    pub list_id: i32,
+    /// The list's name.
+    pub list: &'static str,
+    /// The programs' names, in order.
+    pub names: [&'static str; 3],
+}
+
+/// The program list of the plugin.
+pub const PROGRAMS: Programs = Programs {
+    list_id: 1,
+    list: "Factory",
+    names: ["Init", "Pad", "Lead"],
+};
+
+/// How a format names the presets it lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresetIds {
+    /// Programs of a named list: `Program { list_id, index }`, the list's name
+    /// as the bank (VST3).
+    Programs,
+    /// One flat set, `Number(index)`, no bank (VST2, AU).
+    Numbered,
+    /// The format lists no preset (CLAP).
+    Unlisted,
+}
+
 /// Where a format keeps the plugin's own bypass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bypass {
@@ -357,6 +394,8 @@ pub struct Surface {
     /// parameter. Where `true`, the meter is not automatable and every other
     /// parameter is.
     pub reports_automatable: bool,
+    /// How the format names the presets it lists ([`PROGRAMS`]).
+    pub preset_ids: PresetIds,
 }
 
 /// The role every VST3 plugin of ours declares, by parameter (function names
@@ -398,6 +437,7 @@ pub const CLAP: Surface = Surface {
     assignments: &[],
     reports_access: true,
     reports_automatable: true,
+    preset_ids: PresetIds::Unlisted,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -420,6 +460,7 @@ pub const VST2: Surface = Surface {
     assignments: &[],
     reports_access: false,
     reports_automatable: false,
+    preset_ids: PresetIds::Numbered,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -443,6 +484,7 @@ pub const VST3: Surface = Surface {
     assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: true,
+    preset_ids: PresetIds::Programs,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -466,6 +508,7 @@ pub const VST3_CPP: Surface = Surface {
     assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: true,
+    preset_ids: PresetIds::Programs,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -492,4 +535,5 @@ pub const AU: Surface = Surface {
     assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: false,
+    preset_ids: PresetIds::Numbered,
 };

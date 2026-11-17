@@ -8,8 +8,8 @@ use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, BusRole, BypassWrite, Control, Controller, Loaded, Normalized,
     OwnBypass, ParamFlags, ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginTail,
-    ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange,
-    TransportInfo,
+    Preset, PresetId, ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples,
+    TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -271,7 +271,7 @@ pub fn tail_markers_reported<F: Format>() {
 pub fn parameters_listed<F: Format>() {
     let mut got = F::load().parameters(main_thread());
     // The bypass parameter some formats list is the bypass cases' witness.
-    got.retain(|p| p.id() != spec::BYPASS_ID);
+    got.retain(|p| p.id() != spec::BYPASS_ID && p.id() != spec::PROGRAM_ID);
     got.sort_by_key(|p| p.id().get());
     assert_eq!(got.len(), Param::ALL.len(), "the listed parameters");
     for (info, &(param, default)) in got.iter().zip(&Param::ALL) {
@@ -303,6 +303,61 @@ pub fn parameters_listed<F: Format>() {
                 "{param:?} automatable"
             );
         }
+    }
+}
+
+/// The plugin lists its presets in the spec's order with the spec's names
+/// ([`spec::PROGRAMS`]), and loading a listed preset makes the plugin's current
+/// preset the one loaded.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+///
+/// Spec: vst3.IUnitInfo.getProgramListCount, vst3.IUnitInfo.getProgramListInfo, vst3.IUnitInfo.getProgramName, vst2.eff.GetProgramNameIndexed, vst2.eff.SetProgram, vst2.eff.GetProgram, au.prop.FactoryPresets, au.prop.PresentPreset
+pub fn presets_listed_in_order<F: Format>() {
+    let main = main_thread();
+    let mut loaded = F::load();
+    let programs = &spec::PROGRAMS;
+    let want: Vec<Preset> = programs
+        .names
+        .iter()
+        .zip(0u32..)
+        .map(|(&name, index)| match F::SURFACE.preset_ids {
+            spec::PresetIds::Programs => Preset::in_bank(
+                PresetId::Program {
+                    list_id: programs.list_id,
+                    index,
+                },
+                name,
+                programs.list,
+            ),
+            spec::PresetIds::Numbered | spec::PresetIds::Unlisted => {
+                Preset::new(PresetId::Number(index as i32), name)
+            }
+        })
+        .collect();
+    let listed = loaded.presets(main);
+    assert_eq!(
+        listed,
+        want,
+        "{}: the presets listed, in the spec's order",
+        F::NAME
+    );
+    for preset in listed.iter().rev() {
+        assert!(
+            loaded.load_preset(main, &preset.id),
+            "{}: the plugin takes the listed preset {}",
+            F::NAME,
+            preset.name
+        );
+        assert_eq!(
+            loaded.current_preset(main),
+            Some(preset.id.clone()),
+            "{}: the current preset is the one loaded, {}",
+            F::NAME,
+            preset.name
+        );
     }
 }
 
@@ -399,7 +454,14 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
             F::NAME
         ),
     }
-    let mut ids: Vec<_> = controls.iter().map(|p| p.id().get()).collect();
+    // The program-change parameter VST3 lists is a control the host leaves in: it is the
+    // preset selector, and `presets_listed_in_order` is its witness.
+    let mut ids: Vec<_> = controls
+        .iter()
+        .map(|p| p.id())
+        .filter(|&id| id != spec::PROGRAM_ID)
+        .map(|id| id.get())
+        .collect();
     ids.sort_unstable();
     let want: Vec<_> = Param::ALL.iter().map(|(p, _)| p.id().get()).collect();
     assert_eq!(ids, want, "{}: the controls are the four", F::NAME);
@@ -414,6 +476,10 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
     fn check<F: Format, C: Control + ?Sized>(c: &C, when: &str) {
         let spec = F::SURFACE;
         for info in c.controls(main_thread()) {
+            // The preset selector of the program list, not a parameter of the plugin's sound.
+            if info.id() == spec::PROGRAM_ID {
+                continue;
+            }
             let (param, _) = *Param::ALL
                 .iter()
                 .find(|(p, _)| p.id() == info.id())
