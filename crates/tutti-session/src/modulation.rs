@@ -1625,7 +1625,7 @@ impl Mods<'_> {
     }
 
     /// The key the reconciler holds `target` under: what
-    /// `ModState::lane` and [`ModRefusal::target`] speak. A param's is
+    /// [`ModState::lane`] and [`ModRefusal::target`] speak. A param's is
     /// [`ParamRef::key`], a mix's [`MixRef::key`]; an edge's is minted on first
     /// use and kept.
     pub fn key(&mut self, target: impl Into<ModTarget>) -> TargetKey {

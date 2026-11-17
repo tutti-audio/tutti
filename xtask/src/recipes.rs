@@ -284,11 +284,6 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a configured thing is built by the one shape, bar the rows of xtask/building-baseline.txt and the gate's allow-list",
     ),
     (
-        "check-values",
-        "",
-        "a value is written with `set` on a target, bar the rows of xtask/values-baseline.txt",
-    ),
-    (
         "check-logging",
         "",
         "no `log` dependency, and no print macro outside a main, a test or an example",
@@ -681,7 +676,6 @@ impl Planner<'_> {
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
             "check-session-api" => self.out.push(Step::Gate(Gate::SessionApi)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
-            "check-values" => self.out.push(Step::Gate(Gate::Values)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
@@ -813,7 +807,7 @@ impl Planner<'_> {
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
-                    "check-session-api", "check-values",
+                    "check-session-api",
                 ] {
                     self.dep(d)?;
                 }
