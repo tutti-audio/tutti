@@ -284,7 +284,7 @@ struct Capture {
     /// live plugin holds unchanged (under an edit made in its editor, say)
     /// is not sent to the fork either, and the export renders what live
     /// playback plays.
-    delivered: Vec<(tutti_plugin_types::ParamId, f64)>,
+    delivered: Vec<(tutti_types::ParamId, f64)>,
     origin: IpcOrigin,
     /// The live instance's plugin id, which the fresh one must match.
     id: String,

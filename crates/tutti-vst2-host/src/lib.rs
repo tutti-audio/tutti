@@ -64,6 +64,7 @@
 //! ```rust,no_run
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");
 //! # let (_collector, work) = tutti_plugin_types::MainWork::new();
+//! use tutti_buffers::{InputOutput, Planes, PlanesMut};
 //! use tutti_plugin_types::{Loaded, MaxBlock, Prepare, SampleRate, Samples};
 //! use tutti_vst2_host::{Vst2ProcessContext, Vst2Loaded};
 //!
@@ -83,10 +84,16 @@
 //! let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
 //! let mut out_refs: Vec<&mut [f32]> =
 //!     outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+//! let mut block = InputOutput::new(
+//!     Samples(512),
+//!     Planes::new(&in_refs).unwrap(),
+//!     PlanesMut::new(&mut out_refs).unwrap(),
+//! )
+//! .unwrap();
 //!
 //! let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::SR_48K);
 //! let _midi_out: &tutti_vst2_host::MidiEventVec =
-//!     processor.process_f32(&in_refs, &mut out_refs, 512, &ctx);
+//!     processor.process_planes(&mut block, &ctx);
 //!
 //! // Ending it rejoins the halves.
 //! let Ok(_plugin) = Vst2Loaded::deactivate(main, processor, controller) else {
@@ -182,7 +189,7 @@
 //!
 //! ## Threading and real-time safety
 //!
-//! [`Vst2Processor::process_f32`] and [`Vst2Processor::process_f64`] do not
+//! [`Vst2Processor::process_planes`] does not
 //! allocate or lock, and are meant for the audio thread; a block the plugin cannot
 //! take (a 32-bit block for a 64-bit activation) is an error and renders nothing.
 //! Loading, the editor, and the activation and rejoin belong on the main thread, and take a `tutti_plugin_types::MainThreadMarker`
@@ -195,8 +202,7 @@
 //! [`Vst2Loaded`]: crate::Vst2Loaded
 //! [`Vst2Loaded::take_requests`]: tutti_plugin_types::Control::take_requests
 //! [`Vst2Processor`]: crate::Vst2Processor
-//! [`Vst2Processor::process_f32`]: crate::Vst2Processor::process_f32
-//! [`Vst2Processor::process_f64`]: crate::Vst2Processor::process_f64
+//! [`Vst2Processor::process_planes`]: crate::Vst2Processor::process_planes
 //! [`Vst2Controller`]: crate::Vst2Controller
 //! [`Vst2ProcessContext`]: crate::Vst2ProcessContext
 //! [`PluginInfo`]: crate::PluginInfo
@@ -211,7 +217,7 @@
 //! [`WindowHandle`]: crate::WindowHandle
 //! [`Samples`]: crate::Samples
 //! [`WireMidi`]: crate::WireMidi
-//! [`ParamId`]: tutti_plugin_types::ParamId
+//! [`ParamId`]: tutti_types::ParamId
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

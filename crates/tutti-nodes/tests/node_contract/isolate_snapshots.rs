@@ -26,12 +26,15 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, TransientShaperConfig, TransientShaperNode,
 };
-use tutti_nodes::{StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode};
+use tutti_nodes::{
+    PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
+    TiltFilterNode,
+};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, Semitones, StereoWidth, UnitParam,
+    Resonance, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -311,6 +314,24 @@ fn envelope_filter() {
 }
 
 #[test]
+fn transient_shaper() {
+    IsolateRow::new("TransientShaperNode (stereo)", || {
+        TransientShaperNode::from(
+            TransientShaperConfig::new(ChannelLayout::STEREO)
+                .attack(Db(6.0))
+                .sustain(Db(-3.0)),
+        )
+    })
+    .control("attack", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 0), 12.0))
+    })
+    .control("sustain", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 1), 9.0))
+    })
+    .check();
+}
+
+#[test]
 fn auto_pan() {
     IsolateRow::new("AutoPanNode", || {
         AutoPanNode::from(AutoPanConfig::new().depth(Depth::of(0.2)))
@@ -381,6 +402,32 @@ fn phaser() {
     })
     .control("feedback", |p| {
         assert!(p.param_set().set(UnitParam::Feedback, 0.7));
+    })
+    .check();
+}
+
+#[test]
+fn plate_reverb() {
+    IsolateRow::new("PlateReverbNode", || {
+        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(1.0)))
+    })
+    .control("decay", |p| {
+        assert!(p.param_set().set(UnitParam::Decay, 6.0))
+    })
+    .control("damping", |p| {
+        assert!(p.param_set().set(UnitParam::Damping, 0.8))
+    })
+    .control("predelay", |p| {
+        assert!(p.param_set().set(UnitParam::DelayTime, 0.01))
+    })
+    .control("bandwidth", |p| {
+        assert!(p.param_set().set(UnitParam::Cutoff, 500.0))
+    })
+    .control("modulation", |p| {
+        assert!(p.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .control("diffusion", |p| {
+        assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
     })
     .check();
 }

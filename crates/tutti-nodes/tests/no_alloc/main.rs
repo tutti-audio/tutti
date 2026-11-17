@@ -24,5 +24,6 @@ mod rt_no_alloc_modulate;
 mod rt_no_alloc_modulated_reverb;
 mod rt_no_alloc_modulation;
 mod rt_no_alloc_reverb;
+mod rt_no_alloc_transient;
 mod rt_no_alloc_utility;
 mod spatial_rt_no_alloc;

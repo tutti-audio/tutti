@@ -149,7 +149,7 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_types::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth,
-    Frame, Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones,
+    Frame, Hz, MaxBlock, Meter, MeterMap, ParamId, Q, SampleRate, Samples, Seconds, Semitones,
     TimeSignature,
 };
 
@@ -175,7 +175,7 @@ pub use tutti_plugin::Normalized;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId, StateUse};
+pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -259,12 +259,13 @@ pub mod nodes {
         InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
         ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        TiltFilterConfig, TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode,
-        VolumeOutOfRange,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerNode, VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -277,8 +278,8 @@ pub mod nodes {
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
-        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
-        TiltFilterSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet,
+        PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
 }
 

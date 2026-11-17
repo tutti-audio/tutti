@@ -21,8 +21,11 @@ use tutti_au_ffi::{Element, Scope};
 use tutti_au_host::offline::PushScratch;
 use tutti_au_host::types::{AudioUnitRenderActionFlags, K_AUDIO_UNIT_ERR_UNINITIALIZED};
 use tutti_au_host::{AuComponentInfo, AuController, AuError, AuLoaded, AuProcessor, StreamConfig};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{Control, Loaded, MaxBlock, PluginError, Prepare, RenderMode, SampleRate};
+use tutti_plugin_types::{
+    ChannelTable, Control, Loaded, MaxBlock, PluginError, Prepare, RenderMode, SampleRate,
+};
 use tutti_types::Samples;
 
 enum State {
@@ -252,7 +255,7 @@ impl Au {
         }
     }
 
-    /// See [`AuProcessor::render_f32`]; an uninitialized unit refuses.
+    /// See [`AuProcessor::render_planes`]; an uninitialized unit refuses.
     pub fn process(
         &mut self,
         input: &[&[f32]],
@@ -261,13 +264,13 @@ impl Au {
     ) -> tutti_au_host::Result<()> {
         match &self.state {
             State::Active { processor, .. } => {
-                processor.borrow_mut().render_f32(input, output, num_frames)
+                render(&mut processor.borrow_mut(), input, output, num_frames)
             }
             _ => Err(Self::uninitialized("Au::process")),
         }
     }
 
-    /// See [`AuProcessor::render_f64`]; an uninitialized unit refuses.
+    /// See [`AuProcessor::render_planes`]; an uninitialized unit refuses.
     pub fn process_f64(
         &mut self,
         input: &[&[f64]],
@@ -276,7 +279,7 @@ impl Au {
     ) -> tutti_au_host::Result<()> {
         match &self.state {
             State::Active { processor, .. } => {
-                processor.borrow_mut().render_f64(input, output, num_frames)
+                render(&mut processor.borrow_mut(), input, output, num_frames)
             }
             _ => Err(Self::uninitialized("Au::process_f64")),
         }
@@ -423,4 +426,35 @@ impl std::fmt::Debug for Au {
             .field("initialized", &self.is_initialized())
             .finish_non_exhaustive()
     }
+}
+
+/// One block of `num_frames` frames over the caller's channel slices, as the views
+/// [`AuProcessor::render_planes`] takes. The tables are on the stack: the no-alloc suites run it.
+fn render<S: Float>(
+    processor: &mut AuProcessor,
+    input: &[&[S]],
+    output: &mut [&mut [S]],
+    num_frames: u32,
+) -> tutti_au_host::Result<()> {
+    let n = num_frames as usize;
+    let ins: ChannelTable<&[S]> = input.iter().map(|c| &c[..n.min(c.len())]).collect();
+    let mut outs: ChannelTable<&mut [S]> = output
+        .iter_mut()
+        .map(|c| {
+            let len = n.min(c.len());
+            &mut c[..len]
+        })
+        .collect();
+    let input = if ins.is_empty() {
+        Planes::default()
+    } else {
+        Planes::new(&ins).expect("equal channels")
+    };
+    let output = if outs.is_empty() {
+        PlanesMut::default()
+    } else {
+        PlanesMut::new(&mut outs).expect("equal channels")
+    };
+    let mut io = InputOutput::new(Samples(n), input, output).expect("the channels hold the block");
+    processor.render_planes(&mut io)
 }

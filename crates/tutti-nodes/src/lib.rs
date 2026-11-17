@@ -30,6 +30,8 @@
 //!   `LimiterNode` (each a `KernelNode` over a bank of `tutti_dsp`: the compressor and the
 //!   gate read a typed `KeySource`, through an optional `KeyFilter`; the limiter reports its
 //!   lookahead as latency), and
+//!   `TransientShaperNode` (the attack and the sustain of a signal raised or lowered apart,
+//!   one linked gain from a fast and a slow envelope), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
 //!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
@@ -210,7 +212,7 @@
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
 //!   [`InterpolationMode`] and [`MaxDelay`].
 //! - Dynamics: [`CompressorNode`], [`GateNode`], [`LimiterNode`],
-//!   [`BrickwallLimiterNode`], and [`MultibandCompressorNode`] (2 to 4
+//!   [`BrickwallLimiterNode`], [`TransientShaperNode`], and [`MultibandCompressorNode`] (2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
@@ -322,13 +324,14 @@ pub use dynamics::{
     BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
     CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
     GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode,
-    MultibandControls,
+    MultibandControls, TransientShaperConfig, TransientShaperKernel, TransientShaperNode,
+    TransientShaperSet,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
     CompressorControls, DynamicEqControls, DynamicMode, GateControls, KeyFilter, KeySource,
-    LimiterControls, Lookahead, PeakDetection,
+    LimiterControls, Lookahead, PeakDetection, TransientControls,
 };
 
 // Utilities: polarity, mid/side and stereo width.
@@ -372,8 +375,12 @@ pub use reverb_freeverb::{FreeverbKernel, FreeverbNode, FreeverbSet};
 mod reverb_fdn;
 pub use reverb_fdn::{FdnKernel, FdnNode, FdnSet};
 
+// Dattorro's plate as a `KernelNode`.
+mod reverb_plate;
+pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
+
 // The banks' controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay};
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

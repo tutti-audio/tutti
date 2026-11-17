@@ -1,5 +1,6 @@
 //! Dynamics algorithms: the gain curves, the compressor, gate, limiter and brickwall over
-//! buffers views, the dynamic EQ band, the multiband compressor, and the limiter's lookahead ring.
+//! buffers views, the dynamic EQ band, the multiband compressor, the transient shaper, and the
+//! limiter's lookahead ring.
 
 mod brickwall;
 mod compressor;
@@ -12,6 +13,7 @@ mod limiter;
 mod lookahead;
 mod multiband;
 mod shared;
+mod transient;
 mod window;
 
 pub use brickwall::{BrickwallBank, BrickwallControls, BrickwallLanes};
@@ -32,3 +34,4 @@ pub use multiband::{
 };
 pub use shared::GAIN_GLIDE;
 pub(crate) use shared::{Follower, floored, key_levels};
+pub use transient::{TransientBank, TransientControls};

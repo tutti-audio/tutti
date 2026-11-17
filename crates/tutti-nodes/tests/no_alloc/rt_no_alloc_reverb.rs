@@ -9,10 +9,11 @@
 //! idle blocks and the wake), a lane driving the slow controls (the longest tail a block takes
 //! is designed from them) and a block of non-finite input run under it too.
 
+use tutti_graph::IntoNode;
 use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
-use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay};
+use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
 use tutti_types::{SampleRate, Seconds, UnitAddr, UnitParam};
 
 /// A bound a stable loop stays far under, wet gain at +24 dB and the longest decay included:
@@ -69,8 +70,16 @@ fn controls(freezable: bool) -> Vec<Control> {
 /// A node of `layout` through `BlockRig` on a noise-like alternating input: 32 warm-up
 /// blocks, then `blocks` under `assert_no_alloc`, `between(i)` run before each (the cells
 /// move). The output of every block is finite and under [`BOUND`].
-fn gate(layout: FdnLayout, blocks: usize, mut between: impl FnMut(&ParamSet, usize)) {
-    let node = FdnNode::live(layout, FdnControls::DEFAULT);
+fn gate(layout: FdnLayout, blocks: usize, between: impl FnMut(&ParamSet, usize)) {
+    gate_of(FdnNode::live(layout, FdnControls::DEFAULT), blocks, between);
+}
+
+/// [`gate`] for any node whose controls are a `ParamSet`.
+fn gate_of<N: IntoNode<Controls = ParamSet>>(
+    node: N,
+    blocks: usize,
+    mut between: impl FnMut(&ParamSet, usize),
+) {
     let (mut rig, set) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
         let c = c.into_samples_mut();
@@ -288,4 +297,90 @@ fn the_fdn_renders_non_finite_input_without_allocating() {
             }
         });
     }
+}
+
+/// The plate's process allocates nothing with every control at both ends of its range and
+/// moving each block (so a glide is in flight on all of them), and the output stays finite
+/// and bounded.
+#[test]
+fn the_plate_node_process_is_allocation_free_with_every_control_moving() {
+    let ends = [
+        (UnitParam::Decay, 0.05, 8.0),
+        (UnitParam::Damping, 0.0, 0.999),
+        (UnitParam::DelayTime, 0.0, 0.5),
+        (UnitParam::Cutoff, 10.0, 20_000.0),
+        (UnitParam::Depth, 0.0, 1.0),
+        (UnitParam::Diffusion, 0.0, 1.0),
+    ];
+    gate_of(
+        PlateReverbNode::from(PlateReverbConfig::new()),
+        1_000,
+        |set, i| {
+            for &(param, lo, hi) in &ends {
+                let at = if i.is_multiple_of(2) { lo } else { hi };
+                assert!(set.set(UnitAddr::first(param), at));
+            }
+        },
+    );
+}
+
+/// The plate parks and wakes without allocating (a short decay, so it parks well within the
+/// gate's 2,500 silent blocks), and renders a block of non-finite input and the blocks after it.
+#[test]
+fn the_plate_parks_wakes_and_renders_non_finite_input_without_allocating() {
+    let mut rig = Direct::new(
+        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(0.1))),
+        SampleRate::SR_48K,
+        64,
+    );
+    let set_input = |rig: &mut Direct<PlateReverbNode>, amplitude: f32| {
+        for c in rig.inputs_mut().iter_mut() {
+            for (i, x) in c.into_samples_mut().iter_mut().enumerate() {
+                *x = if i % 2 == 0 { amplitude } else { -amplitude };
+            }
+        }
+    };
+    let peak = |rig: &Direct<PlateReverbNode>| {
+        (0..2).fold(0.0f32, |m, c| {
+            rig.output()
+                .plane(c)
+                .samples()
+                .iter()
+                .fold(m, |m, s| m.max(s.abs()))
+        })
+    };
+    set_input(&mut rig, 0.5);
+    for _ in 0..32 {
+        rig.block();
+    }
+    assert!(peak(&rig) > 0.0, "the room rings before the gate");
+    set_input(&mut rig, 0.0);
+    let mut idle = 0;
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..2_500 {
+            idle += usize::from(rig.block() == Status::Idle);
+        }
+    });
+    assert!(
+        idle > 1_000,
+        "it parks and stays parked: {idle} idle blocks"
+    );
+    set_input(&mut rig, 0.5);
+    let mut woke = 0.0f32;
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..100 {
+            rig.block();
+            woke = woke.max(peak(&rig));
+        }
+    });
+    assert!(woke > 0.0 && woke < BOUND, "it wakes: {woke}");
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
+        (c[0], c[1], c[2]) = (f32::NAN, f32::INFINITY, f32::NEG_INFINITY);
+    }
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..200 {
+            rig.block();
+        }
+    });
 }

@@ -401,6 +401,7 @@ impl Drop for ClapLoaded {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_types::ParamId;
 
     /// **Activation reserves the pool budget, not parameters × room**: for
     /// 2 000 and 16 384 parameters at 512- and 4096-frame blocks, the input
@@ -473,7 +474,7 @@ mod tests {
         let room = ParameterQueue::chunk_room(FRAMES);
         let mut chunk = ParameterChanges::reserved_bridged(PARAMS as usize, room);
         for id in 0..PARAMS {
-            assert!(chunk.open_queue(id.into()));
+            assert!(chunk.open_queue(ParamId::new(id)));
         }
         for k in 0..room {
             for i in 0..PARAMS as usize {
