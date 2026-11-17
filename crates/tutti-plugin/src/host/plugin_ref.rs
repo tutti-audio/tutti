@@ -8,7 +8,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use tutti_plugin_db::{PluginEntry, format_from_path};
+use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::{Load, PluginFormat};
 
 /// One plugin: the file it is in, its format, and its id in that file.
@@ -37,7 +37,7 @@ impl PluginRef {
     #[must_use]
     pub fn file(path: impl Into<PathBuf>) -> Option<Self> {
         let path = path.into();
-        let format = format_from_path(&path)?;
+        let format = PluginFormat::from_path(&path)?;
         Some(Self {
             path,
             format,

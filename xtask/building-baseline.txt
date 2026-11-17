@@ -236,7 +236,6 @@ tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneCont
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_mode
 tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_meter
-tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_mode
 tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_volume
 tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency

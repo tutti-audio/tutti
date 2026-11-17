@@ -13,7 +13,7 @@ use tutti_types::Samples;
 /// to display. A source inside the graph needs none of it: the compiler
 /// aligns it.
 ///
-/// A plain lock, not an [`ArcLend`](tutti_rt::ArcLend): **no audio thread
+/// A plain lock, not a [`Publisher`](tutti_rt::Publisher): **no audio thread
 /// reads it.** The writer is the session's commit and the reader is a
 /// host, so a reader registered per thread and a retirement
 /// list would buy nothing. Each call holds the lock for one copy of the

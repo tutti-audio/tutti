@@ -143,7 +143,7 @@
 //! | a multi-field struct, or anything heap-backed | a command queue: flatten the struct into scalar fields, allocate sender-side, drain in the callback |
 //!
 //! A plain `AtomicBool` field is not enough: `Clone` copies the atomic rather
-//! than sharing it, so writes to one clone never reach another. `ArcLend` is
+//! than sharing it, so writes to one clone never reach another. `Publisher` is
 //! for moving a *deallocation* off the audio thread (routing tables, delay
 //! vectors), not for sharing a small `Copy` value.
 //!
@@ -256,7 +256,9 @@ pub use tutti_types::{
 // deliberately outside this workspace.
 
 mod click;
-pub use click::{ClickNode, ClickSettings, ClickState, MetronomeMode, VolumeOutOfRange};
+pub use click::{
+    ClickConfig, ClickNode, ClickSettings, ClickState, MetronomeMode, VolumeOutOfRange,
+};
 
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
