@@ -20,8 +20,8 @@
 //! use std::time::Instant;
 //! use tutti_midi_device::{EndpointName, ProductInstanceId};
 //! use tutti_midi_network::{
-//!     Client, Credentials, NetworkEndpoint, EndpointIdentity, Event, Host, HostConfig, SessionConfig,
-//!     SessionState,
+//!     Client, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
+//!     SessionConfig, SessionState,
 //! };
 //!
 //! let identity = |name: &str, id: &str| EndpointIdentity {

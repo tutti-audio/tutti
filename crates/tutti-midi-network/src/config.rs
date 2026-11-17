@@ -141,7 +141,7 @@ impl SessionConfig {
 
     /// How long a missing sequence number is waited for before a Retransmit
     /// Request asks for it (the specification suggests 10 ms), which lets
-    /// an out-of-order command arrive first. Held to 1 ms to an hour.
+    /// an out-of-order command arrive first. Saturates to 1 ms..1 h.
     #[must_use]
     pub fn with_reorder_wait(mut self, wait: Duration) -> Self {
         self.reorder_wait = wait.clamp(TIMER_MIN, TIMER_MAX);
@@ -157,8 +157,7 @@ impl SessionConfig {
         self
     }
 
-    /// How long a peer is silent before a Ping is sent. Held to 1 ms to an
-    /// hour.
+    /// How long a peer is silent before a Ping is sent. Saturates to 1 ms..1 h.
     #[must_use]
     pub fn with_ping_interval(mut self, interval: Duration) -> Self {
         self.ping_interval = interval.clamp(TIMER_MIN, TIMER_MAX);
@@ -166,7 +165,7 @@ impl SessionConfig {
     }
 
     /// How long a peer is silent before the Session is ended with a Bye for
-    /// timeout. Held to 1 ms to an hour.
+    /// timeout. Saturates to 1 ms..1 h.
     #[must_use]
     pub fn with_liveness_timeout(mut self, timeout: Duration) -> Self {
         self.liveness_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
@@ -182,7 +181,7 @@ impl SessionConfig {
     }
 
     /// How long a repeated command is repeated before the endpoint gives up
-    /// and ends the Session with a Bye. Held to 1 ms to an hour.
+    /// and ends the Session with a Bye. Saturates to 1 ms..1 h.
     #[must_use]
     pub fn with_command_timeout(mut self, timeout: Duration) -> Self {
         self.command_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
@@ -191,7 +190,7 @@ impl SessionConfig {
 
     /// How long a Client waits for an Invitation Reply: Accepted after the
     /// Host said it was Pending (a user may be deciding), and how long a Host
-    /// holds a challenge or a confirmation open. Held to 1 ms to an hour.
+    /// holds a challenge or a confirmation open. Saturates to 1 ms..1 h.
     #[must_use]
     pub fn with_pending_timeout(mut self, timeout: Duration) -> Self {
         self.pending_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);

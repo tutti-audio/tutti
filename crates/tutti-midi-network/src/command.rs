@@ -310,7 +310,9 @@ pub struct Nak {
     pub reason: NakReason,
     /// The header of the command that is refused.
     pub refused: Header,
-    /// Words for the user; may be empty.
+    /// Words for the user; may be empty. Text a peer sent that is not UTF-8 is
+    /// read up to the last whole character before the bad byte, and the NAK is
+    /// still read.
     pub text: NakText,
 }
 
@@ -407,7 +409,9 @@ impl ByeReason {
 pub struct Bye {
     /// Why.
     pub reason: ByeReason,
-    /// Words for the user; may be empty.
+    /// Words for the user; may be empty. Text a peer sent that is not UTF-8 is
+    /// read up to the last whole character before the bad byte, and the Bye
+    /// still ends the Session.
     pub text: ByeText,
 }
 
@@ -607,8 +611,8 @@ pub enum ParseError {
     /// A text is empty or too long for its field, or holds a NUL.
     #[error("a text is not valid for its field")]
     Text(#[source] TextError),
-    /// The nonce is not ASCII.
-    #[error("the nonce is not ASCII")]
+    /// A received nonce is not ASCII.
+    #[error("a received nonce is not ASCII")]
     Nonce,
     /// An enumerated field holds a reserved value that has no meaning to act
     /// on.
@@ -811,6 +815,7 @@ impl Command {
 
     /// The command a header and its payload make. `payload` is the bytes that
     /// follow the header, as many as its payload length counts in words.
+    /// The text of a Bye or NAK is read leniently (see [`Bye::text`]).
     ///
     /// # Errors
     ///
@@ -864,7 +869,7 @@ impl Command {
                 let (nonce, rest) = payload.split_first_chunk::<16>().ok_or_else(bad_length)?;
                 let (name, id) =
                     split_identity(usize::from(header.data1()), rest).ok_or_else(bad_length)?;
-                let nonce = Nonce::new(*nonce).ok_or(ParseError::Nonce)?;
+                let nonce = Nonce::from_wire(*nonce).ok_or(ParseError::Nonce)?;
                 let identity = read_identity(name, id)?;
                 if header.code() == code::AUTH_REQUIRED {
                     let state = match header.data2() {

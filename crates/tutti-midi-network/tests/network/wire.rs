@@ -513,6 +513,42 @@ fn a_non_ascii_nonce_is_refused() {
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
 }
 
+/// Spec: m2-124/6.7 (the sender's nonce is ASCII 32-126; a received one is
+/// only hashed, so any ASCII is read)
+#[test]
+fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
+    let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
+        state: AuthState::First,
+        nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
+        identity: identity("A", "B"),
+    }));
+    bytes[4] = 0x01;
+    let Ok(Command::AuthRequired(challenge)) = one(&bytes) else {
+        panic!("a nonce holding 0x01 is read")
+    };
+    assert_eq!(challenge.nonce.get()[0], 0x01);
+    let mut raw = *b"0123456789abcdef";
+    raw[0] = 0x01;
+    assert!(Nonce::new(raw).is_none(), "this crate issues only 32..=126");
+}
+
+#[test]
+fn a_payload_of_the_wrong_length_is_a_length_error_from_command_parse() {
+    // A Ping's header counts one payload word.
+    let header = Header::from_word(0x2001_0000);
+    let length = ParseError::Length {
+        code: 0x20,
+        words: 1,
+    };
+    assert_eq!(
+        Command::parse(header, &[0, 0, 0, 7]),
+        Ok(Command::Ping(PingId::new(7)))
+    );
+    assert_eq!(Command::parse(header, &[0, 0, 7]), Err(length));
+    assert_eq!(Command::parse(header, &[0, 0, 0, 0, 7]), Err(length));
+    assert_eq!(Command::parse(header, &[]), Err(length));
+}
+
 /// Spec: m2-124/7.1#3
 #[test]
 fn ump_data_over_sixty_four_words_is_refused() {

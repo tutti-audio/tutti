@@ -1092,14 +1092,28 @@ fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
     let total = 1 + batches * per_batch;
     assert!(total > MAX_QUEUED_EVENTS);
     assert_eq!(client.events_lost(), (total - MAX_QUEUED_EVENTS) as u64);
+    let lost = client.events_lost();
+    // A Closed at a full queue is kept and is not a loss.
+    host.close(now, client_addr(), ByeReason::PowerDown);
+    deliver(&mut host, &mut client, now);
+    assert_eq!(client.events_lost(), lost);
     let mut held = 0;
     let mut first = None;
+    let mut last = None;
     while let Some(event) = client.poll_event() {
-        first.get_or_insert(event);
+        first.get_or_insert_with(|| event.clone());
+        last = Some(event);
         held += 1;
     }
-    assert_eq!(held, MAX_QUEUED_EVENTS);
+    assert_eq!(held, MAX_QUEUED_EVENTS + 1);
     assert!(matches!(first, Some(Event::Established { .. })));
+    assert!(matches!(
+        last,
+        Some(Event::Closed {
+            reason: ByeReason::PowerDown,
+            ..
+        })
+    ));
 }
 
 // ---- Idle periods ----

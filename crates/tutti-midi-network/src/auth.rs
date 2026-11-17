@@ -25,15 +25,23 @@ pub struct Nonce([u8; 16]);
 impl Nonce {
     /// The nonce with these bytes, or `None` when one is outside `32..=126`.
     ///
-    /// The wire reader uses this check too: the specification requires the
-    /// range of the sender (M2-124 section 6.7) and asks a receiver for no
-    /// leniency, so a peer's nonce outside it is a malformed command.
+    /// The nonces this crate issues follow the specification's range for a
+    /// sender (M2-124 section 6.7). A nonce received from a peer is read
+    /// leniently: any ASCII is taken.
     #[must_use]
     pub fn new(bytes: [u8; 16]) -> Option<Self> {
         bytes
             .iter()
             .all(|b| (PRINTABLE_FIRST..PRINTABLE_FIRST + PRINTABLE_COUNT).contains(b))
             .then_some(Self(bytes))
+    }
+
+    /// A nonce a peer sent: any ASCII bytes. The range is a requirement on the
+    /// sender, and a received nonce is only hashed with the secret, so reading
+    /// one outside it costs nothing; the Client answers with the digest of the
+    /// bytes it was given.
+    pub(crate) fn from_wire(bytes: [u8; 16]) -> Option<Self> {
+        bytes.is_ascii().then_some(Self(bytes))
     }
 
     /// A nonce drawn from blocks of random bytes: each byte below 190 picks
