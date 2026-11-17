@@ -14,8 +14,10 @@
 //! node without a lock.
 //!
 //! - **Filters** — `SvfFilterNode`, `LadderFilterNode` (both any width, one
-//!   coefficient solve shared across the channels), `EqBandNode`, and `CutFilterNode`, a
-//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave.
+//!   coefficient solve shared across the channels), `EqBandNode`, `CutFilterNode`, a
+//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave,
+//!   `BellFilterNode`, a peaking equalizer matched to the analog bell up to Nyquist, and
+//!   `TiltFilterNode`, a first-order tilt about a pivot.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
@@ -195,7 +197,8 @@
 //! ## Items
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
-//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]); the coefficient solvers
+//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
+//!   [`TiltFilterNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
 //!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
 //!   is `tutti_buffers::Float` with [`Lanes`].
@@ -295,9 +298,11 @@ pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
+    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
     CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
-    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, LadderFilterNode, LadderKernel,
-    LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
+    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, EqControls, EqKernel,
+    LadderFilterNode, LadderKernel, LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
+    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
