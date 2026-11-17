@@ -25,14 +25,12 @@
 //! Its fork is a transform in the mode the controls hold when it is made, with
 //! no state of the notes: an offline render starts its clip from the top.
 
-use std::sync::Arc;
-
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
     Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{MpeMode, Translator};
-use tutti_rt::{ArcLend, Counter, CounterWriter, Reader, counter};
+use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
 
 use super::ingest_node::{MIDI_INPUT_EVENT_CAPACITY, Staging};
@@ -59,9 +57,11 @@ pub struct MpeTransformNode {
     mpe: MpeIngest,
     /// The mode in force.
     mode: MpeMode,
-    /// What the host asked for, read once per block. The reader owns its cell
-    /// (`Reader::cell`), which the controls publish to.
+    /// What the host asked for, read once per block.
     request: Reader<MpeMode>,
+    /// The cell `request` reads, which the controls publish to; the node never
+    /// touches it.
+    request_cell: Publisher<MpeMode>,
     /// What the block sends, which may outnumber what it read.
     out: Box<[UmpAt]>,
     /// The events a block translates and the port holds.
@@ -103,13 +103,14 @@ impl MpeTransformNode {
     /// A transform that starts in `mode`.
     #[must_use]
     pub fn new(mode: MpeMode) -> Self {
-        let cell = Arc::new(ArcLend::new(mode));
+        let cell = Publisher::new(mode);
         let (dropped, dropped_reader) = counter();
         Self {
             translator: Translator::default(),
             mpe: MpeIngest::new(mode),
             mode,
             request: cell.reader(),
+            request_cell: cell,
             out: vec![BLANK; note_off_room(MIDI_INPUT_EVENT_CAPACITY)].into_boxed_slice(),
             capacity: MIDI_INPUT_EVENT_CAPACITY,
             active: 0,
@@ -124,8 +125,8 @@ impl MpeTransformNode {
 #[derive(Clone, Debug)]
 pub struct MpeTransformControls {
     /// What the node reads; the controls publish to it and read it back with
-    /// `ArcLend::current`.
-    request: Arc<ArcLend<MpeMode>>,
+    /// `Publisher::current`.
+    request: Publisher<MpeMode>,
     dropped: Counter<Losses>,
 }
 
@@ -245,7 +246,7 @@ impl Node for MpeTransformNode {
 
 /// A [`MpeTransformNode`]'s fork: a transform in the mode the controls hold.
 struct ModeFork {
-    mode: Arc<ArcLend<MpeMode>>,
+    mode: Publisher<MpeMode>,
 }
 
 impl ForkSource for ModeFork {
@@ -260,9 +261,9 @@ impl IntoNode for MpeTransformNode {
     type Controls = MpeTransformControls;
 
     fn into_parts(self) -> NodeParts<MpeTransformControls> {
-        let request = Arc::clone(self.request.cell());
+        let request = self.request_cell.clone();
         let controls = MpeTransformControls {
-            request: Arc::clone(&request),
+            request: request.clone(),
             dropped: self.dropped_reader.clone(),
         };
         NodeParts {

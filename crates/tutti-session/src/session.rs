@@ -68,7 +68,7 @@ pub enum Phase {
     /// and the device's own events (feature `device`).
     Poll,
     /// Frees, here, what the audio thread let go of in every cell the
-    /// session publishes to (`ArcLend::reclaim`): the project meter and the
+    /// session publishes to (`Publisher::reclaim`): the project meter and the
     /// plugin slots following it, the modulation
     /// lanes' programs, the session's clips, the hardware input's MPE
     /// request and port set. A value a block still held when it was

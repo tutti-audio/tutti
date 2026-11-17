@@ -13,7 +13,7 @@ use super::TempoReader;
 use super::state::AtomicBpm;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 use tutti_tempo::TempoMap;
 
 use atomic_float::AtomicF64;
@@ -30,7 +30,7 @@ pub struct TransportSettings {
     /// and lent to the engine's clock once per block through the one `Reader`
     /// its [`TransportAudio`](super::TransportAudio) registers. The session's
     /// `Reclaim` phase sweeps it ([`reclaim_tempo`](Self::reclaim_tempo)).
-    pub(crate) tempo_map: Arc<ArcLend<TempoMap>>,
+    pub(crate) tempo_map: Publisher<TempoMap>,
     /// Moves on after every publish to [`tempo_map`](Self::tempo_map), which is
     /// stored first: a clock that sees a new count lends the new map or a later
     /// one, never an older one.
@@ -103,7 +103,7 @@ impl TransportSettings {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            tempo_map: Arc::new(ArcLend::new(Self::default_map())),
+            tempo_map: Publisher::new(Self::default_map()),
             map_generation: Arc::new(AtomicU64::new(0)),
             beat: Arc::new(AtomicF64::new(0.0)),
             segment_generation: Arc::new(AtomicU64::new(0)),
@@ -154,7 +154,7 @@ impl TransportSettings {
     }
 
     /// The map as published now. Control thread: it takes the cell's lock and
-    /// an owning handle, as [`ArcLend::current`] does.
+    /// an owning handle, as [`Publisher::current`] does.
     #[must_use]
     pub fn tempo_map(&self) -> Arc<TempoMap> {
         self.tempo_map.current()
