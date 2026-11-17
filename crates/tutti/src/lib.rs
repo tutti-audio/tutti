@@ -698,25 +698,25 @@ pub mod midi {
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
-        BendValue, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, ChordType,
-        ControlValue, Data128, DeltaTicks, Direction as BlockDirection, DiscoveryFilter,
-        EndpointInfoNotification, Field, FirstGroup, Flex, FlexAddress, FlexTextKind,
-        FlexTimeSignature, Form, Framed, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo,
-        FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
-        MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
-        MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
-        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
-        SharpsFlats, Stream, SyllableError, Sysex7Packet, Sysex7Packets, Sysex8Packet,
-        Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef,
-        SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
+        BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
+        ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
+        Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
+        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+        KeySignature, Lane, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
+        Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
+        NotChunkSize, NotManufacturerId, NotSharpsFlats, NoteKey, NoteKeyEvent, OutOfRange,
+        PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
+        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet,
+        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
+        SysexMessage, SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion,
+        Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
         MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
-    pub use tutti_ump::{Join, Span, Spans};
+    pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{
         LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
     };

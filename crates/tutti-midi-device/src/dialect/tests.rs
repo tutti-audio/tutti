@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use tutti_ump::{
-    Direction, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, MidiChannel, Protocol,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, MidiChannel, Protocol,
     StreamConfig,
 };
 
@@ -24,7 +24,7 @@ fn block_id() -> FunctionBlockId {
     FunctionBlockId::new(0).unwrap()
 }
 
-fn endpoint(protocol: Protocol, direction: Direction, active: bool) -> Endpoint {
+fn endpoint(protocol: Protocol, direction: BlockDirection, active: bool) -> Endpoint {
     Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
@@ -64,7 +64,7 @@ fn endpoint_with(protocol: Protocol, port: Midi1Port, rx_jr: bool) -> Endpoint {
     .block(
         FunctionBlock::builder(
             block_id(),
-            Direction::Bidirectional,
+            BlockDirection::Bidirectional,
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
@@ -123,7 +123,7 @@ fn jr_timestamps_are_prepended_when_the_endpoint_receives_them() {
 }
 
 fn speaking(protocol: Protocol) -> Endpoint {
-    endpoint(protocol, Direction::Bidirectional, true)
+    endpoint(protocol, BlockDirection::Bidirectional, true)
 }
 
 /// The target at `address`; only a Channel names a count (§7.10 note).
@@ -314,7 +314,7 @@ fn a_disabled_mpe_profile_is_no_zone() {
 /// Spec: m2-104/7.1.8#4
 #[test]
 fn a_block_that_is_unknown_inactive_or_transmit_only_is_no_dialect() {
-    // M2-104 §7.1.8: the Active flag and the Direction of a Function Block.
+    // M2-104 §7.1.8: the Active flag and the BlockDirection of a Function Block.
     let none = table(&[]);
     let other = FunctionBlockId::new(5).unwrap();
     assert_eq!(
@@ -323,14 +323,23 @@ fn a_block_that_is_unknown_inactive_or_transmit_only_is_no_dialect() {
     );
     assert_eq!(
         of(
-            &endpoint(Protocol::Midi2, Direction::Bidirectional, false),
+            &endpoint(Protocol::Midi2, BlockDirection::Bidirectional, false),
             &none
         ),
         Err(NoDialect::Inactive(block_id()))
     );
     assert_eq!(
-        of(&endpoint(Protocol::Midi2, Direction::Output, true), &none),
+        of(
+            &endpoint(Protocol::Midi2, BlockDirection::Output, true),
+            &none
+        ),
         Err(NoDialect::NotReceiving(block_id()))
     );
-    assert!(of(&endpoint(Protocol::Midi2, Direction::Input, true), &none).is_ok());
+    assert!(
+        of(
+            &endpoint(Protocol::Midi2, BlockDirection::Input, true),
+            &none
+        )
+        .is_ok()
+    );
 }

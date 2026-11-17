@@ -3,7 +3,9 @@ use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{MpeZoneConfig, MpeZones, widen_bend, widen_value, widen_velocity};
-use tutti_ump::{Address, CCNumber, KeyEvent, Message, MpeChannels, MpeZoneSpan, U7, U14, Voice2};
+use tutti_ump::{
+    Address, CCNumber, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent, U7, U14, Voice2,
+};
 
 /// What the ingest sends, collected: the tests read it as a list.
 trait Collected {
@@ -76,7 +78,7 @@ fn member_channel_bend_becomes_per_note_pitch_bend() {
         ingest
             .translated(&note_on(2, 60, 100))
             .next()
-            .map(|(_, ump)| matches!(ump.key_event(), Some(KeyEvent::On(_))))
+            .map(|(_, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::On(_))))
             .unwrap()
     );
     // Channel bend on ch2 → per-note bend on note 60.
@@ -1307,7 +1309,10 @@ fn what_a_member_was_told_goes_ahead_of_its_note_on() {
     assert_cv2!(out[1], _, Voice2::PolyPressure { note, .. } if note.get() == 60);
     assert_cv2!(out[2], _, Voice2::AssignablePerNote { note, controller: 74, .. }
         if note.get() == 60);
-    assert!(matches!(out[3].1.key_event(), Some(KeyEvent::On(_))));
+    assert!(matches!(
+        out[3].1.note_key_event(),
+        Some(NoteKeyEvent::On(_))
+    ));
 }
 
 /// **MPE 1.1's Configuration Message has no part in the Profile** (M2-120
@@ -1387,7 +1392,7 @@ fn a_note_on_the_manager_channel_passes() {
         .translated(&note_on(0, 60, 100))
         .next()
         .expect("passes");
-    assert!(matches!(out.1.key_event(), Some(KeyEvent::On(_))));
+    assert!(matches!(out.1.note_key_event(), Some(NoteKeyEvent::On(_))));
 }
 
 /// **A Manager Channel's zone-wide message is every channel of its zone's**

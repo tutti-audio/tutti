@@ -20,7 +20,7 @@ use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 use crate::common;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_ump::{Address, BendValue, ControlValue, Flex, KeyEvent, Message, System, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, Message, NoteKeyEvent, System, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -189,7 +189,7 @@ fn an_epoch_change_processes_without_allocating() {
             let n = out.poll_into(&mut drain);
             offs += drain[..n]
                 .iter()
-                .filter(|(_, ump)| matches!(ump.key_event(), Some(KeyEvent::Off(_))))
+                .filter(|(_, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))))
                 .count();
         }
     });
@@ -586,9 +586,9 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
         exec.process(512, &t, &[], &mut []);
         let n = out.poll_into(&mut drain);
         for e in &drain[..n] {
-            match e.1.key_event() {
-                Some(tutti_ump::KeyEvent::On(_)) => sounding += 1,
-                Some(tutti_ump::KeyEvent::Off(_)) => sounding -= 1,
+            match e.1.note_key_event() {
+                Some(tutti_ump::NoteKeyEvent::On(_)) => sounding += 1,
+                Some(tutti_ump::NoteKeyEvent::Off(_)) => sounding -= 1,
                 _ => {}
             }
         }

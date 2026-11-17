@@ -35,7 +35,7 @@
 mod controllers;
 
 pub(crate) use controllers::Controllers;
-use tutti_ump::{KeyBitset, KeyEvent, MidiGroup, Ump};
+use tutti_ump::{KeyBitset, MidiGroup, NoteKeyEvent, Ump};
 
 /// The notes and controllers a source has started and not ended.
 pub(crate) struct HeldState {
@@ -79,14 +79,14 @@ impl HeldState {
     /// Anything else changes nothing.
     pub fn observe(&mut self, ump: impl Into<Ump>) {
         let ump = ump.into();
-        match ump.key_event() {
-            Some(KeyEvent::On(key)) => {
+        match ump.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => {
                 self.keys.insert(key);
             }
-            Some(KeyEvent::Off(key)) => {
+            Some(NoteKeyEvent::Off(key)) => {
                 self.keys.remove(key);
             }
-            Some(KeyEvent::Sustain { .. }) | None => {}
+            Some(NoteKeyEvent::Sustain { .. }) | None => {}
         }
         self.controllers.observe(ump);
     }

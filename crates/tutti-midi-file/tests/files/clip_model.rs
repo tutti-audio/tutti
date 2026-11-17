@@ -1182,8 +1182,8 @@ fn a_written_clip_stamps_every_message_and_ends_the_header_at_start_of_clip() {
     }
     let header = &packets[..s - 1];
     assert!(header.contains(&program_change()) && header.contains(&sysex));
-    assert!(header.iter().all(|p| p.key_event().is_none()));
-    assert!(packets[s..].iter().any(|p| p.key_event().is_some()));
+    assert!(header.iter().all(|p| p.note_key_event().is_none()));
+    assert!(packets[s..].iter().any(|p| p.note_key_event().is_some()));
 }
 
 /// Events that follow one Delta Clockstamp are at one tick and keep the order

@@ -1,4 +1,5 @@
 use super::*;
+use crate::Complex32;
 
 fn frame(n: usize) -> Vec<f32> {
     (0..n)
@@ -29,7 +30,7 @@ fn the_transform_is_the_dft_for_every_size() {
         let fft = RealFft::new(n);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&frame, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
         for (k, bin) in bins.iter().enumerate() {
             let (re, im) = dft(&frame, k);
             assert!(
@@ -43,7 +44,7 @@ fn the_transform_is_the_dft_for_every_size() {
         }
 
         let mut back = vec![0.0f32; n];
-        fft.inverse(&mut bins, &mut back, &mut scratch);
+        fft.inverse(&mut bins, MonoMut::new(&mut back), &mut scratch);
         for (i, (&got, &want)) in back.iter().zip(&frame).enumerate() {
             assert!(
                 (got / n as f32 - want).abs() < 1e-5,
@@ -62,7 +63,7 @@ fn larger_odd_sizes_match_the_dft() {
         let fft = RealFft::new(n);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&frame, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
         for (k, bin) in bins.iter().enumerate() {
             let (re, im) = dft(&frame, k);
             assert!(
@@ -89,7 +90,7 @@ fn the_inverse_ignores_dc_and_nyquist_imaginary_parts() {
                 bins[n / 2] = Complex32::new(0.5, im_ny);
             }
             let mut out = vec![0.0f32; n];
-            fft.inverse(&mut bins, &mut out, &mut scratch);
+            fft.inverse(&mut bins, MonoMut::new(&mut out), &mut scratch);
             out
         };
         let clean = tone(0.0, 0.0);
@@ -114,7 +115,7 @@ fn the_scratch_covers_both_directions() {
     // there takes tens of seconds and adds no new scratch rule.
     let top = if cfg!(miri) { 10 } else { 15 };
     for n in (1..=33usize).chain((6..=top).map(|p| 1usize << p)) {
-        let fft = RealFft::new(n);
+        let fft = RealFft::<f32>::new(n);
         assert!(fft.scratch_len() >= fft.forward_scratch_len(), "size {n}");
         assert!(fft.scratch_len() >= fft.inverse_scratch_len(), "size {n}");
         assert_eq!(fft.new_scratch().len(), fft.scratch_len());
@@ -131,7 +132,7 @@ fn an_impulse_has_a_flat_spectrum() {
         let fft = RealFft::new(n);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&frame, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
         for (k, bin) in bins.iter().enumerate() {
             assert!(
                 (bin.re - 1.0).abs() < 1e-6 && bin.im.abs() < 1e-6,
@@ -139,7 +140,7 @@ fn an_impulse_has_a_flat_spectrum() {
             );
         }
         let mut back = vec![0.0f32; n];
-        fft.inverse(&mut bins, &mut back, &mut scratch);
+        fft.inverse(&mut bins, MonoMut::new(&mut back), &mut scratch);
         assert!((back[0] / n as f32 - 1.0).abs() < 1e-6, "size {n}");
         assert!(back[1..].iter().all(|x| (x / n as f32).abs() < 1e-6));
     }
@@ -156,7 +157,7 @@ fn a_bin_centred_cosine_lands_in_its_bin() {
         let fft = RealFft::new(n);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&frame, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
         let tol = 1e-3 * n as f32 / 2.0;
         for (b, bin) in bins.iter().enumerate() {
             let want = if b == k { n as f32 / 2.0 } else { 0.0 };
@@ -179,7 +180,7 @@ fn the_transform_preserves_energy() {
         let fft = RealFft::new(n);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&frame, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
         let time: f64 = frame.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
         let last = bins.len() - 1;
         let freq: f64 = bins
@@ -199,5 +200,34 @@ fn the_transform_preserves_energy() {
             (time - freq).abs() < 1e-4 * time,
             "size {n}: {time} vs {freq}"
         );
+    }
+}
+
+/// At `f64` a bin-centred cosine of amplitude 1 puts `size / 2` in bin `k`
+/// and zero elsewhere, to far below `f32` precision, for an even and an odd
+/// size.
+#[test]
+fn an_f64_cosine_lands_in_its_bin_at_f64_precision() {
+    for n in [64usize, 63] {
+        let k = 5;
+        let frame: Vec<f64> = (0..n)
+            .map(|t| (2.0 * PI * (k * t) as f64 / n as f64).cos())
+            .collect();
+        let fft = RealFft::<f64>::new(n);
+        let mut scratch = fft.new_scratch();
+        let mut bins = vec![Complex::new(0.0, 0.0); fft.bins()];
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
+        for (b, bin) in bins.iter().enumerate() {
+            let want = if b == k { n as f64 / 2.0 } else { 0.0 };
+            assert!(
+                (bin.re - want).abs() < 1e-11 && bin.im.abs() < 1e-11,
+                "size {n} bin {b}: {bin} != {want}"
+            );
+        }
+        let mut back = vec![0.0f64; n];
+        fft.inverse(&mut bins, MonoMut::new(&mut back), &mut scratch);
+        for (i, (&got, &want)) in back.iter().zip(&frame).enumerate() {
+            assert!((got / n as f64 - want).abs() < 1e-12, "size {n} sample {i}");
+        }
     }
 }

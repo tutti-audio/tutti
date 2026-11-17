@@ -359,19 +359,19 @@ impl<S: Sample> OnsetMeter<S> {
             let value = match plan.function {
                 DetectionFunction::Energy => energy(samples),
                 DetectionFunction::SpectralFlux => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = spectral_flux(previous, spectrum);
                     store_magnitudes(previous, spectrum);
                     v
                 }
                 DetectionFunction::HighFrequencyContent => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = high_frequency_content(spectrum) * 0.01;
                     store_magnitudes(previous, spectrum);
                     v
                 }
                 DetectionFunction::ComplexDomain => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = complex_domain_deviation(previous, spectrum);
                     store_magnitudes(previous, spectrum);
                     v
