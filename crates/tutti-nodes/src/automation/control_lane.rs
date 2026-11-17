@@ -13,7 +13,7 @@ use tutti_graph::{
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
 };
-use tutti_rt::{ArcLend, PackedAtomic, Reader};
+use tutti_rt::{PackedAtomic, Publisher, Reader};
 use tutti_types::{
     AtomicF32, Beat, Frame, ParamAddr, ParamCell, SamplePosition, Samples, Tail, UnitAddr,
     UnitParam,
@@ -58,12 +58,12 @@ struct Published {
 struct Shared {
     /// What the lane reads once per block, through the reader the node
     /// registered on it when it was built.
-    program: Arc<ArcLend<Published>>,
+    program: Publisher<Published>,
     /// The generation of the last publish, handed out by `fetch_add` so two
     /// racing publishes never share one (the lane compares generations for
     /// inequality only, so their order in the cell does not matter). The
     /// program itself is the cell's: the fork and `program()` read
-    /// `ArcLend::current` (a `Loan` must not leave the block).
+    /// `Publisher::current` (a `Loan` must not leave the block).
     generation: AtomicU64,
     /// Set by [`LaneControls::resync`]: the next block sends at frame 0.
     resync: AtomicBool,
@@ -361,10 +361,10 @@ impl ControlLaneNode {
         native: bool,
     ) -> Self {
         let shared = Shared {
-            program: Arc::new(ArcLend::new(Published {
+            program: Publisher::new(Published {
                 generation: 0,
                 program: Arc::clone(&program),
-            })),
+            }),
             generation: AtomicU64::new(0),
             resync: AtomicBool::new(false),
             knob,
@@ -448,7 +448,7 @@ impl ControlLaneNode {
 
     /// [`fork_fresh`](Self::fork_fresh) from a lane's parts, for the fork
     /// source, which keeps the parts rather than a lane: it reads the program
-    /// with `ArcLend::current` (an owning read under the publisher's lock,
+    /// with `Publisher::current` (an owning read under the publisher's lock,
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {

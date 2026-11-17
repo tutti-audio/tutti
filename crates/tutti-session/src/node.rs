@@ -22,7 +22,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 ///
 /// Every impl states what frees what its controls publish
 /// ([`reclaimer`](Self::reclaimer)): [`Reclaims::Cells`] for a node whose
-/// controls publish to it through an `ArcLend` cell (or hold another
+/// controls publish to it through a `Publisher` cell (or hold another
 /// control-side free), [`Reclaims::Nothing`] for one that publishes nothing.
 /// There is no default, so an impl that forgets the sweep does not compile and
 /// the session's reclaim phase reaches every node whichever host inserted it.
@@ -122,7 +122,7 @@ impl Reclaims {
 
 /// A node's control-side reclaim, kept by the graph
 /// ([`SessionNode::reclaimer`]): a clone of the node's controls, which
-/// implement [`Reclaim`](tutti_rt::Reclaim) (each `ArcLend::reclaim`), and how
+/// implement [`Reclaim`](tutti_rt::Reclaim) (each `Publisher::reclaim`), and how
 /// many retired values are still pinned after it runs. Control thread only,
 /// like the `reclaim` it calls.
 pub struct Reclaimer(Box<dyn tutti_rt::Reclaim + Send>);
