@@ -16,8 +16,8 @@
 //!
 //! # What each model asserts
 //!
-//! Each model runs at `i16`, `f32` and `f64` (`models!` at the foot): the
-//! slot is a 16-, a 32- and a 64-bit atomic word, and the protocol must hold
+//! Each model runs at `i16`, `I24`, `f32` and `f64` (`models!` at the foot):
+//! the slot is a 16-bit, a 32-bit (two mappings) and a 64-bit atomic word, and the protocol must hold
 //! at each width.
 //!
 //! A ring of 4 slots, 2 channels. (The slot map, `s mod N` by a
@@ -84,7 +84,7 @@ fn push<S: RingSample>(writer: &mut PosWriter<S>, data: &[S]) -> Samples {
 /// A ring holding positions `0..4` written under generation 0, keeping
 /// `keep` behind the reader, which the writer says plays at `play`.
 fn full_ring<S: RingSample>(keep: u64, play: u64) -> (PosWriter<S>, PosReader<S>) {
-    let (mut writer, reader) = PosRing::new(4, LAYOUT, keep);
+    let (mut writer, reader) = PosRing::new(4, LAYOUT, keep).expect("stereo");
     writer.set_play(4);
     assert_eq!(push(&mut writer, &frames(0, 4, 0)), Samples(4));
     writer.set_play(play);
@@ -216,10 +216,13 @@ fn a_partly_capped_push_then_reset_keeps_the_claim<S: RingSample>() {
     });
 }
 
-/// Runs each model once per slot width: a 16-bit, a 32-bit and a 64-bit atomic
-/// word.
+/// Runs each model once per slot mapping: a 16-bit word, a 32-bit word holding
+/// an `I24`, a 32-bit float and a 64-bit float.
 macro_rules! models {
     ($($name:ident),* $(,)?) => {
+        mod i24_slots {
+            $(#[test] fn $name() { super::$name::<tutti_buffers::I24>() })*
+        }
         mod i16_slots {
             $(#[test] fn $name() { super::$name::<i16>() })*
         }

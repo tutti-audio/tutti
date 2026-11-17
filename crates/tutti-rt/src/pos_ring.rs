@@ -28,9 +28,9 @@
 //!
 //! # Why a write never tears a read
 //!
-//! Every sample is an atomic word of its format's width ([`RingSample`]), so a slip in the protocol below is a wrong
-//! sample, never undefined behaviour; the protocol is what makes it never a
-//! wrong sample. The reader, per block ([`PosReader::claim`]):
+//! Every sample is an atomic word of its format's width ([`RingSample`]), so
+//! a slip in the protocol below is a wrong sample, never undefined behaviour;
+//! the protocol is what makes it never a wrong sample. The reader, per block ([`PosReader::claim`]):
 //!
 //! 1. stores where it plays, and the ranges `[a, e)` its block may read
 //!    (`Release`);
@@ -151,8 +151,10 @@ macro_rules! ring_sample {
 ring_sample!(i8, AtomicU8, |v: i8| v as u8, |r: u8| r as i8);
 ring_sample!(i16, AtomicU16, |v: i16| v as u16, |r: u16| r as i16);
 ring_sample!(i32, AtomicU32, |v: i32| v as u32, |r: u32| r as i32);
+// A word only ever holds a value stored from a valid `I24` (or the initial
+// silence), so the range check cannot fail on a load.
 ring_sample!(I24, AtomicU32, |v: I24| v.get() as u32, |r: u32| {
-    I24::new(r as i32).unwrap_or(I24::ZERO)
+    I24::new(r as i32).expect("a slot holds only values stored from an I24")
 });
 ring_sample!(f32, AtomicU32, f32::to_bits, f32::from_bits);
 ring_sample!(f64, AtomicU64, f64::to_bits, f64::from_bits);
@@ -244,7 +246,7 @@ impl RingWindow {
 /// use tutti_types::{ChannelLayout, Samples};
 ///
 /// // 8 stereo frames, nothing kept behind the play position.
-/// let (mut writer, mut reader) = PosRing::<f32>::new(8, ChannelLayout::STEREO, 0);
+/// let (mut writer, mut reader) = PosRing::<f32>::new(8, ChannelLayout::STEREO, 0)?;
 ///
 /// // Streaming thread: frames for positions 0..3.
 /// let data = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
@@ -259,14 +261,13 @@ impl RingWindow {
 /// ```
 pub struct PosRing<S: RingSample = f32> {
     layout: ChannelLayout,
-    stride: usize,
     frames: usize,
     /// `ceil(2^64 / frames)` (wrapping to 0 for one frame): [`slot`](Self::slot)'s
     /// reciprocal.
     recip: u64,
     /// Positions the writer keeps behind where the reader plays.
     keep_behind: u64,
-    /// `frames * stride` samples, each an atomic word of its format's width.
+    /// `frames` slots of a frame's samples, each an atomic word of its format's width.
     slots: Box<[S::Atom]>,
     /// The packed [`RingWindow`].
     window: AtomicU64,
@@ -284,7 +285,7 @@ impl<S: RingSample> std::fmt::Debug for PosRing<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PosRing")
             .field("frames", &self.frames)
-            .field("stride", &self.stride)
+            .field("layout", &self.layout)
             .field("window", &self.window())
             .finish_non_exhaustive()
     }
@@ -294,28 +295,33 @@ impl<S: RingSample> PosRing<S> {
     /// Creates an empty ring and returns its one writer and its one reader.
     ///
     /// `frames` is the slot count, clamped to `1..=`[`MAX_POS_RING_FRAMES`];
-    /// `layout` the width of a frame, at least one channel (the empty layout
-    /// makes a mono ring). The writer never reuses
-    /// the slot of a position less than `keep_behind` behind where the reader
-    /// plays (for a reader that taps positions behind the one it plays).
-    /// Allocates the slots, so call it off the audio thread.
+    /// `layout` the width of a frame. The writer never reuses the slot of a
+    /// position less than `keep_behind` behind where the reader plays (for a
+    /// reader that taps positions behind the one it plays). Allocates the
+    /// slots, so call it off the audio thread.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::ZeroWidth`] for the empty layout.
     #[allow(clippy::new_ret_no_self)] // the ring is its two ends
-    #[must_use]
+    #[must_use = "the ring's two ends are the result"]
     pub fn new(
         frames: usize,
         layout: ChannelLayout,
         keep_behind: u64,
-    ) -> (PosWriter<S>, PosReader<S>) {
+    ) -> Result<(PosWriter<S>, PosReader<S>), BufferError> {
+        if layout.count() == 0 {
+            return Err(BufferError::ZeroWidth);
+        }
         let frames = frames.clamp(1, MAX_POS_RING_FRAMES);
-        let layout = ChannelLayout::from_count(layout.count().max(1));
-        let stride = usize::from(layout.count());
         let ring = Arc::new(Self {
             layout,
-            stride,
             frames,
             recip: recip(frames as u64),
             keep_behind,
-            slots: (0..frames * stride).map(|_| S::atom(S::SILENCE)).collect(),
+            slots: (0..Samples(frames).interleaved_len(layout))
+                .map(|_| S::atom(S::SILENCE))
+                .collect(),
             window: AtomicU64::new(0),
             play: AtomicU64::new(0),
             reads: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -326,7 +332,7 @@ impl<S: RingSample> PosRing<S> {
             ring: Arc::clone(&ring),
             stale: (u64::MAX, 0),
         };
-        (writer, PosReader { ring })
+        Ok((writer, PosReader { ring }))
     }
 
     /// Returns the slot count, in frames.
@@ -337,11 +343,6 @@ impl<S: RingSample> PosRing<S> {
     /// Returns the width of a frame.
     pub fn layout(&self) -> ChannelLayout {
         self.layout
-    }
-
-    /// Returns the samples per frame.
-    pub fn stride(&self) -> usize {
-        self.stride
     }
 
     /// Returns the slot of position `s`, `s mod frames`, without a divide.
@@ -425,11 +426,6 @@ impl<S: RingSample> PosWriter<S> {
     /// Returns the width of a frame.
     pub fn layout(&self) -> ChannelLayout {
         self.ring.layout
-    }
-
-    /// Returns the samples per frame.
-    pub fn stride(&self) -> usize {
-        self.ring.stride
     }
 
     /// Returns the window now.
@@ -629,9 +625,9 @@ impl<S: RingSample> std::fmt::Debug for PosReader<S> {
 }
 
 impl<S: RingSample> PosReader<S> {
-    /// Returns the samples per frame.
-    pub fn stride(&self) -> usize {
-        self.ring.stride
+    /// Returns the width of a frame.
+    pub fn layout(&self) -> ChannelLayout {
+        self.ring.layout
     }
 
     /// Claims this block's reads; call it once per block, before any read.
@@ -715,8 +711,13 @@ impl<'a, S: RingSample> PosClaim<'a, S> {
             self.reads.iter().any(|&(a, e)| (a..e).contains(&s)),
             "position {s} outside the claimed ranges"
         );
-        let at = Samples(self.ring.slot(s)).interleaved_len(self.ring.layout);
-        PosFrame(&self.ring.slots[at..at + self.ring.stride])
+        let slot = self.ring.slot(s);
+        let layout = self.ring.layout;
+        let (from, to) = (
+            Samples(slot).interleaved_len(layout),
+            Samples(slot + 1).interleaved_len(layout),
+        );
+        PosFrame(&self.ring.slots[from..to])
     }
 
     /// Returns channel `c` of position `s`.

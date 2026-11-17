@@ -348,7 +348,7 @@ impl RegionOut {
         let channels = self.ring.channels;
         #[cfg(codec)]
         if let Some(decoder) = self.decoder.as_mut() {
-            let ch = self.writer.stride();
+            let ch = usize::from(self.writer.layout().count());
             if decoder.cursor() != Samples(at) && decoder.seek(Samples(at)).is_err() {
                 out.fill(0.0);
                 return false;
@@ -387,7 +387,7 @@ impl RegionOut {
     /// reading the file. `false` when any read of the file failed (a decode
     /// fault: the frames before it are kept, the rest is silence).
     pub(crate) fn fill_with(&mut self, mapping: &Mapping, pos: u64, out: &mut [f32]) -> bool {
-        let ch = self.writer.stride();
+        let ch = usize::from(self.writer.layout().count());
         let mut read_ok = true;
         mapping.fill(pos, out, ch, &mut |at, run| {
             read_ok &= self.read_file(at, run);
@@ -457,7 +457,8 @@ impl RegionBuffer {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),
             None => (Mapping::unbounded(), Arrangement::unbounded()),
         };
-        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES);
+        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES)
+            .expect("`nonempty` gave a layout of at least one channel");
         let ring = Arc::new(Ring {
             region_id,
             file_path,

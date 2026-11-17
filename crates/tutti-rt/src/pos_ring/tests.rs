@@ -6,7 +6,7 @@ fn indexed(frames: usize, channels: usize) -> Vec<f32> {
 
 /// A ring of `frames` slots of `stride`, keeping `keep` behind.
 fn ring(frames: usize, stride: usize, keep: u64) -> (PosWriter, PosReader) {
-    PosRing::new(frames, ChannelLayout::from_count(stride as u16), keep)
+    PosRing::new(frames, ChannelLayout::clamped(stride), keep).expect("a non-empty layout")
 }
 
 /// Pushes whole frames of `samples` and returns how many landed.
@@ -17,7 +17,7 @@ fn push(writer: &mut PosWriter, samples: &[f32]) -> usize {
 
 /// Position `s` through a claim of exactly its frame.
 fn frame_at(reader: &mut PosReader, s: u64) -> Vec<f32> {
-    let stride = reader.stride();
+    let stride = usize::from(reader.layout().count());
     let claim = reader.claim(s, [(s, s + 1), (0, 0)]);
     (0..stride).map(|c| claim.sample(s, c)).collect()
 }
@@ -454,8 +454,8 @@ fn a_window_never_passes_the_position_limit() {
 /// Pushes `frames` of `stride` channels of `S` valued `value(i)` and reads
 /// every one back by position.
 fn round_trips<S: RingSample>(stride: usize, value: impl Fn(usize) -> S, bits: impl Fn(S) -> u64) {
-    let layout = ChannelLayout::from_count(stride as u16);
-    let (mut writer, mut reader) = PosRing::<S>::new(16, layout, 0);
+    let layout = ChannelLayout::clamped(stride);
+    let (mut writer, mut reader) = PosRing::<S>::new(16, layout, 0).expect("a non-empty layout");
     let data: Vec<S> = (0..9 * stride).map(&value).collect();
     let view = Interleaved::new(&data, layout).expect("whole frames");
     assert_eq!(writer.push(view), Ok(Samples(9)));
@@ -515,7 +515,7 @@ fn a_pushed_frame_reads_back_bit_exactly_in_every_format() {
 #[test]
 fn an_unwritten_slot_reads_silence() {
     fn silent<S: RingSample>() {
-        let (_writer, mut reader) = PosRing::<S>::new(4, ChannelLayout::STEREO, 0);
+        let (_writer, mut reader) = PosRing::<S>::new(4, ChannelLayout::STEREO, 0).expect("stereo");
         let claim = reader.claim(0, [(0, 0), (0, 0)]);
         let slots = &claim.ring.slots;
         assert!(slots.iter().all(|a| S::load(a) == S::SILENCE));
@@ -539,7 +539,8 @@ fn a_view_of_the_wrong_width_is_refused() {
         (ChannelLayout::STEREO, ChannelLayout::MONO),
         (ChannelLayout::STEREO, ChannelLayout::QUAD),
     ] {
-        let (mut writer, _reader) = PosRing::<f32>::new(16, ring_width, 0);
+        let (mut writer, _reader) =
+            PosRing::<f32>::new(16, ring_width, 0).expect("a non-empty layout");
         let view = Interleaved::new(&data, view_width).expect("whole frames");
         assert_eq!(
             writer.push(view),
@@ -550,4 +551,14 @@ fn a_view_of_the_wrong_width_is_refused() {
         );
         assert_eq!(writer.window(), RingWindow { from: 0, to: 0 });
     }
+}
+
+/// **The empty layout is refused**: a ring of no channels has no frame to
+/// hold, so building one names the zero width rather than making a mono ring.
+#[test]
+fn an_empty_layout_is_refused() {
+    assert_eq!(
+        PosRing::<f32>::new(16, ChannelLayout::EMPTY, 0).map(|_| ()),
+        Err(BufferError::ZeroWidth)
+    );
 }

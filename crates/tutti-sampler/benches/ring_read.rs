@@ -46,7 +46,8 @@ fn voices(n: usize, frames: usize) -> Vec<Voice> {
     let data: Vec<f32> = (0..frames * 2).map(|i| (i as f32 * 1e-3).sin()).collect();
     (0..n)
         .map(|v| {
-            let (mut writer, reader) = PosRing::<f32>::new(frames, ChannelLayout::STEREO, 4);
+            let (mut writer, reader) =
+                PosRing::<f32>::new(frames, ChannelLayout::STEREO, 4).expect("stereo");
             writer.reset(from);
             writer.set_play(from + 4);
             let view = Interleaved::new(&data, ChannelLayout::STEREO).expect("whole frames");
