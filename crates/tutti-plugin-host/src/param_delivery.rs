@@ -120,8 +120,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use tutti_plugin_types::{Normalized, ParamId, ParameterChanges, ParameterQueue};
+use tutti_plugin_types::{Normalized, ParameterChanges, ParameterQueue};
 use tutti_rt::{Tally, TallyWriter, tally};
+use tutti_types::ParamId;
 
 /// A slot with no queue in the chunk being filled.
 const NO_QUEUE: u32 = u32::MAX;
@@ -945,7 +946,7 @@ impl DeliveryCounters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::ParamId;
+    use tutti_types::ParamId;
 
     fn op(id: u32) -> ParamId {
         ParamId::new(id)

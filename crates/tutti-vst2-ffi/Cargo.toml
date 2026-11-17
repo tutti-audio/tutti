@@ -42,6 +42,7 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 num-traits = "0.2"
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }

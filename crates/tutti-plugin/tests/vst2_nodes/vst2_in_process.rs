@@ -23,7 +23,8 @@ use tutti_vst2_host::Vst2Loaded;
 use tutti_fixtures::midi;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::EditorPresence;
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
+use tutti_types::ParamId;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 

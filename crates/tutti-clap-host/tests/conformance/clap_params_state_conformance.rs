@@ -38,7 +38,8 @@ use tutti_clap_test_plugin::{
     ProcessCapture, STATE_MAGIC,
 };
 use tutti_plugin_types::{AutomationMode, Control, StateUse};
-use tutti_plugin_types::{Normalized, ParamFlags, ParamId, ParamSteps, Request, RescanScope};
+use tutti_plugin_types::{Normalized, ParamFlags, ParamSteps, Request, RescanScope};
+use tutti_types::ParamId;
 
 /// CLAP event type constants, pinned here rather than imported: these are the
 /// wire values the host puts on the FFI, so a failure names what the plugin
@@ -239,7 +240,7 @@ fn host_enumerates_parameters_with_plugin_ids_in_index_order() {
 
     let listed = loaded.parameter_list(main_thread());
     let got_ids: Vec<ParamId> = listed.iter().map(|p| p.id()).collect();
-    let want_ids: Vec<ParamId> = probe_params().iter().map(|p| p.id.into()).collect();
+    let want_ids: Vec<ParamId> = probe_params().iter().map(|p| ParamId::new(p.id)).collect();
     assert_eq!(
         got_ids, want_ids,
         "host must hand back the plugin's own param ids, in the plugin's index \
@@ -258,7 +259,7 @@ fn host_projects_parameter_metadata_exactly() {
 
     for (i, want) in probe_params().iter().enumerate() {
         let got = &listed[i];
-        assert_eq!(got.id(), want.id.into(), "param {i} id");
+        assert_eq!(got.id(), ParamId::new(want.id), "param {i} id");
         assert_eq!(
             got.name().as_bytes(),
             want.name,
@@ -550,8 +551,8 @@ fn host_denormalizes_automation_against_the_parameter_range() {
 
     let mut params = ParameterChanges::reserved(1, 2);
     // Deliberately out of offset order, so the sort is exercised too.
-    params.add_change(p.id.into(), 192, 0.75);
-    params.add_change(p.id.into(), 64, 0.25);
+    params.add_change(ParamId::new(p.id), 192, 0.75);
+    params.add_change(ParamId::new(p.id), 64, 0.25);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -586,8 +587,8 @@ fn host_denormalizes_each_parameter_against_its_own_range() {
     let b = param(1); // -12 .. 12
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(a.id.into(), 0, 0.5);
-    params.add_change(b.id.into(), 0, 0.5);
+    params.add_change(ParamId::new(a.id), 0, 0.5);
+    params.add_change(ParamId::new(b.id), 0, 0.5);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -625,7 +626,7 @@ fn a_stepped_parameter_automated_at_each_position_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let mut params = ParameterChanges::reserved(1, 1);
-        params.add_change(mode.id.into(), 0, f64::from(k) / 22.0);
+        params.add_change(ParamId::new(mode.id), 0, f64::from(k) / 22.0);
         let ctx = ClapProcessContext {
             params: Some(&params),
             ..Default::default()
@@ -654,7 +655,7 @@ fn a_stepped_parameter_set_from_the_control_thread_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let n = Normalized::new(f64::from(k) / 22.0).expect("on 0..=1");
-        Control::set_parameter(&mut loaded, main_thread(), mode.id.into(), n)
+        Control::set_parameter(&mut loaded, main_thread(), ParamId::new(mode.id), n)
             .expect("a declared, writable parameter");
         let cap = probe.capture();
         assert_eq!(cap.flush_event_count, 1, "position {k}");
@@ -696,8 +697,8 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     let (ro, rw) = (param(0), param(1));
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(ro.id.into(), 0, 0.5);
-    params.add_change(rw.id.into(), 0, 0.5);
+    params.add_change(ParamId::new(ro.id), 0, 0.5);
+    params.add_change(ParamId::new(rw.id), 0, 0.5);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -720,14 +721,14 @@ fn set_parameter_does_not_write_a_read_only_parameter() {
     set_readonly_param(param(0).id);
     let n = Normalized::new(0.5).expect("on 0..=1");
 
-    let read_only = param(0).id.into();
+    let read_only = ParamId::new(param(0).id);
     assert_eq!(
         Control::set_parameter(&mut loaded, main_thread(), read_only, n),
         Err(tutti_plugin_types::ParamWriteError::ReadOnly(read_only))
     );
     assert_eq!(probe.capture().flush_event_count, 0, "a read-only value");
 
-    Control::set_parameter(&mut loaded, main_thread(), param(1).id.into(), n)
+    Control::set_parameter(&mut loaded, main_thread(), ParamId::new(param(1).id), n)
         .expect("a declared, writable parameter");
     assert_eq!(probe.capture().flush_event_count, 1, "a writable one");
     set_readonly_param(u32::MAX);

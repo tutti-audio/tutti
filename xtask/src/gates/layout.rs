@@ -171,6 +171,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-ipc",
             "tutti-plugin-ipc-ffi",
             "tutti-plugin-types",
+            "tutti-types",
             "tutti-rt",
             "tutti-ump",
             "tutti-graph",

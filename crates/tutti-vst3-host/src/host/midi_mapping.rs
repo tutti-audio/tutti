@@ -37,6 +37,7 @@ use tutti_plugin_types::{
     MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource, Normalized,
 };
 use tutti_rt::{Reader, RtVec};
+use tutti_types::ParamId;
 use tutti_vst3_ffi::{EventList, Plugin};
 
 /// The MIDI a [`CcRoute`] passes on: a block's whole MIDI cap, so the route
@@ -114,7 +115,7 @@ pub(crate) fn declared_assignments(slots: &[Slot]) -> Vec<MidiAssignment> {
             Some(MidiAssignment {
                 channel: u8::try_from(slot.channel).ok().and_then(MidiChannel::new),
                 source,
-                param: slot.id.into(),
+                param: ParamId::new(slot.id),
             })
         })
         .collect()
@@ -296,8 +297,11 @@ pub(crate) fn route_cc_events(
                     // keeps the latest value in time, the host's or the CC's
                     // (`PointBuf::push_or_replace_last`), counted in the
                     // set's `points_overflowed`.
-                    let _ =
-                        out_params.add_change(param_id.into(), event.0.get() as i32, value.get());
+                    let _ = out_params.add_change(
+                        ParamId::new(param_id),
+                        event.0.get() as i32,
+                        value.get(),
+                    );
                 }
                 // Mappable message but no mapping for this slot — keep it as a
                 // MIDI event so the plugin can still react.

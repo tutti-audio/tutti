@@ -45,8 +45,8 @@ use support::main_thread;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, ParameterChanges};
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{HOLE_NONE, ProcessCapture};
-use tutti_plugin_types::ParamId;
 use tutti_plugin_types::PluginAudio;
+use tutti_types::ParamId;
 
 /// CLAP's `PARAM_VALUE` wire type, pinned rather than imported: it is the value
 /// the host puts on the FFI, so a failure names what the plugin actually saw.
@@ -236,7 +236,7 @@ fn hole_in_params_still_denormalizes_surviving_params() {
     let expected = min + NORMALIZED * (max - min);
 
     let mut changes = ParameterChanges::reserved(1, 1);
-    changes.add_change(survivor.into(), 0, NORMALIZED);
+    changes.add_change(ParamId::new(survivor), 0, NORMALIZED);
 
     drive_block(
         &mut inst,
@@ -309,7 +309,7 @@ fn hole_in_params_does_not_deliver_undenormalized_automation() {
 
     const NORMALIZED: f64 = 0.25;
     let mut changes = ParameterChanges::reserved(1, 1);
-    changes.add_change(holed.into(), 0, NORMALIZED);
+    changes.add_change(ParamId::new(holed), 0, NORMALIZED);
 
     drive_block(
         &mut inst,
@@ -358,7 +358,7 @@ fn hole_in_params_never_misattributes_a_range() {
     for info in &listed {
         let declared = probe_params()
             .iter()
-            .find(|p| info.id() == p.id.into())
+            .find(|p| info.id() == ParamId::new(p.id))
             .unwrap_or_else(|| panic!("host reported unknown param id {}", info.id()));
         assert_eq!(
             info.range().bounds(),
@@ -413,7 +413,7 @@ fn hole_in_params_does_not_promote_later_params() {
         .iter()
         .map(|p| p.id())
         .collect();
-    let expected_prefix = probe_params()[0].id.into();
+    let expected_prefix = ParamId::new(probe_params()[0].id);
 
     assert!(
         ids.as_slice() == [expected_prefix] || ids.is_empty(),
@@ -549,7 +549,7 @@ fn no_hole_enumerates_everything() {
         .iter()
         .map(|p| p.id())
         .collect();
-    let expected: Vec<ParamId> = probe_params().iter().map(|p| p.id.into()).collect();
+    let expected: Vec<ParamId> = probe_params().iter().map(|p| ParamId::new(p.id)).collect();
     assert_eq!(
         ids, expected,
         "with no hole the host must report every parameter, in index order"

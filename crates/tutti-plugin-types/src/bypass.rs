@@ -1,7 +1,8 @@
 //! A plugin's own bypass: where it lives ([`OwnBypass`]) and what a write of it
 //! came to ([`BypassWrite`]).
 
-use crate::{Normalized, ParamFlags, ParamId, ParamWriteError, ParameterInfo};
+use crate::{Normalized, ParamFlags, ParamWriteError, ParameterInfo};
+use tutti_types::ParamId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

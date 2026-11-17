@@ -117,7 +117,8 @@
 //!
 //! ```rust,no_run
 //! # use tutti_clap_host::{ClapLoaded, LoadOptions, StateContext};
-//! use tutti_plugin_types::{Control, Normalized, ParamId, StateUse};
+//! use tutti_plugin_types::{Control, Normalized, StateUse};
+//! use tutti_types::ParamId;
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");
 //! # let (_collector, work) = tutti_plugin_types::MainWork::new();

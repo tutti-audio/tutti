@@ -1,8 +1,8 @@
 //! `convert`, `interleave` and `deinterleave`: figures and mismatch errors.
 
 use tutti_buffers::{
-    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, convert, convert_planes,
-    deinterleave, interleave,
+    BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, convert,
+    convert_mono, convert_planes, deinterleave, interleave,
 };
 use tutti_types::{ChannelLayout, LayoutError, Samples};
 
@@ -335,4 +335,31 @@ fn planes_past_a_layout_carry_the_layout_error_and_the_refused_count() {
     // `transparent` forwards `source()` to the layout error's own, which has none.
     assert!(refused.source().is_none());
     assert!(refused.to_string().contains("65536"));
+}
+
+#[test]
+fn convert_mono_follows_the_sample_rule() {
+    let src = [i16::MIN, 0, i16::MAX];
+    let mut wide = [9.0f32; 3];
+    convert_mono(Mono::new(&src), MonoMut::new(&mut wide)).unwrap();
+    assert_eq!(wide, [-1.0, 0.0, 32767.0 / 32768.0]);
+    // float to integer is x * 2^15, rounded half to even: 0.5 / 2^15 is a half, rounds to 0.
+    let half = [0.5f32 / 32768.0, 1.5 / 32768.0, 2.5 / 32768.0];
+    let mut narrow = [7i16; 3];
+    convert_mono(Mono::new(&half), MonoMut::new(&mut narrow)).unwrap();
+    assert_eq!(narrow, [0, 2, 2]);
+}
+
+#[test]
+fn convert_mono_refuses_a_length_mismatch_and_writes_nothing() {
+    let src = [0.5f32; 3];
+    let mut dst = [7i16; 2];
+    assert_eq!(
+        convert_mono(Mono::new(&src), MonoMut::new(&mut dst)),
+        Err(BufferError::LengthMismatch {
+            src: Samples(3),
+            dst: Samples(2)
+        })
+    );
+    assert_eq!(dst, [7, 7]);
 }

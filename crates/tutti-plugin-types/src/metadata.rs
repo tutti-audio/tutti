@@ -447,11 +447,11 @@ mod tests {
             tail: PluginTail::Finite(Samples(48_000)),
             features: Features::F64_AUDIO | Features::MIDI_IN,
             probed: Features::F64_AUDIO | Features::MIDI_IN | Features::EDITOR,
-            own_bypass: Some(OwnBypass::Parameter(crate::ParamId::new(4))),
+            own_bypass: Some(OwnBypass::Parameter(tutti_types::ParamId::new(4))),
             assignments: vec![MidiAssignment {
                 channel: tutti_ump::MidiChannel::new(3),
                 source: crate::MidiSource::PitchBend,
-                param: crate::ParamId::new(9),
+                param: tutti_types::ParamId::new(9),
             }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();

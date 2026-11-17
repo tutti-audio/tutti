@@ -29,7 +29,7 @@
 //!
 //! ## Why the push path is a separate module and not a `process` variant
 //!
-//! [`AuProcessor::render_f32`](crate::processor::AuProcessor::render_f32) is a *pull* render:
+//! [`AuProcessor::render_planes`](crate::processor::AuProcessor::render_planes) is a *pull* render:
 //! it stages input into the heap-pinned `RenderScratch`, then `AudioUnitRender`
 //! calls back into that scratch to fetch it. The push path never installs a
 //! callback — with `AudioUnitProcess` the `ioData` buffer list carries the

@@ -33,6 +33,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 # `midi1`: a channel voice message as the MIDI 1.0 bytes `MusicDeviceMIDIEvent`
 # takes (the narrowing and a banked Program Change's three messages).
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
+# The block views a render takes (`InputOutput`, `Float`).
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The engine's unit newtypes: `Bpm`/`Beat` on `TransportState` and `Seconds` on
 # `get_tail_time`. `default-features = false` drops this crate's codec/midi
 # defaults, which the unit vocabulary does not need.
@@ -53,8 +55,6 @@ tutti-au-ffi = { path = "../tutti-au-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 tutti-graph = { path = "../tutti-graph" }
-# The block views the suites build (`InputOutput`, `Planes`, `PlanesMut`).
-tutti-buffers = { path = "../tutti-buffers" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "au"] }
 assert_no_alloc = { version = "1", default-features = false }
 

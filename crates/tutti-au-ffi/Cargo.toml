@@ -24,6 +24,8 @@ testing = []
 dpi.workspace = true
 # The derive of every error type's `Display` and `Error`.
 thiserror = { workspace = true, features = ["std"] }
+# The block views (`Planes`, `PlanesMut`) a render converts to and from the AU's f32.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The MIDI 2.0 widening of what a plugin emits.
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # `RenderCount`: the renders in flight, which a MIDI-output withdrawal checks
@@ -54,7 +56,7 @@ objc2 = { version = "0.6", features = ["relax-void-encoding"] }
 # `AUEventListenerCreateWithDispatchQueue` takes an Objective-C *block*, not a
 # function pointer, and it is the only listener constructor that works without a
 # running CFRunLoop (see `listener.rs`).
-block2 = "0.6"
+block2 = { workspace = true }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSGeometry", "NSObject"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

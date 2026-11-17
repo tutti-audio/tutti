@@ -12,11 +12,12 @@ use tutti_session::Root;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
 use tutti_session::{
     DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
     SessionEvent,
 };
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, Depth, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -99,7 +100,10 @@ fn probe_switch<T>(name: &[u8], arg: T) {
 /// parameter 1's knob where the plugin started it.
 fn a_plugin_gui_edit_becomes_the_knob() {
     let (mut s, node) = session_with_probe();
-    let (p0, p1) = (ParamRef::plugin(node, 0), ParamRef::plugin(node, 1));
+    let (p0, p1) = (
+        ParamRef::plugin(node, ParamId::new(0)),
+        ParamRef::plugin(node, ParamId::new(1)),
+    );
     {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
@@ -174,7 +178,7 @@ impl Node for EventSource1 {
 /// `sources` still lists the lane and the plugin still reads `0.25`.
 fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let (mut s, node) = session_with_probe();
-    let p0 = ParamRef::plugin(node, 0);
+    let p0 = ParamRef::plugin(node, ParamId::new(0));
     {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
@@ -236,7 +240,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
 /// and update the knob is still 0 and the plugin still reads 0.25.
 fn a_plugin_echoing_the_lane_keeps_its_knob() {
     let (mut s, node) = session_with_probe();
-    let p0 = ParamRef::plugin(node, 0);
+    let p0 = ParamRef::plugin(node, ParamId::new(0));
     {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();

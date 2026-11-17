@@ -52,12 +52,13 @@ use tutti_rt::LockExt;
 
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, ParamAccess, ParamId, ParamWriteError, ParameterChanges, ParameterQueue,
+    MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
     PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, ProcessWake,
     Refused, Reopen, Request, RestartRules, ResyncKind, SampleFormat, SampleRate, Samples,
     StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
+use tutti_types::ParamId;
 
 use crate::subprocess::swap_slab;
 use crate::{
