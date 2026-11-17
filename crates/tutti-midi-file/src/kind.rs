@@ -48,7 +48,7 @@ impl MidiFileKind {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`](crate::Error::Io) (step [`IoStep::Read`](crate::IoStep::Read)) if the file cannot be opened or read. A
+    /// [`Error::Io`] (step [`IoStep::Read`]) if the file cannot be opened or read. A
     /// file shorter than a header is not an error; it returns `Ok(None)`.
     pub fn detect_path(path: impl AsRef<Path>) -> Result<Option<Self>> {
         use std::io::Read;

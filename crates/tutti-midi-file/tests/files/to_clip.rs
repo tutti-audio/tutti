@@ -1001,7 +1001,7 @@ fn two_tempos_that_snap_to_one_position_leave_the_later() {
 /// 7.5.3): it is dropped as `ZeroTempo`, it is not the clip's first tempo (the
 /// default 120 BPM stands at tick 0, M2-116 section 7.1.1) and it does not
 /// supersede the real tempo it lands on.
-/// Spec: m2-104/7.5.3, m2-116/7.1.1#1
+/// Spec: m2-104/7.5.3#4, m2-116/7.1.1#1
 #[test]
 fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
     let smf = format0(vec![
