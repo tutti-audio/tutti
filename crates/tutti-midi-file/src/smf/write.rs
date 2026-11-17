@@ -1,35 +1,38 @@
 //! The writer: the reader's inverse, a fold of pure functions.
 //!
-//! An event is a pure function to its bytes ([`encode`]); a track body is a
-//! fold of events over the running status ([`body`]), which elides a channel
-//! status byte equal to the one before it (SMF 1.0 section 3: running status;
-//! sysex and meta cancel it); a chunk's length is computed from the body it
-//! frames ([`chunk`]), never patched in afterwards.
+//! [`measure`] is the arithmetic of what an SMF's length fields hold, run when
+//! a file is built; [`write()`] is then infallible. An event is a pure function
+//! to its bytes ([`encode`]); a track body is a fold of events over the
+//! running status ([`body`]), which elides a channel status byte equal to the
+//! one before it (SMF 1.0 section 3: running status; sysex and meta cancel
+//! it); a chunk's length is computed from the body it frames ([`chunk`]),
+//! never patched in afterwards.
 
 use tutti_ump::{Message, Midi1Bytes};
 
 use super::SmfDivision;
-use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
-use crate::{ConfigError, Error, Refusal, Result};
-
-fn too_large() -> Error {
-    ConfigError::TooLarge.into()
-}
+use crate::TracksError;
+use crate::file::{FileEvent, Meta, SmfFormat, Tick, Track};
 
 /// The widest value a variable-length quantity holds: 28 bits.
-const VLQ_MAX: u32 = 0x0FFF_FFFF;
+const VLQ_MAX: u64 = 0x0FFF_FFFF;
 
-/// The variable-length quantity of `n` (SMF 1.0 section 1.1), `None` past 28
-/// bits: seven bits a byte, most significant first, the top bit set on all
-/// but the last.
-fn vlq(n: u32) -> Option<impl Iterator<Item = u8>> {
-    (n <= VLQ_MAX).then(|| {
-        (1..4u32)
-            .rev()
-            .filter(move |i| n >> (7 * i) != 0)
-            .chain(std::iter::once(0))
-            .map(move |i| (n >> (7 * i)) as u8 & 0x7F | if i > 0 { 0x80 } else { 0 })
-    })
+/// The bytes of the variable-length quantity of `n` (SMF 1.0 section 1.1).
+fn vlq_len(n: u64) -> usize {
+    1 + usize::from(n >= 1 << 7) + usize::from(n >= 1 << 14) + usize::from(n >= 1 << 21)
+}
+
+/// The variable-length quantity of `n`: seven bits a byte, most significant
+/// first, the top bit set on all but the last. Only the low 28 bits are
+/// written: [`measure`] and the constructor's checks have refused a wider
+/// value.
+fn vlq(n: u64) -> impl Iterator<Item = u8> {
+    let n = n & VLQ_MAX;
+    (1..4u32)
+        .rev()
+        .filter(move |i| n >> (7 * i) != 0)
+        .chain(std::iter::once(0))
+        .map(move |i| (n >> (7 * i)) as u8 & 0x7F | if i > 0 { 0x80 } else { 0 })
 }
 
 /// An event's bytes, status byte first.
@@ -50,36 +53,18 @@ impl Encoded {
 }
 
 /// `lead`, the length of `data` as a vlq, then `data`.
-fn counted(lead: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let length = u32::try_from(data.len())
-        .ok()
-        .and_then(vlq)
-        .ok_or_else(too_large)?;
-    Ok(lead
-        .iter()
+fn counted(lead: &[u8], data: &[u8]) -> Vec<u8> {
+    lead.iter()
         .copied()
-        .chain(length)
+        .chain(vlq(data.len() as u64))
         .chain(data.iter().copied())
-        .collect())
+        .collect()
 }
 
 /// A meta event's type byte and data.
 fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
     match meta {
-        Meta::Text { kind, bytes } => (
-            match kind {
-                TextKind::Text => 0x01,
-                TextKind::Copyright => 0x02,
-                TextKind::TrackName => 0x03,
-                TextKind::InstrumentName => 0x04,
-                TextKind::Lyric => 0x05,
-                TextKind::Marker => 0x06,
-                TextKind::CuePoint => 0x07,
-                TextKind::ProgramName => 0x08,
-                TextKind::DeviceName => 0x09,
-            },
-            bytes.to_vec(),
-        ),
+        Meta::Text { kind, bytes } => (kind.meta_type(), bytes.to_vec()),
         Meta::Tempo {
             micros_per_quarter,
             extra,
@@ -116,42 +101,42 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
     }
 }
 
-/// One event of track `track` as bytes.
-///
-/// # Errors
-///
-/// [`ConfigError::TooLarge`] for an event too long for its length field, and
-/// [`ConfigError::Refused`] for what an SMF cannot hold (a packet other than
-/// MIDI 1.0 channel voice): the constructor refuses it first.
-fn encode(track: usize, event: &FileEvent) -> Result<Encoded> {
-    Ok(match event {
+/// The length of a meta event's data: that of [`meta_parts`], without making it.
+fn meta_data_len(meta: &Meta) -> usize {
+    match meta {
+        Meta::Text { bytes, .. } => bytes.len(),
+        Meta::Tempo { extra, .. } => 3 + extra.len(),
+        Meta::TimeSignature { extra, .. } => 4 + extra.len(),
+        Meta::KeySignature { extra, .. } => 2 + extra.len(),
+        Meta::Other { data, .. } => data.len(),
+        Meta::Malformed(malformed) => malformed.data().len(),
+    }
+}
+
+/// The bytes of an event of `lead` bytes and `len` bytes of data under their
+/// vlq length, `TooLarge` past the vlq.
+fn counted_len(lead: usize, len: usize) -> Result<usize, TracksError> {
+    if len as u64 > VLQ_MAX {
+        return Err(TracksError::TooLarge);
+    }
+    Ok(lead + vlq_len(len as u64) + len)
+}
+
+/// One event as bytes. `None` for what an SMF cannot hold (a packet other than
+/// MIDI 1.0 channel voice): the constructor has refused it.
+fn encode(event: &FileEvent) -> Option<Encoded> {
+    match event {
         FileEvent::Message(Message::Midi1(address, voice)) => {
-            Encoded::Channel(voice.bytes(address.channel))
+            Some(Encoded::Channel(voice.bytes(address.channel)))
         }
-        FileEvent::SysEx(data) => Encoded::Other(counted(&[0xF0], data)?),
-        FileEvent::Escape(data) => Encoded::Other(counted(&[0xF7], data)?),
+        FileEvent::SysEx(data) => Some(Encoded::Other(counted(&[0xF0], data))),
+        FileEvent::Escape(data) => Some(Encoded::Other(counted(&[0xF7], data))),
         FileEvent::Meta(meta) => {
             let (kind, data) = meta_parts(meta);
-            Encoded::Other(counted(&[0xFF, kind], &data)?)
+            Some(Encoded::Other(counted(&[0xFF, kind], &data)))
         }
-        FileEvent::Message(
-            Message::Midi2(..)
-            | Message::Utility(_)
-            | Message::System(..)
-            | Message::Sysex7(..)
-            | Message::Data128(..)
-            | Message::Flex(..)
-            | Message::Stream(_),
-        )
-        | FileEvent::Unknown(_) => {
-            return Err(ConfigError::Refused {
-                track,
-                in_header: false,
-                refusal: Refusal::SmfPacket,
-            }
-            .into());
-        }
-    })
+        FileEvent::Message(_) | FileEvent::Unknown(_) => None,
+    }
 }
 
 /// A track body's fold state: the bytes so far, the running status, and the
@@ -159,87 +144,111 @@ fn encode(track: usize, event: &FileEvent) -> Result<Encoded> {
 type Fold = (Vec<u8>, Option<u8>, Tick);
 
 /// The delta from `from` to `to` as vlq bytes.
-fn delta(from: Tick, to: Tick) -> Result<impl Iterator<Item = u8>> {
-    to.0.checked_sub(from.0)
-        .and_then(|d| u32::try_from(d).ok())
-        .and_then(vlq)
-        .ok_or_else(too_large)
+fn delta(from: Tick, to: Tick) -> impl Iterator<Item = u8> {
+    vlq(to.0.saturating_sub(from.0))
 }
 
 /// Folds one event onto the body: its delta, then its bytes without a status
 /// byte the running status already holds.
-fn append(
-    track: usize,
-    (mut out, running, at): Fold,
-    (tick, event): &(Tick, FileEvent),
-) -> Result<Fold> {
-    let encoded = encode(track, event)?;
-    let (&status, data) = encoded.bytes().split_first().ok_or_else(too_large)?;
+fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Fold {
+    let Some(encoded) = encode(event) else {
+        return (out, running, at);
+    };
+    let Some((&status, data)) = encoded.bytes().split_first() else {
+        return (out, running, at);
+    };
     let is_channel = matches!(encoded, Encoded::Channel(_));
-    out.extend(delta(at, *tick)?);
+    out.extend(delta(at, *tick));
     out.extend(
         (!(is_channel && running == Some(status)))
             .then_some(status)
             .into_iter()
             .chain(data.iter().copied()),
     );
-    Ok((out, is_channel.then_some(status), *tick))
+    (out, is_channel.then_some(status), *tick)
 }
 
 /// A track's body: its events, then End of Track at its `end`.
-fn body(index: usize, track: &Track) -> Result<Vec<u8>> {
+fn body(track: &Track) -> Vec<u8> {
     let (out, _, at) = track
         .events
         .iter()
-        .try_fold((Vec::new(), None, Tick(0)), |fold, event| {
-            append(index, fold, event)
-        })?;
-    Ok(out
-        .into_iter()
-        .chain(delta(at, track.end)?)
+        .fold((Vec::new(), None, Tick(0)), append);
+    out.into_iter()
+        .chain(delta(at, track.end))
         .chain([0xFF, 0x2F, 0x00])
-        .collect())
+        .collect()
 }
 
-/// A chunk: its type, the length of `body`, the body.
-fn chunk(kind: &[u8; 4], body: &[u8]) -> Result<Vec<u8>> {
-    let len = u32::try_from(body.len()).map_err(|_| too_large())?;
-    Ok(kind
-        .iter()
+/// A chunk: its type, the length of `body`, the body. [`measure`] has checked
+/// that the length fits.
+fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let len = u32::try_from(body.len()).unwrap_or(u32::MAX);
+    kind.iter()
         .copied()
         .chain(len.to_be_bytes())
         .chain(body.iter().copied())
-        .collect())
+        .collect()
+}
+
+/// Whether `tracks` fit an SMF's length fields, by arithmetic over their
+/// events and no allocation: every event's data is at most 28 bits long, and
+/// every track chunk is at most 32 bits long.
+///
+/// # Errors
+///
+/// [`TracksError::TooLarge`] for an event or a chunk past its length field. A
+/// caller has checked the rest ([`MidiFile`](crate::MidiFile)'s constructor):
+/// events in order, a delta that fits the wire's 28 bits, only group-0 MIDI
+/// 1.0 messages, at most 65535 tracks.
+pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
+    for track in tracks {
+        let (mut at, mut running) = (Tick(0), None);
+        let mut total = 0u64;
+        for (tick, event) in &track.events {
+            total += vlq_len(tick.0.saturating_sub(at.0)) as u64;
+            at = *tick;
+            let bytes = match event {
+                FileEvent::Message(Message::Midi1(address, voice)) => {
+                    let bytes = voice.bytes(address.channel);
+                    let status = bytes.as_slice().first().copied();
+                    let elided = usize::from(status.is_some() && status == running);
+                    running = status;
+                    bytes.as_slice().len() - elided
+                }
+                FileEvent::SysEx(data) | FileEvent::Escape(data) => {
+                    running = None;
+                    counted_len(1, data.len())?
+                }
+                FileEvent::Meta(meta) => {
+                    running = None;
+                    counted_len(2, meta_data_len(meta))?
+                }
+                FileEvent::Message(_) | FileEvent::Unknown(_) => 0,
+            };
+            total += bytes as u64;
+        }
+        // The End of Track: its delta, `FF 2F 00`.
+        total += (vlq_len(track.end.0.saturating_sub(at.0)) + 3) as u64;
+        if total > u64::from(u32::MAX) {
+            return Err(TracksError::TooLarge);
+        }
+    }
+    Ok(())
 }
 
 /// Writes `tracks` as an SMF of `format` and division `ticks_per_quarter`.
 ///
 /// Each track ends with an End of Track at its `end`. A caller has checked the
-/// tracks ([`MidiFile`](crate::MidiFile)'s constructor): events in order, a
-/// delta that fits the wire's 28 bits, only group-0 MIDI 1.0 messages.
-///
-/// # Errors
-///
-/// [`ConfigError::TooLarge`] if the SMF cannot hold it: more than 65535 tracks,
-/// an event or a chunk too long for its length field.
-pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Result<Vec<u8>> {
-    let format_word: u16 = match format {
-        SmfFormat::SingleTrack => 0,
-        SmfFormat::Parallel => 1,
-        SmfFormat::Sequential => 2,
-    };
-    let count = u16::try_from(tracks.len()).map_err(|_| too_large())?;
-    let header: Vec<u8> = [format_word, count, division.get()]
+/// tracks with [`measure`] and the constructor's rules.
+pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Vec<u8> {
+    let count = u16::try_from(tracks.len()).unwrap_or(u16::MAX);
+    let header: Vec<u8> = [format.word(), count, division.get()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();
-    let chunks = std::iter::once(chunk(b"MThd", &header))
-        .chain(
-            tracks
-                .iter()
-                .enumerate()
-                .map(|(i, t)| body(i, t).and_then(|b| chunk(b"MTrk", &b))),
-        )
-        .collect::<Result<Vec<_>>>()?;
-    Ok(chunks.concat())
+    std::iter::once(chunk(b"MThd", &header))
+        .chain(tracks.iter().map(|t| chunk(b"MTrk", &body(t))))
+        .collect::<Vec<_>>()
+        .concat()
 }

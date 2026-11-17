@@ -13,9 +13,7 @@ pub fn midi_file_read(data: &[u8]) {
     for track in file.tracks() {
         let _ = track.notes();
     }
-    let Ok(bytes) = file.to_bytes() else {
-        return;
-    };
+    let bytes = file.to_bytes();
     let again = MidiFile::from_bytes(&bytes).expect("a file this crate wrote reads back");
     assert_eq!(again, file, "write then read changed the file");
 }

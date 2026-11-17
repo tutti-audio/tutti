@@ -1,6 +1,7 @@
 //! Unit tests for the CLAP host's event translation.
 
 use std::ffi::c_void;
+use tutti_types::ParamId;
 
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END,
@@ -393,7 +394,7 @@ fn test_output_event_list_push_param_value() {
 
     let changes = param_changes(&list);
     assert_eq!(changes.queues.len(), 1);
-    assert_eq!(changes.queues[0].param_id, 7u32.into());
+    assert_eq!(changes.queues[0].param_id, ParamId::new(7u32));
     assert!((changes.queues[0].points[0].value.get() - 0.42).abs() < 0.001);
 }
 
@@ -404,12 +405,12 @@ fn test_output_event_list_push_param_value() {
 #[test]
 fn test_param_changes_through_input_list() {
     let mut changes = ParameterChanges::new();
-    let mut q1 = ParameterQueue::with_capacity(1u32.into(), 2);
+    let mut q1 = ParameterQueue::with_capacity(ParamId::new(1u32), 2);
     q1.add_point(0, 0.0);
     q1.add_point(128, 1.0);
     changes.add_queue(q1);
 
-    let mut q2 = ParameterQueue::with_capacity(2u32.into(), 1);
+    let mut q2 = ParameterQueue::with_capacity(ParamId::new(2u32), 1);
     q2.add_point(64, 0.5);
     changes.add_queue(q2);
 

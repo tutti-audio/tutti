@@ -214,7 +214,7 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
         MidiFile::smf(SmfFormat::Sequential, SmfDivision::of(480), vec![track]).unwrap();
     assert!(matches!(
         s.midi().play_file(synth, Beat(0.0), &sequential),
-        Err(MidiError::File(tutti_midi_file::Error::NoCommonTimeline(_)))
+        Err(MidiError::NoCommonTimeline(_))
     ));
 }
 

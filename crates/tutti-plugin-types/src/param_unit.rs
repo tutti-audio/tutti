@@ -289,7 +289,8 @@ impl PlainUnit for BeatDuration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ParamId, ParameterInfo};
+    use crate::ParameterInfo;
+    use tutti_types::ParamId;
 
     fn plain(min: f64, max: f64) -> ParamRange {
         ParamRange::Plain {

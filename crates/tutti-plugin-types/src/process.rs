@@ -10,9 +10,10 @@
 use tutti_graph::UmpAt;
 
 use crate::{
-    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionTextChanges, ParamId,
-    ParameterChanges, ScaleChanges, TransportChange, TransportInfo, WireMidi,
+    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionTextChanges, ParameterChanges,
+    ScaleChanges, TransportChange, TransportInfo, WireMidi,
 };
+use tutti_types::ParamId;
 
 /// Sequencer-context inputs for one block: chords, scales, per-note text and
 /// integer per-note expression.

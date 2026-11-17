@@ -149,7 +149,7 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_types::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth,
-    Frame, Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones,
+    Frame, Hz, MaxBlock, Meter, MeterMap, ParamId, Q, SampleRate, Samples, Seconds, Semitones,
     TimeSignature,
 };
 
@@ -175,7 +175,7 @@ pub use tutti_plugin::Normalized;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId, StateUse};
+pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -258,24 +258,25 @@ pub mod nodes {
         InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
         ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        TiltFilterConfig, TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode,
-        VolumeOutOfRange,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode, VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
         ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
         FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
-        LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
+        LimiterKernel, ModDelayKernel, PhaserKernel, PlateKernel, ReconcileError, SvfKernel,
+        TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
-        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet, TiltFilterSet,
+        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, PlateSet, SvfSet, TiltFilterSet,
     };
 }
 
@@ -672,7 +673,6 @@ pub mod midi {
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
-    pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
@@ -680,8 +680,8 @@ pub mod midi {
         TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
+        WriteError,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -701,8 +701,9 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
+        ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
@@ -715,10 +716,10 @@ pub mod midi {
         Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
         NotChunkSize, NotManufacturerId, NotSharpsFlats, NoteKey, NoteKeyEvent, OutOfRange,
         PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
-        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet, Sysex7Packets,
-        Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage,
-        SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
-        Utility, Voice2,
+        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet,
+        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
+        SysexMessage, SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion,
+        Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,

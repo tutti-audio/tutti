@@ -149,10 +149,10 @@ pub(crate) fn schedule_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::ParamId;
+    use tutti_types::ParamId;
 
     fn queue(id: u32, points: &[(i32, f64)]) -> ParameterQueue {
-        let mut queue = ParameterQueue::with_capacity(ParamId::from(id), points.len());
+        let mut queue = ParameterQueue::with_capacity(ParamId::new(id), points.len());
         for &(offset, value) in points {
             assert!(queue.add_point(offset, value));
         }
@@ -260,7 +260,7 @@ mod tests {
         let stage = Stage::shared();
         let mut stage = stage.borrow_mut();
         let bounds = ParamBounds { min: 0.0, max: 1.0 };
-        let mut too_many = ParameterQueue::with_capacity(ParamId::from(1), EVENT_ROOM + 1);
+        let mut too_many = ParameterQueue::with_capacity(ParamId::new(1), EVENT_ROOM + 1);
         for offset in 0..=EVENT_ROOM as i32 {
             assert!(too_many.add_point(offset, 0.5));
         }

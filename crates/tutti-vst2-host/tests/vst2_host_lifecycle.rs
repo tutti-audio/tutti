@@ -27,8 +27,9 @@ use keyboard_types::{Code, Key, KeyState, Modifiers, NamedKey};
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     ContentScale, Control, Controller, EditorWindow, KeyEvent, KeyUse, ModifierConvention,
-    Normalized, ParamEdit, ParamId, Request,
+    Normalized, ParamEdit, Request,
 };
+use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
 use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2Loaded, Vst2ProcessContext};
 use tutti_vst2_test_plugin::ProcessCapture;

@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, Normalized, ParamId, PluginError, PluginFailure, RenderMode, StateError,
-    TerminationReason, WindowHandle,
+    Health, Normalized, PluginError, PluginFailure, RenderMode, StateError, TerminationReason,
+    WindowHandle,
 };
 use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -25,6 +25,7 @@ use tutti_plugin_types::{
 use tutti_plugin_types::{MainThreadMarker, StateUse};
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
+use tutti_types::ParamId;
 
 /// How a [`PluginHandle`] reaches a plugin's main-thread [`Control`].
 ///
@@ -886,8 +887,9 @@ impl PluginHandle {
 mod tests {
     use super::*;
     use tutti_plugin_types::{
-        EditorWindow, Normalized, ParamId, ParameterInfo, Preset, PresetId, RenderMode,
+        EditorWindow, Normalized, ParameterInfo, Preset, PresetId, RenderMode,
     };
+    use tutti_types::ParamId;
 
     /// A test control that reaches presets. Doubles as proof the route is
     /// implementable from outside this crate's own backends: a `Control` that

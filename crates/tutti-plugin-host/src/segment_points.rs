@@ -55,7 +55,7 @@ use tutti_graph::ParamSegment;
 use tutti_types::Samples;
 
 use super::param_delivery::ParamDelivery;
-use tutti_plugin_types::ParamId;
+use tutti_types::ParamId;
 
 /// Segment slots the unit tests prepare: a figure past any they fill.
 #[cfg(test)]
@@ -230,7 +230,8 @@ mod tests {
     use std::sync::Arc;
     use tutti_graph::Exponent;
     use tutti_graph::Law;
-    use tutti_plugin_types::{ParamId, ParameterChanges};
+    use tutti_plugin_types::ParameterChanges;
+    use tutti_types::ParamId;
 
     const A: ParamId = ParamId::new(7);
 
@@ -279,7 +280,7 @@ mod tests {
     /// before it.
     #[test]
     fn a_start_on_the_chunk_s_last_frame_is_a_corner() {
-        let seg = ParamSegment::foreign(7, 0.5, 1.0, Samples(100), Law::Linear);
+        let seg = ParamSegment::foreign(ParamId::new(7), 0.5, 1.0, Samples(100), Law::Linear);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7]);
         sp.prepare(MAX_SEGMENTS);
@@ -308,7 +309,13 @@ mod tests {
     /// now the play clock's 32-frame grid (doc 014 §5.3).
     #[test]
     fn a_segment_sends_points_until_it_lands() {
-        let seg = ParamSegment::foreign(7, 0.0, 1.0, Samples(150), Law::PowerIn(Exponent::of(2.0)));
+        let seg = ParamSegment::foreign(
+            ParamId::new(7),
+            0.0,
+            1.0,
+            Samples(150),
+            Law::PowerIn(Exponent::of(2.0)),
+        );
         let grid = |f: u64| f.is_multiple_of(32);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7]);
@@ -355,7 +362,7 @@ mod tests {
     #[test]
     fn an_interrupting_event_stops_the_segment() {
         let b = ParamId::new(8);
-        let seg = ParamSegment::foreign(7, 0.0, 1.0, Samples(500), Law::Linear);
+        let seg = ParamSegment::foreign(ParamId::new(7), 0.0, 1.0, Samples(500), Law::Linear);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7, 8]);
         sp.prepare(MAX_SEGMENTS);
@@ -382,7 +389,7 @@ mod tests {
         // Address `k` arrives `400 - k` frames after frame 0.
         let seg = |k: u32| {
             ParamSegment::foreign(
-                100 + k,
+                addr(k),
                 0.0,
                 1.0,
                 Samples(401 - k as usize),
@@ -448,7 +455,8 @@ mod tests {
         let mut sp = SegmentPoints::default();
         let mut d = delivery([1, 2, 3]);
         sp.prepare(2);
-        let seg = |id: u32| ParamSegment::foreign(id, 0.0, 1.0, Samples(500), Law::Linear);
+        let seg =
+            |id: u32| ParamSegment::foreign(ParamId::new(id), 0.0, 1.0, Samples(500), Law::Linear);
         d.begin();
         sp.begin(64);
         for id in [1, 2, 3] {

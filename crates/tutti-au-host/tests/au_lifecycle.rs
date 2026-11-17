@@ -392,10 +392,11 @@ mod halves {
     use super::*;
     use tutti_au_host::{AuController, AuLoaded, AuProcessor};
     use tutti_plugin_types::{
-        Control, Controller, Loaded, MaxBlock, Normalized, ParamFlags, ParamId, ParameterChanges,
+        Control, Controller, Loaded, MaxBlock, Normalized, ParamFlags, ParameterChanges,
         ParameterQueue, PluginAudio, PluginIo, ProcessContext, ProcessOutput, Processor, Request,
         taken,
     };
+    use tutti_types::ParamId;
     use tutti_types::Samples;
 
     fn prepare(rate: tutti_types::SampleRate, block: usize) -> tutti_plugin_types::Prepare {

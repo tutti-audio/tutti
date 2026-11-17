@@ -8,11 +8,11 @@
 //! reading of the bytes, never on the bytes.
 
 use crate::common::track;
-use crate::support::{Division, RawEvent, build_smf, decode_smf};
+use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    Error, FileEvent, IoStep, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind,
-    PairedNote, SmfDivision, SmfFormat, TextKind, Tick, Track, Truncated,
+    FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
+    ReadError, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick, Track, TracksError,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
@@ -202,20 +202,11 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(at(27).1, FileEvent::Escape(vec![1, 2, 3].into()));
         assert_eq!(at(28).0, Tick(20 + u64::from(BEAT)));
 
-        let written = file.to_bytes().expect("writes");
+        let written = file.to_bytes();
         // SMF 1.0 section 2.1: the header's format word, after the chunk type
         // "MThd" and the length 6.
         assert_eq!(&written[8..10], &format.to_be_bytes());
         assert_eq!(read(&written), file, "format {format}");
-        // The second opinion: the same events, read by a decoder that shares
-        // nothing with the crate.
-        assert_eq!(
-            decode_smf(&written)
-                .expect("a foreign reader accepts it")
-                .tracks,
-            decode_smf(&bytes).expect("and the original").tracks,
-            "format {format}"
-        );
     }
 }
 
@@ -236,7 +227,7 @@ fn the_end_of_a_track_is_kept() {
     let file = read(&bytes);
     assert_eq!(file.tracks()[0].end, Tick(4 * u64::from(BEAT)));
     assert_eq!(file.end_beat(), Beat(4.0));
-    assert_eq!(read(&file.to_bytes().unwrap()).tracks()[0].end, Tick(1920));
+    assert_eq!(read(&file.to_bytes()).tracks()[0].end, Tick(1920));
 }
 
 /// A delta on a non-note event advances the clock: the note after a SysEx a
@@ -274,7 +265,7 @@ fn format_2_keeps_its_sequences_apart() {
             ],
         ],
     ));
-    assert_eq!(&file.to_bytes().unwrap()[8..10], &[0, 2]);
+    assert_eq!(&file.to_bytes()[8..10], &[0, 2]);
     assert!(file.events().is_err(), "no common timeline to merge on");
     assert_eq!(file.tracks().len(), 2);
     let tempo = |i| file.tempo_map_of(i).unwrap().tempo_at(Beat(0.0));
@@ -362,7 +353,7 @@ fn the_tempo_map_follows_the_file() {
     assert_eq!(file.beat_at(Tick(480)), Beat(1.0));
     // And it comes back out: the tempo events are events of the track.
     assert_eq!(
-        read(&file.to_bytes().unwrap()).seconds_at(Beat(8.0)),
+        read(&file.to_bytes()).seconds_at(Beat(8.0)),
         file.seconds_at(Beat(8.0))
     );
 }
@@ -449,7 +440,7 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     assert_eq!(points[1].tempo, Bpm::of(60_000_000.0));
     assert!((points[2].tempo.get() - 60_000_000.0 / 16_777_215.0).abs() < 1e-12);
     // The zero is written back.
-    assert_eq!(read(&file.to_bytes().unwrap()), file);
+    assert_eq!(read(&file.to_bytes()), file);
 }
 
 /// Writing a tempo above the wire's range writes the fastest quarter, 1 us,
@@ -500,7 +491,7 @@ fn smpte_division_is_refused() {
     );
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiUnsupportedTiming)
+        Err(ReadError::SmpteDivision)
     ));
 }
 
@@ -509,7 +500,11 @@ fn a_zero_division_is_refused() {
     let bytes = build_smf(0, Division::Metrical(0), &[vec![]]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::ZeroTicksPerBeat
+        })
     ));
 }
 
@@ -548,12 +543,20 @@ fn a_chunk_cut_short_is_truncated() {
     let cut = &bytes[..bytes.len() - 5];
     assert!(matches!(
         MidiFile::from_bytes(cut),
-        Err(Error::Truncated(Truncated::Chunk))
+        Err(ReadError::Smf {
+            track: None,
+            offset: 14,
+            cause: SmfParseError::ChunkCutOff
+        })
     ));
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
         MidiFile::from_bytes(&bytes[..14 + 5]),
-        Err(Error::Truncated(Truncated::Chunk))
+        Err(ReadError::Smf {
+            track: None,
+            offset: 14,
+            cause: SmfParseError::ChunkCutOff
+        })
     ));
 }
 
@@ -572,12 +575,17 @@ fn a_file_missing_a_track_is_truncated() {
     let cut = &two[..one.len()];
     assert!(matches!(
         MidiFile::from_bytes(cut),
-        Err(Error::Truncated(Truncated::Tracks))
+        Err(ReadError::Smf {
+            track: None,
+            offset,
+            cause: SmfParseError::TracksCutOff
+        }) if offset == one.len()
     ));
 }
 
-/// A track whose chunk length is right but which ends mid-event is malformed:
-/// a lenient reader would keep the events before it and say nothing.
+/// A track whose chunk length is right but which ends mid-event is malformed,
+/// and the error names the track and the event's offset: a lenient reader
+/// would keep the events before it and say nothing.
 #[test]
 fn a_track_that_ends_mid_event_is_a_parse_error() {
     let mut bytes = build_smf(0, Division::Metrical(TPQ), &[vec![]]);
@@ -586,9 +594,60 @@ fn a_track_that_ends_mid_event_is_a_parse_error() {
     bytes.extend_from_slice(b"MTrk");
     bytes.extend_from_slice(&3u32.to_be_bytes());
     bytes.extend_from_slice(&[0x00, 0x90, 0x3C]);
+    // The header chunk is 14 bytes and the track chunk's own header 8.
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 22,
+            cause: SmfParseError::ChannelData
+        })
+    ));
+}
+
+/// A meta event whose length runs past the end of its chunk is cut off, and
+/// the error names the track and where the event starts.
+#[test]
+fn a_meta_event_longer_than_its_chunk_is_an_event_cut_off() {
+    let mut bytes = build_smf(0, Division::Metrical(TPQ), &[vec![]]);
+    bytes.truncate(14);
+    bytes.extend_from_slice(b"MTrk");
+    bytes.extend_from_slice(&4u32.to_be_bytes());
+    // A Text meta event declaring 5 bytes of text and holding none.
+    bytes.extend_from_slice(&[0x00, 0xFF, 0x01, 0x05]);
+    let err = MidiFile::from_bytes(&bytes).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ReadError::Smf {
+                track: Some(0),
+                offset: 22,
+                cause: SmfParseError::EventCutOff
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "SMF track 0 at byte 22: an event is cut off by the end of its chunk"
+    );
+}
+
+/// A track chunk past the header's count is named at its own chunk.
+#[test]
+fn a_chunk_past_the_declared_tracks_is_named_where_it_starts() {
+    let mut bytes = build_smf(0, Division::Metrical(TPQ), &[vec![]]);
+    let second = bytes.len();
+    bytes.extend_from_slice(b"MTrk");
+    bytes.extend_from_slice(&4u32.to_be_bytes());
+    bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+    assert!(matches!(
+        MidiFile::from_bytes(&bytes),
+        Err(ReadError::Smf {
+            track: None,
+            offset,
+            cause: SmfParseError::ExtraTracks
+        }) if offset == second
     ));
 }
 
@@ -662,15 +721,16 @@ fn a_velocity_zero_note_on_closes_the_note() {
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
     assert_eq!(file.tracks()[0].events[0].1, on(0, 60, 0));
-    assert_eq!(read(&file.to_bytes().unwrap()), file);
+    assert_eq!(read(&file.to_bytes()), file);
 }
 
 // ---- building a file -----------------------------------------------------
 
-/// The writer's own framing is read by the independent decoder: chunk
-/// lengths, VLQ deltas, the division, the mandatory End of Track.
+/// The writer's framing is the spec's bytes (SMF 1.0 sections 2.1, 2.2, 3 and
+/// 1.1): the header chunk, a length for each track chunk, a two-byte delta for
+/// tick 1920 (`8F 00`) and the End of Track each track ends with.
 #[test]
-fn the_writer_is_read_by_a_foreign_decoder() {
+fn the_writer_frames_a_file_as_the_spec_bytes() {
     let file = MidiFile::smf(
         SmfFormat::Parallel,
         SMF_DIVISION,
@@ -683,18 +743,22 @@ fn the_writer_is_read_by_a_foreign_decoder() {
         ],
     )
     .unwrap();
-    let bytes = file.to_bytes().unwrap();
-    let decoded = decode_smf(&bytes).expect("a foreign decoder accepts the framing");
-    assert_eq!(decoded.format, 1);
-    assert_eq!(decoded.ticks_per_quarter(), Some(TPQ));
-    assert_eq!(decoded.note_on_ticks(), [0]);
-    assert_eq!(decoded.first_tempo_us(), Some(666_667));
-    assert!(decoded.tracks.iter().all(|t| {
-        t.last()
-            .is_some_and(|e| e.status == 0xFF && e.data.first() == Some(&0x2F))
-    }));
-    // Ticks past a 2-byte VLQ delta survive: tick 1920 is `8F 00`.
-    assert_eq!(decoded.tracks[1][1].tick, 1920);
+    assert_eq!(
+        file.to_bytes(),
+        [
+            // MThd, length 6, format 1, two tracks, 480 ticks per quarter.
+            0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xE0, //
+            // MTrk, length 11: Set Tempo 666 667 us (90 BPM), End of Track.
+            0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 11, //
+            0x00, 0xFF, 0x51, 0x03, 0x0A, 0x2C, 0x2B, //
+            0x00, 0xFF, 0x2F, 0x00, //
+            // MTrk, length 13: Note On, Note Off at delta 1920, End of Track.
+            0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 13, //
+            0x00, 0x90, 0x3C, 0x64, //
+            0x8F, 0x00, 0x80, 0x3C, 0x00, //
+            0x00, 0xFF, 0x2F, 0x00,
+        ]
+    );
 }
 
 #[test]
@@ -702,7 +766,7 @@ fn a_format_0_file_has_one_track() {
     let two = vec![Track::default(), Track::default()];
     assert!(matches!(
         MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, two),
-        Err(Error::Config(_))
+        Err(TracksError::SingleTrack { tracks: 2 })
     ));
 }
 
@@ -710,7 +774,7 @@ fn a_format_0_file_has_one_track() {
 fn an_empty_track_list_is_refused() {
     assert!(matches!(
         MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![]),
-        Err(Error::Config(_))
+        Err(TracksError::NoTracks)
     ));
 }
 
@@ -775,7 +839,7 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
         vec![events.into_iter().collect()],
     )
     .unwrap();
-    assert_eq!(read(&file.to_bytes().unwrap()), file);
+    assert_eq!(read(&file.to_bytes()), file);
 }
 
 #[test]
@@ -787,7 +851,7 @@ fn events_out_of_order_are_refused() {
     };
     assert!(matches!(
         MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![out_of_order]),
-        Err(Error::Config(_))
+        Err(TracksError::OutOfOrder { .. })
     ));
     // An end before the last event.
     let early_end = Track {
@@ -797,7 +861,7 @@ fn events_out_of_order_are_refused() {
     };
     assert!(matches!(
         MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![early_end]),
-        Err(Error::Config(_))
+        Err(TracksError::EndBeforeLast { .. })
     ));
 }
 
@@ -819,18 +883,35 @@ fn what_an_smf_cannot_hold_is_refused() {
         },
         Voice1::ProgramChange(U7::of(1)),
     ));
-    assert!(matches!(one(group_1), Err(Error::Config(_))));
+    assert!(matches!(one(group_1), Err(TracksError::Refused { .. })));
     let midi2 = FileEvent::Message(Message::Midi2(
         Address::first(MidiChannel::FIRST),
         tutti_ump::Voice2::ChannelPressure(ControlValue::MIN),
     ));
-    assert!(matches!(one(midi2), Err(Error::Config(_))));
+    assert!(matches!(one(midi2), Err(TracksError::Refused { .. })));
     let gap = MidiFile::smf(
         SmfFormat::SingleTrack,
         SMF_DIVISION,
         vec![track(vec![(0x1000_0000, on(0, 60, 1))])],
     );
-    assert!(matches!(gap, Err(Error::Config(_))));
+    assert!(matches!(gap, Err(TracksError::Gap { .. })));
+}
+
+/// An event's length is a variable-length quantity of at most 28 bits (SMF 1.0
+/// section 1.1): one byte past it is refused when the file is built, one byte
+/// short of it is not.
+#[test]
+fn an_event_longer_than_28_bits_is_too_large() {
+    let sysex = |len: usize| {
+        MidiFile::smf(
+            SmfFormat::SingleTrack,
+            SMF_DIVISION,
+            vec![track(vec![(0, FileEvent::SysEx(vec![0; len].into()))])],
+        )
+        .map(drop)
+    };
+    assert_eq!(sysex(1 << 28), Err(TracksError::TooLarge));
+    assert_eq!(sysex((1 << 28) - 1), Ok(()));
 }
 
 /// The longest gap the wire holds, 28 bits, round-trips.
@@ -842,7 +923,7 @@ fn the_widest_delta_round_trips() {
         vec![track(vec![(0x0FFF_FFFF, on(0, 60, 1))])],
     )
     .unwrap();
-    assert_eq!(read(&file.to_bytes().unwrap()), file);
+    assert_eq!(read(&file.to_bytes()), file);
 }
 
 /// A file written to a path reads back from it, and a path that is not there
@@ -861,10 +942,7 @@ fn a_file_reads_and_writes_a_path() {
     assert_eq!(MidiFile::read(&path).unwrap(), file);
     assert!(matches!(
         MidiFile::read(dir.path().join("absent.mid")),
-        Err(Error::Io {
-            step: IoStep::Read,
-            ..
-        })
+        Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound
     ));
 }
 
@@ -872,10 +950,10 @@ fn a_file_reads_and_writes_a_path() {
 fn bytes_of_neither_container_are_named_as_such() {
     assert!(matches!(
         MidiFile::from_bytes(b"RIFF....WAVE"),
-        Err(Error::UnknownFormat)
+        Err(ReadError::UnknownFormat)
     ));
     assert!(matches!(
         MidiFile::from_bytes(b""),
-        Err(Error::UnknownFormat)
+        Err(ReadError::UnknownFormat)
     ));
 }

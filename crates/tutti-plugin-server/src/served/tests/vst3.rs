@@ -85,7 +85,7 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
     instance
         .set_parameter(
             main_thread(),
-            tutti_plugin_types::ParamId::new(PARAM_MODE),
+            tutti_types::ParamId::new(PARAM_MODE),
             Normalized::clamped(MODE_ACTIVATION_COUNT),
         )
         .expect("a declared, writable parameter");

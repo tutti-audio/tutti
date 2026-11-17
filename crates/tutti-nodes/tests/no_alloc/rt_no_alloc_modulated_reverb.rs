@@ -4,8 +4,13 @@
 //! and no allocation on the audio thread.
 
 use tutti_graph::ParamNode;
-use tutti_nodes::{FreeverbControls, FreeverbNode, ModDelayControls, ModDelayNode, Stagger, Sweep};
-use tutti_types::UnitParam::{Damping, Depth, Feedback, Rate, RoomSize};
+use tutti_nodes::{
+    FreeverbControls, FreeverbNode, ModDelayControls, ModDelayNode, PlateReverbConfig,
+    PlateReverbNode, Stagger, Sweep,
+};
+use tutti_types::UnitParam::{
+    Cutoff, Damping, Decay, DelayTime, Depth, Diffusion, Feedback, Rate, RoomSize,
+};
 use tutti_types::{BusTopology, ChannelLayout, PhaseIncrement};
 
 use super::rt_no_alloc_dynamics::{Corners, addr, sweep};
@@ -130,4 +135,50 @@ fn freeverb_corners_are_allocation_free_and_finite() {
             .count(),
         2
     );
+}
+
+/// The plate at every corner: each control from far below its range to far past it and not a
+/// number. Every coefficient is clamped by the design (the decay to 50 ms to 8 s, the damping
+/// pole under 1), so the loop never gains and a bounded input stays bounded.
+#[test]
+fn plate_corners_are_allocation_free_and_finite() {
+    static CORNERS: Corners = Corners {
+        cells: &[
+            (addr(Decay, 0), -1.0e30, 1.0e30),
+            (addr(Damping, 0), -2.0, 9.0),
+            (addr(DelayTime, 0), -1.0, 9.0),
+            (addr(Cutoff, 0), -1.0e30, 1.0e30),
+            (addr(Depth, 0), -5.0, 5.0),
+            (addr(Diffusion, 0), -2.0, 9.0),
+        ],
+        lanes: &[],
+        lane_values: &[],
+        bound: 1_000.0,
+        frames: 19_200,
+    };
+    static HELD: Corners = Corners {
+        cells: &[
+            (addr(Decay, 0), f32::NAN, f32::INFINITY),
+            (addr(Damping, 0), f32::NEG_INFINITY, f32::NAN),
+            (addr(DelayTime, 0), f32::NAN, f32::INFINITY),
+            (addr(Cutoff, 0), f32::INFINITY, f32::NAN),
+            (addr(Depth, 0), f32::NAN, f32::NEG_INFINITY),
+            (addr(Diffusion, 0), f32::INFINITY, f32::NAN),
+        ],
+        lanes: &[],
+        lane_values: &[],
+        bound: 1_000.0,
+        frames: 19_200,
+    };
+    for corners in [&CORNERS, &HELD] {
+        sweep(
+            || PlateReverbNode::from(PlateReverbConfig::new()),
+            corners,
+            1.5,
+            None,
+        );
+    }
+    // Every control the sweep writes is a cell of the node: the swept ports are the plate's six.
+    let node = PlateReverbNode::from(PlateReverbConfig::new());
+    assert_eq!(node.param_set().params().count(), 6);
 }

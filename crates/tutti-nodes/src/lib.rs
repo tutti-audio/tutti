@@ -367,8 +367,12 @@ pub use reverb_freeverb::{FreeverbKernel, FreeverbNode, FreeverbSet};
 mod reverb_fdn;
 pub use reverb_fdn::{FdnKernel, FdnNode, FdnSet};
 
+// Dattorro's plate as a `KernelNode`.
+mod reverb_plate;
+pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
+
 // The banks' controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay};
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
