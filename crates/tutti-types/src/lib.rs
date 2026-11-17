@@ -165,7 +165,7 @@ pub use value::{
     Bpm, BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
     Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Frame, Gain,
     HoldFactor, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment, NotOnMidiScale, Note,
-    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw,
+    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamId, ParamKey, ParamRaw,
     ParkedSampleRate, Phase, PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Q, Radians,
     ReadRate, Resonance, Resyncs, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
     SampleSpanOutOfRange, Samples, Seconds, Semitones, Spread, SrcRatio, StereoBalance,

@@ -19,9 +19,10 @@ use tutti_plugin_ipc_ffi::Ready;
 
 use crate::{
     AutomationMode, ContentScale, EditorCapabilities, EditorError, KeyEvent, KeyUse, Loaded,
-    MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId, PluginError, PluginResult,
-    Request, Wakeups, WindowHandle,
+    MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, PluginError, PluginResult, Request,
+    Wakeups, WindowHandle,
 };
+use tutti_types::ParamId;
 
 /// What to load from a plugin file: which plugin, when the file exports
 /// several.

@@ -41,8 +41,9 @@ use support::main_thread;
 
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::params_state::{GAIN_DB_MAX, GAIN_DB_MIN, GAIN_PARAM_ID};
+use tutti_plugin_types::ParameterChanges;
 use tutti_plugin_types::PluginAudio;
-use tutti_plugin_types::{ParamId, ParameterChanges};
+use tutti_types::ParamId;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 512;

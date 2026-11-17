@@ -136,9 +136,10 @@ use tutti_plugin_host::{
     NodeControls, Notice, PluginControls, PluginHandle, PluginStatus, Subscription,
 };
 use tutti_plugin_types::{
-    BridgeError, Normalized, ParamEdit, ParamId, PluginFailure, PluginInvalidation, PluginRefresh,
+    BridgeError, Normalized, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh,
     PluginTail,
 };
+use tutti_types::ParamId;
 use tutti_types::{SampleRate, Samples};
 
 mod entry;
@@ -1196,10 +1197,8 @@ impl HostedPlugin {
 
     /// Parameter `id`'s value, as a modulation lane's knob starts at it:
     /// `None` while not read, `Some(None)` for one it does not list.
-    pub(crate) fn param_value(&self, id: u32) -> Option<Option<f32>> {
-        self.mirror
-            .get(tutti_plugin_types::ParamId::new(id))
-            .map(|v| v.map(|v| v.get() as f32))
+    pub(crate) fn param_value(&self, id: tutti_types::ParamId) -> Option<Option<f32>> {
+        self.mirror.get(id).map(|v| v.map(|v| v.get() as f32))
     }
 
     /// Sets the builder of the node that replaces this plugin's when it
@@ -1254,7 +1253,7 @@ impl Key<PluginNode> {
     /// is; [`Plugin::params`] resolves one now.
     #[must_use]
     pub fn param(self, id: ParamId) -> crate::ParamRef {
-        crate::ParamRef::plugin(self, id.get())
+        crate::ParamRef::plugin(self, id)
     }
 }
 
@@ -2350,7 +2349,8 @@ mod tests {
     use super::*;
     use crate::{RecoveryPolicy, Task};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use tutti_plugin_types::{Normalized, ParamId, ParameterInfo};
+    use tutti_plugin_types::{Normalized, ParameterInfo};
+    use tutti_types::ParamId;
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
@@ -2938,12 +2938,16 @@ mod tests {
         mirror.land(read.run().expect("the read lands"));
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.mirror = mirror;
-        assert_eq!(hosted.param_value(3), Some(Some(0.25)), "precondition");
+        assert_eq!(
+            hosted.param_value(ParamId::new(3)),
+            Some(Some(0.25)),
+            "precondition"
+        );
 
         let (incoming, _) = fake_handle(None, vec![(param, 0.75)]);
         hosted.adopt(incoming, Placement::InProcess);
         assert_eq!(
-            hosted.param_value(3),
+            hosted.param_value(ParamId::new(3)),
             None,
             "not ready until the read lands: nothing was read on this thread"
         );
@@ -2954,7 +2958,7 @@ mod tests {
         let job = jobs.pop().unwrap();
         rig.run_and_land(job);
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(3),
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
             "the mirror holds the incoming plugin's values"
         );
@@ -2969,14 +2973,14 @@ mod tests {
         hosted.adopt(third, Placement::InProcess);
         rig.run_and_land(stale);
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(3),
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
             "a read of the previous plugin must not land"
         );
         let own = rig.plugins_at(30).pop().expect("its own read");
         rig.run_and_land(own);
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(3),
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.125))
         );
     }
@@ -3015,7 +3019,7 @@ mod tests {
         let job = rig.plugins_at(0).pop().expect("the read is submitted");
         rig.run_and_land(job);
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(3),
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
             "the mirror is not ready"
         );
@@ -3027,7 +3031,7 @@ mod tests {
         unlisted.store(false, Ordering::SeqCst);
         rig.run_and_land(job);
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(3),
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
             "the re-run read filled the mirror"
         );

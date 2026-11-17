@@ -15,11 +15,12 @@ use tutti_plugin_ipc::{
     unique_socket_path,
 };
 use tutti_plugin_types::{
-    ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParamId, ParameterChanges,
+    ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParameterChanges,
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, SampleFormat,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
+use tutti_types::ParamId;
 use tutti_types::{Beat, Bpm, SampleRate, Samples};
 
 pub(super) const SR: SampleRate = SampleRate::SR_48K;

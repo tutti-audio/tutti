@@ -15,10 +15,11 @@ use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::{PluginHandle, RefreshSink};
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Health, Normalized, ParamFlags, ParamId,
-    ParamUnit, ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
+    AnyThread, AutomationMode, AutomationModeError, Health, Normalized, ParamFlags, ParamUnit,
+    ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_rt::LockExt;
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 const CUTOFF: ParamId = ParamId::new(1);
@@ -504,7 +505,7 @@ fn the_automation_mode_refusal_is_its_own_type() {
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
     let level = s.plugin_view(node).unwrap().params().get(LEVEL).unwrap();
-    assert_eq!(level.target(), crate::ParamRef::plugin(node, LEVEL.get()));
+    assert_eq!(level.target(), crate::ParamRef::plugin(node, LEVEL));
 }
 
 /// **A plugin's key names a parameter as a route's target** (`modulation`):
@@ -518,7 +519,7 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
     let target = key.param(LEVEL);
-    assert_eq!(target, ParamRef::plugin(key, LEVEL.get()));
+    assert_eq!(target, ParamRef::plugin(key, LEVEL));
     assert_eq!(
         target,
         s.plugin_view(key)

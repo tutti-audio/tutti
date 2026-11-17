@@ -342,7 +342,7 @@ fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::ParameterInfo 
     // passes through verbatim: splitting it here would impose a hierarchy the
     // shared vocabulary does not model, and three of the four hosted formats
     // could not fill.
-    tutti_plugin_types::ParameterInfo::new(tutti_plugin_types::ParamId::new(info.id), info.name)
+    tutti_plugin_types::ParameterInfo::new(tutti_types::ParamId::new(info.id), info.name)
         .with_range(ParamRange::Plain {
             min: info.min_value,
             max: info.max_value,

@@ -16,11 +16,11 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tutti_buffers::{Float, Planes};
 use tutti_plugin_types::BlockStatus;
 use tutti_plugin_types::{
-    ChannelTable, ChordValue, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo,
-    WireMidi,
+    ChordValue, ParameterChanges, PluginAudio, PluginIo, PluginResult, ProcessContext,
+    ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo, WireMidi,
 };
 
 use super::Link;
@@ -66,13 +66,6 @@ impl IpcProcessor {
 
 impl Processor for IpcProcessor {
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let PluginAudio::F32(buffer) = &mut io.buffer else {
-            return Err(PluginError::Block("the served pipeline takes f32 blocks"));
-        };
-        let frames = buffer.frames().0;
-        let (input, mut output) = buffer.split();
-        let inputs = ChannelTable::of_planes(input)?;
-        let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
         let mut piece = Piece {
             ctx: io.ctx,
             out: &mut *io.out,
@@ -82,8 +75,16 @@ impl Processor for IpcProcessor {
             over: 0,
             said: BlockStatus::Continue,
         };
-        self.batcher
-            .process(&self.link.bridge, frames, &inputs, &mut outputs, &mut piece);
+        let carries = match &mut io.buffer {
+            PluginAudio::F32(buffer) => {
+                self.batcher.process(&self.link.bridge, buffer, &mut piece);
+                carries_input(piece.ctx, buffer.split().0)
+            }
+            PluginAudio::F64(buffer) => {
+                self.batcher.process(&self.link.bridge, buffer, &mut piece);
+                carries_input(piece.ctx, buffer.split().0)
+            }
+        };
         let over = piece.over;
         let said = piece.said;
         // **A sleep is applied only to a piece that gave the plugin nothing.**
@@ -93,7 +94,7 @@ impl Processor for IpcProcessor {
         // would park the node and that chunk with it, so a piece that carries
         // anything (an event, a parameter, a note expression, a non-silent
         // input frame) does not get the sleep, and the node stays called.
-        if said == BlockStatus::Sleep && !carries_input(io.ctx, &inputs, frames) {
+        if said == BlockStatus::Sleep && !carries {
             io.out.set_status(BlockStatus::Sleep);
         }
         if over > 0 {
@@ -176,7 +177,7 @@ struct Piece<'a, 'c> {
 /// Whether a piece hands the plugin anything a sleeping plugin would wake
 /// for: MIDI, parameter changes, note expression, sequencer context, or a
 /// non-silent input frame.
-fn carries_input(ctx: &ProcessContext<'_>, inputs: &[&[f32]], frames: usize) -> bool {
+fn carries_input<S: Float>(ctx: &ProcessContext<'_>, input: Planes<'_, S>) -> bool {
     !ctx.midi_events.is_empty()
         || ctx.param_changes.is_some_and(|c| !c.is_empty())
         || ctx.note_expression.is_some_and(|c| !c.changes.is_empty())
@@ -186,9 +187,9 @@ fn carries_input(ctx: &ProcessContext<'_>, inputs: &[&[f32]], frames: usize) -> 
                 || e.expr_texts.is_some_and(|c| !c.changes.is_empty())
                 || e.expr_ints.is_some_and(|c| !c.changes.is_empty())
         })
-        || inputs
+        || input
             .iter()
-            .any(|ch| ch[..frames.min(ch.len())].iter().any(|&x| x != 0.0))
+            .any(|plane| plane.iter().any(|&x| x != S::SILENCE))
 }
 
 impl Chunks for Piece<'_, '_> {
@@ -314,7 +315,7 @@ impl Chunks for Piece<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::ParamId;
+    use tutti_types::ParamId;
 
     /// **A piece carries input when it holds an event, a parameter change or a non-silent frame,
     /// and only then**: it is what keeps a collected *sleep* from idling the
@@ -326,16 +327,30 @@ mod tests {
         let mut noisy = silence;
         noisy[5] = 0.25;
         let quiet = ProcessContext::new();
-        assert!(!carries_input(&quiet, &[&silence, &silence], 8));
-        assert!(carries_input(&quiet, &[&silence, &noisy], 8), "a sample");
+        let (a, b) = (&silence[..], &noisy[..]);
+        let both_quiet = [a, a];
+        assert!(!carries_input(
+            &quiet,
+            Planes::new(&both_quiet).expect("equal")
+        ));
+        let one_noisy = [a, b];
         assert!(
-            !carries_input(&quiet, &[&noisy], 5),
+            carries_input(&quiet, Planes::new(&one_noisy).expect("equal")),
+            "a sample"
+        );
+        let past = [&noisy[..5]];
+        assert!(
+            !carries_input(&quiet, Planes::new(&past).expect("one")),
             "a sample past the piece is not the piece's"
         );
         let mut changes = ParameterChanges::reserved(1, 4);
         assert!(changes.add_change(ParamId::new(1), 3, 0.5));
         let with_params = ProcessContext::new().params(&changes);
-        assert!(carries_input(&with_params, &[&silence], 8), "a parameter");
+        let one = [&silence[..]];
+        assert!(
+            carries_input(&with_params, Planes::new(&one).expect("one")),
+            "a parameter"
+        );
     }
 
     /// **A piece's chords and scales join the chunk shifted to the chunk's

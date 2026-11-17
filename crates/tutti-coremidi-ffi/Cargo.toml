@@ -16,9 +16,9 @@ workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi-sys = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
-block2 = "0.6"
+block2 = { workspace = true }
 core-foundation = { workspace = true }
-mach2 = "0.7"
+mach2 = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-core-midi = { workspace = true }

@@ -51,7 +51,9 @@ fn an_unknown_id_does_not_open() {
 fn capability_is_read_from_the_endpoint_not_assumed() {
     // A MIDI-1.0-protocol virtual source: the safe wrapper's plain
     // `virtual_source` is MIDI 1.0 by construction.
-    let client = match tutti_coremidi_ffi::create_client(|| Client::new("tutti-cap-test")) {
+    let client = match tutti_coremidi_ffi::create_client(|| {
+        Client::new("tutti-cap-test").map_err(OsStatus::new)
+    }) {
         Ok(c) => c,
         // No CoreMIDI here (sandbox/headless) — nothing to test against.
         Err(_) => return,
@@ -107,6 +109,9 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
 #[test]
 fn the_os_blocks_are_within_the_spec() {
     let backend = CoreMidiEndpoints::new();
+    // Unsupported is a fact of the OS (the class is absent), so one read of it
+    // holds for every listing below; an exception proves nothing.
+    let unsupported = matches!(ump_endpoints(), Err(UmpEndpointsError::Unsupported));
     let all = backend.inputs().into_iter().chain(backend.outputs());
     for info in all {
         let cap = &info.capability;
@@ -122,7 +127,7 @@ fn the_os_blocks_are_within_the_spec() {
             let end = u16::from(block.first_group().get()) + u16::from(block.groups().get());
             assert!(end <= 16, "{}: Groups run to {end}", info.name);
         }
-        if !matches!(ump_endpoints(), Ok(Some(_))) {
+        if unsupported {
             assert!(cap.blocks.is_empty(), "no UMP endpoint list, no blocks");
         }
     }

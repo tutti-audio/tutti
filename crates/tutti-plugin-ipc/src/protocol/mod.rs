@@ -207,11 +207,12 @@ pub use tutti_plugin_types::SampleFormat;
 //   (`tutti-{vst2,vst3,clap,au}-host`) via `tutti-plugin-types`.
 pub use tutti_plugin_types::{
     AutomationMode, BusChannels, ChannelLayout, ChordChanges, LoadedPlugin, Normalized,
-    NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit, ParamId,
+    NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit,
     ParameterChanges, ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor,
     PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleChanges,
     TransportChanges, TransportInfo,
 };
+pub use tutti_types::ParamId;
 
 #[cfg(test)]
 mod tests {
