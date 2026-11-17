@@ -43,7 +43,7 @@ struct Cells {
 /// use tutti_rt::tally;
 ///
 /// let lost = tally::<u64>();
-/// let (mut a, mut b) = (lost.writer(), lost.writer());
+/// let (a, b) = (lost.writer(), lost.writer());
 /// a.add(2);
 /// b.add(3);
 /// assert_eq!(lost.get(), 5);
@@ -104,7 +104,8 @@ impl<U: Count> Tally<U> {
         U::from_words(words)
     }
 
-    /// A new writer for the cell. Control side: it clones one `Arc`.
+    /// A new writer for the cell. It clones one `Arc`, so mint writers on the
+    /// control side and add through them from any thread.
     pub fn writer(&self) -> TallyWriter<U> {
         TallyWriter {
             cells: Arc::clone(&self.cells),
@@ -115,9 +116,10 @@ impl<U: Count> Tally<U> {
 
 impl<U: Count> TallyWriter<U> {
     /// Adds `by` to the total, one `fetch_add` per word, wrapping at 2^64.
-    /// Wait-free; allocates nothing.
+    /// Wait-free; allocates nothing. `&self`: writers on any number of threads
+    /// add at once, through one shared writer or several.
     #[inline]
-    pub fn add(&mut self, by: U) {
+    pub fn add(&self, by: U) {
         let by = by.to_words();
         for (add, cell) in by.as_slice().iter().zip(&*self.cells.words) {
             cell.fetch_add(*add, Ordering::Relaxed);
