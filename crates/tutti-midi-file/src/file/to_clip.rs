@@ -18,7 +18,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::Container;
 use crate::{
-    FileEvent, Meta, MicrosPerQuarter, MidiFile, Result, SmfFormat, TextKind, Tick, Track,
+    FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfFormat, TextKind, Tick, Track, TracksError,
 };
 
 use lyrics::Lyrics;
@@ -26,7 +26,7 @@ use lyrics::Lyrics;
 mod lyrics;
 
 /// Why a file cannot be a clip.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToClipError {
     /// A format 2 file holds independent sequences, each on its own
@@ -37,6 +37,10 @@ pub enum ToClipError {
     /// The file is a Clip File already.
     #[error("the file is a Clip File already")]
     AlreadyClip,
+    /// The clip made of the file is refused: a gap whose Null restarts alone
+    /// would be over 4 GB of the clip's bytes.
+    #[error(transparent)]
+    Tracks(#[from] TracksError),
 }
 
 /// Why an SMF event has no place in the clip.
@@ -523,17 +527,17 @@ impl MidiFile {
     ///
     /// # Errors
     ///
-    /// [`Error::ToClip`](crate::Error::ToClip): [`ToClipError::Sequential`] for a format 2 file,
-    /// [`ToClipError::AlreadyClip`] for a Clip File. [`Error::Config`](crate::Error::Config)
-    /// or [`Error::Tempo`](crate::Error::Tempo) cannot happen for a valid SMF.
+    /// [`ToClipError::Sequential`] for a format 2 file,
+    /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::Tracks`]
+    /// if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
-    pub fn to_clip(&self) -> Result<Converted> {
+    pub fn to_clip(&self) -> Result<Converted, ToClipError> {
         let format = match self.container {
             Container::Smf(SmfFormat::Sequential, _) => {
-                return Err(ToClipError::Sequential.into());
+                return Err(ToClipError::Sequential);
             }
             Container::Smf(format, _) => format,
-            Container::Clip(_) => return Err(ToClipError::AlreadyClip.into()),
+            Container::Clip(_) => return Err(ToClipError::AlreadyClip),
         };
 
         // Track order, then the track's own: the stable sort by tick keeps it.

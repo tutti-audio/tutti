@@ -87,8 +87,9 @@ impl Lyrics {
                 for Piece { body, end } in syllables {
                     let body = SyllableBody::try_from(&*body).map_err(|e| match e {
                         SyllableError::Text(e) => DropReason::Text(e),
-                        // The split leaves no separator in a body.
-                        other => unreachable!("{other:?} in a syllable the split made"),
+                        // The split leaves no separator in a body, so a
+                        // refusal that is not the text's leaves no syllable.
+                        _ => DropReason::LyricWithoutSyllable,
                     })?;
                     let packets = flex_lyric_packets(
                         MidiGroup::FIRST,

@@ -3,9 +3,9 @@
 //! (`support`, which shares no code with the crate).
 
 use crate::common::{note, track, unsorted};
-use crate::support::{Division, RawEvent, build_smf, write_vlq};
+use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfDivision, SmfFormat,
+    DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
     SmfParseError, TextKind, Tick,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
@@ -89,20 +89,9 @@ fn a_quantity_writes_to_its_bytes() {
             )])],
         )
         .unwrap()
-        .to_bytes()
-        .unwrap();
+        .to_bytes();
         // 14-byte header, 8-byte track header, then the delta.
         assert_eq!(written.get(22..22 + bytes.len()), Some(bytes), "{value:#x}");
-    }
-}
-
-/// `support`'s encoder agrees with the table (a check on the oracle).
-#[test]
-fn the_oracle_encoder_agrees_with_the_table() {
-    for (value, bytes) in QUANTITIES {
-        let mut out = Vec::new();
-        write_vlq(&mut out, value);
-        assert_eq!(out, bytes);
     }
 }
 
@@ -113,12 +102,16 @@ fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&body)),
-        Err(Error::MidiFileParse(SmfParseError::VariableLengthQuantity))
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 22,
+            cause: SmfParseError::VariableLengthQuantity
+        })
     ));
     // And one cut off mid-quantity.
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&[0x81, 0x80])),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -155,7 +148,7 @@ fn a_meta_event_cancels_running_status() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -170,7 +163,7 @@ fn a_sysex_cancels_running_status() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -179,7 +172,7 @@ fn a_sysex_cancels_running_status() {
 fn a_first_event_needs_a_status() {
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&[0x00, 0x3C, 0x40])),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -201,7 +194,7 @@ fn system_statuses_are_refused() {
         assert!(
             matches!(
                 MidiFile::from_bytes(&raw_track(&[0x00, status, 0x00])),
-                Err(Error::MidiFileParse(_))
+                Err(ReadError::Smf { .. })
             ),
             "{status:#x}"
         );
@@ -213,7 +206,7 @@ fn system_statuses_are_refused() {
 fn a_high_data_byte_is_malformed() {
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&[0x00, 0x90, 0x3C, 0x80])),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -238,7 +231,7 @@ fn more_tracks_than_declared_is_malformed() {
     bytes[10..12].copy_from_slice(&1u16.to_be_bytes());
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
     assert!(MidiFile::from_bytes(&two).is_ok());
 }
@@ -315,7 +308,7 @@ fn a_longer_meta_event_is_written_back_as_it_was() {
         0x00, 0xFF, 0x59, 0x03, 0xFD, 0x01, 0x99, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let back = MidiFile::from_bytes(&bytes).unwrap().to_bytes().unwrap();
+    let back = MidiFile::from_bytes(&bytes).unwrap().to_bytes();
     assert_eq!(back, bytes);
 }
 
@@ -331,7 +324,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(Error::MidiFileParse(_))
+        Err(ReadError::Smf { .. })
     ));
 }
 
@@ -341,8 +334,7 @@ fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let track = track(events);
     let bytes = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])
         .unwrap()
-        .to_bytes()
-        .unwrap();
+        .to_bytes();
     bytes.get(22..).unwrap().to_vec()
 }
 
@@ -400,7 +392,7 @@ fn a_written_file_reads_back_equal() {
         vec![track.clone(), track],
     )
     .unwrap();
-    let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
+    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
     assert_eq!(back.ticks_per_quarter(), DIVISION);
 }
@@ -436,7 +428,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         };
         assert_eq!((malformed.kind(), malformed.data()), (kind, data));
         // Written back as the file had it, and read as the same.
-        let written = read.to_bytes().unwrap();
+        let written = read.to_bytes();
         let mut event = vec![0xFF, kind, data.len() as u8];
         event.extend_from_slice(data);
         assert!(

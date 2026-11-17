@@ -11,7 +11,7 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
+    DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
     SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
@@ -259,7 +259,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         ),
         (480, note(0, 60)),
     ]);
-    let bytes = smf.to_clip().unwrap().clip.to_bytes().unwrap();
+    let bytes = smf.to_clip().unwrap().clip.to_bytes();
     let words: Vec<u32> = bytes[8..]
         .as_chunks::<4>()
         .0
@@ -364,19 +364,13 @@ fn format_2_is_refused() {
         vec![track(vec![(0, note(0, 60))]), track(vec![(0, note(0, 61))])],
     )
     .unwrap();
-    assert!(matches!(
-        smf.to_clip(),
-        Err(Error::ToClip(ToClipError::Sequential))
-    ));
+    assert!(matches!(smf.to_clip(), Err(ToClipError::Sequential)));
 }
 
 #[test]
 fn a_clip_is_not_converted_again() {
     let clip = format0(vec![(0, note(0, 60))]).to_clip().unwrap().clip;
-    assert!(matches!(
-        clip.to_clip(),
-        Err(Error::ToClip(ToClipError::AlreadyClip))
-    ));
+    assert!(matches!(clip.to_clip(), Err(ToClipError::AlreadyClip)));
 }
 
 /// M2-116 sections 7.1.1 and 7.1.2: the first Set Tempo, then the first Set
@@ -775,7 +769,7 @@ fn the_clip_round_trips_through_its_bytes() {
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
 }
 
@@ -1033,7 +1027,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
@@ -1047,7 +1041,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
     assert_eq!(flex_events(&again, is_signature), [(0, sig)]);

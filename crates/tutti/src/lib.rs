@@ -621,7 +621,6 @@ pub mod midi {
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
-    pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
@@ -629,8 +628,8 @@ pub mod midi {
         TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
+        WriteError,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]

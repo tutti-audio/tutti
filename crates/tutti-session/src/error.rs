@@ -187,9 +187,13 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// A MIDI file could not be read, built or written.
+    /// A MIDI file could not be read.
     #[error("MIDI file: {0}")]
-    File(#[from] tutti_midi_file::Error),
+    File(#[from] tutti_midi_file::ReadError),
+
+    /// A file has no one timeline to play ([`Midi::play_file`](crate::Midi::play_file)).
+    #[error(transparent)]
+    NoCommonTimeline(#[from] tutti_midi_file::NoCommonTimeline),
 
     /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
     /// its work panicked, or the spawner dropped it.

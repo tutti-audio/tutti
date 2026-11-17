@@ -43,8 +43,8 @@ use tutti_ump::{
     Flex, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump, Utility, split_stream,
 };
 
-use super::{CLIP_FILE_MAGIC, ClipFileError, ParsedClip, property_exchange};
-use crate::Truncated;
+use super::{ClipFileError, ParsedClip, property_exchange};
+use crate::ReadError;
 
 /// Why a rule refused, carried as winnow context and mapped to
 /// [`ClipFileError`] once, in [`error_of`].
@@ -462,7 +462,7 @@ fn error_of(e: &winnow::error::ErrMode<ContextError<Fault>>, torn: bool) -> Clip
         Some(Fault::MissingDctpq | Fault::MissingStartOfClip | Fault::MissingEndOfClip) | None
             if torn =>
         {
-            ClipFileError::Truncated(Truncated::Message)
+            ClipFileError::MessageCutOff
         }
         Some(Fault::MissingDctpq) => ClipFileError::MissingDctpq,
         Some(Fault::ZeroDctpq) => ClipFileError::ZeroDctpq,
@@ -481,7 +481,7 @@ fn error_of(e: &winnow::error::ErrMode<ContextError<Fault>>, torn: bool) -> Clip
         Some(Fault::TrailingData) => ClipFileError::TrailingData,
         // Every rule that can refuse names its fault; a refusal with none ran
         // out of packets inside a rule.
-        None => ClipFileError::Truncated(Truncated::Clip),
+        None => ClipFileError::StructureCutOff,
     }
 }
 
@@ -496,16 +496,25 @@ fn absolute(timed: &[Timed]) -> Vec<(u64, Ump)> {
         .collect()
 }
 
-/// Parses a Clip File.
+/// The refusal of `cause`, found `at` packets into `packets`.
+fn refusal(packets: &[Packet], at: usize, cause: ClipFileError) -> ReadError {
+    let word = packets[..at].iter().map(|p| p.ump.words().len()).sum();
+    ReadError::Clip { word, cause }
+}
+
+/// Parses a Clip File's `body`, the bytes after its magic.
 ///
 /// # Errors
 ///
-/// The [`ClipFileError`] naming the rule broken.
-pub(crate) fn parse(bytes: &[u8]) -> Result<ParsedClip, ClipFileError> {
-    if bytes.len() < 8 || bytes[..8] != CLIP_FILE_MAGIC {
-        return Err(ClipFileError::BadMagic);
-    }
-    let words = words_of(&bytes[8..]).ok_or(ClipFileError::Unaligned)?;
+/// [`ReadError::Clip`] naming the rule broken and the word it was found at.
+pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
+    let Some(words) = words_of(body) else {
+        let word = body.len() / 4;
+        return Err(ReadError::Clip {
+            word,
+            cause: ClipFileError::Unaligned,
+        });
+    };
     // `split_stream` ends at a truncated packet without saying so: the words
     // it left are what the packets fall short of.
     let packets: Vec<Packet> = split_stream(&words).map(classify).collect();
@@ -513,11 +522,21 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ParsedClip, ClipFileError> {
     let torn = taken < words.len();
 
     let mut input = &packets[..];
-    let clip = clip
-        .parse_next(&mut input)
-        .map_err(|e| error_of(&e, torn))?;
+    let clip = clip.parse_next(&mut input).map_err(|e| {
+        let cause = error_of(&e, torn);
+        // A cut-off packet stands past the last whole one.
+        let at = if cause == ClipFileError::MessageCutOff {
+            packets.len()
+        } else {
+            packets.len() - input.len()
+        };
+        refusal(&packets, at, cause)
+    })?;
     if torn {
-        return Err(ClipFileError::TrailingData);
+        return Err(ReadError::Clip {
+            word: taken,
+            cause: ClipFileError::TrailingData,
+        });
     }
 
     let mut header: Vec<(u64, Ump)> = clip.preamble.into_iter().map(|ump| (0, ump)).collect();

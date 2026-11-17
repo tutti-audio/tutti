@@ -1384,8 +1384,8 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::File`] for a format 2 file, which has no one timeline
-    /// ([`tutti_midi_file::Error::NoCommonTimeline`]); otherwise as
+    /// [`MidiError::NoCommonTimeline`] for a format 2 file, which has no one
+    /// timeline; otherwise as
     /// [`play_clip`](Self::play_clip).
     pub fn play_file(
         &mut self,
@@ -1393,7 +1393,7 @@ impl Midi<'_> {
         at: Beat,
         file: &tutti_midi_file::MidiFile,
     ) -> Result<()> {
-        let timeline = file.timeline().map_err(tutti_midi_file::Error::from)?;
+        let timeline = file.timeline()?;
         if !timeline.dropped.is_empty() {
             tracing::warn!(
                 dropped = timeline.dropped.len(),

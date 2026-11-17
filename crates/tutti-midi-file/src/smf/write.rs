@@ -9,11 +9,13 @@
 use tutti_ump::{Message, Midi1Bytes};
 
 use super::SmfDivision;
-use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
-use crate::{ConfigError, Error, Refusal, Result};
+use crate::file::{FileEvent, Meta, SmfFormat, Tick, Track};
+use crate::{Refusal, TrackPart, TracksError};
 
-fn too_large() -> Error {
-    ConfigError::TooLarge.into()
+type Result<T> = std::result::Result<T, TracksError>;
+
+fn too_large() -> TracksError {
+    TracksError::TooLarge
 }
 
 /// The widest value a variable-length quantity holds: 28 bits.
@@ -66,20 +68,7 @@ fn counted(lead: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 /// A meta event's type byte and data.
 fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
     match meta {
-        Meta::Text { kind, bytes } => (
-            match kind {
-                TextKind::Text => 0x01,
-                TextKind::Copyright => 0x02,
-                TextKind::TrackName => 0x03,
-                TextKind::InstrumentName => 0x04,
-                TextKind::Lyric => 0x05,
-                TextKind::Marker => 0x06,
-                TextKind::CuePoint => 0x07,
-                TextKind::ProgramName => 0x08,
-                TextKind::DeviceName => 0x09,
-            },
-            bytes.to_vec(),
-        ),
+        Meta::Text { kind, bytes } => (kind.meta_type(), bytes.to_vec()),
         Meta::Tempo {
             micros_per_quarter,
             extra,
@@ -120,8 +109,8 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
 ///
 /// # Errors
 ///
-/// [`ConfigError::TooLarge`] for an event too long for its length field, and
-/// [`ConfigError::Refused`] for what an SMF cannot hold (a packet other than
+/// [`TracksError::TooLarge`] for an event too long for its length field, and
+/// [`TracksError::Refused`] for what an SMF cannot hold (a packet other than
 /// MIDI 1.0 channel voice): the constructor refuses it first.
 fn encode(track: usize, event: &FileEvent) -> Result<Encoded> {
     Ok(match event {
@@ -144,12 +133,11 @@ fn encode(track: usize, event: &FileEvent) -> Result<Encoded> {
             | Message::Stream(_),
         )
         | FileEvent::Unknown(_) => {
-            return Err(ConfigError::Refused {
+            return Err(TracksError::Refused {
                 track,
-                in_header: false,
+                part: TrackPart::Events,
                 refusal: Refusal::SmfPacket,
-            }
-            .into());
+            });
         }
     })
 }
@@ -220,16 +208,11 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Result<Vec<u8>> {
 ///
 /// # Errors
 ///
-/// [`ConfigError::TooLarge`] if the SMF cannot hold it: more than 65535 tracks,
+/// [`TracksError::TooLarge`] if the SMF cannot hold it: more than 65535 tracks,
 /// an event or a chunk too long for its length field.
 pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Result<Vec<u8>> {
-    let format_word: u16 = match format {
-        SmfFormat::SingleTrack => 0,
-        SmfFormat::Parallel => 1,
-        SmfFormat::Sequential => 2,
-    };
     let count = u16::try_from(tracks.len()).map_err(|_| too_large())?;
-    let header: Vec<u8> = [format_word, count, division.get()]
+    let header: Vec<u8> = [format.word(), count, division.get()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();
