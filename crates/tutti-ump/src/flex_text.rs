@@ -238,7 +238,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// unless it is a System Real Time or a JR Clock message (section 7.5.2).
     fn other(&mut self, ump: Ump) {
         let Some(group) = ump.group() else { return };
-        let real_time = ump.message_type() == 0x1 && (ump.0[0] >> 16) & 0xFF >= 0xF8;
+        let real_time = ump.is_system_real_time();
         if !real_time {
             self.end_run(group.index());
         }

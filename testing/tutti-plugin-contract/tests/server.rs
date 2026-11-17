@@ -118,7 +118,7 @@ fn no_editor(
     _: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),
     })

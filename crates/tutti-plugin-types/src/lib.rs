@@ -231,6 +231,7 @@ mod transport;
 mod transport_request;
 mod version;
 mod wakeups;
+mod wire_error;
 
 // Test-only global allocator for the no-alloc gates: panics on any heap
 // allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
@@ -317,7 +318,10 @@ pub use midi::{
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
+// In the public `BridgeError::Slab`, so a host matches it without depending on ipc-ffi.
+pub use tutti_plugin_ipc_ffi::SlabError;
 pub use wakeups::Wakeups;
+pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutError};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
 pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};
@@ -338,7 +342,7 @@ pub use parameters::{
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};
 pub use presets::{Preset, PresetId, PresetSupport};
 #[cfg(feature = "probe-wire")]
-pub use probe_wire::{ProbeOutcome, ResultError, read_result, write_result};
+pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};
 pub use render_mode::RenderModeSupport;
 pub use sample_format::{SampleFormat, negotiate};

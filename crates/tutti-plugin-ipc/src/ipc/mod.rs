@@ -601,7 +601,7 @@ impl Ipc {
     pub fn reopen_restoring(&self, state: Option<&[u8]>) -> BridgeResult<Launched> {
         let Some(origin) = &self.link.origin else {
             return Err(BridgeError::LoadFailed {
-                path: PathBuf::new(),
+                path: None,
                 stage: LoadStage::Opening,
                 reason: "this served plugin has no origin to reopen".into(),
             });

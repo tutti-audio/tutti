@@ -1,34 +1,9 @@
-//! [`CCNumber`] — which Control Change controller a message addresses.
+//! [`CCNumber`]: which Control Change controller a message addresses.
 //!
-//! An *address*, not a measure — so like [`MidiChannel`](crate::MidiChannel) it
-//! is an integer newtype rather than one of the float-backed units in
-//! `tutti_types`, and it deliberately does not implement
-//! `Unit`: "controller 74" is not an automatable DSP parameter
-//! and must not be reachable through `Param`. (The *value* a CC
-//! carries is automatable; the *index* selecting it is not.)
-//!
-//! # Why a newtype and not `u8`
-//!
-//! A CC number and a MIDI channel are both small integers that arrive together
-//! and mask silently, so a signature like
-//! `handle_cc(cc_num: u8, value: f32, channel: u8)` has two interchangeable
-//! `u8`s. Swapping them does not crash: CC 1 on channel 3 becomes CC 3 on channel 1, so the mod
-//! wheel silently drives brightness, or a sustain pedal lands on a channel
-//! nobody is playing. Both failures are audible-but-plausible, which is the
-//! worst kind.
-//!
-//! A `pub type CCNumber = u8` alias prevents none of that — an alias is the
-//! same type as what it aliases. This is a real newtype, serializable (feature
-//! `serde`) so a document can persist one (a CC automation lane is keyed by
-//! one).
-//!
-//! # Why 7-bit, in a MIDI 2.0 engine
-//!
-//! MIDI 2.0 widened the CC *value* to 32 bits but left the *index* at 7 —
-//! `Voice2::ControlChange { controller, value: u32 }` (M2-104 §7.4.6). So
-//! `0..=127` remains correct here even though nothing else about a Control
-//! Change message is 7-bit any more, and the range is a property of the format
-//! rather than a legacy carry-over.
+//! An address, not a quantity: the index selects a controller, and the value
+//! it carries is a [`ControlValue`](crate::ControlValue) (MIDI 2.0) or a
+//! [`U7`](crate::U7) (MIDI 1.0). The index is 7 bits in both protocols
+//! (M2-104 §7.4.6), so the range is `0..=127`.
 
 use crate::OutOfRange;
 

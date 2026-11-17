@@ -3050,6 +3050,7 @@ name = "tutti-plugin-db"
 version = "0.0.1"
 dependencies = [
  "crossbeam-channel",
+ "postcard",
  "serde",
  "serde_json",
  "tempfile",

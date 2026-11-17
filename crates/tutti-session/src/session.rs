@@ -477,6 +477,12 @@ pub struct MidiNodes {
     pub clock_master: tutti_midi_runtime::ClockControls,
 }
 
+/// The bound on an app's key type, the name an app gives a node in its model.
+/// Every `Ord + Clone + Debug + Send + Sync + 'static` type is one.
+pub trait AppKey: Ord + Clone + std::fmt::Debug + Send + Sync + 'static {}
+
+impl<T: Ord + Clone + std::fmt::Debug + Send + Sync + 'static> AppKey for T {}
+
 /// Whether the root is as it was asked to be
 /// ([`Session::root_topology_status`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -538,7 +544,9 @@ pub enum RootTopologyStatus {
 /// ```
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
-pub struct Session<C: Clock = Offline> {
+pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
+    /// No `K` is held; `fn() -> K` keeps `Send` following the clock.
+    pub(crate) _key: std::marker::PhantomData<fn() -> K>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
@@ -551,7 +559,7 @@ pub struct Session<C: Clock = Offline> {
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
-    pub(crate) pool: crate::Pool<C>,
+    pub(crate) pool: crate::Pool<K, C>,
     /// The plugin entries whose node waits to swap to a reloaded plugin.
     #[cfg(feature = "plugin")]
     pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
@@ -696,7 +704,7 @@ impl SharedWork {
     }
 }
 
-impl Session<Offline> {
+impl Session<&'static str, Offline> {
     /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
     /// [`LIVE_MAX_BLOCK`](crate::LIVE_MAX_BLOCK) frames
     /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
@@ -714,7 +722,9 @@ impl Session<Offline> {
     pub fn new(rate: tutti_types::SampleRate) -> crate::Result<Self> {
         Self::builder().sample_rate(rate).build()
     }
+}
 
+impl<K: AppKey> Session<K, Offline> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
     /// start of the next block.
@@ -723,7 +733,7 @@ impl Session<Offline> {
     }
 }
 
-impl<C: RealTime> Session<C> {
+impl<K: AppKey, C: RealTime> Session<K, C> {
     /// The configuration of the stream that renders the session's blocks: its
     /// rate, width and block (the callback size, or the timer's block).
     #[must_use]
@@ -746,7 +756,7 @@ impl<C: RealTime> Session<C> {
 
 /// A detached session: the executor stays on this side, and the caller renders.
 #[cfg(feature = "testing")]
-impl Session<crate::Detached> {
+impl<K: AppKey> Session<K, crate::Detached> {
     /// Renders one frame on the calling thread under a stopped transport:
     /// no inputs, `output` one sample per global output. Commits any edit
     /// first.
@@ -772,7 +782,7 @@ impl Session<crate::Detached> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
@@ -782,8 +792,9 @@ impl<C: Clock> Session<C> {
     /// and do not: the caller has run or refused them first, so this runs no
     /// closure of the app's.
     #[cfg(feature = "device")]
-    pub(crate) fn with_clock<K: Clock>(self, running: K::Running) -> (Session<K>, C::Running) {
+    pub(crate) fn with_clock<N: Clock>(self, running: N::Running) -> (Session<K, N>, C::Running) {
         let Session {
+            _key,
             #[cfg(feature = "plugin")]
             _early_work,
             running: old_running,
@@ -848,6 +859,7 @@ impl<C: Clock> Session<C> {
         let pool = pool.rebind();
         (
             Session {
+                _key,
                 #[cfg(feature = "plugin")]
                 _early_work,
                 running,
@@ -914,7 +926,7 @@ impl<C: Clock> Session<C> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a

@@ -98,7 +98,7 @@ pub enum StateJobFailed {
     Wait(#[from] WaitError),
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
     /// for `state_use` ([`StateUse::Project`] is the state a project keeps).
     /// The round trip starts on the session's spawner and the state lands in a
@@ -113,13 +113,13 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`StateJobError::Entry`] when the key has no loaded plugin entry;
     /// [`StateJobError::NoNode`] when the plugin is in no node.
-    pub fn save_state<K>(
+    pub fn save_state<P>(
         &mut self,
-        key: &K,
+        key: &P,
         state_use: StateUse,
-    ) -> Result<Job<SaveState>, StateJobError<K>>
+    ) -> Result<Job<SaveState>, StateJobError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
         Ok(self.jobs.submit_job(
@@ -158,13 +158,13 @@ impl<C: crate::Clock> Session<C> {
     /// [`StateJobError::NoNode`] when the plugin is in no node;
     /// [`StateJobError::OtherPeer`] when `state` was saved from another
     /// peer than this plugin (nothing is sent).
-    pub fn restore_state<K>(
+    pub fn restore_state<P>(
         &mut self,
-        key: &K,
+        key: &P,
         state: PeerState,
-    ) -> Result<Job<RestoreState>, StateJobError<K>>
+    ) -> Result<Job<RestoreState>, StateJobError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, plugin, notices, _) = self.state_parts(key)?;
         state
@@ -186,14 +186,14 @@ impl<C: crate::Clock> Session<C> {
     }
 
     /// The handle, the plugin and the notice queue of the node over `key`.
-    pub(super) fn state_parts<K>(
+    pub(super) fn state_parts<P>(
         &self,
-        key: &K,
-    ) -> Result<(PluginHandle, PluginRef, super::Notices, Hosted), NodeLookup<K>>
+        key: &P,
+    ) -> Result<(PluginHandle, PluginRef, super::Notices, Hosted), NodeLookup<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.loaded::<K, PluginEntry>(key)?;
+        self.pool.loaded::<P, PluginEntry>(key)?;
         let pool_key = PoolKey::new(key);
         // At most one node links a key: `add_pooled_plugin` refuses a key a
         // node already holds (`AddPluginError::Installed`) and a swap keeps

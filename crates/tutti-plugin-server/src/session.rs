@@ -416,7 +416,7 @@ impl Session {
             // blocks: the audio connection's, where the render thread owns the
             // Processor that forgets (`RenderSide::handle`).
             M::Reset => Err(BridgeError::ProtocolError(
-                "Reset is carried on the audio connection".to_string(),
+                "Reset is carried on the audio connection",
             )),
 
             M::OpenEditor { parent, scale } => {
@@ -1038,7 +1038,10 @@ mod tests {
     fn the_audio_connection_refuses_a_control_message() {
         let s = Rig::new();
         let refused = s.side().handle(HostMessage::GetParameterList);
-        assert!(matches!(refused, Err(BridgeError::ProtocolError(_))));
+        assert!(matches!(
+            refused,
+            Err(BridgeError::UnexpectedMessage { .. })
+        ));
     }
 
     /// What a save in the middle of steady playback did to the blocks around it.

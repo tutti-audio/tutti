@@ -25,7 +25,9 @@
 //!   each able to hear that key through a `KeyFilter`, an SVF high-pass or band-pass; the
 //!   threshold a per-frame lane, the makeup and the range `Glide`s over `GAIN_GLIDE`); the
 //!   lookahead limiter (`LimiterBank`: threshold and ceiling per-frame lanes, every coefficient
-//!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); and
+//!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); the
+//!   dynamic EQ band (`DynamicEqBank`: an SVF bell whose gain follows the level of a band-passed
+//!   key through the compressor's static curve, cutting or boosting by a `DynamicMode`); and
 //!   the multiband compressor (`MultibandBank`: a crossover tree per channel and a
 //!   `CompressorBank` per band, each band's makeup, bypass and solo gliding over
 //!   `GAIN_GLIDE`).
@@ -209,10 +211,11 @@ pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
-    CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
-    GateLanes, KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes,
-    Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, PeakDetection,
-    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    CompressorBank, CompressorControls, CompressorLanes, DynamicEqBank, DynamicEqControls,
+    DynamicMode, GAIN_GLIDE, GateBank, GateControls, GateLanes, KeyFilter, KeySource, LimiterBank,
+    LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError, MultibandBank,
+    MultibandLanes, MultibandSettings, PeakDetection, TruePeakError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{

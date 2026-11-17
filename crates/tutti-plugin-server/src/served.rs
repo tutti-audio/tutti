@@ -26,7 +26,7 @@ use tutti_plugin_types::{
     Normalized, Notice, OutOfProcess, ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor,
     PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat,
-    Stage, State, StateUse, TrackInfo,
+    Stage, State, StateError, StateUse, TrackInfo,
 };
 use tutti_types::ParamId;
 
@@ -245,7 +245,7 @@ impl<F: OutOfProcess> Drop for Served<F> {
 }
 
 fn lost() -> PluginError {
-    PluginError::State("the plugin is lost".to_string())
+    PluginError::StateFailed(StateError::PluginCrashed)
 }
 
 fn load_failed(stage: LoadStage, reason: String) -> PluginError {

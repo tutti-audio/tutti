@@ -68,6 +68,14 @@ mod tests;
 ///
 /// Names are `"Client: Port"`, matching how `aconnect -l` presents them, unless
 /// the port name already starts with the client's.
+///
+/// A walk that stopped on an error gives the ports it reached. Its callers are
+/// `Session::connect_input_with` and `connect_output_with` (through `inputs()`
+/// and `outputs()`) and `Devices::capability`: a short list there is a
+/// transient `NotFound` (or a `None` capability) for a device that is still
+/// present, and the next call walks again and finds it. Only a change report
+/// must be whole, since a short one would remove devices that are still there
+/// ([`both`]).
 pub(super) fn endpoints(seq: &Client, direction: Direction) -> Vec<OsEndpoint> {
     walk(seq, [direction]).lists.into_iter().flatten().collect()
 }
@@ -101,6 +109,9 @@ fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
     // `-ENXIO` (`snd_seq_ioctl_query_next_port`): not the end of its ports, so
     // the walk is short and is taken again.
     let found = seq.list_ports();
+    if let Some(error) = &found.incomplete {
+        tracing::debug!("ALSA port walk is short: {}", crate::error::chain(error));
+    }
     for port in found.ports {
         let caps = port.caps;
         let listed = |d: Direction| caps & d.required_caps() == d.required_caps();
@@ -116,7 +127,7 @@ fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
     }
     Walk {
         lists: out,
-        complete: found.complete,
+        complete: found.incomplete.is_none(),
     }
 }
 
@@ -140,7 +151,7 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
         } else {
             format!("{client_name}: {port_name}")
         },
-        capability: capability_of(ump.as_ref()),
+        capability: capability_of(ump.as_deref()),
     }
 }
 
