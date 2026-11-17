@@ -1548,7 +1548,7 @@ fn test_clap_param_set_reaches_the_next_block() {
     // plain range, at the head of the block.
     let (min, max) = instance
         .clap_loaded()
-        .parameter_range(main_thread(), clap_id)
+        .parameter_range(main_thread(), tutti_types::ParamId::new(clap_id))
         .expect("the parameter declares a range");
     let capture = read_process_capture();
     let event = capture.events[..capture.event_count as usize]

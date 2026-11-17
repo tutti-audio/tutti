@@ -122,7 +122,7 @@ impl Variant {
     }
 }
 
-use tutti_buffers::InterleavedMut;
+use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
@@ -325,7 +325,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         let (l, r) = (ir(1), ir(2));
         let (conv, _) = s
             .graph()
-            .add(ConvolverNode::per_channel(&[&l, &r], PARTITION).unwrap());
+            .add(ConvolverNode::per_channel(&[Mono::new(&l), Mono::new(&r)], PARTITION).unwrap());
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }

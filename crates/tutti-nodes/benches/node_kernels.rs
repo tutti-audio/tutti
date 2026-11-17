@@ -433,10 +433,17 @@ fn reverb(c: &mut Criterion) {
     );
 }
 fn convolver(c: &mut Criterion) {
+    use tutti_buffers::Mono;
     use tutti_fixtures::signal::decay_ir;
     use tutti_nodes::ConvolverNode;
     let ir = decay_ir(256, Seconds::new(0.05), SR);
-    run(c, "convolver", "1", || ConvolverNode::new(&ir, 64), None);
+    run(
+        c,
+        "convolver",
+        "1",
+        || ConvolverNode::new(Mono::new(&ir), 64),
+        None,
+    );
 }
 criterion_group!(
     benches,

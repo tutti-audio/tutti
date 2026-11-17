@@ -8,7 +8,8 @@
 # key     `<file>::<fn>` for a free function, `<file>::<Owner>::<fn>` for a method,
 #         `<file>::-` outside any function.
 # reason  pending      not judged yet.
-#         not-audio: <why>   a stride that is not channel interleave.
+#         not-interleave: <why>   judged: the stride is not a channel interleave
+#                                 (complex re/im packing, a matrix row).
 #
 # A free-text `measured:` is refused.
 crates/tutti-cpal/src/mic.rs::Capture::block  pending
