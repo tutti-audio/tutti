@@ -312,8 +312,7 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 
 /// A Registered Controller sent into a MIDI 1.0 source reaches a subscriber as
 /// the four Control Changes of M2-104 Appendix D.2.3 (CC 101, 100, 6, 38), and
-/// a second value for the same parameter, from the source's one narrower, is
-/// only CC 6 and CC 38: the select is already there.
+/// a second value for the same parameter is the four again.
 #[test]
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     let spec = spec("rpn").with_protocol(VirtualProtocol::Midi1);
@@ -331,12 +330,14 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     source
         .send(registered(channel, Rpn::PITCH_BEND_SENSITIVITY, 7 << 25))
         .expect("sends");
-    let got = read(&peer, 6);
+    let got = read(&peer, 8);
     let want = [
         cc(101, 0),
         cc(100, 0),
         cc(6, 12),
         cc(38, 0),
+        cc(101, 0),
+        cc(100, 0),
         cc(6, 7),
         cc(38, 0),
     ];
