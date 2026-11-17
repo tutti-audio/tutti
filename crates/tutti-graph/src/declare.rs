@@ -485,7 +485,7 @@ macro_rules! declare_params {
             }
         };
 
-        #[doc = concat!("The initial settings of a [`", stringify!($ty), "`]: each entry's value, set by a chained option.")]
+        #[doc = concat!("The initial settings of a `", stringify!($ty), "`: each entry's value, set by a chained option.")]
         #[derive(Clone, Copy, Debug)]
         pub struct $cfg {
             $($name: $st,)+
@@ -516,7 +516,7 @@ macro_rules! declare_params {
 
         impl<$($g)*> $ty {
             $(
-                #[doc = concat!("The setting `", stringify!($name), "`: `set` on the control side, `get` once per block on the audio side.")]
+                #[doc = concat!("The setting `", stringify!($name), "`: `set` on the control side, `get` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
                 pub fn $name(&self) -> &$crate::__private::Setting<$st> {
                     &self.$name
                 }

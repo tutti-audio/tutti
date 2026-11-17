@@ -19,7 +19,8 @@ mod sync {
 
 /// A value stored in one atomic word by its encoding.
 ///
-/// `from_word(to_word(v))` is `Some(v)` for every `v`. A word no value encodes
+/// `to_word` and `from_word` are pure and deterministic, so `from_word(to_word(v))`
+/// is `Some(v)` every time, for every `v`. A word no value encodes
 /// reads `None`; a [`Setting`] never holds one, because only `to_word` writes
 /// it. [`setting_word!`](crate::setting_word) writes this for a fieldless enum.
 pub trait SettingWord: Copy {
@@ -107,7 +108,9 @@ impl<T: SettingWord> Setting<T> {
     ///
     /// # Panics
     ///
-    /// Never: the cell holds only a word `new` or `set` checked decodes.
+    /// Never, for an impl that holds the [`SettingWord`] contract: the cell
+    /// holds only a word `new` or `set` checked decodes. An impure impl that
+    /// stops decoding its own word panics here, at the read.
     #[inline]
     pub fn get(&self) -> T {
         T::from_word(self.word.load(Ordering::Acquire))
