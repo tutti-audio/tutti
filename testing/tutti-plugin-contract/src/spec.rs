@@ -95,10 +95,8 @@ pub enum PresetIds {
     /// Programs of a named list: `Program { list_id, index }`, the list's name
     /// as the bank (VST3).
     Programs,
-    /// One flat set, `Number(index)`, no bank (VST2, AU).
+    /// One flat set, `Number(index)`, no bank (CLAP, VST2, AU).
     Numbered,
-    /// The format lists no preset (CLAP).
-    Unlisted,
 }
 
 /// Where a format keeps the plugin's own bypass.
@@ -437,7 +435,7 @@ pub const CLAP: Surface = Surface {
     assignments: &[],
     reports_access: true,
     reports_automatable: true,
-    preset_ids: PresetIds::Unlisted,
+    preset_ids: PresetIds::Numbered,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.

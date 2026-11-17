@@ -797,12 +797,10 @@ unsafe extern "C" fn get_property(
                     );
                     write_property(data, io_size, array)
                 }
-                // The program `core::PROGRAM` holds, as its number and name; the name is a
+                // The program `Core::program` holds, as its number and name; the name is a
                 // reference the caller owns (Copy rule).
                 x if x == sys::kAudioUnitProperty_PresentPreset => {
-                    let last = (core::PROGRAM_LIST.2.len() - 1) as f64;
-                    let number = (i.core.param(core::PROGRAM).unwrap_or(0.0) * last).round();
-                    let preset = factory_presets().presets[number as usize];
+                    let preset = factory_presets().presets[i.core.program() as usize];
                     write_property(
                         data,
                         io_size,
@@ -906,7 +904,7 @@ unsafe extern "C" fn set_property(
                     ctl.offline = u32::from(offline != 0);
                     0
                 }
-                // Selecting a factory preset by its number moves `core::PROGRAM`; a number
+                // A factory preset's number selects the program; a number
                 // the unit does not list is refused.
                 x if x == sys::kAudioUnitProperty_PresentPreset => {
                     let Some(preset) = read_property::<sys::AUPreset>(data, size) else {
@@ -916,10 +914,7 @@ unsafe extern "C" fn set_property(
                     if !(0..=last).contains(&preset.presetNumber) {
                         return ERR_INVALID_PROPERTY_VALUE;
                     }
-                    i.core.set_param(
-                        core::PROGRAM,
-                        f64::from(preset.presetNumber) / f64::from(last),
-                    );
+                    i.core.set_program(preset.presetNumber as u32);
                     0
                 }
                 // The host's write of the bypass is the plugin's parameter

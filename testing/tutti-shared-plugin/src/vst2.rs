@@ -58,16 +58,12 @@ impl PluginParameters for Params {
         }
     }
     fn change_preset(&self, preset: i32) {
-        let last = core::PROGRAM_LIST.2.len() as i32 - 1;
-        if (0..=last).contains(&preset) {
-            self.0
-                .set_param(core::PROGRAM, f64::from(preset) / f64::from(last));
+        if let Ok(index) = u32::try_from(preset) {
+            self.0.set_program(index);
         }
     }
     fn get_preset_num(&self) -> i32 {
-        let last = core::PROGRAM_LIST.2.len() as i32 - 1;
-        let selected = self.0.param(core::PROGRAM).unwrap_or(0.0);
-        (selected * f64::from(last)).round() as i32
+        self.0.program() as i32
     }
     fn get_preset_name(&self, preset: i32) -> String {
         usize::try_from(preset)

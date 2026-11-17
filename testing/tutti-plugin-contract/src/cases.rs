@@ -271,7 +271,10 @@ pub fn tail_markers_reported<F: Format>() {
 pub fn parameters_listed<F: Format>() {
     let mut got = F::load().parameters(main_thread());
     // The bypass parameter some formats list is the bypass cases' witness.
-    got.retain(|p| p.id() != spec::BYPASS_ID && p.id() != spec::PROGRAM_ID);
+    got.retain(|p| p.id() != spec::BYPASS_ID);
+    if F::SURFACE.preset_ids == spec::PresetIds::Programs {
+        got.retain(|p| p.id() != spec::PROGRAM_ID);
+    }
     got.sort_by_key(|p| p.id().get());
     assert_eq!(got.len(), Param::ALL.len(), "the listed parameters");
     for (info, &(param, default)) in got.iter().zip(&Param::ALL) {
@@ -332,9 +335,7 @@ pub fn presets_listed_in_order<F: Format>() {
                 name,
                 programs.list,
             ),
-            spec::PresetIds::Numbered | spec::PresetIds::Unlisted => {
-                Preset::new(PresetId::Number(index as i32), name)
-            }
+            spec::PresetIds::Numbered => Preset::new(PresetId::Number(index as i32), name),
         })
         .collect();
     let listed = loaded.presets(main);
@@ -459,7 +460,9 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
     let mut ids: Vec<_> = controls
         .iter()
         .map(|p| p.id())
-        .filter(|&id| id != spec::PROGRAM_ID)
+        .filter(|&id| {
+            !(F::SURFACE.preset_ids == spec::PresetIds::Programs && id == spec::PROGRAM_ID)
+        })
         .map(|id| id.get())
         .collect();
     ids.sort_unstable();
@@ -477,7 +480,7 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
         let spec = F::SURFACE;
         for info in c.controls(main_thread()) {
             // The preset selector of the program list, not a parameter of the plugin's sound.
-            if info.id() == spec::PROGRAM_ID {
+            if F::SURFACE.preset_ids == spec::PresetIds::Programs && info.id() == spec::PROGRAM_ID {
                 continue;
             }
             let (param, _) = *Param::ALL
@@ -653,12 +656,28 @@ pub fn unlisted_parameter_is_none<F: Format>() {
         None,
         "loaded"
     );
+    // The program-change parameter is listed by the formats that declare a program list, and by no
+    // other: where it is not listed it reads `None`.
+    if F::SURFACE.preset_ids != spec::PresetIds::Programs {
+        assert_eq!(
+            loaded.parameter(main_thread(), spec::PROGRAM_ID),
+            None,
+            "loaded: the program parameter, which the format does not list"
+        );
+    }
     let a = activate(loaded, BLOCK);
     assert_eq!(
         a.controller().parameter(main_thread(), spec::UNLISTED),
         None,
         "active"
     );
+    if F::SURFACE.preset_ids != spec::PresetIds::Programs {
+        assert_eq!(
+            a.controller().parameter(main_thread(), spec::PROGRAM_ID),
+            None,
+            "active: the program parameter, which the format does not list"
+        );
+    }
 }
 
 /// A write to the parameter the plugin declares read-only (the meter) fails at
