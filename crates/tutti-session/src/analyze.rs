@@ -19,8 +19,8 @@ use tutti_codec::Wave;
 use tutti_measure::{Measure, Meter};
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
 
-use feed::Chunk;
 pub use feed::{AudioContext, AudioInput};
+use feed::{Bind, Chunk, View};
 
 use crate::job::{Cancel, sealed};
 use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};

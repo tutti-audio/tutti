@@ -7,8 +7,8 @@ use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
 use super::AnalyzeError;
 
 /// One chunk of interleaved audio at the audio's own width, with the scratch
-/// the views that are not interleaved are made in. Unnameable outside the
-/// crate: the traits that take it are implemented here alone.
+/// the views that are not interleaved are made in. Opaque: [`AudioInput`] names
+/// it and only this crate makes one.
 #[derive(Debug)]
 pub struct Chunk {
     data: Vec<f32>,
@@ -41,6 +41,7 @@ impl Chunk {
     }
 
     /// Keeps the first `frames` frames of what was filled.
+    #[cfg(codec)]
     pub(crate) fn truncate(&mut self, frames: usize) {
         self.data
             .truncate(frames * usize::from(self.layout.count()));
@@ -62,30 +63,48 @@ impl Chunk {
 ///
 /// Implemented for the contexts the analyses take: a [`SampleRate`], a
 /// [`ChannelLayout`], both as a pair, and `()`.
-pub trait AudioContext {
-    /// The context for audio at `rate` and `layout`.
-    fn from_audio(rate: SampleRate, layout: ChannelLayout) -> Self;
+///
+/// Sealed: the contexts below are the whole set.
+pub trait AudioContext: sealed_context::Sealed {}
+
+pub(crate) use sealed_context::Sealed as Bind;
+
+mod sealed_context {
+    use tutti_types::{ChannelLayout, SampleRate};
+
+    /// Builds the context from the audio; unnameable outside the crate.
+    pub trait Sealed {
+        fn from_audio(rate: SampleRate, layout: ChannelLayout) -> Self;
+    }
 }
 
-impl AudioContext for SampleRate {
+impl AudioContext for SampleRate {}
+
+impl sealed_context::Sealed for SampleRate {
     fn from_audio(rate: SampleRate, _: ChannelLayout) -> Self {
         rate
     }
 }
 
-impl AudioContext for ChannelLayout {
+impl AudioContext for ChannelLayout {}
+
+impl sealed_context::Sealed for ChannelLayout {
     fn from_audio(_: SampleRate, layout: ChannelLayout) -> Self {
         layout
     }
 }
 
-impl AudioContext for (SampleRate, ChannelLayout) {
+impl AudioContext for (SampleRate, ChannelLayout) {}
+
+impl sealed_context::Sealed for (SampleRate, ChannelLayout) {
     fn from_audio(rate: SampleRate, layout: ChannelLayout) -> Self {
         (rate, layout)
     }
 }
 
-impl AudioContext for () {
+impl AudioContext for () {}
+
+impl sealed_context::Sealed for () {
     fn from_audio(_: SampleRate, _: ChannelLayout) -> Self {}
 }
 
@@ -96,22 +115,32 @@ impl AudioContext for () {
 /// channel by the audio's own topology (the audio itself when it is mono).
 /// [`StereoPlanes`] is a stereo chunk's two planes; audio of another width is
 /// refused with [`AnalyzeError::Width`].
-pub trait AudioInput<'a>: Sized {
-    /// The view of `chunk`.
-    ///
-    /// # Errors
-    ///
-    /// The audio cannot be viewed this way.
-    fn view(chunk: &'a mut Chunk) -> Result<Self, AnalyzeError>;
+///
+/// Sealed: the three views above are the whole set.
+pub trait AudioInput<'a>: sealed::Sealed<'a> {}
+
+pub(crate) use sealed::Sealed as View;
+
+mod sealed {
+    use super::{AnalyzeError, Chunk};
+
+    /// Makes the view from a chunk; unnameable outside the crate.
+    pub trait Sealed<'a>: Sized {
+        fn view(chunk: &'a mut Chunk) -> Result<Self, AnalyzeError>;
+    }
 }
 
-impl<'a> AudioInput<'a> for Interleaved<'a> {
+impl<'a> AudioInput<'a> for Interleaved<'a> {}
+
+impl<'a> sealed::Sealed<'a> for Interleaved<'a> {
     fn view(chunk: &'a mut Chunk) -> Result<Self, AnalyzeError> {
         Ok(Interleaved::new(&chunk.data, chunk.layout)?)
     }
 }
 
-impl<'a> AudioInput<'a> for Mono<'a> {
+impl<'a> AudioInput<'a> for Mono<'a> {}
+
+impl<'a> sealed::Sealed<'a> for Mono<'a> {
     fn view(chunk: &'a mut Chunk) -> Result<Self, AnalyzeError> {
         if chunk.layout == ChannelLayout::MONO {
             return Ok(Mono::new(&chunk.data));
@@ -127,7 +156,9 @@ impl<'a> AudioInput<'a> for Mono<'a> {
     }
 }
 
-impl<'a> AudioInput<'a> for StereoPlanes<'a> {
+impl<'a> AudioInput<'a> for StereoPlanes<'a> {}
+
+impl<'a> sealed::Sealed<'a> for StereoPlanes<'a> {
     fn view(chunk: &'a mut Chunk) -> Result<Self, AnalyzeError> {
         if chunk.layout != ChannelLayout::STEREO {
             return Err(AnalyzeError::Width {

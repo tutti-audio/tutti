@@ -195,3 +195,70 @@ fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
         .collect();
     assert_eq!(spans, [(1000, 2000)]);
 }
+
+/// An analysis that counts the chunks its meter is pushed.
+struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+struct CountingMeter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl tutti_measure::Measure for Counting {
+    type Context = ();
+    type Meter = CountingMeter;
+
+    fn measure(&self, (): ()) -> tutti_measure::Result<CountingMeter> {
+        Ok(CountingMeter(self.0.clone()))
+    }
+}
+
+impl Meter for CountingMeter {
+    type Input<'a> = tutti_buffers::Mono<'a>;
+    type Item = ();
+    type Output = usize;
+
+    fn push(&mut self, _: Self::Input<'_>, _: &mut impl Extend<()>) -> tutti_measure::Result<()> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn finish(self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[test]
+fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    let held: Arc<Mutex<Vec<crate::Task>>> = Arc::default();
+    let into = Arc::clone(&held);
+    let mut s = Session::builder()
+        .spawn_with(move |task| into.lock().unwrap().push(task))
+        .build_detached(RATE)
+        .unwrap();
+    let pushed = Arc::new(AtomicUsize::new(0));
+    // Ten chunks long: a worker that ignored the drop would push ten.
+    let wave = Wave::from_samples(RATE, &vec![0.0; 10 * CHUNK_FRAMES]);
+    let job = s.analyze(wave, Counting(Arc::clone(&pushed)));
+    drop(job);
+    let tasks: Vec<_> = held.lock().unwrap().drain(..).collect();
+    for task in tasks {
+        task.run();
+    }
+    assert_eq!(pushed.load(Ordering::SeqCst), 0);
+    let landed = s
+        .update()
+        .iter()
+        .filter(|event| matches!(event, crate::SessionEvent::Landed(_)))
+        .count();
+    assert_eq!(landed, 0);
+}
+
+#[test]
+fn a_job_that_is_not_dropped_pushes_every_chunk() {
+    let mut s = session();
+    let pushed = std::sync::Arc::default();
+    let wave = Wave::from_samples(RATE, &vec![0.0; 2 * CHUNK_FRAMES + 1]);
+    let job = s.analyze(wave, Counting(std::sync::Arc::clone(&pushed)));
+    assert_eq!(land(&mut s, &job).unwrap(), 3);
+}

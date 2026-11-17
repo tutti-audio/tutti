@@ -511,36 +511,29 @@ pub mod sampler {
 /// hold. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
+    pub use tutti_measure::{Error, Measure, Meter};
+    // Silence and onsets.
     pub use tutti_measure::{
-        AlignConfig, Alignment, Alternatives, AlternativesError, Ballistics, BandCount,
-        BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, BeatGrid, ChannelBlock,
-        ChordConfig, ChordQuality, ChordSpan, Chroma, ChromaConfig, ChromaFrame, ChromaMeter,
-        ChromaSummary, CorrelationPeak, CrossCorrelation, DetectionFunction, Error, FiniteLevel,
-        FiniteLevelError, Framing, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
-        HarmonicsError, HopPolicy, Key, KeyEstimate, KeyProfile, Loudness, LoudnessConfig,
-        LoudnessMeter, Mode, NormalizedMagnitudes, NoteConfig, NoteEvent, NoteSpan, NoteSpanError,
-        Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity,
-        OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, PeakBlock, PeakBlocks,
-        PeakConfig, PeakDecay, PeakDecayError, PeakFloor, PeakFloorError, PeakMeter, Pitch,
-        PitchEstimate, PitchHop, PitchHopError, PitchSplit, PitchSplitError, PriorSpread,
-        PriorSpreadError, RawMagnitudes, Region, SampleRange, ScopePoint, SelfTransition,
-        SelfTransitionError, Sharpness, SharpnessError, SilenceConfig, SilenceMeter, Smoothing,
-        SpectralFeatures, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
-        SpectrumTime, SpectrumTimeError, StereoLevels, StereoReading, StereoSmoother, Stft,
-        StftMagnitude, StftPolar, StftRequest, Tempo, TempoCandidate, TempoConfig, TempoRange,
-        Tightness, TightnessError, TruePeakConfig, TruePeakMeter, Tuning, TuningOffset,
-        TuningOffsetError, VectorscopeConfig, VectorscopeMeter, VelocityRange,
-        WindowedLoudnessConfig, WindowedMeter, WindowedReading, YinConfig, YinThreshold,
-        YinThresholdError, align, chroma, complex_domain_deviation, correlate, cross_correlate,
-        detect_chords, detect_onsets, estimate_key, estimate_key_from_mean, estimate_tempo,
-        estimate_tempo_from_novelty, frame_levels, high_frequency_content, istft_transform,
-        measure_loudness, measure_true_peak, median_filter, notes_from_track, penalize_jumps,
-        spectral_centroid, spectral_energy, spectral_features, spectral_flatness, spectral_flux,
-        spectral_rolloff, stft, stft_magnitude, stft_polar, strip_silence, summarize,
-        summarize_block, suppress_close_onsets, track_beats, track_beats_from_novelty, transcribe,
-        vectorscope_points, yin, yin_track,
+        DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
+        OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
     };
-    pub use tutti_measure::{Measure, Meter};
+    // Spectrum and chroma.
+    pub use tutti_measure::{
+        BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, Chroma,
+        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+        HarmonicDecayError, Harmonics, HarmonicsError, PeakDecay, PeakDecayError, PeakFloor,
+        PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
+        SpectrumMeter, SpectrumTime, SpectrumTimeError, Tuning, TuningOffset, TuningOffsetError,
+    };
+    // Loudness, waveform blocks and the vectorscope.
+    pub use tutti_measure::{
+        ChannelBlock, Loudness, LoudnessConfig, LoudnessMeter, PeakBlock, PeakBlocks, PeakConfig,
+        PeakMeter, ScopePoint, TruePeakConfig, TruePeakMeter, VectorscopeConfig, VectorscopeMeter,
+        WindowedLoudnessConfig, WindowedMeter, WindowedReading,
+    };
+    // What `Error` and the spectrum names.
+    pub use tutti_dsp::{FrameCount, StftError};
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
