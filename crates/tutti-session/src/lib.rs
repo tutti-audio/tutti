@@ -116,6 +116,7 @@ mod pool;
 mod recorder;
 #[cfg(feature = "plugin")]
 mod recovery;
+mod rt_log;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
