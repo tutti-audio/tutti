@@ -869,9 +869,11 @@ impl<C: Clock> SessionBuilder<C> {
             );
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)?
+                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)
+                        .map_err(crate::Error::MidiHardware)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets, options)?,
+                None => tutti_midi_hardware::MidiSession::open(inlets, options)
+                    .map_err(crate::Error::MidiHardware)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.

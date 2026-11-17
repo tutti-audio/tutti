@@ -564,11 +564,6 @@ pub(crate) fn route_batch(
     refused
 }
 
-/// What [`Midi::unroute`] found missing: the rule `id` named.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("no MIDI route {0:?}")]
-pub struct NoSuchMidiRoute(pub MidiRouteId);
-
 /// Where a take's events belong on the timeline: the figure
 /// [`Midi::record`]'s readers are placed by. A note played at graph frame `F`
 /// was answered by output the device played `output` after it was rendered, and
@@ -736,7 +731,6 @@ pub(crate) struct MidiState {
     /// The sinks the pool's `midi_sink` entries opened.
     pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
-    #[cfg(feature = "midi-hardware")]
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`Midi::set_mpe`]).
     mpe: MpeMode,
@@ -890,27 +884,12 @@ impl MidiState {
     /// The ingest nodes of the input ports: none on a session without the OS
     /// MIDI layer.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
-        #[cfg(feature = "midi-hardware")]
-        {
-            self.ports.input_nodes()
-        }
-        #[cfg(not(feature = "midi-hardware"))]
-        {
-            Vec::new()
-        }
+        self.ports.input_nodes()
     }
 
     /// Whether `node` is the ingest node of an input port.
     pub(crate) fn is_input_node(&self, node: NodeKey) -> bool {
-        #[cfg(feature = "midi-hardware")]
-        {
-            self.ports.is_input_node(node)
-        }
-        #[cfg(not(feature = "midi-hardware"))]
-        {
-            let _ = node;
-            false
-        }
+        self.ports.is_input_node(node)
     }
 
     /// The timing of a drain at `now`, from the engine's block clock: `None`
@@ -1031,14 +1010,12 @@ impl MidiState {
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
         let timing = self.output_timing(now);
         // Every output is sent it, and counts what does not go.
-        #[cfg(feature = "midi-hardware")]
         self.ports.route(&batch, timing.as_ref());
         self.sinks.route(&batch, timing.as_ref());
     }
 
     /// Counts `n` events a look could not become as refused by every output.
     fn refuse_to_outputs(&mut self, n: u64) {
-        #[cfg(feature = "midi-hardware")]
         self.ports.refuse(n);
         self.sinks.refuse(n);
     }
@@ -1051,10 +1028,7 @@ impl MidiState {
     pub(crate) fn follow_rate(&mut self, graph: &mut Graph, now: Instant) -> bool {
         let timing = self.output_timing(now);
         let sinks = self.sinks.reopen(graph, timing.as_ref());
-        #[cfg(feature = "midi-hardware")]
         let ports = self.ports.reopen(graph, timing.as_ref());
-        #[cfg(not(feature = "midi-hardware"))]
-        let ports = false;
         sinks || ports
     }
 
@@ -1071,7 +1045,6 @@ impl MidiState {
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
-        #[cfg(feature = "midi-hardware")]
         self.ports.drain_outputs(timing.as_ref());
         self.send_machine_control(playhead, now);
         edited
@@ -1110,7 +1083,9 @@ pub(crate) fn drain_events(
 /// to the sinks `resolve` names, replacing every route before: the ports of
 /// every input node feed each sink their rule gives ports, so devices merge in
 /// the sink's event fan-in. A target `resolve` maps to no node, or to one not in
-/// the graph, takes nothing (and still covers its rule's ports); a sink fed
+/// the graph, takes nothing (and still covers its rule's ports): a host's table
+/// may name a target it has not made yet or has removed, so this is the one
+/// place a missing target is skipped, not refused. A sink fed
 /// before and not now is unwired. `routed` holds the sinks the last compile fed.
 fn compile_feeds<'r, T: Copy + Ord + 'r>(
     graph: &mut Graph,
@@ -1550,9 +1525,13 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while a host's `set_routes` declares
-    /// the routes.
+    /// the routes, and [`MidiError::NoEventInput`] naming a target that is not
+    /// in the graph or takes no MIDI. Nothing changes.
     pub fn route(&mut self, rule: MidiRouteRule) -> Result<MidiRouteId> {
         self.own_may_declare()?;
+        for &target in &rule.targets {
+            self.takes_midi(target)?;
+        }
         let id = MidiRouteId::mint(&self.state.minted);
         self.state.rules.insert(id, rule);
         self.compile_session_routes();
@@ -1563,11 +1542,11 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoSuchRoute`] ([`NoSuchMidiRoute`]) when there is no rule `id` (removed already, or
+    /// [`MidiError::NoSuchRoute`] when there is no rule `id` (removed already, or
     /// never added); nothing changes.
     pub fn unroute(&mut self, id: MidiRouteId) -> Result<()> {
         if self.state.rules.remove(&id).is_none() {
-            return Err(NoSuchMidiRoute(id).into());
+            return Err(MidiError::NoSuchRoute(id));
         }
         self.compile_session_routes();
         Ok(())
@@ -1579,10 +1558,16 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while a host's
-    /// [`set_routes`](Self::set_routes) declares the routes.
+    /// [`set_routes`](Self::set_routes) declares the routes, and
+    /// [`MidiError::NoEventInput`] naming a fallback that is not in the graph
+    /// or takes no MIDI. Nothing changes.
     pub fn set_route_fallback(&mut self, fallback: Option<impl Into<NodeKey>>) -> Result<()> {
         self.own_may_declare()?;
-        self.state.fallback = fallback.map(Into::into);
+        let fallback = fallback.map(Into::into);
+        if let Some(target) = fallback {
+            self.takes_midi(target)?;
+        }
+        self.state.fallback = fallback;
         self.compile_session_routes();
         Ok(())
     }
@@ -1631,8 +1616,12 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while the session's own rules or
-    /// fallback are declared ([`unroute`](Self::unroute) them first).
-    /// Nothing is changed.
+    /// fallback are declared ([`unroute`](Self::unroute) them first), and
+    /// [`MidiError::NotAnInput`] when `input` is not in the graph or has no event
+    /// output. Nothing is changed. Those are the only refusals: any node with event
+    /// outputs may be the source (a host's own `MidiIngestNode`, or a stand-in
+    /// that sends on the ingest layout's ports), because a host routes from
+    /// sources the session did not make, so a port's ingest node is not required.
     pub fn set_routes<'r, T: Copy + Ord + 'r>(
         &mut self,
         input: impl Into<NodeKey>,
@@ -1641,6 +1630,13 @@ impl Midi<'_> {
         resolve: impl Fn(T) -> Option<NodeKey>,
     ) -> Result<()> {
         let input = input.into();
+        if !self
+            .graph
+            .shape(input)
+            .is_some_and(|shape| shape.event_out > 0)
+        {
+            return Err(MidiError::NotAnInput(input));
+        }
         if !self.state.rules.is_empty() || self.state.fallback.is_some() {
             return Err(MidiError::TwoRouteDeclarers(RouteDeclarer::Session));
         }
@@ -1747,23 +1743,25 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI.
+    /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI,
+    /// and [`MidiError::Tap`] when the live input's port is gone from the graph.
     pub fn record(
         &mut self,
         target: impl Into<NodeKey>,
         capacity: tutti_graph::EventCapacity,
     ) -> Result<EventTapReader> {
         let target = target.into();
-        let node = match self.instrument_queue(target) {
-            Some(queue) if self.takes_midi(target).is_ok() => queue,
-            _ => self.live_inlet(target)?,
+        let node = if let Some(queue) = self.instrument_queue(target) {
+            self.takes_midi(target)?;
+            queue
+        } else {
+            self.live_inlet(target)?
         };
         let source = EventOutPort::new(node, 0);
         self.graph
             .taps()
             .open_event(source, tutti_graph::TapAlign::Raw, capacity)
-            // The live input was just found or opened in this graph, with its port.
-            .map_err(|_| MidiError::NoEventInput(node))
+            .map_err(MidiError::Tap)
     }
 
     // --- Following an outside tempo ---
@@ -1790,8 +1788,7 @@ impl Midi<'_> {
                 tutti_graph::TapAlign::Raw,
                 capacity,
             )
-            // The Group's port was just found on the input: a refusal is a port it lacks.
-            .map_err(|_| MidiError::GroupNotHeard(group))
+            .map_err(MidiError::Tap)
     }
 
     /// Follows the tempo (and, if `follow.meter`, the time signature) the session's MIDI
@@ -1828,7 +1825,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] while a Beat Clock
     /// [`follow_clock`](Self::follow_clock) publishes the tempo. Nothing changes.
     pub fn follow_tempo(&mut self, follow: FollowTempo) -> Result<()> {
@@ -1904,17 +1902,26 @@ impl Midi<'_> {
     /// kept rolling is not trailed by more than a block's placement. **A Beat
     /// Clock follower owns the tempo map** as `follow_tempo` does: the map found
     /// now is the one [`unfollow_clock`](Self::unfollow_clock) restores, and
-    /// `Session::set_tempo` refuses while it follows. **It does not correct
-    /// drift**: a tempo estimate moves the map by steps of at least
-    /// `ClockFollower::TEMPO_STEP`, and the beat the source counts and the beat
-    /// the transport counts are matched at each locate and not in between.
+    /// `Session::set_tempo` refuses while it follows.
+    ///
+    /// **Drift is corrected.** In each poll while the transport rolls, the
+    /// beat the source counts is compared with the beat the transport reaches
+    /// at the next block ([`clock_error`](Self::clock_error)), and the tempo
+    /// published is the fit trimmed to close the error in `ClockFollower::CATCH_UP`
+    /// (4 seconds), by at most 2% of the fit. A trim goes into the map as any
+    /// tempo does, a step of at least `ClockFollower::TEMPO_STEP` and one point
+    /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
+    /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
+    /// quarter of a beat) locates to the source's beat once and is reported as
+    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim.
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
@@ -1935,6 +1942,16 @@ impl Midi<'_> {
             self.meter.current(),
         ));
         Ok(())
+    }
+
+    /// The beat error of the Beat Clock the session follows: the source's beat
+    /// less the transport's, read at the last [`Poll`](crate::Phase::Poll) phase
+    /// (positive when the transport is behind). `None` when no clock is followed,
+    /// or the follower could not read one: not locked, not rolling, an MTC
+    /// follower, or a locate that has not landed yet.
+    #[must_use]
+    pub fn clock_error(&self) -> Option<tutti_types::Beat> {
+        self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
@@ -1997,7 +2014,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node and
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear.
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node.
     /// Nothing changes.
     pub fn follow_machine_control(&mut self, follow: FollowMachineControl) -> Result<()> {
         let tap = self.follow_tap(follow.input, follow.group, MACHINE_TAP_CAPACITY)?;

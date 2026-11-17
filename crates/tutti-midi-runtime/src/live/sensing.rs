@@ -27,11 +27,11 @@ use tutti_ump::MidiGroup;
 /// How long a receiver waits for any message once it has seen an Active
 /// Sensing before it judges the cable gone: over 330 ms (p. 32), the spec's 300 ms
 /// and the roughly 10% margin it recommends.
-pub const ACTIVE_SENSING_JUDGE: Seconds = Seconds(0.330);
+pub(crate) const ACTIVE_SENSING_JUDGE: Seconds = Seconds(0.330);
 
 /// The Active Sensing watch of every Group of one device.
 #[derive(Clone, Debug)]
-pub struct ActiveSensing {
+pub(crate) struct ActiveSensing {
     /// How long over which a watched Group is judged gone.
     limit: Samples,
     /// For each Group: the frame of the last message it sent, once it has sent
@@ -53,12 +53,6 @@ impl ActiveSensing {
     #[must_use]
     pub(crate) fn at_rate(rate: SampleRate) -> Self {
         Self::new(ACTIVE_SENSING_JUDGE.to_samples(rate))
-    }
-
-    /// How long a watched Group may be silent.
-    #[must_use]
-    pub const fn limit(&self) -> Samples {
-        self.limit
     }
 
     /// A message of `group` arrived at `at`: it clears the timer of a watched
