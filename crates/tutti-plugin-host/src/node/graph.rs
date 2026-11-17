@@ -298,7 +298,7 @@ where
                     .collect();
                 let rendered = render_with(
                     processor.as_deref_mut(),
-                    (&this.unlent, &this.failed),
+                    (&this.unlent_writer, &this.failed_writer),
                     &this.params,
                     &mut this.midi,
                     &mut this.out,
@@ -435,7 +435,7 @@ where
                 .collect();
             let rendered = render_with(
                 processor,
-                (&this.unlent, &this.failed),
+                (&this.unlent_writer, &this.failed_writer),
                 &this.params,
                 &mut this.midi,
                 &mut this.out,
