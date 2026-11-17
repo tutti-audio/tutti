@@ -20,7 +20,11 @@ fn pair<T>() -> (Hand<T>, Rt<T>) {
         Hand {
             shared: Arc::clone(&shared),
         },
-        Rt { shared, held: None },
+        Rt {
+            _control: ControlDrop::new(),
+            shared,
+            held: None,
+        },
     )
 }
 
@@ -123,4 +127,15 @@ fn a_value_in_the_slot_drops_with_the_last_end() {
     assert_eq!(drops.get(), 1, "the audio end holds it");
     drop(rt);
     assert_eq!(drops.get(), 2);
+}
+
+/// The audio end is control-side state: a debug build panics when it drops
+/// inside an audio block.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "Rt<u32> dropped on the audio thread")]
+fn the_audio_end_dropped_in_a_block_panics() {
+    let (_hand, rt) = handoff::<u32>();
+    let _inside = crate::RtScope::enter();
+    drop(rt);
 }

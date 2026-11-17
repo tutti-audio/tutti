@@ -136,12 +136,13 @@ impl AudioBridge {
         // The rate lives on `Channels`, not here: the bridge thread sizes its
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
-        let channels = Channels::new(sample_rate);
+        let (channels, sleeper) = Channels::new(sample_rate);
         let payloads = PayloadPool::new();
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let thread = BridgeThread::spawn(
             channels.clone(),
+            sleeper,
             payloads.clone(),
             lifecycle.clone(),
             Arc::clone(&listener),
@@ -930,7 +931,7 @@ mod tests {
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
         let bridge = AudioBridge {
-            channels: Channels::new(SampleRate::SR_48K),
+            channels: Channels::new(SampleRate::SR_48K).0,
             payloads: PayloadPool::new(),
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
@@ -1000,7 +1001,7 @@ mod tests {
     /// disconnected.
     #[test]
     fn the_sample_rate_is_stored_and_updated_live() {
-        let channels = Channels::new(SampleRate::SR_48K);
+        let channels = Channels::new(SampleRate::SR_48K).0;
         assert_eq!(channels.sample_rate(), SampleRate::SR_48K);
 
         channels.set_sample_rate(SampleRate::SR_192K);

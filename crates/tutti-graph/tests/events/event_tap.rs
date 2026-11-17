@@ -638,7 +638,7 @@ fn closed_fork_reopen_and_reap() {
 /// A reader dropped on the audio thread is a bug the debug build reports.
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "an event tap reader dropped on the audio thread")]
+#[should_panic(expected = "EventTapReader dropped on the audio thread")]
 fn a_reader_dropped_on_the_audio_thread_panics() {
     let mut r = rig(1, false, 0);
     script(&mut r, 1, Script::new(vec![]));

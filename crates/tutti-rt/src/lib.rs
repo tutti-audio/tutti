@@ -49,9 +49,9 @@
 //! - [`handoff()`] — one value that moves between a control thread and the
 //!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
 //!   trades).
-//! - [`Doorbell`] — wakes one parked thread from the audio thread (a futex
-//!   wake only if a sleeper is parked), with no wake-up lost between the
-//!   sleeper's check and its park.
+//! - [`doorbell()`], [`Doorbell`] and [`Sleeper`] — wake one parked thread from
+//!   the audio thread (a futex wake only if a sleeper is parked), with no
+//!   wake-up lost between the sleeper's check and its park.
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
@@ -74,7 +74,7 @@
 //! **Thread and OS**
 //!
 //! - [`RtScope`] — a per-thread "inside a block" marker that a `Drop` impl
-//!   checks ([`RtScope::check_outside`]).
+//!   checks ([`RtScope::check_outside`]), or a [`ControlDrop`] field does.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
@@ -181,7 +181,7 @@ pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
-pub use doorbell::Doorbell;
+pub use doorbell::{Doorbell, Sleeper, doorbell};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use fault_latch::{Drained, FaultLatch};
 pub use gauge::{
@@ -203,7 +203,7 @@ pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
 pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
-pub use scope::{RtScope, RtScopeGuard};
+pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;

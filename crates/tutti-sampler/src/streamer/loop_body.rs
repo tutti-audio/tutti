@@ -14,6 +14,8 @@ use crossbeam_channel::Receiver;
 
 use super::bell::Bell;
 use super::command::StreamerCommand;
+use tutti_rt::Sleeper;
+
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
 
@@ -39,6 +41,7 @@ pub(super) fn streamer_loop(
     queue: &Receiver<StreamerCommand>,
     shared: Handles,
     mut cycle: StreamerCycle,
+    mut sleeper: Sleeper,
     backstop: Duration,
 ) {
     let bell = shared.bell.clone();
@@ -49,7 +52,7 @@ pub(super) fn streamer_loop(
             // that holds all its mapping writes, the tail of every clip):
             // sleep until something rings.
             StepOutcome::Idle | StepOutcome::Healthy | StepOutcome::Stalled => {
-                sleep(&bell, queue, backstop);
+                sleep(&bell, &mut sleeper, queue, backstop);
             }
 
             // A ring is below threshold and the cycle moved frames into it:
@@ -59,6 +62,11 @@ pub(super) fn streamer_loop(
     }
 }
 
-fn sleep(bell: &Bell, queue: &Receiver<StreamerCommand>, backstop: Duration) {
-    bell.sleep(|| !queue.is_empty(), backstop);
+fn sleep(
+    bell: &Bell,
+    sleeper: &mut Sleeper,
+    queue: &Receiver<StreamerCommand>,
+    backstop: Duration,
+) {
+    bell.sleep(sleeper, || !queue.is_empty(), backstop);
 }

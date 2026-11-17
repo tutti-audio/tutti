@@ -45,8 +45,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use tutti_rt::RtScope;
-use tutti_rt::{Overflow, RingReader, RingWriter, ring};
+use tutti_rt::{ControlDrop, Overflow, RingReader, RingWriter, ring};
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
 
@@ -81,6 +80,7 @@ const _: () = assert!(std::mem::size_of::<TapEvent>() == 24);
 /// writer takes can only be an overestimate. An event may be refused that the
 /// reader had just made room for, and none is taken past the ring.
 pub struct EventTapWriter {
+    _control: ControlDrop<Self>,
     ring: RingWriter<TapEvent>,
     /// The events held before anything but a note-off is refused.
     capacity: usize,
@@ -94,12 +94,6 @@ impl std::fmt::Debug for EventTapWriter {
         f.debug_struct("EventTapWriter")
             .field("capacity", &self.capacity)
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for EventTapWriter {
-    fn drop(&mut self) {
-        RtScope::check_outside("an event tap writer");
     }
 }
 
@@ -159,6 +153,7 @@ pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
 /// the editor closes or reaps it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct EventTapReader {
+    _control: ControlDrop<Self>,
     id: EventTapId,
     ring: RingReader<TapEvent>,
     lost: Arc<AtomicU64>,
@@ -176,12 +171,6 @@ impl std::fmt::Debug for EventTapReader {
     }
 }
 
-impl Drop for EventTapReader {
-    fn drop(&mut self) {
-        RtScope::check_outside("an event tap reader");
-    }
-}
-
 impl EventTapReader {
     /// A reader and the writer the executor will fill it with: a ring that
     /// holds [`note_off_room`] of `capacity` events,
@@ -196,6 +185,7 @@ impl EventTapReader {
         let lost = Arc::new(AtomicU64::new(0));
         let (prod, cons) = ring::<TapEvent>(note_off_room(capacity), Overflow::Refuse);
         let reader = Self {
+            _control: ControlDrop::new(),
             id,
             ring: cons,
             lost: Arc::clone(&lost),
@@ -205,6 +195,7 @@ impl EventTapReader {
         (
             reader,
             EventTapWriter {
+                _control: ControlDrop::new(),
                 ring: prod,
                 capacity,
                 lost,

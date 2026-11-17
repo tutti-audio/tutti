@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize};
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
-use tutti_rt::RtScope;
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -20,11 +19,10 @@ use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::GainCell;
 use crate::held::{Keys, Tables};
-use crate::io::Io;
 use crate::loss::EventLoss;
 use crate::meter::MeterWriter;
 use crate::mode::{BypassLine, ModeState};
-use crate::node::{Cx, Node, Prepare, Status};
+use crate::node::{Node, Prepare};
 use crate::param::ParamState;
 use crate::plan::{Delta, Plan, UnitIdx};
 use crate::play::PlayReader;
@@ -34,20 +32,25 @@ use crate::{EdgeFade, EdgeId, EventTapId, MeterId, TapId};
 
 /// A unit, owned. Crate-private, so the only code that can replace or drop
 /// the box is this crate's; its drop is checked against the audio-thread
-/// marker (`RtScope::check_outside`). This crate must *run* its
+/// marker (a [`ControlDrop`] field). This crate must *run* its
 /// units, so the box hands `&mut` out.
 ///
 /// It carries the unit's [`Wake`]: the executor's clone of the flag lives and
 /// dies with the unit, so its drop is the control side's too, and the audio
 /// thread is never the last owner of the flag's storage.
 pub(crate) struct NodeBox<F: Float = f32> {
+    _control: ControlDrop<Self>,
     node: Box<dyn Node<F>>,
     wake: Wake,
 }
 
 impl<F: Float> NodeBox<F> {
     pub(crate) fn new(node: Box<dyn Node<F>>, wake: Wake) -> Self {
-        Self { node, wake }
+        Self {
+            _control: ControlDrop::new(),
+            node,
+            wake,
+        }
     }
 
     /// Whether the unit's [`Wake`] was raised since the last call, clearing
@@ -57,26 +60,10 @@ impl<F: Float> NodeBox<F> {
         self.wake.take()
     }
 
-    /// The unit, out of its box — control side, to re-prepare it. Leaves a
-    /// zero-sized placeholder behind for the box's own drop, which therefore
-    /// frees nothing (a `Box` of a zero-sized type never allocated).
-    pub(crate) fn into_inner(mut self) -> Box<dyn Node<F>> {
-        std::mem::replace(&mut self.node, Box::new(Vacant))
+    /// The unit, out of its box — control side, to re-prepare it.
+    pub(crate) fn into_inner(self) -> Box<dyn Node<F>> {
+        self.node
     }
-}
-
-/// What a [`NodeBox`] holds once its unit has been taken out.
-pub(super) struct Vacant;
-
-impl<F: Float> Node<F> for Vacant {
-    fn shape(&self) -> crate::node::Shape {
-        crate::node::Shape::EMPTY
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
-        Status::Silent
-    }
-    fn reset(&mut self) {}
 }
 
 impl<F: Float> Deref for NodeBox<F> {
@@ -92,17 +79,12 @@ impl<F: Float> DerefMut for NodeBox<F> {
     }
 }
 
-impl<F: Float> Drop for NodeBox<F> {
-    fn drop(&mut self) {
-        RtScope::check_outside("a unit");
-    }
-}
-
 /// One crossfade's own state (see the `fade` module, `src/fade.rs`). Built on
 /// the control side with the commit that asks for it, so its scratch is
 /// allocated there; it travels back in a commit box, so it is freed there
 /// too.
 pub(crate) struct Crossfade<F: Float = f32> {
+    _control: ControlDrop<Self>,
     key: NodeKey,
     /// The unit fading out, once the fade has started.
     pub(super) out: Option<NodeBox<F>>,
@@ -131,12 +113,6 @@ impl<F: Float> Crossfade<F> {
     /// Its key.
     pub(crate) fn key(&self) -> NodeKey {
         self.key
-    }
-}
-
-impl<F: Float> Drop for Crossfade<F> {
-    fn drop(&mut self) {
-        RtScope::check_outside("a crossfade");
     }
 }
 
@@ -172,6 +148,7 @@ pub(super) struct Relined<F: Float = f32> {
 /// everything the executor replaced. Dropping it on the audio thread panics
 /// in a debug build.
 pub(crate) struct Commit<F: Float = f32> {
+    _control: ControlDrop<Self>,
     /// The editor's count of commits sent, this one included: a scheduled
     /// command checked against this commit waits until it is applied.
     pub(super) seq: u64,
@@ -223,12 +200,6 @@ pub(crate) struct Opened {
     pub(crate) meters: Vec<(MeterId, MeterWriter)>,
 }
 
-impl<F: Float> Drop for Commit<F> {
-    fn drop(&mut self) {
-        RtScope::check_outside("Commit");
-    }
-}
-
 impl<F: Float> Commit<F> {
     /// `params` builds each incoming unit's param state from its key and
     /// declared port count (the editor's range cells).
@@ -262,6 +233,7 @@ impl<F: Float> Commit<F> {
                     .map(|&(key, f)| {
                         let width = plan.unit(key).map_or(0, |u| u.shape.audio_out().count());
                         Box::new(Crossfade {
+                            _control: ControlDrop::new(),
                             key,
                             out: None,
                             waiting: None,
@@ -321,6 +293,7 @@ impl<F: Float> Commit<F> {
         let spare_modes = Vec::with_capacity(incoming.len() + delta_units);
         let spare_lines = Vec::with_capacity(relined.len());
         Box::new(Self {
+            _control: ControlDrop::new(),
             seq,
             suspend: None,
             plan: Some(plan),
@@ -346,6 +319,7 @@ impl<F: Float> Commit<F> {
     /// moves them in without growing.
     pub(crate) fn suspend(seq: u64, prepare: Prepare, units: usize) -> Box<Commit<F>> {
         Box::new(Self {
+            _control: ControlDrop::new(),
             seq,
             suspend: Some(prepare),
             plan: None,

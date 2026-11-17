@@ -567,17 +567,39 @@ impl IUnitInfoTrait for Plugin {
         info.id = id;
         info.parentUnitId = parent;
         put_wstring(name, &mut info.name);
-        info.programListId = kNoProgramListId;
+        info.programListId = if id == 1 {
+            core::PROGRAM_LIST.0
+        } else {
+            kNoProgramListId
+        };
         kResultOk
     }
     unsafe fn getProgramListCount(&self) -> i32 {
-        0
+        1
     }
-    unsafe fn getProgramListInfo(&self, _index: i32, _info: *mut ProgramListInfo) -> tresult {
-        kInvalidArgument
+    unsafe fn getProgramListInfo(&self, index: i32, info: *mut ProgramListInfo) -> tresult {
+        let (id, name, programs) = core::PROGRAM_LIST;
+        if index != 0 {
+            return kInvalidArgument;
+        }
+        // SAFETY: `info` is an out-pointer the host owns for the call.
+        let info = unsafe { &mut *info };
+        info.id = id;
+        put_wstring(name, &mut info.name);
+        info.programCount = programs.len() as i32;
+        kResultOk
     }
-    unsafe fn getProgramName(&self, _list: i32, _index: i32, _name: *mut String128) -> tresult {
-        kInvalidArgument
+    unsafe fn getProgramName(&self, list: i32, index: i32, name: *mut String128) -> tresult {
+        let (id, _, programs) = core::PROGRAM_LIST;
+        let Some(program) = usize::try_from(index).ok().and_then(|i| programs.get(i)) else {
+            return kInvalidArgument;
+        };
+        if list != id {
+            return kInvalidArgument;
+        }
+        // SAFETY: `name` is an out-pointer the host owns for the call.
+        put_wstring(program, unsafe { &mut *name });
+        kResultOk
     }
     unsafe fn getProgramInfo(
         &self,

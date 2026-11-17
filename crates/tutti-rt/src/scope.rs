@@ -101,5 +101,57 @@ impl Drop for RtScopeGuard {
     }
 }
 
+/// A field whose drop asserts, in debug builds, that its owner is dropped
+/// outside an audio block: [`RtScope::check_outside`] named for `Owner`.
+///
+/// A value that must be freed on the control thread holds one instead of
+/// writing a `Drop` impl, so it can still be taken apart by a move.
+/// Zero-sized, and `Send` and `Sync` whatever `Owner` is.
+///
+/// ```
+/// use tutti_rt::{ControlDrop, RtScope};
+///
+/// struct Buffers {
+///     _control: ControlDrop<Buffers>,
+///     frames: Vec<f32>,
+/// }
+///
+/// let buffers = Buffers { _control: ControlDrop::new(), frames: vec![0.0; 64] };
+/// let _block = RtScope::enter();
+/// let dropped = std::panic::catch_unwind(move || drop(buffers));
+/// assert_eq!(dropped.is_err(), cfg!(debug_assertions));
+/// ```
+pub struct ControlDrop<Owner: ?Sized> {
+    _owner: core::marker::PhantomData<fn() -> Owner>,
+}
+
+impl<Owner: ?Sized> ControlDrop<Owner> {
+    /// The guard for one `Owner`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            _owner: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<Owner: ?Sized> Default for ControlDrop<Owner> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<Owner: ?Sized> core::fmt::Debug for ControlDrop<Owner> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ControlDrop")
+    }
+}
+
+impl<Owner: ?Sized> Drop for ControlDrop<Owner> {
+    fn drop(&mut self) {
+        RtScope::check_outside(core::any::type_name::<Owner>());
+    }
+}
+
 #[cfg(test)]
 mod tests;
