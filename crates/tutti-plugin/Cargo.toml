@@ -19,8 +19,8 @@ workspace = true
 # build pulls no serde and no format FFI.
 default = []
 
-# `PluginRef` and `PluginState` derive `Serialize` and `Deserialize`: a project
-# file keeps them. So does the catalog's `PluginDb`: the app picks the format.
+# `PluginRef` derives `Serialize` and `Deserialize`: a project
+# file keeps it. So does the catalog's `PluginDb`: the app picks the format.
 serde = ["dep:serde", "tutti-plugin-db/serde"]
 
 # In-process GUI support (loads plugin library in host for editor only)

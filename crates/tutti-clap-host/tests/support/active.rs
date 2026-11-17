@@ -8,21 +8,22 @@
 
 use std::marker::PhantomData;
 
+use tutti_buffers::Float;
 use tutti_clap_host::{
     AudioBuffer, ClapController, ClapLoaded, ClapProcessContext, ClapProcessor,
     instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{
-    AudioBufferMut, MainThreadMarker, MaxBlock, PluginError, Prepare, Sample, SampleFormat,
-    SampleRate, Samples,
+    AudioBufferMut, MainThreadMarker, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate,
+    Samples,
 };
 
 /// A sample width a suite names with a type (`Active<f32>`, `AudioBuffer32`):
 /// test-side sugar for the processor's runtime `SampleFormat`. The host has no
 /// sample type parameter; this only picks the format value and wraps a typed
 /// buffer for the one `process`.
-pub trait Width: Sample {
+pub trait Width: Float {
     /// The format an activation at this width negotiates.
     const FORMAT: SampleFormat;
     /// The buffer as the processor takes it.
@@ -74,7 +75,7 @@ pub type Active<T> = tutti_fixtures::Active<Clap<T>>;
 
 fn prepare_for<T: Width>(rate: f64, frames: u32) -> Prepare {
     let block = MaxBlock::new(Samples(frames as usize)).expect("a block of at least one frame");
-    Prepare::new(SampleRate::of(rate), block).with_format(T::FORMAT)
+    Prepare::new(SampleRate::of(rate), block).with_format(<T as Width>::FORMAT)
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
