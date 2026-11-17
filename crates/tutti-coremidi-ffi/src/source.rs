@@ -9,6 +9,7 @@
 //! `MIDISourceCreateWithProtocol` and fed `MIDIReceivedEventList` with raw UMP
 //! words. That is what [`UmpSource`] does.
 
+use crate::client_retry::create_client;
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{
@@ -55,7 +56,8 @@ impl Protocol {
 /// needs the raw one, so this module keeps a client of its own. It is never
 /// disposed: Apple warns that disposing the last client may make the MIDI server
 /// exit and fail every later client creation, and coremidi 0.9 stopped disposing
-/// its own for the same reason. A failed creation is not cached.
+/// its own for the same reason. A creation the server's exit refused is retried
+/// for a bounded time; a failed one is not cached.
 pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, i32> {
     static CLIENT: Mutex<Option<MIDIClientRef>> = Mutex::new(None);
     let mut slot = CLIENT
@@ -65,20 +67,20 @@ pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, i32> {
         return Ok(client);
     }
     let name = CFString::new("tutti-ump-src");
-    let mut client: MIDIClientRef = 0;
-    // SAFETY: `name` outlives the call; `client` is a valid out-pointer. A NULL
-    // notify proc with a NULL context is the documented "no notifications" form.
-    let status = unsafe {
-        MIDIClientCreate(
-            name.as_concrete_TypeRef(),
-            None,
-            std::ptr::null_mut(),
-            &mut client,
-        )
-    };
-    if status != 0 {
-        return Err(status);
-    }
+    let client = create_client(|| {
+        let mut client: MIDIClientRef = 0;
+        // SAFETY: `name` outlives the call; `client` is a valid out-pointer. A NULL
+        // notify proc with a NULL context is the documented "no notifications" form.
+        let status = unsafe {
+            MIDIClientCreate(
+                name.as_concrete_TypeRef(),
+                None,
+                std::ptr::null_mut(),
+                &mut client,
+            )
+        };
+        if status == 0 { Ok(client) } else { Err(status) }
+    })?;
     *slot = Some(client);
     Ok(client)
 }

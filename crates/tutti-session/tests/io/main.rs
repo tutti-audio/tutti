@@ -28,6 +28,9 @@ mod file_in_pump;
 mod inlet;
 #[cfg(feature = "record")]
 mod recorder_thread;
+// A node's audio-thread log, emitted as `tracing` events.
+#[cfg(feature = "device")]
+mod rt_log;
 mod tap_close;
 #[cfg(feature = "record")]
 mod tap_to_wav_roundtrip;

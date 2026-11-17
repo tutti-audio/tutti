@@ -1323,7 +1323,11 @@ fn four_buses(root: Option<ChannelTopology>) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::QUAD);
     let id = g.add(Const::frame(&[0.1, 0.2, 0.3, 0.4]));
     g.pipe_output(id);
-    built_with(g, RATE, Setup::new().root(root))
+    let setup = match root {
+        Some(root) => Setup::new().root(root),
+        None => Setup::new(),
+    };
+    built_with(g, RATE, setup)
 }
 
 /// The first frame of every plane of a render.
@@ -1374,7 +1378,7 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(6u16));
         let id = g.add(Const::frame(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         g.pipe_output(id);
-        built_with(g, RATE, Setup::new().root(Some(root)))
+        built_with(g, RATE, Setup::new().root(root))
     };
     let swapped = ChannelTopology::assumed(ChannelLayout::from(6u16));
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());

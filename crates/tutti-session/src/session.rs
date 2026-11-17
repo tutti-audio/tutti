@@ -78,7 +78,8 @@ pub enum Phase {
     /// length check per cell when nothing is retired. It also closes the
     /// graph's taps whose readers were dropped
     /// ([`Taps::open`](crate::Taps::open),
-    /// [`Taps::open_event`](crate::Taps::open_event)).
+    /// [`Taps::open_event`](crate::Taps::open_event)), and emits what the
+    /// graph's nodes logged on the audio thread as `tracing` events.
     Reclaim,
 }
 
@@ -1254,6 +1255,7 @@ impl<C: Clock> Session<C> {
                     taps.reclaim();
                 }
                 self.reclaim();
+                self.graph.drain_rt_log();
             }
         }
     }

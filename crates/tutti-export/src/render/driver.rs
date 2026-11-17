@@ -21,10 +21,11 @@
 
 use crate::control::{Control, Outcome, Stage};
 use crate::render::BlockCursor;
-use crate::{ConfigError, RenderGraph};
+use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
+use std::sync::Arc;
 use tutti_buffers::{Fold, InterleavedMut, Planes, interleave};
-use tutti_graph::fold_to_width;
+use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
@@ -116,6 +117,19 @@ pub(crate) struct GraphSource<'a> {
     /// where the pair was wrapped); kept apart, because a recovery in the
     /// render may be of a refusal before it.
     before: (u64, u64),
+    /// Where the executor's log records go between blocks.
+    rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
+}
+
+/// Hands what the executor's log rings hold to the sink, stores the sink's
+/// filter for the next block, and reports what was lost since the last drain.
+fn drain_rt_log(rt_log: Option<&(RtLogReaders, Arc<dyn RtLogSink>)>) {
+    if let Some((readers, sink)) = rt_log {
+        let lost = readers.drain(sink.filter(), |r| sink.record(r));
+        if lost > 0 {
+            sink.lost(lost);
+        }
+    }
 }
 
 impl<'a> GraphSource<'a> {
@@ -132,6 +146,7 @@ impl<'a> GraphSource<'a> {
         clock: &'a dyn RenderClock,
         root: Option<ChannelTopology>,
         before: (u64, u64),
+        rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
     ) -> crate::Result<Self> {
         let prepared = executor.prepare().sample_rate();
         if prepared.get() != sample_rate.get() {
@@ -170,6 +185,8 @@ impl<'a> GraphSource<'a> {
             },
         );
         let planes = vec![vec![0.0f32; max_block]; rendered];
+        // The gate is open from the first block.
+        drain_rt_log(rt_log.as_ref());
         Ok(Self {
             editor,
             executor,
@@ -182,6 +199,7 @@ impl<'a> GraphSource<'a> {
             max_block,
             produced: Samples(0),
             before,
+            rt_log,
         })
     }
 }
@@ -261,6 +279,7 @@ impl GraphSource<'_> {
         // Retired units and returned commits are freed here, on this thread,
         // as a host's control loop would free them.
         self.editor.collect();
+        drain_rt_log(self.rt_log.as_ref());
         self.produced = Samples(self.produced.get() + block_size);
         block_size
     }
@@ -308,8 +327,9 @@ pub(crate) fn with_source<T>(
 ) -> crate::Result<(Outcome<T>, u64)> {
     let root = graph.root_topology().cloned();
     let settled = graph.settled();
+    let rt_log = graph.rt_log();
     let (editor, executor) = graph.parts_mut();
-    let mut src = GraphSource::new(editor, executor, sample_rate, clock, root, settled)?;
+    let mut src = GraphSource::new(editor, executor, sample_rate, clock, root, settled, rt_log)?;
     let rendered = f(&mut src);
     // The next render counts from here, whether this one finished or not.
     let counts = src.counts();

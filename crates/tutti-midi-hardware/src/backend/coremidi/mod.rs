@@ -78,7 +78,9 @@ pub(crate) fn shared_client() -> std::result::Result<&'static Client, coremidi::
     if let Some(client) = *slot {
         return Ok(client);
     }
-    let client: &'static Client = Box::leak(Box::new(Client::new("tutti-midi")?));
+    let client: &'static Client = Box::leak(Box::new(tutti_coremidi_ffi::create_client(|| {
+        Client::new("tutti-midi")
+    })?));
     *slot = Some(client);
     Ok(client)
 }
@@ -241,6 +243,10 @@ impl CoreMidiEndpoints {
     /// reports nothing and opening reports the status it failed with, which is
     /// what a headless machine or a sandbox without MIDI access should look
     /// like.
+    ///
+    /// While the MIDI server restarts (CoreMIDI refuses clients for about five
+    /// seconds) the first call waits, up to 10 s once per process window; calls
+    /// made within 10 s of a failed wait fail at once.
     pub fn new() -> Self {
         Self {
             client: shared_client(),

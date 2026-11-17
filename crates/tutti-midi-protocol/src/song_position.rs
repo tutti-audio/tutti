@@ -20,7 +20,7 @@ const MIDI_BEATS_PER_BEAT: f64 = 4.0;
 /// ```
 #[must_use]
 pub fn song_position(beat: Beat) -> U14 {
-    let midi_beats = (beat.get().max(0.0) * MIDI_BEATS_PER_BEAT).round();
+    let midi_beats = libm::round(beat.get().max(0.0) * MIDI_BEATS_PER_BEAT);
     // `max(0.0)` turned NaN and negatives into 0, and `as` saturates.
     U14::new(midi_beats as u16).unwrap_or(U14::MAX)
 }
