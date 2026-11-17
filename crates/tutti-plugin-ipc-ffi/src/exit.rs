@@ -15,8 +15,22 @@ mod platform;
 #[path = "exit/kqueue.rs"]
 mod platform;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-#[path = "exit/polled.rs"]
-mod platform;
+mod platform {
+    /// A platform with no wake for a child's end: no value exists, and
+    /// [`of`](Self::of) is always `None`.
+    #[derive(Debug)]
+    pub(super) enum Imp {}
+
+    impl Imp {
+        pub(super) fn of(_child: &std::process::Child) -> Option<Self> {
+            None
+        }
+
+        pub(super) fn wait(&self, _timeout: std::time::Duration) -> bool {
+            match *self {}
+        }
+    }
+}
 
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +48,8 @@ const NAP: Duration = Duration::from_millis(10);
 /// is a poll there.
 #[derive(Debug)]
 pub struct ExitWait {
-    inner: platform::Imp,
+    /// `None` when the OS gave no wake for this child: the wait then sleeps.
+    inner: Option<platform::Imp>,
     /// Until the first [`wait`](Self::wait) has answered. A child may have
     /// ended before the OS was asked to watch it (a kqueue registration on a
     /// zombie succeeds and never fires), so the first wait says "may have
@@ -62,7 +77,11 @@ impl ExitWait {
         if self.unasked.swap(false, Ordering::AcqRel) {
             return true;
         }
-        self.inner.wait(timeout)
+        let Some(inner) = &self.inner else {
+            std::thread::sleep(timeout.min(NAP));
+            return true;
+        };
+        inner.wait(timeout)
     }
 }
 
