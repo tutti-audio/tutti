@@ -4,11 +4,19 @@
 //! spec's fields as well as against the writer.
 
 use tutti_ump::{
-    Data128, Message, MidiChannel, MidiGroup, Sysex7Packet, Sysex8Assembler, Sysex8Message,
-    Sysex8Step, SysexStatus, Ump, Voice1,
+    Data128, Message, MidiChannel, MidiGroup, Sysex7Packet, Sysex8Assembler, Sysex8Packets,
+    Sysex8Step, Sysex8Streams, SysexStatus, Ump, Voice1,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
+
+/// The packets of `payload` on stream `id`, taken from a receiver that takes
+/// every stream.
+fn written(id: u8, group: MidiGroup, payload: &[u8]) -> Sysex8Packets<'_> {
+    let mut streams = Sysex8Streams::discovered(255);
+    let stream = (0..=id).map(|_| streams.open().unwrap()).last().unwrap();
+    stream.packets(group, payload)
+}
 
 fn assembler(lanes: usize) -> Sysex8Assembler<Vec<u8>> {
     Sysex8Assembler::new(vec![0; 64 * lanes], 64, lanes)
@@ -80,13 +88,9 @@ fn packets_follow_table_19_at_boundary_sizes() {
     ];
     for (len, statuses, counts) in cases {
         let data = payload(len);
-        let message = Sysex8Message {
-            group: MidiGroup::of(3),
-            stream_id: 9,
-            payload: &data,
-        };
-        let umps: Vec<Ump> = message.packets().collect();
-        assert_eq!(message.packets().len(), umps.len(), "{len}");
+        let (group, id, data) = (MidiGroup::of(3), 9, &data);
+        let umps: Vec<Ump> = written(id, group, data).collect();
+        assert_eq!(written(id, group, data).len(), umps.len(), "{len}");
         let words: Vec<(u32, u32, u32)> = umps
             .iter()
             .map(|u| {
@@ -111,12 +115,12 @@ fn a_written_message_reads_back_whole() {
     let mut a = assembler(1);
     for len in [0, 1, 12, 13, 14, 15, 26, 27, 28, 63, 64] {
         let data = payload(len);
-        let message = Sysex8Message {
-            group: MidiGroup::of(5),
-            stream_id: 200,
-            payload: &data,
-        };
-        assert_eq!(feed(&mut a, message.packets()), [(5, 200, data)], "{len}");
+        let (group, id, data) = (MidiGroup::of(5), 200, &data);
+        assert_eq!(
+            feed(&mut a, written(id, group, data)),
+            [(5, 200, data.clone())],
+            "{len}"
+        );
     }
     assert_eq!(a.dropped(), 0);
 }
@@ -323,21 +327,16 @@ fn packets_with_no_start_are_dropped_and_counted_once() {
 fn an_over_long_message_is_dropped_whole_and_counted_once() {
     let mut a = Sysex8Assembler::new(vec![0; 20], 20, 1);
     let data = payload(21);
-    let message = Sysex8Message {
-        group: G0,
-        stream_id: 0,
-        payload: &data,
-    };
-    assert!(feed_any(&mut a, message.packets()).is_empty());
+    let (group, id, data) = (G0, 0, &data);
+    assert!(feed_any(&mut a, written(id, group, data)).is_empty());
     assert_eq!(a.dropped(), 1);
     // The limit itself fits.
     let fits = payload(20);
-    let message = Sysex8Message {
-        group: G0,
-        stream_id: 0,
-        payload: &fits,
-    };
-    assert_eq!(feed_any(&mut a, message.packets()), [fits]);
+    let (group, id, data) = (G0, 0, &fits);
+    assert_eq!(
+        feed_any(&mut a, written(id, group, data)),
+        std::slice::from_ref(&fits)
+    );
     assert_eq!(a.dropped(), 1);
 }
 
@@ -399,12 +398,8 @@ fn only_sysex8_packets_are_taken() {
 fn unused_bytes_of_a_packet_are_zero() {
     for len in 0..=40 {
         let data = vec![0xFF; len];
-        let message = Sysex8Message {
-            group: G0,
-            stream_id: 0x55,
-            payload: &data,
-        };
-        for ump in message.packets() {
+        let (group, id, data) = (G0, 0x55, &data);
+        for ump in written(id, group, data) {
             let count = ((ump.0[0] >> 16) & 0xF) as usize;
             let mut bytes = Vec::new();
             bytes.extend([ump.0[0] >> 8, ump.0[0]].map(|w| w as u8));
@@ -417,4 +412,53 @@ fn unused_bytes_of_a_packet_are_zero() {
             assert!(bytes[count..].iter().all(|b| *b == 0), "{len}");
         }
     }
+}
+
+/// Opened streams of a receiver, as the lowest-first Stream IDs.
+fn open_all(streams: &mut Sysex8Streams) -> Vec<u8> {
+    std::iter::from_fn(|| streams.open().map(|s| s.id())).collect()
+}
+
+/// Section 7.8, Stream id: a device with only one stream uses Stream ID 0,
+/// whether it declared one stream, none, or has not been discovered.
+/// Spec: m2-104/7.8#5
+#[test]
+fn a_one_stream_device_uses_stream_id_0() {
+    for mut streams in [
+        Sysex8Streams::undiscovered(),
+        Sysex8Streams::discovered(0),
+        Sysex8Streams::discovered(1),
+    ] {
+        assert_eq!(streams.count(), 1);
+        let stream = streams.open().unwrap();
+        for ump in stream.packets(G0, &[0x80; 40]) {
+            assert_eq!((ump.0[0] >> 8) & 0xFF, 0);
+        }
+    }
+}
+
+/// Section 7.8, Stream id: without discovery of multi-stream support only one
+/// stream is sent at a time: a second is refused while the first is open,
+/// never interleaved, and is available once the first is closed.
+/// Spec: m2-104/7.8#6
+#[test]
+fn without_discovery_a_second_concurrent_stream_is_refused() {
+    let mut streams = Sysex8Streams::undiscovered();
+    let first = streams.open().unwrap();
+    assert!(streams.open().is_none());
+    streams.close(first);
+    assert_eq!(streams.open().unwrap().id(), 0);
+}
+
+/// Section 7.8, Stream id: a receiver of N streams takes Stream IDs 0 to N-1
+/// only, and a stream beyond N waits for one to close.
+/// Spec: m2-104/7.8#7
+#[test]
+fn n_streams_use_only_stream_ids_0_to_n_minus_1() {
+    let mut streams = Sysex8Streams::discovered(3);
+    assert_eq!(open_all(&mut streams), [0, 1, 2]);
+    let again = Sysex8Streams::discovered(255);
+    assert_eq!(again.count(), 255);
+    let mut again = again;
+    assert_eq!(open_all(&mut again), (0..=254).collect::<Vec<u8>>());
 }

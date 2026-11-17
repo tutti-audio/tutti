@@ -17,7 +17,8 @@
 //! are a checked complete SysEx and the one SysEx7 reassembler (a stream per
 //! Group), over a buffer the caller owns, as [`Sysex8Assembler`] and
 //! [`MixedDataAssembler`] are of System Exclusive 8 (a message per Group and
-//! Stream ID, [`Sysex8Message::packets`] its inverse) and Mixed Data Sets (a set
+//! Stream ID, [`Sysex8Stream::packets`] its inverse, its Stream IDs from the
+//! receiver's [`Sysex8Streams`]) and Mixed Data Sets (a set
 //! per Group and MDS ID, [`MixedDataSet::packets`] its inverse);
 //! [`SysexMessage::packets`] is its inverse, the one writer of a payload as
 //! SysEx7 packets ([`Sysex7Packets::from_payload`] for plain bytes), as
@@ -160,6 +161,8 @@ pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
     SysexStep,
 };
-pub use sysex8::{Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step};
+pub use sysex8::{
+    Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step, Sysex8Stream, Sysex8Streams,
+};
 pub use text::{StreamTextAssembler, TextPackets, text_packets};
 pub use ump::{Key, KeyEvent, Ump, split_stream};

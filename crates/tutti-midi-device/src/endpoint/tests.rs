@@ -970,3 +970,85 @@ fn a_changed_identity_name_or_instance_id_is_sent() {
         [[0xF004_534E, 0x2D30_3030, 0x3200_0000, 0]]
     );
 }
+
+/// A merger of `sources` SysEx 8 payloads onto one receiver: each takes a
+/// stream of `streams` when one is free and waits when none is. Every packet
+/// of every running stream is written round-robin, and a source that is
+/// written closes its stream. Returns the Stream IDs on the wire and what a
+/// receiver assembles.
+fn merge(mut streams: Sysex8Streams, sources: &[Vec<u8>]) -> (Vec<u8>, Vec<Vec<u8>>) {
+    use tutti_ump::{MidiGroup, Sysex8Assembler, Sysex8Packets, Sysex8Step, Sysex8Stream};
+
+    let mut waiting: Vec<&Vec<u8>> = sources.iter().rev().collect();
+    let mut running: Vec<(Sysex8Stream, Sysex8Packets<'_>)> = Vec::new();
+    let mut receiver = Sysex8Assembler::new(vec![0; 16 * 64], 64, 16);
+    let (mut ids, mut done) = (Vec::new(), Vec::new());
+    while !waiting.is_empty() || !running.is_empty() {
+        while let Some(&payload) = waiting.last() {
+            let Some(stream) = streams.open() else { break };
+            let packets = stream.packets(MidiGroup::FIRST, payload);
+            running.push((stream, packets));
+            waiting.pop();
+        }
+        let mut finished = Vec::new();
+        for (i, (stream, packets)) in running.iter_mut().enumerate() {
+            let Some(ump) = packets.next() else {
+                finished.push(i);
+                continue;
+            };
+            ids.push(stream.id());
+            if let Sysex8Step::Complete(m) = receiver.push(ump) {
+                done.push(m.payload.to_vec());
+            }
+            if packets.len() == 0 {
+                finished.push(i);
+            }
+        }
+        for i in finished.into_iter().rev() {
+            streams.close(running.remove(i).0);
+        }
+    }
+    assert_eq!(receiver.dropped(), 0);
+    (ids, done)
+}
+
+/// Function Block Info's `Max Number of SysEx8 Streams` is the bound a sender
+/// takes: 0 and 1 are one stream, N is N.
+/// Spec: m2-104/7.8#5, m2-104/7.8#7
+#[test]
+fn a_block_declares_the_streams_a_sender_may_use() {
+    for (declared, count) in [(0, 1), (1, 1), (2, 2), (3, 3), (255, 255)] {
+        let block = block(0, 0, 1).midi_ci(0, declared).build().unwrap();
+        assert_eq!(block.sysex8_streams().count(), count);
+    }
+}
+
+/// A merger sends several sources through one receiver. Before discovery of
+/// more than one stream, they go one at a time on Stream ID 0.
+/// Spec: m2-104/7.8#6, m2-104/7.8#8
+#[test]
+fn a_merger_without_discovery_sends_one_stream_at_a_time() {
+    let sources = [vec![0x80; 30], vec![0x81; 30], vec![0x82; 20]];
+    let (ids, done) = merge(Sysex8Streams::undiscovered(), &sources);
+    assert!(ids.iter().all(|&id| id == 0));
+    assert_eq!(done, sources);
+}
+
+/// A merger that discovered N streams uses only Stream IDs 0 to N-1: with
+/// N = 3 and five sources, the fourth and fifth wait for a stream to close.
+/// Spec: m2-104/7.8#7, m2-104/7.8#8
+#[test]
+fn a_merger_after_discovery_uses_only_stream_ids_below_the_count() {
+    let block = block(0, 0, 1).midi_ci(1, 3).build().unwrap();
+    let sources: Vec<Vec<u8>> = (0..5)
+        .map(|i| vec![0x90 + i; 40 + usize::from(i)])
+        .collect();
+    let (ids, done) = merge(block.sysex8_streams(), &sources);
+    assert!(ids.iter().all(|&id| id < 3));
+    for id in 0..3 {
+        assert!(ids.contains(&id), "stream {id} is used");
+    }
+    let mut got = done;
+    got.sort();
+    assert_eq!(got, sources);
+}

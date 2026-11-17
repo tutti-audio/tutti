@@ -13,40 +13,135 @@ const BYTES_PER_PACKET: usize = 13;
 /// per lane.
 const LANES: usize = 16;
 
-/// A complete System Exclusive 8 message (section 7.8): the Group and Stream
-/// ID it travels on and its bytes after the Stream ID, which begin with the
-/// Manufacturer ID, Device ID and Sub IDs of the message's protocol and are
-/// not interpreted here.
+/// A complete System Exclusive 8 message (section 7.8) a
+/// [`Sysex8Assembler`] hands back: the Group and Stream ID it travelled on
+/// and its bytes after the Stream ID, which begin with the Manufacturer ID,
+/// Device ID and Sub IDs of the message's protocol and are not interpreted
+/// here.
 ///
-/// A sender writes one with [`packets`](Self::packets); the
-/// [`Sysex8Assembler`] hands one back, borrowing its buffer. Any byte value
-/// is data: that is the point of SysEx8. The Stream ID is a plain byte
-/// because a receiver declares how many it supports (section 7.8, "Stream
-/// id") and the codec does not know the number.
+/// Any byte value is data: that is the point of SysEx8. The Stream ID is the
+/// plain byte the sender wrote. A sender has no way to write one itself: it
+/// takes a [`Sysex8Stream`] from the [`Sysex8Streams`] of its receiver and
+/// writes with [`Sysex8Stream::packets`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sysex8Message<'a> {
-    /// The Group it travels on.
+    /// The Group it travelled on.
     pub group: MidiGroup,
-    /// The stream it is on: messages of different streams interleave.
+    /// The stream it was on: messages of different streams interleave.
     pub stream_id: u8,
     /// The message's bytes after the Stream ID.
     pub payload: &'a [u8],
 }
 
-impl<'a> Sysex8Message<'a> {
-    /// The message as packets: see [`Sysex8Packets`].
+/// The SysEx 8 streams a receiver accepts (section 7.8, "Stream id") and
+/// which of them a sender has open: the only source of a [`Sysex8Stream`], so
+/// the only source of a Stream ID on the wire.
+///
+/// A receiver that declares `N` simultaneous streams (the `Max Number of
+/// SysEx8 Streams` of its Function Block Info, `2..=255`) takes the Stream
+/// IDs `0` to `N - 1`. A receiver that declares `0` or `1`, or that has not
+/// been discovered, takes one stream, and only Stream ID 0: a sender that has
+/// not discovered more sends one stream at a time. [`open`](Self::open) hands
+/// out the lowest free ID of `0..N` and answers `None` while all `N` are
+/// open, so a message is never interleaved with another of the same stream.
+/// One `Sysex8Streams` per receiver serves a merger: every source it merges
+/// opens its stream here.
+///
+/// ```
+/// use tutti_ump::Sysex8Streams;
+///
+/// let mut streams = Sysex8Streams::discovered(2);
+/// let first = streams.open().unwrap();
+/// let second = streams.open().unwrap();
+/// assert_eq!((first.id(), second.id()), (0, 1));
+/// assert!(streams.open().is_none());
+/// streams.close(first);
+/// assert_eq!(streams.open().unwrap().id(), 0);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sysex8Streams {
+    /// The streams the receiver takes, at least one.
+    count: u8,
+    /// Bit `i` is set while Stream ID `i` is open.
+    open: [u64; 4],
+}
+
+impl Sysex8Streams {
+    /// The streams of a receiver whose Function Block Info has not been
+    /// discovered: one, Stream ID 0.
     #[must_use]
-    pub fn packets(self) -> Sysex8Packets<'a> {
+    pub const fn undiscovered() -> Self {
+        Self::discovered(0)
+    }
+
+    /// The streams of a receiver that declared `max_streams` simultaneous
+    /// SysEx 8 streams (its Function Block Info): `0` and `1` are one stream.
+    #[must_use]
+    pub const fn discovered(max_streams: u8) -> Self {
+        Self {
+            count: if max_streams == 0 { 1 } else { max_streams },
+            open: [0; 4],
+        }
+    }
+
+    /// How many streams the receiver takes; the Stream IDs are `0` to one
+    /// less.
+    #[must_use]
+    pub const fn count(&self) -> u8 {
+        self.count
+    }
+
+    /// Open the lowest free stream, or `None` while all are open.
+    pub fn open(&mut self) -> Option<Sysex8Stream> {
+        let id =
+            (0..usize::from(self.count)).find(|&i| self.open[i / 64] & (1 << (i % 64)) == 0)?;
+        self.open[id / 64] |= 1 << (id % 64);
+        Some(Sysex8Stream {
+            id: u8::try_from(id).ok()?,
+        })
+    }
+
+    /// Close a stream whose message is written, so [`open`](Self::open) can
+    /// hand its ID out again.
+    pub fn close(&mut self, stream: Sysex8Stream) {
+        let id = usize::from(stream.id);
+        self.open[id / 64] &= !(1 << (id % 64));
+    }
+}
+
+/// One open SysEx 8 stream of a [`Sysex8Streams`]: the proof that its Stream
+/// ID is one the receiver takes, and that no other message is using it.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use = "an open stream is held until `Sysex8Streams::close`"]
+pub struct Sysex8Stream {
+    id: u8,
+}
+
+impl Sysex8Stream {
+    /// The Stream ID it writes.
+    #[must_use]
+    pub const fn id(&self) -> u8 {
+        self.id
+    }
+
+    /// `payload` (the bytes after the Stream ID) as packets of this stream on
+    /// `group`: see [`Sysex8Packets`].
+    #[must_use]
+    pub fn packets<'a>(&self, group: MidiGroup, payload: &'a [u8]) -> Sysex8Packets<'a> {
         Sysex8Packets {
-            message: self,
-            rest: self.payload,
+            message: Sysex8Message {
+                group,
+                stream_id: self.id,
+                payload,
+            },
+            rest: payload,
             started: false,
         }
     }
 }
 
-/// The packets of a [`Sysex8Message`] (section 7.8), from
-/// [`Sysex8Message::packets`].
+/// The packets of one SysEx 8 message (section 7.8), from
+/// [`Sysex8Stream::packets`].
 ///
 /// A payload of up to 13 bytes is one `Complete` packet (an empty one is a
 /// `Complete` that holds the Stream ID alone, `# of bytes` 1). A longer one is
@@ -55,10 +150,10 @@ impl<'a> Sysex8Message<'a> {
 /// nothing is allocated. [`Sysex8Assembler`] is the inverse.
 ///
 /// ```
-/// use tutti_ump::{Data128, Message, MidiGroup, Sysex8Message, SysexStatus};
+/// use tutti_ump::{Data128, Message, MidiGroup, Sysex8Streams, SysexStatus};
 ///
-/// let message = Sysex8Message { group: MidiGroup::of(0), stream_id: 2, payload: &[0xFF; 14] };
-/// let mut packets = message.packets();
+/// let stream = Sysex8Streams::undiscovered().open().unwrap();
+/// let mut packets = stream.packets(MidiGroup::of(0), &[0xFF; 14]);
 /// assert_eq!(packets.len(), 2);
 /// let Ok(Message::Data128(_, Data128::Sysex8(first))) = packets.next().unwrap().decode() else {
 ///     unreachable!()
@@ -174,14 +269,14 @@ struct Entry {
 /// [`dropped`](Self::dropped) can exceed the messages lost.
 ///
 /// ```
-/// use tutti_ump::{MidiGroup, Sysex8Assembler, Sysex8Message, Sysex8Step};
+/// use tutti_ump::{MidiGroup, Sysex8Assembler, Sysex8Streams, Sysex8Step};
 ///
-/// let message = Sysex8Message { group: MidiGroup::of(0), stream_id: 0, payload: &[0x80; 40] };
+/// let stream = Sysex8Streams::undiscovered().open().unwrap();
 /// let mut assembler = Sysex8Assembler::new([0u8; 64], 64, 1);
 /// let mut done = 0;
-/// for ump in message.packets() {
+/// for ump in stream.packets(MidiGroup::of(0), &[0x80; 40]) {
 ///     if let Sysex8Step::Complete(whole) = assembler.push(ump) {
-///         assert_eq!(whole, message);
+///         assert_eq!((whole.stream_id, whole.payload), (0, &[0x80; 40][..]));
 ///         done += 1;
 ///     }
 /// }

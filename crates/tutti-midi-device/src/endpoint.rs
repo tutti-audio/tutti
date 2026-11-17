@@ -9,7 +9,8 @@
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
     FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
-    Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
+    Midi1Port, Protocol, Stream, StreamConfig, Sysex8Streams, UiHint, Ump, UmpVersion,
+    text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
@@ -334,6 +335,15 @@ impl FunctionBlock {
     #[must_use]
     pub const fn max_sysex8_streams(&self) -> u8 {
         self.max_sysex8_streams
+    }
+
+    /// The SysEx 8 streams a sender may use towards this block: its
+    /// [`max_sysex8_streams`](Self::max_sysex8_streams), where `0` and `1` are
+    /// one stream. A sender that has not discovered the block uses
+    /// [`Sysex8Streams::undiscovered`].
+    #[must_use]
+    pub const fn sysex8_streams(&self) -> Sysex8Streams {
+        Sysex8Streams::discovered(self.max_sysex8_streams)
     }
 
     /// Its name, when it has one.

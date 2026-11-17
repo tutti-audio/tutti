@@ -8,7 +8,7 @@ use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, DeltaTicks, ManufacturerId, MdsChunkUmps, MdsIdentity,
     Message, MidiChannel, MidiGroup, MixedDataSet, NoteNumber, NoteVelocity, PerNoteManagement,
-    RegisteredPerNoteController, Sysex7Packet, Sysex8Message, SysexStatus, System,
+    RegisteredPerNoteController, Sysex7Packet, Sysex8Streams, SysexStatus, System,
     TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
@@ -329,13 +329,8 @@ fn narrow_message_refuses_what_narrow_refuses() {
 #[test]
 fn sysex8_mixed_data_and_utility_have_no_midi1_bytes() {
     let g = MidiGroup::FIRST;
-    let sysex8: Vec<_> = Sysex8Message {
-        group: g,
-        stream_id: 0,
-        payload: &[0x80; 30],
-    }
-    .packets()
-    .collect();
+    let stream = Sysex8Streams::undiscovered().open().unwrap();
+    let sysex8: Vec<_> = stream.packets(g, &[0x80; 30]).collect();
     assert!(sysex8.len() > 1, "a message of several packets");
     let data = [0xAAu8; 40];
     let set = MixedDataSet {
