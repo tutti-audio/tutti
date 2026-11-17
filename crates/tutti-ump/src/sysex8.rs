@@ -58,7 +58,17 @@ pub struct Sysex8Message<'a> {
 /// streams.close(first);
 /// assert_eq!(streams.open().unwrap().id(), 0);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// It is neither `Clone` nor `Copy`: a copy would duplicate which IDs are
+/// open and hand the same one out twice. Share it as `&mut`.
+///
+/// ```compile_fail
+/// use tutti_ump::Sysex8Streams;
+///
+/// let streams = Sysex8Streams::undiscovered();
+/// let mut copy = streams.clone();
+/// ```
+#[derive(Debug, PartialEq, Eq)]
 pub struct Sysex8Streams {
     /// The streams the receiver takes, at least one.
     count: u8,
