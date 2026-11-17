@@ -603,6 +603,7 @@ fn run_to(rig: &mut crate::testing::Rig, now: Instant) {
 /// A device and an input pump connected to its port, with the inlet the pump
 /// fills and the graph (on the wall clock) that plays it.
 struct Pumped {
+    /// Keeps the device (and so the port the pump reads) alive.
     device: Virtual,
     rig: crate::testing::Rig,
     connection: Option<Box<dyn crate::endpoints::InputConnection>>,
@@ -802,21 +803,29 @@ const EIO: i32 = 5;
 /// Dropping an input does not wait for ever on a pump that will not stop: here
 /// one held in its first read, which `JOIN_BOUND` cuts short, so the drop
 /// returns and detaches it. The test waits for the pump to be held (the hook
-/// says so), then drops, then lets the pump go.
+/// says so), drops, checks the hook has not been released (so the drop did not
+/// wait for the pump), then lets the pump go.
 #[test]
 fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
     let device = plug(&unique("stuck"));
     let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
     let (held, held_rx) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel::<()>();
+    let freed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&freed);
     let mut pumped = Pumped::hooked(device, id, move || {
         let _ = held.send(());
         // Held until the sender drops.
         let _ = released.recv();
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     });
     held_rx.recv_timeout(PATIENCE).expect("the pump to be held");
     drop(pumped.connection.take());
+    assert!(
+        !freed.load(std::sync::atomic::Ordering::SeqCst),
+        "the drop returned while the pump was still held"
+    );
     drop(release);
 }
 

@@ -372,6 +372,8 @@ struct Running {
     identity: DeviceIdentity,
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
+    /// What the devices' Responders serve: the session's, given at start.
+    store: Arc<Mutex<ResourceStore>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns is reported again.
@@ -494,14 +496,7 @@ impl Ci {
         }
         match (&mut self.running, identity) {
             (Some(running), _) => {
-                running.reconcile(
-                    &self.groups,
-                    &self.store,
-                    &mut entropy,
-                    now,
-                    out,
-                    &mut changes,
-                );
+                running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
                 running.step(now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
@@ -723,6 +718,7 @@ impl Running {
             identity,
             members,
             assembler,
+            store: Arc::clone(store),
             unstarted,
         };
         let mut changes = CiChanges {
@@ -753,7 +749,6 @@ impl Running {
     fn reconcile(
         &mut self,
         groups: &[MidiGroup],
-        store: &Arc<Mutex<ResourceStore>>,
         entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
         out: &mut OpenOutput,
@@ -777,7 +772,7 @@ impl Running {
                     started.push((group, first));
                     self.unstarted.retain(|g| *g != group);
                     self.members
-                        .push(Member::new(group, device, Arc::clone(store)));
+                        .push(Member::new(group, device, Arc::clone(&self.store)));
                     changed = true;
                 }
                 Err(error) => {
@@ -1456,14 +1451,7 @@ mod tests {
         let (head, tail) = packets.split_at(packets.len() / 2);
         for (ms, part) in [(1, head), (2, tail)] {
             let mut changes = CiChanges::default();
-            running.reconcile(
-                &[G0, G1],
-                &Arc::default(),
-                &mut source,
-                at(ms),
-                &mut out,
-                &mut changes,
-            );
+            running.reconcile(&[G0, G1], &mut source, at(ms), &mut out, &mut changes);
             running.step(at(ms), &heard(part), &mut out, &mut changes);
             assert!(changes.unstarted.is_empty(), "reported once");
             if ms == 1 {
@@ -1480,14 +1468,7 @@ mod tests {
 
         // The next draw succeeds: Group 1 starts and sends its Discovery.
         let mut changes = CiChanges::default();
-        running.reconcile(
-            &[G0, G1],
-            &Arc::default(),
-            &mut source,
-            at(3),
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[G0, G1], &mut source, at(3), &mut out, &mut changes);
         assert!(changes.unstarted.is_empty());
         assert!(running.unstarted.is_empty());
         let sent = counters.take_sent(raw);
@@ -1521,40 +1502,19 @@ mod tests {
         assert!(!running.is_idle(), "the Groups still wait to start");
         for _ in 0..3 {
             let mut changes = CiChanges::default();
-            running.reconcile(
-                &[G0, G1],
-                &Arc::default(),
-                &mut source,
-                now,
-                &mut out,
-                &mut changes,
-            );
+            running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
             assert!(changes.unstarted.is_empty(), "reported once");
             assert!(!running.is_idle());
             assert!(running.members.is_empty());
         }
         // The next draws succeed: both Groups start, and nothing is reported.
         let mut changes = CiChanges::default();
-        running.reconcile(
-            &[G0, G1],
-            &Arc::default(),
-            &mut source,
-            now,
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
         assert!(changes.unstarted.is_empty());
         assert_eq!(running.members.len(), 2);
         assert!(running.unstarted.is_empty());
         // No Group is called for: nothing waits and nothing runs.
-        running.reconcile(
-            &[],
-            &Arc::default(),
-            &mut source,
-            now,
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[], &mut source, now, &mut out, &mut changes);
         assert!(running.is_idle());
     }
 
@@ -1575,24 +1535,10 @@ mod tests {
         );
         assert_eq!(first.unstarted.len(), 1);
         let mut changes = CiChanges::default();
-        running.reconcile(
-            &[G1],
-            &Arc::default(),
-            &mut source,
-            now,
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
         assert_eq!(changes.unstarted, [(G1, EntropyError::unavailable())]);
         let mut changes = CiChanges::default();
-        running.reconcile(
-            &[G0, G1],
-            &Arc::default(),
-            &mut source,
-            now,
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
         assert_eq!(changes.unstarted, [(G0, EntropyError::unavailable())]);
     }
 
@@ -1660,14 +1606,7 @@ mod tests {
         let (mut running, _) =
             Running::start(&[G0], &shared, identity(), &mut entropy, now, &mut out);
         let mut changes = CiChanges::default();
-        running.reconcile(
-            &[G0, G1],
-            &shared,
-            &mut entropy,
-            now,
-            &mut out,
-            &mut changes,
-        );
+        running.reconcile(&[G0, G1], &mut entropy, now, &mut out, &mut changes);
         assert_eq!(running.members.len(), 2);
         let given = shared.lock().unwrap().resource_list();
         for member in &running.members {
