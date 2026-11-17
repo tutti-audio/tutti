@@ -46,7 +46,7 @@ mod clap {
         s.plugin_view(node)
             .unwrap()
             .state()
-            .save()
+            .save(tutti_plugin_types::StateUse::Project)
             .expect("the plugin saves")
             .bytes()
             .to_vec()

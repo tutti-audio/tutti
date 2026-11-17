@@ -863,9 +863,9 @@ impl MidiSession {
             .map_or_else(Learned::new, |stream| stream.said());
         for peer in held.stream.ci_peers().iter() {
             let peer = peer.peer();
-            let mut said = Learned::new().with_identity(peer.discovery().identity);
+            let mut said = Learned::new().identified(peer.discovery().identity);
             if let Some(instance) = peer.product_instance_id() {
-                said = said.with_instance_id(*instance);
+                said = said.instanced(*instance);
             }
             learned = learned.or(said);
         }

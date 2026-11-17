@@ -211,7 +211,7 @@ fn offering_both() -> Endpoint {
         rx_jr: true,
         tx_jr: true,
     }))
-    .with_function_block(block())
+    .block(block())
 }
 
 /// M2-100 Table 4 steps 2 to 4 over the wire: Endpoint Discovery first, then
@@ -301,7 +301,7 @@ fn a_device_that_offers_only_midi1_stays_in_midi1() {
         midi1: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block());
+    .block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
     wire.open();
     let mut all = Vec::new();
@@ -851,7 +851,7 @@ fn the_output_follows_the_negotiated_protocol() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block());
+    .block(block());
     // A device that has MIDI 2.0 on offer but is in MIDI 1.0; the session asks
     // for MIDI 2.0, so it ends in MIDI 2.0 ...
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
@@ -933,7 +933,7 @@ fn moved_block(first_group: u8) -> Stream {
 #[test]
 fn static_blocks_are_not_re_read_and_others_are() {
     for is_static in [true, false] {
-        let device = offering_both().with_static_function_blocks(is_static);
+        let device = offering_both().static_blocks(is_static);
         let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
         wire.open();
         settle(&mut wire);
@@ -992,7 +992,7 @@ fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
         midi1: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block());
+    .block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
     wire.open();
     assert_eq!(settle(&mut wire).config().protocol, Protocol::Midi1);
@@ -1032,7 +1032,7 @@ fn a_midi1_device_that_answers_an_identity_request_is_learned_and_checked_agains
     let _ = wire.session.poll(wire.at(20)).count();
 
     let learned = wire.session.learned(&wire.id);
-    assert_eq!(learned, Learned::new().with_identity(identity()));
+    assert_eq!(learned, Learned::new().identified(identity()));
     let saved = wire.session.saved(&wire.id).expect("an open, listed input");
     assert_eq!(saved.info().id, wire.id);
     assert_eq!(saved.learned(), &learned);
@@ -1040,7 +1040,7 @@ fn a_midi1_device_that_answers_an_identity_request_is_learned_and_checked_agains
     // Another model answers where this one was saved; the same model might be
     // another unit of it.
     assert_eq!(
-        saved.confirm(&Learned::new().with_identity(model_identity(9))),
+        saved.confirm(&Learned::new().identified(model_identity(9))),
         Match::Different
     );
     assert_eq!(saved.confirm(&learned), Match::SameModel);
@@ -1059,8 +1059,8 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
     use tutti_midi_device::{Learned, Match, ProductInstanceId};
 
     let device = offering_both()
-        .with_identity(identity())
-        .with_instance_id(ProductInstanceId::new("SN-0042").unwrap());
+        .identified(identity())
+        .instanced(ProductInstanceId::new("SN-0042").unwrap());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
     wire.open();
     assert!(wire.session.learned(&wire.id).is_empty(), "not settled yet");
@@ -1076,8 +1076,8 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
     let saved = wire.session.saved(&wire.id).unwrap();
     assert_eq!(saved.confirm(&learned), Match::SameUnit);
     let other_unit = Learned::new()
-        .with_identity(identity())
-        .with_instance_id(ProductInstanceId::new("SN-0043").unwrap());
+        .identified(identity())
+        .instanced(ProductInstanceId::new("SN-0043").unwrap());
     assert_eq!(saved.confirm(&other_unit), Match::Different);
 }
 
