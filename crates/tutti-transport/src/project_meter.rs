@@ -22,9 +22,9 @@
 //! the new meter in the metronome and in every plugin; a block that starts
 //! while it runs can read the old meter in some and the new in others.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
-use tutti_rt::{ArcLend, Reader};
+use tutti_rt::{ArcLend, LockExt, Reader};
 use tutti_types::MeterMap;
 
 /// What a following node reads: the project's meter, or none (the node then
@@ -75,7 +75,7 @@ impl ProjectMeter {
     fn state(&self) -> MutexGuard<'_, ProjectState> {
         // A poisoned lock still holds a whole state: the list is changed in
         // one `retain` or push.
-        self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.state.lock_recover()
     }
 
     /// Publishes `meter` to the metronome and to every following slot, before
@@ -222,10 +222,7 @@ impl MeterSlot {
 
     fn follows(&self) -> MutexGuard<'_, Option<ProjectMeter>> {
         // A poisoned lock still holds a whole `Option`, set in one assignment.
-        self.0
-            .follows
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.0.follows.lock_recover()
     }
 
     /// Follow `meter` from the node's next block: its meter now, and every

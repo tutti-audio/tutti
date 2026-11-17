@@ -5,8 +5,8 @@
 
 use tutti_ump::{
     Data128, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunks, MdsIdentity, Message,
-    MidiGroup, MixedDataAssembler, MixedDataHeader, MixedDataSet, MixedDataStep, Sysex8Packet,
-    SysexStatus, U4, Ump,
+    MidiGroup, MixedDataAssembler, MixedDataHeader, MixedDataSet, MixedDataStep, Sysex8StreamIds,
+    U4, Ump,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
@@ -212,10 +212,12 @@ fn mds_ids_and_groups_are_independent() {
 fn other_messages_inside_a_set_end_nothing() {
     let mut a = assembler(1);
     let bytes = data(20);
-    let sx8 = Ump::from(Message::Data128(
-        G0,
-        Data128::Sysex8(Sysex8Packet::new(SysexStatus::Complete, 0, &[1]).unwrap()),
-    ));
+    let sx8 = Sysex8StreamIds::undiscovered()
+        .open()
+        .unwrap()
+        .packets(G0, &[1])
+        .next()
+        .unwrap();
     let mut umps: Vec<Ump> = set(G0, 0, &bytes)
         .packets(MdsChunkUmps::of(1))
         .unwrap()

@@ -30,10 +30,10 @@
 //!
 //! A block of another width than the tap's counts as lost, whole.
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use tutti_graph::{TapReader, TapWriter};
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Opens that can be in flight at once. The install queue holds one more: a
@@ -165,7 +165,7 @@ pub(crate) fn link() -> (HeardTaps, Hearing) {
 
 impl HeardTaps {
     fn control(&self) -> std::sync::MutexGuard<'_, Control> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.lock_recover()
     }
 
     /// Opens the tap: `width` channels (the device's, so every output channel

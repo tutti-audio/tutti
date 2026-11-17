@@ -159,6 +159,7 @@ mod gauge;
 mod handoff;
 mod job_gate;
 mod level_cell;
+mod lock;
 mod main_thread;
 mod packed_atomic;
 mod pos_ring;
@@ -190,6 +191,7 @@ pub use gauge::{
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
+pub use lock::LockExt;
 pub use main_thread::MainThreadMarker;
 pub use packed_atomic::PackedAtomic;
 pub use pos_ring::{

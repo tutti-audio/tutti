@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
-use tutti_rt::ThreadHandle;
+use tutti_rt::{LockExt, ThreadHandle};
 
 use crate::job::{Cancel, Job, JobKind, LandedQueue, Ticket};
 use crate::{Clock, Session, SessionEvent, WorkerError};
@@ -443,12 +443,7 @@ impl Jobs {
 
     /// Reports what typed jobs landed, in landing order.
     pub(crate) fn report_landed(&mut self, out: &mut Vec<SessionEvent>) {
-        let landed = std::mem::take(
-            &mut *self
-                .landed
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = std::mem::take(&mut *self.landed.lock_recover());
         out.extend(landed.into_iter().map(SessionEvent::Landed));
     }
 

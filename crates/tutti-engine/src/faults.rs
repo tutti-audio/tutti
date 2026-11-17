@@ -22,7 +22,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use bytemuck::{Pod, Zeroable};
-use tutti_rt::{AudioThreadCell, Contended, Drained, FaultLatch, SeqReader, SeqWriter};
+use tutti_rt::{AudioThreadCell, Contended, Drained, FaultLatch, LockExt, SeqReader, SeqWriter};
 
 /// How long backend errors may arrive with no audio delivered before the
 /// stream counts as gone.
@@ -297,7 +297,7 @@ impl StreamFaults {
     }
 
     fn last_guard(&self) -> MutexGuard<'_, Slots> {
-        self.slots.lock().unwrap_or_else(|p| p.into_inner())
+        self.slots.lock_recover()
     }
 
     /// Returns how many faults this stream has reported since the last start.

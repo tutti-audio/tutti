@@ -60,7 +60,7 @@
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_codec::Format;
@@ -71,6 +71,7 @@ use tutti_export::{
     Resample, Target, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapAlign, TapId};
+use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
 use tutti_types::{Beat, ChannelLayout, ChannelTopology, Frame, SampleRate, Samples, Seconds};
@@ -1288,7 +1289,7 @@ impl BounceHandle {
     /// pipeline's own weights.
     #[must_use]
     pub fn progress(&self) -> Option<Progress> {
-        *self.progress.lock().unwrap_or_else(PoisonError::into_inner)
+        *self.progress.lock_recover()
     }
 
     fn stop_requested(&self) -> bool {
@@ -1297,7 +1298,7 @@ impl BounceHandle {
 
     /// The render's callback: records the reading.
     fn record(&self, p: &Progress) {
-        *self.progress.lock().unwrap_or_else(PoisonError::into_inner) = Some(*p);
+        *self.progress.lock_recover() = Some(*p);
     }
 }
 

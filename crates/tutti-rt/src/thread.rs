@@ -26,6 +26,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::LockExt;
 use crate::priority::{PriorityOutcome, PriorityRequest, request_priority};
 
 /// A thread's body panicked.
@@ -57,19 +58,13 @@ struct Ended {
 
 impl Ended {
     fn set(&self) {
-        *self
-            .ended
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        *self.ended.lock_recover() = true;
         self.wake.notify_all();
     }
 
     /// Waits at most `timeout` for [`set`](Self::set); returns whether it came.
     fn wait(&self, timeout: Duration) -> bool {
-        let ended = self
-            .ended
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ended = self.ended.lock_recover();
         *self
             .wake
             .wait_timeout_while(ended, timeout, |ended| !*ended)
@@ -132,11 +127,7 @@ impl StopToken {
     pub fn stop(&self) {
         // The flag is set under the gate, so a sleeper that checked it before
         // the store is already parked on the condvar when the notify comes.
-        let _gate = self
-            .state
-            .gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _gate = self.state.gate.lock_recover();
         self.state.stopped.store(true, Ordering::Release);
         self.state.wake.notify_all();
     }
@@ -146,11 +137,7 @@ impl StopToken {
     #[must_use = "true means the body should return"]
     pub fn wait(&self, timeout: Duration) -> bool {
         let deadline = Deadline::after(Instant::now(), timeout);
-        let mut gate = self
-            .state
-            .gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut gate = self.state.gate.lock_recover();
         loop {
             if self.is_stopped() {
                 return true;
