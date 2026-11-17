@@ -39,7 +39,10 @@ fn reply_from(
     Decoded::Message(CiMessage::ProfileReply {
         header: header_from(source, address),
         to: Muid::of(to),
-        profiles: ProfileLists::new(enabled.to_vec(), disabled.to_vec()).unwrap(),
+        profiles: ProfileLists::new(
+            ProfileList::try_from(enabled.to_vec()).unwrap(),
+            ProfileList::try_from(disabled.to_vec()).unwrap(),
+        ),
     })
 }
 

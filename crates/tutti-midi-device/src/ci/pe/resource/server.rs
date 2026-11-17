@@ -893,7 +893,7 @@ impl ResourceResponder {
         let target = |resource: PeResource| {
             match request.res_id.clone() {
                 Some(id) => ResourceTarget::entry(resource, id),
-                None => ResourceTarget::new(resource),
+                None => ResourceTarget::try_from(resource),
             }
             .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))
         };
@@ -1048,9 +1048,9 @@ impl ResourceResponder {
                 (data, Announce::Full, ChangeKind::Full)
             }
             PeSetScope::Partial => {
-                let json = PeJson::parse(&bytes)
+                let json = PeJson::try_from(bytes.as_slice())
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
-                let update = PartialUpdate::from_json(&json)
+                let update = PartialUpdate::try_from(&json)
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
                 let data = self.changed(&target, &update).map_err(|e| match e {
                     PublishError::NoData(_) => refusal(PeStatus::NotFound, e.to_string()),

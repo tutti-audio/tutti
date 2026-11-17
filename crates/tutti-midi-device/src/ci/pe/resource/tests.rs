@@ -17,7 +17,7 @@ use crate::Muid;
 use crate::ci::testing::{OURS, PEER};
 
 fn json(text: &str) -> PeJson {
-    PeJson::parse(text.as_bytes()).unwrap()
+    PeJson::try_from(text.as_bytes()).unwrap()
 }
 
 fn decode(resource: &PeResource, text: &str) -> Result<PeData, PeDataError> {
@@ -912,7 +912,7 @@ fn columns_name_a_property_or_a_link() {
 #[test]
 fn a_target_has_a_res_id_when_the_resource_has_entries() {
     assert!(matches!(
-        ResourceTarget::new(PeResource::ProgramList),
+        ResourceTarget::try_from(PeResource::ProgramList),
         Err(RequestRefused::ResIdRequired(_))
     ));
     assert!(ResourceTarget::entry(PeResource::ProgramList, id("general")).is_ok());
@@ -920,9 +920,9 @@ fn a_target_has_a_res_id_when_the_resource_has_entries() {
         ResourceTarget::entry(PeResource::LocalOn, id("x")),
         Err(RequestRefused::ResIdUnused(_))
     ));
-    assert!(ResourceTarget::new(PeResource::LocalOn).is_ok());
+    assert!(ResourceTarget::try_from(PeResource::LocalOn).is_ok());
     // A manufacturer Resource is either, as its entry says.
-    assert!(ResourceTarget::new(custom("X-A")).is_ok());
+    assert!(ResourceTarget::try_from(custom("X-A")).is_ok());
     assert!(ResourceTarget::entry(custom("X-A"), id("one")).is_ok());
 }
 
@@ -934,7 +934,7 @@ fn only_a_list_resource_is_asked_for_a_page() {
         offset: 0,
         limit: NonZeroU32::new(5).unwrap(),
     };
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     assert!(matches!(
         ResourceGet::new(target)
             .paged(page)
@@ -958,10 +958,11 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
     let now = Instant::now();
     let (mut init, _) =
         ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
-    let paged = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap()).paged(PePage {
-        offset: 0,
-        limit: NonZeroU32::new(5).unwrap(),
-    });
+    let paged =
+        ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap()).paged(PePage {
+            offset: 0,
+            limit: NonZeroU32::new(5).unwrap(),
+        });
     assert!(matches!(
         init.get(&paged, now),
         Err(CallError::Refused(RequestRefused::NotPaginable(_)))
@@ -975,7 +976,7 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
 // M2-103 §10: a Set carries the data of the Resource it is for.
 #[test]
 fn a_set_carries_data_of_its_resource() {
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     assert!(ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(true))).is_ok());
     assert!(matches!(
         ResourceSet::full(target, PeData::ExternalSync(PeExternalSync(true))),
@@ -996,7 +997,7 @@ fn a_get_is_checked_against_its_entry() {
         offset: 0,
         limit: NonZeroU32::new(2).unwrap(),
     };
-    let channels = ResourceGet::new(ResourceTarget::new(PeResource::ChannelList).unwrap());
+    let channels = ResourceGet::new(ResourceTarget::try_from(PeResource::ChannelList).unwrap());
     let entry = entry_of(PeResource::ChannelList);
     assert_eq!(channels.check_get(&entry), Ok(()));
     assert!(matches!(
@@ -1036,7 +1037,7 @@ fn a_get_is_checked_against_its_entry() {
         Ok(())
     );
     assert!(matches!(
-        ResourceGet::new(ResourceTarget::new(custom("X-A")).unwrap()).check_get(
+        ResourceGet::new(ResourceTarget::try_from(custom("X-A")).unwrap()).check_get(
             &ResourceEntry::builder(custom("X-A"))
                 .schema(json(r#"{"title":"A"}"#))
                 .require_res_id(true)
@@ -1052,7 +1053,7 @@ fn a_get_is_checked_against_its_entry() {
 /// Spec: m2-103/10#3, m2-103/10#9
 #[test]
 fn a_set_is_checked_against_its_entry() {
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     let full = ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(true))).unwrap();
     let partial = ResourceSet::partial(target, PartialUpdate::new());
     let local_on = entry_of(PeResource::LocalOn);
@@ -1065,7 +1066,7 @@ fn a_set_is_checked_against_its_entry() {
         })
     ));
     let read_only = ResourceSet::full(
-        ResourceTarget::new(PeResource::ChannelMode).unwrap(),
+        ResourceTarget::try_from(PeResource::ChannelMode).unwrap(),
         PeData::ChannelMode(PeChannelMode(PeMidiMode::OmniOffPoly)),
     )
     .unwrap();
@@ -1083,7 +1084,7 @@ fn a_set_is_checked_against_its_entry() {
         .build()
         .unwrap();
     assert_eq!(
-        ResourceSet::partial(ResourceTarget::new(x).unwrap(), PartialUpdate::new())
+        ResourceSet::partial(ResourceTarget::try_from(x).unwrap(), PartialUpdate::new())
             .check(&editable),
         Ok(())
     );
@@ -1092,7 +1093,7 @@ fn a_set_is_checked_against_its_entry() {
 // M2-103 §11, §14.2: a Subscription needs `canSubscribe`.
 #[test]
 fn a_subscription_needs_can_subscribe() {
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::ChannelList).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::ChannelList).unwrap());
     let entry = entry_of(PeResource::ChannelList);
     assert!(matches!(
         get.check_subscribe(&entry),

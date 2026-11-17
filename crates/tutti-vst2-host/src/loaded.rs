@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginError};
 
-use vst::host::{PluginInstance, PluginLoader};
+use vst::host::{PluginInstance, PluginLoadError, PluginLoader};
 use vst::plugin::Category;
 
 use tutti_plugin_types::{PluginDescriptor, PluginVersion};
@@ -357,20 +357,25 @@ impl Vst2Loaded {
             chosen.unwrap_or(0),
         ));
 
-        let mut loader = PluginLoader::load(&resolved, Arc::clone(&host)).map_err(|e| {
-            Vst2Error::LoadFailed {
+        let midi_out_dropped = host.dropped_midi_out().clone();
+        let mut loader = PluginLoader::load(&resolved, Arc::clone(&host)).map_err(|source| {
+            let stage = match source {
+                PluginLoadError::OpenLibrary { .. } => LoadStage::Opening,
+                _ => LoadStage::Factory,
+            };
+            Vst2Error::Loader {
                 path: path.to_path_buf(),
-                stage: LoadStage::Factory,
-                reason: format!("PluginLoader::load failed: {:?}", e),
+                stage,
+                source,
             }
         })?;
 
         let mut instance = loader
             .instance(main, work)
-            .map_err(|e| Vst2Error::LoadFailed {
+            .map_err(|source| Vst2Error::Loader {
                 path: path.to_path_buf(),
                 stage: LoadStage::Instantiation,
-                reason: format!("loader.instance failed: {:?}", e),
+                source,
             })?;
 
         instance.init(main);
@@ -479,7 +484,7 @@ impl Vst2Loaded {
             param_rx: param_q,
             audio: Some(AudioSide {
                 time_info,
-                midi: MidiIo::new(midi_out_q),
+                midi: MidiIo::new(midi_out_q, &midi_out_dropped),
             }),
             metadata,
             descriptor,
