@@ -13,7 +13,7 @@ use crate::{Address, CCNumber, Lane, MidiChannel, MidiGroup, NoteNumber, Protoco
 /// [`is_panic_controller`](Self::is_panic_controller),
 /// [`key_event`](Self::key_event), [`note_off`](Self::note_off),
 /// [`sustain_up`](Self::sustain_up)) are the packet-level bit reads that
-/// consumers without a decoded [`Message`] need; each agrees with
+/// consumers without a decoded `Message` need; each agrees with
 /// [`decode`](Self::decode) and `From<Message> for Ump` on every packet.
 ///
 /// `Pod`, so a block of packets crosses a process boundary as one copy.
