@@ -23,6 +23,7 @@ use symphonia::core::packet::Packet;
 
 use super::error::convert;
 use super::placement::topology_of;
+use super::riff_guard;
 use crate::DecodeError;
 use crate::Wave;
 use tutti_types::{ChannelTopology, Placement};
@@ -153,7 +154,11 @@ pub(super) fn probe_path(path: &Path) -> Result<Box<dyn FormatReader>, Error> {
     probe_source(source, &hint)
 }
 
-fn probe_source(source: Box<dyn MediaSource>, hint: &Hint) -> Result<Box<dyn FormatReader>, Error> {
+fn probe_source(
+    mut source: Box<dyn MediaSource>,
+    hint: &Hint,
+) -> Result<Box<dyn FormatReader>, Error> {
+    riff_guard::check(&mut *source)?;
     let stream = MediaSourceStream::new(source, Default::default());
     symphonia::default::get_probe().probe(
         hint,
