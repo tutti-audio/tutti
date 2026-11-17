@@ -1,7 +1,7 @@
 //! The writer: the reader's inverse, a fold of pure functions.
 //!
 //! [`measure`] is the arithmetic of what an SMF's length fields hold, run when
-//! a file is built; [`write`] is then infallible. An event is a pure function
+//! a file is built; [`write()`] is then infallible. An event is a pure function
 //! to its bytes ([`encode`]); a track body is a fold of events over the
 //! running status ([`body`]), which elides a channel status byte equal to the
 //! one before it (SMF 1.0 section 3: running status; sysex and meta cancel

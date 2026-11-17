@@ -84,18 +84,20 @@ impl Lyrics {
         self,
     ) -> impl Iterator<Item = (usize, Result<Vec<FileEvent>, DropReason>, Vec<LyricChange>)> {
         self.events.into_iter().map(|(index, syllables, changes)| {
-            let events = syllables.and_then(|syllables| {
-                let mut events = Vec::new();
-                for Piece { body, end } in syllables {
-                    let packets = flex_lyric_packets(
-                        MidiGroup::FIRST,
-                        FlexAddress::Group,
-                        LyricKind::Lyrics,
-                        &Syllable { body, end },
-                    );
-                    events.extend(packets.map(event));
-                }
-                Ok(events)
+            let events = syllables.map(|syllables| {
+                syllables
+                    .into_iter()
+                    .flat_map(|Piece { body, end }| {
+                        flex_lyric_packets(
+                            MidiGroup::FIRST,
+                            FlexAddress::Group,
+                            LyricKind::Lyrics,
+                            &Syllable { body, end },
+                        )
+                        .map(event)
+                        .collect::<Vec<_>>()
+                    })
+                    .collect()
             });
             (index, events, changes)
         })
