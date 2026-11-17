@@ -1,77 +1,56 @@
 //! The plugin scanner, with crash recovery.
 //!
 //! A scan works on a snapshot of the database: a worker discovers plugin files,
-//! probes the new or changed ones and sends a [`Delta`] per file. The owner of
+//! probes the new or changed ones and sends a [`RowChange`] per file. The owner of
 //! the [`PluginDb`] applies them as they arrive ([`Scan::poll`]), so the database
 //! stays readable for the whole scan. An internal dead-man's pedal
 //! auto-blacklists a plugin that takes the host down while it is probed.
 
 use super::facts::{self, FileFacts, ScanDecision};
-use super::format::{PluginClass, PluginDescriptor, PluginFormat};
 use super::fs::{canonical_path, discover};
 use super::pedal::Pedal;
-use super::table::{Delta, FileRow, PluginDb};
-use crossbeam_channel::{Receiver, Sender, TryRecvError};
+use super::table::{FileRow, PluginDb, RowChange};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use tutti_rt::LockExt;
+use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat};
+use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
-/// Progress information emitted during a scan.
-#[derive(Debug, Clone)]
-pub struct ScanProgress {
-    /// How many plugins have been processed so far.
-    pub current: usize,
-    /// How many were discovered in total. Zero during
-    /// [`Discovery`](ScanPhase::Discovery), when the count is not yet known.
-    pub total: usize,
-    /// The plugin being processed as this was emitted.
-    pub current_path: PathBuf,
-    /// Which phase the scan is in.
-    pub phase: ScanPhase,
-}
+/// How many progress updates wait for the owner before the scan drops the
+/// next one.
+const PROGRESS_CAPACITY: usize = 256;
 
-/// Which phase the scanner is currently in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScanPhase {
-    /// Finding plugin files on disk.
-    Discovery,
-    /// Loading and validating individual plugins.
-    Scanning,
-    /// Scan is finished.
-    Complete,
-}
-
-/// A request to stop, which a probe in flight watches.
+/// Where a scan stands, as it advances.
 ///
-/// A [`Scan`] holds one and raises it when it drops; the probe it runs checks it
-/// while it waits and, once raised, kills its child process and returns. Clones
-/// share the request.
-#[derive(Debug, Clone, Default)]
-pub struct Cancel(Arc<AtomicBool>);
-
-impl Cancel {
-    /// A request that is not raised.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Raises the request.
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-
-    /// Whether the request is raised.
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
+/// Advisory: the owner reads it with [`Scan::progress`], and an update the owner
+/// had not read when the queue was full is dropped, the next one superseding it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanProgress {
+    /// Finding plugin files in a directory. Only a scan of directories reports
+    /// it, once per directory, before the walk.
+    Discovering {
+        /// The directory about to be walked.
+        directory: PathBuf,
+    },
+    /// Probing one plugin file.
+    Probing {
+        /// The file's place in the scan, counting from one.
+        current: usize,
+        /// How many files the scan looks at.
+        total: usize,
+        /// The file being probed.
+        path: PathBuf,
+    },
+    /// Every file has been looked at.
+    Complete {
+        /// How many files the scan looked at.
+        total: usize,
+    },
 }
 
 /// What a scanner calls to read one plugin file's metadata.
-type ProbeFn = dyn Fn(&Path, PluginFormat, &Cancel) -> Result<Vec<PluginDescriptor>, ProbeFailure>
+type ProbeFn = dyn Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
     + Send
     + Sync;
 
@@ -81,8 +60,7 @@ type ProbeFn = dyn Fn(&Path, PluginFormat, &Cancel) -> Result<Vec<PluginDescript
 /// out-of-process one); unchanged ones (same modification time) are skipped. A
 /// plugin that fails to load, hangs or crashes its probe is blacklisted with the
 /// reason, and a sentinel file (the "dead-man's pedal") blacklists the plugin a
-/// crashed scan was probing on the next run. `tutti_plugin::catalog::Catalog`
-/// drives a scanner for most hosts.
+/// crashed scan was probing on the next run.
 ///
 /// A scanner holds no database. Every scan takes the database it reads from and
 /// writes to, so one scanner serves any number of them.
@@ -108,12 +86,12 @@ impl Scanner {
     ///
     /// `probe` reads one plugin file's metadata. It runs out of process where
     /// it loads the plugin, so a crash or a hang cannot take the scan down. It
-    /// watches the [`Cancel`] it is given and, once it is raised, ends the
-    /// process it is waiting on and returns at once: a dropped [`Scan`] waits for
-    /// the probe in flight to return.
+    /// watches the [`StopToken`] it is given and, once a stop is requested, ends
+    /// the process it is waiting on and returns at once: a dropped [`Scan`] waits
+    /// for the probe in flight to return.
     pub fn new(
         pedal_path: impl Into<PathBuf>,
-        probe: impl Fn(&Path, PluginFormat, &Cancel) -> Result<Vec<PluginDescriptor>, ProbeFailure>
+        probe: impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
         + Send
         + Sync
         + 'static,
@@ -163,59 +141,49 @@ impl Scanner {
     ///
     /// Runs crash recovery on the calling thread first (see
     /// [`recover_crash`](Self::recover_crash)), then hands the worker a snapshot
-    /// of `db`. The worker's findings come back as deltas: call
+    /// of `db`. The worker's findings come back as changes: call
     /// [`Scan::poll`] with the database to apply them. Until it does, `db` is
     /// unchanged and fully usable.
     ///
-    /// Spawns a thread and hands back channels, in the shape of
-    /// [`std::process::Command::spawn`]: this is not an `async fn` and returns
-    /// no future. See [`scan`](Self::scan) for the blocking form. Dropping the
-    /// [`Scan`] raises the worker's [`Cancel`], which ends the probe in flight,
-    /// and waits for the worker, so the next scan can start as soon as the drop
-    /// returns.
+    /// Dropping the [`Scan`] requests the worker's stop, which ends the probe in
+    /// flight, and waits for the worker, so the next scan can start as soon as
+    /// the drop returns.
     ///
     /// # Errors
     ///
-    /// [`ScanBusy`] while another scan or a recovery is using the same pedal,
-    /// whether from this scanner, a clone of it, or any scanner built on that
-    /// pedal path. The claim ends when the worker thread exits, which a dropped
-    /// [`Scan`] waits for, so a second scan cannot delete the armed sentinel of
-    /// a probe still in flight.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the OS refuses to spawn the scanner thread.
+    /// [`ScanError::Busy`] while another scan or a recovery is using the same
+    /// pedal, whether from this scanner, a clone of it, or any scanner built on
+    /// that pedal path. The claim ends when the worker thread exits, which a
+    /// dropped [`Scan`] waits for, so a second scan cannot delete the armed
+    /// sentinel of a probe still in flight. [`ScanError::Spawn`] when the OS
+    /// refuses the worker thread.
     pub fn spawn(
         &self,
         db: &mut PluginDb,
         directories: impl IntoIterator<Item = impl AsRef<Path>>,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
-    ) -> Result<Scan, ScanBusy> {
+    ) -> Result<Scan, ScanError> {
         let targets = Targets::Directories(
             directories
                 .into_iter()
                 .map(|d| d.as_ref().to_path_buf())
                 .collect(),
         );
-        Ok(Self::start(self.job(db, targets, save)?))
+        Self::start(self.job(db, targets, save)?)
     }
 
     /// Probes the given plugin files on a background thread, returning
-    /// immediately, whether or not a row for them is up to date: the delta of
+    /// immediately, whether or not a row for them is up to date: the change of
     /// each replaces its file's row. Each file comes with the format the caller
     /// knows it as. The probe reads each file as that format, whatever its
     /// extension (a link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by
     /// the file's canonical path, as a scan keys it. In every other respect as
-    /// [`spawn`](Self::spawn): the same pedal, claim, deltas and drop.
+    /// [`spawn`](Self::spawn): the same pedal, claim, changes and drop.
     ///
     /// # Errors
     ///
     /// [`FilesError::Missing`] for a path that is not a file, before anything
-    /// starts; [`FilesError::Busy`] as for [`spawn`](Self::spawn).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the OS refuses to spawn the scanner thread.
+    /// starts; [`FilesError::Scan`] as for [`spawn`](Self::spawn).
     pub fn spawn_files(
         &self,
         db: &mut PluginDb,
@@ -230,62 +198,29 @@ impl Scanner {
             }
             targets.push((file.to_path_buf(), format));
         }
-        Ok(Self::start(self.job(db, Targets::Files(targets), save)?))
+        Ok(Self::start(self.job(db, Targets::Files(targets), save)?)?)
     }
 
-    fn start(job: Job) -> Scan {
-        let cancel = job.cancel.clone();
-        let (progress_tx, progress_rx) = crossbeam_channel::unbounded();
+    fn start(job: Job) -> Result<Scan, ScanError> {
+        let (progress_tx, progress_rx) = crossbeam_channel::bounded(PROGRESS_CAPACITY);
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        let worker = tutti_rt::spawn_named("plugin-scanner", None, move |_| {
-            let result = job.run(Some(&progress_tx), |delta| {
-                tx.send(Message::Delta(delta)).is_ok()
+        let worker = tutti_rt::spawn_named("plugin-scanner", None, move |stop| {
+            let result = job.run(stop, &progress_tx, |change| {
+                tx.send(Message::Change(change)).is_ok()
             });
             // Release the pedal before announcing the end, so a caller that
             // sees `Done` can start the next scan.
             drop(job);
             let _ = tx.send(Message::Done(result));
         })
-        .expect("failed to spawn plugin scanner thread");
+        .map_err(ScanError::Spawn)?;
 
-        Scan {
+        Ok(Scan {
             progress_rx,
             rx,
-            cancel,
-            worker: Some(worker),
-        }
-    }
-
-    /// Scans directories on the calling thread into `db`, blocking until done.
-    ///
-    /// Runs crash recovery first. A probe may spawn a subprocess, so a large
-    /// plugin folder can take minutes the first time; see
-    /// [`spawn`](Self::spawn) for the background form.
-    ///
-    /// `directories` can be `&[PathBuf]`, an array of `&str`, or any iterator
-    /// of paths.
-    ///
-    /// # Errors
-    ///
-    /// [`ScanBusy`], as for [`spawn`](Self::spawn).
-    pub fn scan(
-        &self,
-        db: &mut PluginDb,
-        directories: impl IntoIterator<Item = impl AsRef<Path>>,
-        save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
-    ) -> Result<ScanResult, ScanBusy> {
-        let targets = Targets::Directories(
-            directories
-                .into_iter()
-                .map(|d| d.as_ref().to_path_buf())
-                .collect(),
-        );
-        let job = self.job(db, targets, save)?;
-        Ok(job.run(None, |delta| {
-            db.apply(delta);
-            true
-        }))
+            _worker: worker,
+        })
     }
 
     fn job(
@@ -293,12 +228,11 @@ impl Scanner {
         db: &mut PluginDb,
         targets: Targets,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
-    ) -> Result<Job, ScanBusy> {
+    ) -> Result<Job, ScanError> {
         let claim = Claim::take(&self.pedal)?;
         self.pedal.recover(db, save);
         Ok(Job {
             _claim: claim,
-            cancel: Cancel::new(),
             snapshot: db.clone(),
             targets,
             pedal: self.pedal.clone(),
@@ -341,13 +275,24 @@ impl Drop for Claim {
 #[error("a plugin scan is already running on this pedal")]
 pub struct ScanBusy;
 
-/// Why a task over named files did not start ([`Scanner::spawn_files`], and the
-/// catalog's `register` and `measure` over it).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum FilesError {
+/// Why a scan did not start ([`Scanner::spawn`]).
+#[derive(Debug, thiserror::Error)]
+pub enum ScanError {
     /// A scan or a crash recovery is already using the pedal.
     #[error(transparent)]
     Busy(#[from] ScanBusy),
+    /// The OS refused the worker thread.
+    #[error("could not start the plugin scanner thread")]
+    Spawn(#[source] std::io::Error),
+}
+
+/// Why a task over named files did not start ([`Scanner::spawn_files`], and the
+/// catalog's `register` and `measure` over it).
+#[derive(Debug, thiserror::Error)]
+pub enum FilesError {
+    /// The scan the task is did not start.
+    #[error(transparent)]
+    Scan(#[from] ScanError),
     /// A path is not a file that exists.
     #[error("no plugin file at {0}")]
     Missing(PathBuf),
@@ -360,9 +305,9 @@ pub enum FilesError {
 
 /// The one task type of discovery: a worker probing files, in flight. A scan of
 /// directories ([`Scanner::spawn`]), a registration and a measurement (both
-/// [`Scanner::spawn_files`]) each probe files and send a [`Delta`] per file.
+/// [`Scanner::spawn_files`]) each probe files and send a [`RowChange`] per file.
 ///
-/// Dropping it cancels the work ([`Cancel`]).
+/// Dropping it stops the work and waits for the worker.
 ///
 /// The worker owns a snapshot of the database; this is the other end. It holds
 /// no database, so the owner reads its own throughout and applies what arrives
@@ -370,60 +315,41 @@ pub enum FilesError {
 #[derive(Debug)]
 #[must_use]
 pub struct Scan {
-    /// Per-plugin progress, emitted as the scan advances. Only a scan of
-    /// directories emits [`ScanPhase::Discovery`] (one per directory, before the
-    /// walk); a task over named files emits [`ScanPhase::Scanning`] and
-    /// [`ScanPhase::Complete`] only.
-    pub progress_rx: Receiver<ScanProgress>,
+    progress_rx: Receiver<ScanProgress>,
     rx: Receiver<Message>,
-    cancel: Cancel,
-    worker: Option<tutti_rt::ThreadHandle<()>>,
-}
-
-impl Drop for Scan {
-    /// Cancels the probe in flight, which kills its child process, and waits for
-    /// the worker to exit, so the pedal is released when the drop returns. The
-    /// wait is the probe's reaction to the cancel, not its handshake deadline.
-    fn drop(&mut self) {
-        self.cancel.cancel();
-        if let Some(worker) = self.worker.take() {
-            // A worker that panicked is reported by `poll` as `Died`; its
-            // claim is released by unwinding.
-            let _ = worker.join();
-        }
-    }
+    _worker: ThreadHandle<()>,
 }
 
 /// What the worker sends the owner.
 #[derive(Debug)]
 enum Message {
-    Delta(Delta),
+    Change(RowChange),
     Done(ScanResult),
 }
 
 /// Where a scan stands after [`Scan::poll`].
 #[derive(Debug)]
 pub enum ScanPoll {
-    /// The worker is still going; every delta sent so far has been applied.
+    /// The worker is still going; every change sent so far has been applied.
     Running,
-    /// The worker finished and every delta has been applied. Drop the [`Scan`];
+    /// The worker finished and every change has been applied. Drop the [`Scan`];
     /// polling it again reports [`Died`](Self::Died).
     Done(ScanResult),
-    /// The worker thread ended without finishing, so a probe panicked. Deltas
+    /// The worker thread ended without finishing, so a probe panicked. Changes
     /// sent before that have been applied.
     Died,
 }
 
 impl Scan {
-    /// Applies every delta the worker has sent to `db` and reports where the
+    /// Applies every change the worker has sent to `db` and reports where the
     /// scan stands. Never blocks.
     ///
     /// This and [`wait`](Self::wait) are the only places a scan changes a
-    /// database, and each delta goes through [`PluginDb::apply`].
+    /// database, and each change goes through [`PluginDb::apply`].
     pub fn poll(&self, db: &mut PluginDb) -> ScanPoll {
         loop {
             match self.rx.try_recv() {
-                Ok(Message::Delta(delta)) => db.apply(delta),
+                Ok(Message::Change(change)) => db.apply(change),
                 Ok(Message::Done(result)) => return ScanPoll::Done(result),
                 Err(TryRecvError::Empty) => return ScanPoll::Running,
                 Err(TryRecvError::Disconnected) => return ScanPoll::Died,
@@ -431,12 +357,23 @@ impl Scan {
         }
     }
 
-    /// Blocks until the scan ends, applying deltas to `db` as they arrive.
+    /// The progress updates the scan has made since the last call, oldest
+    /// first. Never blocks. An update made while the queue was full was dropped.
+    pub fn progress(&self) -> impl Iterator<Item = ScanProgress> + '_ {
+        self.progress_rx.try_iter()
+    }
+
+    /// Blocks until the scan ends, applying changes to `db` as they arrive.
     /// Returns `None` if the worker died without finishing.
     pub fn wait(self, db: &mut PluginDb) -> Option<ScanResult> {
+        self.drain(db)
+    }
+
+    /// [`wait`](Self::wait) without consuming the scan.
+    fn drain(&self, db: &mut PluginDb) -> Option<ScanResult> {
         while let Ok(message) = self.rx.recv() {
             match message {
-                Message::Delta(delta) => db.apply(delta),
+                Message::Change(change) => db.apply(change),
                 Message::Done(result) => return Some(result),
             }
         }
@@ -456,7 +393,6 @@ enum Targets {
 /// One scan's inputs, moved onto its worker.
 struct Job {
     _claim: Claim,
-    cancel: Cancel,
     snapshot: PluginDb,
     targets: Targets,
     pedal: Pedal,
@@ -464,27 +400,24 @@ struct Job {
 }
 
 impl Job {
-    /// Walks, classifies (pure), then probes (effectful), passing each delta to
+    /// Walks, classifies (pure), then probes (effectful), passing each change to
     /// `sink`. A sink that returns `false` stops the scan.
     fn run(
         &self,
-        progress_tx: Option<&Sender<ScanProgress>>,
-        mut sink: impl FnMut(Delta) -> bool,
+        stop: &StopToken,
+        progress_tx: &Sender<ScanProgress>,
+        mut sink: impl FnMut(RowChange) -> bool,
     ) -> ScanResult {
-        let emit = |p: ScanProgress| {
-            if let Some(tx) = progress_tx {
-                let _ = tx.send(p);
-            }
+        // Progress is advisory: an update the owner has no room for is dropped.
+        let emit = |p: ScanProgress| match progress_tx.try_send(p) {
+            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
         };
 
         let (plugin_paths, force) = match &self.targets {
             Targets::Directories(directories) => {
                 for dir in directories {
-                    emit(ScanProgress {
-                        current: 0,
-                        total: 0,
-                        current_path: dir.clone(),
-                        phase: ScanPhase::Discovery,
+                    emit(ScanProgress::Discovering {
+                        directory: dir.clone(),
                     });
                 }
                 let found = discover(directories);
@@ -502,14 +435,13 @@ impl Job {
 
         let mut result = ScanResult::with_total(total);
         for (i, (path, format)) in plugin_paths.iter().enumerate() {
-            if self.cancel.is_cancelled() {
+            if stop.is_stopped() {
                 return result;
             }
-            emit(ScanProgress {
+            emit(ScanProgress::Probing {
                 current: i + 1,
                 total,
-                current_path: path.clone(),
-                phase: ScanPhase::Scanning,
+                path: path.clone(),
             });
             // A named file is probed as named (a link keeps the extension that
             // names its format) and recorded under its canonical path.
@@ -524,7 +456,7 @@ impl Job {
             } else {
                 facts::classify(self.snapshot.row(&key), &facts)
             };
-            let (outcome, delta, failure) = match decision {
+            let (outcome, change, failure) = match decision {
                 ScanDecision::Blacklisted => {
                     debug!("skipping blacklisted plugin: {:?}", path);
                     (ScanOutcome::Blacklisted, None, None)
@@ -533,7 +465,7 @@ impl Job {
                     debug!("skipping up-to-date plugin: {:?}", path);
                     (ScanOutcome::UpToDate, None, None)
                 }
-                ScanDecision::Probe => self.probe_one(path, &key, *format, &facts),
+                ScanDecision::Probe => self.probe_one(stop, path, &key, *format, &facts),
             };
             result = result.tally(outcome);
             if let Some(failure) = failure {
@@ -542,19 +474,14 @@ impl Job {
                     failure,
                 });
             }
-            if let Some(delta) = delta
-                && !sink(delta)
+            if let Some(change) = change
+                && !sink(change)
             {
                 return result;
             }
         }
 
-        emit(ScanProgress {
-            current: total,
-            total,
-            current_path: PathBuf::new(),
-            phase: ScanPhase::Complete,
-        });
+        emit(ScanProgress::Complete { total });
 
         info!(
             "scan complete: {} scanned, {} new, {} failed, {} blacklisted",
@@ -578,31 +505,32 @@ impl Job {
     /// re-admits it without the user knowing the blacklist existed.
     fn probe_one(
         &self,
+        stop: &StopToken,
         path: &Path,
         key: &Path,
         format: PluginFormat,
         facts: &FileFacts,
-    ) -> (ScanOutcome, Option<Delta>, Option<ProbeFailure>) {
+    ) -> (ScanOutcome, Option<RowChange>, Option<ProbeFailure>) {
         if let Err(e) = self.pedal.arm(path) {
             warn!("failed to arm dead-man's pedal: {e}");
         }
-        let probed = (self.probe)(path, format, &self.cancel);
+        let probed = (self.probe)(path, format, stop);
         self.pedal.disarm(path);
-        // A probe a cancel ended says nothing about the plugin.
-        if self.cancel.is_cancelled() {
+        // A probe a stop ended says nothing about the plugin.
+        if stop.is_stopped() {
             return (ScanOutcome::Failed, None, None);
         }
         match probed {
             Ok(plugins) => (
                 ScanOutcome::New,
-                Some(Delta::put(key, FileRow::probed(format, facts, plugins))),
+                Some(RowChange::put(key, FileRow::probed(format, facts, plugins))),
                 None,
             ),
             Err(failure) if failure.blacklistable() => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason);
                 (
                     ScanOutcome::NewlyBlacklisted,
-                    Some(Delta::put(
+                    Some(RowChange::put(
                         key,
                         FileRow::blacklisted(failure.reason.clone(), facts),
                     )),
@@ -782,9 +710,24 @@ mod tests {
     fn filename_probe(
         path: &Path,
         format: PluginFormat,
-        _: &Cancel,
+        _: &StopToken,
     ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
         Ok(vec![probe_plugin_fallback(path, format)])
+    }
+
+    /// A generous bound on how long a test waits for an event it knows is
+    /// coming; it guards a hang and never measures speed.
+    const HANG_GUARD: Duration = Duration::from_secs(30);
+
+    /// Scans `dirs` on the worker and waits for it, applying its changes to `db`.
+    fn scan_dirs(
+        scanner: &Scanner,
+        db: &mut PluginDb,
+        dirs: impl IntoIterator<Item = impl AsRef<Path>>,
+        save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
+    ) -> Result<ScanResult, ScanError> {
+        let scan = scanner.spawn(db, dirs, save)?;
+        Ok(scan.wait(db).expect("the worker finishes"))
     }
 
     fn no_save(_: &PluginDb) -> std::io::Result<()> {
@@ -834,9 +777,7 @@ mod tests {
         create_fake_plugin(&plugins_dir, "comp.clap");
 
         let mut db = PluginDb::new();
-        let result = scanner_for(dir.path())
-            .scan(&mut db, &[plugins_dir], no_save)
-            .unwrap();
+        let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
         assert_eq!(result.scanned, 2);
         assert_eq!(result.new + result.failed, 2);
         assert_eq!(db.len(), 2);
@@ -860,15 +801,28 @@ mod tests {
 
         let owned: Vec<PathBuf> = vec![plugins_dir.clone()];
         let mut db = PluginDb::new();
-        assert_eq!(scanner.scan(&mut db, &owned, no_save).unwrap().scanned, 1);
+        assert_eq!(
+            scan_dirs(&scanner, &mut db, &owned, no_save)
+                .unwrap()
+                .scanned,
+            1
+        );
 
         let as_str = plugins_dir.to_str().unwrap();
         let mut db = PluginDb::new();
-        assert_eq!(scanner.scan(&mut db, [as_str], no_save).unwrap().scanned, 1);
+        assert_eq!(
+            scan_dirs(&scanner, &mut db, [as_str], no_save)
+                .unwrap()
+                .scanned,
+            1
+        );
 
         let mut db = PluginDb::new();
         let lazy = owned.iter().filter(|p| p.exists());
-        assert_eq!(scanner.scan(&mut db, lazy, no_save).unwrap().scanned, 1);
+        assert_eq!(
+            scan_dirs(&scanner, &mut db, lazy, no_save).unwrap().scanned,
+            1
+        );
     }
 
     /// An already-blacklisted plugin is skipped without being probed, and is
@@ -885,9 +839,7 @@ mod tests {
         let mut db = PluginDb::new();
         db.blacklist(&bad, "known crasher".into(), &FileFacts::read(&bad));
 
-        let result = scanner_for(dir.path())
-            .scan(&mut db, &[plugins_dir], no_save)
-            .unwrap();
+        let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
         assert_eq!(result.scanned, 2);
         assert_eq!(
@@ -936,12 +888,10 @@ mod tests {
         let same = create_fake_plugin(&plugins_dir, "same.vst3");
         let changed = create_fake_plugin(&plugins_dir, "changed.vst3");
         let mut db = PluginDb::new();
-        db.apply(Delta::put(&same, measured_row(&same, None)));
-        db.apply(Delta::put(&changed, measured_row(&changed, Some(1))));
+        db.apply(RowChange::put(&same, measured_row(&same, None)));
+        db.apply(RowChange::put(&changed, measured_row(&changed, Some(1))));
 
-        scanner_for(dir.path())
-            .scan(&mut db, &[plugins_dir], no_save)
-            .unwrap();
+        scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
         let measured = |path: &Path| db.row(path).unwrap().plugins()[0].measured.is_some();
         assert!(measured(&same), "an unchanged file keeps its measurement");
@@ -958,7 +908,7 @@ mod tests {
         let plugin = create_fake_plugin(&plugins_dir, "cached.vst3");
 
         let mut db = PluginDb::new();
-        db.apply(Delta::put(
+        db.apply(RowChange::put(
             &plugin,
             FileRow::probed(
                 PluginFormat::Vst3,
@@ -971,9 +921,7 @@ mod tests {
             ),
         ));
 
-        let result = scanner_for(dir.path())
-            .scan(&mut db, &[plugins_dir], no_save)
-            .unwrap();
+        let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
         assert_eq!(result.scanned, 1);
         assert_eq!(result.new, 0);
@@ -993,8 +941,10 @@ mod tests {
         assert!(!pedal_file.exists());
     }
 
+    /// A scan of directories reports each directory it walks, each file it
+    /// probes in order with the count, and its end.
     #[test]
-    fn spawned_scan_with_progress() {
+    fn a_scan_reports_discovery_each_probe_and_the_end_as_progress() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.vst3");
@@ -1002,32 +952,54 @@ mod tests {
 
         let mut db = PluginDb::new();
         let scan = scanner_for(dir.path())
-            .spawn(&mut db, &[plugins_dir], no_save)
+            .spawn(&mut db, [&plugins_dir], no_save)
             .unwrap();
-
-        let mut saw_discovery = false;
-        let mut saw_scanning = false;
-        let mut saw_complete = false;
-        while let Ok(p) = scan.progress_rx.recv_timeout(Duration::from_secs(30)) {
-            match p.phase {
-                ScanPhase::Discovery => saw_discovery = true,
-                ScanPhase::Scanning => saw_scanning = true,
-                ScanPhase::Complete => {
-                    saw_complete = true;
-                    break;
-                }
-            }
-        }
-        assert!(saw_discovery);
-        assert!(saw_scanning);
-        assert!(saw_complete);
-
-        let result = scan.wait(&mut db).expect("the worker finishes");
+        let result = scan.drain(&mut db).expect("the worker finishes");
         assert_eq!(result.new + result.failed, 2);
+
+        let updates: Vec<_> = scan.progress().collect();
+        assert_eq!(updates.len(), 4, "{updates:?}");
+        assert_eq!(
+            updates[0],
+            ScanProgress::Discovering {
+                directory: plugins_dir
+            }
+        );
+        let probing: Vec<_> = updates[1..3]
+            .iter()
+            .map(|u| match u {
+                ScanProgress::Probing { current, total, .. } => (*current, *total),
+                other => panic!("expected a probe, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(probing, [(1, 2), (2, 2)]);
+        assert_eq!(updates[3], ScanProgress::Complete { total: 2 });
+    }
+
+    /// Progress nobody reads is dropped once the queue is full, and the scan
+    /// still finishes with every file recorded.
+    #[test]
+    fn an_unread_progress_queue_drops_updates_and_the_scan_still_finishes() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let files = PROGRESS_CAPACITY + 10;
+        for i in 0..files {
+            create_fake_plugin(&plugins_dir, &format!("p{i}.clap"));
+        }
+
+        let mut db = PluginDb::new();
+        let scan = scanner_for(dir.path())
+            .spawn(&mut db, [&plugins_dir], no_save)
+            .unwrap();
+        let result = scan.drain(&mut db).expect("the worker finishes");
+
+        assert_eq!(result.new, files);
+        assert_eq!(db.len(), files);
+        assert_eq!(scan.progress().count(), PROGRESS_CAPACITY);
     }
 
     /// A spawned scan's findings reach the database through `wait`: the worker
-    /// holds only a snapshot, so a scan whose deltas were never applied would
+    /// holds only a snapshot, so a scan whose changes were never applied would
     /// leave the caller with nothing.
     #[test]
     fn a_spawned_scan_applies_its_findings_to_the_db() {
@@ -1087,7 +1059,7 @@ mod tests {
         // Simulate a reinstall: the file's mtime moves.
         let mut row = db.row(&bad).unwrap().clone();
         row.mtime = row.mtime.map(|t| t - 1);
-        db.apply(Delta::put(&bad, row));
+        db.apply(RowChange::put(&bad, row));
 
         assert!(db.is_blacklisted(&bad), "flag is still set");
         assert!(
@@ -1184,7 +1156,7 @@ mod tests {
         // And it is not permanent: reinstalling the plugin re-admits it.
         let mut row = db.row(&broken).unwrap().clone();
         row.mtime = row.mtime.map(|t| t - 1);
-        db.apply(Delta::put(&broken, row));
+        db.apply(RowChange::put(&broken, row));
         assert!(
             matches!(
                 facts::classify(db.row(&broken), &FileFacts::read(&broken)),
@@ -1213,7 +1185,7 @@ mod tests {
         let (scanner, _) = counting_scanner(dir.path(), two_plugins);
         let mut db = PluginDb::new();
 
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(db.len(), 1, "one file, one row");
         let ids: Vec<_> = db.plugins().map(|p| p.descriptor.id.clone()).collect();
@@ -1230,8 +1202,8 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let second = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
+        let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(second.scanned, 1);
@@ -1247,11 +1219,11 @@ mod tests {
         set_mtime(&plugin, 1_000_000_000);
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         assert_eq!(db.row(&plugin).unwrap().mtime, Some(1_000_000_000));
 
         set_mtime(&plugin, 1_000_000_007);
-        let second = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(second.new, 1);
@@ -1269,10 +1241,10 @@ mod tests {
         let gone = create_fake_plugin(&plugins_dir, "gone.clap");
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         std::fs::remove_file(&gone).unwrap();
 
-        let second = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(second.scanned, 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2, "only the two first probes");
@@ -1299,17 +1271,17 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), crashes);
         let mut db = PluginDb::new();
 
-        let first = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let first = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         assert_eq!(first.newly_blacklisted, 1);
         assert!(db.is_blacklisted(&plugin));
         assert_eq!(db.plugins().count(), 0);
 
-        let second = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1, "the second scan skips it");
         assert_eq!(second.blacklisted - second.newly_blacklisted, 1);
 
         set_mtime(&plugin, 1_000_000_009);
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2, "a changed file is probed");
     }
 
@@ -1328,8 +1300,8 @@ mod tests {
         });
         let mut db = PluginDb::new();
 
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
+        scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert!(db.row(&plugin).is_none());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -1367,12 +1339,11 @@ mod tests {
         let (next, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
         let mut saved = None;
-        let result = next
-            .scan(&mut db, [&plugins_dir], |db| {
-                saved = Some(db.clone());
-                Ok(())
-            })
-            .unwrap();
+        let result = scan_dirs(&next, &mut db, [&plugins_dir], |db| {
+            saved = Some(db.clone());
+            Ok(())
+        })
+        .unwrap();
 
         let row = saved
             .expect("recovery saved before the scan")
@@ -1389,7 +1360,7 @@ mod tests {
 
     /// The database is usable while a scan runs, and every row a reader sees is
     /// whole. The probe of the second file blocks on a gate the test holds, so
-    /// the scan is parked mid-flight with no sleep: the first file's delta is
+    /// the scan is parked mid-flight with no sleep: the first file's change is
     /// already there to apply, the second file still shows its old row, and the
     /// owner reads and edits throughout. Whatever the order of the two files,
     /// each shows its old row or its new one, never a mixture.
@@ -1410,7 +1381,7 @@ mod tests {
                 ..FileFacts::read(p)
             };
             let stale = vec![PluginDescriptor::new("old", "old", PluginClass::Unknown)];
-            db.apply(Delta::put(
+            db.apply(RowChange::put(
                 p,
                 FileRow::probed(PluginFormat::Clap, &facts, stale),
             ));
@@ -1422,7 +1393,7 @@ mod tests {
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, _| {
             if probes.fetch_add(1, Ordering::SeqCst) == 1 {
                 parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+                release_rx.recv_timeout(HANG_GUARD).unwrap();
             }
             Ok(vec![PluginDescriptor::new(
                 "new",
@@ -1433,7 +1404,7 @@ mod tests {
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
 
         let parked = parked_rx
-            .recv_timeout(Duration::from_secs(30))
+            .recv_timeout(HANG_GUARD)
             .expect("the second probe parks");
         let (first, second) = if parked == a { (&b, &a) } else { (&a, &b) };
 
@@ -1451,35 +1422,22 @@ mod tests {
             matches!((row.mtime, name), (Some(t), "old") if t == old)
                 || matches!((row.mtime, name), (Some(t), "new") if t == new)
         };
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        let mut seen_first_new = false;
-        while !seen_first_new {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the first file's delta never arrived while the scan was parked"
-            );
-            assert!(matches!(scan.poll(&mut db), ScanPoll::Running));
-            assert!(whole(&db, first) && whole(&db, second));
-            seen_first_new = db.row(first).unwrap().mtime == Some(new);
-            std::thread::yield_now();
-        }
+        // The first file's change was sent before the second probe started, so
+        // it is already there to apply.
+        assert!(matches!(scan.poll(&mut db), ScanPoll::Running));
+        assert!(whole(&db, first) && whole(&db, second));
+        assert_eq!(db.row(first).unwrap().mtime, Some(new));
         assert_eq!(db.row(second).unwrap().mtime, Some(old), "still parked");
 
         release_tx.send(()).unwrap();
-        let result = loop {
-            match scan.poll(&mut db) {
-                ScanPoll::Done(result) => break result,
-                ScanPoll::Running => assert!(whole(&db, first) && whole(&db, second)),
-                ScanPoll::Died => panic!("the worker died"),
-            }
-            std::thread::yield_now();
-        };
+        let result = scan.wait(&mut db).expect("the worker finishes");
         assert_eq!(result.new, 2);
+        assert!(whole(&db, first) && whole(&db, second));
         assert_eq!(db.row(second).unwrap().mtime, Some(new));
     }
 
     /// An edit made while a scan runs (a blacklist the user set) is still there
-    /// after the scan's deltas land: the scan replaces the rows it probed and
+    /// after the scan's changes land: the scan replaces the rows it probed and
     /// touches no other.
     #[test]
     fn an_edit_made_during_a_scan_survives_it() {
@@ -1522,7 +1480,7 @@ mod tests {
         let scanner = Scanner::new(dir.join(".scanning"), move |path, _, _| {
             if seen.fetch_add(1, Ordering::SeqCst) == 0 {
                 parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+                release_rx.recv_timeout(HANG_GUARD).unwrap();
             }
             answer(path)
         });
@@ -1536,21 +1494,9 @@ mod tests {
         })
     }
 
-    /// Waits until the worker has exited: its progress sender is the last thing
-    /// it drops.
-    fn worker_exited(progress: &Receiver<ScanProgress>) {
-        loop {
-            match progress.recv_timeout(Duration::from_secs(30)) {
-                Ok(_) => {}
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
-                Err(e) => panic!("the worker did not exit: {e}"),
-            }
-        }
-    }
-
     /// While a scan is parked mid-probe, nothing else may use its pedal: not a
     /// second scan from the scanner, a clone or a new scanner on the same path,
-    /// not a blocking scan, not a recovery. Each would delete the armed sentinel
+    /// not a recovery. Each would delete the armed sentinel
     /// and blacklist a plugin that did not crash. The claim ends when the worker
     /// exits, so `Done` already allows the next scan.
     #[test]
@@ -1561,22 +1507,18 @@ mod tests {
         let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
         let mut db = PluginDb::new();
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
-        parked.recv_timeout(Duration::from_secs(30)).unwrap();
+        parked.recv_timeout(HANG_GUARD).unwrap();
 
-        assert_eq!(
-            scanner.spawn(&mut db, [&plugins_dir], no_save).err(),
-            Some(ScanBusy)
-        );
+        assert!(matches!(
+            scanner.spawn(&mut db, [&plugins_dir], no_save),
+            Err(ScanError::Busy(ScanBusy))
+        ));
         let clone = scanner.clone();
-        assert_eq!(
-            clone.spawn(&mut db, [&plugins_dir], no_save).err(),
-            Some(ScanBusy)
-        );
+        assert!(matches!(
+            clone.spawn(&mut db, [&plugins_dir], no_save),
+            Err(ScanError::Busy(ScanBusy))
+        ));
         let fresh = scanner_for(dir.path());
-        assert_eq!(
-            fresh.scan(&mut db, [&plugins_dir], no_save).err(),
-            Some(ScanBusy)
-        );
         assert_eq!(fresh.recover_crash(&mut db, no_save), Err(ScanBusy));
         assert_eq!(
             std::fs::read(dir.path().join(".scanning")).unwrap(),
@@ -1594,7 +1536,7 @@ mod tests {
     }
 
     /// A scan whose `Scan` is dropped stops after the file in flight even when
-    /// no file produces a delta (every failure environmental), and the pedal is
+    /// no file produces a change (every failure environmental), and the pedal is
     /// disarmed. Without the stop flag the worker would probe every remaining
     /// file, each with a `plugin-server` child.
     #[test]
@@ -1607,25 +1549,19 @@ mod tests {
         let (scanner, parked, release, calls) = gated_scanner(dir.path(), environmental);
         let mut db = PluginDb::new();
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
-        parked.recv_timeout(Duration::from_secs(30)).unwrap();
-        let progress = scan.progress_rx.clone();
-        let stop = scan.cancel.clone();
+        parked.recv_timeout(HANG_GUARD).unwrap();
+        let stop = scan._worker.token();
 
         // The drop waits for the parked probe: release it from this thread,
         // once the drop has asked the worker to stop.
         let dropping = tutti_rt::spawn_named("scan-dropper", None, move |_| drop(scan))
             .expect("the dropping thread starts");
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while !stop.is_cancelled() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the drop never asked the worker to stop"
-            );
-            std::thread::yield_now();
-        }
+        assert!(
+            stop.wait(HANG_GUARD),
+            "the drop never asked the worker to stop"
+        );
         release.send(()).unwrap();
         dropping.join().unwrap();
-        worker_exited(&progress);
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(
@@ -1635,54 +1571,25 @@ mod tests {
         assert!(db.is_empty());
     }
 
-    /// **A dropped scan has released the pedal when the drop returns**: the
-    /// probe in flight outlives the drop request for 200 ms, and the next scan
-    /// still starts at once instead of being refused as busy.
+    /// **A dropped scan reaches the probe in flight, and has released the pedal
+    /// when the drop returns**: the probe waits on its `StopToken` as a real one
+    /// waits on its child, so the drop returns as soon as the probe sees the
+    /// request, not when its own deadline passes (ten minutes here, past the
+    /// test harness's limit, so a drop that waited for it fails).
     #[test]
-    fn a_new_scan_starts_right_after_a_scan_is_dropped() {
+    fn dropping_the_scan_stops_the_probe_in_flight_and_releases_the_pedal() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.clap");
         let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, _| {
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, stop| {
             let _ = probing_tx.try_send(());
-            std::thread::sleep(Duration::from_millis(200));
+            let _ = stop.wait(Duration::from_secs(600));
             named(path)
         });
         let mut db = PluginDb::new();
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
-        probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-
-        drop(scan);
-
-        assert!(
-            scanner.spawn(&mut db, [&plugins_dir], no_save).is_ok(),
-            "the dropped scan's worker had not released the pedal"
-        );
-    }
-
-    /// **A dropped scan reaches the probe in flight**: the probe waits on its
-    /// `Cancel` as a real one waits on its child, so the drop returns as soon as
-    /// the probe sees the request, not when its own deadline passes (ten
-    /// minutes here, past the test harness's limit, so a drop that waited for
-    /// it fails).
-    #[test]
-    fn dropping_the_scan_raises_the_cancel_the_probe_in_flight_watches() {
-        let dir = TempDir::new().unwrap();
-        let plugins_dir = plugins_dir(&dir);
-        create_fake_plugin(&plugins_dir, "a.clap");
-        let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, cancel| {
-            let _ = probing_tx.try_send(());
-            let deadline = std::time::Instant::now() + Duration::from_secs(600);
-            while !cancel.is_cancelled() && std::time::Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            named(path)
-        });
-        let mut db = PluginDb::new();
-        let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
-        probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        probing_rx.recv_timeout(HANG_GUARD).unwrap();
 
         drop(scan);
 
@@ -1692,59 +1599,52 @@ mod tests {
         );
     }
 
-    /// **A probe a cancel ended records nothing**: no delta, no blacklist row,
+    /// **A probe a stop ended records nothing**: no change, no blacklist row,
     /// not even when the probe reports what a killed child looks like (a crash),
     /// and the row that was there is as it was.
     #[test]
-    fn a_cancelled_probe_leaves_the_row_as_it_was() {
+    fn a_stopped_probe_leaves_the_row_as_it_was() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let file = create_fake_plugin(&plugins_dir, "a.clap");
         let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, cancel| {
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, stop| {
             let _ = probing_tx.try_send(());
-            while !cancel.is_cancelled() {
-                std::thread::sleep(Duration::from_millis(2));
-            }
+            let _ = stop.wait(Duration::from_secs(600));
             Err(ProbeFailure {
                 reason: "crashed during probe".into(),
                 kind: ProbeFailureKind::Crashed,
             })
         });
         let mut db = PluginDb::new();
-        scanner_for(dir.path())
-            .scan(&mut db, [&plugins_dir], no_save)
-            .unwrap();
+        scan_dirs(&scanner_for(dir.path()), &mut db, [&plugins_dir], no_save).unwrap();
         let before = db.row(&file).cloned().expect("a row");
 
         let task = scanner
             .spawn_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
             .unwrap();
-        probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-        task.cancel.cancel();
-        worker_exited(&task.progress_rx);
-        // The worker's whole output is waiting in the task: apply it.
-        let end = task.poll(&mut db);
+        probing_rx.recv_timeout(HANG_GUARD).unwrap();
+        task._worker.token().stop();
+        let result = task.wait(&mut db).expect("the worker finishes");
 
-        assert!(
-            matches!(&end, ScanPoll::Done(r) if r.failures.is_empty()),
-            "{end:?}"
-        );
+        assert!(result.failures.is_empty(), "{result:?}");
         assert_eq!(db.row(&file), Some(&before));
         assert!(!db.is_blacklisted(&file));
     }
 
     /// **A file task probes the files it names whether or not their rows are
-    /// current**, and delivers one delta each, keyed by canonical path.
+    /// current**, and delivers one change each, keyed by canonical path.
     #[test]
-    fn a_file_task_reprobes_a_current_row_and_delivers_its_delta() {
+    fn a_file_task_reprobes_a_current_row_and_delivers_its_change() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let file = create_fake_plugin(&plugins_dir, "a.clap");
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
         assert_eq!(
-            scanner.scan(&mut db, [&plugins_dir], no_save).unwrap().new,
+            scan_dirs(&scanner, &mut db, [&plugins_dir], no_save)
+                .unwrap()
+                .new,
             1
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -1799,12 +1699,12 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
-        assert_eq!(
+        assert!(matches!(
             scanner
                 .spawn_files(&mut db, [(&missing, PluginFormat::Clap)], no_save)
                 .unwrap_err(),
-            FilesError::Missing(missing)
-        );
+            FilesError::Missing(path) if path == missing
+        ));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(
             scanner
@@ -1827,16 +1727,13 @@ mod tests {
         let mut db = PluginDb::new();
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        let end = loop {
-            match scan.poll(&mut db) {
-                ScanPoll::Running => {
-                    assert!(std::time::Instant::now() < deadline, "poll never ended");
-                    std::thread::yield_now();
-                }
-                other => break other,
-            }
-        };
+        // The panicking worker drops its sender: the channel's end is the
+        // event, with no message before it.
+        assert!(matches!(
+            scan.rx.recv_timeout(HANG_GUARD),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        ));
+        let end = scan.poll(&mut db);
 
         assert!(matches!(end, ScanPoll::Died), "{end:?}");
     }
@@ -1858,7 +1755,7 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
-        let result = scanner.scan(&mut db, [&plugins_dir], failing_save).unwrap();
+        let result = scan_dirs(&scanner, &mut db, [&plugins_dir], failing_save).unwrap();
 
         assert_eq!(result.new, 1);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -1907,9 +1804,9 @@ mod tests {
             let (scanner, calls) = counting_scanner(dir.path(), named);
             let mut db = PluginDb::new();
 
-            scanner.scan(&mut db, [&alias, &real], no_save).unwrap();
-            scanner.scan(&mut db, [&real, &alias], no_save).unwrap();
-            scanner.scan(&mut db, [&alias], no_save).unwrap();
+            scan_dirs(&scanner, &mut db, [&alias, &real], no_save).unwrap();
+            scan_dirs(&scanner, &mut db, [&real, &alias], no_save).unwrap();
+            scan_dirs(&scanner, &mut db, [&alias], no_save).unwrap();
 
             assert_eq!(db.len(), 1, "{:?}", db.rows().collect::<Vec<_>>());
             assert_eq!(db.plugins().count(), 1);
@@ -1930,7 +1827,7 @@ mod tests {
             let (scanner, _) = counting_scanner(dir.path(), crashes);
             let mut db = PluginDb::new();
 
-            scanner.scan(&mut db, [&links], no_save).unwrap();
+            scan_dirs(&scanner, &mut db, [&links], no_save).unwrap();
 
             let row = db.row(&target).expect("keyed by the target");
             assert_eq!(row.format, PluginFormat::Clap);
@@ -1949,7 +1846,7 @@ mod tests {
             let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
             let mut db = PluginDb::new();
             let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
-            parked.recv_timeout(Duration::from_secs(30)).unwrap();
+            parked.recv_timeout(HANG_GUARD).unwrap();
 
             let link = dir.path().join("link");
             std::os::unix::fs::symlink(dir.path(), &link).unwrap();

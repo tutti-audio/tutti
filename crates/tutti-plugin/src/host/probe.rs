@@ -10,17 +10,18 @@
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
-use tutti_plugin_db::{Cancel, PluginFormat};
 use tutti_plugin_ipc::Reaped;
 use tutti_plugin_types::BridgeError;
-use tutti_plugin_types::{Helper, Locator, PluginDescriptor, ProbeOutcome, read_result};
+use tutti_plugin_types::{
+    Helper, Locator, PluginDescriptor, PluginFormat, ProbeOutcome, read_result,
+};
+use tutti_rt::StopToken;
 
 /// Why a probe returned no descriptors.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProbeError {
-    /// The caller's [`Cancel`] was raised, and the child was killed.
+    /// The caller's [`StopToken`] was stopped, and the child was killed.
     #[error("the probe was cancelled")]
     Cancelled,
     /// The probe ran, or could not be started, and failed.
@@ -45,16 +46,16 @@ const POLL: Duration = Duration::from_millis(5);
 /// [`BridgeError::LoadFailed`] if the probe ran to its end and the plugin could
 /// not be read; [`BridgeError::ProcessCrashed`] if it died without a result;
 /// [`BridgeError::Timeout`] if it did not finish within `timeout` (it is killed);
-/// [`ProbeError::Cancelled`] if `cancel` was raised (the child is killed and
+/// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
 /// reaped before this returns).
 pub(crate) fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
-    run(locator, plugin_path, format, timeout, cancel, &[])
+    run(locator, plugin_path, format, timeout, stop, &[])
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
@@ -78,7 +79,7 @@ pub(crate) fn measure_metadata_with(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
     state: Option<&Path>,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
     let mut args = vec!["--measure".as_ref()];
@@ -86,7 +87,7 @@ pub(crate) fn measure_metadata_with(
         args.push("--state".as_ref());
         args.push(state.as_os_str());
     }
-    run(locator, plugin_path, format, timeout, cancel, &args)
+    run(locator, plugin_path, format, timeout, stop, &args)
 }
 
 fn run(
@@ -94,7 +95,7 @@ fn run(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
     flags: &[&std::ffi::OsStr],
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
     let probe = locator
@@ -121,7 +122,7 @@ fn run(
         .spawn()
         .map_err(BridgeError::Io)?;
     let mut child = Reaped::new(child);
-    let status = wait(&mut child, timeout, cancel);
+    let status = wait(&mut child, timeout, stop);
     // The file is read even after a timeout or a bad exit: it is the only proof
     // of finishing, and a probe that finished at the deadline did.
     let file = read_result(&result).map_err(|e| BridgeError::IpcError(e.to_string()));
@@ -162,13 +163,13 @@ enum Waited {
 }
 
 /// Waits for `child` to exit, killing and reaping it at `timeout` or when
-/// `cancel` is raised.
-fn wait(child: &mut Child, timeout: Duration, cancel: &Cancel) -> Waited {
+/// `stop` is requested.
+fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return Waited::Exited,
-            Ok(None) if cancel.is_cancelled() => {
+            Ok(None) if stop.is_stopped() => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Waited::Cancelled;
@@ -178,7 +179,10 @@ fn wait(child: &mut Child, timeout: Duration, cancel: &Cancel) -> Waited {
                 let _ = child.wait();
                 return Waited::TimedOut;
             }
-            Ok(None) => thread::sleep(POLL),
+            Ok(None) => {
+                // Wakes at once on a stop; the child's exit has no wake to wait on.
+                let _ = stop.wait(POLL);
+            }
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -193,6 +197,7 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::thread;
     use tempfile::TempDir;
     use tutti_plugin_types::BridgeResult;
 
@@ -215,7 +220,7 @@ mod tests {
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             timeout,
-            &Cancel::new(),
+            &StopToken::new(),
         )
         .map_err(|e| match e {
             ProbeError::Bridge(e) => e,
@@ -275,9 +280,9 @@ mod tests {
             &dir,
             &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
         );
-        let cancel = Cancel::new();
+        let stop = StopToken::new();
         let raiser = {
-            let (cancel, pid_file) = (cancel.clone(), pid_file.clone());
+            let (stop, pid_file) = (stop.clone(), pid_file.clone());
             tutti_rt::spawn_named("probe-raiser", None, move |_| {
                 // The child has written its whole pid (a line) once it is running;
                 // a child that never starts is a failure, not a hang.
@@ -286,7 +291,7 @@ mod tests {
                     assert!(Instant::now() < deadline, "the child never wrote its pid");
                     thread::sleep(Duration::from_millis(2));
                 }
-                cancel.cancel();
+                stop.stop();
             })
             .expect("the raiser starts")
         };
@@ -297,7 +302,7 @@ mod tests {
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             Duration::from_secs(300),
-            &cancel,
+            &stop,
         );
         raiser.join().unwrap();
 

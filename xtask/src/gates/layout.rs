@@ -179,14 +179,12 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
     // The probe reads one file as a format host would: the hosts, the descriptor
-    // types, the experiment's units, and the catalog's extension table
-    // (`format_from_path`) for a path with no `--as`.
+    // types and the experiment's units.
     // No hosting (`tutti-plugin-ipc`, `tutti-plugin-host`, `tutti-plugin`).
     (
         "tutti-plugin-probe",
         &[
             "tutti-plugin-types",
-            "tutti-plugin-db",
             "tutti-types",
             "tutti-graph",
             "tutti-ump",
