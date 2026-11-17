@@ -29,7 +29,7 @@
 //!    then, as CLAP's `[active ? audio-thread : main-thread]` says. The `clap.gui` entries follow `create` and
 //!    precede `destroy`, which `Plugin` tracks.
 //! 2. *Audio entries never overlap.* Every audio-side entry runs under the
-//!    instance's [`AudioClaim`](crate::AudioClaim), so two audio-side calls never overlap even
+//!    instance's audio claim, so two audio-side calls never overlap even
 //!    from two OS threads. `params.flush` on an active plugin, the one entry
 //!    the spec gives to the audio-thread role when the plugin is active, takes
 //!    the claim too.
@@ -54,6 +54,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tutti_rt::LockExt;
+use tutti_types::{MaxBlock, SampleRate, Samples};
+
+/// The smallest block a plugin is activated for: CLAP forbids an empty one.
+pub(crate) const MIN_FRAMES: u32 = 1;
 
 use clap_sys::ext::ambisonic::{
     CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_plugin_ambisonic,
@@ -184,8 +188,6 @@ pub(crate) struct Core {
     pub(crate) reset_owed: AtomicBool,
     /// The block size the instance was activated for; `process` refuses more.
     pub(crate) max_frames: AtomicU32,
-    /// The smallest block the instance was activated for.
-    pub(crate) min_frames: AtomicU32,
     /// The channel counts of the plugin's ports as of the last activation:
     /// what `process` must be handed. Written by `activate` (no `AudioSide`
     /// exists then), cloned into each `AudioSide`.
@@ -280,6 +282,10 @@ pub enum CallError {
     /// nothing was called.
     #[error("the entry is not legal in the current activation state")]
     WrongState,
+    /// A path argument holds a nul byte, so it is not a C string: nothing was
+    /// called.
+    #[error("the path holds a nul byte")]
+    InvalidPath,
 }
 
 /// Why [`Plugin::activate`] did not activate.
@@ -293,11 +299,6 @@ pub enum ActivateError {
     /// not called.
     #[error("the plugin is already active")]
     AlreadyActive,
-    /// The sample rate is not finite and positive, `min_frames` is zero, or
-    /// `min_frames` exceeds `max_frames`: CLAP forbids all three. The plugin
-    /// was not called.
-    #[error("the sample rate or block range is one CLAP forbids")]
-    BadConfig,
     /// The plugin has no `activate` entry or answered `false`.
     #[error("the plugin has no activate entry or refused it")]
     Refused,
@@ -343,6 +344,7 @@ plain!(
     clap_sys::ext::note_name::clap_note_name,
     clap_sys::ext::voice_info::clap_voice_info,
     clap_sys::ext::ambisonic::clap_ambisonic_config,
+    clap_sys::ext::track_info::clap_track_info,
 );
 
 impl Plugin {
@@ -391,7 +393,6 @@ impl Plugin {
             processing: AtomicBool::new(false),
             reset_owed: AtomicBool::new(false),
             max_frames: AtomicU32::new(0),
-            min_frames: AtomicU32::new(0),
             layout: Mutex::new(Arc::default()),
         });
         Ok(Self {
@@ -427,12 +428,6 @@ impl Plugin {
         }
     }
 
-    /// The instance's thread roles.
-    #[must_use]
-    pub fn roles(&self) -> &Arc<ThreadRoles> {
-        &self.core.roles
-    }
-
     /// Whether the plugin implements `clap.state-context`.
     #[must_use]
     pub fn supports_state_context(&self) -> bool {
@@ -459,27 +454,22 @@ impl Plugin {
     /// [`ActivateError::AlreadyActive`] while the plugin is active,
     /// [`ActivateError::ProcessorStillAlive`] while an
     /// [`AudioSide`](crate::AudioSide) of an earlier activation lives,
-    /// [`ActivateError::BadConfig`] for a rate or block range CLAP forbids,
     /// and [`ActivateError::Refused`] when the plugin has no entry or says no.
+    ///
+    /// The plugin is activated for blocks of one frame up to `max_block`
+    /// (the range CLAP allows).
     pub fn activate(
         &mut self,
         main: MainThreadMarker,
-        sample_rate: f64,
-        min_frames: u32,
-        max_frames: u32,
+        sample_rate: SampleRate,
+        max_block: MaxBlock,
     ) -> Result<(), ActivateError> {
+        let max_frames = max_block.get_u32();
         if self.audio_sides() != 0 {
             return Err(ActivateError::ProcessorStillAlive);
         }
         if self.is_active() {
             return Err(ActivateError::AlreadyActive);
-        }
-        if !(sample_rate.is_finite()
-            && sample_rate > 0.0
-            && min_frames >= 1
-            && min_frames <= max_frames)
-        {
-            return Err(ActivateError::BadConfig);
         }
         // Read before the plugin is activated: these are the ports the host
         // configured its buffers against, and `[!active]` entries such as
@@ -496,11 +486,10 @@ impl Plugin {
         // is not active and no `AudioSide` exists to be in `process` (both
         // checked above), so it is inactive and quiescent as `activate`
         // requires.
-        if !unsafe { activate(self.core.raw(), sample_rate, min_frames, max_frames) } {
+        if !unsafe { activate(self.core.raw(), sample_rate.get(), MIN_FRAMES, max_frames) } {
             return Err(ActivateError::Refused);
         }
         *self.core.layout.lock_recover() = Arc::new(layout);
-        self.core.min_frames.store(min_frames, Ordering::Release);
         self.core.max_frames.store(max_frames, Ordering::Release);
         self.core.active.store(true, Ordering::Release);
         Ok(())
@@ -764,8 +753,9 @@ impl Plugin {
     /// `preset-load.from_location` for a file path.
     ///
     /// # Errors
-    /// The extension or entry is missing, the path has an interior nul, or the
-    /// plugin answered `false` ([`CallError::Failed`]).
+    /// The extension or entry is missing, the path has an interior nul
+    /// ([`CallError::InvalidPath`]), or the plugin answered `false`
+    /// ([`CallError::Failed`]).
     pub fn preset_load_file(
         &mut self,
         _main: MainThreadMarker,
@@ -776,8 +766,7 @@ impl Plugin {
             .ok_or(CallError::NoExtension)?
             .from_location
             .ok_or(CallError::NoFunction)?;
-        let location =
-            CString::new(path.to_string_lossy().as_ref()).map_err(|_| CallError::Failed)?;
+        let location = crate::c_path::c_path(path).map_err(|_| CallError::InvalidPath)?;
         // SAFETY: the plugin's own `from_location` with the instance, the file
         // location kind, a nul-terminated path and a null load key.
         unsafe {
@@ -796,8 +785,8 @@ impl Plugin {
 
     /// `latency.get`, 0 without the extension.
     #[must_use]
-    pub fn latency(&self, _main: MainThreadMarker) -> u32 {
-        call!(self.latency.get() else 0)
+    pub fn latency(&self, _main: MainThreadMarker) -> Samples {
+        Samples(call!(self.latency.get() else 0) as usize)
     }
 
     /// `tail.get`, `None` without the extension.

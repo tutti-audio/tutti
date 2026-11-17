@@ -21,7 +21,7 @@
 //! | `PortScratch`, `ProcessCall` | the channel-pointer tables and the one call that binds a block's buffers and runs the plugin |
 //! | `InputStream`, `OutputStream` | `clap_istream` and `clap_ostream` over byte buffers |
 //! | `TaskPool`, `GraphPool`, `PoolHandle` | `clap.thread-pool`: a plugin's `request_exec` served on a pool for the span of its `process` call; `TaskPool` is an `unsafe trait` (its `try_run` must return only once no participant is inside the job) and `GraphPool` is the one safe implementation, over a `tutti_graph::Pool`; a handle is bound to the instance it was made for and ignored by any other |
-//! | `ThreadRoles`, `AudioClaim` | which thread is the `[main-thread]` and `[audio-thread]`, and the lock that keeps audio-side entries from overlapping |
+//! | `ThreadRoles` | which thread is the `[main-thread]` and `[audio-thread]`, and the lock that keeps audio-side entries from overlapping |
 //!
 //! ## How the thread rules are in the types
 //!
@@ -29,7 +29,7 @@
 //! `[main-thread]` entry is a method of `Plugin`, which is `Send` but not `Sync`
 //! and takes a `MainThreadMarker`: holding one is the proof, and `ThreadRoles` (built
 //! from one) is the single place the main thread is named. An `[audio-thread]`
-//! entry is a method of `AudioSide`, which takes the instance's `AudioClaim` for
+//! entry is a method of `AudioSide`, which takes the instance's audio claim for
 //! the whole call. A processor that holds an `AudioSide` therefore cannot make a
 //! main-thread call, and a controller that holds the `Plugin` cannot make an
 //! audio-thread one, however the embedder wires them.
@@ -76,6 +76,7 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 
 mod audio;
+mod c_path;
 mod events;
 mod guard;
 mod gui;
@@ -92,13 +93,13 @@ pub use events::{EventRef, EventSink, EventSource, PluginEvent, header_size};
 #[cfg(feature = "testing")]
 #[doc(hidden)]
 pub use events::{input_raw_for_test, output_raw_for_test};
-pub use gui::{EmbedOutcome, GuiError, GuiHints, gui_size};
+pub use gui::{EditorKind, EmbedOutcome, GuiError, gui_size};
 pub use host::{Host, HostCallbacks};
 pub use library::{Bundle, DescriptorInfo, LoadError, Stage};
 pub use plugin::PortConfigRequest;
 pub use plugin::{ActivateError, AudioPortInfo, CallError, Plugin, PortKind};
 pub use pool::{GraphPool, PoolHandle, TaskPool};
-pub use roles::{AudioClaim, LifecycleClaim, ThreadRoles};
+pub use roles::ThreadRoles;
 pub use stream::{InputStream, OutputStream};
 pub use types::{
     AmbisonicDecl, AudioPortFlags, AudioPortsConfig, AudioPortsRescanFlags, AutomationState,

@@ -183,7 +183,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
         .expect_err("the probe has no gui in the server");
     let reason = refused.to_string();
     assert!(
-        reason.contains("No GUI extension"),
+        reason.contains("no gui extension"),
         "the refusal is the CLAP host's, in the server: {reason}"
     );
     // The server's answer was an answer, not a crash: the plugin is still served.
