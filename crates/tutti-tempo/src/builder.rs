@@ -71,6 +71,13 @@ impl TempoMapBuilder {
         self.then(Transition::RampBeats, beat, tempo)
     }
 
+    /// Reach `tempo` at `beat` by `transition`: [`step_to`](Self::step_to),
+    /// [`ramp_time_to`](Self::ramp_time_to) or
+    /// [`ramp_beats_to`](Self::ramp_beats_to), chosen by a value.
+    pub fn transition_to(self, transition: Transition, beat: Beat, tempo: Bpm) -> Self {
+        self.then(transition, beat, tempo)
+    }
+
     /// The map.
     ///
     /// # Errors

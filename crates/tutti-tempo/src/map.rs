@@ -115,6 +115,50 @@ impl TempoMap {
         Self::new(pts)
     }
 
+    /// This map with `tempo` taking over at `beat`: the map up to `beat` as it
+    /// stands, then a step to `tempo`, and nothing after. `Ok(None)` when that
+    /// changes nothing (the map already holds `tempo` from `beat` on, with no
+    /// point after it).
+    ///
+    /// A ramp `beat` lands in is cut there: the ramp is kept up to `beat` (it
+    /// reaches the tempo this map has at `beat`, so every beat before `beat`
+    /// keeps its time), and the step follows one ulp of a beat later, because a
+    /// map holds one tempo at a beat and a tempo that jumps needs two points. A
+    /// `beat` before 0 is beat 0. The old map is untouched.
+    ///
+    /// # Errors
+    ///
+    /// A [`TempoError`] when the result cannot be held (a tempo so small that a
+    /// segment's duration overflows).
+    pub fn stepped_to(&self, beat: Beat, tempo: Bpm) -> Result<Option<Self>, TempoError> {
+        let beat = Beat(beat.get().max(0.0));
+        let points = self.points();
+        if points
+            .last()
+            .is_some_and(|last| last.beat <= beat && last.tempo == tempo)
+        {
+            return Ok(None);
+        }
+        let kept = points.partition_point(|p| p.beat < beat);
+        let Some(first) = points[..kept].first() else {
+            return Self::constant(tempo).map(Some);
+        };
+        let mut builder = Self::builder(first.tempo);
+        for pair in points[..kept].windows(2) {
+            builder = builder.transition_to(pair[0].transition, pair[1].beat, pair[1].tempo);
+        }
+        let last = &points[kept - 1];
+        builder = if last.transition == Transition::Step {
+            builder.step_to(beat, tempo)
+        } else {
+            // The ramp is cut at `beat`: it reaches what the map has there.
+            builder
+                .transition_to(last.transition, beat, self.tempo_at(beat))
+                .step_to(Beat(beat.get().next_up()), tempo)
+        };
+        builder.build().map(Some)
+    }
+
     /// A [`TempoView`] over this map at `rate`: the frame queries, with a
     /// lookup hint, for a reader that walks the map in order.
     #[must_use]
