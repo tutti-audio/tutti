@@ -883,7 +883,7 @@ impl InputRooms {
     /// one parameter
     /// ([`ParameterQueue::chunk_room`](tutti_plugin_types::ParameterQueue::chunk_room)).
     #[must_use]
-    pub const fn with_param_points(mut self, points: usize) -> Self {
+    pub const fn param_points(mut self, points: usize) -> Self {
         self.param_points = points;
         self
     }
@@ -891,12 +891,7 @@ impl InputRooms {
     /// The Controller's parameter edits, the note expressions and the
     /// transport changes one block adds.
     #[must_use]
-    pub const fn with_sources(
-        mut self,
-        edits: usize,
-        expressions: usize,
-        transport: usize,
-    ) -> Self {
+    pub const fn sources(mut self, edits: usize, expressions: usize, transport: usize) -> Self {
         self.edits = edits;
         self.expressions = expressions;
         self.transport = transport;
@@ -1122,7 +1117,7 @@ impl InputEventList {
 
     /// Parameter points [`add_param_changes`](Self::add_param_changes) could
     /// not hand on whole, past the room
-    /// [`InputRooms::with_param_points`] gave: one that
+    /// [`InputRooms::param_points`] gave: one that
     /// replaced its parameter's previous point (so the parameter still ends
     /// the block on its latest value), or one with no room at all. Counted
     /// since the list was built; zero while the host stays within the room
@@ -1540,7 +1535,7 @@ impl InputEventList {
     /// `ranges` is **sorted by id** (each id is found by binary search, so a
     /// block with a change for every parameter costs `n log n`, not `n²`).
     ///
-    /// At most the [room](InputRooms::with_param_points) of points is pushed;
+    /// At most the [room](InputRooms::param_points) of points is pushed;
     /// past it, a point replaces its parameter's previous one, or is dropped
     /// when its parameter has none in the list, and either is counted
     /// ([`param_points_dropped`](Self::param_points_dropped)).
@@ -1604,7 +1599,7 @@ impl InputEventList {
     /// Adds the block's queued edits. `drain` hands each queued edit to the
     /// callback it is given, oldest first. A [`Edit::Reset`] voids the edits
     /// before it; the edits kept are added in order, and any past the room
-    /// [`InputRooms::with_sources`] gave them, or past the
+    /// [`InputRooms::sources`] gave them, or past the
     /// [`EDIT_CAPACITY`] the block can hold, are refused and counted
     /// ([`refused`](Self::refused)).
     pub(crate) fn add_param_edits(
@@ -1642,7 +1637,7 @@ impl InputEventList {
     /// its rule for an id the table lacks.
     ///
     /// An edit does not count against the parameter room: it has its own
-    /// ([`InputRooms::with_sources`]), and one past it is
+    /// ([`InputRooms::sources`]), and one past it is
     /// refused and counted ([`refused`](Self::refused)).
     pub(crate) fn add_param_edit(
         &mut self,
@@ -1705,7 +1700,7 @@ impl InputEventList {
     /// frame 0). Added before [`sort_by_time`](Self::sort_by_time), it takes
     /// its place in time order among the block's other events, after those
     /// already added at the same frame. At most the room
-    /// [`InputRooms::with_sources`] gave transport changes a
+    /// [`InputRooms::sources`] gave transport changes a
     /// block; one past it is refused and counted
     /// ([`refused`](Self::refused)).
     pub(crate) fn add_transport(
@@ -2573,7 +2568,7 @@ mod tests {
         let mut changes = ParameterChanges::reserved(2, 1);
         changes.add_change(9u32.into(), 0, 0.5);
         changes.add_change(5u32.into(), 1, 0.25);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &ranges, true);
         let got: Vec<(u32, f64)> = list
             .events()
@@ -3127,7 +3122,7 @@ mod tests {
             }
         }
         let build = || {
-            let mut list = InputEventList::new(InputRooms::new(16).with_param_points(200 * points));
+            let mut list = InputEventList::new(InputRooms::new(16).param_points(200 * points));
             list.add_param_changes(&changes, &[], false);
             for frame in [0usize, 100, 475] {
                 list.add_midi(&(at(frame), fx::note_off(MidiChannel::FIRST, 60, 0)));
@@ -3186,7 +3181,7 @@ mod tests {
             changes.add_change(2u32.into(), k as i32, v);
         }
         changes.add_change(3u32.into(), 0, 0.9);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(5));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(5));
         list.add_param_changes(&changes, &[], false);
         let got: Vec<(u32, f64)> = list
             .events()
@@ -3210,11 +3205,7 @@ mod tests {
     /// parameter points 4, and a room of 3 edits, 3 expressions and 2
     /// transport changes.
     fn reserved_list() -> InputEventList {
-        let mut list = InputEventList::new(
-            InputRooms::new(8)
-                .with_param_points(4)
-                .with_sources(3, 3, 2),
-        );
+        let mut list = InputEventList::new(InputRooms::new(8).param_points(4).sources(3, 3, 2));
         list.set_note_ports(&[false]);
         list
     }
@@ -3291,7 +3282,7 @@ mod tests {
         for k in 0..5 {
             changes.add_change(1u32.into(), k, 0.5);
         }
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(3));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
         let tally = list.param_points_tally();
         let capacity = list.events.capacity();
         assert_no_alloc::assert_no_alloc(|| {
@@ -3307,7 +3298,7 @@ mod tests {
     /// counted.** One more than the room is queued; the room's worth is kept.
     #[test]
     fn an_edit_past_the_edit_room_is_refused_and_counted() {
-        let mut list = InputEventList::new(InputRooms::new(8).with_sources(EDIT_CAPACITY, 0, 0));
+        let mut list = InputEventList::new(InputRooms::new(8).sources(EDIT_CAPACITY, 0, 0));
         let capacity = list.events.capacity();
         assert_no_alloc::assert_no_alloc(|| {
             list.add_param_edits(&[], false, |each| {
@@ -3327,7 +3318,7 @@ mod tests {
     /// A reset in the block's edits voids the ones before it.
     #[test]
     fn a_reset_voids_the_edits_before_it() {
-        let mut list = InputEventList::new(InputRooms::new(0).with_sources(8, 0, 0));
+        let mut list = InputEventList::new(InputRooms::new(0).sources(8, 0, 0));
         let param = |id| Edit::Param {
             id: ParamId::new(id),
             value: Normalized::clamped(0.5),
@@ -3354,7 +3345,7 @@ mod tests {
     /// `midi_dropped`, and the edits added after them all fit.
     #[test]
     fn sysex_cannot_take_the_edit_room() {
-        let mut list = InputEventList::new(InputRooms::new(3).with_sources(3, 0, 0));
+        let mut list = InputEventList::new(InputRooms::new(3).sources(3, 0, 0));
         list.set_note_ports(&[true]);
         for k in 0..5 {
             list.add_midi_events(&sysex_packets(&[1, 2, 3], k));
@@ -3422,7 +3413,7 @@ mod tests {
         // Param 9 has plain range [100, 1100]; a normalized 0.25 → 350.
         let mut changes = ParameterChanges::reserved(1, 1);
         changes.add_change(9u32.into(), 0, 0.25);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[ParamBounds::continuous(9, 100.0, 1100.0)], true);
         assert!((first_param_value(&list) - 350.0).abs() < 1e-6);
     }
@@ -3439,7 +3430,7 @@ mod tests {
             for k in 0..=n {
                 let mut changes = ParameterChanges::reserved(1, 1);
                 changes.add_change(9u32.into(), 0, f64::from(k) / f64::from(n));
-                let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+                let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
                 list.add_param_changes(&changes, &bounds, true);
                 assert_eq!(
                     first_param_value(&list).trunc(),
@@ -3509,13 +3500,13 @@ mod tests {
     #[test]
     fn a_stepped_edit_is_computed_in_f64_from_the_plugins_own_range() {
         let bounds = [ParamBounds::stepped(4, 0.0, 22.0)];
-        let mut list = InputEventList::new(InputRooms::new(0).with_sources(1, 0, 0));
+        let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
         list.add_param_edit(4, 13.0 / 22.0, &bounds, true);
         assert_eq!(first_param_value(&list).trunc(), 13.0);
 
         // 0..=16_777_217 is not representable in f32 at the top step.
         let wide = [ParamBounds::stepped(5, 0.0, 16_777_217.0)];
-        let mut list = InputEventList::new(InputRooms::new(0).with_sources(1, 0, 0));
+        let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
         list.add_param_edit(5, 1.0, &wide, true);
         assert_eq!(first_param_value(&list), 16_777_217.0);
     }
@@ -3525,7 +3516,7 @@ mod tests {
         // A normalized 1.5 (over-range) must clamp to the plain max, not overshoot.
         let mut changes = ParameterChanges::reserved(1, 1);
         changes.add_change(9u32.into(), 0, 1.5);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[ParamBounds::continuous(9, 0.0, 10.0)], true);
         assert!((first_param_value(&list) - 10.0).abs() < 1e-6);
     }
@@ -3537,7 +3528,7 @@ mod tests {
         // thread — the value lands inside the range either way round.
         let mut changes = ParameterChanges::reserved(1, 1);
         changes.add_change(9u32.into(), 0, 0.5);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[ParamBounds::continuous(9, 10.0, 0.0)], true);
         let v = first_param_value(&list);
         assert!((0.0..=10.0).contains(&v), "value {v} escaped the range");
@@ -3549,7 +3540,7 @@ mod tests {
         // for the common normalized-0..1 param).
         let mut changes = ParameterChanges::reserved(1, 1);
         changes.add_change(9u32.into(), 0, 0.42);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
         assert!((first_param_value(&list) - 0.42).abs() < 1e-6);
     }
@@ -3639,7 +3630,7 @@ mod tests {
     fn negative_sample_offset_does_not_wrap_to_four_billion() {
         let mut changes = ParameterChanges::reserved(1, 1);
         changes.add_change(9u32.into(), -1, 0.5);
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(4));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
         assert_eq!(
             first_time(&list),
@@ -3651,7 +3642,7 @@ mod tests {
     /// The same trap on the note-expression path.
     #[test]
     fn negative_note_expression_offset_does_not_wrap() {
-        let mut list = InputEventList::new(InputRooms::new(0).with_sources(0, 1, 0));
+        let mut list = InputEventList::new(InputRooms::new(0).sources(0, 1, 0));
         let mut expr = ClapNoteExpression::new(NoteExpressionType::Pressure, 0, 0.5);
         expr.sample_offset = -32;
         list.add_note_expressions(&[expr]);
@@ -3728,7 +3719,7 @@ mod tests {
             tsig_num: 4,
             tsig_denom: 4,
         };
-        let mut list = InputEventList::new(InputRooms::new(1).with_sources(0, 0, 4));
+        let mut list = InputEventList::new(InputRooms::new(1).sources(0, 0, 4));
         list.add_midi(&(at(10), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
         list.add_transport(5, transport(100.0, 0.5));
         list.add_transport(20, transport(90.0, -0.25));
@@ -3854,7 +3845,7 @@ mod tests {
             ClapNoteExpression::new(NoteExpressionType::Volume, 1, 0.5),
             ClapNoteExpression::new(NoteExpressionType::Custom(100_000), 1, 0.5),
         ];
-        let mut list = InputEventList::new(InputRooms::new(0).with_sources(0, 8, 0));
+        let mut list = InputEventList::new(InputRooms::new(0).sources(0, 8, 0));
         list.add_note_expressions(&exprs);
         assert_eq!(
             list.events.len(),
@@ -4719,7 +4710,7 @@ mod tests {
         // it holds a block, so the budget is that much over what can arrive.
         let pooled = ParameterChanges::POOLED_QUEUES;
         let carried = (PARAMS as usize - pooled) * ParameterChanges::FLOOR_POINTS + pooled * room;
-        let mut list = InputEventList::new(InputRooms::new(0).with_param_points(budget));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(budget));
         let fill = |list: &mut InputEventList, changes: &ParameterChanges| {
             list.clear();
             list.add_param_changes(changes, &[], false);

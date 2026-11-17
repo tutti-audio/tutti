@@ -304,8 +304,8 @@ fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
     InputRooms::for_port(INPUT_PORT_UMPS)
-        .with_param_points(param_points)
-        .with_sources(
+        .param_points(param_points)
+        .sources(
             EDIT_CAPACITY,
             INPUT_NOTE_EXPRESSIONS,
             tutti_graph::MAX_TRANSPORT_CHANGES,

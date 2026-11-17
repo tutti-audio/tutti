@@ -413,7 +413,7 @@ fn test_param_changes_through_input_list() {
     q2.add_point(64, 0.5);
     changes.add_queue(q2);
 
-    let mut list = InputEventList::new(InputRooms::new(0).with_param_points(3));
+    let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
     // No range map and no claim of params → pass-through (this test only
     // asserts event count, not denormalized values; the denorm math is covered
     // in the events unit tests).

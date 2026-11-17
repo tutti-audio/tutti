@@ -74,7 +74,7 @@ fn a_pool_spent_chunk_reaches_a_clap_plugin_whole() {
     lane_chunk(&mut d, &mut latest, 0);
     let budget = tutti_plugin_types::ParameterChanges::point_budget(PARAMS as usize, room);
     let mut list = tutti_clap_host::InputEventList::new(
-        tutti_clap_host::InputRooms::new(0).with_param_points(budget),
+        tutti_clap_host::InputRooms::new(0).param_points(budget),
     );
     let carried: usize = d.changes().queues.iter().map(|q| q.points.len()).sum();
     assert_no_alloc::assert_no_alloc(|| {
