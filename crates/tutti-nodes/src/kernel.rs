@@ -391,7 +391,7 @@ impl<K: Kernel> KernelNode<K> {
     }
 
     /// The first NaN or infinity in the block's output, as `(frame, channel)`.
-    fn wrote_non_finite(&self, io: &mut Io<'_>) -> Option<(usize, usize)> {
+    fn first_non_finite_output(&self, io: &mut Io<'_>) -> Option<(usize, usize)> {
         let (_, mut outs) = io.split();
         first_non_finite(outs.bus(self.out).into_channels())
     }
@@ -422,6 +422,8 @@ pub(crate) fn first_non_finite<T: AsRef<[f32]>>(
 
 /// Logs the reset that follows a non-finite output at `frame` of `channel`.
 pub(crate) fn log_non_finite(io: &Io<'_>, frame: usize, channel: usize) {
+    // `frame` is inside the block (both callers scan channels `io.frames()` long), so the
+    // offset exists; a frame outside it would log nothing rather than a wrong offset.
     if let Some(at) = io.offset(frame) {
         io.log(
             RtLevel::Warn,
@@ -624,7 +626,7 @@ impl<K: Kernel> Node for KernelNode<K> {
                 ch[live..size].fill(0.0);
             }
             self.park();
-        } else if let Some((frame, channel)) = self.wrote_non_finite(&mut io) {
+        } else if let Some((frame, channel)) = self.first_non_finite_output(&mut io) {
             log_non_finite(&io, frame, channel);
             self.clear();
         }
@@ -709,6 +711,30 @@ mod tests {
 
     use super::*;
     use crate::DelayNode;
+
+    /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
+    /// unequal length are each read to their own end.
+    #[test]
+    fn first_non_finite_is_the_earliest_frame_then_the_lowest_channel() {
+        let n = f32::NAN;
+        let clean: [&[f32]; 2] = [&[0.0; 4], &[1.0; 4]];
+        assert_eq!(first_non_finite(clean.into_iter()), None);
+        let later_channel_earlier_frame: [&[f32]; 3] = [
+            &[0.0, 0.0, 0.0, n],
+            &[0.0, n, 0.0, 0.0],
+            &[0.0, 0.0, n, 0.0],
+        ];
+        assert_eq!(
+            first_non_finite(later_channel_earlier_frame.into_iter()),
+            Some((1, 1))
+        );
+        let tie: [&[f32]; 3] = [&[0.0, 0.0, 0.0], &[0.0, 0.0, f32::INFINITY], &[0.0, 0.0, n]];
+        assert_eq!(first_non_finite(tie.into_iter()), Some((2, 1)));
+        let unequal: [&[f32]; 2] = [&[0.0, 0.0, 0.0, 0.0, 0.0, n], &[0.0, 0.0, n]];
+        assert_eq!(first_non_finite(unequal.into_iter()), Some((2, 1)));
+        let short_first: [&[f32]; 2] = [&[n], &[n, n, n]];
+        assert_eq!(first_non_finite(short_first.into_iter()), Some((0, 0)));
+    }
 
     /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
     /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and

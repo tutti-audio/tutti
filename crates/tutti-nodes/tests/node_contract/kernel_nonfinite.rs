@@ -183,14 +183,14 @@ fn one_infinite_input_sample_is_heard_in_at_most_one_block() {
 
 mod logged {
     //! A kernel that resets after a non-finite block says so on the realtime log: one warning
-    //! per reset, at the first non-finite frame, naming the first channel that holds one.
+    //! per reset, at the earliest non-finite frame, naming its channel (the lowest on a tie).
 
     use super::{BLOCK, POISONED, SR};
     use tutti_graph::{
-        Cx, Editor, Executor, IntoNode, Io, LogFilter, Node, NodeKey, OutPort, Prepare, RtLevel,
-        RtLogReaders, RtRecord, RtValue, Shape, Source, Status, TransportPosition, Unforkable,
+        Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
+        Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Source, Status,
+        TransportPosition, Unforkable,
     };
-    use tutti_graph::{Edge, InPort};
     use tutti_nodes::{
         CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode, MultibandCompressorNode,
     };
