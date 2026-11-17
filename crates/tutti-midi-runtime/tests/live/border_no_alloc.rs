@@ -149,8 +149,8 @@ fn the_border_nodes_process_without_allocating() {
 fn an_epoch_change_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().following(&epochs));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
@@ -169,8 +169,8 @@ fn an_epoch_change_processes_without_allocating() {
             // A device goes every eighth block and another takes the input two
             // blocks on.
             match b % 8 {
-                0 => epochs.depart(),
-                2 => epochs.arrive(),
+                0 => writer.depart(),
+                2 => writer.arrive(),
                 _ => {}
             }
             exec.process(512, &t, &[], &mut []);
@@ -182,7 +182,7 @@ fn an_epoch_change_processes_without_allocating() {
         }
     });
     assert!(offs > 0, "the departures released the keys they held");
-    epochs.depart();
+    writer.depart();
     exec.process(512, &t, &[], &mut []);
     assert!(epochs.is_settled(), "the last departure was handled");
 }

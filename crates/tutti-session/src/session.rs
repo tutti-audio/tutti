@@ -1355,7 +1355,7 @@ impl<C: Clock> Session<C> {
         }
         #[cfg(feature = "midi-hardware")]
         if let Some(io) = &self.midi_io {
-            pinned += io.ports().inlets().reclaim();
+            pinned += tutti_rt::Reclaim::reclaim(&**io.ports().inlets());
         }
         pinned
     }
