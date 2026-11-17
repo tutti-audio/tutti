@@ -156,7 +156,7 @@ fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> Node
                 .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
             "the declarations apply"
         );
-        if let Some((key, _)) = s.mod_state().lane_controls(target.key()) {
+        if let Some((key, _)) = s.mod_state().lane(target.key()) {
             return key;
         }
         assert!(Instant::now() < deadline, "no lane on {target:?}");
@@ -378,10 +378,7 @@ fn a_set_under_a_lane_writes_the_knob() {
     }
 
     set_gain(&s, node, 0.5);
-    let knob = s
-        .mod_state()
-        .lane_controls(gain.key())
-        .and_then(|(_, l)| l.knob());
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
     assert_eq!(knob, Some(0.5), "the knob is the set value, with no update");
     let read = s
         .plugin_view(node)
@@ -423,10 +420,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
     lane_of(&mut drive, &mut s, gain);
 
     set_gain(&s, node, 0.5);
-    let knob = s
-        .mod_state()
-        .lane_controls(gain.key())
-        .and_then(|(_, l)| l.knob());
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
     assert_eq!(knob, Some(0.5), "the knob is the set value");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !near(gain_value(&s, node), 0.25) {
@@ -464,7 +458,7 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
         m.clear_range(gain);
     }
     let deadline = Instant::now() + Duration::from_secs(10);
-    while s.mod_state().lane_controls(gain.key()).is_some() {
+    while s.mod_state().lane(gain.key()).is_some() {
         assert!(Instant::now() < deadline, "the lane never left");
         drive.update(&mut s);
     }
@@ -589,7 +583,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     lane_of(&mut drive, &mut s, gain);
     let knob = s
         .mod_state()
-        .lane_controls(gain.key())
+        .lane(gain.key())
         .and_then(|(_, lane)| lane.knob())
         .expect("a plugin lane has a knob");
     assert!(

@@ -116,7 +116,7 @@ fn no_problems_while_the_declarations_apply() {
     assert_eq!(s.mod_state().problems().next(), None);
     assert!(
         s.mod_state()
-            .lane_controls(ParamRef::from(lp.cutoff()).key())
+            .lane(ParamRef::from(lp.cutoff()).key())
             .is_some()
     );
 }

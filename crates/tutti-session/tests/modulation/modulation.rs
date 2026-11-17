@@ -269,7 +269,7 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
         s.mod_state().problems().cloned().collect::<Vec<_>>(),
         [unresolved(TargetName::Host(HOST_TARGET))]
     );
-    assert!(s.mod_state().lane_controls(HOST_TARGET).is_none());
+    assert!(s.mod_state().lane(HOST_TARGET).is_none());
 
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     keys.node.set(Some(probe.erase()));
@@ -279,10 +279,7 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
         None,
         "resolved on the update its node was placed"
     );
-    assert!(
-        s.mod_state().lane_controls(HOST_TARGET).is_some(),
-        "with its lane"
-    );
+    assert!(s.mod_state().lane(HOST_TARGET).is_some(), "with its lane");
     assert!(!s.graph_ref().is_edited(), "and the lane committed");
 }
 
@@ -451,7 +448,7 @@ fn a_host_and_the_session_cannot_both_declare() {
         "{events:?}"
     );
     assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&refusal]);
-    assert!(s.mod_state().lane_controls(HOST_TARGET).is_none());
+    assert!(s.mod_state().lane(HOST_TARGET).is_none());
 }
 
 /// **The graph's own removal takes the session's declarations too**, as
@@ -477,10 +474,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
     }
     assert_eq!(s.mods().routes().count(), 0, "the route into it went");
     assert_eq!(s.mod_state().problems().next(), None, "nothing to warn of");
-    assert!(
-        s.mod_state().lane_controls(cutoff.key()).is_none(),
-        "its lane went"
-    );
+    assert!(s.mod_state().lane(cutoff.key()).is_none(), "its lane went");
 }
 
 /// **A removed node takes the session's declarations on it**: its range
@@ -497,14 +491,11 @@ fn removing_a_node_forgets_its_declarations() {
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
     settle(&mut s);
-    assert!(s.mod_state().lane_controls(cutoff.key()).is_some());
+    assert!(s.mod_state().lane(cutoff.key()).is_some());
 
     s.remove(probe).unwrap();
     settle(&mut s);
-    assert!(
-        s.mod_state().lane_controls(cutoff.key()).is_none(),
-        "its lane went"
-    );
+    assert!(s.mod_state().lane(cutoff.key()).is_none(), "its lane went");
 }
 
 /// The key a session `ParamRef` names is its node's key bits.
@@ -616,7 +607,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
     settle(&mut s);
-    let (_, lane) = s.mod_state().lane_controls(cutoff.key()).expect("the lane");
+    let (_, lane) = s.mod_state().lane(cutoff.key()).expect("the lane");
     let lane = lane.clone();
     assert_eq!(lane.retired_programs(), 0, "settled");
 
@@ -655,7 +646,7 @@ fn an_own_edit_after_a_steady_state_applies() {
     }
     let program = |s: &Session| {
         s.mod_state()
-            .lane_controls(cutoff.key())
+            .lane(cutoff.key())
             .expect("a lane")
             .1
             .program()

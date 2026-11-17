@@ -67,7 +67,7 @@ fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f32 {
                 .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
             "the declarations apply"
         );
-        if let Some((_, lane)) = s.mod_state().lane_controls(target.key()) {
+        if let Some((_, lane)) = s.mod_state().lane(target.key()) {
             return lane.knob().expect("a plugin lane has a knob");
         }
         assert!(Instant::now() < deadline, "no lane on {target:?}");
@@ -131,12 +131,9 @@ fn a_plugin_gui_edit_becomes_the_knob() {
     update(&mut s, Instant::now());
 
     let state = s.mod_state();
+    assert_eq!(state.lane(p0.key()).expect("a lane").1.knob(), Some(0.5));
     assert_eq!(
-        state.lane_controls(p0.key()).expect("a lane").1.knob(),
-        Some(0.5)
-    );
-    assert_eq!(
-        state.lane_controls(p1.key()).expect("a lane").1.knob(),
+        state.lane(p1.key()).expect("a lane").1.knob(),
         Some(1.0 / 16.0)
     );
     assert_eq!(
@@ -186,7 +183,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
             .unwrap();
     }
     knob_of(&mut s, p0);
-    let lane = s.mod_state().lane_controls(p0.key()).expect("a lane").0;
+    let lane = s.mod_state().lane(p0.key()).expect("a lane").0;
     let (clip, _) = s.graph().add(tutti_graph::ForkByClone(EventSource1));
     let _ = s.update();
     let mut side = s.graph().take_audio_side();
@@ -262,11 +259,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
         handle.editor_idle(tutti_fixtures::main_thread());
         update(&mut s, Instant::now());
         assert_eq!(
-            s.mod_state()
-                .lane_controls(p0.key())
-                .expect("a lane")
-                .1
-                .knob(),
+            s.mod_state().lane(p0.key()).expect("a lane").1.knob(),
             Some(0.0),
             "round {round}: the knob"
         );

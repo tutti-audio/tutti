@@ -58,7 +58,7 @@ fn settle(s: &mut Session) {
 /// The knob of `node`'s drive lane, `None` with no lane or no knob.
 fn knob(s: &Session, node: NodeKey) -> Option<f32> {
     s.mod_state()
-        .lane_controls(ParamRef::unit(node, UnitParam::Drive).key())
+        .lane(ParamRef::unit(node, UnitParam::Drive).key())
         .and_then(|(_, lane)| lane.knob())
 }
 

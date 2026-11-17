@@ -712,17 +712,8 @@ impl ModState {
 
     /// `target`'s lane: its node and its controls (the knob, the range, the
     /// counters). `None` while it has none.
-    #[cfg_attr(not(any(feature = "testing", feature = "plugin")), allow(dead_code))]
-    pub(crate) fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
+    pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
         self.modulation.lane(target)
-    }
-
-    /// `lane` for a test that reads a lane's program, counters
-    /// and knob: the lane's controls write the knob too, so the feature
-    /// `testing` is what exposes them.
-    #[cfg(feature = "testing")]
-    pub fn lane_controls(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
-        self.lane(target)
     }
 
     /// The lanes with a knob that drive `node`'s plugin parameters, by id.
