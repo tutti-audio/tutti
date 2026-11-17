@@ -51,7 +51,6 @@
 //!   piece 0 after it.
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
-use tutti_rt::Reader;
 use tutti_types::{
     BarCount, Beat, BeatDuration, Bpm, LoopRange, Meter, MeterMap, Pass, PassEnd, SampleRate,
     Samples, Seconds, TimeSignature, first_frame_at_or_after,
@@ -276,7 +275,7 @@ impl ClockMaster {
     pub(crate) fn tick(
         &mut self,
         messages: SyncMessages,
-        meter: &mut Reader<MeterMap>,
+        meter: Option<&MeterMap>,
         transport: &TransportPosition,
         block: Samples,
         emit: &mut impl FnMut(UmpAt),
@@ -304,19 +303,19 @@ impl ClockMaster {
             self.flex.tempo = None;
             self.flex.meter = None;
         }
-        if !messages.clock && messages.flex && block_size != 0 {
-            // Flex alone: no clock bytes, and the clock's own edge and locate
-            // state is left as it was.
+        if !messages.clock && !messages.mtc && messages.flex && block_size != 0 {
+            // Flex alone: no clock bytes or timecode, and the clock's own edge
+            // and locate state is left as it was.
             if transport.playing {
                 let beats_per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
                 let region = transport
                     .looping
                     .and_then(|l| LoopRange::new(l.start, l.end));
                 let mut clock = transport.clock(sample_rate);
-                let loan = meter.lend();
                 for pass in clock.passes(Samples(block_size), region) {
+                    let Some(meter) = meter else { break };
                     self.send_flex(
-                        &loan,
+                        meter,
                         &pass,
                         block_size,
                         beats_per_sample,
@@ -329,7 +328,7 @@ impl ClockMaster {
             self.prev.wrapped = false;
             return;
         }
-        if !messages.clock || block_size == 0 {
+        if !(messages.clock || messages.mtc) || block_size == 0 {
             // Keep prev.playing honest so re-enabling mid-playback emits a fresh
             // Start/Continue rather than silently assuming playback was already
             // under way.
@@ -344,14 +343,16 @@ impl ClockMaster {
 
         // --- transport edges -------------------------------------------------
         if playing && !was_playing {
-            if (beat - Beat(0.0)).abs() <= START_EPSILON {
-                emit((Offset::ZERO, self.system(System::Start)));
-            } else {
-                emit((
-                    Offset::ZERO,
-                    self.system(System::SongPosition(song_position(beat))),
-                ));
-                emit((Offset::ZERO, self.system(System::Continue)));
+            if messages.clock {
+                if (beat - Beat(0.0)).abs() <= START_EPSILON {
+                    emit((Offset::ZERO, self.system(System::Start)));
+                } else {
+                    emit((
+                        Offset::ZERO,
+                        self.system(System::SongPosition(song_position(beat))),
+                    ));
+                    emit((Offset::ZERO, self.system(System::Continue)));
+                }
             }
             // The receiver is told where it starts from, unless a cue already
             // did; then the grid realigns to the (possibly non-zero) start beat.
@@ -361,7 +362,9 @@ impl ClockMaster {
             self.prev.cued = None;
             self.restart_mtc();
         } else if !playing && was_playing {
-            emit((Offset::ZERO, self.system(System::Stop)));
+            if messages.clock {
+                emit((Offset::ZERO, self.system(System::Stop)));
+            }
             self.prev.wrapped = false;
             self.prev.cued = Some(beat);
             return;
@@ -396,10 +399,12 @@ impl ClockMaster {
         let located = (beat - prev_end).abs() > SEEK_EPSILON;
         let wrapped = self.prev.wrapped;
         if !is_edge && (located || wrapped) {
-            emit((
-                Offset::ZERO,
-                self.system(System::SongPosition(song_position(beat))),
-            ));
+            if messages.clock {
+                emit((
+                    Offset::ZERO,
+                    self.system(System::SongPosition(song_position(beat))),
+                ));
+            }
             if messages.mtc {
                 self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
             }
@@ -416,16 +421,16 @@ impl ClockMaster {
             .looping
             .and_then(|l| LoopRange::new(l.start, l.end));
         let mut clock = transport.clock(sample_rate);
-        // Lent once, held across every pass of the block.
-        let loan = messages.flex.then(|| meter.lend());
         let mut ends_on_wrap = false;
         for pass in clock.passes(Samples(block_size), region) {
             ends_on_wrap = pass.end == PassEnd::Wrap;
             if !pass.start.is_zero() {
-                emit((
-                    frame_offset(pass.start.get(), block_size),
-                    self.system(System::SongPosition(song_position(pass.beat))),
-                ));
+                if messages.clock {
+                    emit((
+                        frame_offset(pass.start.get(), block_size),
+                        self.system(System::SongPosition(song_position(pass.beat))),
+                    ));
+                }
                 if messages.mtc {
                     self.send_full_message(
                         pass.beat,
@@ -437,9 +442,11 @@ impl ClockMaster {
                 }
                 self.restart_mtc();
             }
-            self.tick_clock(&pass, block_size, beats_per_sample, emit);
-            if let Some(loan) = &loan {
-                self.send_flex(loan, &pass, block_size, beats_per_sample, tempo, emit);
+            if messages.clock {
+                self.tick_clock(&pass, block_size, beats_per_sample, emit);
+            }
+            if let Some(meter) = meter.filter(|_| messages.flex) {
+                self.send_flex(meter, &pass, block_size, beats_per_sample, tempo, emit);
             }
             if messages.mtc {
                 self.tick_mtc(&pass, block_size, sample_rate, beats_per_sample, emit);
@@ -576,9 +583,6 @@ impl ClockMaster {
     /// Emit MTC quarter-frames that fall within `pass`. Quarter-frames go
     /// out at `fps * 4` Hz; each carries one of 8 nibbles of the current SMPTE
     /// time (M2-104 §7.6, MTC quarter-frame 0xF1).
-    /// `beats_per_sample` is a rate and `beat` a position. They were adjacent
-    /// bare `f64`s, so transposing them compiled and produced garbage timecode;
-    /// the two types make that a compile error.
     fn tick_mtc(
         &mut self,
         pass: &Pass,
@@ -679,8 +683,8 @@ fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Ite
 }
 
 /// A frame index as an event's offset in a block of `block_size` frames. Every
-/// frame placed is inside the block, so the clamp onto the last frame (what the
-/// node did to a stray offset) is unreachable.
+/// frame placed is inside the block, so the clamp onto the last frame never
+/// runs.
 fn frame_offset(frames: usize, block_size: usize) -> Offset {
     Offset::new(
         Samples(frames.min(block_size.saturating_sub(1))),

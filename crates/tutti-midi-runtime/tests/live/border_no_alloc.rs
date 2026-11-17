@@ -13,14 +13,14 @@ use tutti_midi_runtime::{
     DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode, MidiKeys,
     MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
 };
-use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
+use tutti_types::{MaxBlock, MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
 use crate::common;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_ump::{Address, BendValue, ControlValue, KeyEvent, Message, System, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, KeyEvent, Message, System, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -69,16 +69,20 @@ fn the_border_nodes_process_without_allocating() {
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
+    let meter = tutti_transport::ProjectMeter::default();
+    let sync_meter = meter.clone();
     ed.insert(
         NodeKey(3),
         "sync",
-        SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
-            clock: true,
-            mtc: true,
-            mmc: Some(Recipient::AllCall),
-            flex: true,
-            rate: MtcRate::Fps30,
-        }),
+        SyncOut::new(MidiGroup::FIRST)
+            .meter(move || sync_meter.reader())
+            .messages(SyncMessages {
+                clock: true,
+                mtc: true,
+                mmc: Some(Recipient::AllCall),
+                flex: true,
+                rate: MtcRate::Fps30,
+            }),
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     ed.commit().unwrap();
@@ -90,6 +94,7 @@ fn the_border_nodes_process_without_allocating() {
     let _ = out.poll_into(&mut drain);
 
     let (mut clocks, mut quarter_frames, mut sysex) = (0usize, 0usize, 0usize);
+    let (mut tempos, mut meters) = (0usize, 0usize);
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
             busy(&mut dev, u64::from(b));
@@ -101,9 +106,21 @@ fn the_border_nodes_process_without_allocating() {
             )
             .unwrap();
             // Every path of the sync output runs under the gate: a tempo that
-            // changes each block, a stop and a start every 50th (Stop, Start,
-            // Play, Stop) and a jump every 30th (Song Position, a Full Message,
-            // a Locate).
+            // changes each block (Set Tempo), a meter published off the grid
+            // every 20th block (Set Time Signature on the new bars, the reader
+            // lent over a changing meter), a stop and a start every 50th (Stop,
+            // Start, Play, Stop) and a jump every 30th (Song Position, a Full
+            // Message, a Locate).
+            if b % 20 == 0 {
+                assert_no_alloc::permit_alloc(|| {
+                    let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
+                    meter.set_meter(MeterMap::new([
+                        MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+                        MeterChange::new(Beat(0.1), TimeSignature::of(signature.0, signature.1)),
+                    ]));
+                    meter.reclaim();
+                });
+            }
             let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
             let at = Beat(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
             exec.process(
@@ -118,6 +135,8 @@ fn the_border_nodes_process_without_allocating() {
                     Ok(Message::System(_, System::TimingClock)) => clocks += 1,
                     Ok(Message::System(_, System::TimeCode(_))) => quarter_frames += 1,
                     Ok(Message::Sysex7(..)) => sysex += 1,
+                    Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
+                    Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
                     _ => {}
                 }
             }
@@ -130,6 +149,9 @@ fn the_border_nodes_process_without_allocating() {
         clocks > 0 && quarter_frames > 0 && sysex > 0,
         "{clocks} ticks, {quarter_frames} quarter-frames, {sysex} SysEx packets"
     );
+    // A Set Tempo for the changing tempo, a Set Time Signature for the meters
+    // published mid-stream.
+    assert!(tempos > 0 && meters > 0, "{tempos} tempos, {meters} meters");
 }
 
 /// **A device's departure and arrival process without allocating**: the ingest
@@ -810,7 +832,9 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
 }
 
 /// **`reset` allocates nothing**: the executor calls it on the audio thread as
-/// a node leaves bypass, on the ingest and sync nodes alike.
+/// a node leaves bypass, on the ingest and sync nodes alike, after real
+/// traffic (a sync node that has sent clock, timecode, Machine Control and Flex
+/// holds state in each) and not only on a fresh node.
 #[test]
 fn resetting_the_border_nodes_allocates_nothing() {
     use tutti_graph::Node;
@@ -818,9 +842,33 @@ fn resetting_the_border_nodes_allocates_nothing() {
 
     let rate = SampleRate::SR_48K;
     let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
-    let mut sync = Direct::new(SyncOut::new(MidiGroup::FIRST), rate, 64);
+    let sync = SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
+        clock: true,
+        mtc: true,
+        mmc: Some(Recipient::AllCall),
+        flex: true,
+        rate: MtcRate::Fps30,
+    });
+    let mut sync = Direct::new(sync, rate, 64);
+    let sent = |d: &mut Direct<SyncOut>, playing: bool, beat: f64| {
+        d.set_transport(TransportPosition::new(
+            playing,
+            Bpm::of(120.0),
+            Beat(beat),
+            None,
+        ));
+        d.block();
+        d.events_out(0).len()
+    };
+    let traffic = |d: &mut Direct<SyncOut>| {
+        (0..8)
+            .map(|k| sent(d, k != 5, 1.0 + f64::from(k) * 64.0 / 24_000.0))
+            .sum::<usize>()
+    };
+    assert!(traffic(&mut sync) > 0, "the node has state to forget");
     assert_no_alloc::assert_no_alloc(|| {
         ingest.node.reset();
         sync.node.reset();
     });
+    assert!(traffic(&mut sync) > 0, "and works after the reset");
 }

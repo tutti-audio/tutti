@@ -88,9 +88,10 @@ impl Rig {
     }
 
     fn tick(&mut self, block_size: usize) {
+        let loan = self.messages.flex.then(|| self.meter.lend());
         self.cm.tick(
             self.messages,
-            &mut self.meter,
+            loan.as_deref(),
             &self.transport.now(),
             Samples(block_size),
             &mut |e| {
@@ -966,14 +967,9 @@ fn every_event_goes_out_on_the_masters_group() {
     transport.set_beat(8.0);
     transport.set_playing(true);
     let mut events = Vec::new();
-    let mut meter = ProjectMeter::default().reader();
-    cm.tick(
-        messages,
-        &mut meter,
-        &transport.now(),
-        Samples(4096),
-        &mut |e| events.push(e),
-    );
+    cm.tick(messages, None, &transport.now(), Samples(4096), &mut |e| {
+        events.push(e)
+    });
     let statuses: std::collections::BTreeSet<u8> = events
         .iter()
         .map(|(_, ump)| ((ump.0[0] >> 16) & 0xFF) as u8)
@@ -1173,8 +1169,13 @@ impl FlexMaster {
         block: Samples,
         emit: &mut impl FnMut(UmpAt),
     ) {
-        self.cm
-            .tick(self.messages, &mut self.reader, transport, block, emit);
+        self.cm.tick(
+            self.messages,
+            Some(&*self.reader.lend()),
+            transport,
+            block,
+            emit,
+        );
     }
 }
 

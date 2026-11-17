@@ -24,11 +24,10 @@ use tutti_ump::U7;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SyncMessages {
     /// The Beat Clock: Timing Clock (24 a quarter note), Song Position and
-    /// Start, Continue and Stop. MTC rides on it: with `clock` off the clock
-    /// does not follow the transport's edges and locates, so `mtc` sends
-    /// nothing either.
+    /// Start, Continue and Stop.
     pub clock: bool,
     /// MIDI Time Code: the quarter-frames, and a Full Message on every locate.
+    /// Sent with or without the Beat Clock.
     pub mtc: bool,
     /// MIDI Machine Control: Play, Stop and Locate to this recipient, each on
     /// the frame the transport changes. `None` sends none.

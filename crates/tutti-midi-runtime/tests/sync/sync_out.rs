@@ -11,8 +11,7 @@
 use tutti_graph::Node as _;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Editor, EventKind, Executor, IntoNode as _, NodeKey, Offset, TransportChanges,
-    TransportPosition,
+    Editor, EventKind, Executor, NodeKey, Offset, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
@@ -54,7 +53,12 @@ impl Rig {
     }
 
     fn over(node: SyncOut) -> Self {
-        let mut rig = EventRig::events_only(RATE, BLOCK, 1);
+        Self::at(RATE, node)
+    }
+
+    /// A node in a graph at `rate`.
+    fn at(rate: f64, node: SyncOut) -> Self {
+        let mut rig = EventRig::events_only(rate, BLOCK, 1);
         let controls = rig.editor.insert(NodeKey(1), "sync", node).controls;
         rig.feed(NodeKey(1), 0, 0);
         rig.commit();
@@ -415,7 +419,6 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     let got: Vec<_> = heard(&rig.seen).into_iter().map(|e| e.1).collect();
     assert_eq!(got[0], system(G, System::Start));
     assert_eq!(got[1], system(G, System::TimingClock));
-    let _ = SyncOut::new(MidiGroup::FIRST).into_node();
 }
 
 /// **Flex Data states the tempo and the node's meter (M2-104 7.5.3 and 7.5.4)**
@@ -532,5 +535,133 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     assert!(
         drive(&mut reset, rolling(Beat(0.0))).is_empty(),
         "the look after a reset is a first"
+    );
+}
+
+/// **An MMC Locate on a loop wrap is on the first frame of the next block**
+/// (RP-013 p.28): a block ends inside the loop having wrapped, the next block
+/// is the first to see the position is not where rolling would have left it.
+/// The loop is beats 2.0 to 2.1 (2 400 frames); the first block of 4 096 wraps
+/// on frame 2 400 and ends 1 696 frames into the loop, beat 2 + 1696/24000,
+/// 1 s + 848/24000 s = 1.03533 s, which at 30 fps is frame 31.06: `00:00:01:01`
+/// and 6 hundredths of a frame. One message, LOCATE then DEFERRED PLAY `03`,
+/// on frame 4 096; the wrap's own frame sends nothing.
+#[test]
+fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
+    use tutti_graph::LoopRange;
+    let looping = Some(LoopRange {
+        start: Beat(2.0),
+        end: Beat(2.1),
+    });
+    let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
+    let first = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    assert!(
+        sysex(&rig.block(BLOCK, first, &[])).is_empty(),
+        "the first look"
+    );
+    let next = TransportPosition::new(true, Bpm::of(120.0), beat(2.0, 1696), looping);
+    let got = sysex(&rig.block(BLOCK, next, &[]));
+    assert_eq!(
+        got,
+        [(
+            BLOCK as u64,
+            vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, 0x60, 0, 1, 1, 6, 0x03]
+        )]
+    );
+}
+
+/// **A graph at 44.1 kHz ticks every 918.75 frames**: `prepare` gives the
+/// clock the graph's rate. Tick `k` is the first frame at or after
+/// `918.75 k`: 0, 919, 1 838, 2 757 (2 756.25), 3 675 (exactly).
+#[test]
+fn a_44_1_khz_graph_ticks_every_918_75_frames() {
+    let mut rig = Rig::at(44_100.0, SyncOut::new(G).messages(clock()));
+    let got = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    let ticks: Vec<u64> = systems(&got, |m| (m == System::TimingClock).then_some(()))
+        .iter()
+        .map(|t| t.0)
+        .collect();
+    assert_eq!(ticks, [0, 919, 1838, 2757, 3675]);
+}
+
+/// **MTC without the Beat Clock sends Quarter Frames and Full Messages and no
+/// clock bytes** (M1 p.52: timecode does not need the clock). At 30 fps from
+/// beat 0: a Full Message of `00:00:00:00` and a quarter-frame every 400 frames
+/// on frame 0, no Start, Timing Clock, Song Position or Stop.
+#[test]
+fn mtc_sends_without_the_beat_clock() {
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            mtc: true,
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        },
+    );
+    let got = rig.block(1000, rolling(Beat(0.0)), &[(900, stopped(beat(0.0, 900)))]);
+    assert_eq!(sysex(&got), [(0, full_message(0x60, 0, 0))]);
+    let pieces: Vec<u64> = systems(&got, |m| match m {
+        System::TimeCode(_) => Some(()),
+        _ => None,
+    })
+    .iter()
+    .map(|p| p.0)
+    .collect();
+    assert_eq!(pieces, [0, 400, 800]);
+    let clock_bytes = systems(&got, |m| match m {
+        System::TimeCode(_) => None,
+        other => Some(other),
+    });
+    assert!(clock_bytes.is_empty(), "{clock_bytes:?}");
+}
+
+/// **A forked sync node states the real meter**, not a constant one: the fork
+/// registers its own reader on the cell the live node reads. A 3/4 meter is a
+/// Set Time Signature of 3, 2^2, 8 thirty-seconds on the start frame.
+#[test]
+fn a_fork_states_the_live_nodes_meter() {
+    use tutti_graph::{ForkMode, ForkTarget};
+    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
+        Beat(0.0),
+        TimeSignature::of(3, 4),
+    )])));
+    let mut rig = EventRig::new(RATE, BLOCK, 1);
+    rig.editor.insert(
+        NodeKey(1),
+        "sync",
+        SyncOut::new(G)
+            .meter(move || meter.reader())
+            .messages(SyncMessages {
+                flex: true,
+                ..SyncMessages::OFF
+            }),
+    );
+    rig.feed(NodeKey(1), 0, 0);
+    rig.commit();
+    let prepare = *rig.editor.prepare();
+    let (_fork, mut exec) = rig
+        .editor
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    let mut out = vec![0.0f32; 512];
+    exec.process(512, &rolling(Beat(0.0)), &[], &mut [&mut out[..]]);
+    let signatures: Vec<_> = heard(&rig.seen)
+        .into_iter()
+        .filter_map(|(frame, ump)| match ump.decode() {
+            Ok(Message::Flex(_, tutti_ump::Flex::SetTimeSignature(s))) => Some((frame, s)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        signatures,
+        [(
+            0,
+            tutti_ump::FlexTimeSignature {
+                numerator: 3,
+                denominator: 2,
+                thirty_seconds: 8
+            }
+        )]
     );
 }

@@ -14,7 +14,10 @@
 //!   DEFERRED PLAY while rolling) each on the frame the transport changes, so a
 //!   start and a stop in one block both go. The first block after MMC is turned
 //!   on only looks. A loop wrap inside a block is a locate on the next block's
-//!   first frame, where the position is first seen to have moved.
+//!   first frame, where the position is first seen to have moved: at most one
+//!   block late, unlike the clock's and MTC's, which are on the wrap's own
+//!   frame. A look sees only a position, so several wraps in one block can
+//!   leave it where rolling would have, and then no Locate goes at all.
 //! - Flex Data tempo and meter are the clock's too ([`SyncMessages::flex`]): the
 //!   meter is read from the cell [`meter`](SyncOut::meter) names (4/4 until one is).
 //! - **One rate**: MTC and an MMC LOCATE state time codes at
@@ -121,8 +124,10 @@ pub struct SyncOut {
     clock: ClockMaster,
     /// The reader of the project meter, lent once per block when Flex is on.
     meter: Reader<MeterMap>,
-    /// Registers another reader on the same meter: a fork's.
-    meter_source: MeterSource,
+    /// Registers another reader on the same meter, for a fork. Control side:
+    /// `into_parts` moves it into the fork source, so the audio node holds
+    /// only its reader.
+    meter_source: Option<MeterSource>,
     sender: MachineControlSender,
     group: MidiGroup,
     controls: Arc<SyncOutControls>,
@@ -162,7 +167,7 @@ impl SyncOut {
         Self {
             clock: ClockMaster::new(group, UNPREPARED_RATE),
             meter: (meter_source.0)(),
-            meter_source,
+            meter_source: Some(meter_source),
             sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
             group,
             controls: Arc::new(SyncOutControls {
@@ -182,32 +187,43 @@ impl SyncOut {
         mut self,
         register: impl Fn() -> Reader<MeterMap> + Send + Sync + 'static,
     ) -> Self {
-        self.meter_source = MeterSource(Arc::new(register));
-        self.meter = (self.meter_source.0)();
+        let source = MeterSource(Arc::new(register));
+        self.meter = (source.0)();
+        self.meter_source = Some(source);
         self
     }
 
     /// What the node sends from its first block.
     #[must_use]
     pub fn messages(self, messages: SyncMessages) -> Self {
-        self.controls.messages.set(messages);
+        self.controls
+            .messages
+            .set(SyncSettings::new().messages(messages).messages);
         self
     }
+}
 
-    /// Adds one Machine Control message's packets, at `at`, whole or not at all.
-    fn push_message(&mut self, at: Offset, payload: &[u8]) {
-        // A payload the sender built is seven-bit and short.
-        let Ok(packets) = Sysex7Packets::from_payload(self.group, payload) else {
-            self.losses.add(Losses::refused(1));
-            return;
-        };
-        if packets.len() > SYNC_OUT_EVENT_CAPACITY.saturating_sub(self.pending.len()) {
-            self.losses.add(Losses::lost(1));
-            return;
-        }
-        for packet in packets {
-            let _ = self.pending.push((at, packet));
-        }
+/// Adds one Machine Control message's packets to `pending`, at `at`, whole or
+/// not at all: a message with no room is counted lost, one that cannot be
+/// packed refused.
+fn push_message(
+    pending: &mut RtVec<UmpAt, SYNC_OUT_EVENT_CAPACITY>,
+    losses: &mut CounterWriter<Losses>,
+    group: MidiGroup,
+    at: Offset,
+    payload: &[u8],
+) {
+    // A payload the sender built is seven-bit and short.
+    let Ok(packets) = Sysex7Packets::from_payload(group, payload) else {
+        losses.add(Losses::refused(1));
+        return;
+    };
+    if packets.len() > SYNC_OUT_EVENT_CAPACITY.saturating_sub(pending.len()) {
+        losses.add(Losses::lost(1));
+        return;
+    }
+    for packet in packets {
+        let _ = pending.push((at, packet));
     }
 }
 
@@ -232,12 +248,14 @@ impl Node for SyncOut {
         let messages = self.controls.messages.get();
         self.pending.clear();
         let mut dropped = 0u64;
+        // Lent once, held across every piece of the block.
+        let loan = messages.flex.then(|| self.meter.lend());
         for (start, seg) in cx.env.segments() {
             let base = start.get();
             let pending = &mut self.pending;
             self.clock.tick(
                 messages,
-                &mut self.meter,
+                loan.as_deref(),
                 &seg.transport,
                 seg.block_len,
                 &mut |(at, ump): UmpAt| {
@@ -266,7 +284,13 @@ impl Node for SyncOut {
                         seg.frame,
                         cx.env.sample_rate,
                     ) {
-                        Ok(Some(payload)) => self.push_message(at, &payload),
+                        Ok(Some(payload)) => push_message(
+                            &mut self.pending,
+                            &mut self.losses,
+                            self.group,
+                            at,
+                            &payload,
+                        ),
                         Ok(None) => {}
                         Err(_) => self.losses.add(Losses::refused(1)),
                     }
@@ -317,12 +341,15 @@ impl IntoNode for SyncOut {
     /// What it sends, and what it could not.
     type Controls = Arc<SyncOutControls>;
 
-    fn into_parts(self) -> NodeParts<Arc<SyncOutControls>> {
+    fn into_parts(mut self) -> NodeParts<Arc<SyncOutControls>> {
         let controls = Arc::clone(&self.controls);
         let fork = SyncFork {
             group: self.group,
             controls: Arc::clone(&controls),
-            meter: self.meter_source.clone(),
+            meter: self
+                .meter_source
+                .take()
+                .unwrap_or_else(MeterSource::constant),
         };
         NodeParts {
             node: Box::new(self),
