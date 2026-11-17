@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-103/<section>#<n>          the nth sentence under the numbered section
@@ -21,263 +24,263 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-103/1.2.1#1 | both |  | permitted | M2-103 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-103/1.2.1#2 | both |  | permitted | M2-103 §1.2.1 | either device can start a Transaction at any time |  |  |
-m2-103/1.2.1#3 | both |  | permitted | M2-103 §1.2.1 | glossary: Process Inquiry lets one device read another's current MIDI message state, definition only |  |  |
-m2-103/1.2.1#4 | both |  | permitted | M2-103 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-103/1.2.1#5 | both |  | permitted | M2-103 §1.2.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-103/1.2.1#6 | both |  | recommended | M2-103 §1.2.1 | glossary: tempo is clocks per time unit, definition only |  |  |
-m2-103/1.2.1#7 | both |  | permitted | M2-103 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-103/1.2.1#8 | both |  | permitted | M2-103 §1.2.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
-m2-103/1.2.1#9 | both |  | permitted | M2-103 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte-stream systems |  |  |
-m2-103/2.1#1 | both |  | permitted | M2-103 §2.1 | Property Exchange lets devices work across many platforms and tie into DAWs and controllers |  |  |
-m2-103/2.1#2 | both |  | permitted | M2-103 §2.1 | custom applications can still offer their own experience |  |  |
-m2-103/3.1#1 | initiator |  | permitted | M2-103 §3.1 | an Initiator can subscribe to a Resource the Responder reports as subscribable |  |  |
-m2-103/3.1#2 | responder |  | permitted | M2-103 §3.1 | a manufacturer chooses which Resources its device implements |  |  |
-m2-103/3.1#3 | both |  | permitted | M2-103 §3.1 | Property Data is JSON by default, or the format the Resource definition gives |  |  |
-m2-103/3.1#4 | both |  | required | M2-103 §3.1 | where a common MIDI message (Program Change, Control Change) can make a change, the MIDI message is used rather than Property Exchange |  |  |
-m2-103/3.4#1 | both |  | permitted | M2-103 §3.4 | example data in the document may be made up |  |  |
-m2-103/3.4#2 | both |  | permitted | M2-103 §3.4 | the examples can include made-up content to explain a concept |  |  |
-m2-103/4#1 | both |  | recommended | M2-103 §4 | the example data is not definitive for any device | neg=1 |  |
-m2-103/5.2#1 | both |  | permitted | M2-103 §5.2 | a sender can send a Data Set as one SysEx message or as several chunks |  |  |
-m2-103/5.2#2 | both |  | permitted | M2-103 §5.2 | a message with Header Data only is not chunked | neg=1 |  |
-m2-103/5.2#3 | both |  | required | M2-103 §5.2 | Header Data is in the first chunk only |  |  |
-m2-103/5.2#4 | both |  | required | M2-103 §5.2 | a message larger than the peer's Receivable Maximum SysEx Message Size is broken into chunks |  |  |
-m2-103/5.2#5 | both |  | permitted | M2-103 §5.2 | a sender can chunk a message for its own reasons even when it would fit |  |  |
-m2-103/5.3#1 | both |  | required | M2-103 §5.3 | every chunk of a message carries the same Request ID |  |  |
-m2-103/5.3#2 | responder |  | required | M2-103 §5.3 | a reply carries the Request ID of its inquiry |  |  |
-m2-103/5.3#3 | responder |  | permitted | M2-103 §5.3 | a reply can take a while, which is why several requests overlap |  |  |
-m2-103/5.3#4 | both |  | required | M2-103 §5.3 | a device stays within the number of simultaneous requests the other side reports | neg=1 |  |
-m2-103/5.3#5 | responder |  | permitted | M2-103 §5.3 | a device can report one simultaneous-request limit shared by all its Initiators |  |  |
-m2-103/5.3#6 | initiator |  | permitted | M2-103 §5.3 | an Initiator expects that other Initiators may have used up a shared request limit |  |  |
-m2-103/5.3#7 | responder |  | permitted | M2-103 §5.3 | a Responder can answer a request with a Too Many Requests error, which the Initiator retries |  |  |
-m2-103/5.3#8 | initiator |  | recommended | M2-103 §5.3 | an Initiator at its request limit issues nothing new until a Transaction completes | neg=1 |  |
-m2-103/5.3#9 | both |  | permitted | M2-103 §5.3 | a Request ID can be reused once its Transaction is complete |  |  |
-m2-103/5.3#10 | both |  | permitted | M2-103 §5.3 | the same Request ID can be active on different MUID pairs without a clash |  |  |
-m2-103/6#1 | both |  | required | M2-103 §6 | Property Data is JSON by default |  |  |
-m2-103/6#2 | both |  | permitted | M2-103 §6 | with a mediaType Header Property the Property Data can be non-JSON |  |  |
-m2-103/6.1#1 | both |  | required | M2-103 §6.1 | Property names are camelCase ASCII using letters and digits only |  |  |
-m2-103/6.1#2 | both |  | required | M2-103 §6.1 | a Property name is never just a number | neg=1 |  |
-m2-103/6.1#3 | both |  | recommended | M2-103 §6.1 | Property names are short but meaningful |  |  |
-m2-103/6.1#4 | both |  | required | M2-103 §6.1 | hex numbers written in data are converted to decimal integers |  |  |
-m2-103/6.1.1#1 | both |  | permitted | M2-103 §6.1.1 | a forward slash can be written plain or escaped in Property Exchange JSON |  |  |
-m2-103/6.1.1#2 | both |  | required | M2-103 §6.1.1 | characters outside 7-bit ASCII are converted to UTF-16 and escaped with the JSON \u form |  |  |
-m2-103/6.1.2#1 | both |  | required | M2-103 §6.1.2 | an example JSON with non-ASCII text, which is escaped before it is sent |  |  |
-m2-103/6.1.4#1 | both |  | permitted | M2-103 §6.1.4 | manufacturers can add their own information inside MMA/AMEI Resources |  |  |
-m2-103/6.1.4#2 | both |  | required | M2-103 §6.1.4 | manufacturer-specific Properties are named with an x- prefix |  |  |
-m2-103/6.1.4#3 | both |  | required | M2-103 §6.1.4 | manufacturer-specific Properties follow all the other format rules |  |  |
-m2-103/6.1.5#1 | both |  | required | M2-103 §6.1.5 | non-JSON Property Data has a mediaType Header Property declaring its format |  |  |
-m2-103/6.1.5#2 | both |  | required | M2-103 §6.1.5 | non-JSON Property Data is encoded into 7-bit SysEx data |  |  |
-m2-103/6.1.5#3 | both |  | permitted | M2-103 §6.1.5 | non-JSON Property Data can also be compressed |  |  |
-m2-103/6.1.6#1 | both |  | permitted | M2-103 §6.1.6 | Property Data is JSON by default or another type declared by mediaType |  |  |
-m2-103/6.1.6#2 | both |  | permitted | M2-103 §6.1.6 | Property Data can use compression or encoding when both devices support it |  |  |
-m2-103/6.1.6#3 | initiator |  | required | M2-103 §6.1.6 | supported compression and encoding types are found with a ResourceList inquiry |  |  |
-m2-103/6.1.6#4 | both |  | required | M2-103 §6.1.6 | a compressed or encoded payload has its type declared in the Header Data |  |  |
-m2-103/6.1.7#1 | both |  | required | M2-103 §6.1.7 | Property Data that is not plain ASCII text is Mcoded7-encoded from 8-bit to 7-bit |  |  |
-m2-103/6.2.1#1 | both |  | required | M2-103 §6.2.1 | steps for formatting uncompressed, unencoded Property Data |  |  |
-m2-103/6.2.2#1 | both |  | required | M2-103 §6.2.2 | steps for formatting zlib-compressed Property Data, which is always Mcoded7-encoded |  |  |
-m2-103/6.2.3#1 | both |  | required | M2-103 §6.2.3 | steps for formatting encoded Property Data |  |  |
-m2-103/6.2.4#1 | both |  | required | M2-103 §6.2.4 | steps for formatting zlib-compressed and Mcoded7-encoded Property Data |  |  |
-m2-103/7.1#1 | both |  | required | M2-103 §7.1 | Header Data holds Properties in JSON |  |  |
-m2-103/7.1#2 | both |  | required | M2-103 §7.1 | Header Data follows the Property Data rules plus the extra Header rules |  |  |
-m2-103/7.1#3 | both |  | required | M2-103 §7.1 | Header Data is JSON even when the Property Data is not |  |  |
-m2-103/7.1.1#1 | both |  | required | M2-103 §7.1.1 | Header Properties are numbers, booleans or strings |  |  |
-m2-103/7.1.1#2 | both |  | required | M2-103 §7.1.1 | a described string Property defines a maximum length |  |  |
-m2-103/7.1.1#3 | both |  | required | M2-103 §7.1.1 | Header Property names are camelCase ASCII of at most 20 characters |  |  |
-m2-103/7.1.1#4 | initiator |  | required | M2-103 §7.1.1 | in a request the Resource is the first Property |  |  |
-m2-103/7.1.1#5 | responder |  | required | M2-103 §7.1.1 | in a reply the status is the first Property |  |  |
-m2-103/7.1.1#6 | both |  | required | M2-103 §7.1.1 | in a subscription message the command is the first Property |  |  |
-m2-103/7.1.1#7 | both |  | required | M2-103 §7.1.1 | Header Data has no whitespace | neg=1 |  |
-m2-103/7.1.1#8 | both |  | required | M2-103 §7.1.1 | Header Data is on one line |  |  |
-m2-103/7.2#1 | initiator |  | required | M2-103 §7.2 | a request Header Property value is one of the standard types |  |  |
-m2-103/7.2#2 | initiator |  | required | M2-103 §7.2 | a fragment of a Header Property condition for when it may be set, no behaviour of its own |  |  |
-m2-103/7.3#1 | responder |  | required | M2-103 §7.3 | reply Header Data uses the status list of the status section |  |  |
-m2-103/7.3#2 | responder |  | required | M2-103 §7.3 | a reply Header Property value is one of the standard types |  |  |
-m2-103/7.3#3 | responder |  | required | M2-103 §7.3 | the reply's encoding matches the mutualEncoding asked for in the Get Property Data inquiry |  |  |
-m2-103/7.3#4 | initiator |  | recommended | M2-103 §7.3 | a Resource's reply details can be cached |  |  |
-m2-103/7.4#1 | responder |  | required | M2-103 §7.4 | every Property Exchange reply carries a status Property in its Header Data |  |  |
-m2-103/7.4#2 | responder |  | recommended | M2-103 §7.4 | a status other than 200 comes with a message |  |  |
-m2-103/7.4#3 | responder |  | recommended | M2-103 §7.4 | the message says why the status arose, not what the code means |  |  |
-m2-103/7.4#4 | responder |  | permitted | M2-103 §7.4 | a message can also be used with a successful Transaction |  |  |
-m2-103/7.4#5 | responder |  | required | M2-103 §7.4 | a Responder confirms a successful Set Property Data with status 200 |  |  |
-m2-103/7.4#6 | responder |  | permitted | M2-103 §7.4 | the message can report an error code with an explanation |  |  |
-m2-103/7.4.1#1 | responder |  | required | M2-103 §7.4.1 | replies use only the status codes in the table |  |  |
-m2-103/7.4.1#2 | both |  | recommended | M2-103 §7.4.1 | the status code table groups codes, 300s meaning retry |  |  |
-m2-103/7.4.1#3 | both |  | permitted | M2-103 §7.4.1 | a sentence fragment in the status table example, no behaviour of its own |  |  |
-m2-103/7.4.2#1 | responder |  | permitted | M2-103 §7.4.2 | MIDI-CI NAK can be used when no better error report is possible |  |  |
-m2-103/7.4.3#1 | responder |  | recommended | M2-103 §7.4.3 | cacheTime is the seconds the Initiator keeps the Property Data cached |  |  |
-m2-103/7.4.3#2 | initiator |  | recommended | M2-103 §7.4.3 | during cacheTime the Initiator uses the cached Property Data |  |  |
-m2-103/7.4.3#3 | both |  | recommended | M2-103 §7.4.3 | implementations keep cacheTime per request |  |  |
-m2-103/7.4.3#4 | initiator |  | permitted | M2-103 §7.4.3 | an implementation can keep one cacheTime per Resource instead |  |  |
-m2-103/7.4.3#5 | initiator |  | recommended | M2-103 §7.4.3 | with one cacheTime per Resource the oldest is kept even when partial data renews it |  |  |
-m2-103/7.4.3#6 | initiator |  | recommended | M2-103 §7.4.3 | if the oldest cacheTime has expired when partial data arrives, all cached data is dropped |  |  |
-m2-103/7.5#1 | both |  | required | M2-103 §7.5 | non-JSON Property Data has a mediaType Header Property naming its format |  |  |
-m2-103/7.6#1 | both |  | permitted | M2-103 §7.6 | future Resources can need new Header Properties |  |  |
-m2-103/7.6#2 | both |  | required | M2-103 §7.6 | any new Header Property follows the Header rules of this section |  | other-side | M2-103 §7.6: rule on the authors of future Resource specifications
-m2-103/8#1 | both |  | required | M2-103 §8 | Resource names are nouns |  |  |
-m2-103/8#2 | both |  | required | M2-103 §8 | Resource names are PascalCase with no spaces | neg=1 |  |
-m2-103/8.1#1 | both |  | required | M2-103 §8.1 | Resources are JSON by default under the format rules |  |  |
-m2-103/8.1#2 | both |  | permitted | M2-103 §8.1 | a Resource carries non-JSON data only when its mediaType says so |  |  |
-m2-103/8.3#1 | both |  | recommended | M2-103 §8.3 | standard Resources give a unified approach to common uses |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications
-m2-103/8.3#2 | both |  | required | M2-103 §8.3 | standard Resources describe their Properties, intent, rules and relations |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications
-m2-103/8.3#3 | both |  | required | M2-103 §8.3 | a Resource spec says which Properties are required and which optional |  | other-side | M2-103 §8.3: rule on the authors of Resource specifications
-m2-103/8.3#4 | responder |  | required | M2-103 §8.3 | a required Property, including a required string, is never empty | neg=1 |  |
-m2-103/8.4#1 | responder |  | permitted | M2-103 §8.4 | manufacturers can design devices with custom Resources |  |  |
-m2-103/8.4#2 | responder |  | required | M2-103 §8.4 | a custom Resource follows the Property Exchange style rules |  |  |
-m2-103/8.4#3 | responder |  | required | M2-103 §8.4 | custom Resource names carry an X- prefix |  |  |
-m2-103/8.5#1 | both |  | permitted | M2-103 §8.5 | a Resource can require a resId Property |  |  |
-m2-103/8.5#2 | responder |  | permitted | M2-103 §8.5 | a Resource can have several entries, any of which can be returned |  |  |
-m2-103/8.5#3 | responder |  | required | M2-103 §8.5 | such a Resource gives each entry a unique resId value |  |  |
-m2-103/8.5#4 | initiator |  | required | M2-103 §8.5 | every inquiry for such a Resource carries a resId choosing the entry |  |  |
-m2-103/8.5#5 | responder |  | required | M2-103 §8.5 | a Resource using resId has requireResId true in the ResourceList |  |  |
-m2-103/8.6#1 | responder |  | required | M2-103 §8.6 | List Resource names end with List |  |  |
-m2-103/8.6.1#1 | responder |  | required | M2-103 §8.6.1 | a reply to a List Resource is an array of objects |  |  |
-m2-103/8.6.1#2 | responder |  | recommended | M2-103 §8.6.1 | list objects are one level deep |  |  |
-m2-103/8.6.1#3 | responder |  | required | M2-103 §8.6.1 | list objects can hold arrays of plain values or strings but not nested objects, except a link | neg=1 |  |
-m2-103/8.6.1#4 | responder |  | permitted | M2-103 §8.6.1 | a list object can carry a link Property pointing to a Resource with more detail |  |  |
-m2-103/8.6.2#1 | responder |  | required | M2-103 §8.6.2 | a Resource that paginates says so with canPaginate true in the ResourceList |  |  |
-m2-103/8.6.2#2 | initiator |  | permitted | M2-103 §8.6.2 | offset and limit in a Get Property Data header page a List Resource |  |  |
-m2-103/8.6.2#3 | initiator |  | required | M2-103 §8.6.2 | a paginated inquiry has both offset and limit |  |  |
-m2-103/8.6.2#4 | responder |  | required | M2-103 §8.6.2 | every reply for a paginating List Resource carries totalCount |  |  |
-m2-103/8.6.2#5 | initiator |  | recommended | M2-103 §8.6.2 | the first paginated inquiry starts at offset 0 |  |  |
-m2-103/8.6.2#6 | initiator |  | permitted | M2-103 §8.6.2 | an Initiator plans its pages from totalCount and its own limit |  |  |
-m2-103/8.6.2#7 | responder |  | required | M2-103 §8.6.2 | without offset and limit the reply holds the whole list |  |  |
-m2-103/9.1#1 | initiator |  | recommended | M2-103 §9.1 | a ResourceList inquiry comes before other Property Exchange inquiries |  |  |
-m2-103/9.1#2 | responder |  | required | M2-103 §9.1 | every Property Exchange device answers a ResourceList inquiry with the Resources it supports |  |  |
-m2-103/9.1#3 | responder |  | required | M2-103 §9.1 | the ResourceList reply does not list ResourceList itself | neg=1 |  |
-m2-103/9.2#1 | responder |  | recommended | M2-103 §9.2 | devices support the Foundational Resources DeviceInfo, ChannelList and JSONSchema |  |  |
-m2-103/10#1 | initiator |  | required | M2-103 §10 | a full SET sends Set Property Data to update a whole Resource |  |  |
-m2-103/10#2 | initiator |  | required | M2-103 §10 | a full SET carries the whole Resource Data a Get reply would hold |  |  |
-m2-103/10#3 | initiator |  | permitted | M2-103 §10 | a full SET is used only when canSet is partial or full for the Resource |  |  |
-m2-103/10#4 | initiator |  | required | M2-103 §10 | a partial SET sends Set Property Data for incremental changes |  |  |
-m2-103/10#5 | initiator |  | required | M2-103 §10 | a partial SET has setPartial true in its header |  |  |
-m2-103/10#6 | initiator |  | required | M2-103 §10 | each key in a partial SET is a JSON Pointer into the Resource Data |  |  |
-m2-103/10#7 | initiator |  | required | M2-103 §10 | a partial SET value is a string, number or boolean |  |  |
-m2-103/10#8 | initiator |  | required | M2-103 §10 | a partial SET value is never an object or array | neg=1 |  |
-m2-103/10#9 | initiator |  | permitted | M2-103 §10 | a partial SET is used only when canSet is partial for the Resource |  |  |
-m2-103/10.2#1 | initiator |  | permitted | M2-103 §10.2 | one partial SET can carry several changes |  |  |
-m2-103/11#1 | both |  | permitted | M2-103 §11 | a subscription keeps a Resource's data in step on both devices |  |  |
-m2-103/11#2 | initiator |  | permitted | M2-103 §11 | an Initiator subscribes while it needs ongoing access to the data |  |  |
-m2-103/11#3 | responder |  | required | M2-103 §11 | a Responder marks subscribable Resources in its ResourceList reply |  |  |
-m2-103/11#4 | initiator |  | permitted | M2-103 §11 | an Initiator subscribes with a Subscription message whose command is start |  |  |
-m2-103/11#5 | responder |  | required | M2-103 §11 | a changed subscribed Property is announced with a Subscription message of partial, full or notify |  |  |
-m2-103/11#6 | initiator |  | required | M2-103 §11 | an Initiator that changes a subscribed Property updates the Responder one of two ways |  |  |
-m2-103/11#7 | initiator |  | required | M2-103 §11 | if a MIDI message can set the Property on the Responder, the Initiator sends that |  |  |
-m2-103/11#8 | initiator |  | required | M2-103 §11 | otherwise the Initiator sends Set Property Data |  |  |
-m2-103/11#9 | responder |  | required | M2-103 §11 | each subscription update from the Responder is a Subscription message |  |  |
-m2-103/11#10 | both |  | required | M2-103 §11 | each reply to a Subscription message is a Reply to Subscription message |  |  |
-m2-103/11#11 | initiator |  | permitted | M2-103 §11 | an Initiator can also subscribe to Resources linked from a subscribed one |  |  |
-m2-103/11#12 | initiator |  | permitted | M2-103 §11 | an update can arrive some time after the Initiator's Set Property Data |  |  |
-m2-103/11#13 | both |  | recommended | M2-103 §11 | a device showing a Property does not show duplicate data | neg=1 |  |
-m2-103/11.1#1 | initiator |  | permitted | M2-103 §11.1 | an Initiator can hold several subscriptions at once |  |  |
-m2-103/11.1#2 | responder |  | required | M2-103 §11.1 | the Responder assigns the Subscription Id when a subscription starts |  |  |
-m2-103/11.1#3 | both |  | required | M2-103 §11.1 | the Subscription Id is used in all updates and in ending the subscription |  |  |
-m2-103/11.1#4 | initiator |  | required | M2-103 §11.1 | the start command creates a new subscription |  |  |
-m2-103/11.1#5 | responder |  | permitted | M2-103 §11.1 | the partial command sends an update for a subset of the data |  |  |
-m2-103/11.1#6 | responder |  | required | M2-103 §11.1 | a partial update uses the format of a partial Set Property Data |  |  |
-m2-103/11.1#7 | responder |  | required | M2-103 §11.1 | the full command sends the whole data in the format of a Get reply |  |  |
-m2-103/11.1#8 | responder |  | required | M2-103 §11.1 | the notify command asks the Initiator for a complete refresh |  |  |
-m2-103/11.1#9 | initiator |  | required | M2-103 §11.1 | an Initiator never sends notify and instead performs Get Property Data | neg=1 |  |
-m2-103/11.1.1#1 | responder |  | recommended | M2-103 §11.1.1 | a small change is announced with partial |  |  |
-m2-103/11.1.1#2 | responder |  | recommended | M2-103 §11.1.1 | a large change is announced with full |  |  |
-m2-103/11.1.1#3 | responder |  | recommended | M2-103 §11.1.1 | a Simple Property Resource is announced with full |  |  |
-m2-103/11.1.1#4 | responder |  | recommended | M2-103 §11.1.1 | partial and full are used only when the data fits one chunk |  |  |
-m2-103/11.2#1 | both |  | required | M2-103 §11.2 | a device that gets a Subscription message replies with a Reply to Subscription message reporting success or failure |  |  |
-m2-103/11.2#2 | both |  | permitted | M2-103 §11.2 | after a failure the sender can retry or end the subscription with command end |  |  |
-m2-103/11.2#3 | initiator |  | required | M2-103 §11.2 | an Initiator that cannot handle a partial or full update takes defined recovery steps |  |  |
-m2-103/11.3#1 | responder |  | required | M2-103 §11.3 | a full update for an array or object uses the partial Set Property Data format |  |  |
-m2-103/11.4#1 | both |  | permitted | M2-103 §11.4 | two devices can have several subscriptions at once, each with its own Subscription Id |  |  |
-m2-103/11.4#2 | initiator |  | required | M2-103 §11.4 | an Initiator refreshes its data with the same Header Data it used first |  |  |
-m2-103/11.5#1 | initiator |  | recommended | M2-103 §11.5 | an Initiator ends a subscription it no longer needs |  |  |
-m2-103/11.5#2 | both |  | recommended | M2-103 §11.5 | a subscription stays active until one of the listed end events |  |  |
-m2-103/12#1 | both |  | permitted | M2-103 §12 | notifications can be sent by an Initiator or a Responder |  |  |
-m2-103/12.1.1#1 | responder |  | permitted | M2-103 §12.1.1 | a Responder ends a running Transaction with NAK status 0x20 and status data 0 |  |  |
-m2-103/12.1.1#2 | initiator |  | required | M2-103 §12.1.1 | on that NAK for a Get, the Initiator stops expecting chunks for the Request Id |  |  |
-m2-103/12.1.1#3 | initiator |  | required | M2-103 §12.1.1 | on that NAK for a Set, the Initiator stops sending chunks for the Request Id |  |  |
-m2-103/12.1.1#4 | both |  | required | M2-103 §12.1.1 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |
-m2-103/12.1.2#1 | initiator |  | permitted | M2-103 §12.1.2 | an Initiator ends a running Transaction with NAK status 0x20 and status data 1 |  |  |
-m2-103/12.1.2#2 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Get, the Responder stops sending chunks for the Request Id |  |  |
-m2-103/12.1.2#3 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Set, the Responder stops expecting chunks for the Request Id |  |  |
-m2-103/12.1.2#4 | both |  | required | M2-103 §12.1.2 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |
-m2-103/12.1.3#1 | both |  | recommended | M2-103 §12.1.3 | the Notify Terminate Inquiry message is not sent | neg=1 |  |
-m2-103/12.1.3#2 | both |  | required | M2-103 §12.1.3 | a receiver still terminates the running request on a Notify with status 144 |  |  |
-m2-103/12.1.3#3 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request ID stop at once after a Notify that ends them |  |  |
-m2-103/12.1.3#4 | both |  | permitted | M2-103 §12.1.3 | earlier revisions let either device end a request with Notify status 144, informative |  |  |
-m2-103/12.1.3#5 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request Id stop at once |  |  |
-m2-103/12.2#1 | responder |  | required | M2-103 §12.2 | a Responder replies to any inquiry within three seconds unless it asks for more time |  |  |
-m2-103/12.2#2 | both |  | required | M2-103 §12.2 | the gap between chunks of one message is under three seconds |  |  |
-m2-103/12.2.1#1 | responder |  | recommended | M2-103 §12.2.1 | a Responder that cannot reply or send the next chunk in time sends ACK status 0x10 with the wait in its status data |  |  |
-m2-103/12.2.1#2 | initiator |  | required | M2-103 §12.2.1 | on that ACK the Initiator extends its timeout by at least the wait asked |  |  |
-m2-103/12.2.2#1 | both |  | recommended | M2-103 §12.2.2 | the Notify Timeout Wait is deprecated and the ACK form is used instead |  |  |
-m2-103/12.2.2#2 | both |  | recommended | M2-103 §12.2.2 | a receiver treats a Notify with status 100 as the Timeout Wait ACK |  |  |
-m2-103/12.2.2#3 | both |  | permitted | M2-103 §12.2.2 | earlier revisions let a Responder send Notify status 100 mid-reply, informative |  |  |
-m2-103/12.2.2#4 | both |  | recommended | M2-103 §12.2.2 | that Notify is deprecated in favour of the ACK method |  |  |
-m2-103/12.2.3#1 | initiator |  | permitted | M2-103 §12.2.3 | an Initiator that hears nothing in time can end the Transaction with NAK status 0x42 |  |  |
-m2-103/12.2.3#2 | both |  | required | M2-103 §12.2.3 | both sides treat the Transaction as concluded, with no reply |  |  |
-m2-103/12.2.4#1 | both |  | recommended | M2-103 §12.2.4 | the Notify Timeout Has Occurred is deprecated and the NAK form is used instead |  |  |
-m2-103/12.2.4#2 | both |  | recommended | M2-103 §12.2.4 | a device treats a Notify with status 408 as the timeout NAK |  |  |
-m2-103/12.2.4#3 | both |  | permitted | M2-103 §12.2.4 | earlier revisions let a Responder cancel with Notify status 408, informative |  |  |
-m2-103/12.2.4#4 | initiator |  | permitted | M2-103 §12.2.4 | an Initiator that hears nothing in time can end the inquiry with Notify status 408 |  |  |
-m2-103/13#1 | responder |  | permitted | M2-103 §13 | a Resource returning an object or array can link to related Resources |  |  |
-m2-103/13#2 | both |  | required | M2-103 §13 | future specifications define the roles of linked Resources |  | other-side | M2-103 §13: rule on the authors of Resource specifications
-m2-103/13#3 | both |  | required | M2-103 §13 | role definitions come from the MMA/AMEI, a Resource spec or a manufacturer |  | other-side | M2-103 §13: rule on the authors of Resource specifications
-m2-103/13#4 | both |  | required | M2-103 §13 | a manufacturer-specific role is prefixed with x- |  |  |
-m2-103/13#5 | initiator |  | permitted | M2-103 §13 | an Initiator can show link information to the user |  |  |
-m2-103/13.1#1 | responder |  | permitted | M2-103 §13.1 | a Resource can be closely tied to or depend on another |  |  |
-m2-103/13.1#2 | responder |  | permitted | M2-103 §13.1 | a Resource can declare those ties with an optional links Property |  |  |
-m2-103/13.1#3 | both |  | permitted | M2-103 §13.1 | a triggered action can change device state, settings or configuration |  |  |
-m2-103/13.1#4 | responder |  | recommended | M2-103 §13.1 | a Responder declares only the roles it can process |  |  |
-m2-103/13.1#5 | initiator |  | required | M2-103 §13.1 | an Initiator uses only roles the Responder declared |  |  |
-m2-103/13.1.1#1 | both |  | permitted | M2-103 §13.1.1 | a simpleAction can trigger its action directly or show a confirmation |  |  |
-m2-103/13.1.1#2 | initiator |  | required | M2-103 §13.1.1 | an activated action sends Set Property Data |  |  |
-m2-103/13.1.1#3 | responder |  | recommended | M2-103 §13.1.1 | a Set reply can carry a msg text for the user to see |  |  |
-m2-103/13.1.1#4 | responder |  | required | M2-103 §13.1.1 | an action Resource is listed in the ResourceList |  |  |
-m2-103/13.1.1#5 | initiator |  | required | M2-103 §13.1.1 | an action link whose Resource needs a resId fills it |  |  |
-m2-103/13.1.2#1 | responder |  | permitted | M2-103 §13.1.2 | a Link can offer options for the user to choose from |  |  |
-m2-103/13.1.2#2 | responder |  | required | M2-103 §13.1.2 | a selector Link entry has three parts |  |  |
-m2-103/13.1.2#3 | responder |  | required | M2-103 §13.1.2 | the selected-property Resource is a Simple Property Resource |  |  |
-m2-103/13.1.2#4 | initiator |  | permitted | M2-103 §13.1.2 | the user selects a single option from the list |  |  |
-m2-103/13.1.2#5 | responder |  | required | M2-103 §13.1.2 | the options list is a List Resource |  |  |
-m2-103/13.1.2#6 | initiator |  | required | M2-103 §13.1.2 | a selector Link whose Resource needs a resId fills it |  |  |
-m2-103/13.1.2#7 | initiator |  | required | M2-103 §13.1.2 | the characters-only resId requirement is filled |  |  |
-m2-103/13.1.2#8 | initiator |  | required | M2-103 §13.1.2 | a user's selection sends Set Property Data to the action Resource |  |  |
-m2-103/13.1.2#9 | responder |  | recommended | M2-103 §13.1.2 | a Set reply can carry a msg text for the user to see |  |  |
-m2-103/14#1 | responder |  | required | M2-103 §14 | a ResourceList inquiry is answered with a list of every Resource the device supports |  |  |
-m2-103/14#2 | responder |  | permitted | M2-103 §14 | a device can override individual settings of a Resource |  |  |
-m2-103/14#3 | responder |  | required | M2-103 §14 | the ResourceList reply includes every standard and manufacturer Resource the device supports |  |  |
-m2-103/14#4 | responder |  | required | M2-103 §14 | the ResourceList reply has no entry for ResourceList itself | neg=1 |  |
-m2-103/14.2#1 | responder |  | permitted | M2-103 §14.2 | a firmware-upload style Resource can set a ResourceList flag to false |  |  |
-m2-103/14.2#2 | responder |  | required | M2-103 §14.2 | requireResId says an inquiry must carry resId in its header |  |  |
-m2-103/14.2#3 | responder |  | recommended | M2-103 §14.2 | a manufacturer-specific Resource defines its schema |  |  |
-m2-103/14.2.1#1 | responder |  | required | M2-103 §14.2.1 | a List Resource entry carries the extra pagination Properties where they apply |  |  |
-m2-103/14.2.1#2 | responder |  | permitted | M2-103 §14.2.1 | a List Resource can declare whether it paginates, default false |  |  |
-m2-103/14.2.1#3 | responder |  | permitted | M2-103 §14.2.1 | a List Resource spec can make pagination mandatory |  |  |
-m2-103/14.3#1 | responder |  | permitted | M2-103 §14.3 | each ResourceList object explains how a Resource can be used on the device |  |  |
-m2-103/14.3#2 | responder |  | required | M2-103 §14.3 | an entry that departs from a default value states that Property and value |  |  |
-m2-103/14.3#3 | responder |  | required | M2-103 §14.3 | standard Resources keep the defaults for schema, requireResId, canPaginate, canSet and canGet unless their spec allows otherwise | neg=1 |  |
-m2-103/14.4#1 | responder |  | required | M2-103 §14.4 | standard Resources need no JSON Schema exchange and their defaults are not overridden | neg=1 |  |
-m2-103/14.4#2 | responder |  | required | M2-103 §14.4 | a manufacturer-specific JSON Resource supplies at least a simple JSON Schema |  |  |
-m2-103/14.4#3 | responder |  | required | M2-103 §14.4 | the JSON Schema has at least title and type |  |  |
-m2-103/14.4#4 | responder |  | permitted | M2-103 §14.4 | another JSON Schema revision is declared with the $schema Property |  |  |
-m2-103/14.4.1#1 | responder |  | permitted | M2-103 §14.4.1 | a simple manufacturer Resource can carry its whole JSON Schema in the schema Property |  |  |
-m2-103/14.4.2#1 | initiator |  | permitted | M2-103 §14.4.2 | an Initiator fetches a JSON Schema with Get Property Data for the JSONSchema Resource |  |  |
-m2-103/14.5#1 | responder |  | permitted | M2-103 §14.5 | the columns Property describes a table view of a List Resource |  |  |
-m2-103/14.6#1 | responder |  | required | M2-103 §14.6 | for non-JSON Resources the JSON Schema type is left empty |  |  |
-m2-103/14.6#2 | responder |  | required | M2-103 §14.6 | the data type of a non-JSON Resource comes from mediaType in the Header Data |  |  |
-m2-103/14.6#3 | responder |  | required | M2-103 §14.6 | the schema still gives the Resource its title |  |  |
-m2-103/15#1 | both |  | permitted | M2-103 §15 | binary Property Data can need a thousand chunks or more |  |  |
-m2-103/15#2 | both |  | permitted | M2-103 §15 | a receiver can slow a sender with a Flow Control ACK between chunks |  |  |
-m2-103/15#3 | initiator |  | required | M2-103 §15 | an Initiator asks for Flow Control with flowControl true in the Header Data |  |  |
-m2-103/15.2#1 | initiator |  | recommended | M2-103 §15.2 | flowControl in a Get header asks for Flow Control ACKs |  |  |
-m2-103/15.2#2 | responder |  | required | M2-103 §15.2 | without flowControl true the Responder sends all chunks with no ACK wait |  |  |
-m2-103/15.2#3 | responder |  | recommended | M2-103 §15.2 | flowControl on a Resource without Flow Control support is answered status 406 |  |  |
-m2-103/15.3#1 | initiator |  | recommended | M2-103 §15.3 | flowControl in a Set header asks for Flow Control ACKs |  |  |
-m2-103/15.3#2 | responder |  | recommended | M2-103 §15.3 | a Set without flowControl on a Resource with fcOnSet is answered status 407 |  |  |
-m2-103/15.3#3 | responder |  | recommended | M2-103 §15.3 | flowControl on a Resource without Flow Control support is answered status 406 |  |  |
-m2-103/15.3#4 | both |  | recommended | M2-103 §15.3 | a sender keeps transmitted data until its ACK arrives so it can resend | neg=1 |  |
-m2-103/15.4#1 | both |  | recommended | M2-103 §15.4 | a receiver asks for the last chunk again if a chunk is lost or corrupted |  |  |
-m2-103/15.5#1 | both |  | permitted | M2-103 §15.5 | a sender can time out waiting for an ACK |  |  |
-m2-103/15.5#2 | both |  | recommended | M2-103 §15.5 | with Flow Control a chunk with no ACK in three seconds is sent again |  |  |
-m2-103/15.5#3 | both |  | recommended | M2-103 §15.5 | after three failed resends the sender fails and sends a Terminate NAK |  |  |
-m2-103/15.5#4 | both |  | permitted | M2-103 §15.5 | a receiver of Property Data can time out |  |  |
-m2-103/15.5#5 | both |  | required | M2-103 §15.5 | sender and receiver use the timeout rules of the timeout section to end an unresolved timeout |  |  |
+m2-103/1.2.1#1 | both |  | permitted | M2-103 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-103/1.2.1#2 | both |  | permitted | M2-103 §1.2.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-103/1.2.1#3 | both |  | permitted | M2-103 §1.2.1 | glossary: Process Inquiry lets one device read another's current MIDI message state, definition only |  |  |  | a275bb07f619853f
+m2-103/1.2.1#4 | both |  | permitted | M2-103 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-103/1.2.1#5 | both |  | permitted | M2-103 §1.2.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | df715a47c47fb193
+m2-103/1.2.1#6 | both |  | recommended | M2-103 §1.2.1 | glossary: tempo is clocks per time unit, definition only |  |  |  | e4d91cad7c188b45
+m2-103/1.2.1#7 | both |  | permitted | M2-103 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-103/1.2.1#8 | both |  | permitted | M2-103 §1.2.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |  | bbe806d164dfe0e4
+m2-103/1.2.1#9 | both |  | permitted | M2-103 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte-stream systems |  |  |  | 7feaf7f9d052ffeb
+m2-103/2.1#1 | both |  | permitted | M2-103 §2.1 | Property Exchange lets devices work across many platforms and tie into DAWs and controllers |  |  |  | 50efc8ce53dc7fcb
+m2-103/2.1#2 | both |  | permitted | M2-103 §2.1 | custom applications can still offer their own experience |  |  |  | 1fa6e1cad6900d1a
+m2-103/3.1#1 | initiator |  | permitted | M2-103 §3.1 | an Initiator can subscribe to a Resource the Responder reports as subscribable |  |  |  | 2e03d5b2e2d26538
+m2-103/3.1#2 | responder |  | permitted | M2-103 §3.1 | a manufacturer chooses which Resources its device implements |  |  |  | c24822f3deeeb09e
+m2-103/3.1#3 | both |  | permitted | M2-103 §3.1 | Property Data is JSON by default, or the format the Resource definition gives |  |  |  | dcb0179b0c8772b0
+m2-103/3.1#4 | both |  | required | M2-103 §3.1 | where a common MIDI message (Program Change, Control Change) can make a change, the MIDI message is used rather than Property Exchange |  |  |  | 4ba48374a9e4f5ec
+m2-103/3.4#1 | both |  | permitted | M2-103 §3.4 | example data in the document may be made up |  |  |  | 70695ee01c230836
+m2-103/3.4#2 | both |  | permitted | M2-103 §3.4 | the examples can include made-up content to explain a concept |  |  |  | 968c0fda5047c666
+m2-103/4#1 | both |  | recommended | M2-103 §4 | the example data is not definitive for any device | neg=1 |  |  | 4ba110660ed8dc2a
+m2-103/5.2#1 | both |  | permitted | M2-103 §5.2 | a sender can send a Data Set as one SysEx message or as several chunks |  |  |  | afcd442482653217
+m2-103/5.2#2 | both |  | permitted | M2-103 §5.2 | a message with Header Data only is not chunked | neg=1 |  |  | eb31013841327313
+m2-103/5.2#3 | both |  | required | M2-103 §5.2 | Header Data is in the first chunk only |  |  |  | f5c9a2989817d913
+m2-103/5.2#4 | both |  | required | M2-103 §5.2 | a message larger than the peer's Receivable Maximum SysEx Message Size is broken into chunks |  |  |  | 5501e2268ec901e0
+m2-103/5.2#5 | both |  | permitted | M2-103 §5.2 | a sender can chunk a message for its own reasons even when it would fit |  |  |  | 3112e5ceac57eafe
+m2-103/5.3#1 | both |  | required | M2-103 §5.3 | every chunk of a message carries the same Request ID |  |  |  | f1f6bc70eefc9dcb
+m2-103/5.3#2 | responder |  | required | M2-103 §5.3 | a reply carries the Request ID of its inquiry |  |  |  | 3eab810df9d04c04
+m2-103/5.3#3 | responder |  | permitted | M2-103 §5.3 | a reply can take a while, which is why several requests overlap |  |  |  | 53a7a24e60506bfb
+m2-103/5.3#4 | both |  | required | M2-103 §5.3 | a device stays within the number of simultaneous requests the other side reports | neg=1 |  |  | fc8449df8af564fe
+m2-103/5.3#5 | responder |  | permitted | M2-103 §5.3 | a device can report one simultaneous-request limit shared by all its Initiators |  |  |  | 5a22d58b9a19b49c
+m2-103/5.3#6 | initiator |  | permitted | M2-103 §5.3 | an Initiator expects that other Initiators may have used up a shared request limit |  |  |  | a0b6e52619ea73d6
+m2-103/5.3#7 | responder |  | permitted | M2-103 §5.3 | a Responder can answer a request with a Too Many Requests error, which the Initiator retries |  |  |  | 568fe74c9c3b295a
+m2-103/5.3#8 | initiator |  | recommended | M2-103 §5.3 | an Initiator at its request limit issues nothing new until a Transaction completes | neg=1 |  |  | 7479264194e3bf77
+m2-103/5.3#9 | both |  | permitted | M2-103 §5.3 | a Request ID can be reused once its Transaction is complete |  |  |  | ee31955f351201ba
+m2-103/5.3#10 | both |  | permitted | M2-103 §5.3 | the same Request ID can be active on different MUID pairs without a clash |  |  |  | 70fdc53150e043d8
+m2-103/6#1 | both |  | required | M2-103 §6 | Property Data is JSON by default |  |  |  | 2b5c4ed89146afdd
+m2-103/6#2 | both |  | permitted | M2-103 §6 | with a mediaType Header Property the Property Data can be non-JSON |  |  |  | fcde128673c92030
+m2-103/6.1#1 | both |  | required | M2-103 §6.1 | Property names are camelCase ASCII using letters and digits only |  |  |  | 8de140e772e5f336
+m2-103/6.1#2 | both |  | required | M2-103 §6.1 | a Property name is never just a number | neg=1 |  |  | 0315e1dc429bb632
+m2-103/6.1#3 | both |  | recommended | M2-103 §6.1 | Property names are short but meaningful |  |  |  | 1a70d7b72e900b7e
+m2-103/6.1#4 | both |  | required | M2-103 §6.1 | hex numbers written in data are converted to decimal integers |  |  |  | 4b209d7b73cfd2b8
+m2-103/6.1.1#1 | both |  | permitted | M2-103 §6.1.1 | a forward slash can be written plain or escaped in Property Exchange JSON |  |  |  | a0f53876e186ede1
+m2-103/6.1.1#2 | both |  | required | M2-103 §6.1.1 | characters outside 7-bit ASCII are converted to UTF-16 and escaped with the JSON \u form |  |  |  | 54631d81b1d24c74
+m2-103/6.1.2#1 | both |  | required | M2-103 §6.1.2 | an example JSON with non-ASCII text, which is escaped before it is sent |  |  |  | 65077c7f1d866926
+m2-103/6.1.4#1 | both |  | permitted | M2-103 §6.1.4 | manufacturers can add their own information inside MMA/AMEI Resources |  |  |  | 8052c611093993db
+m2-103/6.1.4#2 | both |  | required | M2-103 §6.1.4 | manufacturer-specific Properties are named with an x- prefix |  |  |  | 50f8ea277df518bc
+m2-103/6.1.4#3 | both |  | required | M2-103 §6.1.4 | manufacturer-specific Properties follow all the other format rules |  |  |  | 0194c51df1bfb424
+m2-103/6.1.5#1 | both |  | required | M2-103 §6.1.5 | non-JSON Property Data has a mediaType Header Property declaring its format |  |  |  | 117b05840ae8400c
+m2-103/6.1.5#2 | both |  | required | M2-103 §6.1.5 | non-JSON Property Data is encoded into 7-bit SysEx data |  |  |  | abcd517bdc1b5d79
+m2-103/6.1.5#3 | both |  | permitted | M2-103 §6.1.5 | non-JSON Property Data can also be compressed |  |  |  | 97d6b3b8503deee8
+m2-103/6.1.6#1 | both |  | permitted | M2-103 §6.1.6 | Property Data is JSON by default or another type declared by mediaType |  |  |  | eb88a44b0841f6af
+m2-103/6.1.6#2 | both |  | permitted | M2-103 §6.1.6 | Property Data can use compression or encoding when both devices support it |  |  |  | e963ced9fa190e7c
+m2-103/6.1.6#3 | initiator |  | required | M2-103 §6.1.6 | supported compression and encoding types are found with a ResourceList inquiry |  |  |  | 707923f512a66c77
+m2-103/6.1.6#4 | both |  | required | M2-103 §6.1.6 | a compressed or encoded payload has its type declared in the Header Data |  |  |  | d30e6132f3534130
+m2-103/6.1.7#1 | both |  | required | M2-103 §6.1.7 | Property Data that is not plain ASCII text is Mcoded7-encoded from 8-bit to 7-bit |  |  |  | 92646e0bbdd0a490
+m2-103/6.2.1#1 | both |  | required | M2-103 §6.2.1 | steps for formatting uncompressed, unencoded Property Data |  |  |  | 9ae111cb68309804
+m2-103/6.2.2#1 | both |  | required | M2-103 §6.2.2 | steps for formatting zlib-compressed Property Data, which is always Mcoded7-encoded |  |  |  | a296235bcacf7fd9
+m2-103/6.2.3#1 | both |  | required | M2-103 §6.2.3 | steps for formatting encoded Property Data |  |  |  | 3a9f76587cdbf113
+m2-103/6.2.4#1 | both |  | required | M2-103 §6.2.4 | steps for formatting zlib-compressed and Mcoded7-encoded Property Data |  |  |  | a296235bcacf7fd9
+m2-103/7.1#1 | both |  | required | M2-103 §7.1 | Header Data holds Properties in JSON |  |  |  | 3d8802bec1d50a2a
+m2-103/7.1#2 | both |  | required | M2-103 §7.1 | Header Data follows the Property Data rules plus the extra Header rules |  |  |  | 20bf9ba6e7344025
+m2-103/7.1#3 | both |  | required | M2-103 §7.1 | Header Data is JSON even when the Property Data is not |  |  |  | b7a23901dcb1cb87
+m2-103/7.1.1#1 | both |  | required | M2-103 §7.1.1 | Header Properties are numbers, booleans or strings |  |  |  | 904334e9d4300307
+m2-103/7.1.1#2 | both |  | required | M2-103 §7.1.1 | a described string Property defines a maximum length |  |  |  | 4b1675e4a6b6c7f0
+m2-103/7.1.1#3 | both |  | required | M2-103 §7.1.1 | Header Property names are camelCase ASCII of at most 20 characters |  |  |  | 114f43428c59a69b
+m2-103/7.1.1#4 | initiator |  | required | M2-103 §7.1.1 | in a request the Resource is the first Property |  |  |  | 82e2facc78e32daa
+m2-103/7.1.1#5 | responder |  | required | M2-103 §7.1.1 | in a reply the status is the first Property |  |  |  | e487d7d37e2cea5d
+m2-103/7.1.1#6 | both |  | required | M2-103 §7.1.1 | in a subscription message the command is the first Property |  |  |  | 0b68e2902f6f3ae0
+m2-103/7.1.1#7 | both |  | required | M2-103 §7.1.1 | Header Data has no whitespace | neg=1 |  |  | f80ecb49f6cc691a
+m2-103/7.1.1#8 | both |  | required | M2-103 §7.1.1 | Header Data is on one line |  |  |  | 18f78262cce44951
+m2-103/7.2#1 | initiator |  | required | M2-103 §7.2 | a request Header Property value is one of the standard types |  |  |  | 72acd00668405ef9
+m2-103/7.2#2 | initiator |  | required | M2-103 §7.2 | a fragment of a Header Property condition for when it may be set, no behaviour of its own |  |  |  | d1d95b1b635a09cb
+m2-103/7.3#1 | responder |  | required | M2-103 §7.3 | reply Header Data uses the status list of the status section |  |  |  | ac368c6f176d8e11
+m2-103/7.3#2 | responder |  | required | M2-103 §7.3 | a reply Header Property value is one of the standard types |  |  |  | 6922c50662995c30
+m2-103/7.3#3 | responder |  | required | M2-103 §7.3 | the reply's encoding matches the mutualEncoding asked for in the Get Property Data inquiry |  |  |  | 088e9230b47a2465
+m2-103/7.3#4 | initiator |  | recommended | M2-103 §7.3 | a Resource's reply details can be cached |  |  |  | 9fc934bebe0d3adb
+m2-103/7.4#1 | responder |  | required | M2-103 §7.4 | every Property Exchange reply carries a status Property in its Header Data |  |  |  | ab6cb90a047acba4
+m2-103/7.4#2 | responder |  | recommended | M2-103 §7.4 | a status other than 200 comes with a message |  |  |  | a7ddd8472e0d240f
+m2-103/7.4#3 | responder |  | recommended | M2-103 §7.4 | the message says why the status arose, not what the code means |  |  |  | 21c38209f5c6aae6
+m2-103/7.4#4 | responder |  | permitted | M2-103 §7.4 | a message can also be used with a successful Transaction |  |  |  | 4c7ce5fa89dbe769
+m2-103/7.4#5 | responder |  | required | M2-103 §7.4 | a Responder confirms a successful Set Property Data with status 200 |  |  |  | 0dc2d3452d9fdd4d
+m2-103/7.4#6 | responder |  | permitted | M2-103 §7.4 | the message can report an error code with an explanation |  |  |  | b0d86bd3adb2e70c
+m2-103/7.4.1#1 | responder |  | required | M2-103 §7.4.1 | replies use only the status codes in the table |  |  |  | a22eea89c6fd3aff
+m2-103/7.4.1#2 | both |  | recommended | M2-103 §7.4.1 | the status code table groups codes, 300s meaning retry |  |  |  | 8a154f3f0a6afb9f
+m2-103/7.4.1#3 | both |  | permitted | M2-103 §7.4.1 | a sentence fragment in the status table example, no behaviour of its own |  |  |  | 53103d93b2cde7c8
+m2-103/7.4.2#1 | responder |  | permitted | M2-103 §7.4.2 | MIDI-CI NAK can be used when no better error report is possible |  |  |  | 71773996cdb8a1ca
+m2-103/7.4.3#1 | responder |  | recommended | M2-103 §7.4.3 | cacheTime is the seconds the Initiator keeps the Property Data cached |  |  |  | 030fb5cfe310158c
+m2-103/7.4.3#2 | initiator |  | recommended | M2-103 §7.4.3 | during cacheTime the Initiator uses the cached Property Data |  |  |  | cfb6371ce80c1fff
+m2-103/7.4.3#3 | both |  | recommended | M2-103 §7.4.3 | implementations keep cacheTime per request |  |  |  | 75c2ccf4d7a60f2f
+m2-103/7.4.3#4 | initiator |  | permitted | M2-103 §7.4.3 | an implementation can keep one cacheTime per Resource instead |  |  |  | 5337e5a7182fac96
+m2-103/7.4.3#5 | initiator |  | recommended | M2-103 §7.4.3 | with one cacheTime per Resource the oldest is kept even when partial data renews it |  |  |  | 03b50755f36f684f
+m2-103/7.4.3#6 | initiator |  | recommended | M2-103 §7.4.3 | if the oldest cacheTime has expired when partial data arrives, all cached data is dropped |  |  |  | 76ad714dd95f32df
+m2-103/7.5#1 | both |  | required | M2-103 §7.5 | non-JSON Property Data has a mediaType Header Property naming its format |  |  |  | 5b71f6a80bdc76d4
+m2-103/7.6#1 | both |  | permitted | M2-103 §7.6 | future Resources can need new Header Properties |  |  |  | f7f34a89003e1ae5
+m2-103/7.6#2 | both |  | required | M2-103 §7.6 | any new Header Property follows the Header rules of this section |  | other-side | M2-103 §7.6: rule on the authors of future Resource specifications | f649325e4e3b0992
+m2-103/8#1 | both |  | required | M2-103 §8 | Resource names are nouns |  |  |  | 947da11e594ec8b2
+m2-103/8#2 | both |  | required | M2-103 §8 | Resource names are PascalCase with no spaces | neg=1 |  |  | 803269d18c4e8595
+m2-103/8.1#1 | both |  | required | M2-103 §8.1 | Resources are JSON by default under the format rules |  |  |  | 91bff67edac0a589
+m2-103/8.1#2 | both |  | permitted | M2-103 §8.1 | a Resource carries non-JSON data only when its mediaType says so |  |  |  | 4406ba2e6c7bdf79
+m2-103/8.3#1 | both |  | recommended | M2-103 §8.3 | standard Resources give a unified approach to common uses |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications | 34ef82298f6f8ae6
+m2-103/8.3#2 | both |  | required | M2-103 §8.3 | standard Resources describe their Properties, intent, rules and relations |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications | aa66ac47f3543276
+m2-103/8.3#3 | both |  | required | M2-103 §8.3 | a Resource spec says which Properties are required and which optional |  | other-side | M2-103 §8.3: rule on the authors of Resource specifications | fe2c0b1f6423cf98
+m2-103/8.3#4 | responder |  | required | M2-103 §8.3 | a required Property, including a required string, is never empty | neg=1 |  |  | 95f99e3b4cd7f384
+m2-103/8.4#1 | responder |  | permitted | M2-103 §8.4 | manufacturers can design devices with custom Resources |  |  |  | c4a08dd92fc6e9e5
+m2-103/8.4#2 | responder |  | required | M2-103 §8.4 | a custom Resource follows the Property Exchange style rules |  |  |  | 005b90398e13b5ab
+m2-103/8.4#3 | responder |  | required | M2-103 §8.4 | custom Resource names carry an X- prefix |  |  |  | 853eef0e437caab2
+m2-103/8.5#1 | both |  | permitted | M2-103 §8.5 | a Resource can require a resId Property |  |  |  | c1cc4a68d5b1cf6e
+m2-103/8.5#2 | responder |  | permitted | M2-103 §8.5 | a Resource can have several entries, any of which can be returned |  |  |  | 1271e62771ec4c2d
+m2-103/8.5#3 | responder |  | required | M2-103 §8.5 | such a Resource gives each entry a unique resId value |  |  |  | b2c50ea084d5df3a
+m2-103/8.5#4 | initiator |  | required | M2-103 §8.5 | every inquiry for such a Resource carries a resId choosing the entry |  |  |  | abc73cb83d598347
+m2-103/8.5#5 | responder |  | required | M2-103 §8.5 | a Resource using resId has requireResId true in the ResourceList |  |  |  | 7a5608f548ac77f0
+m2-103/8.6#1 | responder |  | required | M2-103 §8.6 | List Resource names end with List |  |  |  | 6de73a7ab56ee6a3
+m2-103/8.6.1#1 | responder |  | required | M2-103 §8.6.1 | a reply to a List Resource is an array of objects |  |  |  | e405814853dfb466
+m2-103/8.6.1#2 | responder |  | recommended | M2-103 §8.6.1 | list objects are one level deep |  |  |  | 0b9289aa0cb11f5b
+m2-103/8.6.1#3 | responder |  | required | M2-103 §8.6.1 | list objects can hold arrays of plain values or strings but not nested objects, except a link | neg=1 |  |  | 31fa7c3bcfc15cdb
+m2-103/8.6.1#4 | responder |  | permitted | M2-103 §8.6.1 | a list object can carry a link Property pointing to a Resource with more detail |  |  |  | e959b2b593f8fdfe
+m2-103/8.6.2#1 | responder |  | required | M2-103 §8.6.2 | a Resource that paginates says so with canPaginate true in the ResourceList |  |  |  | 40c0005c426d070e
+m2-103/8.6.2#2 | initiator |  | permitted | M2-103 §8.6.2 | offset and limit in a Get Property Data header page a List Resource |  |  |  | e292d6f44e5a441e
+m2-103/8.6.2#3 | initiator |  | required | M2-103 §8.6.2 | a paginated inquiry has both offset and limit |  |  |  | 0275e7939ab54eac
+m2-103/8.6.2#4 | responder |  | required | M2-103 §8.6.2 | every reply for a paginating List Resource carries totalCount |  |  |  | 786a8dd81ba095fb
+m2-103/8.6.2#5 | initiator |  | recommended | M2-103 §8.6.2 | the first paginated inquiry starts at offset 0 |  |  |  | ae171ce77aaac266
+m2-103/8.6.2#6 | initiator |  | permitted | M2-103 §8.6.2 | an Initiator plans its pages from totalCount and its own limit |  |  |  | bfe1a308401704d5
+m2-103/8.6.2#7 | responder |  | required | M2-103 §8.6.2 | without offset and limit the reply holds the whole list |  |  |  | fd785b670d60296e
+m2-103/9.1#1 | initiator |  | recommended | M2-103 §9.1 | a ResourceList inquiry comes before other Property Exchange inquiries |  |  |  | 11c64d1124c877e3
+m2-103/9.1#2 | responder |  | required | M2-103 §9.1 | every Property Exchange device answers a ResourceList inquiry with the Resources it supports |  |  |  | d54c481f313fe469
+m2-103/9.1#3 | responder |  | required | M2-103 §9.1 | the ResourceList reply does not list ResourceList itself | neg=1 |  |  | 517129a5b2f81ba9
+m2-103/9.2#1 | responder |  | recommended | M2-103 §9.2 | devices support the Foundational Resources DeviceInfo, ChannelList and JSONSchema |  |  |  | 490817b9997c8dd2
+m2-103/10#1 | initiator |  | required | M2-103 §10 | a full SET sends Set Property Data to update a whole Resource |  |  |  | f7961759cbc17253
+m2-103/10#2 | initiator |  | required | M2-103 §10 | a full SET carries the whole Resource Data a Get reply would hold |  |  |  | 9bbba9624f0b51d1
+m2-103/10#3 | initiator |  | permitted | M2-103 §10 | a full SET is used only when canSet is partial or full for the Resource |  |  |  | dd9fa6c3cc10c1ea
+m2-103/10#4 | initiator |  | required | M2-103 §10 | a partial SET sends Set Property Data for incremental changes |  |  |  | d40372347409fa2a
+m2-103/10#5 | initiator |  | required | M2-103 §10 | a partial SET has setPartial true in its header |  |  |  | 4044d24e1a7328c8
+m2-103/10#6 | initiator |  | required | M2-103 §10 | each key in a partial SET is a JSON Pointer into the Resource Data |  |  |  | e1736db9199f6f4f
+m2-103/10#7 | initiator |  | required | M2-103 §10 | a partial SET value is a string, number or boolean |  |  |  | 85a966cdd5c2f989
+m2-103/10#8 | initiator |  | required | M2-103 §10 | a partial SET value is never an object or array | neg=1 |  |  | 30a01df9e8f6805c
+m2-103/10#9 | initiator |  | permitted | M2-103 §10 | a partial SET is used only when canSet is partial for the Resource |  |  |  | 8d72a68f782c0016
+m2-103/10.2#1 | initiator |  | permitted | M2-103 §10.2 | one partial SET can carry several changes |  |  |  | 4df0b510d9f39738
+m2-103/11#1 | both |  | permitted | M2-103 §11 | a subscription keeps a Resource's data in step on both devices |  |  |  | f157a8621270fb18
+m2-103/11#2 | initiator |  | permitted | M2-103 §11 | an Initiator subscribes while it needs ongoing access to the data |  |  |  | 7bb23712da9f1272
+m2-103/11#3 | responder |  | required | M2-103 §11 | a Responder marks subscribable Resources in its ResourceList reply |  |  |  | 46649214b8041967
+m2-103/11#4 | initiator |  | permitted | M2-103 §11 | an Initiator subscribes with a Subscription message whose command is start |  |  |  | eefe09ed5b9963c6
+m2-103/11#5 | responder |  | required | M2-103 §11 | a changed subscribed Property is announced with a Subscription message of partial, full or notify |  |  |  | 13c155118f3e17c0
+m2-103/11#6 | initiator |  | required | M2-103 §11 | an Initiator that changes a subscribed Property updates the Responder one of two ways |  |  |  | 2342886f7a306440
+m2-103/11#7 | initiator |  | required | M2-103 §11 | if a MIDI message can set the Property on the Responder, the Initiator sends that |  |  |  | e26cb10b8549066d
+m2-103/11#8 | initiator |  | required | M2-103 §11 | otherwise the Initiator sends Set Property Data |  |  |  | 403a369082c49fa0
+m2-103/11#9 | responder |  | required | M2-103 §11 | each subscription update from the Responder is a Subscription message |  |  |  | 5501f6169831301b
+m2-103/11#10 | both |  | required | M2-103 §11 | each reply to a Subscription message is a Reply to Subscription message |  |  |  | 6508a913d571ac85
+m2-103/11#11 | initiator |  | permitted | M2-103 §11 | an Initiator can also subscribe to Resources linked from a subscribed one |  |  |  | 6e3ea7f6a46164f7
+m2-103/11#12 | initiator |  | permitted | M2-103 §11 | an update can arrive some time after the Initiator's Set Property Data |  |  |  | 853a2d9408fef4a5
+m2-103/11#13 | both |  | recommended | M2-103 §11 | a device showing a Property does not show duplicate data | neg=1 |  |  | 7f748f4b1ae26168
+m2-103/11.1#1 | initiator |  | permitted | M2-103 §11.1 | an Initiator can hold several subscriptions at once |  |  |  | cd94f5a034a896ef
+m2-103/11.1#2 | responder |  | required | M2-103 §11.1 | the Responder assigns the Subscription Id when a subscription starts |  |  |  | 48e803a83ae7c636
+m2-103/11.1#3 | both |  | required | M2-103 §11.1 | the Subscription Id is used in all updates and in ending the subscription |  |  |  | 8fe263792ee84c3e
+m2-103/11.1#4 | initiator |  | required | M2-103 §11.1 | the start command creates a new subscription |  |  |  | 3463e333a991aba3
+m2-103/11.1#5 | responder |  | permitted | M2-103 §11.1 | the partial command sends an update for a subset of the data |  |  |  | fc69d23f27d583ed
+m2-103/11.1#6 | responder |  | required | M2-103 §11.1 | a partial update uses the format of a partial Set Property Data |  |  |  | 91a38b9e439ae961
+m2-103/11.1#7 | responder |  | required | M2-103 §11.1 | the full command sends the whole data in the format of a Get reply |  |  |  | e794ade838d28063
+m2-103/11.1#8 | responder |  | required | M2-103 §11.1 | the notify command asks the Initiator for a complete refresh |  |  |  | 9c2ef3deea6dcc26
+m2-103/11.1#9 | initiator |  | required | M2-103 §11.1 | an Initiator never sends notify and instead performs Get Property Data | neg=1 |  |  | b14a67acc06f1a4c
+m2-103/11.1.1#1 | responder |  | recommended | M2-103 §11.1.1 | a small change is announced with partial |  |  |  | 33b967b8aa80b744
+m2-103/11.1.1#2 | responder |  | recommended | M2-103 §11.1.1 | a large change is announced with full |  |  |  | cbc2330a5a2bd661
+m2-103/11.1.1#3 | responder |  | recommended | M2-103 §11.1.1 | a Simple Property Resource is announced with full |  |  |  | b8710d5ab4fc22b3
+m2-103/11.1.1#4 | responder |  | recommended | M2-103 §11.1.1 | partial and full are used only when the data fits one chunk |  |  |  | 485cff33f168c668
+m2-103/11.2#1 | both |  | required | M2-103 §11.2 | a device that gets a Subscription message replies with a Reply to Subscription message reporting success or failure |  |  |  | 2c82539d7ed0bfdb
+m2-103/11.2#2 | both |  | permitted | M2-103 §11.2 | after a failure the sender can retry or end the subscription with command end |  |  |  | e9f59999670c8570
+m2-103/11.2#3 | initiator |  | required | M2-103 §11.2 | an Initiator that cannot handle a partial or full update takes defined recovery steps |  |  |  | 9978477b61e60da4
+m2-103/11.3#1 | responder |  | required | M2-103 §11.3 | a full update for an array or object uses the partial Set Property Data format |  |  |  | 503e65aefb7895b6
+m2-103/11.4#1 | both |  | permitted | M2-103 §11.4 | two devices can have several subscriptions at once, each with its own Subscription Id |  |  |  | 268e1c0da6720300
+m2-103/11.4#2 | initiator |  | required | M2-103 §11.4 | an Initiator refreshes its data with the same Header Data it used first |  |  |  | ee97f0e3a635d9f2
+m2-103/11.5#1 | initiator |  | recommended | M2-103 §11.5 | an Initiator ends a subscription it no longer needs |  |  |  | 71547627560a9c8c
+m2-103/11.5#2 | both |  | recommended | M2-103 §11.5 | a subscription stays active until one of the listed end events |  |  |  | f8e6db6727ac7b71
+m2-103/12#1 | both |  | permitted | M2-103 §12 | notifications can be sent by an Initiator or a Responder |  |  |  | 10ef183ea62d7713
+m2-103/12.1.1#1 | responder |  | permitted | M2-103 §12.1.1 | a Responder ends a running Transaction with NAK status 0x20 and status data 0 |  |  |  | 275a9e03ade79356
+m2-103/12.1.1#2 | initiator |  | required | M2-103 §12.1.1 | on that NAK for a Get, the Initiator stops expecting chunks for the Request Id |  |  |  | 0e9bfde6b927defb
+m2-103/12.1.1#3 | initiator |  | required | M2-103 §12.1.1 | on that NAK for a Set, the Initiator stops sending chunks for the Request Id |  |  |  | 9fb3c666a02898fc
+m2-103/12.1.1#4 | both |  | required | M2-103 §12.1.1 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |  | ee6f0283220040e7
+m2-103/12.1.2#1 | initiator |  | permitted | M2-103 §12.1.2 | an Initiator ends a running Transaction with NAK status 0x20 and status data 1 |  |  |  | 4cb3b40850bdce06
+m2-103/12.1.2#2 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Get, the Responder stops sending chunks for the Request Id |  |  |  | 692adbb19d45666b
+m2-103/12.1.2#3 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Set, the Responder stops expecting chunks for the Request Id |  |  |  | 933e3aedc22c2762
+m2-103/12.1.2#4 | both |  | required | M2-103 §12.1.2 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |  | c2152aee3dba72ee
+m2-103/12.1.3#1 | both |  | recommended | M2-103 §12.1.3 | the Notify Terminate Inquiry message is not sent | neg=1 |  |  | 4c12c36205375e33
+m2-103/12.1.3#2 | both |  | required | M2-103 §12.1.3 | a receiver still terminates the running request on a Notify with status 144 |  |  |  | 3f1135903be227f4
+m2-103/12.1.3#3 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request ID stop at once after a Notify that ends them |  |  |  | b15c4e77e89d305e
+m2-103/12.1.3#4 | both |  | permitted | M2-103 §12.1.3 | earlier revisions let either device end a request with Notify status 144, informative |  |  |  | de5930277d5b3833
+m2-103/12.1.3#5 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request Id stop at once |  |  |  | b15c4e77e89d305e
+m2-103/12.2#1 | responder |  | required | M2-103 §12.2 | a Responder replies to any inquiry within three seconds unless it asks for more time |  |  |  | 4b700e3636cd5cb6
+m2-103/12.2#2 | both |  | required | M2-103 §12.2 | the gap between chunks of one message is under three seconds |  |  |  | 5548977d24434980
+m2-103/12.2.1#1 | responder |  | recommended | M2-103 §12.2.1 | a Responder that cannot reply or send the next chunk in time sends ACK status 0x10 with the wait in its status data |  |  |  | a9d73058f0185357
+m2-103/12.2.1#2 | initiator |  | required | M2-103 §12.2.1 | on that ACK the Initiator extends its timeout by at least the wait asked |  |  |  | bfdb55b512d204d5
+m2-103/12.2.2#1 | both |  | recommended | M2-103 §12.2.2 | the Notify Timeout Wait is deprecated and the ACK form is used instead |  |  |  | 61ca93e6a871b38a
+m2-103/12.2.2#2 | both |  | recommended | M2-103 §12.2.2 | a receiver treats a Notify with status 100 as the Timeout Wait ACK |  |  |  | a59fc0acc5650ee7
+m2-103/12.2.2#3 | both |  | permitted | M2-103 §12.2.2 | earlier revisions let a Responder send Notify status 100 mid-reply, informative |  |  |  | 12860d44ae832c61
+m2-103/12.2.2#4 | both |  | recommended | M2-103 §12.2.2 | that Notify is deprecated in favour of the ACK method |  |  |  | aede469174c34f69
+m2-103/12.2.3#1 | initiator |  | permitted | M2-103 §12.2.3 | an Initiator that hears nothing in time can end the Transaction with NAK status 0x42 |  |  |  | e69307e9337c3b7f
+m2-103/12.2.3#2 | both |  | required | M2-103 §12.2.3 | both sides treat the Transaction as concluded, with no reply |  |  |  | 21712afad23ad052
+m2-103/12.2.4#1 | both |  | recommended | M2-103 §12.2.4 | the Notify Timeout Has Occurred is deprecated and the NAK form is used instead |  |  |  | 02b40884f576fb13
+m2-103/12.2.4#2 | both |  | recommended | M2-103 §12.2.4 | a device treats a Notify with status 408 as the timeout NAK |  |  |  | 80f88235700b2906
+m2-103/12.2.4#3 | both |  | permitted | M2-103 §12.2.4 | earlier revisions let a Responder cancel with Notify status 408, informative |  |  |  | 081835e4cf044df0
+m2-103/12.2.4#4 | initiator |  | permitted | M2-103 §12.2.4 | an Initiator that hears nothing in time can end the inquiry with Notify status 408 |  |  |  | ae072c053ff7d717
+m2-103/13#1 | responder |  | permitted | M2-103 §13 | a Resource returning an object or array can link to related Resources |  |  |  | 8b81d19ac2ae8a59
+m2-103/13#2 | both |  | required | M2-103 §13 | future specifications define the roles of linked Resources |  | other-side | M2-103 §13: rule on the authors of Resource specifications | 64353b4cedbc6e81
+m2-103/13#3 | both |  | required | M2-103 §13 | role definitions come from the MMA/AMEI, a Resource spec or a manufacturer |  | other-side | M2-103 §13: rule on the authors of Resource specifications | ada305a633426755
+m2-103/13#4 | both |  | required | M2-103 §13 | a manufacturer-specific role is prefixed with x- |  |  |  | c512774ce5e89a6d
+m2-103/13#5 | initiator |  | permitted | M2-103 §13 | an Initiator can show link information to the user |  |  |  | 827eca9a4dbddcd2
+m2-103/13.1#1 | responder |  | permitted | M2-103 §13.1 | a Resource can be closely tied to or depend on another |  |  |  | 14fe67e8f5af0b68
+m2-103/13.1#2 | responder |  | permitted | M2-103 §13.1 | a Resource can declare those ties with an optional links Property |  |  |  | 82148cb8c96b5722
+m2-103/13.1#3 | both |  | permitted | M2-103 §13.1 | a triggered action can change device state, settings or configuration |  |  |  | c3fcb07e301d1dd0
+m2-103/13.1#4 | responder |  | recommended | M2-103 §13.1 | a Responder declares only the roles it can process |  |  |  | 725c317508405931
+m2-103/13.1#5 | initiator |  | required | M2-103 §13.1 | an Initiator uses only roles the Responder declared |  |  |  | ed34ad80ab5266e2
+m2-103/13.1.1#1 | both |  | permitted | M2-103 §13.1.1 | a simpleAction can trigger its action directly or show a confirmation |  |  |  | 986d08800e2033c2
+m2-103/13.1.1#2 | initiator |  | required | M2-103 §13.1.1 | an activated action sends Set Property Data |  |  |  | 89243390ae797d6a
+m2-103/13.1.1#3 | responder |  | recommended | M2-103 §13.1.1 | a Set reply can carry a msg text for the user to see |  |  |  | f2f3a08f2cd86d69
+m2-103/13.1.1#4 | responder |  | required | M2-103 §13.1.1 | an action Resource is listed in the ResourceList |  |  |  | 9d70748fcd7b4939
+m2-103/13.1.1#5 | initiator |  | required | M2-103 §13.1.1 | an action link whose Resource needs a resId fills it |  |  |  | 9bf970abd8c183f9
+m2-103/13.1.2#1 | responder |  | permitted | M2-103 §13.1.2 | a Link can offer options for the user to choose from |  |  |  | fd186002e8c5c27a
+m2-103/13.1.2#2 | responder |  | required | M2-103 §13.1.2 | a selector Link entry has three parts |  |  |  | cee270ea1de9c6be
+m2-103/13.1.2#3 | responder |  | required | M2-103 §13.1.2 | the selected-property Resource is a Simple Property Resource |  |  |  | 9114c30e0bb11890
+m2-103/13.1.2#4 | initiator |  | permitted | M2-103 §13.1.2 | the user selects a single option from the list |  |  |  | 551c54792d508752
+m2-103/13.1.2#5 | responder |  | required | M2-103 §13.1.2 | the options list is a List Resource |  |  |  | 93b26be542231994
+m2-103/13.1.2#6 | initiator |  | required | M2-103 §13.1.2 | a selector Link whose Resource needs a resId fills it |  |  |  | c5e4481be2c0fd72
+m2-103/13.1.2#7 | initiator |  | required | M2-103 §13.1.2 | the characters-only resId requirement is filled |  |  |  | cdea275f146bed91
+m2-103/13.1.2#8 | initiator |  | required | M2-103 §13.1.2 | a user's selection sends Set Property Data to the action Resource |  |  |  | c240d434ae79177a
+m2-103/13.1.2#9 | responder |  | recommended | M2-103 §13.1.2 | a Set reply can carry a msg text for the user to see |  |  |  | f2f3a08f2cd86d69
+m2-103/14#1 | responder |  | required | M2-103 §14 | a ResourceList inquiry is answered with a list of every Resource the device supports |  |  |  | 1a4d0bfbb287d7bb
+m2-103/14#2 | responder |  | permitted | M2-103 §14 | a device can override individual settings of a Resource |  |  |  | 238a43a87b5c3168
+m2-103/14#3 | responder |  | required | M2-103 §14 | the ResourceList reply includes every standard and manufacturer Resource the device supports |  |  |  | 76510a34b3d7155b
+m2-103/14#4 | responder |  | required | M2-103 §14 | the ResourceList reply has no entry for ResourceList itself | neg=1 |  |  | b74b36883031aa39
+m2-103/14.2#1 | responder |  | permitted | M2-103 §14.2 | a firmware-upload style Resource can set a ResourceList flag to false |  |  |  | 1099cb3e2fef2686
+m2-103/14.2#2 | responder |  | required | M2-103 §14.2 | requireResId says an inquiry must carry resId in its header |  |  |  | c3133d35efe40dcd
+m2-103/14.2#3 | responder |  | recommended | M2-103 §14.2 | a manufacturer-specific Resource defines its schema |  |  |  | 170f83444607e0c6
+m2-103/14.2.1#1 | responder |  | required | M2-103 §14.2.1 | a List Resource entry carries the extra pagination Properties where they apply |  |  |  | b3b69d2118f31b77
+m2-103/14.2.1#2 | responder |  | permitted | M2-103 §14.2.1 | a List Resource can declare whether it paginates, default false |  |  |  | 6df5907c0db85f9e
+m2-103/14.2.1#3 | responder |  | permitted | M2-103 §14.2.1 | a List Resource spec can make pagination mandatory |  |  |  | 54449f730e6f0499
+m2-103/14.3#1 | responder |  | permitted | M2-103 §14.3 | each ResourceList object explains how a Resource can be used on the device |  |  |  | f6a0613867cb4eed
+m2-103/14.3#2 | responder |  | required | M2-103 §14.3 | an entry that departs from a default value states that Property and value |  |  |  | c1ae069275cd4d00
+m2-103/14.3#3 | responder |  | required | M2-103 §14.3 | standard Resources keep the defaults for schema, requireResId, canPaginate, canSet and canGet unless their spec allows otherwise | neg=1 |  |  | 996cec3e29044cf5
+m2-103/14.4#1 | responder |  | required | M2-103 §14.4 | standard Resources need no JSON Schema exchange and their defaults are not overridden | neg=1 |  |  | f37ae190c443cc6f
+m2-103/14.4#2 | responder |  | required | M2-103 §14.4 | a manufacturer-specific JSON Resource supplies at least a simple JSON Schema |  |  |  | 19838c3f2fe37d85
+m2-103/14.4#3 | responder |  | required | M2-103 §14.4 | the JSON Schema has at least title and type |  |  |  | 570035ab1f664023
+m2-103/14.4#4 | responder |  | permitted | M2-103 §14.4 | another JSON Schema revision is declared with the $schema Property |  |  |  | 96ad3d8ef83871e6
+m2-103/14.4.1#1 | responder |  | permitted | M2-103 §14.4.1 | a simple manufacturer Resource can carry its whole JSON Schema in the schema Property |  |  |  | 6576c93fda20ac8a
+m2-103/14.4.2#1 | initiator |  | permitted | M2-103 §14.4.2 | an Initiator fetches a JSON Schema with Get Property Data for the JSONSchema Resource |  |  |  | b880396ac02a7a42
+m2-103/14.5#1 | responder |  | permitted | M2-103 §14.5 | the columns Property describes a table view of a List Resource |  |  |  | 428f82366024c374
+m2-103/14.6#1 | responder |  | required | M2-103 §14.6 | for non-JSON Resources the JSON Schema type is left empty |  |  |  | 40681783a6a58382
+m2-103/14.6#2 | responder |  | required | M2-103 §14.6 | the data type of a non-JSON Resource comes from mediaType in the Header Data |  |  |  | b9c4c8390d2069d6
+m2-103/14.6#3 | responder |  | required | M2-103 §14.6 | the schema still gives the Resource its title |  |  |  | 9c1fd1ca546c6c82
+m2-103/15#1 | both |  | permitted | M2-103 §15 | binary Property Data can need a thousand chunks or more |  |  |  | 8944e229589f64e9
+m2-103/15#2 | both |  | permitted | M2-103 §15 | a receiver can slow a sender with a Flow Control ACK between chunks |  |  |  | 7f8a1d61f9190a86
+m2-103/15#3 | initiator |  | required | M2-103 §15 | an Initiator asks for Flow Control with flowControl true in the Header Data |  |  |  | f2bbcb8ee0d1db36
+m2-103/15.2#1 | initiator |  | recommended | M2-103 §15.2 | flowControl in a Get header asks for Flow Control ACKs |  |  |  | 91dc3aa28a47a38d
+m2-103/15.2#2 | responder |  | required | M2-103 §15.2 | without flowControl true the Responder sends all chunks with no ACK wait |  |  |  | 3b81da5703c10a95
+m2-103/15.2#3 | responder |  | recommended | M2-103 §15.2 | flowControl on a Resource without Flow Control support is answered status 406 |  |  |  | c09393fa96fd3760
+m2-103/15.3#1 | initiator |  | recommended | M2-103 §15.3 | flowControl in a Set header asks for Flow Control ACKs |  |  |  | 338c50f0eeca996b
+m2-103/15.3#2 | responder |  | recommended | M2-103 §15.3 | a Set without flowControl on a Resource with fcOnSet is answered status 407 |  |  |  | 00a789ab09601592
+m2-103/15.3#3 | responder |  | recommended | M2-103 §15.3 | flowControl on a Resource without Flow Control support is answered status 406 |  |  |  | c09393fa96fd3760
+m2-103/15.3#4 | both |  | recommended | M2-103 §15.3 | a sender keeps transmitted data until its ACK arrives so it can resend | neg=1 |  |  | 7897bfce342e6713
+m2-103/15.4#1 | both |  | recommended | M2-103 §15.4 | a receiver asks for the last chunk again if a chunk is lost or corrupted |  |  |  | 6d58e6fbb9db3075
+m2-103/15.5#1 | both |  | permitted | M2-103 §15.5 | a sender can time out waiting for an ACK |  |  |  | 2ace5559c880b028
+m2-103/15.5#2 | both |  | recommended | M2-103 §15.5 | with Flow Control a chunk with no ACK in three seconds is sent again |  |  |  | 9923b66ba037111f
+m2-103/15.5#3 | both |  | recommended | M2-103 §15.5 | after three failed resends the sender fails and sends a Terminate NAK |  |  |  | 593f68033602f0e4
+m2-103/15.5#4 | both |  | permitted | M2-103 §15.5 | a receiver of Property Data can time out |  |  |  | 550b4917a606d1da
+m2-103/15.5#5 | both |  | required | M2-103 §15.5 | sender and receiver use the timeout rules of the timeout section to end an unresolved timeout |  |  |  | 8b01b15110dcb6e4

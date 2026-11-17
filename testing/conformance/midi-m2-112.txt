@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-112/<section>#<n>          the nth sentence under the numbered section
@@ -21,11 +24,11 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-112/1.1#1 | responder |  | recommended | M2-112 §1.1 | a device with a clock that follows external MIDI sync supports ExternalSync |  |  |
-m2-112/1.3#1 | both |  | permitted | M2-112 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-112/2#1 | responder |  | required | M2-112 §2 | a device whose clock follows external sync recognizes the System Real Time clock messages |  |  |
-m2-112/2#2 | responder |  | permitted | M2-112 §2 | a device that follows external clock can also follow Song Select and Song Position Pointer |  |  |
-m2-112/2.1#1 | initiator |  | permitted | M2-112 §2.1 | an Initiator can read ExternalSync with a Get |  |  |
-m2-112/2.2#1 | initiator |  | permitted | M2-112 §2.2 | an Initiator can write ExternalSync with a Set |  |  |
-m2-112/2.3#1 | responder |  | required | M2-112 §2.3 | a Responder answers a ResourceList Get with all the Resources it supports |  |  |
-m2-112/2.3#2 | responder |  | required | M2-112 §2.3 | a Responder with ExternalSync declares it in its ResourceList reply |  |  |
+m2-112/1.1#1 | responder |  | recommended | M2-112 §1.1 | a device with a clock that follows external MIDI sync supports ExternalSync |  |  |  | 6f07e22d4645a21b
+m2-112/1.3#1 | both |  | permitted | M2-112 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | ab84069d7a4b5f42
+m2-112/2#1 | responder |  | required | M2-112 §2 | a device whose clock follows external sync recognizes the System Real Time clock messages |  |  |  | 0b17cdd1fd190418
+m2-112/2#2 | responder |  | permitted | M2-112 §2 | a device that follows external clock can also follow Song Select and Song Position Pointer |  |  |  | 1b702265ff644a45
+m2-112/2.1#1 | initiator |  | permitted | M2-112 §2.1 | an Initiator can read ExternalSync with a Get |  |  |  | cdef62201e3d43a1
+m2-112/2.2#1 | initiator |  | permitted | M2-112 §2.2 | an Initiator can write ExternalSync with a Set |  |  |  | 0f8d404b570631fa
+m2-112/2.3#1 | responder |  | required | M2-112 §2.3 | a Responder answers a ResourceList Get with all the Resources it supports |  |  |  | 0d1c7c4c9fc9533a
+m2-112/2.3#2 | responder |  | required | M2-112 §2.3 | a Responder with ExternalSync declares it in its ResourceList reply |  |  |  | 345bb5cad9da1c96

@@ -28,7 +28,10 @@ use tutti_nodes::{
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
     TransientShaperConfig, TransientShaperNode,
 };
-use tutti_nodes::{StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode};
+use tutti_nodes::{
+    PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
+    TiltFilterNode,
+};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
     Resonance, Seconds, StereoWidth, UnitAddr, UnitParam,
@@ -381,6 +384,32 @@ fn phaser() {
     })
     .control("feedback", |p| {
         assert!(p.param_set().set(UnitParam::Feedback, 0.7));
+    })
+    .check();
+}
+
+#[test]
+fn plate_reverb() {
+    IsolateRow::new("PlateReverbNode", || {
+        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(1.0)))
+    })
+    .control("decay", |p| {
+        assert!(p.param_set().set(UnitParam::Decay, 6.0))
+    })
+    .control("damping", |p| {
+        assert!(p.param_set().set(UnitParam::Damping, 0.8))
+    })
+    .control("predelay", |p| {
+        assert!(p.param_set().set(UnitParam::DelayTime, 0.01))
+    })
+    .control("bandwidth", |p| {
+        assert!(p.param_set().set(UnitParam::Cutoff, 500.0))
+    })
+    .control("modulation", |p| {
+        assert!(p.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .control("diffusion", |p| {
+        assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
     })
     .check();
 }

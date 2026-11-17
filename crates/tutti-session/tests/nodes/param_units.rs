@@ -82,6 +82,10 @@ units! {
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::FreeverbNode { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode { Volume => Amplitude }
+        tutti_nodes::PlateReverbNode {
+            Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Depth,
+            Diffusion => Mix
+        }
         tutti_nodes::FdnNode {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
             Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
