@@ -178,7 +178,6 @@ mod filter;
 mod fir;
 mod glide;
 mod interp;
-mod level;
 mod modulation;
 mod oscillator;
 mod oversample;

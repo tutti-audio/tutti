@@ -10,7 +10,8 @@
 //! so the smoothed pair contradicts the invariant the kernel guarantees.
 
 use tutti_buffers::{Sample, StereoPlanes};
-use tutti_types::{Amplitude, Correlation, Db, Seconds, StereoBalance, StereoWidth};
+use tutti_dsp::Smoother;
+use tutti_types::{Amplitude, Ballistics, Correlation, Db, Seconds, StereoBalance, StereoWidth};
 
 /// Mid/side and per-channel levels.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -155,85 +156,37 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     }
 }
 
-/// Meter ballistics: how fast a reading rises and falls.
-///
-/// A one-pole attack/release smoother that shapes how a reading moves: a
-/// meter's face ([`StereoSmoother`]) and the spectrum meter's
-/// [`Smoothing`](crate::Smoothing). The loudness, peak and correlation readings
-/// are taken from the raw signal, never through it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Ballistics {
-    attack: Seconds,
-    release: Seconds,
-}
-
-impl Ballistics {
-    /// Both times in [`Seconds`], like every other time-valued setter in the
-    /// engine. As two adjacent bare `f32` milliseconds, transposing them
-    /// compiles and makes the meter sluggish to peaks and instant to release —
-    /// under-reporting exactly the problems it exists to show.
-    pub fn new(attack: Seconds, release: Seconds) -> Self {
-        Self { attack, release }
-    }
-
-    /// 10 ms attack, 100 ms release — standard meter ballistics.
-    #[must_use]
-    pub fn standard() -> Self {
-        Self::new(Seconds(0.01), Seconds(0.1))
-    }
-
-    /// How far to move toward a new value over `dt`, in `[0, 1]`.
-    ///
-    /// Public because ballistics are not stereo-specific: a level meter smooths
-    /// the peak and RMS of `tutti_graph::Level`
-    /// with the same attack and release (the meter holds the peak since the
-    /// last read; the decay is the reader's). [`StereoSmoother::push`] stays the
-    /// convenience for the stereo case.
-    ///
-    /// The one-pole coefficient of the attack or release over a step of
-    /// `dt`, `1 - exp(-dt/t)` ([`Seconds::one_pole_coeff_over`]). A zero or
-    /// negative time means "no smoothing" and returns 1.0, so a caller that
-    /// has not configured a rise or fall gets the instantaneous value rather
-    /// than a division by zero.
-    #[inline]
-    pub fn coefficient(&self, rising: bool, dt: Seconds) -> f32 {
-        let time = if rising { self.attack } else { self.release };
-        time.one_pole_coeff_over(dt)
-    }
-
-    /// Moves `old` toward `new` by one step of `dt`.
-    ///
-    /// The rise/fall decision is made from the two values rather than passed
-    /// in, which is what stops a caller smoothing a falling level with the
-    /// attack coefficient — the transposition that makes a meter instant to
-    /// release and sluggish to peaks, under-reporting what it exists to show.
-    #[inline]
-    pub fn step(&self, old: f32, new: f32, dt: Seconds) -> f32 {
-        old + (new - old) * self.coefficient(new > old, dt)
-    }
-}
-
 /// A display filter over stereo level readings, not a stream meter: it takes a
 /// reading and the time since the last, and carries the smoothed reading
-/// between pushes with the config's attack and release.
+/// between pushes with the attack and release of its [`Ballistics`].
 #[derive(Debug, Clone, Copy)]
 pub struct StereoSmoother {
     cfg: Ballistics,
     current: StereoReading,
 }
 
-impl Ballistics {
-    /// A smoother seeded with a default (silent, uncorrelated) reading.
+impl StereoSmoother {
+    /// A smoother of `ballistics`, seeded with a default (silent, uncorrelated) reading.
     #[must_use]
-    pub fn smoother(&self) -> StereoSmoother {
-        StereoSmoother {
-            cfg: *self,
+    pub fn new(ballistics: Ballistics) -> Self {
+        Self {
+            cfg: ballistics,
             current: StereoReading::default(),
         }
     }
-}
 
-impl StereoSmoother {
+    /// A smoother with 10 ms attack and 100 ms release, the standard meter ballistics.
+    ///
+    /// # Panics
+    ///
+    /// Never: 10 ms and 100 ms are finite and not negative, which `Ballistics::new` accepts.
+    #[must_use]
+    pub fn standard() -> Self {
+        Self::new(
+            Ballistics::new(Seconds(0.01), Seconds(0.1)).expect("10 ms and 100 ms are valid times"),
+        )
+    }
+
     /// The latest smoothed reading.
     #[inline]
     #[must_use]
@@ -258,8 +211,8 @@ impl StereoSmoother {
     /// Only `correlation` and the levels are smoothed; width is derived from the
     /// smoothed correlation afterwards, so the two cannot disagree.
     pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
-        let cfg = &self.cfg;
-        let smooth = |old: f32, new: f32| cfg.step(old, new, dt);
+        let cfg = self.cfg;
+        let smooth = |old: f32, new: f32| Smoother::toward(old, new, cfg.coeff_over(new > old, dt));
 
         let correlation = Correlation::new_clamped(smooth(
             self.current.correlation.get(),
@@ -309,6 +262,10 @@ mod tests {
         StereoPlanes::new(l, r).expect("test planes must be the same length")
     }
 
+    fn smoother(attack: Seconds, release: Seconds) -> StereoSmoother {
+        StereoSmoother::new(Ballistics::new(attack, release).expect("valid times"))
+    }
+
     fn tone(n: usize, scale: f32) -> Vec<f32> {
         (0..n).map(|i| (i as f32 / 20.0).sin() * scale).collect()
     }
@@ -353,17 +310,17 @@ mod tests {
     /// step of one time constant a one-pole moves `1 - 1/e` of the way.
     #[test]
     fn standard_ballistics_are_ten_milliseconds_up_and_a_hundred_down() {
-        let cfg = Ballistics::standard();
+        let cfg = StereoSmoother::standard().cfg;
         let want = 1.0 - (-1.0f32).exp();
-        assert!((cfg.coefficient(true, Seconds(0.01)) - want).abs() < 1e-6);
-        assert!((cfg.coefficient(false, Seconds(0.1)) - want).abs() < 1e-6);
+        assert!((cfg.coeff_over(true, Seconds(0.01)) - want).abs() < 1e-6);
+        assert!((cfg.coeff_over(false, Seconds(0.1)) - want).abs() < 1e-6);
     }
 
     /// Width is derived, so it cannot
     /// drift from the correlation it is defined from — even after smoothing.
     #[test]
     fn width_cannot_contradict_correlation_even_when_smoothed() {
-        let mut state = Ballistics::standard().smoother();
+        let mut state = StereoSmoother::standard();
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
@@ -379,7 +336,7 @@ mod tests {
     /// The smoothed value is what comes back, not the instantaneous one.
     #[test]
     fn the_return_value_is_the_smoothed_reading() {
-        let mut state = Ballistics::new(Seconds(1.0), Seconds(1.0)).smoother();
+        let mut state = smoother(Seconds(1.0), Seconds(1.0));
         let mono = tone(512, 1.0);
 
         let instant = correlate(pair(&mono, &mono));
@@ -398,8 +355,8 @@ mod tests {
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
-        let mut fast = Ballistics::new(Seconds(0.001), Seconds(0.001)).smoother();
-        let mut slow = Ballistics::new(Seconds(1.0), Seconds(1.0)).smoother();
+        let mut fast = smoother(Seconds(0.001), Seconds(0.001));
+        let mut slow = smoother(Seconds(1.0), Seconds(1.0));
 
         let target = correlate(pair(&mono, &mono));
         let fast_out = fast.push(target, Seconds(0.01));
@@ -412,7 +369,7 @@ mod tests {
 
         // And the release path differs from the attack path.
         let falling = correlate(pair(&mono, &inverted));
-        let mut state = Ballistics::new(Seconds(0.001), Seconds(1.0)).smoother();
+        let mut state = smoother(Seconds(0.001), Seconds(1.0));
         state.push(target, Seconds(0.01));
         let before = state.current().correlation;
         state.push(falling, Seconds(0.01));
@@ -427,11 +384,14 @@ mod tests {
     /// reaches the new value, rising and falling.
     #[test]
     fn a_zero_time_is_instant() {
-        let cfg = Ballistics::new(Seconds(0.0), Seconds(0.0));
-        assert_eq!(cfg.coefficient(true, Seconds(0.001)), 1.0);
-        assert_eq!(cfg.coefficient(false, Seconds(0.001)), 1.0);
-        assert_eq!(cfg.step(0.0, 0.8, Seconds(0.001)), 0.8);
-        assert_eq!(cfg.step(0.8, 0.25, Seconds(0.001)), 0.25);
+        let mut smoother = smoother(Seconds(0.0), Seconds(0.0));
+        let reading = |correlation: f32| StereoReading {
+            correlation: Correlation::new_clamped(correlation),
+            ..StereoReading::default()
+        };
+        let dt = Seconds(0.001);
+        assert_eq!(smoother.push(reading(0.8), dt).correlation.get(), 0.8);
+        assert_eq!(smoother.push(reading(0.25), dt).correlation.get(), 0.25);
     }
 
     #[test]
