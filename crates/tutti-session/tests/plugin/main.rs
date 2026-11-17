@@ -49,9 +49,10 @@ mod plugin_modulation;
 // The reference VST2 plugin, in process: the project meter it is given.
 #[cfg(feature = "vst2")]
 mod vst2_meter;
-// Presets through the main-thread view: a list that loads by id (VST2, in
-// process) and a file that loads by path (CLAP, in a real `plugin-server`).
-#[cfg(any(feature = "clap", feature = "vst2"))]
+// A plugin's presets through its info and the session's jobs: a list that loads
+// by id (VST2, in process), one read for a served plugin (VST3, in a real
+// `plugin-server`) and a file that loads by path (CLAP, in a real `plugin-server`).
+#[cfg(any(feature = "clap", feature = "vst2", feature = "vst3"))]
 mod plugin_presets;
 // Diagnostics and buses: the counts either hosting reads the
 // same way, an aux input wired through the plugin's bus handles, a server named

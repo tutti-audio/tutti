@@ -206,9 +206,10 @@ pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
+    AddPluginError, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    PortsRefusal, RestoreState, SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
+    PortsRefusal, PresetJobError, PresetJobFailed, RestoreState, SaveState, StateJobError,
+    StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
@@ -234,7 +235,7 @@ pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
-pub use plugin_presets::{PresetEntry, PresetKind, Presets};
+pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{
