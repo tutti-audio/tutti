@@ -9,7 +9,6 @@
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use tutti_plugin_types::{Controller, MainThreadMarker, PluginTail, Samples};
 use tutti_rt::Publisher;
