@@ -52,8 +52,8 @@
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
 use tutti_types::{
-    BarCount, Beat, BeatDuration, Bpm, LoopRange, Meter, MeterMap, Pass, PassEnd, SampleRate,
-    Samples, Seconds, TimeSignature, first_frame_at_or_after,
+    BarCount, Beat, BeatDuration, Bpm, Meter, MeterMap, Pass, PassEnd, SampleRate, Samples,
+    Seconds, TimeSignature, first_frame_at_or_after,
 };
 use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
 
@@ -308,9 +308,7 @@ impl ClockMaster {
             // and locate state is left as it was.
             if transport.playing {
                 let beats_per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
-                let region = transport
-                    .looping
-                    .and_then(|l| LoopRange::new(l.start, l.end));
+                let region = transport.looping;
                 let mut clock = transport.clock(sample_rate);
                 for pass in clock.passes(Samples(block_size), region) {
                     let Some(meter) = meter else { break };
@@ -417,9 +415,7 @@ impl ClockMaster {
         // follow the wrapped playhead instead of running on past the loop's
         // end. A wrap is a locate on its own frame: a Song Position there, and
         // the MTC grid restarts on it.
-        let region = transport
-            .looping
-            .and_then(|l| LoopRange::new(l.start, l.end));
+        let region = transport.looping;
         let mut clock = transport.clock(sample_rate);
         let mut ends_on_wrap = false;
         for pass in clock.passes(Samples(block_size), region) {

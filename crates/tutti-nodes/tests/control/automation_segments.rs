@@ -140,10 +140,7 @@ fn check_rolling(
 ) -> Vec<f32> {
     let (mut ed, mut exec) = graph(lane);
     let mut clock = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE));
-    let graph_loop = looping.map(|l| tutti_graph::LoopRange {
-        start: l.start(),
-        end: l.end(),
-    });
+    let graph_loop = looping.map(|l| LoopRange::new(l.start(), l.end()).expect("a loop"));
     let mut all = Vec::new();
     for &n in blocks {
         let t = TransportPosition::counted(true, TEMPO, clock.origin(), graph_loop);
