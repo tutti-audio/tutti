@@ -341,7 +341,7 @@ fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
     assert_eq!(ed.prepare().max_block().get(), 64);
     exec.process(64, &TransportPosition::default(), &[], &mut []);
     assert_eq!(exec.prepare().max_block().get(), 64);
-    assert_eq!(ed.commit(), Ok(()), "and the editor is not stuck");
+    ed.commit().expect("and the editor is not stuck");
 }
 
 /// Declares 1 ms of latency at whatever rate it was last prepared for, and
@@ -423,7 +423,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     );
     assert_eq!(ed.spec().topology.nodes[&LAG].latency, Samples(96));
     assert_eq!(ed.spec().topology.nodes[&SUM].latency, Samples(96));
-    assert_eq!(ed.commit(), Ok(()), "and commits flow again");
+    ed.commit().expect("and commits flow again");
 }
 
 /// Between the two commits the executor renders silence for whatever block
@@ -449,7 +449,7 @@ fn between_the_two_commits_the_executor_renders_silence_at_the_new_size() {
         256,
         "the clock tracks device time, silent blocks included"
     );
-    assert_eq!(rig.ed.commit(), Ok(()), "collects, resumes, then commits");
+    rig.ed.commit().expect("collects, resumes, then commits");
     assert!(!rig.ed.is_repreparing(), "resumed");
     assert_eq!(rig.ed.poison_cause(), None);
     rig.exec.process(

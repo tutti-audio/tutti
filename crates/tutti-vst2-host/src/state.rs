@@ -154,7 +154,7 @@ impl Vst2Loaded {
     ///
     /// # Errors
     ///
-    /// Returns [`Vst2Error::StateError`] if the plugin's chunk save fails, or if
+    /// Returns [`Vst2Error::ChunkSave`] if the plugin's chunk save fails, or [`Vst2Error::NoGetParameter`] if
     /// it declares parameters but exposes no `getParameter` to read them.
     ///
     /// `effGetChunk` is a main-thread opcode, so this takes the proof.
@@ -174,12 +174,10 @@ impl Vst2Loaded {
             // parameter snapshot, losing the non-parameter state chunks exist
             // to carry. A failure is an error; an *empty* chunk still falls through
             // to the parameter snapshot, keeping a fresh plugin saveable.
-            let chunk = self.instance.try_get_preset_data(main).map_err(|e| {
-                Vst2Error::StateError(format!(
-                    "plugin advertises effFlagsProgramChunks but its preset \
-                     chunk save failed: {e}"
-                ))
-            })?;
+            let chunk = self
+                .instance
+                .try_get_preset_data(main)
+                .map_err(Vst2Error::ChunkSave)?;
             if !chunk.is_empty() {
                 let mut state = Vec::with_capacity(8 + chunk.len());
                 state.extend_from_slice(&STATE_HEADER_CHUNK);
@@ -206,10 +204,10 @@ impl Vst2Loaded {
             // cannot be serialized: writing 0.0 would produce a blob that
             // restores silently and wrongly, which is worse than refusing.
             let Some(value) = self.instance.get_parameter(i) else {
-                return Err(Vst2Error::StateError(format!(
-                    "plugin reports {param_count} parameters but exposes no \
-                     getParameter, so parameter {i} cannot be saved"
-                )));
+                return Err(Vst2Error::NoGetParameter {
+                    count: param_count,
+                    index: i,
+                });
             };
             state.extend_from_slice(&value.to_le_bytes());
         }
@@ -224,7 +222,7 @@ impl Vst2Loaded {
     ///
     /// # Errors
     ///
-    /// Returns [`Vst2Error::StateError`] if the blob is malformed (unknown
+    /// Returns [`Vst2Error::TooManyParameters`] or [`Vst2Error::NoSetParameter`] if the blob is malformed (unknown
     /// header, truncated, or an empty chunk), if a parameter snapshot holds
     /// more parameters than the plugin declares, or if it exposes no `setParameter` to write
     /// parameters with. A plugin's own refusal of a chunk is not an error here: the header
@@ -255,10 +253,10 @@ impl Vst2Loaded {
                 // `read_state` just wrote for that same plugin.
                 let actual_count = self.instance.get_info().parameters.max(0);
                 if count > actual_count {
-                    return Err(Vst2Error::StateError(format!(
-                        "State has {} parameters but plugin only has {}",
-                        count, actual_count
-                    )));
+                    return Err(Vst2Error::TooManyParameters {
+                        saved: count,
+                        actual: actual_count,
+                    });
                 }
 
                 for i in 0..count {
@@ -273,10 +271,7 @@ impl Vst2Loaded {
                     if !self.instance.set_parameter(i, value) {
                         // Reporting success here would claim a preset was
                         // restored while every value went nowhere.
-                        return Err(Vst2Error::StateError(format!(
-                            "plugin exposes no setParameter, so parameter {i} \
-                             could not be restored"
-                        )));
+                        return Err(Vst2Error::NoSetParameter { index: i });
                     }
                 }
 
