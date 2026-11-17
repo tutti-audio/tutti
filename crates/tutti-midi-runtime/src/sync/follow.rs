@@ -35,6 +35,34 @@
 //!   by a gap in the ticks or by [`MidiClockDecoder::DROPOUT`] of silence, which
 //!   also stops a transport the source had started.
 //!
+//! # Drift
+//!
+//! A tempo announced only when it moves by [`TEMPO_STEP`](ClockFollower::TEMPO_STEP)
+//! leaves a tempo the source wanders by less than that unfollowed, and a transport
+//! that was located a block late stays a block late: the beat error `e`, the
+//! source's beat less the transport's, grows between locates. The owner of the
+//! transport reads its beat and gives it to [`steer`](ClockFollower::steer),
+//! which closes `e` by a trim of the fitted tempo:
+//!
+//! - `e` is the source's beat at `now`, the ticks counted plus the time since the
+//!   last at the fitted tempo, less the transport's beat at `now`.
+//! - The trim is the tempo that closes `e` in [`CATCH_UP`](ClockFollower::CATCH_UP):
+//!   `e * 60 / CATCH_UP` bpm, at most 2% of the
+//!   fitted tempo either way. The trimmed tempo is announced by the rule above,
+//!   so a trim is a tempo step of at least `TEMPO_STEP` and a map grows by one
+//!   point a beat at most.
+//! - A tempo step is the smallest correction, so an error below
+//!   `TEMPO_STEP * CATCH_UP / 60` beats is left: with the tutti constants,
+//!   `0.1 * 4 / 60`, about 0.0067 beat. Over a quarter note of
+//!   ticks (the least between announcements) the error grows by at most
+//!   `TEMPO_STEP / 60` beats a second more, so the error stays within that
+//!   bound plus the fit's own noise.
+//! - An error past [`SLIP`](ClockFollower::SLIP) is not drift: the follower says
+//!   [`ClockEvent::Slipped`] and locates to the source's beat, once, and holds off
+//!   for a second while the command lands (as it does after any locate).
+//!
+//! MTC has no tempo to trim; [`steer`](ClockFollower::steer) does nothing for it.
+//!
 //! # MIDI Time Code
 //!
 //! [`ClockKind::Mtc`] (`MtcFollower`) reads Quarter Frames through [`MtcDecoder`] and the Full
@@ -104,6 +132,13 @@ pub enum ClockEvent {
     Locked,
     /// The follower lost the source: a gap, or silence for the kind's dropout.
     Unlocked,
+    /// The transport was further than [`ClockFollower::SLIP`] from the source
+    /// ([`ClockFollower::steer`]): a [`Locate`](Self::Locate) to the source's
+    /// beat follows at once.
+    Slipped {
+        /// The source's beat less the transport's, when it was found.
+        error: Beat,
+    },
 }
 
 /// Follows one outside MIDI clock; the rules are in the module docs.
@@ -142,6 +177,16 @@ struct BeatClockFollower {
     announced: Option<Bpm>,
     ticks_since_announce: usize,
     locked: bool,
+    /// When the last tick arrived.
+    last_tick: Option<Seconds>,
+    /// The trim [`steer`](ClockFollower::steer) last asked, as a fraction of the
+    /// fitted tempo: the announced tempo is the fit times one plus this.
+    trim: f64,
+    /// The latest beat error `steer` found.
+    error: Option<Beat>,
+    /// No steering until `now` reaches this: a locate was sent and the transport
+    /// has not taken it yet.
+    held_until: Option<Seconds>,
 }
 
 /// The MTC state machine.
@@ -171,6 +216,17 @@ impl ClockFollower {
     /// source's tempo moving; and it is a tenth of a percent at 120 bpm, a beat
     /// of drift in a thousand.
     pub const TEMPO_STEP: Bpm = Bpm::of(0.1);
+
+    /// The time a Beat Clock beat error is closed in: 4 seconds (tutti's
+    /// choice). Short enough that a drift of a tenth of a beat is gone in a
+    /// phrase, long enough that the trim it asks (`e * 60 / 4` bpm) moves by
+    /// [`TEMPO_STEP`](Self::TEMPO_STEP) only for an error of 0.0067 beat.
+    pub const CATCH_UP: Seconds = Seconds::new(4.0);
+
+    /// The beat error past which [`steer`](Self::steer) locates instead of
+    /// trimming: a quarter of a beat (tutti's choice), 125 ms at 120 bpm, which a
+    /// player hears as a flam and a trim of 2% takes twelve seconds to close.
+    pub const SLIP: Beat = Beat::new(0.25);
 
     /// Consistent Quarter Frame cycles that lock the follower: 3, which is
     /// two intervals of agreement over six frames, twelve to ninety-six
@@ -231,6 +287,31 @@ impl ClockFollower {
         }
     }
 
+    /// Closes the drift between the source's beat and the transport's: `transport`
+    /// is the beat the transport is at on `now`, on the clock of `step`'s `at`.
+    /// Call it once per control tick while the transport rolls (rules in the
+    /// module docs). The trim is announced as a [`ClockEvent::Tempo`] by the
+    /// next Timing Clock; an error past [`SLIP`](Self::SLIP) says
+    /// [`ClockEvent::Slipped`] and locates now. A follower that is not locked and
+    /// playing, or a locate that has not landed, leaves the error unread. Does
+    /// nothing for MTC. Allocates nothing.
+    pub fn steer(&mut self, transport: Beat, now: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        if let Follower::BeatClock(f) = &mut self.0 {
+            f.steer(transport, now, out);
+        }
+    }
+
+    /// The beat error [`steer`](Self::steer) found last, the source's beat less
+    /// the transport's: positive when the transport is behind. `None` until it
+    /// has read one, and while the follower cannot (see `steer`).
+    #[must_use]
+    pub fn error(&self) -> Option<Beat> {
+        match &self.0 {
+            Follower::BeatClock(f) => f.error,
+            Follower::Mtc(_) => None,
+        }
+    }
+
     /// Forgets the source: unlocked, at beat 0, no tempo, no partial frame.
     pub fn reset(&mut self) {
         match &mut self.0 {
@@ -247,12 +328,68 @@ impl BeatClockFollower {
             announced: None,
             ticks_since_announce: 0,
             locked: false,
+            last_tick: None,
+            trim: 0.0,
+            error: None,
+            held_until: None,
         }
+    }
+
+    /// The most the tempo is trimmed either way, as a fraction of the fit: 2%
+    /// (tutti's choice), 2.4 bpm at 120, which closes a beat in 25 seconds at the
+    /// most and keeps a wrong error from moving the tempo audibly far.
+    const MAX_TRIM: f64 = 0.02;
+
+    /// How long a locate is given to land before the error is read again:
+    /// one second (tutti's choice), a hundred blocks of 512 frames at 48 kHz.
+    const SETTLE: Seconds = Seconds::new(1.0);
+
+    /// A locate to `position` as of `at`, which the transport takes as new: no
+    /// trim carries over, and the error is not read until it has landed.
+    fn locate(&mut self, position: Beat, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        self.trim = 0.0;
+        self.error = None;
+        self.held_until = Some(at + Self::SETTLE);
+        out(ClockEvent::Locate {
+            position: ClockPosition::Beat(position),
+            at,
+        });
+    }
+
+    fn steer(&mut self, transport: Beat, now: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        self.error = None;
+        if self.held_until.is_some_and(|until| now < until) {
+            return;
+        }
+        let (true, ClockTransportState::Playing, Some(fit), Some(last)) = (
+            self.locked,
+            self.decoder.transport_state(),
+            self.decoder.tempo_bpm(),
+            self.last_tick,
+        ) else {
+            return;
+        };
+        // The ticks counted, and the time since the last at the fitted tempo.
+        let source = self.decoder.beat_position().get() + (now - last).get() * fit.get() / 60.0;
+        let error = source - transport.get();
+        self.error = Some(Beat::new(error));
+        if error.abs() > ClockFollower::SLIP.get() {
+            out(ClockEvent::Slipped {
+                error: Beat::new(error),
+            });
+            self.locate(Beat::new(source), now, out);
+            return;
+        }
+        // The tempo that closes `error` in `CATCH_UP`, as a fraction of the fit.
+        let wanted = error * 60.0 / (ClockFollower::CATCH_UP.get() * fit.get());
+        self.trim = wanted.clamp(-Self::MAX_TRIM, Self::MAX_TRIM);
     }
 
     fn poll(&mut self, now: Seconds, out: &mut impl FnMut(ClockEvent)) {
         if self.decoder.drop_out(now) {
             self.announced = None;
+            self.trim = 0.0;
+            self.error = None;
             if std::mem::take(&mut self.locked) {
                 out(ClockEvent::Unlocked);
             }
@@ -268,29 +405,30 @@ impl BeatClockFollower {
         self.announced = None;
         self.ticks_since_announce = 0;
         self.locked = false;
+        self.last_tick = None;
+        self.trim = 0.0;
+        self.error = None;
+        self.held_until = None;
     }
 
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
         let Ok(Message::System(_, system)) = ump.decode() else {
             return;
         };
-        let here = |beat: Beat| ClockEvent::Locate {
-            position: ClockPosition::Beat(beat),
-            at,
-        };
         match system {
             System::TimingClock => {
                 self.decoder.tick(at);
+                self.last_tick = Some(at);
                 self.after_tick(out);
             }
             System::Start => {
                 self.decoder.start_msg();
-                out(here(Beat::new(0.0)));
+                self.locate(Beat::new(0.0), at, out);
                 out(ClockEvent::Play);
             }
             System::Continue => {
                 self.decoder.continue_msg();
-                out(here(self.decoder.beat_position()));
+                self.locate(self.decoder.beat_position(), at, out);
                 out(ClockEvent::Play);
             }
             System::Stop => {
@@ -299,7 +437,7 @@ impl BeatClockFollower {
             }
             System::SongPosition(position) => {
                 self.decoder.song_position_msg(position);
-                out(here(self.decoder.beat_position()));
+                self.locate(self.decoder.beat_position(), at, out);
             }
             _ => {}
         }
@@ -313,6 +451,8 @@ impl BeatClockFollower {
                 out(ClockEvent::Locked);
             } else {
                 self.announced = None;
+                self.trim = 0.0;
+                self.error = None;
                 out(ClockEvent::Unlocked);
             }
         }
@@ -323,6 +463,8 @@ impl BeatClockFollower {
         let Some(tempo) = self.decoder.tempo_bpm() else {
             return;
         };
+        // The fit, trimmed by what `steer` asked.
+        let tempo = Bpm::new(tempo.get() * (1.0 + self.trim)).unwrap_or(tempo);
         let due = match self.announced {
             None => true,
             Some(last) => {
