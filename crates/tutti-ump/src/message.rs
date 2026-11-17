@@ -373,9 +373,11 @@ pub struct Sysex8Packet {
 }
 
 impl Sysex8Packet {
-    /// The packet, or `None` for more than 13 data bytes.
+    /// The packet, or `None` for more than 13 data bytes. Only a
+    /// [`Sysex8Stream`](crate::Sysex8Stream) writes packets; the others are
+    /// decoded.
     #[must_use]
-    pub fn new(status: SysexStatus, stream_id: u8, data: &[u8]) -> Option<Self> {
+    pub(crate) fn new(status: SysexStatus, stream_id: u8, data: &[u8]) -> Option<Self> {
         if data.len() > 13 {
             return None;
         }
