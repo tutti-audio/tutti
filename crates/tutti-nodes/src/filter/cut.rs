@@ -82,14 +82,14 @@ impl CutFilterConfig {
 }
 
 /// A high-pass or low-pass of any width, a [`Butterworth`] or [`LinkwitzRiley`] design run
-/// as a cascade of state-variable sections ([`SosBank`]) in `f64`.
+/// as a cascade of state-variable sections ([`SosBank`](tutti_dsp::SosBank)) in `f64`.
 ///
 /// The cutoff is a live [`Hz`] cell (`UnitParam::Cutoff`), designed on a 16-frame grid
 /// and reached along a line in the sections' coefficients over the next 16 frames with the
 /// state kept, so an automated cutoff glides and the cascade stays stable. The response and
 /// the order are the node's build: another is another node.
 ///
-/// The tail is the ring-out of the whole cascade at the lowest cutoff ([`Sos`]'s tail,
+/// The tail is the ring-out of the whole cascade at the lowest cutoff ([`Sos`](tutti_dsp::Sos)'s tail,
 /// every pole together), the ceiling over every control. No latency. A [`KernelNode`]. Made
 /// from a [`CutFilterConfig`] (`CutFilterNode::from`).
 ///
