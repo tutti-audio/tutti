@@ -16,7 +16,7 @@ const FLOOR: f64 = 1e-7;
 ///
 /// - **One-pole attack and release**, per frame:
 ///   `env ← (1 − c) · env + c · level`, `c = 1 − exp(−1 / (τ · rate))`
-///   ([`Seconds::one_pole_coeff`]), the envelope in `f64`, with `τ` the attack
+///   ([`Ballistics::coeffs`]), the envelope in `f64`, with `τ` the attack
 ///   while the level is above the envelope and the release otherwise. A `τ` of
 ///   zero follows the level exactly. Below `1e-7` the envelope is 0, so a
 ///   release reaches silence in finite time.

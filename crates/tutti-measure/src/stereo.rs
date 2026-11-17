@@ -177,6 +177,10 @@ impl BallisticsMeter {
     }
 
     /// A smoother with 10 ms attack and 100 ms release, the standard meter ballistics.
+    ///
+    /// # Panics
+    ///
+    /// Never: 10 ms and 100 ms are finite and not negative, the only times `Ballistics::new` refuses.
     #[must_use]
     pub fn standard() -> Self {
         Self::new(

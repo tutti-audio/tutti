@@ -47,7 +47,7 @@
 //! # Smoothing, peaks, spectrogram
 //!
 //! [`Smoothing`] works on the linear power of each output with
-//! [`Ballistics`](tutti_types::Ballistics)'s one-pole step, so an averaged level is the dB of an
+//! [`Ballistics`]'s one-pole step, so an averaged level is the dB of an
 //! average power, and a released level falls linearly in dB per second. The
 //! first frame seeds the state. The peak of an output is held for
 //! [`hold`](SpectrumConfig::peak_hold) rounded up to a whole number of frames,

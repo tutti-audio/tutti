@@ -47,7 +47,7 @@ pub(super) const MAX_KNEE_DB: f32 = 400.0;
 pub(super) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
     // A time that is not below `f64::MAX` seconds is infinite to the coefficient: its decay
     // length `t * rate` overflows to infinity at every rate above 1 Hz, which holds.
-    let time = |t: Seconds| Seconds(t.get().max(0.0).min(f64::MAX));
+    let time = |t: Seconds| Seconds(t.get().max(0.0).clamp(0.0, f64::MAX));
     Ballistics::new(time(attack), time(release))
         .expect("a time floored at 0 and capped at f64::MAX is finite and not negative")
 }
