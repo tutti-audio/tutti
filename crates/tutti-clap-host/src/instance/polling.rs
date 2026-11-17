@@ -154,21 +154,7 @@ impl ClapLoaded {
         if !self.flags.gui_created {
             return EditorCapabilities::default();
         }
-        let Some(hints) = self.plugin.gui_hints(main) else {
-            return EditorCapabilities::default();
-        };
-        let mut caps = EditorCapabilities {
-            resize: tutti_plugin_types::ResizeHints {
-                resizable: hints.resizable,
-                can_resize_horizontally: hints.can_resize_horizontally,
-                can_resize_vertically: hints.can_resize_vertically,
-            },
-            aspect: tutti_plugin_types::AspectRatio::default(),
-            appkit_autoresize_friendly: false,
-        };
-        caps.aspect.preserve = hints.preserve_aspect_ratio;
-        caps.aspect.ratio = hints.aspect_ratio;
-        caps
+        self.plugin.gui_hints(main).unwrap_or_default()
     }
 
     /// Tells the open editor its window's scale changed (`gui.set_scale`).
@@ -204,21 +190,8 @@ impl ClapLoaded {
     /// is free to ignore or clamp the size — CLAP treats it as a request, not
     /// an instruction.
     pub fn take_editor_resize_request(&self) -> Option<Size> {
-        if !self
-            .host_state
-            .gui
-            .request_resize_pending
-            .swap(false, std::sync::atomic::Ordering::AcqRel)
-        {
-            return None;
-        }
-        let gui = &self.host_state.gui;
-        Some(tutti_clap_ffi::gui_size(
-            gui.request_resize_width
-                .load(std::sync::atomic::Ordering::Acquire),
-            gui.request_resize_height
-                .load(std::sync::atomic::Ordering::Acquire),
-        ))
+        let [width, height] = self.host_state.gui.take_resize()?;
+        Some(tutti_clap_ffi::gui_size(width, height))
     }
 
     /// [`EditorWindow::close_editor`](tutti_plugin_types::EditorWindow::close_editor) without a token, for `Drop`, which
@@ -251,22 +224,13 @@ impl ClapLoaded {
     /// Consumes and returns the `params_flush_requested` flag — call
     /// [`Self::flush_params`] or run a process block when this fires.
     pub fn take_params_flush_requested(&self) -> bool {
-        self.host_state
-            .take(&self.host_state.params.flush_requested)
+        self.host_state.take(&self.host_state.flush_requested)
     }
 
     /// Consumes and returns the `state_dirty` flag — the plugin's state has
     /// diverged from the last save.
     pub fn take_state_dirty(&self) -> bool {
-        self.host_state
-            .take(&self.host_state.processing.state_dirty)
-    }
-
-    /// Consumes and returns the `notes.ports_changed` flag. The note dialect
-    /// ([`ClapProcessor::sends_midi_notes`](crate::ClapProcessor::sends_midi_notes)) is
-    /// read only at activation, so on `true` activate again.
-    pub fn take_note_ports_changed(&self) -> bool {
-        self.host_state.take(&self.host_state.notes.ports_changed)
+        self.host_state.take(&self.host_state.state_dirty)
     }
 
     /// Consumes and returns the `gui.closed` flag.
@@ -279,8 +243,7 @@ impl ClapLoaded {
     /// Cumulative, not consumed on read, so callers track their own delta.
     pub fn log_lines_dropped(&self) -> u32 {
         self.host_state
-            .log
-            .dropped
+            .log_dropped
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
@@ -780,6 +743,35 @@ mod main_thread_work_tests {
         });
         assert_eq!(fired, [1]);
         assert_eq!(n, 1);
+    }
+
+    /// **A registered timer is not due before its registration plus its
+    /// period, and is due at it**: constructed instants, no clock.
+    #[test]
+    fn a_registered_timer_is_due_once_its_period_has_elapsed() {
+        let registered = Instant::now();
+        let mut timers = [TimerEntry {
+            id: 1,
+            period_ms: 1000,
+            last_fire: registered,
+        }];
+        let before = registered + Duration::from_millis(999);
+        assert!(take_due_timers(&mut timers, before).is_empty());
+        let due = registered + Duration::from_millis(1000);
+        assert_eq!(take_due_timers(&mut timers, due), [1]);
+    }
+
+    /// The cached deadline of a registration is its period after it.
+    #[test]
+    fn a_registration_lowers_the_cached_deadline_to_its_period() {
+        let state = TimerState::new();
+        let entry = TimerEntry {
+            id: 1,
+            period_ms: 250,
+            last_fire: state.epoch(),
+        };
+        state.note_due(entry.wake_at());
+        assert_eq!(state.next_due_nanos(), 250_000_000);
     }
 
     /// **The pass leaves the cached deadline at the earliest timer's**, and at

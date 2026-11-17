@@ -51,7 +51,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -67,7 +67,7 @@ impl crate::Chunks for MidiEventVec {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::default()
+        BlockPayload::new(tutti_types::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, events: &MidiEventVec) {
@@ -1320,45 +1320,28 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
          statement about pairing"
     );
 
-    // **The deterministic gate.** Everything else the drain does is invisible by
-    // construction — the audio it recovers is stale and rejected by the slab's
-    // sequence check, and the MIDI it forwards is indistinguishable from MIDI
-    // that arrived on time — so a test that only inspects those observes the
-    // drain's absence statistically, if at all. An earlier version of this test
-    // asserted on stamps alone and passed 12 times out of 12 with `settle`
-    // stubbed out: it was claiming coverage it did not have.
+    // **The deterministic gate.** Everything else the drain does is invisible
+    // by construction (the audio it recovers is stale and rejected by the
+    // slab's sequence check, and the MIDI it forwards looks like MIDI that
+    // arrived on time), so this reads what the drain collected: an owed reply,
+    // counted `late`. Without the drain it stays 0 whatever the stamps say.
     //
-    // `settled_replies` counts what the drain actually took off the socket, so
-    // stubbing `settle` makes this fail every run rather than some of them.
-    //
-    // It is bounded by `abandoned_replies`, not pinned to 1. Block 1's 120 ms
-    // stall is past `MAX_PROCESS_TIMEOUT`, so at least that one reply is
-    // abandoned on any machine; but every later block has the same few-ms
-    // budget, and on a loaded machine (macOS CI, three cores, the whole
-    // workspace running beside it) one of them missing it is a property of the
-    // scheduler, not of the drain. An exact `== 1` read 2 or 3 there. What the
-    // drain owes is what was abandoned, so that is the bound.
-    //
-    // `settled` is read first: its `Acquire` makes every `abandoned` bump that owed those
-    // replies visible to the read after it.
-    let settled = bridge.settled_replies();
-    let abandoned = bridge.abandoned_replies();
+    // Block 1's 120 ms stall is past `MAX_PROCESS_TIMEOUT`, so at least that
+    // one reply is abandoned on any machine; a loaded machine can make a later
+    // block miss its few-ms budget too, so neither count is pinned.
+    let counts = bridge.block_counts();
     assert!(
-        abandoned >= 1,
+        counts.abandoned >= 1,
         "block 1 stalled 120 ms against a budget of at most {:?}, yet no reply \
          was abandoned — the rig did not stage the timeout this test is about",
         std::time::Duration::from_millis(50),
     );
     assert!(
-        settled >= 1,
-        "the drain took no owed replies although {abandoned} were abandoned. \
-         `Owed::settle` never ran or never collected anything, and the abandoned \
-         frame is still queued — which the stamps below cannot reliably detect."
-    );
-    assert!(
-        settled <= abandoned,
-        "the drain took {settled} replies off the socket but only {abandoned} \
-         were ever abandoned: the drain's count no longer matches what it owes."
+        counts.late >= 1,
+        "the drain collected no owed reply although {} blocks were abandoned. \
+         `Owed::take` never ran or never collected anything, and the abandoned \
+         frame is still queued — which the stamps below cannot reliably detect.",
+        counts.abandoned
     );
 
     // The server stamps block `seq`'s reply with `data[0] == seq` (not its
@@ -1547,7 +1530,7 @@ impl crate::Chunks for StatusProbe {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::default()
+        BlockPayload::new(tutti_types::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, _events: &MidiEventVec) {}
@@ -1642,7 +1625,7 @@ impl crate::Chunks for LossProbe {
         };
         BlockPayload {
             midi: std::iter::repeat_n(note, self.midi).collect(),
-            ..BlockPayload::default()
+            ..BlockPayload::new(tutti_types::SampleRate::SR_48K)
         }
     }
 
@@ -1889,7 +1872,7 @@ fn two_stale_blocks(
             &mut tutti_plugin_types::ParameterChanges::new(),
             Default::default(),
             Default::default(),
-            Default::default(),
+            tutti_plugin_types::TransportInfo::new(tutti_types::SampleRate::SR_48K),
             Default::default(),
         );
         assert!(submitted.block);

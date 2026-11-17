@@ -262,15 +262,15 @@ fn refused_sample_rate_change_is_reported() {
     );
 }
 
-/// A refused activation hands the plugin back reporting the configuration it
-/// already accepted, and the very same instance activates there again.
+/// A refused activation leaves the plugin on the configuration it already
+/// accepted, and the very same instance activates there again.
 /// (Putting the previous configuration back automatically is the server
 /// bridge's rollback, tested in `tutti-plugin-server`.)
 ///
 /// The oracle is plugin-side: one accepted activation before, one after, the
 /// second on the base rate.
 #[test]
-fn a_refused_activation_leaves_the_accepted_configuration_reported() {
+fn a_refused_activation_leaves_the_plugin_on_its_accepted_configuration() {
     let probe = Probe::acquire();
     let active = probe.activate();
     assert_eq!(
@@ -285,31 +285,25 @@ fn a_refused_activation_leaves_the_accepted_configuration_reported() {
     set_activate_refusal(ACTIVATE_REFUSE_NONE, 0);
 
     assert_eq!(
-        loaded.sample_rate().get(),
-        BASE_RATE,
-        "reporting 96k would tell the caller the plugin is configured for a rate it refused"
+        last_accepted_activation(),
+        Some((BASE_RATE, BASE_FRAMES)),
+        "the refused rate is not the plugin's configuration"
     );
     assert_eq!(activate_accepts(), 1, "the refusal activated nothing");
 
-    let active = loaded
+    let _active = loaded
         .activate_at::<f32>(BASE_RATE, BASE_FRAMES)
         .map_err(|(_, e)| e)
         .expect("the same instance activates at the accepted configuration");
     assert_eq!(activate_accepts(), 2);
     assert_eq!(last_accepted_activation(), Some((BASE_RATE, BASE_FRAMES)),);
-    assert_eq!(active.loaded().sample_rate().get(), BASE_RATE);
 }
 
-/// A refused block-size growth leaves the block size the plugin accepted, so
-/// `process` does not admit blocks the plugin never agreed to.
-///
-/// The scratch size is what `process` bounds-checks incoming blocks against
-/// (`process_impl` rejects `num_samples > max_frames`). If the host kept
-/// `max_frames` at the refused value, `process` would accept a block larger than
-/// the plugin's declared ceiling — the plugin reads `frames_count` samples out of
-/// buffers it sized for less.
+/// A refused block-size growth leaves the plugin on the ceiling it accepted:
+/// the oracle is plugin-side, the last activation it accepted. The host holds
+/// no block size of its own to disagree with it.
 #[test]
-fn a_refused_block_size_growth_leaves_the_accepted_ceiling() {
+fn a_refused_block_size_growth_leaves_the_plugin_on_its_accepted_ceiling() {
     let probe = Probe::acquire();
     let active = probe.activate();
 
@@ -320,10 +314,11 @@ fn a_refused_block_size_growth_leaves_the_accepted_ceiling() {
 
     assert!(matches!(err, PluginError::Load { .. }), "{err:?}");
     assert_eq!(
-        loaded.block_size(),
-        BASE_FRAMES,
-        "the host must report the ceiling the plugin accepted"
+        last_accepted_activation(),
+        Some((BASE_RATE, BASE_FRAMES)),
+        "the refused ceiling is not the plugin's configuration"
     );
+    drop(loaded);
 }
 
 /// A plugin that refused one configuration still activates and processes at an
@@ -380,7 +375,6 @@ fn accepted_sample_rate_change_reaches_the_plugin() {
         Some((96_000.0, BASE_FRAMES)),
         "the new rate must reach the plugin's `activate`"
     );
-    assert_eq!(active.loaded().sample_rate().get(), 96_000.0);
 }
 
 // ---------------------------------------------------------------------------

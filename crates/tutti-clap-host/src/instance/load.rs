@@ -11,14 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
 use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
-use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin, SampleRate};
+use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
 use tutti_types::LayoutError;
-
-/// A placeholder rate for the plugin until its first activation, whose
-/// `Prepare` carries the real one.
-const PLACEHOLDER_SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
-/// A placeholder block size, for the same reason.
-const PLACEHOLDER_MAX_FRAMES: u32 = 512;
 
 /// What to load: which library of a bundle and which plugin of the library.
 #[derive(Debug, Clone, Default)]
@@ -59,10 +53,14 @@ fn stage_of(stage: Stage) -> LoadStage {
 }
 
 fn load_failed(bundle_path: &Path, error: LoadError) -> ClapError {
+    let mut reason = error.to_string();
+    if let Some(cause) = std::error::Error::source(&error) {
+        reason = format!("{reason}: {cause}");
+    }
     ClapError::LoadFailed {
         path: bundle_path.to_path_buf(),
         stage: stage_of(error.stage()),
-        reason: error.reason(),
+        reason,
     }
 }
 
@@ -93,7 +91,7 @@ impl ClapLoaded {
                 "audio ports can be re-read only while the plugin is deactivated".to_string(),
             ));
         }
-        let (ports, supports_f64) = read_audio_ports(main, &mut self.info, &self.plugin)?;
+        let (ports, supports_f64) = read_audio_ports(main, &self.plugin)?;
         self.ports = ports;
         self.audio.supports_f64 = supports_f64;
         Ok(())
@@ -146,7 +144,7 @@ impl ClapLoaded {
         let index = bundle
             .select(options.plugin_id.as_deref())
             .map_err(|e| load_failed(bundle_path, e))?;
-        let mut plugin_info = info_of(&bundle.descriptors()[index]);
+        let plugin_info = info_of(&bundle.descriptors()[index]);
         // The file opened and the plugin chosen in it, by id even when the
         // load named none, so a reopen takes the same one.
         let origin = Origin::new(
@@ -164,10 +162,8 @@ impl ClapLoaded {
             .instantiate(index, host, host_state.roles.clone(), work)
             .map_err(|e| load_failed(bundle_path, e))?;
 
-        let (ports, supports_f64) = read_audio_ports(main, &mut plugin_info, &plugin)?;
+        let (ports, supports_f64) = read_audio_ports(main, &plugin)?;
         let audio = AudioConfig {
-            sample_rate: PLACEHOLDER_SAMPLE_RATE,
-            max_frames: PLACEHOLDER_MAX_FRAMES,
             supports_f64,
             f64_active: false,
         };
@@ -258,15 +254,12 @@ fn port_channels(
 /// every presented port takes 64-bit audio.
 fn read_audio_ports(
     main: MainThreadMarker,
-    info: &mut PluginInfo,
     source: &impl AudioPortSource,
 ) -> Result<(PortLayout, bool)> {
     let ports = PortLayout {
         inputs: port_channels(main, source, true)?,
         outputs: port_channels(main, source, false)?,
     };
-    info.audio_inputs = ports.input_channel_total();
-    info.audio_outputs = ports.output_channel_total();
     Ok((ports, check_f64_support(main, source)))
 }
 
@@ -577,11 +570,10 @@ mod enumeration_hole_tests {
         assert!(message.contains("input port 0"), "{message}");
         assert!(message.contains("65538"), "{message}");
 
-        let mut info = PluginInfo::new("id", "name");
         assert!(matches!(
-            read_audio_ports(tutti_fixtures::main_thread(), &mut info, &Wide(u32::MAX)),
+            read_audio_ports(tutti_fixtures::main_thread(), &Wide(u32::MAX)),
             Err(ClapError::PortTooWide { .. })
         ));
-        assert!(read_audio_ports(tutti_fixtures::main_thread(), &mut info, &Wide(8)).is_ok());
+        assert!(read_audio_ports(tutti_fixtures::main_thread(), &Wide(8)).is_ok());
     }
 }

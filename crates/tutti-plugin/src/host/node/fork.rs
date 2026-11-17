@@ -253,9 +253,9 @@ impl ServedFork {
             .map_err(PluginForkError::SaveState)?;
         drop(live);
         let origin = self.origin.clone().ok_or_else(|| PluginForkError::Load {
-            path: std::path::PathBuf::new(),
+            path: None,
             source: tutti_plugin_types::BridgeError::LoadFailed {
-                path: std::path::PathBuf::new(),
+                path: None,
                 stage: tutti_plugin_types::LoadStage::Opening,
                 reason: "this served plugin has no origin to reopen".into(),
             },
@@ -309,7 +309,7 @@ impl Capture {
             .origin
             .reopen(self.sample_rate, Some(&self.state))
             .map_err(|source| PluginForkError::Load {
-                path: path.clone(),
+                path: Some(path.clone()),
                 source,
             })?;
         if ipc.descriptor().id != self.id {
@@ -327,7 +327,7 @@ impl Capture {
         // chunk; either way a `prepare` settles and records the plan.
         let wait = ipc.watch(self.offline);
         let mut fork = PluginClient::over(ipc).map_err(|source| PluginForkError::Load {
-            path: path.clone(),
+            path: Some(path.clone()),
             source,
         })?;
         self.sources.install(&fork.controls);

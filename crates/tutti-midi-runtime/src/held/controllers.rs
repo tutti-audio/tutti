@@ -23,7 +23,12 @@ use tutti_ump::{
 };
 
 /// The hold controllers: sustain, sostenuto, soft pedal, hold 2.
-const PEDALS: [u8; 4] = [64, 66, 67, 69];
+const PEDALS: [CCNumber; 4] = [
+    CCNumber::of(64),
+    CCNumber::of(66),
+    CCNumber::of(67),
+    CCNumber::of(69),
+];
 /// The bit of the pitch bend in a lane's state; the pedals are bits 0 to 3.
 const BEND: u8 = 4;
 
@@ -90,8 +95,8 @@ impl Controllers {
             Message::Midi2(
                 address,
                 match PEDALS.get(usize::from(bit)) {
-                    Some(&cc) => Voice2::ControlChange {
-                        controller: CCNumber::new(cc).expect("a controller"),
+                    Some(&controller) => Voice2::ControlChange {
+                        controller,
                         value: ControlValue::MIN,
                     },
                     None => Voice2::PitchBend(BendValue::CENTER),
@@ -101,8 +106,8 @@ impl Controllers {
             Message::Midi1(
                 address,
                 match PEDALS.get(usize::from(bit)) {
-                    Some(&cc) => Voice1::ControlChange {
-                        controller: CCNumber::new(cc).expect("a controller"),
+                    Some(&controller) => Voice1::ControlChange {
+                        controller,
                         value: U7::of(0),
                     },
                     None => Voice1::PitchBend(U14::CENTER),
@@ -172,11 +177,6 @@ impl Controllers {
         true
     }
 
-    /// Whether any controller is off its normal position.
-    pub(crate) fn any(&self) -> bool {
-        self.lanes.iter().any(|&l| l != 0)
-    }
-
     /// Writes the resets the port refused earlier, stopping at the first it
     /// refuses again. Each attempt gives its count back, so a delayed reset
     /// nets zero.
@@ -210,6 +210,6 @@ impl Controllers {
 fn pedal_bit(controller: CCNumber) -> Option<u8> {
     PEDALS
         .iter()
-        .position(|&p| p == controller.get())
+        .position(|&p| p == controller)
         .map(|i| i as u8)
 }

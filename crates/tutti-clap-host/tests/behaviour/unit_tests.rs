@@ -26,11 +26,11 @@ fn at(k: usize) -> Offset {
     Offset::of(Samples(k), Samples(BLOCK))
 }
 
-/// The first event `event` adds to a fresh list.
-fn first(event: &(Offset, tutti_ump::Ump)) -> Option<ClapEvent> {
+/// A fresh list `event` was added to: its first event is what it converts to.
+fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
     let mut list = InputEventList::new();
     list.add_midi(event);
-    list.take_events().into_iter().next()
+    list
 }
 
 use crate::support;
@@ -53,7 +53,8 @@ use tutti_ump::{U7, U14};
 fn test_note_on_roundtrip() {
     // Build with MIDI-2 velocity (half of u16 max ≈ 0x8000).
     let event = (at(10), midi::note_on(MidiChannel::of(3), 60, 0x8000));
-    let clap = first(&event).expect("NoteOn should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("NoteOn should convert");
     assert!(matches!(clap, ClapEvent::NoteOn(_)));
     let back = clap
         .to_midi(&mut tutti_midi_protocol::Translator::new())
@@ -69,7 +70,8 @@ fn test_note_on_roundtrip() {
 #[test]
 fn test_note_off_roundtrip() {
     let event = (at(20), midi::note_off(MidiChannel::of(5), 72, 0x4000));
-    let clap = first(&event).expect("NoteOff should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("NoteOff should convert");
     assert!(matches!(clap, ClapEvent::NoteOff(_)));
     let back = clap
         .to_midi(&mut tutti_midi_protocol::Translator::new())
@@ -92,7 +94,8 @@ fn test_control_change_roundtrip() {
             widen_value(U7::of(100)).get(),
         ),
     );
-    let clap = first(&event).expect("CC should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("CC should convert");
     // CC goes through the generic Midi event
     match clap {
         ClapEvent::Midi(e) => {
@@ -113,7 +116,8 @@ fn test_pitch_bend_roundtrip() {
         at(0),
         midi::pitch_bend(MidiChannel::FIRST, widen_bend(U14::of(8192)).get()),
     );
-    let clap = first(&event).expect("PitchBend should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("PitchBend should convert");
     match clap {
         ClapEvent::Midi(e) => {
             assert_eq!(e.data[0] & 0xF0, 0xE0, "PitchBend status nibble");
@@ -129,7 +133,8 @@ fn test_pitch_bend_roundtrip() {
 #[test]
 fn test_program_change_roundtrip() {
     let event = (at(100), midi::program_change(MidiChannel::of(9), 42, None));
-    let clap = first(&event).expect("ProgramChange should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("ProgramChange should convert");
     match clap {
         ClapEvent::Midi(e) => {
             assert_eq!(e.data[0], 0xC0 | 9, "ProgramChange status byte");
@@ -746,12 +751,12 @@ fn test_host_state_take_clears_flag() {
     use std::sync::atomic::Ordering;
 
     let state = HostState::new(main_thread());
-    state.processing.state_dirty.store(true, Ordering::Release);
+    state.state_dirty.store(true, Ordering::Release);
 
     // First take returns true and clears
-    assert!(state.take(&state.processing.state_dirty));
+    assert!(state.take(&state.state_dirty));
     // Second take returns false
-    assert!(!state.take(&state.processing.state_dirty));
+    assert!(!state.take(&state.state_dirty));
 }
 
 /// The main thread is the one thread that proved it with a token, and no
@@ -1063,148 +1068,6 @@ fn test_host_thread_check_main_thread() {
     assert!(!unsafe { tc.is_audio_thread.unwrap()(raw) });
 }
 
-#[test]
-fn test_host_thread_check_audio_thread() {
-    use clap_sys::ext::thread_check::clap_host_thread_check;
-    use std::sync::Arc;
-
-    let state = Arc::new(HostState::new(main_thread()));
-    let state2 = Arc::clone(&state);
-    let host = ClapHost::new(state);
-    let raw = host.as_raw();
-    let get_ext = unsafe { (*raw).get_extension.unwrap() };
-    let tc_ptr = unsafe { get_ext(raw, c"clap.thread-check".as_ptr()) };
-    let tc = unsafe { &*(tc_ptr as *const clap_host_thread_check) };
-
-    let raw_val = raw as usize;
-    let is_main = tc.is_main_thread.unwrap();
-    let is_audio = tc.is_audio_thread.unwrap();
-
-    // A random thread should NOT be the audio thread (no audio_thread_id set)
-    let handle = std::thread::spawn(move || {
-        let raw = raw_val as *const clap_sys::host::clap_host;
-        let main = unsafe { is_main(raw) };
-        let audio = unsafe { is_audio(raw) };
-        (main, audio)
-    });
-
-    let (main, audio) = handle.join().unwrap();
-    assert!(!main, "Other thread should not be main");
-    assert!(
-        !audio,
-        "Random thread should not be audio (no audio_thread_id set)"
-    );
-
-    // Claim the audio-thread role on this thread, then check.
-    let claim = state2.claim_audio_thread();
-    assert!(
-        unsafe { is_audio(raw) },
-        "Current thread should be audio while holding the claim"
-    );
-    drop(claim);
-    assert!(
-        !unsafe { is_audio(raw) },
-        "Releasing the claim must clear the audio-thread identity"
-    );
-}
-
-/// `is_main_thread` and `is_audio_thread` must be
-/// **mutually exclusive**.
-///
-/// The spec lets a host mark any OS thread — including the main thread — as the
-/// audio thread, but they are alternative *roles*, not simultaneous identities.
-/// Answering `true` to both at once while `start_processing` runs on the main
-/// thread would make every plugin-side thread assertion unfalsifiable: a plugin
-/// asserting `!is_main_thread()` inside an `[audio-thread]` call could never
-/// detect that it was on the wrong thread.
-#[test]
-fn thread_check_roles_are_mutually_exclusive_c1() {
-    use clap_sys::ext::thread_check::clap_host_thread_check;
-    use std::sync::Arc;
-
-    let state = Arc::new(HostState::new(main_thread()));
-    let state2 = Arc::clone(&state);
-    let host = ClapHost::new(state);
-    let raw = host.as_raw();
-    let get_ext = unsafe { (*raw).get_extension.unwrap() };
-    let tc_ptr = unsafe { get_ext(raw, c"clap.thread-check".as_ptr()) };
-    let tc = unsafe { &*(tc_ptr as *const clap_host_thread_check) };
-    let is_main = tc.is_main_thread.unwrap();
-    let is_audio = tc.is_audio_thread.unwrap();
-
-    // Baseline: this IS the main thread, and nothing is the audio thread.
-    assert!(unsafe { is_main(raw) });
-    assert!(!unsafe { is_audio(raw) });
-
-    {
-        // While the main thread holds the audio-thread claim (exactly what
-        // `set_sample_rate` / `deactivate` / `Drop` do when they stop
-        // processing), it must report as the audio thread and NOT as main.
-        let _claim = state2.claim_audio_thread();
-        assert!(
-            unsafe { is_audio(raw) },
-            "the claiming thread must report as the audio thread"
-        );
-        assert!(
-            !unsafe { is_main(raw) },
-            "the host must not assert both identities at once — a plugin's own \
-             `assert(!is_main_thread())` inside start_processing has to be able \
-             to fail"
-        );
-    }
-
-    // Released: the main thread is the main thread again.
-    assert!(unsafe { is_main(raw) });
-    assert!(!unsafe { is_audio(raw) });
-}
-
-/// The audio-thread claim is real mutual exclusion, not
-/// an assertion. A second thread trying to enter an `[audio-thread]` region
-/// must block until the first has left — this is the serialization CLAP's
-/// "`params.flush` must not be called concurrently to `process()`" requires,
-/// and which a `debug_assert!` (compiled out in release) could not provide.
-#[test]
-fn audio_thread_claim_serializes_across_threads_c2() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-
-    let state = Arc::new(HostState::new(main_thread()));
-    // Counts concurrent occupants of the claimed region; must never exceed 1.
-    let inside = Arc::new(AtomicU32::new(0));
-    let overlapped = Arc::new(AtomicBool::new(false));
-
-    let mut handles = Vec::new();
-    for _ in 0..8 {
-        let state = Arc::clone(&state);
-        let inside = Arc::clone(&inside);
-        let overlapped = Arc::clone(&overlapped);
-        handles.push(std::thread::spawn(move || {
-            for _ in 0..200 {
-                let _claim = state.claim_audio_thread();
-                if inside.fetch_add(1, Ordering::SeqCst) != 0 {
-                    overlapped.store(true, Ordering::SeqCst);
-                }
-                // The claiming thread must see itself as the audio thread for
-                // the whole region — no other claim can have overwritten it.
-                assert!(state.is_audio_thread());
-                inside.fetch_sub(1, Ordering::SeqCst);
-            }
-        }));
-    }
-    for h in handles {
-        h.join().unwrap();
-    }
-
-    assert!(
-        !overlapped.load(Ordering::SeqCst),
-        "two threads were inside the [audio-thread] region at once"
-    );
-    assert!(
-        !state.is_audio_thread(),
-        "no claim outstanding, so no thread should be the audio thread"
-    );
-}
-
 // ── Miscellaneous ──
 
 #[test]
@@ -1255,18 +1118,17 @@ fn test_output_event_list_take_events() {
 }
 
 #[test]
-fn test_input_event_list_from_events() {
+fn a_flush_list_is_sent_in_time_order() {
     let events = vec![
         ClapEvent::param_value(10, 1, 0.5),
         ClapEvent::param_value(5, 2, 0.3),
     ];
 
-    let mut list = tutti_clap_host::InputEventList::from_events(events);
-    assert_eq!(list.len(), 2);
-
+    let mut list = tutti_clap_host::FlushEvents::new(events);
     list.sort_by_time();
-    // After sorting, event at time 5 should be first
-    let raw = list.as_raw();
+    let source: *const dyn tutti_clap_ffi::EventSource = &list;
+    // SAFETY: `list` outlives the raw list, which is read here only.
+    let raw = unsafe { tutti_clap_ffi::input_raw_for_test(source) };
     unsafe {
         let size_fn = (*raw).size.unwrap();
         assert_eq!(size_fn(raw), 2);

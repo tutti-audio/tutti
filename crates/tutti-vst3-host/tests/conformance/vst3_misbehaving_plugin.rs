@@ -197,7 +197,7 @@ fn drive_block_with(inst: &mut Active, input: f32) -> Vec<Vec<f32>> {
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     outs
 }

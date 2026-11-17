@@ -3,7 +3,7 @@
 
 use std::ptr::NonNull;
 
-use crate::error::{Result, check};
+use crate::error::{Operation, Result, check};
 use crate::sys;
 
 /// A `snd_seq_port_info_t`.
@@ -14,9 +14,9 @@ impl PortRecord {
         let mut ptr: *mut sys::snd_seq_port_info_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_port_info_malloc(&mut ptr) };
-        check(rc, "snd_seq_port_info_malloc")?;
+        check(rc, Operation::PortInfoMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_seq_port_info_malloc",
+            operation: Operation::PortInfoMalloc,
         })
     }
 
@@ -40,9 +40,9 @@ impl ClientRecord {
         let mut ptr: *mut sys::snd_seq_client_info_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_client_info_malloc(&mut ptr) };
-        check(rc, "snd_seq_client_info_malloc")?;
+        check(rc, Operation::ClientInfoMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_seq_client_info_malloc",
+            operation: Operation::ClientInfoMalloc,
         })
     }
 
@@ -66,9 +66,9 @@ impl BlockRecord {
         let mut ptr: *mut sys::snd_ump_block_info_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_ump_block_info_malloc(&mut ptr) };
-        check(rc, "snd_ump_block_info_malloc")?;
+        check(rc, Operation::UmpBlockInfoMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_ump_block_info_malloc",
+            operation: Operation::UmpBlockInfoMalloc,
         })
     }
 
@@ -92,9 +92,9 @@ impl EndpointRecord {
         let mut ptr: *mut sys::snd_ump_endpoint_info_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_ump_endpoint_info_malloc(&mut ptr) };
-        check(rc, "snd_ump_endpoint_info_malloc")?;
+        check(rc, Operation::UmpEndpointInfoMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_ump_endpoint_info_malloc",
+            operation: Operation::UmpEndpointInfoMalloc,
         })
     }
 
@@ -128,9 +128,9 @@ impl StatusRecord {
         let mut ptr: *mut sys::snd_seq_queue_status_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_queue_status_malloc(&mut ptr) };
-        check(rc, "snd_seq_queue_status_malloc")?;
+        check(rc, Operation::QueueStatusMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_seq_queue_status_malloc",
+            operation: Operation::QueueStatusMalloc,
         })
     }
 
@@ -154,9 +154,9 @@ impl PoolRecord {
         let mut ptr: *mut sys::snd_seq_client_pool_t = std::ptr::null_mut();
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_client_pool_malloc(&mut ptr) };
-        check(rc, "snd_seq_client_pool_malloc")?;
+        check(rc, Operation::ClientPoolMalloc)?;
         NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
-            operation: "snd_seq_client_pool_malloc",
+            operation: Operation::ClientPoolMalloc,
         })
     }
 

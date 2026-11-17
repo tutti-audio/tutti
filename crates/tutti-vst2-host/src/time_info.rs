@@ -20,12 +20,12 @@
 //! **`*_VALID` bits are claims about *this* snapshot.** Setting one tells the
 //! plugin "the matching field holds a real number, use it". A `f64` has no
 //! absent value, so a non-`Option` field is *not* evidence that the field was
-//! populated: a zeroed [`TransportInfo`] hands over `tempo = 0.0`, and a plugin
-//! told `kVstTempoValid` computes `60.0 / 0.0` and puts an infinity into the
-//! master bus. Each bit is therefore gated on the field genuinely being usable
-//! (JUCE's `setFromOptional` is the same shape). The one exception is
-//! `TIME_SIG_VALID`, and it is an exception because the *type* does the work —
-//! see [`build_vst2_time_info`].
+//! populated: a position is a `Beat`, which may hold NaN, and a plugin told
+//! `kVstPpqPosValid` does arithmetic with it. Each position bit is therefore
+//! gated on the field being finite (JUCE's `setFromOptional` is the same
+//! shape). The tempo and the signature are the exceptions, because their
+//! *types* do the work (a `Bpm` is finite and above zero, a `TimeSignature`
+//! is in range) — see [`build_vst2_time_info`].
 //!
 //! **`TRANSPORT_CHANGED` is a claim about the *transition*.** Per the SDK it
 //! means the transport state just changed, and plugins use it as a reset
@@ -36,7 +36,7 @@
 
 use crate::types::TransportInfo;
 // Shared with the VST3 path so the two cannot drift apart.
-use tutti_plugin_types::{AutomationMode, SampleRate, is_usable};
+use tutti_plugin_types::{AutomationMode, SampleRate};
 
 /// The transport bits whose transition defines `TRANSPORT_CHANGED`.
 ///
@@ -62,22 +62,19 @@ pub(crate) fn build_vst2_time_info(
 ) -> vst::api::TimeInfo {
     use vst::api::TimeInfoFlags as F;
 
-    // TIME_SIG_VALID is unconditional, and it is the only one that is. Not
-    // because the field is non-`Option` — that argument is what set every other
-    // VALID bit here unconditionally and shipped `tempo = 0, kVstTempoValid` to
-    // plugins — but because `TimeSignature` is a validated newtype whose
-    // constructors refuse a half outside its legal range. There is no
-    // representable invalid signature, so the claim is always true.
-    let mut flags = F::TIME_SIG_VALID;
+    // TIME_SIG_VALID and TEMPO_VALID are unconditional. Not because the fields
+    // are non-`Option` — that argument shipped `tempo = 0, kVstTempoValid` to
+    // plugins — but because `TimeSignature` and `Bpm` are validated newtypes
+    // whose constructors refuse a value outside the legal range: a signature
+    // is in range, and a tempo is finite and above zero (plugins divide by
+    // it). There is no representable invalid one, so the claim is always true.
+    // A `Beat` is not checked, so each position bit is gated on finiteness.
+    let mut flags = F::TIME_SIG_VALID | F::TEMPO_VALID;
 
-    if is_usable(transport.position.quarters) {
+    if transport.position.beat.get().is_finite() {
         flags |= F::PPQ_POS_VALID;
     }
-    // Tempo additionally has to be non-zero: plugins divide by it.
-    if is_usable(transport.timing.tempo) && transport.timing.tempo > 0.0 {
-        flags |= F::TEMPO_VALID;
-    }
-    if is_usable(transport.bar.position_quarters) {
+    if transport.bar.start.get().is_finite() {
         flags |= F::BARS_VALID;
     }
 
@@ -99,17 +96,12 @@ pub(crate) fn build_vst2_time_info(
     if transport.state.recording {
         flags |= F::TRANSPORT_RECORDING;
     }
-    if transport.state.cycle_active {
-        // Signal both that the cycle is active AND that the cycle_start_pos /
-        // cycle_end_pos fields are populated — without CYCLE_POS_VALID the
-        // plugin ignores the filled cycle boundaries. Same finiteness rule as
-        // the other position fields.
-        flags |= F::TRANSPORT_CYCLE_ACTIVE;
-        if is_usable(transport.loop_region.start_quarters)
-            && is_usable(transport.loop_region.end_quarters)
-        {
-            flags |= F::CYCLE_POS_VALID;
-        }
+    // A `LoopRange` is finite and ordered, so the cycle's presence signals both
+    // that it is active AND that the cycle_start_pos / cycle_end_pos fields are
+    // populated: without CYCLE_POS_VALID the plugin ignores the boundaries.
+    let cycle = transport.loop_region.map(|l| l.range);
+    if cycle.is_some() {
+        flags |= F::TRANSPORT_CYCLE_ACTIVE | F::CYCLE_POS_VALID;
     }
 
     // The host's automation mode: `kVstAutomationReading` and `kVstAutomationWriting`.
@@ -137,7 +129,6 @@ pub(crate) fn build_vst2_time_info(
     }
 
     vst::api::TimeInfo {
-        // The SDK struct holds a bare `f64`: the unit stops at the C write.
         sample_rate: sample_rate.get(),
         // VST2.4 has no `*_VALID` bit for `sample_pos` — the plugin always reads
         // it as fact — so a snapshot without a project-time position can only
@@ -150,11 +141,12 @@ pub(crate) fn build_vst2_time_info(
         // position, past that.
         nanoseconds: transport.system_time_ns.unwrap_or(0) as f64,
         samples_to_next_clock: to_clock.unwrap_or(0),
-        ppq_pos: transport.position.quarters,
-        tempo: transport.timing.tempo,
-        bar_start_pos: transport.bar.position_quarters,
-        cycle_start_pos: transport.loop_region.start_quarters,
-        cycle_end_pos: transport.loop_region.end_quarters,
+        // The SDK struct's `f64`s: the units stop at the C write.
+        ppq_pos: transport.position.beat.get(),
+        tempo: transport.timing.tempo.get(),
+        bar_start_pos: transport.bar.start.get(),
+        cycle_start_pos: cycle.map_or(0.0, |c| c.start().get()),
+        cycle_end_pos: cycle.map_or(0.0, |c| c.end().get()),
         time_sig_numerator: transport.timing.signature.beats_per_bar().into(),
         time_sig_denominator: transport.timing.signature.note_value().into(),
         flags: flags.bits(),
@@ -165,13 +157,23 @@ pub(crate) fn build_vst2_time_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_types::LoopRegion;
+    use tutti_types::{Beat, Bpm, LoopRange};
     use vst::api::TimeInfoFlags as F;
 
+    fn base() -> TransportInfo {
+        TransportInfo::new(SampleRate::SR_48K)
+    }
+
+    fn cycle(start: f64, end: f64) -> LoopRegion {
+        LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+    }
+
     fn playing_transport() -> TransportInfo {
-        TransportInfo::new()
+        base()
             .with_playing(true)
             .with_recording(true)
-            .with_loop(true, 0.0, 8.0)
+            .with_loop(cycle(0.0, 8.0))
     }
 
     /// Spec: vst2.timeinfo.kVstTransportRecording, vst2.timeinfo.kVstTransportCycleActive, vst2.timeinfo.kVstTransportPlaying, vst2.timeinfo.kVstPpqPosValid, vst2.timeinfo.kVstTempoValid
@@ -180,10 +182,9 @@ mod tests {
         // Recording + cycle-active + playing, with real tempo/position values,
         // so every VALID bit is genuinely earned.
         let transport = playing_transport()
-            .with_tempo(120.0)
-            .with_sample_rate(48_000.0)
-            .with_position_quarters(4.0)
-            .with_bar(4.0, Default::default());
+            .with_tempo(Bpm::of(120.0))
+            .with_beat(Beat(4.0))
+            .with_bar(Beat(4.0), Default::default());
 
         // First block: no previous snapshot, so no transition to report.
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
@@ -196,8 +197,7 @@ mod tests {
             | F::TRANSPORT_RECORDING
             | F::TRANSPORT_CYCLE_ACTIVE
             | F::CYCLE_POS_VALID
-            // A usable tempo, position and rate (the snapshot's, as the
-            // plugin node always sends one) put the MIDI clock grid under the
+            // A finite position at the snapshot's tempo and rate put the MIDI clock grid under the
             // playhead.
             | F::VST_CLOCK_VALID)
             .bits();
@@ -246,11 +246,10 @@ mod tests {
     #[test]
     fn smpte_is_never_claimed() {
         let transport = playing_transport()
-            .with_tempo(120.0)
-            .with_sample_rate(48_000.0)
-            .with_position_quarters(4.0)
-            .with_bar(4.0, Default::default());
-        for transport in [&transport, &TransportInfo::new()] {
+            .with_tempo(Bpm::of(120.0))
+            .with_beat(Beat(4.0))
+            .with_bar(Beat(4.0), Default::default());
+        for transport in [&transport, &base()] {
             let info = build_vst2_time_info(
                 transport,
                 SampleRate::SR_48K,
@@ -265,16 +264,19 @@ mod tests {
 
     #[test]
     fn flags_stopped_no_cycle() {
-        // Stopped, not recording, no cycle. `TransportInfo::default()` carries a
-        // real 120 BPM tempo and 4/4, and 0.0 is a perfectly usable position, so
-        // the position/tempo VALID bits stand. Its sample rate is 0, and the
-        // MIDI clock is measured at the snapshot's rate (not the instance's),
-        // so it is not claimed; nor is `nanoSeconds`, with no host clock.
-        let transport = TransportInfo::new();
+        // Stopped, not recording, no cycle. A new snapshot carries a real 120
+        // BPM tempo and 4/4, and 0.0 is a finite position, so the
+        // position/tempo VALID bits stand, and so does the MIDI clock grid
+        // under the playhead; `nanoSeconds` is not claimed, with no host clock.
+        let transport = base();
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
 
-        let expected =
-            (F::PPQ_POS_VALID | F::TEMPO_VALID | F::TIME_SIG_VALID | F::BARS_VALID).bits();
+        let expected = (F::PPQ_POS_VALID
+            | F::TEMPO_VALID
+            | F::TIME_SIG_VALID
+            | F::BARS_VALID
+            | F::VST_CLOCK_VALID)
+            .bits();
 
         assert_eq!(info.flags, expected);
         assert_eq!(info.flags & F::TRANSPORT_PLAYING.bits(), 0);
@@ -292,8 +294,8 @@ mod tests {
     /// Spec: vst2.timeinfo.kVstTransportChanged
     #[test]
     fn transport_changed_is_an_edge_not_a_level() {
-        let stopped = TransportInfo::new();
-        let playing = TransportInfo::new().with_playing(true);
+        let stopped = base();
+        let playing = base().with_playing(true);
 
         // Stopped → playing: an edge.
         let first = build_vst2_time_info(&stopped, SampleRate::SR_48K, None, AutomationMode::Off);
@@ -350,7 +352,7 @@ mod tests {
     /// `playing` never moves.
     #[test]
     fn transport_changed_fires_for_recording_and_cycle_transitions() {
-        let playing = TransportInfo::new().with_playing(true);
+        let playing = base().with_playing(true);
         let base = build_vst2_time_info(&playing, SampleRate::SR_48K, None, AutomationMode::Off);
 
         let armed = playing.with_recording(true);
@@ -358,7 +360,7 @@ mod tests {
             build_vst2_time_info(&armed, SampleRate::SR_48K, Some(&base), AutomationMode::Off);
         assert_ne!(rec.flags & F::TRANSPORT_CHANGED.bits(), 0);
 
-        let looped = armed.with_loop(true, 0.0, 8.0);
+        let looped = armed.with_loop(cycle(0.0, 8.0));
         let cyc =
             build_vst2_time_info(&looped, SampleRate::SR_48K, Some(&rec), AutomationMode::Off);
         assert_ne!(cyc.flags & F::TRANSPORT_CHANGED.bits(), 0);
@@ -367,12 +369,8 @@ mod tests {
     /// A pure position advance is not a transport state change.
     #[test]
     fn moving_the_playhead_is_not_a_transport_change() {
-        let a = TransportInfo::new()
-            .with_playing(true)
-            .with_position_quarters(1.0);
-        let b = TransportInfo::new()
-            .with_playing(true)
-            .with_position_quarters(2.0);
+        let a = base().with_playing(true).with_beat(Beat(1.0));
+        let b = base().with_playing(true).with_beat(Beat(2.0));
 
         let first = build_vst2_time_info(&a, SampleRate::SR_48K, None, AutomationMode::Off);
         let second =
@@ -385,66 +383,45 @@ mod tests {
     /// so the snapshot's `tempo_inc` reaches nothing.
     #[test]
     fn the_snapshots_tempo_is_what_the_plugin_reads() {
-        let transport = TransportInfo::new().with_tempo(97.5).with_tempo_inc(0.001);
+        let transport = base().with_tempo(Bpm::of(97.5)).with_tempo_inc(0.001);
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
         assert_eq!(info.tempo, 97.5);
         assert_ne!(info.flags & F::TEMPO_VALID.bits(), 0);
     }
 
-    /// A zeroed transport carries `tempo = 0.0`; advertising
-    /// `kVstTempoValid` alongside it hands the plugin a divisor of zero, and
-    /// `60.0 / tempo` puts an infinity on the master bus.
-    /// Spec: vst2.timeinfo.kVstTempoValid
-    #[test]
-    fn tempo_valid_is_withheld_for_a_zero_tempo() {
-        let transport = TransportInfo::new().with_tempo(0.0);
-        let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
-        assert_eq!(
-            info.flags & F::TEMPO_VALID.bits(),
-            0,
-            "a zero tempo must not be advertised as valid"
-        );
-        // The other bits are unaffected — this is a per-field gate.
-        assert_ne!(info.flags & F::PPQ_POS_VALID.bits(), 0);
-        assert_ne!(info.flags & F::TIME_SIG_VALID.bits(), 0);
-    }
-
     #[test]
     fn non_finite_fields_are_withheld() {
-        let transport = TransportInfo::new()
-            .with_tempo(f64::NAN)
-            .with_position_quarters(f64::INFINITY)
-            .with_bar(f64::NAN, Default::default());
+        let transport = base()
+            .with_beat(Beat(f64::INFINITY))
+            .with_bar(Beat(f64::NAN), Default::default());
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
 
-        assert_eq!(info.flags & F::TEMPO_VALID.bits(), 0);
         assert_eq!(info.flags & F::PPQ_POS_VALID.bits(), 0);
         assert_eq!(info.flags & F::BARS_VALID.bits(), 0);
         // The signature is a validated newtype, so its claim always holds.
         assert_ne!(info.flags & F::TIME_SIG_VALID.bits(), 0);
     }
 
-    /// A negative tempo is as unusable as a zero one.
+    /// The cycle's presence is `kVstTransportCycleActive` and `kVstCyclePosValid`
+    /// together, and its bounds are the loop's; with none, both are clear and
+    /// the bounds are zero.
+    /// Spec: vst2.timeinfo.kVstCyclePosValid
     #[test]
-    fn negative_tempo_is_withheld() {
-        let info = build_vst2_time_info(
-            &TransportInfo::new().with_tempo(-120.0),
+    fn the_cycle_sets_both_cycle_bits_and_its_bounds() {
+        let on = build_vst2_time_info(
+            &base().with_loop(cycle(4.0, 16.0)),
             SampleRate::SR_48K,
             None,
             AutomationMode::Off,
         );
-        assert_eq!(info.flags & F::TEMPO_VALID.bits(), 0);
-    }
+        assert_ne!(on.flags & F::TRANSPORT_CYCLE_ACTIVE.bits(), 0);
+        assert_ne!(on.flags & F::CYCLE_POS_VALID.bits(), 0);
+        assert_eq!((on.cycle_start_pos, on.cycle_end_pos), (4.0, 16.0));
 
-    /// `CYCLE_POS_VALID` is gated on the boundaries, not just on the cycle
-    /// being switched on.
-    /// Spec: vst2.timeinfo.kVstCyclePosValid
-    #[test]
-    fn cycle_pos_valid_requires_usable_boundaries() {
-        let bad = TransportInfo::new().with_loop(true, 0.0, f64::NAN);
-        let info = build_vst2_time_info(&bad, SampleRate::SR_48K, None, AutomationMode::Off);
-        assert_ne!(info.flags & F::TRANSPORT_CYCLE_ACTIVE.bits(), 0);
-        assert_eq!(info.flags & F::CYCLE_POS_VALID.bits(), 0);
+        let off = build_vst2_time_info(&base(), SampleRate::SR_48K, None, AutomationMode::Off);
+        assert_eq!(off.flags & F::TRANSPORT_CYCLE_ACTIVE.bits(), 0);
+        assert_eq!(off.flags & F::CYCLE_POS_VALID.bits(), 0);
+        assert_eq!((off.cycle_start_pos, off.cycle_end_pos), (0.0, 0.0));
     }
 
     /// **The host clock and the MIDI clock reach `nanoSeconds` and
@@ -456,10 +433,9 @@ mod tests {
     /// prepared at another rate does not rescale it.
     #[test]
     fn host_time_and_midi_clock_are_filled_and_flagged_when_known() {
-        let transport = TransportInfo::new()
-            .with_tempo(120.0)
-            .with_sample_rate(48_000.0)
-            .with_position_quarters(2.0 + 0.25 / 24.0)
+        let transport = base()
+            .with_tempo(Bpm::of(120.0))
+            .with_beat(Beat(2.0 + 0.25 / 24.0))
             .with_position_samples(48_250)
             .with_system_time_ns(5_000_000_000);
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
@@ -472,10 +448,8 @@ mod tests {
             build_vst2_time_info(&transport, SampleRate::SR_96K, None, AutomationMode::Off);
         assert_eq!(other_rate.samples_to_next_clock, -250);
 
-        // No host clock, no usable tempo: neither field is claimed.
-        let bare = TransportInfo::new()
-            .with_tempo(0.0)
-            .with_sample_rate(48_000.0);
+        // No host clock and no finite position: neither field is claimed.
+        let bare = base().with_beat(Beat(f64::NAN));
         let info = build_vst2_time_info(&bare, SampleRate::SR_48K, None, AutomationMode::Off);
         assert_eq!(info.flags & F::NANOSECONDS_VALID.bits(), 0);
         assert_eq!(info.flags & F::VST_CLOCK_VALID.bits(), 0);

@@ -27,7 +27,7 @@ impl ClapLoaded {
             Err(CallError::NoFunction) => {
                 Err(ClapError::StateError("No save function".to_string()))
             }
-            Err(CallError::Failed | CallError::WrongState) => {
+            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => {
                 Err(ClapError::StateError("Save failed".to_string()))
             }
         }
@@ -52,7 +52,7 @@ impl ClapLoaded {
             Err(CallError::NoFunction) => {
                 Err(ClapError::StateError("No load function".to_string()))
             }
-            Err(CallError::Failed | CallError::WrongState) => {
+            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => {
                 Err(ClapError::StateError("Load failed".to_string()))
             }
         }
@@ -88,9 +88,9 @@ impl ClapLoaded {
             .state_save_with_context(main, &mut stream, context)
         {
             Ok(()) => Ok(stream.into_data()),
-            Err(CallError::Failed | CallError::WrongState) => Err(ClapError::StateError(format!(
-                "Context-aware save failed for {context:?}"
-            ))),
+            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => Err(
+                ClapError::StateError(format!("Context-aware save failed for {context:?}")),
+            ),
             // A plugin without the context extension, or without its `save`,
             // is asked for its plain state instead.
             Err(CallError::NoExtension | CallError::NoFunction) => self.read_state(main),
@@ -127,9 +127,9 @@ impl ClapLoaded {
             .state_load_with_context(main, &mut stream, context)
         {
             Ok(()) => Ok(()),
-            Err(CallError::Failed | CallError::WrongState) => Err(ClapError::StateError(format!(
-                "Context-aware load failed for {context:?}"
-            ))),
+            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => Err(
+                ClapError::StateError(format!("Context-aware load failed for {context:?}")),
+            ),
             Err(CallError::NoExtension | CallError::NoFunction) => self.write_state(main, data),
         }
     }
@@ -171,7 +171,7 @@ impl ClapLoaded {
             Err(CallError::NoFunction) => Err(ClapError::StateError(
                 "No from_location function".to_string(),
             )),
-            Err(CallError::Failed | CallError::WrongState) => {
+            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => {
                 Err(ClapError::StateError("Preset load failed".to_string()))
             }
         }

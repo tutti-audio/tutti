@@ -20,7 +20,7 @@ use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     ChannelTable, MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch,
     PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor,
-    SampleRate, TransportInfo, WireMidi, is_usable,
+    TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
@@ -259,8 +259,6 @@ pub struct AuProcessor {
     /// unit that takes MIDI 2.0, legacy bytes for every other.
     midi: MidiDelivery,
     block_size: u32,
-    /// The rate the unit was activated at.
-    sample_rate: SampleRate,
     /// The block's staged automation, which the render notify schedules.
     stage: SharedStage,
     /// Automation points for a parameter the AU does not declare or declares
@@ -366,7 +364,6 @@ pub(crate) struct ProcessorParts {
     pub(crate) receives_midi: bool,
     pub(crate) midi_protocol: Option<Wire>,
     pub(crate) block_size: u32,
-    pub(crate) sample_rate: SampleRate,
     pub(crate) stage: SharedStage,
 }
 
@@ -381,7 +378,6 @@ impl AuProcessor {
             receives_midi,
             midi_protocol,
             block_size,
-            sample_rate,
             stage,
         } = parts;
         Self {
@@ -395,7 +391,6 @@ impl AuProcessor {
             refusal_counted: false,
             midi: MidiDelivery::new(midi_protocol),
             block_size,
-            sample_rate,
             stage,
             param_points_dropped: 0,
         }
@@ -679,20 +674,14 @@ impl AuProcessor {
     /// the frames to the next whole beat. Allocation-free and lock-free. The
     /// distance to the next beat is stored before the snapshot, whose publication
     /// is what makes the callbacks start answering.
-    fn publish_transport(&mut self, transport: &TransportInfo, frames: usize, rate: SampleRate) {
+    fn publish_transport(&mut self, transport: &TransportInfo, frames: usize) {
         let Some(state) = &self.transport else {
             return;
         };
-        let mut snapshot = *transport;
-        // A snapshot without its own rate (a hand-built one) borrows the block's,
-        // so the beat distance can still be derived.
-        if !is_usable(snapshot.sample_rate) || snapshot.sample_rate <= 0.0 {
-            snapshot.sample_rate = rate.get();
-        }
         let frames = u32::try_from(frames).unwrap_or(u32::MAX);
-        let changed = self.playhead.observe(&snapshot, frames);
-        state.set_samples_to_next_beat(snapshot.samples_to_next_beat().unwrap_or(0));
-        state.set_transport(&snapshot, changed);
+        let changed = self.playhead.observe(transport, frames);
+        state.set_samples_to_next_beat(transport.samples_to_next_beat().unwrap_or(0));
+        state.set_transport(transport, changed);
     }
 
     /// A block with no transport: the AU's callbacks answer "cannot provide"
@@ -766,7 +755,7 @@ impl AuProcessor {
         // goes in first. A block with no transport withdraws the last one.
         match ctx.transport {
             Some(transport) => {
-                self.publish_transport(transport, buffer.frames().0, self.sample_rate);
+                self.publish_transport(transport, buffer.frames().0);
             }
             None => self.withdraw_transport(),
         }

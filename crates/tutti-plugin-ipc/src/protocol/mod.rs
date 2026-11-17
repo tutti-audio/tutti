@@ -118,7 +118,11 @@ pub(crate) mod wire;
 /// - **Version 44** adds `refused` to `AudioProcessed`: the server did not
 ///   publish the block's audio (its input slot was recycled before it ran), so
 ///   the host counts the chunk refused rather than leaving it unexplained.
-pub const PROTOCOL_VERSION: u32 = 44;
+/// - **Version 45** writes a block's `TransportInfo` on its units (a `SampleRate`,
+///   a `Bpm`, a `Beat` for the playhead and the bar, a `LoopRange`), one position
+///   for each of the quarter and beat pairs, and the cycle as an optional region
+///   in place of the cycle-active flag.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -149,35 +153,12 @@ pub const PROTOCOL_VERSION: u32 = 44;
 /// routinely exceeds 64 MiB, and a plugin storing an impulse response or a
 /// recorded buffer trivially does — so capping state at this number would
 /// silently lose a user's preset. State travels chunked instead
-/// (`StateChunk`), bounded on reassembly by [`MAX_STATE_BYTES`]. Each wire
+/// (`StateChunk`), bounded on reassembly by [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES). Each wire
 /// frame stays under this cap, so the allocation and deadline guarantees hold
 /// unchanged for state as well. Raising *this* constant to cover the state tail
 /// would re-widen the allocation surface for all traffic and still leave a wall
 /// somewhere; a larger number just moves the cliff.
 pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
-
-/// Largest **reassembled** plugin-state blob either end will accept, in bytes.
-///
-/// Bounds the total across a `StateChunk` sequence, which is a different
-/// question from [`MAX_FRAME_BYTES`]: that one bounds a single allocation off a
-/// single unvalidated length, this one bounds an accumulation across many
-/// individually-valid frames. Without it, chunking would reintroduce the
-/// unbounded allocation the frame cap exists to prevent — a peer would simply
-/// send 64 MiB chunks forever.
-///
-/// 1 GiB, chosen to sit above the real tail and below anything that threatens
-/// the host. The largest plugin states in practice are sample-embedding
-/// instruments (Kontakt libraries, Serum wavetables) and convolution reverbs
-/// carrying impulse responses; these reach high hundreds of MiB but not
-/// gigabytes, because the formats themselves stream rather than inline beyond
-/// that. A blob past 1 GiB is a plugin misbehaving or a corrupt project file,
-/// and failing it with `StateError::TooLarge` is both honest and survivable —
-/// unlike an allocation the host cannot satisfy.
-///
-/// Deliberately *not* enforced by aborting the connection: an over-limit state
-/// is a per-command refusal, and the socket stays synchronised because the
-/// receiver stops accumulating and drains the rest of the sequence.
-pub const MAX_STATE_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Payload size of one `StateChunk` on the wire.
 ///
@@ -805,7 +786,7 @@ mod tests {
             seq: 42,
             num_samples: 512,
             midi_events,
-            ..Default::default()
+            ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         });
 
         let encoded = postcard::to_allocvec(&msg).unwrap();
@@ -877,14 +858,16 @@ mod tests {
     }
 
     #[test]
-    fn test_transport_info_default() {
-        let info = TransportInfo::default();
-        assert_eq!(info.timing.tempo, 120.0);
+    fn a_new_transport_info_is_stopped_at_120_in_four_four() {
+        let info = TransportInfo::new(SampleRate::SR_48K);
+        assert_eq!(info.sample_rate, SampleRate::SR_48K);
+        assert_eq!(info.timing.tempo, tutti_types::Bpm::of(120.0));
         // 4/4 — the musical default, now expressed as the type's own default.
         assert_eq!(u32::from(info.timing.signature.beats_per_bar()), 4);
         assert_eq!(u32::from(info.timing.signature.note_value()), 4);
         assert!(!info.state.playing);
         assert!(!info.state.recording);
+        assert!(info.loop_region.is_none());
     }
 
     /// The harmony inputs (chord / scale / text / int) must survive a postcard
@@ -894,7 +877,7 @@ mod tests {
     fn process_audio_round_trips_harmony_fields() {
         let mut data = ProcessAudioData {
             num_samples: 256,
-            ..Default::default()
+            ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         };
         assert!(data.chords.add_change(ChordValue {
             sample_offset: 0,

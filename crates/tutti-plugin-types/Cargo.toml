@@ -23,7 +23,7 @@ serde = ["dep:serde", "arrayvec/serde", "bitflags/serde", "dpi/serde", "keyboard
 
 # The probe's result file (`ProbeOutcome`, `write_result`, `read_result`): the
 # wire between `tutti-plugin-probe` and the host that spawned it.
-probe-wire = ["serde", "dep:postcard"]
+probe-wire = ["serde"]
 
 # The mapping contract, `tutti_plugin_types::contract`: the
 # laws a `ParamMapping` is held to, as `mapping_contract!`. Test support, so off
@@ -54,8 +54,9 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 serde = { version = "1", features = ["derive"], optional = true }
 raw-window-handle = "0.6"
-# The result file's payload encoding, with `probe-wire`.
-postcard = { version = "1.1.3", default-features = false, features = ["use-std"], optional = true }
+# The wire codec: the probe result file's encoding, and unconditional because
+# `BridgeError::Serialization` carries `postcard::Error` as its source.
+postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 # The editor's sizes, which name their unit (`dpi::Size`), and `ContentScale`'s check.
 dpi.workspace = true
 # The editor key vocabulary (`KeyEvent`).

@@ -381,3 +381,49 @@ fn a_clock_command_the_transport_refuses_is_counted() {
     }
     assert_eq!(refused, 1, "the Start, placed as one locate-and-play");
 }
+
+/// **The beat error reads only where one can be read**: none before a clock is
+/// followed, none for a Beat Clock follower that is not locked and rolling, and
+/// none for MTC, which has no tempo to trim.
+#[test]
+fn the_clock_error_is_none_until_a_locked_rolling_beat_clock_gives_one() {
+    let (mut s, _fake) = rig();
+    assert_eq!(s.midi().clock_error(), None);
+    follow(&mut s, ClockKind::BeatClock);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    assert_eq!(s.midi().clock_error(), None);
+    follow(&mut s, ClockKind::Mtc);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    assert_eq!(s.midi().clock_error(), None);
+}
+
+/// **A locked, rolling Beat Clock follower reads an error**: a Start and 120
+/// Timing Clocks at 120 bpm, each at `base + k * period` from one captured
+/// instant, roll the transport, and once the follower has locked and the
+/// transport has taken the Start, `clock_error` is a reading under `SLIP`.
+#[test]
+fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
+    let (mut s, fake) = rig();
+    follow(&mut s, ClockKind::BeatClock);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    let base = Instant::now();
+    let period = Duration::from_secs_f64(60.0 / (120.0 * 24.0));
+    send(&fake, system(System::Start), base);
+    send_ticks(&fake, base, period, 120);
+    let mut error = None;
+    for _ in 0..1500 {
+        pump(&mut s);
+        error = s.midi().clock_error();
+        if error.is_some() {
+            break;
+        }
+    }
+    let error = error.expect("a locked, rolling follower reads an error");
+    assert!(error.get().abs() < tutti_midi_runtime::ClockFollower::SLIP.get());
+}

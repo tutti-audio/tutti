@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
+use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
@@ -157,8 +158,8 @@ impl Vst2Processor {
     /// Counted apart from the parameter drops because the consequence differs: a
     /// dropped note-off whose note-on landed is a stuck note.
     #[must_use]
-    pub fn dropped_midi_out(&self) -> u64 {
-        self.host.dropped_midi_out() + self.midi.out_overflow()
+    pub fn dropped_midi_out(&self) -> &Tally<u64> {
+        self.host.dropped_midi_out()
     }
 
     /// Returns how many SysEx messages were **dropped** whole since load rather
@@ -172,7 +173,7 @@ impl Vst2Processor {
     /// blocks) and hands the plugin one complete `0xF0 … 0xF7` message, as a
     /// `kVstSysExType` event, at its `END` packet's frame.
     #[must_use]
-    pub fn dropped_sysex(&self) -> u64 {
+    pub fn dropped_sysex(&self) -> &Counter<u64> {
         self.midi.send.sysex_dropped()
     }
 
@@ -181,7 +182,7 @@ impl Vst2Processor {
     /// which takes Group 0's channels only, and a message of another Group is
     /// never heard on them. Monotonic.
     #[must_use]
-    pub fn groups_dropped(&self) -> u64 {
+    pub fn groups_dropped(&self) -> &Counter<u64> {
         self.midi.send.groups_dropped()
     }
 
@@ -190,7 +191,7 @@ impl Vst2Processor {
     /// [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY) (the
     /// plugin node never hands it more). Monotonic.
     #[must_use]
-    pub fn dropped_midi_in(&self) -> u64 {
+    pub fn dropped_midi_in(&self) -> &Counter<u64> {
         self.midi.send.events_dropped()
     }
 

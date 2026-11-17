@@ -137,7 +137,11 @@ impl AudioBridge {
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
         let (channels, sleeper) = Channels::new(sample_rate);
-        let payloads = PayloadPool::new();
+        let payloads = PayloadPool::new(
+            sample_rate,
+            channels.refusal_writer(),
+            channels.leak_writer(),
+        );
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let thread = BridgeThread::spawn(
@@ -243,13 +247,12 @@ impl AudioBridge {
         self.lifecycle.is_rate_refused()
     }
 
-    /// Blocks the bridge thread abandoned and replies it took (on time, or
-    /// owed and taken back off the socket), ever. The bridge thread writes
-    /// them and any thread reads them: relaxed atomics, no lock, no
-    /// allocation.
+    /// Blocks the bridge thread abandoned, owed replies it collected late,
+    /// and replies it took (on time, or owed and taken back off the socket),
+    /// ever. The bridge thread writes them and any thread reads them: relaxed
+    /// atomics, no lock, no allocation.
     pub fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-        let (abandoned, replies) = self.channels.block_counts();
-        tutti_plugin_types::BlockCounts { abandoned, replies }
+        self.channels.block_counts()
     }
 
     /// Latches `cause` as the reason the bridge is dead (the first cause
@@ -257,36 +260,6 @@ impl AudioBridge {
     /// gave.
     pub(crate) fn mark_crashed(&self, cause: PluginFailure) {
         self.lifecycle.mark_crashed(cause);
-    }
-
-    /// How many replies the bridge thread has taken back off the socket after
-    /// abandoning the blocks that asked for them.
-    ///
-    /// Instrumentation for the drain, which is otherwise unobservable: the audio
-    /// it recovers is stale and rejected by the slab's sequence check, and the
-    /// MIDI it forwards looks exactly like MIDI that arrived on time. A test
-    /// that wants to pin the drain has to read this — the alternative is
-    /// inferring it from how far replies lag, which is a function of machine
-    /// load rather than of correctness.
-    ///
-    /// Monotonic over the life of the bridge, and `Relaxed`: nothing branches on
-    /// it.
-    ///
-    /// `cfg(test)`: nothing in the shipping host reads this, and an
-    /// always-compiled accessor with no caller reads as an API someone may
-    /// depend on. The counter itself is unconditional — it is two atomic ops
-    /// on a path that already blocks on a socket — so what the tests observe
-    /// is the production code path, not a test-only variant of it.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn settled_replies(&self) -> u64 {
-        self.channels.settled()
-    }
-
-    /// How many blocks' replies the bridge thread abandoned on a missed budget.
-    /// `cfg(test)` for the reason [`settled_replies`](Self::settled_replies) is.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn abandoned_replies(&self) -> u64 {
-        self.channels.abandoned()
     }
 
     /// How many plugin-originated parameter-change events the bridge
@@ -298,6 +271,25 @@ impl AudioBridge {
     /// Latency, tail and resync events are never dropped.
     pub fn dropped_parameter_events(&self) -> u64 {
         self.channels.dropped_param_events()
+    }
+
+    /// The count of commands the audio side could not hand to the bridge
+    /// thread (a full command queue, an empty payload pool, a parameter buffer
+    /// with no room to return to), shared: the plugin node's controls read it.
+    pub(crate) fn commands_refused_cell(&self) -> tutti_rt::Tally<u64> {
+        self.channels.commands_refused_cell()
+    }
+
+    /// The count of parameter buffers the audio thread leaked rather than
+    /// free, shared. See `commands_refused_cell`.
+    pub(crate) fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
+        self.channels.leaked_buffers_cell()
+    }
+
+    /// The count of audio responses the bridge thread could not queue for the
+    /// audio thread, shared. See `commands_refused_cell`.
+    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
+        self.channels.responses_lost_cell()
     }
 
     /// The count of MIDI events the bridge thread did not send (a block it
@@ -485,7 +477,11 @@ impl AudioBridge {
             return Submitted::REFUSED;
         }
 
-        let mut payload = self.payloads.acquire();
+        // An empty pool refuses the block (counted by the pool): nothing has
+        // moved out of the caller's hands.
+        let Some(mut payload) = self.payloads.acquire() else {
+            return Submitted::REFUSED;
+        };
         payload.seq = seq;
         payload.num_samples = num_samples;
         payload.midi_events = midi_events;
@@ -584,10 +580,10 @@ impl AudioBridge {
         // copying a gigabyte into a command that is only going to be rejected,
         // and it answers on the calling thread rather than after a round trip
         // through the bridge.
-        if data.len() > crate::protocol::MAX_STATE_BYTES {
+        if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
             return Err(StateError::TooLarge {
                 bytes: data.len(),
-                limit: crate::protocol::MAX_STATE_BYTES,
+                limit: tutti_plugin_types::MAX_STATE_BYTES,
             });
         }
         let (ask_resp, reply) = ask::<std::result::Result<(), StateError>>();
@@ -924,15 +920,60 @@ impl AudioBridge {
 mod tests {
     use super::*;
 
+    /// **A block submitted to an empty pool is refused and counted, nothing
+    /// queued and nothing allocated.** Every pooled payload is held out, as
+    /// when more are out than the queue and both threads can hold.
+    #[test]
+    fn a_block_submitted_to_an_empty_pool_is_refused_and_counted() {
+        let channels = Channels::new(SampleRate::SR_48K).0;
+        let bridge = AudioBridge {
+            payloads: PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
+            channels,
+            lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
+            listener: Arc::new(Mutex::new(None)),
+        };
+        let mut held = Vec::new();
+        while let Some(payload) = bridge.payloads.acquire() {
+            held.push(payload);
+        }
+        let refusals = bridge.channels.commands_refused_cell();
+        let before = refusals.get();
+        let mut params = ParameterChanges::new();
+        let submitted = assert_no_alloc::assert_no_alloc(|| {
+            bridge.submit(
+                1,
+                64,
+                MidiEventVec::new(),
+                &mut params,
+                Default::default(),
+                Default::default(),
+                TransportInfo::new(SampleRate::SR_48K),
+                Default::default(),
+            )
+        });
+        assert_eq!(submitted, Submitted::REFUSED);
+        assert_eq!(refusals.get(), before + 1, "the refusal is counted");
+        assert!(bridge.channels.pop_command().is_none(), "nothing queued");
+    }
+
     /// **A full command queue is `Busy`, not a crash**. A bridge
     /// whose queue nothing drains (no thread) refuses a state request once
     /// the queue is full; the plugin is not dead and a retry is reasonable.
     /// Once the bridge is crashed, the same refusal is `PluginCrashed`.
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
+        let channels = Channels::new(SampleRate::SR_48K).0;
         let bridge = AudioBridge {
-            channels: Channels::new(SampleRate::SR_48K).0,
-            payloads: PayloadPool::new(),
+            payloads: PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
+            channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
         };

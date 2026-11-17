@@ -61,3 +61,14 @@ fn mark_overflowed_latches_without_pushing() {
     assert!(v.is_overflowed());
     assert_eq!(v.as_slice(), &['a']);
 }
+
+/// `pop` takes the last item and leaves the overflow flag latched.
+#[test]
+fn pop_takes_the_last_item_and_keeps_the_flag() {
+    let mut v = CappedVec::with_capacity(2);
+    assert_eq!(v.pop(), None);
+    v.extend([1, 2, 3]);
+    assert_eq!(v.pop(), Some(2));
+    assert_eq!(v.as_slice(), &[1]);
+    assert!(v.is_overflowed(), "still latched");
+}

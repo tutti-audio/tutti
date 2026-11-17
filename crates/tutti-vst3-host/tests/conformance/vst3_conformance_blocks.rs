@@ -175,7 +175,7 @@ fn every_audio_class_survives_a_block() {
                         &mut buffer,
                         &InputEvents::default(),
                         None,
-                        &TransportInfo::default(),
+                        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
                     );
 
                     // Silence in must not become non-finite out: a NaN here
@@ -424,7 +424,7 @@ fn transport_across_blocks_is_spec_clean() {
     let mut unloadable: Vec<String> = Vec::new();
 
     for (name, path) in sample_plugins() {
-        let transport = TransportInfo::default();
+        let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
         let blocks: Vec<Block<'_>> = (0..8)
             .map(|_| Block::of(512).transport(&transport))
             .collect();

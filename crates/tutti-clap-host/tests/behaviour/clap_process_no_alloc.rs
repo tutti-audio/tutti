@@ -224,7 +224,7 @@ fn process_steady_state_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -251,7 +251,7 @@ fn process_with_midi_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     let on_event = [(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
     let off_event = [(at(0), midi::note_off(MidiChannel::FIRST, 60, 0))];
@@ -305,7 +305,7 @@ fn process_with_every_message_kind_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     let sysex8 = Sysex8StreamIds::undiscovered()
         .open()
@@ -394,7 +394,7 @@ fn alternating_continue_tail_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -432,7 +432,7 @@ fn alternating_unknown_status_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -461,7 +461,7 @@ fn alternating_continue_sleep_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -527,7 +527,7 @@ fn tail_and_sleep_are_observable_by_a_caller() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -578,7 +578,7 @@ fn plugin_error_status_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -631,7 +631,7 @@ fn oversized_block_rejection_does_not_allocate() {
     let _lock = PROBE_LOCK.lock_recover();
     reset_probe();
     let mut inst = load_probe();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -701,7 +701,7 @@ fn sysex_output_events_do_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -741,7 +741,7 @@ fn drive_and_read_output(
     bufs: &mut StereoBufs,
     midi: &[UmpAt],
 ) -> (Vec<(u32, usize, f64)>, usize) {
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         midi,
         transport: Some(&transport),
@@ -792,7 +792,7 @@ fn param_output_burst_does_not_allocate() {
         "the probe's parameter count sets the reservation; the burst assumes the floor"
     );
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -850,7 +850,7 @@ fn param_output_past_the_room_is_counted_not_grown() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -920,7 +920,7 @@ fn output_events_past_the_room_are_refused_not_grown() {
     let mut inst = load_probe();
     assert!(inst.loaded().parameter_count(main_thread()) <= OUTPUT_QUEUES as usize);
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -983,7 +983,7 @@ fn a_param_flood_keeps_note_offs_and_final_values() {
     set_switch_u32(b"tutti_test_plugin_set_render_mode\0", 4); // Notes: MIDI thru
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let notes = [
         (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
         (at(0), midi::note_off(MidiChannel::FIRST, 60, 0)),
@@ -1078,7 +1078,7 @@ fn audio_thread_logging_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1119,7 +1119,7 @@ fn varying_sysex_payload_sizes_do_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1186,7 +1186,7 @@ fn set_sysex_output_no_alloc(count: u32, bytes: u32) {
 /// the gate only reborrows them — building them per block is what the host is
 /// being tested not to do.
 fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()

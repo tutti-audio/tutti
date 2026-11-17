@@ -6,8 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_plugin_types::{
     Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, ParamId, PluginAudio,
-    PluginError, PluginIo, PluginResult, Processor, SampleFormat, SampleRate,
-    TransportInfo as SharedTransport,
+    PluginError, PluginIo, PluginResult, Processor, SampleFormat,
 };
 use tutti_rt::Reader;
 
@@ -17,7 +16,7 @@ use super::ClapProcessContext;
 use super::audio::ProcessOutputRef;
 use super::config::{AudioScratch, RangeTable};
 use super::thread_pool::PoolCell;
-use crate::types::{ClapNoteExpression, TransportInfo};
+use crate::types::ClapNoteExpression;
 
 /// What activation hands [`ClapProcessor::new`].
 pub(crate) struct ProcessorParts {
@@ -26,7 +25,6 @@ pub(crate) struct ProcessorParts {
     pub input_ports: Vec<u32>,
     pub output_ports: Vec<u32>,
     pub max_frames: u32,
-    pub sample_rate: SampleRate,
     pub scratch: AudioScratch,
     pub ranges: Reader<RangeTable>,
     pub drain: EditDrain,
@@ -56,8 +54,6 @@ pub struct ClapProcessor {
     pub(crate) input_ports: Vec<u32>,
     pub(crate) output_ports: Vec<u32>,
     pub(crate) max_frames: u32,
-    /// The rate the plugin was activated at.
-    sample_rate: SampleRate,
 }
 
 impl std::fmt::Debug for ClapProcessor {
@@ -79,7 +75,6 @@ impl ClapProcessor {
             input_ports,
             output_ports,
             max_frames,
-            sample_rate,
             scratch,
             ranges,
             drain,
@@ -97,7 +92,6 @@ impl ClapProcessor {
             input_ports,
             output_ports,
             max_frames,
-            sample_rate,
         }
     }
 
@@ -129,7 +123,7 @@ impl ClapProcessor {
     /// # Threading
     /// CLAP marks `reset` `[audio-thread & active]`. The `[audio-thread]` half
     /// is taken here rather than asserted: the call runs under an
-    /// [`AudioClaim`](tutti_clap_ffi::AudioClaim), so the calling OS
+    /// audio claim, so the calling OS
     /// thread becomes the audio thread for its duration (which the spec permits
     /// for any thread). It never waits: while the main thread holds the
     /// instance, the plugin's `reset` is owed and the next block runs it first.
@@ -209,7 +203,7 @@ impl ClapProcessor {
     }
 
     /// One block from the shared vocabulary: converts the context into CLAP's
-    /// (note expressions into scratch, transport on the stack), processes, and
+    /// (note expressions into scratch), processes, and
     /// copies what the plugin emitted into `out`.
     fn process_shared(
         &mut self,
@@ -226,18 +220,6 @@ impl ClapProcessor {
                 &mut scratch.in_note_expressions_dropped,
             );
         }
-        let transport = ctx
-            .transport
-            .map(|t| convert_transport(t, self.sample_rate));
-        // Each change as the host's own snapshot, on the stack: at most the
-        // graph's bound, inline.
-        let mut changes = tutti_plugin_types::TransportChanges::new();
-        for c in ctx.transport_changes {
-            let _ = changes.try_push(tutti_plugin_types::TransportChange {
-                offset: c.offset,
-                transport: convert_transport(&c.transport, self.sample_rate),
-            });
-        }
         // `process` borrows `self` for the output it returns, so the expressions
         // are moved out of the scratch for the call and put back after. A move of
         // a `Vec`'s three words, no allocation.
@@ -248,8 +230,8 @@ impl ClapProcessor {
             // `None` and `Some(empty)` differently, so the mapping is kept.
             params: ctx.param_changes.filter(|p| !p.is_empty()),
             expressions: &expressions,
-            transport: transport.as_ref(),
-            transport_changes: &changes,
+            transport: ctx.transport,
+            transport_changes: ctx.transport_changes,
         };
         let result = self.process(buffer, &clap_ctx);
         let result = result
@@ -332,34 +314,6 @@ fn convert_note_expressions(
     }
 }
 
-/// CLAP's transport for the block.
-fn convert_transport(transport: &SharedTransport, sample_rate: SampleRate) -> TransportInfo {
-    // CLAP's `song_pos_seconds`. Prefer the wire's own seconds field (the
-    // plugin node's project time, `transport_source::ProjectTime`); fall back
-    // to the project-time sample position for a producer that reports only
-    // that.
-    let seconds = if transport.position.seconds.get() != 0.0 {
-        transport.position.seconds
-    } else {
-        tutti_types::Seconds(transport.position.samples.unwrap_or(0) as f64 / sample_rate.get())
-    };
-    TransportInfo::default()
-        .with_playing(transport.state.playing)
-        .with_recording(transport.state.recording)
-        .with_tempo(transport.timing.tempo)
-        .with_tempo_inc(transport.timing.tempo_inc)
-        .with_time_signature(transport.timing.signature)
-        .with_position_beats(transport.position.quarters, seconds)
-        .with_loop(
-            transport.state.cycle_active,
-            transport.loop_region.start_quarters,
-            transport.loop_region.end_quarters,
-        )
-        // The bar number arrives over the wire; pass it through rather than
-        // hardcoding 0, which would put every plugin at bar one.
-        .with_bar(transport.bar.position_quarters, transport.bar.number)
-}
-
 /// Copy one block's emitted events out of the CLAP host's pooled buffers into
 /// the caller's reusable [`ProcessOutput`](tutti_plugin_types::ProcessOutput).
 ///
@@ -402,24 +356,5 @@ impl Processor for ClapProcessor {
 
     fn reset(&mut self) {
         ClapProcessor::reset(self);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The plugin server hands the CLAP host the wire's snapshot, and the
-    /// host's own copy keeps the slope with the tempo: `tempo_inc` is what
-    /// CLAP's transport event sends.
-    #[test]
-    fn the_wires_slope_survives_the_conversion() {
-        let wire = SharedTransport::new()
-            .with_playing(true)
-            .with_tempo(133.0)
-            .with_tempo_inc(0.002);
-        let got = convert_transport(&wire, SampleRate::SR_48K);
-        assert_eq!(got.timing.tempo, 133.0);
-        assert_eq!(got.timing.tempo_inc, 0.002);
     }
 }

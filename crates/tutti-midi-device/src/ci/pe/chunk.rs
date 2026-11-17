@@ -200,6 +200,38 @@ fn seven_bit(bytes: &[u8]) -> Result<(), PeChunkError> {
     }
 }
 
+impl TryFrom<&[u8]> for PeChunk {
+    type Error = PeChunkError;
+
+    /// Reads the fields [`encode_fields`](Self::encode_fields) writes.
+    ///
+    /// # Errors
+    ///
+    /// [`PeChunkError::Length`] when the declared lengths do not fill `bytes`,
+    /// and those of [`new`](Self::new), including for a Request ID or a count
+    /// past 7 bits.
+    fn try_from(bytes: &[u8]) -> Result<Self, PeChunkError> {
+        let mut cursor = Cursor(bytes);
+        let request_id = cursor.byte()?;
+        let header_len = cursor.pair()?;
+        let header = cursor.take(header_len.into())?.to_vec();
+        let total = cursor.pair()?;
+        let position = cursor.pair()?;
+        let data_len = cursor.pair()?;
+        let data = cursor.take(data_len.into())?.to_vec();
+        if !cursor.0.is_empty() {
+            return Err(PeChunkError::Length);
+        }
+        Self::new(
+            PeRequestId::new(request_id).ok_or(PeChunkError::NotSevenBit { at: 0 })?,
+            ChunkTotal::from_wire(total).ok_or(PeChunkError::Length)?,
+            ChunkPosition::from_wire(position).ok_or(PeChunkError::Length)?,
+            header,
+            data,
+        )
+    }
+}
+
 impl PeChunk {
     /// A chunk.
     ///
@@ -261,7 +293,7 @@ impl PeChunk {
     /// lists.
     #[must_use]
     pub fn notified(&self) -> Option<PeStatus> {
-        match PeHeader::parse(&self.header) {
+        match PeHeader::try_from(self.header.as_slice()) {
             Ok(PeHeader::Reply(reply)) => Some(reply.status),
             _ => None,
         }
@@ -317,34 +349,6 @@ impl PeChunk {
         out.extend(self.data_len.to_le7());
         out.extend(&self.data);
         out
-    }
-
-    /// Reads the fields [`encode_fields`](Self::encode_fields) writes.
-    ///
-    /// # Errors
-    ///
-    /// [`PeChunkError::Length`] when the declared lengths do not fill `bytes`,
-    /// and those of [`new`](Self::new), including for a Request ID or a count
-    /// past 7 bits.
-    pub fn parse_fields(bytes: &[u8]) -> Result<Self, PeChunkError> {
-        let mut cursor = Cursor(bytes);
-        let request_id = cursor.byte()?;
-        let header_len = cursor.pair()?;
-        let header = cursor.take(header_len.into())?.to_vec();
-        let total = cursor.pair()?;
-        let position = cursor.pair()?;
-        let data_len = cursor.pair()?;
-        let data = cursor.take(data_len.into())?.to_vec();
-        if !cursor.0.is_empty() {
-            return Err(PeChunkError::Length);
-        }
-        Self::new(
-            PeRequestId::new(request_id).ok_or(PeChunkError::NotSevenBit { at: 0 })?,
-            ChunkTotal::from_wire(total).ok_or(PeChunkError::Length)?,
-            ChunkPosition::from_wire(position).ok_or(PeChunkError::Length)?,
-            header,
-            data,
-        )
     }
 }
 

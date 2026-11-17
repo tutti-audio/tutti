@@ -104,8 +104,8 @@ impl Node for ClockNode {
         let block_len = cx.env.block_len;
         self.pending.clear();
         let pending = &mut self.pending;
-        // A segment's events lie inside it, so inside the block; the clamp is
-        // what the sort's `offset_of` did to a stray one.
+        // A segment's events lie inside it, so inside the block; the clamp keeps
+        // a stray one on the last frame.
         let mut dropped = 0u64;
         for (start, seg) in cx.env.segments() {
             let base = start.get();
@@ -129,7 +129,10 @@ impl Node for ClockNode {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.master.reset();
+        self.pending.clear();
+    }
 }
 
 /// A [`ClockNode`]'s fork: a node over a master of its own, disabled, that
@@ -168,3 +171,6 @@ impl IntoNode for ClockNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

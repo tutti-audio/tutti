@@ -111,8 +111,8 @@ fn unsorted_automation() -> ParameterChanges {
 #[test]
 fn process_with_automation_does_not_allocate() {
     let mut inst = load();
-    let transport = TransportInfo::default()
-        .with_tempo(120.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(120.0))
         .with_playing(true);
 
     // Built once, off the audio thread: the assertion is about what the host
@@ -152,8 +152,8 @@ fn process_with_automation_does_not_allocate() {
 #[test]
 fn process_steady_state_does_not_allocate() {
     let mut inst = load();
-    let transport = TransportInfo::default()
-        .with_tempo(120.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(120.0))
         .with_playing(true);
 
     // Warm up — primes plugin internal state and the host's pooled
@@ -168,8 +168,8 @@ fn process_steady_state_does_not_allocate() {
 #[test]
 fn process_with_midi_does_not_allocate() {
     let mut inst = load();
-    let transport = TransportInfo::default()
-        .with_tempo(120.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(120.0))
         .with_playing(true);
 
     let mut out_l = [0.0f32; 64];
@@ -236,8 +236,8 @@ fn process_with_hundreds_of_events_does_not_allocate() {
     use tutti_vst3_host::{NoteExpressionType, NoteExpressionValue};
 
     let mut inst = load();
-    let transport = TransportInfo::default()
-        .with_tempo(120.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(120.0))
         .with_playing(true);
 
     // Built off the audio thread. Four events a frame across the 64-frame

@@ -32,7 +32,7 @@ fn batch() -> [Outgoing; 5] {
 fn os(
     fits: usize,
     sent: usize,
-) -> impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<&'static str>> {
+) -> impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<crate::Error>> {
     let mut seen = 0;
     move |_| {
         seen += 1;
@@ -40,7 +40,7 @@ fn os(
             Ok(())
         } else {
             Err(Refused {
-                error: "no room",
+                error: crate::Error::port("no room"),
                 sent,
             })
         }

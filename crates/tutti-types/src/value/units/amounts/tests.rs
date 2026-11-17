@@ -4,6 +4,9 @@ use super::*;
 /// These must not compile; the ledger is here so a future contributor does
 /// not "helpfully" add them.
 ///
+/// - `Bipolar + Bipolar`, `Bipolar * f32` — a sum or a scaled amount can leave
+///   `-1..=1`. Do the arithmetic on the raw number and call `Bipolar::new` (or
+///   `clamped`). `Neg` stays: the other sign of an amount is in range.
 /// - `Mix + Mix`, `Mix * f32` — a blend *position* does
 ///   not compose or scale; half of a crossfade point is not a crossfade
 ///   point. (`Depth` has a sign, and its own range check — that is the difference
@@ -265,4 +268,57 @@ fn a_bit_depth_is_held_within_one_and_thirty_two() {
     assert_eq!(BitDepth::MIN.get(), 1.0);
     assert_eq!(BitDepth::MAX.get(), 32.0);
     assert!(BitDepth::MIN < BitDepth::MAX);
+}
+
+/// A bipolar amount is within `-1..=1`: `new`, `TryFrom`, `of` and serde agree,
+/// and NaN and the infinities are refused.
+#[cfg(feature = "serde")]
+#[test]
+fn bipolar_keeps_the_range_contract() {
+    let c = tutti_fixtures::RangeContract {
+        new: Bipolar::new,
+        get: Bipolar::get,
+        of: Some(Bipolar::of),
+        valid: &[-1.0, -0.5, 0.0, 0.25, 1.0],
+        invalid: &[-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+    };
+    tutti_fixtures::check_range_contract(&c);
+    tutti_fixtures::check_range_serde(&c);
+}
+
+/// Without serde the same refusals hold through `new`, `TryFrom` and `of`.
+#[test]
+fn bipolar_refuses_what_is_outside_minus_one_to_one() {
+    for bad in [-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(Bipolar::new(bad), None, "{bad}");
+        assert!(Bipolar::try_from(bad).is_err(), "{bad}");
+        assert!(
+            std::panic::catch_unwind(|| Bipolar::of(bad)).is_err(),
+            "{bad}"
+        );
+    }
+    for ok in [-1.0, -0.0, 0.0, 0.5, 1.0] {
+        assert_eq!(Bipolar::new(ok).map(Bipolar::get), Some(ok));
+        assert_eq!(f32::from(Bipolar::try_from(ok).unwrap()), ok);
+    }
+}
+
+/// The ends order and negate into each other; only `clamped` (and a cell's
+/// `Unit::from_raw`) saturates, and NaN is the middle.
+#[test]
+fn bipolar_orders_negates_and_saturates_only_by_name() {
+    assert!(Bipolar::MIN < Bipolar::ZERO && Bipolar::ZERO < Bipolar::MAX);
+    assert_eq!(-Bipolar::MAX, Bipolar::MIN);
+    assert_eq!(Bipolar::of(0.25).min(Bipolar::of(-0.5)), Bipolar::of(-0.5));
+    assert_eq!(Bipolar::of(0.25).max(Bipolar::of(-0.5)), Bipolar::of(0.25));
+    assert_eq!(
+        Bipolar::of(0.75).clamp(Bipolar::of(-0.5), Bipolar::of(0.5)),
+        Bipolar::of(0.5)
+    );
+    assert_eq!(Bipolar::clamped(-2.0), Bipolar::MIN);
+    assert_eq!(Bipolar::clamped(2.0), Bipolar::MAX);
+    assert_eq!(Bipolar::clamped(f32::NAN), Bipolar::ZERO);
+    assert_eq!(<Bipolar as Unit>::from_raw(9.0), Bipolar::MAX);
+    assert_eq!(<Bipolar as Unit>::from_raw(-0.5).get(), -0.5);
+    assert_eq!(<Bipolar as Unit>::to_raw(Bipolar::of(0.5)), 0.5);
 }

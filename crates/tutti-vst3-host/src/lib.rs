@@ -104,7 +104,7 @@
 //!     midi: &midi,
 //!     ..Default::default()
 //! };
-//! let transport = TransportInfo::default().with_tempo(120.0).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
 //!
 //! let out = processor
 //!     .process(&mut buffer, &events, None, &transport)

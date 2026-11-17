@@ -494,9 +494,10 @@ impl RenderSide {
                 }
                 Ok(None)
             }
-            other => Err(BridgeError::ProtocolError(format!(
-                "{other:?} is not carried on the audio connection"
-            ))),
+            other => Err(BridgeError::UnexpectedMessage {
+                expected: "a message the audio connection carries",
+                got: format!("{other:?}"),
+            }),
         }
     }
 
@@ -646,7 +647,7 @@ pub(crate) struct RenderThread {
     handle: Option<ThreadHandle<RenderSide>>,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
-    ended: Arc<OnceLock<BridgeError>>,
+    ended: Arc<OnceLock<Arc<BridgeError>>>,
 }
 
 impl RenderThread {
@@ -670,7 +671,7 @@ impl RenderThread {
     }
 
     /// Why the audio connection ended, once it has.
-    pub(crate) fn ended(&self) -> Option<&BridgeError> {
+    pub(crate) fn ended(&self) -> Option<&Arc<BridgeError>> {
         self.ended.get()
     }
 
@@ -700,7 +701,7 @@ fn run(
     mut side: RenderSide,
     audio: Box<dyn Transport>,
     stop: &StopToken,
-    ended: &OnceLock<BridgeError>,
+    ended: &OnceLock<Arc<BridgeError>>,
 ) -> RenderSide {
     let mut audio = Some(audio);
     while !stop.is_stopped() {
@@ -708,7 +709,7 @@ fn run(
             // The connection is gone; the Processor may still be recalled, so
             // the thread keeps trading it until the main thread has it back.
             audio = None;
-            let _ = ended.set(error);
+            let _ = ended.set(Arc::new(error));
         }
     }
     side

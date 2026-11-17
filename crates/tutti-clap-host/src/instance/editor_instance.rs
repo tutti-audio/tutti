@@ -256,10 +256,6 @@ impl EditorWindow for ClapEditor {
         if reread {
             self.param_ranges = read_param_ranges(main, &self.inner);
         }
-        // If the plugin requested a param flush, perform it.
-        if self.inner.take_params_flush_requested() {
-            let _ = self.inner.flush_params(main, vec![]);
-        }
     }
 
     fn editor_capabilities(&mut self, main: MainThreadMarker) -> EditorCapabilities {

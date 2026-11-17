@@ -212,7 +212,6 @@ impl AuLoaded {
             receives_midi: self.au_type().receives_midi(),
             midi_protocol,
             block_size: self.config().block_size,
-            sample_rate: self.config().sample_rate,
             stage,
         });
         Ok((processor, AuController::new(self, ranges)))

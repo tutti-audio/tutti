@@ -602,10 +602,10 @@ impl MpeIngest {
         &self.groups[group.index()].mode
     }
 
-    /// Reconfigure every Group to a new zone layout. Off-RT: call at wiring
-    /// time, or via
-    /// [`MidiIngestControls::set_mpe_mode`](crate::MidiIngestControls::set_mpe_mode),
-    /// which defers adoption to the ingest node's next block.
+    /// Reconfigure every Group to a new zone layout. Allocates nothing, so the
+    /// ingest node calls it on the audio thread when
+    /// [`MidiIngestControls::set_mpe_mode`](crate::MidiIngestControls::set_mpe_mode)
+    /// publishes a new mode.
     ///
     /// What a channel held or was told is kept where the channel is what it
     /// was, and forgotten where it entered or left MPE control. The sounding
@@ -629,7 +629,7 @@ impl MpeIngest {
     /// Takes `zones` as the MPE Profile zones of `group`: `Some` is the
     /// Profile's rules for those zones in place of MPE 1.1's, `None` is back
     /// to the layout the host and the Group's Configuration Messages left.
-    /// Off-RT with the rest of the layout; the node calls it at a block's
+    /// Allocates nothing; the node calls it on the audio thread at a block's
     /// start.
     ///
     /// A receiver stops all sounding notes and resets the controls of each

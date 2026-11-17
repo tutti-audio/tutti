@@ -310,14 +310,15 @@ pub use tutti_dsp::{
 mod dynamics;
 pub use dynamics::{
     BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
-    CompressorNode, CompressorSet, GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode,
-    LimiterSet, MultibandCompressorNode, MultibandControls,
+    CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
+    GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode,
+    MultibandControls,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
-    CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
-    PeakDetection,
+    CompressorControls, DynamicEqControls, DynamicMode, GateControls, KeyFilter, KeySource,
+    LimiterControls, Lookahead, PeakDetection,
 };
 
 // Utilities: polarity, mid/side and stereo width.

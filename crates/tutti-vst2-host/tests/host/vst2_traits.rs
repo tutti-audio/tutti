@@ -356,7 +356,7 @@ fn automation_is_a_host_write_and_its_echo_is_not_reported() {
     let mut edits = Vec::new();
     controller.take_reported_edits(main_thread(), &mut edits);
     assert_eq!(edits, Vec::new());
-    assert_eq!(controller.loaded().dropped_param_changes(), 0);
+    assert_eq!(controller.loaded().dropped_param_changes().get(), 0);
     drop(rejoin(processor, controller));
 }
 
@@ -596,7 +596,7 @@ fn the_automation_mode_reaches_the_plugin_as_state_and_time_info_flags() {
     const AUTOMATION_READING: i32 = 1 << 7;
     let probe = Probe::acquire();
     let (mut processor, mut controller) = probe.activate();
-    let transport = tutti_vst2_host::TransportInfo::new();
+    let transport = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ProcessContext {
         transport: Some(&transport),
         ..ProcessContext::new()
@@ -641,7 +641,8 @@ fn smpte_is_not_claimed_when_a_plugin_asks_for_it() {
     const PLAYING: i32 = 1 << 1;
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let transport = tutti_vst2_host::TransportInfo::new().with_playing(true);
+    let transport = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true);
     let ctx = ProcessContext {
         transport: Some(&transport),
         ..ProcessContext::new()
@@ -665,8 +666,9 @@ fn a_rejoin_keeps_the_transport_the_plugin_reads() {
     const TRANSPORT_CHANGED: i32 = 1;
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let stopped = tutti_vst2_host::TransportInfo::new();
-    let playing = tutti_vst2_host::TransportInfo::new().with_playing(true);
+    let stopped = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
+    let playing = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true);
     let ctx = |transport| ProcessContext {
         transport: Some(transport),
         ..ProcessContext::new()

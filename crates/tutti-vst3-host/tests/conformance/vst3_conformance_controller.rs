@@ -104,7 +104,7 @@ fn midi_learn_forwards_from_the_main_thread() {
             ..Default::default()
         },
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     assert_eq!(
         inst.get_parameter(AUX),

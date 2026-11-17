@@ -683,8 +683,8 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
     let name = std::str::from_utf8(name).map_err(ParseError::Utf8)?;
     let id = std::str::from_utf8(id).map_err(ParseError::Utf8)?;
     Ok(EndpointIdentity {
-        name: EndpointName::parse(name).map_err(ParseError::Name)?,
-        instance_id: ProductInstanceId::parse(id).map_err(ParseError::InstanceId)?,
+        name: name.parse().map_err(ParseError::Name)?,
+        instance_id: id.parse().map_err(ParseError::InstanceId)?,
     })
 }
 

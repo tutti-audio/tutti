@@ -18,8 +18,9 @@ use std::sync::Arc;
 
 use tutti_plugin_types::BlockStatus;
 use tutti_plugin_types::{
-    ChannelTable, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, WireMidi,
+    ChannelTable, ChordValue, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo,
+    WireMidi,
 };
 
 use super::Link;
@@ -49,9 +50,9 @@ impl IpcProcessor {
     pub(super) fn new(link: Arc<Link>, batcher: Batcher) -> Self {
         let (queues, points) = link.param_room(batcher.chunk());
         Self {
+            pending: BlockPayload::new(link.rate()),
             link,
             batcher,
-            pending: BlockPayload::default(),
             params: ParameterChanges::reserved_bridged(queues, points),
         }
     }
@@ -76,6 +77,7 @@ impl Processor for IpcProcessor {
             ctx: io.ctx,
             out: &mut *io.out,
             pending: &mut self.pending,
+            rate: self.link.rate(),
             params: &mut self.params,
             over: 0,
             said: BlockStatus::Continue,
@@ -111,8 +113,9 @@ impl Processor for IpcProcessor {
     /// graph node's own reset counts the SysEx it cuts.)
     fn reset(&mut self) {
         self.batcher.reset();
-        self.pending = BlockPayload::default();
+        self.pending = BlockPayload::new(self.link.rate());
         self.params.clear();
+        // A refused reset is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.reset_rt();
     }
 
@@ -134,7 +137,8 @@ impl Processor for IpcProcessor {
         self.link.reserve(chunk);
         let (queues, points) = self.link.param_room(chunk);
         self.params = ParameterChanges::reserved_bridged(queues, points);
-        self.pending = BlockPayload::default();
+        self.pending = BlockPayload::new(rate);
+        // A refused rate command is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.set_sample_rate_rt(rate);
         self.link.set_rate(rate);
         // A fork's graph is compiled from the shape read right after this, and
@@ -160,6 +164,8 @@ struct Piece<'a, 'c> {
     ctx: &'a ProcessContext<'c>,
     out: &'a mut ProcessOutput,
     pending: &'a mut BlockPayload,
+    /// The rate the chunk's placeholder transport is at.
+    rate: SampleRate,
     params: &'a mut ParameterChanges,
     /// MIDI the chunk had no room for.
     over: usize,
@@ -189,7 +195,7 @@ impl Chunks for Piece<'_, '_> {
     /// The chunk begins empty: its transport and changes are the node's, read
     /// when it completes ([`payload`](Chunks::payload)).
     fn begin(&mut self, _at: usize, _chunk: usize) {
-        *self.pending = BlockPayload::default();
+        *self.pending = BlockPayload::new(self.rate);
     }
 
     /// The piece's MIDI and harmony join the chunk at `at`, the piece's first
@@ -205,20 +211,30 @@ impl Chunks for Piece<'_, '_> {
                 self.over += 1;
             }
         }
+        // The chunk's harmony carries the degrees a plugin acts on, shifted to
+        // the chunk's frames. Chord and scale text is not carried yet: cloning
+        // a `String` here would allocate, and a refused event would free it.
         let shift = i32::try_from(at).unwrap_or(i32::MAX);
         if let Some(expressive) = &self.ctx.expressive {
             if let Some(chords) = expressive.chords {
                 for chord in &chords.changes {
-                    let mut chord = chord.clone();
-                    chord.sample_offset = chord.sample_offset.saturating_add(shift);
-                    let _ = self.pending.harmony.chords.add_change(chord);
+                    let _ = self.pending.harmony.chords.add_change(ChordValue {
+                        sample_offset: chord.sample_offset.saturating_add(shift),
+                        root: chord.root,
+                        bass_note: chord.bass_note,
+                        mask: chord.mask,
+                        text: String::new(),
+                    });
                 }
             }
             if let Some(scales) = expressive.scales {
                 for scale in &scales.changes {
-                    let mut scale = scale.clone();
-                    scale.sample_offset = scale.sample_offset.saturating_add(shift);
-                    let _ = self.pending.harmony.scales.add_change(scale);
+                    let _ = self.pending.harmony.scales.add_change(ScaleValue {
+                        sample_offset: scale.sample_offset.saturating_add(shift),
+                        root: scale.root,
+                        mask: scale.mask,
+                        text: String::new(),
+                    });
                 }
             }
         }
@@ -231,13 +247,17 @@ impl Chunks for Piece<'_, '_> {
         // that completes it (this call) the transport is the chunk's first
         // frame's, slope included, and the changes are the chunk's, on its
         // frames (`Processor::chunk`'s contract).
-        self.pending.transport = self.ctx.transport.cloned().unwrap_or_default();
+        self.pending.transport = self
+            .ctx
+            .transport
+            .cloned()
+            .unwrap_or_else(|| TransportInfo::new(self.rate));
         for change in self.ctx.transport_changes {
             // The node's list and this one hold the same most: none is lost.
             let _ = self.pending.changes.try_push(*change);
         }
         tutti_plugin_types::insertion_sort_by_key(&mut self.pending.midi, |e| e.offset);
-        std::mem::take(self.pending)
+        std::mem::replace(self.pending, BlockPayload::new(self.rate))
     }
 
     /// The node's chunk so far, copied into the buffer the bridge swaps.
@@ -316,5 +336,62 @@ mod tests {
         assert!(changes.add_change(ParamId::new(1), 3, 0.5));
         let with_params = ProcessContext::new().params(&changes);
         assert!(carries_input(&with_params, &[&silence], 8), "a parameter");
+    }
+
+    /// **A piece's chords and scales join the chunk shifted to the chunk's
+    /// frames, without allocating, whatever text they carry.** The context
+    /// holds a named chord and a named scale; the chunk gets their degrees at
+    /// `at` frames later and no text (a refused event past the cap frees
+    /// nothing either).
+    #[test]
+    fn a_pieces_harmony_joins_the_chunk_shifted_and_allocation_free() {
+        use tutti_plugin_types::{ChordChanges, ExpressiveContext, ScaleChanges};
+        let mut chords = ChordChanges::new();
+        let mut scales = ScaleChanges::new();
+        for i in 0..=tutti_plugin_types::HARMONY_CAPACITY as i32 {
+            let _ = chords.add_change(ChordValue {
+                sample_offset: i,
+                root: 60,
+                bass_note: 48,
+                mask: 0b1001_0001,
+                text: "Cmaj7 over a long enough name to need the heap".into(),
+            });
+            let _ = scales.add_change(ScaleValue {
+                sample_offset: 8 + i,
+                root: 2,
+                mask: 0x0AB5,
+                text: "D Dorian, spelled out at length for the heap".into(),
+            });
+        }
+        let ctx = ProcessContext::new().expressive(ExpressiveContext {
+            chords: Some(&chords),
+            scales: Some(&scales),
+            ..ExpressiveContext::default()
+        });
+        let mut out = ProcessOutput::default();
+        let mut pending = BlockPayload::new(SampleRate::SR_48K);
+        let mut params = ParameterChanges::reserved(1, 4);
+        let mut piece = Piece {
+            ctx: &ctx,
+            out: &mut out,
+            pending: &mut pending,
+            rate: SampleRate::SR_48K,
+            params: &mut params,
+            over: 0,
+            said: BlockStatus::Continue,
+        };
+        assert_no_alloc::assert_no_alloc(|| piece.take(0, 64, 64));
+        let at: Vec<i32> = pending
+            .harmony
+            .chords
+            .changes
+            .iter()
+            .map(|c| c.sample_offset)
+            .collect();
+        assert_eq!(at, [64, 65, 66, 67], "the first four, 64 frames in");
+        assert_eq!(pending.harmony.chords.changes[0].mask, 0b1001_0001);
+        assert_eq!(pending.harmony.chords.changes[0].bass_note, 48);
+        assert_eq!(pending.harmony.scales.changes[3].sample_offset, 8 + 3 + 64);
+        assert_eq!(pending.harmony.scales.changes[0].mask, 0x0AB5);
     }
 }

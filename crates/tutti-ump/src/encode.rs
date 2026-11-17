@@ -71,9 +71,7 @@ fn system(g: MidiGroup, s: System) -> u32 {
     let h = head(0x1, g);
     match s {
         System::TimeCode(d) => h | (0xF1 << 16) | (u7(d) << 8),
-        System::SongPosition(p) => {
-            h | (0xF2 << 16) | ((u32::from(p.get()) & 0x7f) << 8) | (u32::from(p.get()) >> 7)
-        }
+        System::SongPosition(p) => h | (0xF2 << 16) | (u7(p.lsb()) << 8) | u7(p.msb()),
         System::SongSelect(d) => h | (0xF3 << 16) | (u7(d) << 8),
         System::TuneRequest => h | (0xF6 << 16),
         System::TimingClock => h | (0xF8 << 16),
@@ -97,7 +95,7 @@ fn voice1(a: Address, v: Voice1) -> u32 {
         }
         Voice1::ProgramChange(p) => (0xC, u7(p), 0),
         Voice1::ChannelPressure(p) => (0xD, u7(p), 0),
-        Voice1::PitchBend(b) => (0xE, u32::from(b.get()) & 0x7f, u32::from(b.get()) >> 7),
+        Voice1::PitchBend(b) => (0xE, u7(b.lsb()), u7(b.msb())),
     };
     address(0x2, a, opcode) | (d1 << 8) | d2
 }

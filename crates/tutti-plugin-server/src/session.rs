@@ -12,12 +12,12 @@ use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
 use crate::served::AnyServed;
 use dpi::Size;
 use tutti_plugin_ipc::state_chunk::{self, Reassembler};
-use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, MAX_STATE_BYTES, StagedState};
+use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, EditorError, Load, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, SampleFormat, SampleRate, StateUse, Wakeups,
-    WindowHandle,
+    BridgeError, BridgeResult, EditorError, Load, MAX_STATE_BYTES, MainThreadMarker, MainWork,
+    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, SampleFormat, SampleRate, StateUse,
+    Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -413,7 +413,7 @@ impl Session {
             // blocks: the audio connection's, where the render thread owns the
             // Processor that forgets (`RenderSide::handle`).
             M::Reset => Err(BridgeError::ProtocolError(
-                "Reset is carried on the audio connection".to_string(),
+                "Reset is carried on the audio connection",
             )),
 
             M::OpenEditor { parent, scale } => {
@@ -920,7 +920,8 @@ mod tests {
                             side.drain();
                             side.poll_seat();
                         }
-                        std::thread::sleep(std::time::Duration::from_micros(200));
+                        // The ring has no doorbell, so the stepper polls it.
+                        std::thread::yield_now();
                     }
                 }
             });
@@ -991,7 +992,7 @@ mod tests {
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
     use tutti_plugin_types::{
-        MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, TransportInfo,
+        MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges,
     };
 
     fn assert_none(r: Reaction) {
@@ -1013,7 +1014,9 @@ mod tests {
     #[test]
     fn the_control_connection_refuses_a_block() {
         let mut s = Rig::new();
-        let block = HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData::default());
+        let block = HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData::empty(
+            tutti_plugin_types::SampleRate::SR_48K,
+        ));
         assert_error_contains(
             s.session.handle(main_thread(), block).unwrap(),
             "audio connection",
@@ -1031,7 +1034,10 @@ mod tests {
     fn the_audio_connection_refuses_a_control_message() {
         let s = Rig::new();
         let refused = s.side().handle(HostMessage::GetParameterList);
-        assert!(matches!(refused, Err(BridgeError::ProtocolError(_))));
+        assert!(matches!(
+            refused,
+            Err(BridgeError::UnexpectedMessage { .. })
+        ));
     }
 
     /// What a save in the middle of steady playback did to the blocks around it.
@@ -1106,7 +1112,9 @@ mod tests {
                             tutti_plugin_ipc::ProcessAudioData {
                                 seq,
                                 num_samples: FRAMES,
-                                ..Default::default()
+                                ..tutti_plugin_ipc::ProcessAudioData::empty(
+                                    tutti_plugin_types::SampleRate::SR_48K,
+                                )
                             },
                         ))
                         .unwrap();
@@ -1121,7 +1129,8 @@ mod tests {
                     };
                     blocks.push((started, peak));
                     rendered.fetch_add(1, Ordering::Release);
-                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    // The ring has no doorbell, so the player polls it.
+                    std::thread::yield_now();
                 }
                 blocks
             }
@@ -1293,8 +1302,9 @@ mod tests {
                     midi_events: MidiEventVec::new(),
                     param_changes: ParameterChanges::new(),
                     note_expression: NoteExpressionChanges::new(),
-                    transport: TransportInfo::default(),
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
                 Refusal("No plugin loaded"),
             ),
@@ -1578,7 +1588,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: F64_FRAMES,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -1720,7 +1732,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq: SEQ,
                     num_samples: F64_FRAMES,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -1784,7 +1798,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: F64_FRAMES,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -1847,7 +1863,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: frames,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -1911,7 +1929,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: 256,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -2601,8 +2621,9 @@ mod tests {
                     midi_events: MidiEventVec::new(),
                     param_changes: ParameterChanges::new(),
                     note_expression: NoteExpressionChanges::new(),
-                    transport: TransportInfo::default(),
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -2667,7 +2688,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: frames,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .expect("a failed block does not end the server")

@@ -15,20 +15,20 @@
 //! A [`Piece`] is a value moving from one endpoint to another along a `Law`, read at
 //! a progress: the one formula every consumer evaluates.
 //!
-//! An [`Trajectory`] is the least a lane or a recorder needs of
-//! automation: breakpoints in [`Beat`](tutti_types::Beat), each with the `Law`
-//! of the piece it starts, read at a beat.
+//! A [`Trajectory`] is the least a lane or a recorder needs of automation:
+//! breakpoints in [`Beat`](tutti_types::Beat), each with a value in the unit
+//! the trajectory automates and the `Law` of the piece it starts, read at a beat.
 //!
 //! ```
 //! use tutti_curve::{Breakpoint, Exponent, Law, Piece, Trajectory};
-//! use tutti_types::Beat;
+//! use tutti_types::{Beat, Hz};
 //!
 //! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5), 2.0);
 //!
 //! let mut lane = Trajectory::new();
-//! lane.add_breakpoint(Breakpoint::with_law(Beat(0.0), 0.0, Law::PowerIn(Exponent::of(2.0))));
-//! lane.add_breakpoint(Breakpoint::new(Beat(4.0), 1.0));
-//! assert_eq!(lane.value_at(Beat(2.0)), Some(0.25));
+//! lane.add_breakpoint(Breakpoint::with_law(Beat(0.0), Hz(0.0), Law::PowerIn(Exponent::of(2.0))));
+//! lane.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(1.0)));
+//! assert_eq!(lane.value_at(Beat(2.0)), Some(Hz(0.25)));
 //! ```
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]

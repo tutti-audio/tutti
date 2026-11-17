@@ -6,7 +6,7 @@
 
 use super::ClapLoaded;
 use crate::events::ParamBounds;
-use crate::events::{ClapEvent, InputEventList, OutputEventList};
+use crate::events::{ClapEvent, FlushEvents, OutputEventList};
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
@@ -202,7 +202,7 @@ impl ClapLoaded {
     ///   main-thread flush is what the spec asks for. This is the GUI-only /
     ///   setup path.
     /// - **Active** (`flags.active`) — the flush runs under an
-    ///   [`AudioClaim`](tutti_clap_ffi::AudioClaim), so the calling
+    ///   audio claim, so the calling
     ///   thread *becomes* the audio thread for the duration (which the spec
     ///   explicitly permits for any OS thread) and **blocks** until any
     ///   in-flight `process` on the real audio thread has returned.
@@ -225,7 +225,7 @@ impl ClapLoaded {
         main: MainThreadMarker,
         input_events: Vec<ClapEvent>,
     ) -> Vec<ClapEvent> {
-        let mut input_list = InputEventList::from_events(input_events);
+        let mut input_list = FlushEvents::new(input_events);
         input_list.sort_by_time();
         let mut output_list = OutputEventList::new();
 

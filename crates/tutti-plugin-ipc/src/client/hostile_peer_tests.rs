@@ -85,7 +85,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -1340,7 +1340,7 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
 /// A large state survives the round trip, in both directions.
 ///
 /// A state over `MAX_FRAME_BYTES` must travel as chunks, not fail as a *crash*
-/// (`save_state` answering "Bridge process crashed"), which would be
+/// (`save_state` answering "the bridge process crashed"), which would be
 /// indistinguishable from a segfault and lose the user's preset under a wrong
 /// explanation.
 ///
@@ -1423,7 +1423,7 @@ fn a_state_larger_than_one_frame_round_trips() {
 ///   crash about — which is what separates this from an over-cap *receive*.
 #[test]
 fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
-    use crate::protocol::MAX_STATE_BYTES;
+    use tutti_plugin_types::MAX_STATE_BYTES;
 
     let mock = MockServer::start("load-too-big", |_| Action::Silent);
 
@@ -1471,7 +1471,7 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
 /// total.
 ///
 /// A fixed budget for the whole transfer would make
-/// [`MAX_STATE_BYTES`](crate::protocol::MAX_STATE_BYTES) unreachable. That a
+/// [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES) unreachable. That a
 /// transfer advancing inside its window is live however many windows it spans
 /// is the `StallWatch` rule, tested over constructed instants in
 /// `client::audio::progress`; this test carries the reassembly through the

@@ -95,7 +95,7 @@
 //! )
 //! .expect("equal lengths");
 //!
-//! let transport = TransportInfo::default().with_tempo(120.0).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 //! processor.process(&mut PluginAudio::F32(buffer), &ClapProcessContext {
 //!     midi: &midi,
@@ -207,7 +207,7 @@
 //! on the *inner* `ClapLoaded`: [`flush_params`][`ClapLoaded::flush_params`] is
 //! tagged `[active ? audio-thread : main-thread]` and branches on that live flag, so
 //! the same code reached through a `ClapController`'s `loaded_mut` takes the
-//! audio-thread claim (`tutti_clap_ffi::AudioClaim`) where a bare `ClapLoaded` is a
+//! audio-thread claim where a bare `ClapLoaded` is a
 //! main-thread call (it takes the `MainThreadMarker` either way).
 //!
 //! The distinction that gates it is *active* versus *processing*, and they are not
@@ -280,7 +280,7 @@ pub mod topology;
 pub mod types;
 
 pub use error::{ClapError, LoadStage, Result};
-pub use events::{ClapEvent, EventList, InputEventList, OutputEventList, ParamBounds};
+pub use events::{ClapEvent, EventList, FlushEvents, InputEventList, OutputEventList, ParamBounds};
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
     ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, LoadOptions,
