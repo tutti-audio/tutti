@@ -1669,7 +1669,7 @@ mod tests {
         assert!(reading.momentary.get() > -30.0, "{reading:?}");
     }
 
-    /// A 997 Hz tone in one channel of a 5.1 stream over 5000 frames, which no
+    /// A 997 Hz tone in one channel of a 5.1 stream over 48 000 frames, which no
     /// conversion block divides: in a surround channel it reads the 1.41 weight
     /// (+1.49 dB) above the same tone in the left channel, and in the LFE it
     /// reads nothing. A sample moved to another channel by a run cut off a frame

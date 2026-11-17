@@ -387,7 +387,7 @@ impl<S: Sample> OnsetMeter<S> {
         });
     }
 
-    /// The detection curve so far: one `(position, novelty)` pair per frame
+    /// The detection curve so far: one [`Novelty`] per frame
     /// analysed, in analysis order.
     ///
     /// The raw values [`finish`](Self::finish) thresholds, after the config's
@@ -413,7 +413,7 @@ impl<S: Sample> Meter for OnsetMeter<S> {
     type Output = Vec<Onset>;
 
     /// Feeds the next chunk of the buffer, in order, and extends `out` with the
-    /// `(position, novelty)` of each frame the chunk completes.
+    /// [`Novelty`] of each frame the chunk completes.
     fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<Novelty>) -> Result<()> {
         for_blocks(chunk.samples(), 1, |block| {
             self.feed(block, |item| out.extend([item]));
