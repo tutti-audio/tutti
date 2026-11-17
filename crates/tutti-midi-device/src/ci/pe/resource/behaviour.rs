@@ -14,7 +14,7 @@ use super::super::header::{
 };
 use super::super::initiator::{PeCall, PeSet};
 use super::super::limits::{MediaType, ResourceName};
-use super::super::partial::{JsonPointer, PartialUpdate};
+use super::super::partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeObject};
 use super::super::value::{PeExtra, PeExtraError};
@@ -212,8 +212,7 @@ fn queued_partial_updates_fold_into_one() {
     let (mut link, target) = subscribed_link(1, custom("X-ProgramEdit"), Some("abcd"));
     let change = |p: &str, n: i64| {
         PartialUpdate::new()
-            .with(pointer(p), PeJson::Integer(n))
-            .unwrap()
+            .with(pointer(p), PartialValue::Integer(n))
     };
     let first = link
         .resp
@@ -247,8 +246,7 @@ fn queued_partial_updates_fold_into_one() {
 fn partial_updates_that_cannot_fold_are_told_as_a_full() {
     let one = |p: &str| {
         PartialUpdate::new()
-            .with(pointer(p), PeJson::Integer(1))
-            .unwrap()
+            .with(pointer(p), PartialValue::Integer(1))
     };
     assert!(super::server::merged(&one("/a"), &one("/b")).is_some());
     assert!(super::server::merged(&one("/a"), &one("/a")).is_some());
@@ -817,8 +815,7 @@ fn a_partial_change_does_not_apply_to_binary_data() {
     let mut link = Link::new(store(), 256);
     let blob = super::exchange::target(custom("X-Blob"));
     let update = PartialUpdate::new()
-        .with(pointer("/a"), PeJson::Integer(1))
-        .unwrap();
+        .with(pointer("/a"), PartialValue::Integer(1));
     assert!(matches!(
         link.resp.change(&blob, update, link.now),
         Err(PublishError::Data(_))
@@ -1001,10 +998,9 @@ fn a_header_property_and_a_change_are_scalars_of_the_one_json_type() {
         Err(PeExtraError::NotScalar)
     );
     assert!(extra.insert(name, PeJson::Integer(1)).is_ok());
-    assert!(
-        PartialUpdate::new()
-            .with(pointer("/a"), PeJson::Object(PeObject::new()))
-            .is_err()
+    assert_eq!(
+        PartialValue::try_from(&PeJson::Object(PeObject::new())),
+        Err(PartialError::NotAChange)
     );
     // The grammar of Header Data has no whitespace and no nesting; Property Data has both.
     assert!(PeHeader::parse(br#"{"resource": "A"}"#).is_err());

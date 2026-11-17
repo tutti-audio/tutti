@@ -126,7 +126,7 @@ pub use initiator::{
 pub use limits::{
     MediaType, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
 };
-pub use partial::{JsonPointer, PartialError, PartialUpdate};
+pub use partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 pub use reassemble::{
     BufferLimit, NotABufferLimit, NotAStreamLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld,
     PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,

@@ -311,7 +311,7 @@ pub(super) fn merged(old: &PartialUpdate, new: &PartialUpdate) -> Option<Partial
     }
     let mut all = old.clone();
     for (pointer, value) in new.iter() {
-        all = all.with(pointer.clone(), value.clone()).ok()?;
+        all = all.with(pointer.clone(), value.clone());
     }
     (all.iter().count() <= MAX_QUEUED_CHANGES).then_some(all)
 }

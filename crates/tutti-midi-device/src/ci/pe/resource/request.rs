@@ -189,19 +189,12 @@ impl ResourceGet {
     }
 
     /// Asks for a page of a List Resource: `offset` and `limit` together
-    /// (M2-103 §8.6.2).
-    ///
-    /// # Errors
-    ///
-    /// [`RequestRefused::NotPaginable`] for a Resource that is no List Resource.
-    pub fn paged(mut self, page: PePage) -> Result<Self, RequestRefused> {
-        if !self.target.resource.is_list() {
-            return Err(RequestRefused::NotPaginable(
-                self.target.resource.as_str().to_owned(),
-            ));
-        }
+    /// (M2-103 §8.6.2). [`check_get`](Self::check_get) refuses a page of a
+    /// Resource that is no List Resource.
+    #[must_use]
+    pub fn paged(mut self, page: PePage) -> Self {
         self.page = Some(page);
-        Ok(self)
+        self
     }
 
     /// Asks for the reply in `encoding`.
@@ -272,6 +265,9 @@ impl ResourceGet {
     fn check_header(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
         let name = || self.target.resource.as_str().to_owned();
         self.target.agrees_with(entry)?;
+        if self.page.is_some() && !self.target.resource.is_list() {
+            return Err(RequestRefused::NotPaginable(name()));
+        }
         if self.page.is_some() && !entry.can_paginate() {
             return Err(RequestRefused::NotDeclaredPaginable(name()));
         }

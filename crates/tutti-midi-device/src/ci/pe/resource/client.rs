@@ -433,7 +433,7 @@ impl ResourceInitiator {
         let first = get.clone().paged(PePage {
             offset: 0,
             limit: page_size,
-        })?;
+        });
         if let Some(entry) = self.entry(get.target().resource())? {
             first.check_get(entry)?;
         }
@@ -739,7 +739,6 @@ impl ResourceInitiator {
                 offset: have,
                 limit: walk.size,
             });
-        let Ok(next) = next else { return };
         let call = PeCall::Get(pe_get(&next));
         match self.pe.start(call, now) {
             Ok((id, actions)) => {

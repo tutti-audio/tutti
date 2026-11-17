@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_device::{
     CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, JsonPointer,
-    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PeCapabilities, PeData, PeExternalSync, PeHeader,
+    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData, PeExternalSync, PeHeader,
     PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription, PortDirection,
     RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
     ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,

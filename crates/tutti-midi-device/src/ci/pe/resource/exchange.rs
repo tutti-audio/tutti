@@ -16,7 +16,7 @@ use super::super::header::{
 };
 use super::super::initiator::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeSet, PeSettings};
 use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
-use super::super::partial::{JsonPointer, PartialUpdate};
+use super::super::partial::{JsonPointer, PartialUpdate, PartialValue};
 use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, StreamLimit};
 use super::super::tree::PeJson;
 use super::state::StateDevice;
@@ -999,10 +999,8 @@ fn a_partial_set_changes_what_a_later_get_returns() {
     let mut link = Link::new(store(), 256);
     let program = entry_target(custom("X-ProgramEdit"), "abcd");
     let update = PartialUpdate::new()
-        .with(pointer("/pitchEnvelope/rates/0"), PeJson::Integer(80))
-        .unwrap()
-        .with(pointer("/pitchEnvelope/levels/0"), PeJson::Integer(60))
-        .unwrap();
+        .with(pointer("/pitchEnvelope/rates/0"), PartialValue::Integer(80))
+        .with(pointer("/pitchEnvelope/levels/0"), PartialValue::Integer(60));
     let made = link
         .init
         .set(&ResourceSet::partial(program.clone(), update), link.now);
@@ -1119,8 +1117,7 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
         .subscribe(&ResourceGet::new(program.clone()), link.now);
     link.call(made);
     let update = PartialUpdate::new()
-        .with(pointer("/lfoSpeed"), PeJson::Integer(10))
-        .unwrap();
+        .with(pointer("/lfoSpeed"), PartialValue::Integer(10));
     let actions = link.resp.change(&program, update, link.now).unwrap();
     link.publish(actions);
     let updates = link.updates();
@@ -1151,8 +1148,7 @@ fn a_set_is_announced_to_the_subscribers() {
         .subscribe(&ResourceGet::new(program.clone()), link.now);
     link.call(made);
     let update = PartialUpdate::new()
-        .with(pointer("/pitchEnvelope/levels/3"), PeJson::Integer(99))
-        .unwrap();
+        .with(pointer("/pitchEnvelope/levels/3"), PartialValue::Integer(99));
     let made = link
         .init
         .set(&ResourceSet::partial(program, update), link.now);

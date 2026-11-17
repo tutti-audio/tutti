@@ -910,11 +910,18 @@ fn only_a_list_resource_is_asked_for_a_page() {
     };
     let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
     assert!(matches!(
-        ResourceGet::new(target).paged(page),
+        ResourceGet::new(target)
+            .paged(page)
+            .check_get(&entry_of(PeResource::LocalOn)),
         Err(RequestRefused::NotPaginable(_))
     ));
-    let list = ResourceTarget::new(PeResource::ChannelList).unwrap();
-    assert!(ResourceGet::new(list).paged(page).is_ok());
+    let list = ResourceTarget::entry(PeResource::ProgramList, id("g")).unwrap();
+    assert_eq!(
+        ResourceGet::new(list)
+            .paged(page)
+            .check_get(&entry_of(PeResource::ProgramList)),
+        Ok(())
+    );
 }
 
 // M2-103 §10: a Set carries the data of the Resource it is for.
@@ -945,7 +952,7 @@ fn a_get_is_checked_against_its_entry() {
     let entry = entry_of(PeResource::ChannelList);
     assert_eq!(channels.check_get(&entry), Ok(()));
     assert!(matches!(
-        channels.clone().paged(page).unwrap().check_get(&entry),
+        channels.clone().paged(page).check_get(&entry),
         Err(RequestRefused::NotDeclaredPaginable(_))
     ));
     assert!(matches!(
@@ -975,8 +982,7 @@ fn a_get_is_checked_against_its_entry() {
     // ProgramList paginates by default, and wants its resId.
     let programs =
         ResourceGet::new(ResourceTarget::entry(PeResource::ProgramList, id("g")).unwrap())
-            .paged(page)
-            .unwrap();
+            .paged(page);
     assert_eq!(
         programs.check_get(&entry_of(PeResource::ProgramList)),
         Ok(())
