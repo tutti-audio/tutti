@@ -49,7 +49,6 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 # transfer). No cycle: `tutti-graph` names only `tutti-types`, `tutti-rt` and `tutti-ump`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
-
 # The process edge: the wire, the slab, the server's launch and the client of a
 # served plugin.
 tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc" }
@@ -143,7 +142,6 @@ libc = "0.2"
 # The Windows half of the pid probe: `OpenProcess` and its exit code.
 [target.'cfg(windows)'.dev-dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
 
 # NOTE: the `loom` model of this crate's shared-memory header protocol lives in
 # the sibling `tutti-shm-model` crate, not here. `--cfg loom` is a global
