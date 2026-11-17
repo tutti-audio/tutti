@@ -591,6 +591,7 @@ pub mod plugin {
 pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
+    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
