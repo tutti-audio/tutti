@@ -310,10 +310,21 @@ proptest! {
     /// decodes: a Control Change of All Sound Off or All Notes Off, in either
     /// protocol.
     #[test]
-    fn is_panic_controller_agrees_with_decode(mut w in any::<[u32; 4]>(), force in 0u8..4) {
+    fn is_panic_controller_agrees_with_decode(
+        mut w in any::<[u32; 4]>(),
+        force in 0u8..4,
+        pick in 0u8..3,
+    ) {
         match force {
             0 => w[0] = 0x2000_0000 | (w[0] & 0x0FFF_FFFF),
             1 => w[0] = 0x4000_0000 | (w[0] & 0x0FFF_FFFF),
+            // A Control Change of 120, 123 or a random controller, so the
+            // positive cases are common.
+            2 => {
+                let controller = [120, 123, (w[0] >> 8) & 0x7F][usize::from(pick)];
+                let ty = if w[1] & 1 == 0 { 0x2000_0000 } else { 0x4000_0000 };
+                w[0] = ty | (w[0] & 0x0F0F_00FF) | (0xB << 20) | (controller << 8);
+            }
             _ => {}
         }
         if let Ok(message) = Ump(w).decode() {

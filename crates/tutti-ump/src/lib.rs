@@ -13,7 +13,8 @@
 //! other code that shifts a packet's bits, and each agrees with `decode` and
 //! `encode` on every packet (a test holds it). MIDI 1.0 on the wire is the
 //! other place that knows bit positions: [`Voice1::bytes`] and
-//! [`System::bytes`] write a message's bytes, [`frame`] adds a SysEx's delimiters, and [`Midi1Parser`] reads a byte stream
+//! [`System::bytes`] write a message's bytes, [`frame`] adds a SysEx's
+//! delimiters, and [`Midi1Parser`] reads a byte stream
 //! into [`Message`]s. [`NoteId`] is a note's identity (`channel * 128 + note`,
 //! the plugin formats' wire value), and [`SysexMessage`] and [`SysexAssembler`]
 //! are a checked complete SysEx and the one SysEx7 reassembler (a stream per
