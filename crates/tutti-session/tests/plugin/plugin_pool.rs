@@ -1058,7 +1058,7 @@ mod process {
 
         s.remove(node).unwrap();
         pump_until(&mut s, "the server's end", |s| {
-            let _ = s.main(tutti_fixtures::main_thread()).update();
+            let _ = s.update_on(tutti_fixtures::main_thread());
             !alive()
         });
         assert!(

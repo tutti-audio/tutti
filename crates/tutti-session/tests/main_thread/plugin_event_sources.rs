@@ -18,7 +18,7 @@ use tutti_clap_test_plugin::{
 use tutti_fixtures::StandInWindow;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::ContentScale;
-use tutti_session::Session;
+use tutti_session::{Editor, Session};
 use tutti_types::{MaxBlock, Samples};
 
 use crate::support::clap_probe;
@@ -35,7 +35,7 @@ fn probe() -> &'static ClapProbe {
 
 /// A session with the reference plugin hosted in this process, an editor open
 /// on it, and the plugin's latched command run by the editor's `show`.
-fn session_with_open_editor(command: u32) -> Session {
+fn session_with_open_editor(command: u32) -> (Session, Editor) {
     let probe = probe();
     probe.set_gui_mode(GuiMode::Embeddable);
     probe.thread_reset();
@@ -51,28 +51,28 @@ fn session_with_open_editor(command: u32) -> Session {
             Spec::new(plugin).hosting(Hosting::InProcess),
         )
         .expect("the reference plugin loads in this process");
-    s.main(tutti_fixtures::main_thread())
-        .plugin(node)
-        .expect("it is hosted")
-        .editor()
+    let mut editor = s
+        .editor(node, &tutti_fixtures::main_thread())
+        .expect("it is hosted");
+    editor
         .open(&StandInWindow, ContentScale::IDENTITY)
         .expect("the editor opens");
-    s
+    (s, editor)
 }
 
 /// **A descriptor the plugin registered is served by the view's `update` the
 /// moment it is readable**, and by no other call: the view looks at the
 /// plugin's descriptors without waiting and hands back what is ready.
 fn an_in_process_editors_descriptor_is_served_by_the_views_update() {
-    let mut s = session_with_open_editor(CMD_REGISTER_FD);
+    let (mut s, _editor) = session_with_open_editor(CMD_REGISTER_FD);
     let probe = probe();
     assert!(
         probe.thread_capture().fd_registered,
         "the plugin registered a descriptor when its editor was shown"
     );
 
-    let mut ui = s.main(tutti_fixtures::main_thread());
-    let _ = ui.update();
+    let main = tutti_fixtures::main_thread();
+    let _ = s.update_on(main);
     assert_eq!(
         probe.thread_capture().fd_fires,
         0,
@@ -80,14 +80,14 @@ fn an_in_process_editors_descriptor_is_served_by_the_views_update() {
     );
     for fires in 1..=3 {
         assert!(probe.fd_poke(), "the plugin's pipe takes a byte");
-        let _ = ui.update();
+        let _ = s.update_on(main);
         assert_eq!(
             probe.thread_capture().fd_fires,
             fires,
             "one update after the byte, one call of `on_fd`"
         );
     }
-    let _ = ui.update();
+    let _ = s.update_on(main);
     assert_eq!(
         probe.thread_capture().fd_fires,
         3,
@@ -102,12 +102,12 @@ fn an_in_process_editors_descriptor_is_served_by_the_views_update() {
 fn an_in_process_editors_timer_is_served_by_the_views_update() {
     // The shortest period the host keeps.
     probe().set(ClapSwitch::TimerPeriod, 10);
-    let mut s = session_with_open_editor(CMD_REGISTER_TIMER);
+    let (mut s, _editor) = session_with_open_editor(CMD_REGISTER_TIMER);
     let probe = probe();
     assert!(probe.thread_capture().timer_registered);
     let ticks = || probe.thread_capture().sites[Site::OnTimer as usize].visits;
 
-    let mut ui = s.main(tutti_fixtures::main_thread());
+    let main = tutti_fixtures::main_thread();
     // Updates until the timer is served: a hang guard, not a speed claim.
     let guard = std::time::Instant::now() + Duration::from_secs(60);
     while ticks() == 0 {
@@ -115,7 +115,7 @@ fn an_in_process_editors_timer_is_served_by_the_views_update() {
             std::time::Instant::now() < guard,
             "the view's update never served the timer"
         );
-        let _ = ui.update();
+        let _ = s.update_on(main);
     }
     probe.set(ClapSwitch::TimerPeriod, 0);
 }

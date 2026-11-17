@@ -2,9 +2,8 @@
 //! with them, the list where there is one, and a load that says what happened.
 //!
 //! Presets are the main thread's (VST3, VST2 and AU answer them there), so the
-//! view is [`MainPlugin::presets`](crate::MainPlugin::presets), and the read-only
-//! [`Plugin`](crate::Plugin) has none. The three answers of the old
-//! `Option<bool>` are [`PresetError`]: no such operation for this plugin
+//! view is [`Plugin::presets`](crate::Plugin::presets), which takes the proof.
+//! The three answers of the old `Option<bool>` are [`PresetError`]: no such operation for this plugin
 //! ([`Unsupported`](PresetError::Unsupported)), the plugin declined
 //! ([`Refused`](PresetError::Refused)), the plugin is gone
 //! ([`Lost`](PresetError::Lost)).
@@ -26,7 +25,7 @@ pub enum PresetKind {
     File,
 }
 
-/// A hosted plugin's presets, lent by [`MainPlugin::presets`](crate::MainPlugin::presets).
+/// A hosted plugin's presets, lent by [`Plugin::presets`](crate::Plugin::presets).
 ///
 /// The list is read when the view is made, so a call may be a round trip to a
 /// served plugin; the view is a snapshot of it, and the plugin's own list is

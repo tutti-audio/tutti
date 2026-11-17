@@ -67,6 +67,8 @@ mod clock;
 #[cfg(feature = "device")]
 mod device;
 mod edge;
+#[cfg(feature = "plugin")]
+mod editor;
 mod error;
 #[cfg(feature = "export")]
 mod fork;
@@ -82,8 +84,6 @@ mod instrument;
 mod job;
 mod jobs;
 mod key;
-#[cfg(feature = "plugin")]
-mod main_session;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -146,6 +146,8 @@ pub use device::{
     RestartOutcome,
 };
 pub use edge::EdgeGainError;
+#[cfg(feature = "plugin")]
+pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
 };
@@ -171,8 +173,6 @@ pub use key::{
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
     RootDeclaration, Weighted, Wire,
 };
-#[cfg(feature = "plugin")]
-pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
     Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,

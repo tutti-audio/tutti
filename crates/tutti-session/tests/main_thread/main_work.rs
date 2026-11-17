@@ -3,7 +3,7 @@
 //!
 //! An in-process plugin dropped off its own thread cannot close itself there and must not
 //! skip the close. It hands the close to the collector of the session that loaded it
-//! (`tutti_plugin_types::MainWork`), which that session's `MainSession::update` drains. The
+//! (`tutti_plugin_types::MainWork`), which that session's update on the main thread drains. The
 //! reference VST2 plugin counts the `effClose`s it receives, so each test reads the plugin's
 //! own view: how many closes ran, and when. The target runs on the process's main thread, so
 //! a load never waits out a deadline for a main-thread tick that nothing pumps.
@@ -56,7 +56,7 @@ fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) ->
     session.remove(node).expect("the plugin is removed");
     let mut frame = [0.0f32; 2];
     for _ in 0..4 {
-        let _ = session.main(main).update();
+        let _ = session.update_on(main);
         session.render_frame(&mut frame);
     }
     assert_eq!(session.retired_plugins(), 0, "the session let go of it");
@@ -82,12 +82,12 @@ fn a_sessions_update_runs_only_its_own_plugins_closes() {
         .expect("the drop does not panic");
     assert_eq!(closes(), before, "no close ran on the dropping thread");
 
-    let _ = a.main(main).update();
+    let _ = a.update_on(main);
     assert_eq!(closes(), before + 1, "a's update closed a's plugin alone");
-    let _ = b.main(main).update();
+    let _ = b.update_on(main);
     assert_eq!(closes(), before + 2, "b's update closed b's");
-    let _ = a.main(main).update();
-    let _ = b.main(main).update();
+    let _ = a.update_on(main);
+    let _ = b.update_on(main);
     assert_eq!(closes(), before + 2, "each close ran once");
     a.close(main);
     b.close(main);

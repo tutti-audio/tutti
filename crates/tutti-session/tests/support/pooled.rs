@@ -236,7 +236,7 @@ impl<C: tutti_session::Clock> LoadEntry for Session<C> {
         state: Option<PluginState>,
     ) -> u64 {
         let key = KEYS.fetch_add(1, Ordering::Relaxed);
-        let _ = self.main(main).update();
+        let _ = self.update_on(main);
         let mut declared = self.plugin_entry(key, id, catalog).hosting(hosting);
         if let Some(state) = state {
             declared = declared
@@ -254,7 +254,7 @@ impl<C: tutti_session::Clock> LoadEntry for Session<C> {
     ) -> Result<Key<PluginNode>, LoadError> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            for event in self.main(main).update() {
+            for event in self.update_on(main) {
                 let SessionEvent::Pool { key: k, event } = event else {
                     continue;
                 };

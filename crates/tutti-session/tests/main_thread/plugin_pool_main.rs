@@ -834,11 +834,11 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
     );
     // The removed record waits in the graveyard for the main-thread update; the
     // pool entry's hold goes with its release. Then nothing keeps the plugin open.
-    let _ = r.s.main(tutti_fixtures::main_thread()).update();
+    let _ = r.s.update_on(tutti_fixtures::main_thread());
     r.s.pool::<&'static str>(()).unwrap();
     assert!(matches!(next_event(&mut r.s, "verb"), PoolEvent::Released));
     let _ = r.until("the plugin to close", |s| {
-        let _ = s.main(tutti_fixtures::main_thread()).update();
+        let _ = s.update_on(tutti_fixtures::main_thread());
         deactivation().observed
     });
     let closed = deactivation();
