@@ -883,7 +883,7 @@ fn pe_get(get: &ResourceGet) -> PeGet {
 }
 
 fn parse(response: &PeResponse) -> Result<PeJson, ResourceFailure> {
-    Ok(PeJson::parse(&response.body)?)
+    Ok(PeJson::try_from(response.body.as_slice())?)
 }
 
 /// The data of a reply: JSON, or the bytes of its media type.
@@ -905,7 +905,7 @@ fn read_full(
 
 /// The data with the changes of a `partial` update made, when they can be.
 fn apply_partial(held: &PeData, bytes: &[u8]) -> Option<PeData> {
-    let update = PartialUpdate::from_json(&PeJson::parse(bytes).ok()?).ok()?;
+    let update = PartialUpdate::try_from(&PeJson::try_from(bytes).ok()?).ok()?;
     let changed = update.apply(&held.to_json()?).ok()?;
     PeData::decode(&held.resource(), &changed).ok()
 }

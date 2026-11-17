@@ -24,7 +24,7 @@ mod route;
 mod sensing;
 pub mod transform_node;
 
-pub use device_epochs::DeviceEpochs;
+pub use device_epochs::{DeviceEpochs, EpochWriter};
 pub use ingest_node::{
     CHANNELLESS_PORT, MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
     MidiIngestControls, MidiIngestNode, MidiInputPorts,
@@ -35,5 +35,4 @@ pub use input_inlets::{
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mpe_ingest::MpeIngest;
 pub use route::{RouteRule, compile_routes};
-pub use sensing::{ACTIVE_SENSING_JUDGE, ActiveSensing};
 pub use transform_node::{MpeTransformControls, MpeTransformNode};

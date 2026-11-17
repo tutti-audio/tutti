@@ -25,7 +25,8 @@ use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, PropertyAsk, ReportAsk,
 };
 use tutti_midi_runtime::{
-    DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
+    DeviceEpochs, EpochWriter, InputReaders, InputWriters, JrStream, MidiIngestControls,
+    MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_types::{Resyncs, Seconds};
@@ -109,15 +110,21 @@ impl OutputOptions {
     }
 }
 
+/// The session has no OS MIDI layer
+/// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
+/// was not asked for): the reason of [`MidiPortError::NoHardware`] and
+/// [`MidiPolicyError::NoHardware`](crate::MidiPolicyError::NoHardware).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
+pub struct NoHardware;
+
 /// Why a MIDI port did not load.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MidiPortError {
-    /// The session has no OS MIDI layer
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
-    /// was not asked for).
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
-    NoHardware,
+    /// The session has no OS MIDI layer.
+    #[error(transparent)]
+    NoHardware(#[from] NoHardware),
     /// Several present devices could be the saved one, or its ordinal cannot be
     /// trusted across a restart: these are the candidates, ordered by id, for
     /// the app to ask about.
@@ -761,6 +768,9 @@ struct InputPort {
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiIngestControls,
+    /// The one writer of the node's epochs.
+    writer: EpochWriter,
+    /// The node's half of them.
     epochs: DeviceEpochs,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
@@ -1006,11 +1016,12 @@ impl Ports {
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
                 let key = graph.add_event_inlet(inlet).erase();
-                // The ingest node has the one event input.
+                // The ingest node has the one event input, and the inlet was just
+                // added. A host that removed the ingest node itself leaves it nothing to feed.
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
-                port.epochs.arrive();
+                port.writer.arrive();
                 port.open = Some(info.id.clone());
                 port.shared.open();
                 Ok(())
@@ -1037,7 +1048,7 @@ impl Ports {
             // A host that removed the inlet itself leaves nothing to take.
             let _ = graph.remove(key);
         }
-        port.epochs.depart();
+        port.writer.depart();
         port.controls.clear_mpe_profiles();
         // The device's peers went with its connection.
         port.end_requests(Gate::Away, Ended::Disconnected);
@@ -1109,6 +1120,7 @@ impl Ports {
             // The node's block that released the notes has run.
             let done = going.epochs.is_settled();
             if done {
+                // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(going.node);
                 edits.graph = true;
                 edits.routes = true;
@@ -1462,7 +1474,10 @@ impl crate::Midi<'_> {
         ids: crate::peer::ResourceIds,
         saved: DeviceInfo,
     ) -> Result<InputLoaded, MidiPortError> {
-        let io = self.io.as_deref_mut().ok_or(MidiPortError::NoHardware)?;
+        let io = self
+            .io
+            .as_deref_mut()
+            .ok_or(MidiPortError::from(NoHardware))?;
         // A present device is bound when it is surely the saved one, or the one
         // of its name; one of several that could be is for the app to choose.
         let found = match io.devices().resolve(&saved) {
@@ -1471,7 +1486,7 @@ impl crate::Midi<'_> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let epochs = DeviceEpochs::new();
+        let (writer, epochs) = DeviceEpochs::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
@@ -1508,6 +1523,7 @@ impl crate::Midi<'_> {
             shared: Arc::clone(&shared),
             node,
             controls,
+            writer,
             epochs,
             inlet: None,
             saved,
@@ -1516,14 +1532,19 @@ impl crate::Midi<'_> {
         });
         let at = self.state.ports.inputs.len() - 1;
         if let Some(info) = found {
-            let io = self.io.as_deref_mut().ok_or(MidiPortError::NoHardware)?;
+            let io = self
+                .io
+                .as_deref_mut()
+                .ok_or(MidiPortError::from(NoHardware))?;
             if let Err(error) = self.state.ports.connect_input(at, io, self.graph, &info) {
                 // The port was never loaded: it leaves with the entry's failure.
                 self.state.ports.inputs.remove(at);
-                let _ = self.graph.remove(node);
+                let removed = self.graph.remove(node);
+                // The ingest node was added in this call, so it is there.
+                debug_assert!(removed.is_ok());
                 return Err(error);
             }
-            let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
+            let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
             let mut cell = shared.cell.lock_recover();
             cell.info = Arc::new(input_info(
                 io,
@@ -1550,7 +1571,7 @@ impl crate::Midi<'_> {
         saved: DeviceInfo,
         options: OutputOptions,
     ) -> Result<OutputLoaded, MidiPortError> {
-        let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
+        let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
         let found = match io.devices().resolve(&saved) {
             Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
             Resolved::Ambiguous(candidates) => return Err(MidiPortError::Ambiguous(candidates)),

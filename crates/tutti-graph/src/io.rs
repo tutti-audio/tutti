@@ -19,7 +19,7 @@ use tutti_types::{Samples, Tail};
 
 use crate::bus::{InBus, OutBus, PortSpan};
 use crate::event::{EventWriter, SortedEvents, SubBlocks};
-use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask};
+use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask, Wired, WiredMask};
 use crate::param::ParamInput;
 use crate::rtlog::{LogSlots, RtLevel, RtRecord, RtTarget, RtValue};
 use crate::time::Offset;
@@ -75,6 +75,8 @@ pub struct Io<'a, F: Float = f32> {
     silent: SilenceMask,
     constant: ConstantMask,
     in_place: InPlaceMask,
+    /// Which audio ports have a source or a consumer.
+    wired: Wired,
     events_in: &'a [SortedEvents<'a>],
     events_out: &'a mut [EventWriter<'a>],
     /// Per declared param port, what it reads this block; a port past the
@@ -257,6 +259,7 @@ impl<'a, F: Float> Io<'a, F> {
             inputs: PortSpan::new(0, inputs.len()),
             outputs: PortSpan::new(0, outputs.len()),
         };
+        let wired = Wired::all(inputs.len(), outputs.len());
         Self {
             frames,
             inputs,
@@ -265,6 +268,7 @@ impl<'a, F: Float> Io<'a, F> {
             silent,
             constant,
             in_place,
+            wired,
             events_in,
             events_out,
             params: &[],
@@ -272,6 +276,14 @@ impl<'a, F: Float> Io<'a, F> {
             tail: None,
             log: None,
         }
+    }
+
+    /// These buffers, with `wired` as the plan's answer for the node's
+    /// ports. Without it every port reads wired.
+    #[inline]
+    pub(crate) fn with_wired(mut self, wired: Wired) -> Self {
+        self.wired = wired;
+        self
     }
 
     /// These buffers, with the main views covering `main`: the node's
@@ -561,6 +573,51 @@ impl<'a, F: Float> Io<'a, F> {
     /// Main input channels that hold one value throughout this block.
     pub fn constant(&self) -> ConstantMask {
         ConstantMask(shift(self.constant.0, self.main.inputs))
+    }
+
+    /// Main input channels with at least one source in the graph. An unset
+    /// channel reads silence because nothing feeds it, not because a source
+    /// is quiet; [`silent`](Self::silent) does not tell the two apart.
+    ///
+    /// Fixed between commits: a plan's answer, read as a mask like
+    /// [`silent`](Self::silent). A hand-built `Io` reads every port wired.
+    pub fn wired_inputs(&self) -> WiredMask {
+        WiredMask(shift(self.wired.inputs.0, self.main.inputs))
+    }
+
+    /// Main output channels with at least one consumer: an edge, a global
+    /// output, a tap or a meter. An unset channel is written for nobody. A
+    /// hand-built `Io` reads every port wired.
+    pub fn wired_outputs(&self) -> WiredMask {
+        WiredMask(shift(self.wired.outputs.0, self.main.outputs))
+    }
+
+    /// Which channels of input bus `bus` have a source, from bit 0. A
+    /// hand-built `Io` reads every port wired.
+    ///
+    /// # Panics
+    ///
+    /// If the handle reaches past this node's input ports.
+    pub fn wired_bus_in(&self, bus: InBus) -> WiredMask {
+        assert!(
+            bus.0.range().end <= self.inputs.len(),
+            "an input bus past the node's ports"
+        );
+        WiredMask(shift(self.wired.inputs.0, bus.0))
+    }
+
+    /// Which channels of output bus `bus` have a consumer, from bit 0. A
+    /// hand-built `Io` reads every port wired.
+    ///
+    /// # Panics
+    ///
+    /// If the handle reaches past this node's output ports.
+    pub fn wired_bus_out(&self, bus: OutBus) -> WiredMask {
+        assert!(
+            bus.0.range().end <= self.outputs.len(),
+            "an output bus past the node's ports"
+        );
+        WiredMask(shift(self.wired.outputs.0, bus.0))
     }
 
     /// Main channels aliased in place: for each set `c`, output `c` **already

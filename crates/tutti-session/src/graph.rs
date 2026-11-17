@@ -343,6 +343,10 @@ pub struct Graph {
     /// carries the re-insert is sent and the session reports it
     /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
     unwired: Vec<Unwiring>,
+    /// The nodes whose wiring the commits since the last call changed: the
+    /// first commit's `was` and the last's `now`, until the session reports
+    /// them ([`SessionEvent::Rewired`](crate::SessionEvent::Rewired)).
+    rewired: Vec<tutti_graph::Rewired>,
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
@@ -534,6 +538,7 @@ impl Graph {
             reopened: BTreeMap::new(),
             parked: VecDeque::new(),
             unwired: Vec::new(),
+            rewired: Vec::new(),
             removed: Vec::new(),
             root: None,
             output: None,
@@ -1368,6 +1373,36 @@ impl Graph {
                 bus_edges,
             }),
         }
+    }
+
+    /// Folds a commit's rewired nodes into the pending report: a node keeps
+    /// its first `was`, takes the last `now`, and drops out when the commits
+    /// together left its wiring as it was.
+    fn note_rewired(&mut self, rewired: Vec<tutti_graph::Rewired>) {
+        // Only a node with a bus besides its main one has a bus to activate;
+        // the rest read the answer per block and need no notice.
+        let bused = |node| {
+            self.shape(node)
+                .is_some_and(|s| s.buses_in().len() > 1 || s.buses_out().len() > 1)
+        };
+        let rewired: Vec<_> = rewired.into_iter().filter(|r| bused(r.node)).collect();
+        for r in rewired {
+            match self.rewired.iter().position(|p| p.node == r.node) {
+                Some(i) if self.rewired[i].was == r.now => {
+                    self.rewired.remove(i);
+                }
+                Some(i) => self.rewired[i].now = r.now,
+                None => self.rewired.push(r),
+            }
+        }
+        // A node a commit removed has no wiring to report.
+        let nodes = &self.nodes;
+        self.rewired.retain(|r| nodes.contains_key(&r.node));
+    }
+
+    /// The nodes whose wiring the commits since the last call changed.
+    pub(crate) fn take_rewired(&mut self) -> Vec<tutti_graph::Rewired> {
+        std::mem::take(&mut self.rewired)
     }
 
     /// What the re-inserts since the last call unwired, once the commit that
@@ -3635,7 +3670,8 @@ impl Graph {
             return Committed::Refused(refused);
         }
         match self.editor.commit() {
-            Ok(()) => {
+            Ok(rewired) => {
+                self.note_rewired(rewired);
                 self.edited = false;
                 self.refused = None;
                 self.commits += 1;

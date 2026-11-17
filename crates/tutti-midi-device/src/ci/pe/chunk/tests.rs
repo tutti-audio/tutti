@@ -170,7 +170,7 @@ fn the_fields_take_the_bytes_the_tables_lay_out() {
         let fields = chunk.encode_fields();
         // F0, 13 bytes of preamble up to the destination MUID, then F7.
         assert_eq!(fields.len() + 15, chunk.sysex_len());
-        assert_eq!(PeChunk::parse_fields(&fields).as_ref(), Ok(chunk));
+        assert_eq!(PeChunk::try_from(fields.as_slice()).as_ref(), Ok(chunk));
     }
     let first = chunks[0].encode_fields();
     assert_eq!(first[0], 5);
@@ -244,7 +244,7 @@ fn a_later_chunk_with_a_header_cannot_be_made_or_read() {
     // Request ID 5, header length 2 then `{}`, counts 0 and 2, data length 0.
     let wire = [5, 2, 0, b'{', b'}', 0, 0, 2, 0, 0, 0];
     assert_eq!(
-        PeChunk::parse_fields(&wire),
+        PeChunk::try_from(wire.as_slice()),
         Err(PeChunkError::HeaderNotInFirst)
     );
 }
@@ -262,18 +262,21 @@ fn a_chunk_whose_lengths_do_not_fill_its_bytes_is_refused() {
     )
     .unwrap()
     .encode_fields();
-    assert!(PeChunk::parse_fields(&good).is_ok());
+    assert!(PeChunk::try_from(good.as_slice()).is_ok());
     let mut long = good.clone();
     long.push(0);
-    assert_eq!(PeChunk::parse_fields(&long), Err(PeChunkError::Length));
     assert_eq!(
-        PeChunk::parse_fields(&good[..good.len() - 1]),
+        PeChunk::try_from(long.as_slice()),
+        Err(PeChunkError::Length)
+    );
+    assert_eq!(
+        PeChunk::try_from(&good[..good.len() - 1]),
         Err(PeChunkError::Length)
     );
     let mut high = good;
     high[3] = 0x80;
     assert!(matches!(
-        PeChunk::parse_fields(&high),
+        PeChunk::try_from(high.as_slice()),
         Err(PeChunkError::NotSevenBit { .. })
     ));
 }

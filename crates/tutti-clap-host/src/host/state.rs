@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
-use tutti_clap_ffi::{AudioClaim, ThreadRoles};
+use tutti_clap_ffi::ThreadRoles;
 use tutti_plugin_types::{MainThreadMarker, ProcessWake, RequestWord, TrackInfo, TransportRequest};
 
 pub(crate) struct TimerEntry {
@@ -371,24 +371,6 @@ impl HostState {
         flag.swap(false, Ordering::AcqRel)
     }
 
-    /// Claims the `[audio-thread]` role for the calling OS thread, blocking
-    /// until any other claim has been released.
-    ///
-    /// Wrap **every** `[audio-thread]` plugin call in this: `process`,
-    /// `start_processing`, `stop_processing`, and an active `params.flush`.
-    /// The returned guard releases the role on drop.
-    ///
-    /// A poisoned lock is recovered rather than propagated: the data is `()`,
-    /// so there is no invariant a panicking claimant could have broken, and
-    /// panicking here would take down the audio thread.
-    ///
-    /// Not re-entrant — the mutex is not recursive, so a claim held on this
-    /// thread must be threaded into the inner call, not re-taken. That is why
-    /// `ensure_processing` / `stop_processing_claimed` take `&AudioClaim`.
-    pub fn claim_audio_thread(&self) -> AudioClaim<'_> {
-        self.roles.claim()
-    }
-
     /// Whether the calling thread is currently acting as the audio thread.
     pub fn is_audio_thread(&self) -> bool {
         self.roles.is_audio_thread()
@@ -399,7 +381,7 @@ impl HostState {
     /// **Exclusive with [`is_audio_thread`](Self::is_audio_thread)**: the
     /// spec lets a host mark the OS main thread as the audio thread, but the
     /// two symbolic roles are alternatives, not simultaneous identities. While
-    /// an [`AudioClaim`] is held on this thread, this answers `false`,
+    /// an audio claim is held on this thread, this answers `false`,
     /// so a plugin asserting `!is_main_thread()` inside an `[audio-thread]`
     /// call is not silently defeated by a host that claims to be both.
     ///

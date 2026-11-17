@@ -9,12 +9,7 @@ use crate::guard::ctx_mut;
 use clap_sys::stream::{clap_istream, clap_ostream};
 use std::ffi::c_void;
 use std::ptr;
-use tutti_plugin_types::ffi_guard;
-
-/// The most a plugin may write to one [`OutputStream`]: the bound on what a
-/// plugin that never stops writing takes from the host. 1 GiB holds any
-/// sampler state in practice.
-pub(crate) const MAX_STATE_BYTES: usize = 1 << 30;
+use tutti_plugin_types::{MAX_STATE_BYTES, ffi_guard};
 
 /// A writable stream the plugin appends bytes to during state save.
 #[derive(Debug, Default)]
@@ -55,6 +50,7 @@ impl OutputStream {
     /// callbacks itself (a test). The pointer's `ctx` addresses `self`, so it
     /// is valid until `self` moves or drops; `raw` is where it is stored.
     #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
     pub fn raw(&mut self, raw: &mut Option<clap_ostream>) -> *const clap_ostream {
         let stored = raw.insert(clap_ostream {
             ctx: ptr::from_mut(self).cast::<c_void>(),
@@ -137,6 +133,7 @@ impl<'a> InputStream<'a> {
 
     /// As `OutputStream::raw`, for a read stream.
     #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
     pub fn raw(&mut self, raw: &mut Option<clap_istream>) -> *const clap_istream {
         let stored = raw.insert(clap_istream {
             ctx: ptr::from_mut(self).cast::<c_void>(),

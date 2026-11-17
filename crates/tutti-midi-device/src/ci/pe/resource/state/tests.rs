@@ -20,7 +20,7 @@ use super::super::*;
 use crate::CiMessage;
 
 fn json(text: &str) -> PeJson {
-    PeJson::parse(text.as_bytes()).unwrap()
+    PeJson::try_from(text.as_bytes()).unwrap()
 }
 
 fn state_id(text: &str) -> StateId {
@@ -306,7 +306,7 @@ fn the_reply_header_carries_the_media_type_state_rev_and_timestamp() {
                 message: PeCiMessage::Chunk { kind, chunk },
                 ..
             } if !*to && *kind == PeMessageKind::GET_REPLY && !chunk.header().is_empty() => {
-                match PeHeader::parse(chunk.header()) {
+                match PeHeader::try_from(chunk.header()) {
                     Ok(PeHeader::Reply(reply)) if reply.media_type.is_some() => Some(reply),
                     _ => None,
                 }
@@ -504,7 +504,7 @@ fn a_json_state_is_json_and_an_unnamed_media_type_is_refused() {
 #[test]
 fn an_inquiry_for_state_without_a_res_id_is_refused_by_the_type() {
     assert!(matches!(
-        ResourceTarget::new(PeResource::State),
+        ResourceTarget::try_from(PeResource::State),
         Err(RequestRefused::ResIdRequired(_))
     ));
     assert!(ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).is_ok());
