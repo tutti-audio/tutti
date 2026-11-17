@@ -27,7 +27,46 @@ const RATE: SampleRate = SampleRate::SR_48K;
 const MOCK_EDITOR: dpi::Size = dpi::Size::Physical(dpi::PhysicalSize::new(640, 480));
 
 /// What the mock server was sent, in order.
-type Received = Arc<Mutex<Vec<HostMessage>>>;
+type Received = Arc<Log<HostMessage>>;
+
+/// A record that a thread appends to and another waits on: an append notifies
+/// the [`Wake`], so a test waits for the event it needs and never polls.
+struct Log<T> {
+    items: Mutex<Vec<T>>,
+    appended: crate::Wake,
+}
+
+impl<T> Default for Log<T> {
+    fn default() -> Self {
+        Self {
+            items: Mutex::new(Vec::new()),
+            appended: crate::Wake::default(),
+        }
+    }
+}
+
+impl<T> Log<T> {
+    fn push(&self, item: T) {
+        self.items.lock().unwrap().push(item);
+        self.appended.notify();
+    }
+
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Vec<T>>> {
+        self.items.lock()
+    }
+
+    /// Whether the record satisfies `found` now.
+    fn holds(&self, found: impl Fn(&[T]) -> bool) -> bool {
+        found(&self.items.lock().unwrap())
+    }
+
+    /// Waits until the record satisfies `found`. `false` when [`POLL_GUARD`],
+    /// a hang guard far past anything the OS takes, ran out first.
+    fn wait_for(&self, found: impl Fn(&[T]) -> bool) -> bool {
+        self.appended
+            .wait_until(crate::Wake::deadline_in(POLL_GUARD), || self.holds(&found))
+    }
+}
 
 /// A served plugin over a mock server, which records what it is sent, answers
 /// the asks the tests make, and sends what a test injects.
@@ -51,16 +90,20 @@ impl Mock {
         crate::protocol::frame::write_frame(&mut stream, message).unwrap();
     }
 
-    /// Waits for `want` messages of the server's record to satisfy `found`.
+    /// Waits for the server's record to satisfy `found`.
     fn wait_for(&self, found: impl Fn(&[HostMessage]) -> bool) -> bool {
-        let deadline = Instant::now() + POLL_GUARD;
-        while Instant::now() < deadline {
-            if found(&self.received.lock().unwrap()) {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        false
+        self.received.wait_for(found)
+    }
+}
+
+/// Asks the bridge something until `done`. The bridge reads what the server
+/// said unprompted only when it reads a reply, so each ask is one round trip
+/// to the server, which paces the loop; `POLL_GUARD` only guards a hang.
+fn ask_until(what: &str, mut ask: impl FnMut(), done: impl Fn() -> bool) {
+    let deadline = Instant::now() + POLL_GUARD;
+    while !done() {
+        assert!(Instant::now() < deadline, "{what}");
+        ask();
     }
 }
 
@@ -72,7 +115,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -192,7 +235,7 @@ fn mock_with(
                 let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
                     break;
                 };
-                log.lock().unwrap().push(message);
+                log.push(message);
             }
         }
     });
@@ -217,7 +260,7 @@ fn mock_with(
                 break;
             };
             // Recorded before it is answered: a count read after the reply sees it.
-            log.lock().unwrap().push(message.clone());
+            log.push(message.clone());
             match &message {
                 HostMessage::SetSampleRate { rate } => reply(
                     &served,
@@ -350,16 +393,12 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     assert_eq!(processor.latency(), Samples(40), "one chunk of latency");
     assert!(processor.retune(SampleRate::SR_96K, Samples(30), None));
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
-    let deadline = Instant::now() + POLL_GUARD;
-    while !received
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|m| matches!(m, HostMessage::SetSampleRate { rate } if *rate == SampleRate::SR_96K))
-    {
-        assert!(Instant::now() < deadline, "the rate is sent");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    assert!(
+        received.wait_for(|log| log.iter().any(
+            |m| matches!(m, HostMessage::SetSampleRate { rate } if *rate == SampleRate::SR_96K)
+        )),
+        "the rate is sent"
+    );
 }
 
 /// **Only the two halves of one activation rejoin.** A pair from two
@@ -392,10 +431,10 @@ fn only_the_halves_of_one_activation_rejoin() {
 fn the_controller_reports_what_the_plugin_re_reports() {
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    let heard = Arc::new(Mutex::new(Vec::new()));
+    let heard: Arc<Log<String>> = Arc::default();
     let sink = Arc::clone(&heard);
     ipc.forward_events(Some(Arc::new(move |event| {
-        sink.lock().unwrap().push(format!("{event:?}"));
+        sink.push(format!("{event:?}"));
     })));
     let say = |latency| server.say(&BridgeMessage::LatencyChanged { samples: latency });
     let main = main_thread();
@@ -407,16 +446,10 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     // The bridge's thread stores the latency, asks for the re-read, then
     // forwards the event, in that order: once the host has heard it, all
     // three are done.
-    let deadline = Instant::now() + POLL_GUARD;
-    while !heard
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|e| e.contains("LatencyChanged"))
-    {
-        assert!(Instant::now() < deadline, "the host hears it");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    assert!(
+        heard.wait_for(|log| log.iter().any(|e| e.contains("LatencyChanged"))),
+        "the host hears it"
+    );
     assert_eq!(controller.latency(main), Samples(77));
     let mut asked = Vec::new();
     controller.take_requests(main, &mut asked);
@@ -439,10 +472,10 @@ fn the_controller_reports_what_the_plugin_re_reports() {
 fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    let heard = Arc::new(Mutex::new(Vec::new()));
+    let heard: Arc<Log<String>> = Arc::default();
     let sink = Arc::clone(&heard);
     ipc.forward_events(Some(Arc::new(move |event| {
-        sink.lock().unwrap().push(format!("{event:?}"));
+        sink.push(format!("{event:?}"));
     })));
     let main = main_thread();
     let view = ipc.controller();
@@ -463,12 +496,11 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     });
     // An idle bridge reads nothing: the next command's reply reads it.
     assert_eq!(controller.parameters(main).len(), 1);
-    let deadline = Instant::now() + POLL_GUARD;
-    while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
-        assert!(Instant::now() < deadline, "the host hears it");
-        std::thread::sleep(Duration::from_millis(5));
-        let _ = controller.parameters(main);
-    }
+    ask_until(
+        "the host hears it",
+        || drop(controller.parameters(main)),
+        || heard.holds(|log| log.iter().any(|e| e.contains("IoLayout"))),
+    );
     assert_eq!(controller.layout(), announced);
     let wiring = view.wiring(main);
     assert_eq!(
@@ -487,10 +519,10 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
 /// the slab it was activated over: the next activation sees new buses.
 fn announced_and_deactivated(ipc: Ipc, server: &Mock) -> (Ipc, tutti_plugin_types::Layout) {
     let main = main_thread();
-    let heard = Arc::new(Mutex::new(Vec::new()));
+    let heard: Arc<Log<String>> = Arc::default();
     let sink = Arc::clone(&heard);
     ipc.forward_events(Some(Arc::new(move |event| {
-        sink.lock().unwrap().push(format!("{event:?}"));
+        sink.push(format!("{event:?}"));
     })));
     let (processor, controller) = activate(ipc, 32);
     let announced = tutti_plugin_types::Layout {
@@ -503,12 +535,11 @@ fn announced_and_deactivated(ipc: Ipc, server: &Mock) -> (Ipc, tutti_plugin_type
     server.say(&BridgeMessage::PluginIoChanged {
         layout: Some(announced.clone()),
     });
-    let deadline = Instant::now() + POLL_GUARD;
-    while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
-        assert!(Instant::now() < deadline, "the host hears it");
-        std::thread::sleep(Duration::from_millis(5));
-        let _ = controller.parameters(main);
-    }
+    ask_until(
+        "the host hears it",
+        || drop(controller.parameters(main)),
+        || heard.holds(|log| log.iter().any(|e| e.contains("IoLayout"))),
+    );
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     (ipc, announced)
 }
@@ -584,12 +615,11 @@ fn a_change_inside_an_activation_waits_for_the_next_restart() {
     let (processor, mut controller) = activate(ipc, 32);
     // The later layout is heard (a command's reply reads it), after the
     // activation read the second.
-    let deadline = Instant::now() + POLL_GUARD;
-    while controller.layout() != third {
-        assert!(Instant::now() < deadline, "the later buses are heard");
-        std::thread::sleep(Duration::from_millis(5));
-        let _ = controller.parameters(main_thread());
-    }
+    ask_until(
+        "the later buses are heard",
+        || drop(controller.parameters(main_thread())),
+        || controller.layout() == third,
+    );
     assert_eq!(
         controller.wiring(main_thread()).inputs,
         second.inputs,
@@ -676,12 +706,11 @@ fn a_failed_setup_is_followed_by_one_even_for_the_layout_held() {
     server.say(&BridgeMessage::PluginIoChanged {
         layout: Some(original.clone()),
     });
-    let deadline = Instant::now() + POLL_GUARD;
-    while view.layout() != original {
-        assert!(Instant::now() < deadline, "the host hears it");
-        std::thread::sleep(Duration::from_millis(5));
-        let _ = view.parameters(main_thread());
-    }
+    ask_until(
+        "the host hears it",
+        || drop(view.parameters(main_thread())),
+        || view.layout() == original,
+    );
     server
         .refuse_slabs
         .store(false, std::sync::atomic::Ordering::Release);
@@ -719,7 +748,7 @@ fn recording_editor(
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     *EDITOR_LOAD.lock().unwrap() = Some((format, load.clone()));
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "records the choice and loads nothing".into(),
     })
@@ -884,9 +913,7 @@ fn a_client_with_a_loader_sends_no_editor_message() {
 
 /// Renders one block of `frames` silent frames through `processor`.
 fn render_silence(processor: &mut IpcProcessor, frames: usize) {
-    use tutti_plugin_types::{
-        AudioBuffer, AudioBufferMut, PluginIo, ProcessContext, ProcessOutput,
-    };
+    use tutti_plugin_types::{PluginAudio, PluginIo, ProcessContext, ProcessOutput};
     let input = vec![vec![0.0f32; frames]; 2];
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
@@ -894,12 +921,12 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer {
-            inputs: &inputs,
-            outputs: &mut outputs,
-            num_samples: frames,
-            sample_rate: RATE,
-        }),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };
@@ -961,42 +988,39 @@ fn a_reactivation_continues_the_chunk_sequence() {
 const OFF_THE_BUDGET: u64 = 64;
 const CHUNKS_AFTER: usize = 90;
 
-/// Waits for the bridge to have abandoned [`OFF_THE_BUDGET`] blocks past
-/// `before`, panicking with what it had when [`POLL_GUARD`] runs out.
-fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
-    let deadline = Instant::now() + POLL_GUARD;
-    while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
-        assert!(
-            Instant::now() < deadline,
-            "the bridge abandoned {} blocks in {POLL_GUARD:?} after {CHUNKS_AFTER} \
-             chunks, wanted {OFF_THE_BUDGET}: it is holding a block for the \
-             fork's budget",
-            bridge.abandoned_replies() - before
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
-/// Waits for the bridge to have abandoned one block (the first, at the budget).
-fn wait_first_abandoned(bridge: &PluginBridge) {
-    let deadline = Instant::now() + POLL_GUARD;
-    while bridge.abandoned_replies() < 1 {
-        assert!(
-            Instant::now() < deadline,
-            "the bridge never abandoned the first block"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+/// Asserts the bridge abandoned [`OFF_THE_BUDGET`] blocks past `before`, with
+/// what it had when it did not. [`render_chunks`] has the server hold every
+/// chunk before it returns, and the bridge counts a block abandoned before it
+/// sends the next, so the count is settled when the render is.
+fn assert_off_the_budget(bridge: &PluginBridge, before: u64) {
+    let abandoned = bridge.block_counts().abandoned - before;
+    assert!(
+        abandoned >= OFF_THE_BUDGET,
+        "the bridge abandoned {abandoned} blocks after {CHUNKS_AFTER} chunks, wanted \
+         {OFF_THE_BUDGET}: it is holding a block for the fork's budget"
+    );
 }
 
 /// Renders `chunks` more chunks of silence through an offline fork's
-/// processor, a bridge-thread turn apart: a chunk the bridge reaches more than
-/// `MAX_BEHIND` behind the newest is skipped, not abandoned, and the count
-/// below is of abandoned ones.
-fn render_chunks(processor: &mut IpcProcessor, chunks: usize) {
+/// processor, each one taken by the bridge before the next is submitted: the
+/// server has the chunk's `ProcessAudio` when the bridge has finished with the
+/// one before it. A chunk the bridge reaches more than `MAX_BEHIND` behind the
+/// newest is skipped, not abandoned, and the count asserted is of abandoned
+/// ones. A bridge held one budget per chunk fails the server's hang guard.
+fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
+    let sent = |log: &[HostMessage]| {
+        log.iter()
+            .filter(|m| matches!(m, HostMessage::ProcessAudio(_)))
+            .count()
+    };
+    let mut taken = sent(&server.received.lock().unwrap());
     for _ in 0..chunks {
         render_silence(processor, 32);
-        std::thread::sleep(Duration::from_millis(15));
+        taken += 1;
+        assert!(
+            server.wait_for(|log| sent(log) >= taken),
+            "the server was sent {taken} chunks"
+        );
     }
 }
 
@@ -1009,19 +1033,22 @@ fn render_chunks(processor: &mut IpcProcessor, chunks: usize) {
 #[test]
 fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
     let _machine = machine_lock();
-    let (mut ipc, _server) = mock();
+    let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
     let wait = ipc.watch(true);
     let (mut processor, _controller) = activate(ipc, 32);
-    render_chunks(&mut processor, 2);
+    render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
         "the second render's collect misses its budget"
     );
-    wait_first_abandoned(&bridge);
-    let before = bridge.abandoned_replies();
-    render_chunks(&mut processor, CHUNKS_AFTER);
-    wait_off_the_budget(&bridge, before);
+    assert!(
+        bridge.block_counts().abandoned >= 1,
+        "the first block is abandoned at the budget"
+    );
+    let before = bridge.block_counts().abandoned;
+    render_chunks(&mut processor, &server, CHUNKS_AFTER);
+    assert_off_the_budget(&bridge, before);
 }
 
 /// **A reactivation after a give-up stays off the budget.** The fork's wait is
@@ -1032,21 +1059,24 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
 fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     let _machine = machine_lock();
     let main = main_thread();
-    let (mut ipc, _server) = mock();
+    let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
     let wait = ipc.watch(true);
     let (mut processor, controller) = activate(ipc, 32);
-    render_chunks(&mut processor, 2);
+    render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
         "the second render's collect misses its budget"
     );
-    wait_first_abandoned(&bridge);
+    assert!(
+        bridge.block_counts().abandoned >= 1,
+        "the first block is abandoned at the budget"
+    );
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);
-    let before = bridge.abandoned_replies();
-    render_chunks(&mut processor, CHUNKS_AFTER);
-    wait_off_the_budget(&bridge, before);
+    let before = bridge.block_counts().abandoned;
+    render_chunks(&mut processor, &server, CHUNKS_AFTER);
+    assert_off_the_budget(&bridge, before);
 }
 
 /// How many times the mock server was asked for its parameter list.
@@ -1113,20 +1143,19 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
-    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
         if matches!(event, BridgeEvent::Resync(ResyncKind::ParamTitles)) {
-            heard.store(true, std::sync::atomic::Ordering::Release);
+            heard.push(());
         }
     })));
     *server.parameters.lock().unwrap() = vec![param(3, true)];
     server.say(&BridgeMessage::PluginParamTitlesChanged);
-    let deadline = Instant::now() + POLL_GUARD;
-    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
-        assert!(Instant::now() < deadline, "the event never arrived");
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    assert!(
+        arrived.wait_for(|log| !log.is_empty()),
+        "the event never arrived"
+    );
     // The cache is forgotten before the event is forwarded: no read of the
     // bridge stands between the event and this write.
     assert_eq!(
@@ -1230,19 +1259,18 @@ fn a_values_resync_keeps_the_declared_list() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
-    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
         if matches!(event, BridgeEvent::Resync(ResyncKind::ParamValues)) {
-            heard.store(true, std::sync::atomic::Ordering::Release);
+            heard.push(());
         }
     })));
     server.say(&BridgeMessage::PluginParamValuesChanged);
-    let deadline = Instant::now() + POLL_GUARD;
-    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
-        assert!(Instant::now() < deadline, "the event never arrived");
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    assert!(
+        arrived.wait_for(|log| !log.is_empty()),
+        "the event never arrived"
+    );
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
     assert_eq!(list_asks(&server), 1, "the write asked nothing");
 }

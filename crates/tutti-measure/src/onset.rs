@@ -14,12 +14,14 @@
 //! complex-domain deviation both need the previous frame, which a meter
 //! carries, so a run cannot diff its first frame against another run's last.
 
+use core::marker::PhantomData;
+
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Amplitude, SampleRate, Samples, Seconds};
 
-use crate::Result;
 use crate::convert::{for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing};
+use crate::{Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -202,6 +204,11 @@ impl OnsetConfig {
             min_gap: self.min_gap.get().to_samples(rate),
         })
     }
+}
+
+impl<S: Sample> Measure<S> for OnsetConfig {
+    type Context = SampleRate;
+    type Meter = OnsetMeter<S>;
 
     /// A meter that detects onsets in audio at `rate`, chunk by chunk.
     ///
@@ -209,8 +216,8 @@ impl OnsetConfig {
     ///
     /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
     /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<OnsetMeter> {
-        Ok(OnsetMeter::new(self.plan(rate.into())?))
+    fn measure(&self, rate: SampleRate) -> Result<OnsetMeter<S>> {
+        Ok(OnsetMeter::new(self.plan(rate)?))
     }
 }
 
@@ -257,6 +264,16 @@ impl Onset {
     }
 }
 
+/// One frame of an onset detection curve: the detection function after the
+/// config's sensitivity, at the frame's first sample.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Novelty {
+    /// The frame's first sample, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The novelty at the frame, in the detection function's own scale.
+    pub value: f32,
+}
+
 /// How far after the start of its frame the onset a spectral-flux peak marks
 /// sits: `3 * window / 4 - hop / 2`.
 ///
@@ -270,8 +287,9 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> usize {
 }
 
 /// A running onset detection at one rate: fed chunks of the buffer in order,
-/// of any length, it cuts the frames at the hop and reads the onsets at
-/// [`finish`](Self::finish).
+/// of any length, it cuts the frames at the hop, yields each frame's novelty
+/// as an item (its position and the value) and reads the onsets at
+/// [`finish`](Meter::finish).
 ///
 /// Spectral flux and complex-domain deviation both need the previous frame,
 /// which the meter carries, so a run cannot diff its first frame against
@@ -279,7 +297,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> usize {
 ///
 /// Not for the audio thread: it keeps one novelty value per frame, so it grows
 /// with the audio and allocates.
-pub struct OnsetMeter {
+pub struct OnsetMeter<S: Sample = f32> {
     plan: OnsetPlan,
     cutter: FrameCutter,
     fft: FftScratch,
@@ -291,10 +309,11 @@ pub struct OnsetMeter {
     spectrum: Vec<Complex32>,
     /// Novelty per frame, in analysis order. Thresholding is global, so peaks
     /// can only be picked once the run is complete.
-    novelty: Vec<(Samples, f32)>,
+    novelty: Vec<Novelty>,
+    sample: PhantomData<fn(S)>,
 }
 
-impl core::fmt::Debug for OnsetMeter {
+impl<S: Sample> core::fmt::Debug for OnsetMeter<S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("OnsetMeter")
             .field("plan", &self.plan)
@@ -303,7 +322,7 @@ impl core::fmt::Debug for OnsetMeter {
     }
 }
 
-impl OnsetMeter {
+impl<S: Sample> OnsetMeter<S> {
     fn new(plan: OnsetPlan) -> Self {
         let bins = plan.geometry.bins_per_frame().get();
         Self {
@@ -313,17 +332,14 @@ impl OnsetMeter {
             previous: vec![0.0; bins],
             spectrum: vec![Complex32::default(); bins],
             novelty: Vec::new(),
+            sample: PhantomData,
             plan,
         }
     }
 
-    /// Feeds the next chunk of the buffer, in order.
-    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) {
-        for_blocks(chunk.samples(), 1, |block| self.feed(block));
-    }
-
-    /// Takes converted samples and steps each frame they complete.
-    fn feed(&mut self, block: &[f32]) {
+    /// Takes samples and steps each frame they complete, calling `each` with
+    /// the frame's position and novelty.
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(Novelty)) {
         let Self {
             plan,
             cutter,
@@ -332,6 +348,7 @@ impl OnsetMeter {
             previous,
             spectrum,
             novelty,
+            ..
         } = self;
         cutter.feed(block, |index, samples| {
             // Every spectral branch stores its magnitudes, including the ones
@@ -342,30 +359,35 @@ impl OnsetMeter {
             let value = match plan.function {
                 DetectionFunction::Energy => energy(samples),
                 DetectionFunction::SpectralFlux => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = spectral_flux(previous, spectrum);
                     store_magnitudes(previous, spectrum);
                     v
                 }
                 DetectionFunction::HighFrequencyContent => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = high_frequency_content(spectrum) * 0.01;
                     store_magnitudes(previous, spectrum);
                     v
                 }
                 DetectionFunction::ComplexDomain => {
-                    fft.forward(samples, window, spectrum);
+                    fft.forward(Mono::new(samples), window, spectrum);
                     let v = complex_domain_deviation(previous, spectrum);
                     store_magnitudes(previous, spectrum);
                     v
                 }
             };
             let position = Samples(index * plan.geometry.hop().get());
-            novelty.push((position, value * plan.sensitivity.get()));
+            let item = Novelty {
+                frame: position,
+                value: value * plan.sensitivity.get(),
+            };
+            novelty.push(item);
+            each(item);
         });
     }
 
-    /// The detection curve so far: one `(position, novelty)` pair per frame
+    /// The detection curve so far: one [`Novelty`] per frame
     /// analysed, in analysis order.
     ///
     /// The raw values [`finish`](Self::finish) thresholds, after the config's
@@ -373,7 +395,7 @@ impl OnsetMeter {
     /// [`DetectionFunction`] and is only comparable within one run.
     #[inline]
     #[must_use]
-    pub fn novelty(&self) -> &[(Samples, f32)] {
+    pub fn novelty(&self) -> &[Novelty] {
         &self.novelty
     }
 
@@ -383,11 +405,25 @@ impl OnsetMeter {
         self.previous.fill(0.0);
         self.novelty.clear();
     }
+}
+
+impl<S: Sample> Meter for OnsetMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = Novelty;
+    type Output = Vec<Onset>;
+
+    /// Feeds the next chunk of the buffer, in order, and extends `out` with the
+    /// [`Novelty`] of each frame the chunk completes.
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<Novelty>) -> Result<()> {
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |item| out.extend([item]));
+        });
+        Ok(())
+    }
 
     /// The onsets of the audio fed: peaks of the novelty above its adaptive
     /// threshold, closer than the minimum gap resolved to the stronger.
-    #[must_use]
-    pub fn finish(self) -> Vec<Onset> {
+    fn finish(self) -> Vec<Onset> {
         let mut onsets = pick_peaks(&self.plan, &self.novelty);
         suppress_close_onsets(&mut onsets, self.plan.min_gap);
         onsets
@@ -420,7 +456,7 @@ pub fn detect_onsets<S: Sample>(
 pub(crate) fn run(plan: OnsetPlan, samples: &[f32], fft: &mut FftScratch) -> OnsetMeter {
     let mut meter = OnsetMeter::new(plan);
     core::mem::swap(&mut meter.fft, fft);
-    meter.feed(samples);
+    meter.feed(samples, |_| {});
     core::mem::swap(&mut meter.fft, fft);
     meter
 }
@@ -456,7 +492,7 @@ pub fn suppress_close_onsets(onsets: &mut Vec<Onset>, min_gap: Samples) {
 /// Strict local maxima above an adaptive `mean + k·σ` threshold.
 ///
 /// Endpoints are never reported: a maximum needs both neighbours.
-fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
+fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
     if novelty.len() < 3 {
         return Vec::new();
     }
@@ -464,7 +500,8 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
     let len = novelty.len() as f32;
     let (sum, sum_sq, max) = novelty
         .iter()
-        .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), &(_, v)| {
+        .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), n| {
+            let v = n.value;
             (s + v, sq + v * v, mx.max(v))
         });
     let mean = sum / len;
@@ -473,9 +510,12 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
 
     (1..novelty.len() - 1)
         .filter_map(|i| {
-            let (position, value) = novelty[i];
-            let rising = value > novelty[i - 1].1;
-            let falling = value > novelty[i + 1].1;
+            let Novelty {
+                frame: position,
+                value,
+            } = novelty[i];
+            let rising = value > novelty[i - 1].value;
+            let falling = value > novelty[i + 1].value;
             (rising && falling && value > threshold).then(|| Onset {
                 position,
                 strength: Amplitude(if max > 0.0 {
@@ -497,6 +537,7 @@ fn store_magnitudes(previous: &mut [f32], spectrum: &[Complex32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
 
     const SAMPLE_RATE: f64 = 44100.0;
 
@@ -538,19 +579,19 @@ mod tests {
                 .sensitivity(gain(factor))
                 .measure(rate())
                 .unwrap();
-            meter.push(Mono::new(&samples));
+            meter.push(Mono::new(&samples), &mut Vec::new()).unwrap();
             meter
         };
         let (one, three) = (run(1.0), run(3.0));
-        for (i, &(position, _)) in one.novelty().iter().enumerate() {
-            assert_eq!(position, Samples(i * 512));
+        for (i, n) in one.novelty().iter().enumerate() {
+            assert_eq!(n.frame, Samples(i * 512));
         }
         for (a, b) in one.novelty().iter().zip(three.novelty()) {
-            assert!((b.1 - 3.0 * a.1).abs() <= 1e-4 * a.1.max(1.0));
+            assert!((b.value - 3.0 * a.value).abs() <= 1e-4 * a.value.max(1.0));
         }
         // Frames holding the click (samples 8820..8870) carry its energy; a
         // frame wholly before it carries none.
-        let at = |s: usize| one.novelty()[s / 512].1;
+        let at = |s: usize| one.novelty()[s / 512].value;
         assert!(at(8820) > 1.0 && at(2048) == 0.0);
 
         let mut cleared = one;
@@ -584,14 +625,14 @@ mod tests {
         for chunk in [1usize, 7, 511, 2048, 3001, samples.len()] {
             let mut meter = cfg.measure(rate()).unwrap();
             for part in samples.chunks(chunk) {
-                meter.push(Mono::new(part));
+                meter.push(Mono::new(part), &mut Vec::new()).unwrap();
             }
             let curve = meter.novelty().to_vec();
             assert_eq!(meter.finish(), batch, "chunk {chunk}");
 
             let reference = cfg.measure(rate()).unwrap();
             let mut whole = reference;
-            whole.push(Mono::new(&samples));
+            whole.push(Mono::new(&samples), &mut Vec::new()).unwrap();
             assert_eq!(curve, whole.novelty(), "chunk {chunk}");
         }
     }
@@ -607,12 +648,15 @@ mod tests {
             .map(|&s| (s * f32::from(i16::MAX)) as i16)
             .collect();
         let mut float = cfg.measure(rate()).unwrap();
-        float.push(Mono::new(&samples));
+        float.push(Mono::new(&samples), &mut Vec::new()).unwrap();
         let mut int = cfg.measure(rate()).unwrap();
-        int.push(Mono::new(&ints));
+        int.push(Mono::new(&ints), &mut Vec::new()).unwrap();
         assert_eq!(float.novelty().len(), int.novelty().len());
         for (a, b) in float.novelty().iter().zip(int.novelty()) {
-            assert!((a.1 - b.1).abs() <= 1e-2 * a.1.max(1.0), "{a:?} {b:?}");
+            assert!(
+                (a.value - b.value).abs() <= 1e-2 * a.value.max(1.0),
+                "{a:?} {b:?}"
+            );
         }
     }
 
@@ -623,12 +667,12 @@ mod tests {
         let b = signal(0.5, &[0.2]);
 
         let mut reused = flux().measure(rate()).unwrap();
-        reused.push(Mono::new(&a));
+        reused.push(Mono::new(&a), &mut Vec::new()).unwrap();
         reused.reset();
-        reused.push(Mono::new(&b));
+        reused.push(Mono::new(&b), &mut Vec::new()).unwrap();
 
         let mut fresh = flux().measure(rate()).unwrap();
-        fresh.push(Mono::new(&b));
+        fresh.push(Mono::new(&b), &mut Vec::new()).unwrap();
 
         assert_eq!(reused.finish(), fresh.finish());
     }
@@ -653,7 +697,7 @@ mod tests {
         let reserved = meter.spectrum.capacity();
         assert!(reserved > bins, "the reserve must actually over-allocate");
 
-        meter.push(Mono::new(&samples));
+        meter.push(Mono::new(&samples), &mut Vec::new()).unwrap();
 
         assert!(meter.novelty().len() > 8, "the run must cover many frames");
         assert_eq!(meter.spectrum.len(), bins, "one frame of bins");
@@ -835,7 +879,9 @@ mod tests {
         let mut fft = FftScratch::new();
         assert!(detect_at(&flux(), &[0.0; 100], &mut fft).is_empty());
         let mut meter = flux().measure(rate()).unwrap();
-        meter.push(Mono::new(&[0.0f32; 100]));
+        meter
+            .push(Mono::new(&[0.0f32; 100]), &mut Vec::new())
+            .unwrap();
         assert!(meter.novelty().is_empty());
         assert!(meter.finish().is_empty());
     }
@@ -849,7 +895,7 @@ mod tests {
         ] {
             let cfg = flux().framing(framing);
             assert!(matches!(
-                cfg.measure(rate()),
+                Measure::<f32>::measure(&cfg, rate()),
                 Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
             ));
             assert!(matches!(
@@ -862,5 +908,23 @@ mod tests {
                 Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
             ));
         }
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 samples and the rest)
+    /// yields the novelty curve as its items and `detect_onsets` as its output.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_detect_onsets_with_the_curve_as_items() {
+        let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
+        let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
+        let batch = detect_at(&cfg, &samples, &mut FftScratch::new());
+        assert_eq!(batch.len(), 4);
+        let (items, onsets) = fold_uneven(&cfg, rate(), samples.len(), |meter, at, out| {
+            meter.push(Mono::new(&samples[at]), out)
+        })
+        .unwrap();
+        assert_eq!(onsets, batch);
+        let mut whole = cfg.measure(rate()).unwrap();
+        whole.push(Mono::new(&samples), &mut Vec::new()).unwrap();
+        assert_eq!(items, whole.novelty());
     }
 }

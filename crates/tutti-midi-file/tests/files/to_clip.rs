@@ -11,8 +11,8 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, Meta, MidiFile, SmfDivision, SmfFormat, TextKind, Tick,
-    ToClipError, Track,
+    DropReason, Error, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
+    SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
@@ -73,7 +73,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -88,7 +88,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
     let slow = format0(vec![(
         0,
         meta(Meta::Tempo {
-            micros_per_quarter: 0xFF_FFFF,
+            micros_per_quarter: MicrosPerQuarter::of(0xFF_FFFF),
             extra: Box::default(),
         }),
     )]);
@@ -108,7 +108,7 @@ fn a_time_signature_is_a_signature_and_a_metronome() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -253,7 +253,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -403,7 +403,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
                 (
                     0,
                     meta(Meta::Tempo {
-                        micros_per_quarter: 1_000_000,
+                        micros_per_quarter: MicrosPerQuarter::of(1_000_000),
                         extra: Box::default(),
                     }),
                 ),
@@ -433,7 +433,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
         (
             960,
             meta(Meta::Tempo {
-                micros_per_quarter: 250_000,
+                micros_per_quarter: MicrosPerQuarter::of(250_000),
                 extra: Box::default(),
             }),
         ),
@@ -464,7 +464,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
     let smf = format0(vec![(
         0,
         meta(Meta::Tempo {
-            micros_per_quarter: 1_000_000,
+            micros_per_quarter: MicrosPerQuarter::of(1_000_000),
             extra: Box::default(),
         }),
     )]);
@@ -511,7 +511,7 @@ fn the_division_and_the_end_carry_over() {
 fn what_has_no_successor_is_reported_with_its_tick() {
     let other = |kind: u8| {
         meta(Meta::Other {
-            kind,
+            kind: OtherMetaKind::of(kind),
             data: vec![1, 2].into(),
         })
     };
@@ -745,7 +745,7 @@ fn the_clip_round_trips_through_its_bytes() {
                 (
                     0,
                     meta(Meta::Tempo {
-                        micros_per_quarter: 500_000,
+                        micros_per_quarter: MicrosPerQuarter::of(500_000),
                         extra: Box::default(),
                     }),
                 ),
@@ -781,7 +781,7 @@ fn the_clip_round_trips_through_its_bytes() {
 
 fn tempo_event(micros: u32) -> FileEvent {
     meta(Meta::Tempo {
-        micros_per_quarter: micros,
+        micros_per_quarter: MicrosPerQuarter::of(micros),
         extra: Box::default(),
     })
 }
@@ -997,6 +997,34 @@ fn two_tempos_that_snap_to_one_position_leave_the_later() {
     assert_eq!(dropped, [(22, DropReason::Superseded)]);
 }
 
+/// A Set Tempo of 0 us has no Flex form (the field 0 is none, M2-104 section
+/// 7.5.3): it is dropped as `ZeroTempo`, it is not the clip's first tempo (the
+/// default 120 BPM stands at tick 0, M2-116 section 7.1.1) and it does not
+/// supersede the real tempo it lands on.
+/// Spec: m2-104/7.5.3#4, m2-116/7.1.1#1
+#[test]
+fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
+    let smf = format0(vec![
+        (0, tempo_event(0)),
+        (480, tempo_event(250_000)),
+        (480, tempo_event(0)),
+        (960, note(0, 60)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert_eq!(
+        flex_events(&done.clip, is_tempo),
+        [
+            (0, flex(Flex::SetTempo(DEFAULT_TEMPO))),
+            (480, flex(Flex::SetTempo(25_000_000))),
+        ]
+    );
+    let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
+    assert_eq!(
+        dropped,
+        [(0, DropReason::ZeroTempo), (480, DropReason::ZeroTempo)]
+    );
+}
+
 /// A tempo at tick 5 of 480 per quarter snaps to tick 0, where the clip
 /// already has the file's own tempo: no default joins it, so the header holds
 /// one tempo (M2-116 section 6.1.1) and the clip survives its bytes.
@@ -1174,6 +1202,35 @@ fn karaoke_breaks_end_the_syllable_before_them() {
         ["Hel", "lo\r", "Go"]
     );
     assert_eq!(lyric_texts(&["Hel", " lo"]), ["Hel ", "lo"]);
+}
+
+/// What reading a lyric as karaoke changes of its text is reported by event: a
+/// leading `/` or `\` that became a syllable end, and hyphens taken off a
+/// syllable. Text that is carried as it is, spaces and breaks the spec names
+/// included, is not.
+#[test]
+fn a_lyric_whose_text_changes_is_listed_as_altered() {
+    let smf = format0(vec![
+        (0, text(TextKind::Lyric, "Hel-")),
+        (10, text(TextKind::Lyric, "lo")),
+        (20, text(TextKind::Lyric, "/\\world-")),
+        (30, text(TextKind::Lyric, "plain ")),
+        (40, text(TextKind::Lyric, "-")),
+    ]);
+    let done = smf.to_clip().unwrap();
+    let altered: Vec<(u64, LyricChange)> =
+        done.altered.iter().map(|a| (a.tick.0, a.change)).collect();
+    assert_eq!(
+        altered,
+        [
+            (0, LyricChange::HyphenStripped),
+            (20, LyricChange::BreakMark),
+            (20, LyricChange::HyphenStripped),
+        ]
+    );
+    assert_eq!(done.altered[1].event, text(TextKind::Lyric, "/\\world-"));
+    // The lyric of only a hyphen is dropped, not altered.
+    assert_eq!(done.dropped.len(), 1);
 }
 
 /// M2-104 section 7.5.10: a message is one syllable, so an event of several

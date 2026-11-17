@@ -59,10 +59,10 @@ struct PePeer {
 impl PePeer {
     fn new(store: ResourceStore, requests: u8) -> Self {
         use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
-        use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
+        use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
             FunctionBlockId::new(0).unwrap(),
-            Direction::Bidirectional,
+            BlockDirection::Bidirectional,
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
@@ -151,7 +151,7 @@ impl PePeer {
             }) = &decoded
                 && *kind == PeMessageKind::SUBSCRIPTION_INQUIRY
                 && !chunk.header().is_empty()
-                && let Ok(PeHeader::Subscription(subscription)) = PeHeader::parse(chunk.header())
+                && let Ok(PeHeader::Subscription(subscription)) = PeHeader::try_from(chunk.header())
             {
                 match subscription {
                     PeSubscription::Start(request) => {
@@ -167,7 +167,7 @@ impl PePeer {
                 ..
             }) = &decoded
                 && !chunk.header().is_empty()
-                && let Ok(PeHeader::Request(request)) = PeHeader::parse(chunk.header())
+                && let Ok(PeHeader::Request(request)) = PeHeader::try_from(chunk.header())
             {
                 let name = request.resource.as_str().to_owned();
                 // The ResourceList is the session's own, not the app's.
@@ -331,7 +331,7 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     };
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     assert_eq!(wire.peer.responder.store().get(&target), Some(&on(true)));
 }
 
@@ -568,10 +568,11 @@ fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
 /// the rule it broke.
 #[test]
 fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
-    let table_6 = tutti_midi_device::PeJson::parse(
+    let table_6 = tutti_midi_device::PeJson::try_from(
         br#"{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"Workbench",
-        "versionId":[0,0,1,0]}"#,
+        "versionId":[0,0,1,0]}"#
+            .as_slice(),
     )
     .expect("json");
     let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
@@ -654,7 +655,7 @@ fn device_info(model: &str) -> PeData {
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"{model}",
         "versionId":[0,0,1,0]}}"#
     );
-    let json = PeJson::parse(json.as_bytes()).expect("json");
+    let json = PeJson::try_from(json.as_bytes()).expect("json");
     PeData::decode(&PeResource::DeviceInfo, &json).expect("DeviceInfo")
 }
 
@@ -702,7 +703,7 @@ impl Wire {
     }
 
     fn target(resource: PeResource) -> ResourceTarget {
-        ResourceTarget::new(resource).expect("a Resource with no entries")
+        ResourceTarget::try_from(resource).expect("a Resource with no entries")
     }
 
     /// How many times the peer was told of a change of the info of the port.

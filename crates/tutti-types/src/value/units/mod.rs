@@ -14,8 +14,8 @@
 //! `Mix(-3.0)` build through the public field and `new`. The range a
 //! type documents is what its named constructors and methods produce
 //! (`new_clamped`, `wrapped`, `wrap`), not what a hand-built value holds.
-//! The exceptions are hand-written to the range-checked shape (`new` returns
-//! an `Option`): [`Bpm`] and [`Depth`], which no hand-built value leaves.
+//! The exceptions are range-checked (`new` returns an `Option`): [`Bpm`],
+//! [`Depth`] and [`Bipolar`], which no hand-built value leaves.
 //!
 //! # Non-finite input
 //!
@@ -62,6 +62,7 @@ mod macros;
 
 mod amounts;
 mod angles;
+mod ballistics;
 mod frames;
 mod level;
 mod measures;
@@ -74,9 +75,11 @@ mod transport;
 use super::samples::Samples;
 
 pub use amounts::{
-    Balance, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
+    Balance, Bipolar, BipolarOutOfRange, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix,
+    Pan, Spread, StereoWidth,
 };
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
+pub use ballistics::Ballistics;
 pub use frames::{SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};

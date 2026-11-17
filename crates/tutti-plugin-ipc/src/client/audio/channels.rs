@@ -15,6 +15,7 @@ use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use tutti_plugin_types::BlockCounts;
 use tutti_rt::{Doorbell, LockExt, Sleeper, Tally, TallyWriter, doorbell, tally};
 use tutti_types::{AtomicSampleRate, SampleRate};
 
@@ -51,22 +52,33 @@ pub(super) struct Channels {
     /// `0`. An offline render has no deadline, so a reply the server is slow
     /// to send is the server's, not an abandoned block's.
     reply_wait_ns: Arc<AtomicU64>,
-    /// How many owed replies the drain has taken back off the socket, ever.
-    ///
-    /// Pure instrumentation, and the only externally visible evidence that the
-    /// drain ran at all. Everything else it does is invisible by construction:
-    /// the audio it recovers is already stale and rejected by the slab's
-    /// sequence check, and the MIDI it forwards is indistinguishable from MIDI
-    /// that arrived on time. Without this counter a test can only observe the
-    /// drain's *absence* statistically — as a backlog that grows over a long
-    /// enough run — which is a load-dependent assertion of exactly the kind this
-    /// work exists to remove.
-    settled: Arc<AtomicU64>,
-    /// How many blocks the bridge thread abandoned on a missed budget, ever.
-    /// The other half of [`settled`](Self::settled): every abandoned reply is
-    /// owed back, so a test can bound what the drain took by what was owed
-    /// instead of by how many budgets a loaded machine happened to miss.
-    abandoned: Arc<AtomicU64>,
+    /// How many blocks the bridge thread abandoned on a missed budget, ever:
+    /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
+    abandoned: Tally<u64>,
+    /// The bridge thread's writer of `abandoned`, minted in `new`.
+    abandoned_writer: TallyWriter<u64>,
+    /// How many owed replies the bridge thread collected after abandoning the
+    /// blocks that asked for them, ever: the other half of `abandoned`.
+    late: Tally<u64>,
+    /// The bridge thread's writer of `late`, minted in `new`.
+    late_writer: TallyWriter<u64>,
+    /// Commands the audio side could not hand to the bridge thread, ever: a
+    /// full command queue refused one, the payload pool had no payload for a
+    /// block, or a parameter buffer had no room to come back to. Written
+    /// through any clone of the channels, read by the plugin node's controls.
+    commands_refused: Tally<u64>,
+    /// The writer of `commands_refused`, minted in `new`.
+    commands_refused_writer: TallyWriter<u64>,
+    /// Parameter buffers the audio thread leaked rather than free, ever: the
+    /// free list had no room for one it returned (a broken sizing bound).
+    leaked_buffers: Tally<u64>,
+    /// The writer of `leaked_buffers`, minted in `new`.
+    leaked_writer: TallyWriter<u64>,
+    /// Audio responses the bridge thread could not queue for the audio
+    /// thread (the response queue was full), ever.
+    responses_lost: Tally<u64>,
+    /// The bridge thread's writer of `responses_lost`, minted in `new`.
+    responses_lost_writer: TallyWriter<u64>,
     /// How many replies the bridge thread has taken from the plugin, ever,
     /// on time or owed. With [`abandoned`](Self::abandoned) the hang
     /// verdict's input (`PluginHandle::block_counts`): a hang is abandoned
@@ -107,6 +119,11 @@ pub(super) struct Channels {
     /// has not read are there, which `news` alone misses between the bridge's
     /// clearing it and the watcher's setting it again.
     probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
+    /// Notified on the bridge thread when a response is queued and when it has
+    /// finished a turn (a lane read dry, a command answered): what a control or
+    /// worker thread waiting on the bridge sleeps on. The server's watch
+    /// notifies it too, so a waiter wakes at the server's end.
+    progress: Arc<crate::Wake>,
 }
 
 /// How many chunks back [`Fates`] remembers.
@@ -171,9 +188,11 @@ impl Fates {
 impl Channels {
     /// The channels and the [`Sleeper`] of the bridge thread's doorbell,
     /// which that thread alone waits on.
-    pub(super) fn new(sample_rate: SampleRate) -> (Self, Sleeper) {
+    pub(super) fn new(sample_rate: SampleRate, progress: Arc<crate::Wake>) -> (Self, Sleeper) {
         let (bell, sleeper) = doorbell();
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
+        let (abandoned, late, commands_refused, leaked_buffers, responses_lost) =
+            (tally(), tally(), tally(), tally(), tally());
         let channels = Self {
             commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             audio_responses: Arc::new(ArrayQueue::new(RESPONSE_QUEUE_SIZE)),
@@ -181,8 +200,16 @@ impl Channels {
             bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
-            settled: Arc::new(AtomicU64::new(0)),
-            abandoned: Arc::new(AtomicU64::new(0)),
+            abandoned_writer: abandoned.writer(),
+            abandoned,
+            late_writer: late.writer(),
+            late,
+            commands_refused_writer: commands_refused.writer(),
+            commands_refused,
+            leaked_writer: leaked_buffers.writer(),
+            leaked_buffers,
+            responses_lost_writer: responses_lost.writer(),
+            responses_lost,
             replies: Arc::new(AtomicU64::new(0)),
             param_events_writer: dropped_param_events.writer(),
             dropped_param_events,
@@ -193,6 +220,7 @@ impl Channels {
             fates: Arc::new(Fates::new()),
             news: Arc::default(),
             probe: Arc::default(),
+            progress,
         };
         (channels, sleeper)
     }
@@ -297,29 +325,18 @@ impl Channels {
         self.newest_seq.load(Ordering::Relaxed)
     }
 
-    /// Record that the drain took `n` owed replies off the socket. Called by the
-    /// bridge thread only. `Release`, paired with the `Acquire` in
-    /// [`settled`](Self::settled): a reader that sees a settle also sees the
-    /// [`note_abandoned`](Self::note_abandoned) that owed it, so a test may
-    /// assert `settled <= abandoned` by reading `settled` first.
-    pub(super) fn note_settled(&self, n: u32) {
-        if n > 0 {
-            self.settled.fetch_add(n as u64, Ordering::Release);
-            self.replies.fetch_add(u64::from(n), Ordering::Relaxed);
-        }
-    }
-
-    /// How many owed replies the drain has taken, over the life of the bridge.
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn settled(&self) -> u64 {
-        self.settled.load(Ordering::Acquire)
+    /// Record that the drain collected an owed reply off the socket: a block's
+    /// reply that came after its abandonment, which is also a reply the plugin
+    /// gave. Called by the bridge thread only.
+    pub(super) fn note_late(&self) {
+        self.late_writer.add(1);
+        self.replies.fetch_add(1, Ordering::Release);
     }
 
     /// Record that a block's reply missed its budget and is now owed. Called
-    /// by the bridge thread only, before any settle of that reply; `Relaxed`
-    /// because the `Release` on [`note_settled`](Self::note_settled) orders it.
+    /// by the bridge thread only, before any settle of that reply.
     pub(super) fn note_abandoned(&self) {
-        self.abandoned.fetch_add(1, Ordering::Relaxed);
+        self.abandoned_writer.add(1);
     }
 
     /// Record that the plugin answered (a reply for a block, on time or
@@ -328,20 +345,47 @@ impl Channels {
         self.replies.fetch_add(1, Ordering::Release);
     }
 
-    /// Blocks abandoned and replies taken, over the life of the bridge. Two
-    /// reads: a reply landing between them shows up on the next call, which is
-    /// all a poller needs. A counted reply is queued.
-    pub(super) fn block_counts(&self) -> (u64, u64) {
-        (
-            self.abandoned.load(Ordering::Relaxed),
-            self.replies.load(Ordering::Acquire),
-        )
+    /// The block counts over the life of the bridge. Separate reads: a reply
+    /// landing between them shows up on the next call, which is all a poller
+    /// needs. A counted reply is queued.
+    pub(super) fn block_counts(&self) -> BlockCounts {
+        BlockCounts {
+            abandoned: self.abandoned.get(),
+            late: self.late.get(),
+            replies: self.replies.load(Ordering::Acquire),
+        }
     }
 
-    /// How many blocks' replies were abandoned, over the life of the bridge.
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn abandoned(&self) -> u64 {
-        self.abandoned.load(Ordering::Relaxed)
+    /// Record one command the audio side could not hand over. Wait-free, any
+    /// thread.
+    pub(super) fn note_command_refused(&self) {
+        self.commands_refused_writer.add(1);
+    }
+
+    /// A writer of the cell [`note_command_refused`](Self::note_command_refused)
+    /// counts into, for the pools that refuse beside the queue.
+    pub(super) fn refusal_writer(&self) -> TallyWriter<u64> {
+        self.commands_refused_writer.clone()
+    }
+
+    /// The cell [`note_command_refused`](Self::note_command_refused) counts into.
+    pub(super) fn commands_refused_cell(&self) -> Tally<u64> {
+        self.commands_refused.clone()
+    }
+
+    /// A writer of the cell the payload pool counts leaked buffers into.
+    pub(super) fn leak_writer(&self) -> TallyWriter<u64> {
+        self.leaked_writer.clone()
+    }
+
+    /// The cell of parameter buffers the audio thread leaked.
+    pub(super) fn leaked_buffers_cell(&self) -> Tally<u64> {
+        self.leaked_buffers.clone()
+    }
+
+    /// The cell of audio responses lost to a full response queue.
+    pub(super) fn responses_lost_cell(&self) -> Tally<u64> {
+        self.responses_lost.clone()
     }
 
     /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
@@ -402,6 +446,8 @@ impl Channels {
     /// and a load, plus a futex wake when the bridge is parked), and it
     /// cannot be lost, so nothing backs it with a timeout. A push the queue
     /// refuses rings nothing: the bridge is, or is about to be, draining.
+    ///
+    /// A refused command is counted ([`note_command_refused`](Self::note_command_refused)).
     pub(super) fn push_command(&self, cmd: Command) -> bool {
         self.try_push_command(cmd).is_ok()
     }
@@ -410,7 +456,10 @@ impl Channels {
     /// rather than dropping it, so the audio thread can return what it holds
     /// to its pools instead of freeing it.
     pub(super) fn try_push_command(&self, cmd: Command) -> Result<(), Command> {
-        self.commands.push(cmd)?;
+        if let Err(cmd) = self.commands.push(cmd) {
+            self.note_command_refused();
+            return Err(cmd);
+        }
         self.bell.ring();
         Ok(())
     }
@@ -419,8 +468,23 @@ impl Channels {
         self.commands.pop()
     }
 
+    /// Queues a response for the audio thread; a full queue counts it lost.
     pub(super) fn push_audio_response(&self, resp: AudioResponse) {
-        let _ = self.audio_responses.push(resp);
+        if self.audio_responses.push(resp).is_err() {
+            self.responses_lost_writer.add(1);
+        }
+        self.progress.notify();
+    }
+
+    /// The gate a waiter on the bridge's progress sleeps on.
+    pub(super) fn progress(&self) -> &Arc<crate::Wake> {
+        &self.progress
+    }
+
+    /// The bridge thread finished a turn: it answered what it was asked and
+    /// read the lane it was woken for.
+    pub(super) fn turn_done(&self) {
+        self.progress.notify();
     }
 
     pub(super) fn pop_audio_response(&self) -> Option<AudioResponse> {
@@ -433,25 +497,30 @@ mod tests {
     use super::*;
 
     fn channels() -> (Channels, Sleeper) {
-        Channels::new(SampleRate::SR_48K)
+        Channels::new(SampleRate::SR_48K, Arc::default())
     }
 
-    /// Abandoned blocks and replies are separate monotonic totals: a poller
-    /// who sees the first grow while the second does not has a hang.
+    /// Abandoned blocks, owed replies collected late and replies are separate
+    /// monotonic totals: a poller who sees the first grow while the last does
+    /// not has a hang, and a late reply is also a reply.
     #[test]
-    fn blocks_abandoned_and_replies_are_counted_apart() {
+    fn blocks_abandoned_late_and_replies_are_counted_apart() {
         let (c, _) = channels();
-        assert_eq!(c.block_counts(), (0, 0));
+        assert_eq!(c.block_counts(), BlockCounts::default());
         for _ in 0..3 {
             c.note_abandoned();
         }
-        assert_eq!(c.block_counts(), (3, 0));
+        let counts = |abandoned, late, replies| BlockCounts {
+            abandoned,
+            late,
+            replies,
+        };
+        assert_eq!(c.block_counts(), counts(3, 0, 0));
         c.note_replied();
-        assert_eq!(c.block_counts(), (3, 1), "an on-time reply");
-        c.note_settled(2);
-        assert_eq!(c.block_counts(), (3, 3), "owed replies taken back");
-        c.note_settled(0);
-        assert_eq!(c.block_counts(), (3, 3), "settling nothing is no reply");
+        assert_eq!(c.block_counts(), counts(3, 0, 1), "an on-time reply");
+        c.note_late();
+        c.note_late();
+        assert_eq!(c.block_counts(), counts(3, 2, 3), "owed replies collected");
     }
 
     /// A bridge thread as `pump` runs one: sleep for a command, take it,
@@ -535,5 +604,41 @@ mod tests {
         stop.store(true, Ordering::Release);
         c.wake();
         t.join().unwrap();
+    }
+
+    /// **Every command a full queue refuses is counted, and an accepted one is
+    /// not**, whatever the caller does with the answer. The refusal path
+    /// allocates nothing.
+    #[test]
+    fn a_full_command_queue_counts_each_refusal() {
+        let (c, _sleeper) = channels();
+        for _ in 0..COMMAND_QUEUE_SIZE {
+            assert!(c.push_command(Command::Shutdown));
+        }
+        assert_eq!(
+            c.commands_refused_cell().get(),
+            0,
+            "accepted is not refused"
+        );
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..3 {
+                assert!(!c.push_command(Command::Shutdown));
+            }
+        });
+        assert_eq!(c.commands_refused_cell().get(), 3);
+    }
+
+    /// **A response the full response queue refuses is counted lost.**
+    #[test]
+    fn a_full_response_queue_counts_each_loss() {
+        let (c, _sleeper) = channels();
+        let resp = || AudioResponse::Error { seq: None };
+        for _ in 0..RESPONSE_QUEUE_SIZE {
+            c.push_audio_response(resp());
+        }
+        assert_eq!(c.responses_lost_cell().get(), 0);
+        c.push_audio_response(resp());
+        c.push_audio_response(resp());
+        assert_eq!(c.responses_lost_cell().get(), 2);
     }
 }

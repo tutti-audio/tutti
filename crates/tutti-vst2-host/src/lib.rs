@@ -184,9 +184,8 @@
 //!
 //! [`Vst2Processor::process_f32`] and [`Vst2Processor::process_f64`] do not
 //! allocate or lock, and are meant for the audio thread; a block the plugin cannot
-//! take (a channel shorter than the block, a 32-bit block for a 64-bit activation)
-//! is an error and renders nothing. Loading, the editor, and the activation and
-//! rejoin belong on the main thread, and take a `tutti_plugin_types::MainThreadMarker`
+//! take (a 32-bit block for a 64-bit activation) is an error and renders nothing.
+//! Loading, the editor, and the activation and rejoin belong on the main thread, and take a `tutti_plugin_types::MainThreadMarker`
 //! as proof. The plugin is not
 //! thread-safe: the Controller and the Processor are the two threads it is
 //! reached from, and nothing else touches it. A Processor that outlives its

@@ -52,6 +52,14 @@
 //! lag is at most a block and one update's interval; the placement of a
 //! command at a frame inside a block is not done, so it is not removed.
 //!
+//! **Drift.** Once per poll, while the transport rolls, a Beat Clock follower
+//! is given the beat the transport is at on the first frame of the next block
+//! (`ClockFollower::steer`): the error against the source's beat is closed by a
+//! trim of the tempo published through the overlay, and an error past
+//! `ClockFollower::SLIP` locates to the source and is reported
+//! ([`MidiReport::ClockSlipped`]). The latest error is
+//! [`Midi::clock_error`](crate::Midi::clock_error).
+//!
 //! MTC `00:00:00:00` is beat 0 of the project's tempo map: a position in time
 //! is a beat through the map in force.
 
@@ -59,16 +67,14 @@ use std::sync::Arc;
 
 use tutti_engine::Playhead;
 use tutti_graph::EventTapReader;
-use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
+use tutti_midi_protocol::SysexDeviceId;
 use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
     MachineControlFollower, TempoFollower,
 };
-use tutti_tempo::{TempoError, TempoMap, Transition};
+use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
-use tutti_types::{
-    BarCount, Beat, Bpm, Frame, Meter, MeterChange, MeterMap, Seconds, TimeSignature,
-};
+use tutti_types::{Beat, Frame, MeterMap, Seconds};
 use tutti_ump::MidiGroup;
 
 use crate::MidiReport;
@@ -147,19 +153,6 @@ pub struct FollowMachineControl {
     /// This session's MMC device ID. A command to it, to a group it was assigned
     /// to, or to the all-call (`7F`, always accepted) is followed.
     pub device: SysexDeviceId,
-}
-
-/// What [`Midi::send_machine_control`](crate::Midi::send_machine_control) sends:
-/// the transport's play, stop and locate as MMC commands (RP-013 pp.20 and 28)
-/// to every output (a `midi_output` or `midi_sink` entry).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SendMachineControl {
-    /// The Group the SysEx goes out on.
-    pub group: MidiGroup,
-    /// The device, group or all-call the commands are addressed to.
-    pub to: Recipient,
-    /// The frame rate locate targets are stated in.
-    pub rate: MtcRate,
 }
 
 /// The maps a follower overlays: the project's, and what the follower has
@@ -291,7 +284,7 @@ impl Overlay {
         let beat = next_block_beat(&cx.playhead, &self.tempo);
         for change in heard {
             match *change {
-                Followed::Tempo(tempo) => match step_at(&self.tempo, beat, tempo) {
+                Followed::Tempo(tempo) => match self.tempo.stepped_to(beat, tempo) {
                     Ok(Some(map)) => {
                         self.tempo = Arc::new(map);
                         out.push(MidiReport::TempoFollowed { tempo, beat }.into());
@@ -304,8 +297,9 @@ impl Overlay {
                     Err(_) => {}
                 },
                 Followed::Meter(signature) => {
-                    let at = next_bar_line(&self.meter, beat);
-                    if let Some(map) = meter_at(&self.meter, at, signature) {
+                    // `at` is a bar line: it comes from `next_bar_line`.
+                    let at = self.meter.next_bar_line(beat);
+                    if let Some(map) = self.meter.with_change_at(at, signature) {
                         self.meter = Arc::new(map);
                         out.push(
                             MidiReport::MeterFollowed {
@@ -383,6 +377,12 @@ impl ClockFollow {
         self.overlay.as_ref().map_or((None, None), Overlay::restore)
     }
 
+    /// The beat error the follower read at the last poll
+    /// ([`ClockFollower::error`]).
+    pub(crate) fn error(&self) -> Option<Beat> {
+        self.core.error()
+    }
+
     /// The tap's rate, to compare with the graph's.
     pub(crate) fn tap_rate(&self) -> tutti_types::SampleRate {
         self.tap.rate()
@@ -434,6 +434,11 @@ impl ClockFollow {
         self.rolling = rolling;
         let map = cx.settings.tempo_map();
         let tempo = cx.settings.tempo_in_force();
+        // The drift between the source and the transport, read at the frame a
+        // command lands on; a transport that is not rolling has none.
+        let steered =
+            (rolling && cx.playhead.playing()).then(|| next_block_beat(&cx.playhead, &map));
+        self.core.steer(steered, lands, &mut |e| events.push(e));
         let beat_of = |position: ClockPosition, at: Seconds| {
             let lag = if rolling {
                 (lands - at).get().max(0.0)
@@ -465,6 +470,9 @@ impl ClockFollow {
                 ClockEvent::Tempo(tempo) => tempos.push(Followed::Tempo(tempo)),
                 ClockEvent::Locked => out.push(MidiReport::ClockLocked { kind }.into()),
                 ClockEvent::Unlocked => out.push(MidiReport::ClockUnlocked { kind }.into()),
+                ClockEvent::Slipped { error } => {
+                    out.push(MidiReport::ClockSlipped { kind, error }.into());
+                }
             }
         }
         if let Some(overlay) = &mut self.overlay {
@@ -566,264 +574,4 @@ pub(crate) fn next_block_beat(playhead: &Playhead, map: &TempoMap) -> Beat {
     }
     let frame = Frame::new(at.to_samples(rate).get() as u64);
     map.view(rate).beat_at_frame(frame)
-}
-
-/// `map` with `tempo` taking over at `beat`: the map up to `beat` as it stands,
-/// then a step to `tempo`, and nothing after. `Ok(None)` when that changes
-/// nothing (the map already holds `tempo` from `beat` on, with no point after
-/// it), so a source that repeats its tempo grows no map.
-///
-/// A ramp `beat` lands in is cut there: the ramp is kept up to `beat` (it reaches
-/// the tempo `map` has at `beat`, so every beat before `beat` keeps its time),
-/// and the step follows one ulp of a beat later, because a map holds one tempo
-/// at a beat and a tempo that jumps needs two points. A `beat` before 0 is
-/// beat 0.
-///
-/// # Errors
-///
-/// A [`TempoError`] when the map cannot hold the result (a tempo so small that a
-/// segment's duration overflows).
-pub(crate) fn step_at(
-    map: &TempoMap,
-    beat: Beat,
-    tempo: Bpm,
-) -> Result<Option<TempoMap>, TempoError> {
-    let beat = Beat(beat.get().max(0.0));
-    let points = map.points();
-    if points
-        .last()
-        .is_some_and(|last| last.beat <= beat && last.tempo == tempo)
-    {
-        return Ok(None);
-    }
-    let kept = points.partition_point(|p| p.beat < beat);
-    let Some(first) = points[..kept].first() else {
-        return TempoMap::builder(tempo).build().map(Some);
-    };
-    let mut builder = TempoMap::builder(first.tempo);
-    for pair in points[..kept].windows(2) {
-        builder = extend(builder, pair[0].transition, pair[1].beat, pair[1].tempo);
-    }
-    let last = &points[kept - 1];
-    builder = if last.transition == Transition::Step {
-        builder.step_to(beat, tempo)
-    } else {
-        // The ramp is cut at `beat`: it reaches what the map has there.
-        extend(builder, last.transition, beat, map.tempo_at(beat))
-            .step_to(Beat(beat.get().next_up()), tempo)
-    };
-    builder.build().map(Some)
-}
-
-/// The next point of a builder, reached from the last by `transition`.
-fn extend(
-    builder: tutti_tempo::TempoMapBuilder,
-    transition: Transition,
-    beat: Beat,
-    tempo: Bpm,
-) -> tutti_tempo::TempoMapBuilder {
-    match transition {
-        Transition::Step => builder.step_to(beat, tempo),
-        Transition::RampTime => builder.ramp_time_to(beat, tempo),
-        Transition::RampBeats => builder.ramp_beats_to(beat, tempo),
-    }
-}
-
-/// The first bar line at or after `beat` in `meter` (a downbeat, within the
-/// meter's own tolerance, is its own bar line).
-pub(crate) fn next_bar_line(meter: &MeterMap, beat: Beat) -> Beat {
-    let position = meter.bar_at(beat);
-    if position.is_downbeat() {
-        position.bar_start
-    } else {
-        meter.bar_start(position.bar + BarCount(1))
-    }
-}
-
-/// `meter` with `signature` from the bar line `at`: the meter before `at` as it
-/// stands, then the change, and nothing after. `None` when that changes nothing.
-pub(crate) fn meter_at(meter: &MeterMap, at: Beat, signature: TimeSignature) -> Option<MeterMap> {
-    if meter.at(at) == signature && meter.changes().last().is_some_and(|c| c.beat <= at) {
-        return None;
-    }
-    let kept = meter.changes().iter().filter(|c| c.beat < at).copied();
-    Some(MeterMap::new(kept.chain([MeterChange::new(at, signature)])))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tutti_tempo::TempoPoint;
-
-    fn bpm(x: f64) -> Bpm {
-        Bpm::of(x)
-    }
-
-    fn ramp_60_to_180() -> TempoMap {
-        TempoMap::builder(bpm(60.0))
-            .ramp_time_to(Beat(8.0), bpm(180.0))
-            .step_to(Beat(16.0), bpm(90.0))
-            .build()
-            .unwrap()
-    }
-
-    /// **A step on a constant map keeps every beat before it and holds the new
-    /// tempo after**: the map is the old one up to the beat, then one step.
-    #[test]
-    fn a_step_on_a_constant_map_is_one_point() {
-        let old = TempoMap::constant(bpm(120.0)).unwrap();
-        let new = step_at(&old, Beat(3.0), bpm(90.0)).unwrap().unwrap();
-        assert_eq!(
-            new.points(),
-            [
-                TempoPoint::step(Beat(0.0), bpm(120.0)),
-                TempoPoint::step(Beat(3.0), bpm(90.0)),
-            ]
-        );
-        assert_eq!(new.seconds_at(Beat(3.0)), old.seconds_at(Beat(3.0)));
-    }
-
-    /// **A step truncates what came after it**: a project point ahead of the
-    /// step is not in the overlay.
-    #[test]
-    fn a_step_drops_the_points_after_it() {
-        let old = TempoMap::builder(bpm(100.0))
-            .step_to(Beat(4.0), bpm(110.0))
-            .step_to(Beat(8.0), bpm(120.0))
-            .build()
-            .unwrap();
-        let new = step_at(&old, Beat(5.0), bpm(70.0)).unwrap().unwrap();
-        let beats: Vec<f64> = new.points().iter().map(|p| p.beat.get()).collect();
-        assert_eq!(beats, [0.0, 4.0, 5.0]);
-        assert_eq!(new.tempo_at(Beat(100.0)), bpm(70.0));
-    }
-
-    /// **A ramp a step lands in is cut there**: the overlay reaches the tempo the
-    /// ramp had at the beat, so every earlier beat keeps its time; the step
-    /// follows, the map ends on it, and the ramp's own end (beat 8) and the
-    /// point after it are gone.
-    #[test]
-    fn a_ramp_a_step_lands_in_is_cut_at_its_beat() {
-        let old = ramp_60_to_180();
-        let at = Beat(3.0);
-        let cut = old.tempo_at(at);
-        assert!(cut > bpm(60.0) && cut < bpm(180.0), "inside the ramp");
-        let new = step_at(&old, at, bpm(100.0)).unwrap().unwrap();
-
-        let points = new.points();
-        assert_eq!(points.len(), 3, "{points:?}");
-        assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), bpm(60.0)));
-        assert_eq!(
-            points[1],
-            TempoPoint::step(at, cut),
-            "the ramp ends at the cut"
-        );
-        assert_eq!(points[2].beat, Beat(at.get().next_up()));
-        assert_eq!(points[2].tempo, bpm(100.0));
-        assert_eq!(
-            points[2].transition,
-            Transition::Step,
-            "the map ends on a step"
-        );
-
-        for b in [0.0, 0.5, 1.0, 2.0, 2.999, 3.0] {
-            let (a, n) = (old.seconds_at(Beat(b)).get(), new.seconds_at(Beat(b)).get());
-            assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");
-        }
-        assert_eq!(new.tempo_at(Beat(10.0)), bpm(100.0));
-    }
-
-    /// The same cut of a ramp that is linear in beats.
-    #[test]
-    fn a_beat_linear_ramp_is_cut_too() {
-        let old = TempoMap::builder(bpm(60.0))
-            .ramp_beats_to(Beat(8.0), bpm(180.0))
-            .build()
-            .unwrap();
-        let new = step_at(&old, Beat(5.0), bpm(100.0)).unwrap().unwrap();
-        assert_eq!(new.points()[0].transition, Transition::RampBeats);
-        for b in [1.0, 4.0, 5.0] {
-            let (a, n) = (old.seconds_at(Beat(b)).get(), new.seconds_at(Beat(b)).get());
-            assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");
-        }
-    }
-
-    /// A step at beat 0 replaces the first tempo; a beat before 0 is beat 0.
-    #[test]
-    fn a_step_at_the_origin_replaces_the_first_tempo() {
-        let old = ramp_60_to_180();
-        for at in [Beat(0.0), Beat(-2.0)] {
-            let new = step_at(&old, at, bpm(75.0)).unwrap().unwrap();
-            assert_eq!(new.points(), [TempoPoint::step(Beat(0.0), bpm(75.0))]);
-        }
-    }
-
-    /// **A repeated tempo grows no map**: the tempo already in force from the beat
-    /// on, with nothing after, is no change; with a point after it, the step still
-    /// truncates, so it is one.
-    #[test]
-    fn a_repeated_tempo_is_no_change() {
-        let old = TempoMap::constant(bpm(120.0)).unwrap();
-        assert!(step_at(&old, Beat(4.0), bpm(120.0)).unwrap().is_none());
-        let with_tail = TempoMap::builder(bpm(120.0))
-            .step_to(Beat(8.0), bpm(90.0))
-            .build()
-            .unwrap();
-        assert!(
-            step_at(&with_tail, Beat(4.0), bpm(120.0))
-                .unwrap()
-                .is_some()
-        );
-    }
-
-    /// A tempo the map cannot hold is refused, not published.
-    #[test]
-    fn a_tempo_the_map_cannot_hold_is_refused() {
-        let old = TempoMap::constant(bpm(120.0)).unwrap();
-        let slowest = Bpm::new(f64::from_bits(1)).expect("positive and finite");
-        assert!(step_at(&old, Beat(4.0), slowest).is_err());
-    }
-
-    fn four_four() -> MeterMap {
-        MeterMap::default()
-    }
-
-    /// **The next bar line at or after a beat**: mid-bar goes to the next one, a
-    /// downbeat is its own, in whatever meter is in force there.
-    #[test]
-    fn the_next_bar_line_is_at_or_after_the_beat() {
-        let m = four_four();
-        assert_eq!(next_bar_line(&m, Beat(1.3)), Beat(4.0));
-        assert_eq!(next_bar_line(&m, Beat(4.0)), Beat(4.0), "on a bar line");
-        assert_eq!(next_bar_line(&m, Beat(0.0)), Beat(0.0));
-        assert_eq!(next_bar_line(&m, Beat(7.99)), Beat(8.0));
-        let three_four = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
-        ]);
-        assert_eq!(next_bar_line(&three_four, Beat(5.0)), Beat(7.0));
-    }
-
-    /// **The meter overlay keeps the meter before the bar line and drops what
-    /// came after**, and a repeat of the meter in force is no change.
-    #[test]
-    fn a_meter_overlay_truncates_and_a_repeat_is_nothing() {
-        let project = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(16.0), TimeSignature::of(5, 4)),
-        ]);
-        let new = meter_at(&project, Beat(8.0), TimeSignature::of(3, 4)).unwrap();
-        assert_eq!(
-            new.changes(),
-            [
-                MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-                MeterChange::new(Beat(8.0), TimeSignature::of(3, 4)),
-            ]
-        );
-        assert!(meter_at(&four_four(), Beat(8.0), TimeSignature::of(4, 4)).is_none());
-        assert!(
-            meter_at(&project, Beat(8.0), TimeSignature::of(4, 4)).is_some(),
-            "the project's change after it is dropped"
-        );
-    }
 }

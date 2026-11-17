@@ -27,7 +27,7 @@ use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, gate_gain_at};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::delay::finite_or;
 use crate::smoother::Smoother;
 use crate::{Glide, Steps};
@@ -104,15 +104,15 @@ impl Design {
     fn of(c: &GateControls, rate: SampleRate) -> Self {
         let d = GateControls::DEFAULT;
         let threshold = Db(finite_or(c.threshold.get(), d.threshold.get()));
-        // A NaN time reads as 0 (`max` ignores it), instant; an infinite one holds the
-        // follower (a coefficient of 0, as `Seconds::one_pole_coeff` says) or, for a
-        // hold, saturates to the longest count.
+        // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
+        // longest count. `floored` floors the attack and release.
         let hold = Seconds(c.hold.get().max(0.0));
+        let (attack, release) = floored(c.attack, c.release).coeffs(rate);
         Self {
             threshold_linear: threshold.to_amplitude().get(),
             silence_opens: Db::FLOOR >= threshold,
-            attack: Seconds(c.attack.get().max(0.0)).one_pole_coeff(rate),
-            release: Seconds(c.release.get().max(0.0)).one_pole_coeff(rate),
+            attack,
+            release,
             hold_samples: hold.to_samples_floor(rate).get(),
             range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
         }

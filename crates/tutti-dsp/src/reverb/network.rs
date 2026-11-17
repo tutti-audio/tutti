@@ -314,12 +314,15 @@ pub struct Line {
 
 impl Line {
     /// The length the decay formulas use: the centre length plus the nested
-    /// all-pass's group delay at DC; `None` when that delay is unbounded.
+    /// all-pass's group delay at DC and the absorption's
+    /// ([`Absorption::peak_delay`]); `None` when the all-pass's delay is
+    /// unbounded.
     #[must_use]
     fn effective_length(&self) -> Option<SampleSpan> {
+        let held = self.length + self.absorption.peak_delay();
         match self.diffuser {
-            None => Some(self.length),
-            Some(d) => d.low_frequency_delay().map(|nested| self.length + nested),
+            None => Some(held),
+            Some(d) => d.low_frequency_delay().map(|nested| held + nested),
         }
     }
 
@@ -428,6 +431,21 @@ impl Absorption {
                 Band::Mid => mid,
                 Band::High => high,
             },
+        }
+    }
+
+    /// The most group delay the absorption adds to a loop, in frames: a
+    /// [`OnePole`](Self::OnePole) of pole `p` delays `|p| / (1 - |p|)` frames at DC (at
+    /// Nyquist for a negative pole), its largest; a gain and bands add none. A pole that
+    /// is not a filter that settles adds none either: it has no response to read.
+    #[must_use]
+    pub fn peak_delay(&self) -> SampleSpan {
+        match *self {
+            Absorption::OnePole { damp, .. } if damp.is_finite() && damp.abs() < 1.0 => {
+                let p = f64::from(damp.abs());
+                SampleSpan::clamped(p / (1.0 - p))
+            }
+            _ => SampleSpan::ZERO,
         }
     }
 

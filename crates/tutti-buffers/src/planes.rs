@@ -584,6 +584,14 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
         PlaneIterMut { inner, start, end }
     }
 
+    /// Writes silence ([`Sample::SILENCE`]) over every frame of every plane.
+    #[inline]
+    pub fn silence(&mut self) {
+        for mut plane in self.iter_mut() {
+            plane.samples_mut().fill(S::SILENCE);
+        }
+    }
+
     /// Returns every plane narrowed to a frame range, read-only.
     ///
     /// # Panics

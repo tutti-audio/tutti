@@ -37,3 +37,14 @@ fn every_size_up_to_a_word_round_trips() {
     unit.store(());
     assert_eq!(unit.load(), ());
 }
+
+/// `swap` returns the value it replaced and leaves the new one.
+#[test]
+fn swap_returns_the_replaced_value() {
+    let cell = PackedAtomic::new([0u32, 0]);
+    cell.store([7, 8]);
+    assert_eq!(cell.swap([0, 0]), [7, 8]);
+    assert_eq!(cell.load(), [0, 0]);
+    assert_eq!(cell.swap([1, 2]), [0, 0]);
+    assert_eq!(cell.load(), [1, 2]);
+}

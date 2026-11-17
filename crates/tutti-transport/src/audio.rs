@@ -533,7 +533,7 @@ mod tests {
                 TempoPoint {
                     beat: Beat(0.0),
                     tempo: Bpm::of(120.0),
-                    transition: Transition::RampTime,
+                    transition: Transition::RampTime { end: None },
                 },
                 TempoPoint {
                     beat: Beat(4.0),

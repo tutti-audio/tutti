@@ -214,11 +214,6 @@ fn rolls(t: &TransportPosition) -> bool {
     t.playing
 }
 
-/// The loop `t` wraps at, if any.
-fn region(t: &TransportPosition) -> Option<LoopRange> {
-    t.looping.and_then(|l| LoopRange::new(l.start, l.end))
-}
-
 /// Whether the playhead, which would have been at `prev`, jumped to where
 /// `to` puts it. Only a rolling transport jumps (a stop, and a seek while
 /// stopped, do not); a loop wrap always does.
@@ -361,10 +356,11 @@ fn continuation(run: &Run, t: &TransportPosition) -> Next {
         };
     }
     let mut c = run.clock;
-    c.advance(Samples(run.end - run.start), region(t));
+    c.advance(Samples(run.end - run.start), t.looping);
     let wrapped = c.generation() != run.clock.generation();
     let wrap = if wrapped {
-        region(t).and_then(|r| Wrap::new(r, t.tempo, run.sample_rate()))
+        t.looping
+            .and_then(|r| Wrap::new(r, t.tempo, run.sample_rate()))
     } else {
         run.wrap.and_then(|w| w.after(run.end - run.start))
     };
@@ -513,7 +509,7 @@ impl Iterator for Runs<'_> {
                 continue;
             }
             let rolling = rolls(&self.transport);
-            let region = region(&self.transport);
+            let region = self.transport.looping;
             let wrap = region
                 .filter(|r| rolling && self.clock.beat() < r.end())
                 .and_then(|r| wrap_offset(&self.clock, r.end(), end - self.cur));
@@ -671,10 +667,7 @@ mod tests {
     /// run after it starting at the loop's start.
     #[test]
     fn a_loop_wrap_inside_a_block_is_a_jump_on_its_frame() {
-        let looping = Some(tutti_graph::LoopRange {
-            start: Beat(0.0),
-            end: Beat(1.0),
-        });
+        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
         let t = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0 - 10.0 / FPB), looping);
         let mut clock = Clock::new();
         let e = env(t, &[]);
@@ -734,10 +727,7 @@ mod tests {
 
     /// 120 BPM: a loop of one beat is 24 000 frames, and the fade 240.
     fn looping(from: f64) -> TransportPosition {
-        let looping = Some(tutti_graph::LoopRange {
-            start: Beat(0.0),
-            end: Beat(1.0),
-        });
+        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
         TransportPosition::new(true, Bpm::of(120.0), Beat(from / FPB), looping)
     }
 

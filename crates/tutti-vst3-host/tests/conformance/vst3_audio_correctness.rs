@@ -37,6 +37,7 @@
 #![cfg(feature = "conformance")]
 
 use crate::probe::probe_path;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
@@ -48,8 +49,8 @@ use tutti_plugin_types::ParamId;
 use tutti_types::Samples;
 use tutti_ump::{MidiChannel, MidiGroup};
 use tutti_vst3_host::{
-    AudioBuffer, InputEvents, LoadOptions, NoteExpressionType, NoteExpressionValue,
-    ParameterChanges, TransportInfo, Vst3Loaded,
+    InputEvents, LoadOptions, NoteExpressionType, NoteExpressionValue, ParameterChanges,
+    TransportInfo, Vst3Loaded,
 };
 
 /// A block longer than any offset these tests place an event at.
@@ -219,17 +220,22 @@ fn render(
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: frames,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     let events = InputEvents {
         midi,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, params, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        params,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
 
     // Regroup the flat outputs by bus.
     let mut grouped = Vec::new();
@@ -383,18 +389,18 @@ fn a_block_past_the_activated_length_is_refused() {
         let mut output: Vec<Vec<f32>> = (0..outs).map(|_| vec![9.0; frames]).collect();
         let in_refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
         let mut out_refs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
-        let mut buffer = AudioBuffer {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: frames,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        };
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            Planes::new(&in_refs).expect("equal channels"),
+            PlanesMut::new(&mut out_refs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let failed = inst
             .try_process(
                 &mut buffer,
                 &InputEvents::default(),
                 None,
-                &TransportInfo::default(),
+                &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
             )
             .err()
             .map(|e| e.error);
@@ -759,17 +765,17 @@ fn f64_path_carries_the_same_audio() {
     let in_refs: Vec<&[f64]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f64]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     inst.process(
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
 
     let mut flat = outs.into_iter();
@@ -1072,18 +1078,23 @@ fn note_expression_reaches_the_plugin_with_its_value() {
     let mut outs: Vec<Vec<f32>> = (0..total_out).map(|_| vec![0.0f32; FRAMES]).collect();
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     let events = InputEvents {
         midi: &midi,
         note_expressions: &expressions,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, None, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        None,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
     let ch0 = &outs[0];
 
     // VST3 typeIds: Volume = 0, Pan = 1.
@@ -1157,17 +1168,22 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
     let mut outs: Vec<Vec<f32>> = (0..out_channels).map(|_| vec![0.0f32; FRAMES]).collect();
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     let events = InputEvents {
         midi: &midi,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, None, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        None,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
     let ch0 = &outs[0];
 
     // An f32 near 5000 resolves to about 5e-4; the two readings and the old
@@ -1208,17 +1224,17 @@ fn midi_emitted_by_the_plugin_reaches_the_host() {
         let mut outs: Vec<Vec<f32>> = vec![vec![0.0; FRAMES]; 2];
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = AudioBuffer {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: FRAMES,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        };
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            Planes::new(&in_refs).expect("equal channels"),
+            PlanesMut::new(&mut out_refs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let out = inst.process(
             &mut buffer,
             &InputEvents::default(),
             Some(&params),
-            &TransportInfo::default(),
+            &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
         );
         out.midi_events.len()
     };

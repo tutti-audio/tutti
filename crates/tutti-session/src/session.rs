@@ -215,6 +215,25 @@ pub enum SessionEvent {
         /// root.
         bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
     },
+    /// A node with a bus besides its main one (an aux or sidechain bus, a
+    /// plugin's) had its audio wiring changed: a port gained its first source or
+    /// consumer, or lost its last (an edge, a global output, a tap or a
+    /// meter). Reported once per node by the update that sends the commit
+    /// (or the next update, for a commit the host made itself), carrying the
+    /// node's first `was` and last `now` of the commits since the last
+    /// report; a node whose wiring is as it was reports nothing. It is the
+    /// control-side notice a plugin needs to activate or deactivate an aux
+    /// bus; the block that applies the commit reads the same answer through
+    /// [`Io::wired_inputs`](tutti_graph::Io::wired_inputs). A node with only
+    /// a main bus is never reported; it reads its per-block masks.
+    Rewired {
+        /// The node.
+        node: NodeKey,
+        /// Its wired ports before.
+        was: tutti_graph::Wired,
+        /// Its wired ports now.
+        now: tutti_graph::Wired,
+    },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
     /// note-offs), a PDC or feedback delay it feeds was full, or the node
@@ -387,6 +406,12 @@ impl std::fmt::Debug for SessionEvent {
                 .field("event_edges", event_edges)
                 .field("bus_edges", bus_edges)
                 .finish(),
+            Self::Rewired { node, was, now } => f
+                .debug_struct("Rewired")
+                .field("node", node)
+                .field("was", was)
+                .field("now", now)
+                .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
             Self::Device(event) => f.debug_tuple("Device").field(event).finish(),
@@ -435,22 +460,28 @@ impl std::fmt::Debug for SessionEvent {
     }
 }
 
-/// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
-/// and MTC, off until a host enables it), with its controls. An input port's
-/// ingest node is not here: each `midi_input` entry makes its own
-/// (`MidiInput::node`), and each output its own (`MidiSink::node`,
-/// `MidiOutput::node`), fed by the clock.
+/// The engine's MIDI, as graph nodes the builder inserts: the sync node (Beat
+/// Clock, MTC and Machine Control, sending nothing until a host sets its
+/// messages), with its controls. An input port's ingest node is not here: each
+/// `midi_input` entry makes its own (`MidiInput::node`), and each output its own
+/// (`MidiSink::node`, `MidiOutput::node`), fed by the sync node.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
     /// Which of an input port's event outputs carries which Group and channel
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
     pub input_ports: tutti_midi_runtime::MidiInputPorts,
-    /// The clock's node.
-    pub clock: NodeKey,
-    /// The clock master: enable it, pick MTC and its frame rate.
-    pub clock_master: tutti_midi_runtime::ClockControls,
+    /// The sync node, on Group 1.
+    pub sync: NodeKey,
+    /// What the sync node sends (`messages()`) and could not send (`losses()`).
+    pub sync_controls: std::sync::Arc<tutti_midi_runtime::SyncOutControls>,
 }
+
+/// The bound on an app's key type, the name an app gives a node in its model.
+/// Every `Ord + Clone + Debug + Send + Sync + 'static` type is one.
+pub trait AppKey: Ord + Clone + std::fmt::Debug + Send + Sync + 'static {}
+
+impl<T: Ord + Clone + std::fmt::Debug + Send + Sync + 'static> AppKey for T {}
 
 /// Whether the root is as it was asked to be
 /// ([`Session::root_topology_status`]).
@@ -513,7 +544,10 @@ pub enum RootTopologyStatus {
 /// ```
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
-pub struct Session<C: Clock = Offline> {
+pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
+    /// The value lock and the table every node's params are written through,
+    /// shared with the graph and the session's [`Knobs`](crate::Knobs).
+    pub(crate) values: Arc<crate::value::ValueState<K>>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
@@ -526,7 +560,7 @@ pub struct Session<C: Clock = Offline> {
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
-    pub(crate) pool: crate::Pool<C>,
+    pub(crate) pool: crate::Pool<K, C>,
     /// The plugin entries whose node waits to swap to a reloaded plugin.
     #[cfg(feature = "plugin")]
     pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
@@ -671,7 +705,7 @@ impl SharedWork {
     }
 }
 
-impl Session<Offline> {
+impl Session<&'static str, Offline> {
     /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
     /// [`LIVE_MAX_BLOCK`](crate::LIVE_MAX_BLOCK) frames
     /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
@@ -689,7 +723,9 @@ impl Session<Offline> {
     pub fn new(rate: tutti_types::SampleRate) -> crate::Result<Self> {
         Self::builder().sample_rate(rate).build()
     }
+}
 
+impl<K: AppKey> Session<K, Offline> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
     /// start of the next block.
@@ -698,7 +734,7 @@ impl Session<Offline> {
     }
 }
 
-impl<C: RealTime> Session<C> {
+impl<K: AppKey, C: RealTime> Session<K, C> {
     /// The configuration of the stream that renders the session's blocks: its
     /// rate, width and block (the callback size, or the timer's block).
     #[must_use]
@@ -721,7 +757,7 @@ impl<C: RealTime> Session<C> {
 
 /// A detached session: the executor stays on this side, and the caller renders.
 #[cfg(feature = "testing")]
-impl Session<crate::Detached> {
+impl<K: AppKey> Session<K, crate::Detached> {
     /// Renders one frame on the calling thread under a stopped transport:
     /// no inputs, `output` one sample per global output. Commits any edit
     /// first.
@@ -747,7 +783,7 @@ impl Session<crate::Detached> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
@@ -757,8 +793,9 @@ impl<C: Clock> Session<C> {
     /// and do not: the caller has run or refused them first, so this runs no
     /// closure of the app's.
     #[cfg(feature = "device")]
-    pub(crate) fn with_clock<K: Clock>(self, running: K::Running) -> (Session<K>, C::Running) {
+    pub(crate) fn with_clock<N: Clock>(self, running: N::Running) -> (Session<K, N>, C::Running) {
         let Session {
+            values,
             #[cfg(feature = "plugin")]
             _early_work,
             running: old_running,
@@ -823,6 +860,7 @@ impl<C: Clock> Session<C> {
         let pool = pool.rebind();
         (
             Session {
+                values,
                 #[cfg(feature = "plugin")]
                 _early_work,
                 running,
@@ -889,7 +927,7 @@ impl<C: Clock> Session<C> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
@@ -1178,6 +1216,7 @@ impl<C: Clock> Session<C> {
                         bus_edges: u.bus_edges,
                     });
                 }
+                self.report_rewired(out);
                 if !sent && self.resumed {
                     self.publish_sent();
                 }
@@ -1194,16 +1233,13 @@ impl<C: Clock> Session<C> {
                         self.commit_reporting(out);
                     }
                     self.mods.resync(&mut self.graph);
+                    self.report_rewired(out);
                 }
             }
             Phase::MidiOut => {
                 #[cfg(feature = "midi")]
                 {
-                    let playhead = self.playhead();
-                    if self
-                        .midi_state
-                        .midi_out_phase(&mut self.graph, &playhead, cx.now)
-                    {
+                    if self.midi_state.midi_out_phase(&mut self.graph, cx.now) {
                         self.commit();
                     }
                 }
@@ -1355,6 +1391,7 @@ impl<C: Clock> Session<C> {
         }
         #[cfg(feature = "midi-hardware")]
         if let Some(io) = &self.midi_io {
+            use tutti_rt::Reclaim;
             pinned += io.ports().inlets().reclaim();
         }
         pinned
@@ -1370,6 +1407,20 @@ impl<C: Clock> Session<C> {
             self.publish_sent();
         }
         committed
+    }
+
+    /// Pushes the nodes the commits since the last report rewired.
+    fn report_rewired(&mut self, out: &mut Vec<SessionEvent>) {
+        out.extend(
+            self.graph
+                .take_rewired()
+                .into_iter()
+                .map(|r| SessionEvent::Rewired {
+                    node: r.node,
+                    was: r.was,
+                    now: r.now,
+                }),
+        );
     }
 
     /// [`commit`](Self::commit), a refusal pushed onto `out`: whether it sent.

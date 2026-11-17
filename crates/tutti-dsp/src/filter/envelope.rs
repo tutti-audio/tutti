@@ -1,7 +1,7 @@
 //! [`EnvelopeFilterBank`]: a state-variable filter whose cutoff follows the signal's level.
 //!
 //! The bank finds the level of its input (the loudest channel at each frame, held to full
-//! scale 1), follows it with a one-pole attack and release ([`PeakFollower`]) to an envelope
+//! scale 1), follows it with a one-pole attack and release to an envelope
 //! `env` in `[0, 1]` (0 silent, 1 at full scale or above), and filters every channel through
 //! one [`SvfBank`] whose cutoff is
 //!
@@ -33,7 +33,7 @@ use tutti_types::{ChannelLayout, Hz, Q, SampleRate, Samples, Seconds, Semitones}
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
 use crate::delay::finite_or;
-use crate::dynamics::{PeakFollower, key_levels};
+use crate::dynamics::{Follower, floored, key_levels};
 use crate::{COEFF_INTERVAL, Glide, Lanes};
 
 /// The controls of an [`EnvelopeFilterBank`].
@@ -82,7 +82,9 @@ impl Default for EnvelopeFilterControls {
 pub struct EnvelopeFilterBank<F: Float + Lanes = f64> {
     ty: SvfType,
     rate: SampleRate,
-    follower: PeakFollower,
+    follower: Follower,
+    /// The envelope, in `[0, 1]`: 0 until a level is heard.
+    env: f32,
     bank: SvfBank<F>,
     coefficients: Glide<SvfCoefficients<F>>,
     controls: EnvelopeFilterControls,
@@ -99,7 +101,8 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
         let mut bank = Self {
             ty,
             rate,
-            follower: PeakFollower::new(),
+            follower: Follower::of(floored(controls.attack, controls.release), rate),
+            env: 0.0,
             bank: SvfBank::new(width),
             coefficients: Glide::landed(SvfCoefficients::from(&SvfModel::new(
                 SvfControls::DEFAULT,
@@ -117,7 +120,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// Back to silence: the envelope at 0, the filter cleared, the cutoff landed at the
     /// design for an envelope of 0, and the grid counted from here. No allocation.
     pub fn reset(&mut self) {
-        self.follower.reset();
+        self.env = 0.0;
         self.bank.reset();
         self.phase = 0;
         self.coefficients.aim(self.design(0.0));
@@ -126,7 +129,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
 
     /// Lands the cutoff on its design for the current envelope now.
     pub fn settle(&mut self) {
-        self.coefficients.aim(self.design(self.follower.value()));
+        self.coefficients.aim(self.design(self.env));
         self.coefficients.settle();
     }
 
@@ -143,8 +146,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             attack: Seconds(controls.attack.get().max(0.0)),
             release: Seconds(controls.release.get().max(0.0)),
         };
-        self.follower
-            .set(self.controls.attack, self.controls.release, self.rate);
+        self.follower = Follower::of(floored(controls.attack, controls.release), self.rate);
     }
 
     /// The cutoff at the envelope `env` (0 to 1): `base * 2^(depth / 12 * env)`, held within 1
@@ -183,7 +185,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
         let mut start = 0;
         while start < frames {
             if self.phase == 0 {
-                let design = self.design(self.follower.value());
+                let design = self.design(self.env);
                 self.coefficients.aim(design);
             }
             let n = (frames - start).min(COEFF_INTERVAL - self.phase);
@@ -191,7 +193,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.follower.follow(l.min(1.0));
+                self.env = self.follower.follow(self.env, l.min(1.0));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

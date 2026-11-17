@@ -2,12 +2,12 @@ use super::*;
 use crate::{ClockTransportState, MidiClockDecoder, MtcDecoder};
 use atomic_float::AtomicF64;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool as StdAtomicBool;
+use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
 use tutti_transport::ProjectMeter;
 use tutti_types::MeterChange;
-use tutti_types::{Bpm, Seconds};
+use tutti_types::{Bpm, LoopRange, Seconds};
 use tutti_ump::{Flex, Message, MidiGroup, System};
 
 /// The System message a packet carries.
@@ -23,7 +23,7 @@ struct TestTransport {
     beat: AtomicF64,
     tempo: Bpm,
     playing: StdAtomicBool,
-    looping: std::sync::Mutex<Option<tutti_graph::LoopRange>>,
+    looping: std::sync::Mutex<Option<tutti_types::LoopRange>>,
 }
 
 impl TestTransport {
@@ -36,10 +36,8 @@ impl TestTransport {
         }
     }
     fn set_loop(&self, start: f64, end: f64) {
-        *self.looping.lock().unwrap() = Some(tutti_graph::LoopRange {
-            start: Beat(start),
-            end: Beat(end),
-        });
+        *self.looping.lock().unwrap() =
+            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
     }
     fn set_beat(&self, b: f64) {
         self.beat.store(b, Ordering::Release);
@@ -57,19 +55,14 @@ impl TestTransport {
     }
 }
 
-/// A master ticked from a [`TestTransport`], emitting into a mailbox.
+/// A master ticked from a [`TestTransport`], emitting into a mailbox, sending
+/// what `messages` says.
 struct Rig {
     cm: ClockMaster,
-    controls: ClockControls,
+    messages: SyncMessages,
+    meter: tutti_rt::Reader<tutti_types::MeterMap>,
     transport: Arc<TestTransport>,
     out: Collected,
-}
-
-impl std::ops::Deref for Rig {
-    type Target = ClockControls;
-    fn deref(&self) -> &ClockControls {
-        &self.controls
-    }
 }
 
 impl Rig {
@@ -78,25 +71,31 @@ impl Rig {
     }
 
     /// The Beat Clock on or off, the rest of what is sent as it was.
-    fn set_enabled(&self, on: bool) {
-        let sends = self.controls.sends();
-        self.controls.set_sends(ClockSends {
-            timing: on,
-            ..sends
-        });
+    fn set_enabled(&mut self, on: bool) {
+        self.messages.clock = on;
     }
 
     /// MTC on or off, the rest of what is sent as it was.
-    fn set_send_mtc(&self, on: bool) {
-        let sends = self.controls.sends();
-        self.controls.set_sends(ClockSends { mtc: on, ..sends });
+    fn set_send_mtc(&mut self, on: bool) {
+        self.messages.mtc = on;
+    }
+
+    /// The frame rate time codes are stated at.
+    fn set_mtc_fps(&mut self, rate: MtcRate) {
+        self.messages.rate = rate;
     }
 
     fn tick(&mut self, block_size: usize) {
-        self.cm
-            .tick(&self.transport.now(), Samples(block_size), &mut |e| {
+        let loan = self.messages.flex.then(|| self.meter.lend());
+        self.cm.tick(
+            self.messages,
+            loan.as_deref(),
+            &self.transport.now(),
+            Samples(block_size),
+            &mut |e| {
                 self.out.0.lock().unwrap().push(e);
-            });
+            },
+        );
     }
 }
 
@@ -104,18 +103,14 @@ fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTrans
     let transport = Arc::new(TestTransport::new(tempo));
     let receiver = Collected::default();
     let out = receiver.clone();
-    let (cm, controls) = ClockMaster::new(
-        MidiGroup::FIRST,
-        sample_rate.into(),
-        ProjectMeter::default().reader(),
-    );
-    controls.set_sends(ClockSends {
-        timing: true,
-        ..ClockSends::default()
-    });
+    let cm = ClockMaster::new(MidiGroup::FIRST, sample_rate.into());
     let rig = Rig {
         cm,
-        controls,
+        messages: SyncMessages {
+            clock: true,
+            ..SyncMessages::OFF
+        },
+        meter: ProjectMeter::default().reader(),
         transport: Arc::clone(&transport),
         out,
     };
@@ -426,7 +421,7 @@ fn a_rate_change_moves_the_tick_spacing() {
     );
 
     cm.set_sample_rate(SampleRate::SR_48K);
-    assert_eq!(cm.sample_rate(), SampleRate::SR_48K);
+    assert_eq!(cm.cm.sample_rate, SampleRate::SR_48K);
     let run = (&mut beat, &mut frame);
     let after = of(
         &run_at(&mut cm, &transport, &cons, 48_000.0, (480, 100), run),
@@ -960,18 +955,19 @@ fn a_wrap_on_the_block_edge_and_a_locate_are_one_song_position() {
 #[test]
 fn every_event_goes_out_on_the_masters_group() {
     let group = MidiGroup::masked(5);
-    let (mut cm, controls) =
-        ClockMaster::new(group, SampleRate::SR_48K, ProjectMeter::default().reader());
-    controls.set_sends(ClockSends {
-        timing: true,
+    let mut cm = ClockMaster::new(group, SampleRate::SR_48K);
+    let messages = SyncMessages {
+        clock: true,
         mtc: true,
-        flex: false,
-    });
+        ..SyncMessages::OFF
+    };
     let transport = TestTransport::new(Bpm::of(120.0));
     transport.set_beat(8.0);
     transport.set_playing(true);
     let mut events = Vec::new();
-    cm.tick(&transport.now(), Samples(4096), &mut |e| events.push(e));
+    cm.tick(messages, None, &transport.now(), Samples(4096), &mut |e| {
+        events.push(e)
+    });
     let statuses: std::collections::BTreeSet<u8> = events
         .iter()
         .map(|(_, ump)| ((ump.0[0] >> 16) & 0xFF) as u8)
@@ -982,27 +978,9 @@ fn every_event_goes_out_on_the_masters_group() {
             "{status:#x} not sent: {statuses:x?}"
         );
     }
-    assert_eq!(controls.group(), group);
+    assert_eq!(cm.group, group);
     for (_, ump) in &events {
         assert_eq!(ump.group(), Some(group), "{ump:?}");
-    }
-}
-
-/// **Every combination of the settings word reads back as written**: each
-/// `ClockSends` and each frame rate, so what the control side sets is one word
-/// the audio side decodes whole.
-#[test]
-fn the_settings_word_round_trips_every_combination() {
-    for bits in 0..8u8 {
-        let sends = ClockSends {
-            timing: bits & 1 != 0,
-            mtc: bits & 2 != 0,
-            flex: bits & 4 != 0,
-        };
-        for fps in MtcRate::ALL {
-            let settings = Settings { sends, fps };
-            assert_eq!(Settings::from_bits(settings.bits()), settings);
-        }
     }
 }
 
@@ -1027,7 +1005,7 @@ fn a_frame_rate_set_between_blocks_keeps_the_pending_quarter_frame() {
     assert_eq!(before.last(), Some(&10_080), "setup: every 480 frames");
 
     cm.set_mtc_fps(MtcRate::Fps30);
-    assert_eq!(cm.mtc_fps(), MtcRate::Fps30);
+    assert_eq!(cm.messages.rate, MtcRate::Fps30);
     let run = (&mut beat, &mut frame);
     let events = run_at(&mut cm, &transport, &cons, 48_000.0, (512, 20), run);
     assert_eq!(of(&events, 0xF2), Vec::<u64>::new(), "not a seek");
@@ -1059,7 +1037,7 @@ fn full_messages(events: &[UmpAt]) -> Vec<(u32, Vec<u8>)> {
 
 /// A rig at 120 BPM and 48 kHz sending MTC at `fps`, stopped at `beat`.
 fn mtc_rig(fps: MtcRate, beat: f64) -> (Rig, Arc<TestTransport>, Collected) {
-    let (rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
     rig.set_send_mtc(true);
     rig.set_mtc_fps(fps);
     transport.set_beat(beat);
@@ -1175,21 +1153,48 @@ fn no_full_message_is_sent_with_mtc_off() {
 
 // --- Flex Set Tempo and Set Time Signature ----------------------------------
 
+/// A master with the project meter's reader it ticks over, and what it sends.
+struct FlexMaster {
+    cm: ClockMaster,
+    reader: tutti_rt::Reader<tutti_types::MeterMap>,
+    messages: SyncMessages,
+}
+
+impl FlexMaster {
+    fn tick(
+        &mut self,
+        transport: &TransportPosition,
+        block: Samples,
+        emit: &mut impl FnMut(UmpAt),
+    ) {
+        self.cm.tick(
+            self.messages,
+            Some(&*self.reader.lend()),
+            transport,
+            block,
+            emit,
+        );
+    }
+}
+
 /// A master on the first Group at 48 kHz, its clock bytes on or off, Flex on,
 /// reading the meter of the returned project meter (4/4 until set).
-fn flex_master(clock: bool) -> (ClockMaster, ProjectMeter, Collected) {
+fn flex_master(clock: bool) -> (FlexMaster, ProjectMeter, Collected) {
     let meter = ProjectMeter::default();
-    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_sends(ClockSends {
-        timing: clock,
-        mtc: false,
-        flex: true,
-    });
+    let cm = FlexMaster {
+        cm: ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K),
+        reader: meter.reader(),
+        messages: SyncMessages {
+            clock,
+            flex: true,
+            ..SyncMessages::OFF
+        },
+    };
     (cm, meter, Collected::default())
 }
 
 /// One block of `frames` frames at `beat` and `tempo`, playing.
-fn play(cm: &mut ClockMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
+fn play(cm: &mut FlexMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
     let transport = TransportPosition::new(true, Bpm::of(tempo), Beat(beat), None);
     cm.tick(&transport, Samples(frames), &mut |e| {
         out.0.lock().unwrap().push(e);
@@ -1354,14 +1359,9 @@ fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
 /// sends no Flex Data.
 #[test]
 fn no_flex_is_sent_unless_enabled() {
-    let meter = ProjectMeter::default();
-    let (mut cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_sends(ClockSends {
-        timing: true,
-        ..ClockSends::default()
-    });
-    assert!(!controls.sends().flex);
-    let out = Collected::default();
+    let (mut cm, _meter, out) = flex_master(true);
+    cm.messages.flex = false;
+    assert!(cm.messages.clock);
     play(&mut cm, &out, 120.0, 0.0, 48_000);
     play(&mut cm, &out, 150.0, 2.0, 48_000);
     let events = drain_all(&out);
@@ -1497,10 +1497,7 @@ fn a_locate_while_playing_states_the_meter_at_the_next_bar_line() {
 #[test]
 fn the_passes_of_a_looped_block_restate_nothing() {
     let (mut cm, _meter, out) = flex_master(true);
-    let looping = tutti_graph::LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    };
+    let looping = LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop");
     let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), Some(looping));
     cm.tick(&transport, Samples(72_000), &mut |e| {
         out.0.lock().unwrap().push(e);

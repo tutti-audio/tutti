@@ -3,7 +3,6 @@
 
 use tutti_types::{Db, SampleRate, Seconds};
 
-use crate::level::db_to_ratio_f64;
 use crate::{Complex64, Ring};
 
 /// A second-order section with `a0 = 1`:
@@ -108,7 +107,7 @@ pub(super) fn decay_ring(radius: f64, multiplicity: u32, floor: Db, rate: Sample
     if radius <= 0.0 {
         return Ring::Finite(Seconds::new(0.0));
     }
-    let eps = libm::log(db_to_ratio_f64(f64::from(floor.get())));
+    let eps = libm::log(Db::to_amplitude_f64(f64::from(floor.get())));
     let per_frame = -libm::log(radius);
     let mut frames = eps / -per_frame;
     for _ in 0..3 {

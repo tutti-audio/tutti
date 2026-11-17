@@ -52,7 +52,7 @@ impl<F: Float> Editor<F> {
         sources: Vec<Source>,
         align: TapAlign,
         capacity: Samples,
-    ) -> Result<TapReader, MissingSource> {
+    ) -> Result<TapReader<F>, MissingSource> {
         self.check_sources(&sources)?;
         self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, sources.len(), capacity);
@@ -88,7 +88,7 @@ impl<F: Float> Editor<F> {
         id: TapId,
         width: usize,
         capacity: Samples,
-    ) -> Result<TapReader, MissingSource> {
+    ) -> Result<TapReader<F>, MissingSource> {
         let named: Vec<Source> = self
             .spec
             .topology
@@ -115,14 +115,14 @@ impl<F: Float> Editor<F> {
         id: TapId,
         width: usize,
         capacity: Samples,
-    ) -> Result<TapReader, CloseError> {
+    ) -> Result<TapReader<F>, CloseError> {
         match self.spec.topology.taps.get(&id) {
             Some(TapSpec::Outputs { .. }) => Ok(self.replace_output_tap(id, width, capacity)),
             _ => Err(CloseError::Tap(id)),
         }
     }
 
-    fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader {
+    fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
         self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, width, capacity);
         let opened = TapOpened {

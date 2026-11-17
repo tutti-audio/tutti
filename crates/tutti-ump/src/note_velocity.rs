@@ -8,12 +8,6 @@
 /// `u16` is a velocity, so there is no refusing constructor. Zero is a Note On
 /// here, not a Note Off.
 ///
-/// A 7-bit velocity is widened by M2-115's scaling in
-/// `tutti_midi_protocol::widen_velocity` (the scaling lives there, beside the
-/// translator that shares it, since this crate depends on no other), and a
-/// level in `0.0..=1.0` by `tutti_midi_protocol::unit_f32_to_velocity`. The
-/// way back is `narrow_velocity` and `velocity_to_unit_f32`.
-///
 /// # Examples
 ///
 /// ```

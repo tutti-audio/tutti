@@ -221,7 +221,8 @@ fn the_curve_has_its_three_regions() {
 }
 
 /// The member holds the controls made runnable: a knee under 0 reads as 0, a ratio under
-/// 1 as 1, a time under 0 as 0, and a control that is not finite as the default's.
+/// 1 as 1 and a control that is not finite as the default's, and its detector runs a time
+/// under 0 as 0.
 #[test]
 fn the_member_floors_what_cannot_be_run() {
     let base = controls(-18.0, 6.0, 4.0, 0.003, 0.08, 3.0);
@@ -235,9 +236,11 @@ fn the_member_floors_what_cannot_be_run() {
         },
         RATE,
     );
+    assert_eq!((m.knee, m.ratio), (Db(0.0), CompressionRatio(1.0)));
+    // A time under 0 is the follower of time 0: instant.
     assert_eq!(
-        (m.knee, m.ratio, m.attack, m.release),
-        (Db(0.0), CompressionRatio(1.0), Seconds(0.0), Seconds(0.0))
+        Detector::of(&m).ballistics,
+        Follower::of(floored(Seconds(0.0), Seconds(0.0)), RATE)
     );
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(

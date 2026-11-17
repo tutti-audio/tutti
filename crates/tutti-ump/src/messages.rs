@@ -184,7 +184,7 @@ fn passes(packet: Ump, open: &OpenRuns) -> bool {
     match packet.message_type() {
         0 | 0xF => true,
         // System Real Time: status 0xF8 and above.
-        1 => ((packet.0[0] >> 16) & 0xFF) >= 0xF8 || !open.has_group_of(packet),
+        1 => packet.is_system_real_time() || !open.has_group_of(packet),
         _ => !open.has_group_of(packet),
     }
 }
@@ -253,17 +253,17 @@ impl Run {
 
 /// The packets of one message of a batch: what a cut keeps together.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Span<'a, T>(&'a [T]);
+pub struct PacketSpan<'a, T>(&'a [T]);
 
-impl<T> Clone for Span<'_, T> {
+impl<T> Clone for PacketSpan<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for Span<'_, T> {}
+impl<T> Copy for PacketSpan<'_, T> {}
 
-impl<'a, T> Span<'a, T> {
+impl<'a, T> PacketSpan<'a, T> {
     /// The packets, at least one.
     #[must_use]
     pub const fn packets(self) -> &'a [T] {
@@ -283,7 +283,7 @@ impl<'a, T> Span<'a, T> {
     }
 }
 
-/// The messages of `items`, in order, each a [`Span`] of its packets. `ump`
+/// The messages of `items`, in order, each a [`PacketSpan`] of its packets. `ump`
 /// reads the packet an item carries. A message of several packets whose last
 /// the batch never reaches ends where the batch does.
 ///
@@ -337,16 +337,16 @@ pub struct Spans<'a, T, F, J> {
 }
 
 impl<'a, T, F: Fn(&T) -> Ump, J: Fn(&T) -> Join> Iterator for Spans<'a, T, F, J> {
-    type Item = Span<'a, T>;
+    type Item = PacketSpan<'a, T>;
 
-    fn next(&mut self) -> Option<Span<'a, T>> {
+    fn next(&mut self) -> Option<PacketSpan<'a, T>> {
         let len = message_len(self.rest, &self.ump, &self.join);
         if len == 0 {
             return None;
         }
         let (message, rest) = self.rest.split_at(len);
         self.rest = rest;
-        Some(Span(message))
+        Some(PacketSpan(message))
     }
 }
 
@@ -383,7 +383,7 @@ mod tests {
     }
 
     fn lens(batch: &[Ump]) -> Vec<usize> {
-        spans(batch, |ump| *ump).map(Span::len).collect()
+        spans(batch, |ump| *ump).map(PacketSpan::len).collect()
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
             (note(), Join::Alone),
         ];
         let lens: Vec<_> = spans_joined(&batch, |p| p.0, |p| p.1)
-            .map(Span::len)
+            .map(PacketSpan::len)
             .collect();
         assert_eq!(lens, [3, 1]);
     }

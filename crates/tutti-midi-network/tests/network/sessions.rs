@@ -2,15 +2,16 @@
 //! authentication, data transfer with loss, keep-alive, reset and Bye.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tutti_midi_device::EntropyError;
 
 use tutti_midi_network::{
-    Admission, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command, Credentials,
-    DatagramBuilder, Digest, EndedBy, Endpoint, Event, Fec, HostConfig, Invitation, NakReason,
-    Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError, SequenceNumber,
-    SessionConfig, SessionState, UmpData, UserAuthState, Username,
+    Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
+    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, Invitation,
+    MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
+    RetransmitRequest, SendError, SequenceNumber, SessionConfig, SessionState, UmpData,
+    UserAuthChallenge, UserAuthState, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -202,6 +203,7 @@ fn a_malformed_invitation_is_a_protocol_error_bye() {
     );
 }
 
+/// Spec: m2-124/8#4
 #[test]
 fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
     let mut config = host_with(Admission::Open);
@@ -267,7 +269,7 @@ fn secret_sim(client_secret: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#11, m2-124/6.9#1, m2-124/6.9#3
+/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#12, m2-124/6.9#1, m2-124/6.9#3
 #[test]
 fn the_right_shared_secret_establishes_the_session() {
     let mut sim = secret_sim("5483");
@@ -287,7 +289,7 @@ fn the_right_shared_secret_establishes_the_session() {
     );
 }
 
-/// Spec: m2-124/6.7#7, m2-124/6.7#8, m2-124/6.7#12, m2-124/6.9#4
+/// Spec: m2-124/6.7#7, m2-124/6.7#8, m2-124/6.7#13, m2-124/6.9#4
 #[test]
 fn a_wrong_secret_is_answered_after_a_delay_and_the_client_gives_up() {
     let mut sim = secret_sim("0000");
@@ -361,7 +363,7 @@ fn the_delay_after_each_failed_digest_doubles() {
     assert_eq!(drain(&mut sim), 1);
 }
 
-/// Spec: m2-124/6.7#12
+/// Spec: m2-124/6.7#13
 #[test]
 fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     let mut sim = Sim::new(
@@ -413,7 +415,7 @@ static NONCE_CALLS: AtomicU8 = AtomicU8::new(0);
 
 fn counting_nonce() -> Result<Nonce, EntropyError> {
     let n = NONCE_CALLS.fetch_add(1, Ordering::SeqCst);
-    Ok(Nonce::from_entropy([n; 16]))
+    Ok(Nonce::new([b'a' + n; 16]).unwrap())
 }
 
 fn no_nonce() -> Result<Nonce, EntropyError> {
@@ -494,7 +496,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     ));
 }
 
-/// Spec: m2-124/6.9#5, m2-124/6.9#8
+/// Spec: m2-124/6.9#5
 #[test]
 fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_invitation() {
     let mut sim = secret_sim("5483");
@@ -518,7 +520,7 @@ fn users_sim(user: &str, password: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#9, m2-124/6.10#1
+/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#10, m2-124/6.10#1
 #[test]
 fn a_known_user_with_the_right_password_establishes_the_session() {
     let mut sim = users_sim("Rosa", "RPBqBno");
@@ -530,7 +532,7 @@ fn a_known_user_with_the_right_password_establishes_the_session() {
     ));
 }
 
-/// Spec: m2-124/6.8#10, m2-124/6.10#5
+/// Spec: m2-124/6.8#11, m2-124/6.10#5
 #[test]
 fn an_unknown_user_is_told_the_user_was_not_found() {
     let mut sim = users_sim("Bob", "RPBqBno");
@@ -559,6 +561,115 @@ fn a_wrong_password_is_told_the_digest_is_wrong() {
         peer: host_addr(),
         cause: AuthFailure::DigestWrong
     }));
+}
+
+/// What a Client answers when a challenge reaches it: the NAKs, as a Host
+/// would see them.
+fn naks_from_client(sim: &Sim) -> Vec<(NakReason, u32)> {
+    sim.commands(Direction::ClientToHost)
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Nak(n) => Some((n.reason, n.refused.word())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn auth_required() -> Command {
+    Command::AuthRequired(AuthChallenge {
+        state: AuthState::First,
+        nonce: fixed_nonce(),
+        identity: identity("Studio", "HOST-1"),
+    })
+}
+
+fn user_auth_required() -> Command {
+    Command::UserAuthRequired(UserAuthChallenge {
+        state: UserAuthState::First,
+        nonce: fixed_nonce(),
+        identity: identity("Studio", "HOST-1"),
+    })
+}
+
+/// Spec: m2-124/6.7#10, m2-124/6.8#8
+#[test]
+fn a_client_that_sent_no_invitation_naks_a_challenge_as_not_expected() {
+    for challenge in [auth_required(), user_auth_required()] {
+        let mut sim = Sim::new(
+            HostConfig::new(identity("Studio", "HOST-1")),
+            Credentials::none().with_secret("1234"),
+            SessionConfig::default(),
+        );
+        sim.client
+            .on_message(host_addr(), &datagram(&challenge), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, challenge.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::Idle);
+    }
+}
+
+/// M2-124 sections 6.7 and 6.8: a Client that did not advertise the method in
+/// its Invitation answers its challenge with NAK 0x02 (Command Not Expected).
+/// Spec: m2-124/6.7#11, m2-124/6.8#9
+#[test]
+fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
+    let cases = [
+        // Holds a user, advertised USER: a shared-secret challenge is unexpected.
+        (
+            Credentials::none().with_user(Username::new("Rosa").unwrap(), "pw"),
+            auth_required(),
+        ),
+        // Holds a secret, advertised SHARED_SECRET: a user challenge is unexpected.
+        (
+            Credentials::none().with_secret("1234"),
+            user_auth_required(),
+        ),
+        // Advertised nothing: neither is expected.
+        (Credentials::none(), auth_required()),
+        (Credentials::none(), user_auth_required()),
+    ];
+    for (credentials, challenge) in cases {
+        // A Host that holds the Invitation pending leaves it unanswered.
+        let mut sim = Sim::new(
+            host_with(Admission::Confirm),
+            credentials,
+            SessionConfig::default(),
+        );
+        sim.client.connect(sim.now);
+        sim.client
+            .on_message(host_addr(), &datagram(&challenge), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, challenge.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::PendingInvitation);
+        assert!(
+            !sim.client_events
+                .iter()
+                .any(|e| matches!(e, Event::AuthenticationFailed { .. })),
+            "an unexpected challenge is not a failed authentication"
+        );
+    }
+}
+
+/// A NAK quotes the refused command's header as it arrived, reserved bits included.
+/// Spec: m2-124/5.3#6, m2-124/6.15#4
+#[test]
+fn a_nak_quotes_the_header_as_received() {
+    let mut sim = established();
+    // A Ping Reply for a Ping never sent, with its reserved data bits set.
+    let mut bytes = b"MIDI".to_vec();
+    bytes.extend_from_slice(&[0x21, 0x01, 0x12, 0x34, 0, 0, 0, 9]);
+    sim.client.on_message(host_addr(), &bytes, sim.now);
+    sim.flush();
+    assert_eq!(
+        naks_from_client(&sim),
+        vec![(NakReason::BadPingReply, 0x2101_1234)]
+    );
 }
 
 // ---- Data transfer ----
@@ -638,11 +749,11 @@ fn no_fec() -> SessionConfig {
 }
 
 fn lossy_sim(client: SessionConfig, lost: Vec<usize>) -> Sim {
-    let mut sim = Sim::new(
-        HostConfig::new(identity("Studio", "HOST-1")),
-        Credentials::none(),
-        client,
-    );
+    lossy_sim_with(HostConfig::new(identity("Studio", "HOST-1")), client, lost)
+}
+
+fn lossy_sim_with(host: HostConfig, client: SessionConfig, lost: Vec<usize>) -> Sim {
+    let mut sim = Sim::new(host, Credentials::none(), client);
     sim.connect();
     sim.client_events.clear();
     sim.host_events.clear();
@@ -771,6 +882,39 @@ fn a_peer_without_retransmit_naks_the_request_and_the_gap_is_given_up() {
         .filter(|c| matches!(c, Command::RetransmitRequest(_)))
         .count();
     assert_eq!(requests, 1);
+}
+
+/// The wait between requests doubles from `reorder_wait`, and an hour is the
+/// most any wait is, so the doubling never overflows an `Instant`.
+#[test]
+fn the_wait_between_retransmit_requests_stops_doubling_at_the_timer_ceiling() {
+    let hour = Duration::from_secs(60 * 60);
+    let mut host = HostConfig::new(identity("Studio", "HOST-1"));
+    host.session = no_fec()
+        .with_reorder_wait(Duration::MAX)
+        .with_requests(Requests::UpTo(std::num::NonZeroU8::MAX))
+        .with_ping_interval(hour)
+        .with_liveness_timeout(Duration::MAX);
+    // Every retransmission is lost as well, so the gap stays open.
+    let mut sim = lossy_sim_with(host, no_fec(), std::iter::once(2).chain(4..60).collect());
+    for n in (60..63).map(note_on) {
+        sim.client.send(sim.now, &[n]).unwrap();
+        sim.flush();
+    }
+    let requests = |sim: &Sim| {
+        sim.commands(Direction::HostToClient)
+            .iter()
+            .filter(|c| matches!(c, Command::RetransmitRequest(_)))
+            .count()
+    };
+    assert_eq!(requests(&sim), 0, "the first wait is an hour");
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 1);
+    // The second wait would be two hours doubled; the ceiling holds it to one.
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 2);
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 3);
 }
 
 #[test]
@@ -909,12 +1053,141 @@ fn the_host_sends_to_the_client_too() {
     assert_eq!(Sim::umps(&sim.client_events), vec![note_on(72)]);
 }
 
+/// An edge counts what it loses: an application that never polls events keeps
+/// the first [`MAX_QUEUED_EVENTS`] and the count of the rest.
+#[test]
+fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
+    // A Client whose events nobody polls: datagrams cross by hand.
+    let now = Instant::now();
+    let mut host = Host::new(HostConfig::new(identity("Studio", "HOST-1")));
+    let mut client = Client::new(
+        identity("Laptop", "CLIENT-1"),
+        Credentials::none(),
+        SessionConfig::default(),
+        host_addr(),
+        now,
+    );
+    let deliver = |host: &mut Host, client: &mut Client, now| loop {
+        let mut moved = false;
+        while let Some(t) = client.poll_transmit() {
+            moved = true;
+            host.on_message(client_addr(), &t.payload, now);
+        }
+        while let Some(t) = host.poll_transmit() {
+            moved = true;
+            client.on_message(host_addr(), &t.payload, now);
+        }
+        if !moved {
+            break;
+        }
+    };
+    client.connect(now);
+    deliver(&mut host, &mut client, now);
+    assert_eq!(client.state(), SessionState::Established);
+    let batches = 300;
+    let per_batch = 16;
+    for batch in 0..batches {
+        // The first batch is the oldest data in the queue.
+        let note = if batch == 0 { 100 } else { 60 };
+        host.send(now, client_addr(), &[note_on(note); 16]).unwrap();
+        deliver(&mut host, &mut client, now);
+    }
+    // One Established event, then one per UMP delivered; the queue holds the
+    // first MAX_QUEUED_EVENTS.
+    let total = 1 + batches * per_batch;
+    assert!(total > MAX_QUEUED_EVENTS);
+    assert_eq!(client.events_lost(), (total - MAX_QUEUED_EVENTS) as u64);
+    let lost = client.events_lost();
+    // A Closed at a full queue is delivered and evicts the oldest data event.
+    host.close(now, client_addr(), ByeReason::PowerDown);
+    deliver(&mut host, &mut client, now);
+    assert_eq!(client.events_lost(), lost + 1);
+    let mut held = 0;
+    let mut first = None;
+    let mut last = None;
+    let mut oldest_notes = 0;
+    while let Some(event) = client.poll_event() {
+        if event
+            == (Event::Ump {
+                peer: host_addr(),
+                packet: note_on(100),
+            })
+        {
+            oldest_notes += 1;
+        }
+        first.get_or_insert_with(|| event.clone());
+        last = Some(event);
+        held += 1;
+    }
+    assert_eq!(held, MAX_QUEUED_EVENTS, "the queue never exceeds the cap");
+    assert_eq!(oldest_notes, per_batch - 1, "the oldest data event is gone");
+    assert!(matches!(first, Some(Event::Established { .. })));
+    assert!(matches!(
+        last,
+        Some(Event::Closed {
+            reason: ByeReason::PowerDown,
+            ..
+        })
+    ));
+}
+
+/// A queue full of session-life events loses its oldest to a newer one.
+#[test]
+fn a_queue_of_session_events_evicts_its_oldest_for_the_newest() {
+    let now = Instant::now();
+    let mut host = Host::new(HostConfig::new(identity("Studio", "HOST-1")));
+    let mut client = Client::new(
+        identity("Laptop", "CLIENT-1"),
+        Credentials::none(),
+        SessionConfig::default(),
+        host_addr(),
+        now,
+    );
+    let deliver = |host: &mut Host, client: &mut Client| loop {
+        let mut moved = false;
+        while let Some(t) = client.poll_transmit() {
+            moved = true;
+            host.on_message(client_addr(), &t.payload, now);
+        }
+        while let Some(t) = host.poll_transmit() {
+            moved = true;
+            client.on_message(host_addr(), &t.payload, now);
+        }
+        if !moved {
+            break;
+        }
+    };
+    // Each cycle is an Established and a Closed.
+    for _ in 0..MAX_QUEUED_EVENTS / 2 {
+        client.connect(now);
+        deliver(&mut host, &mut client);
+        host.close(now, client_addr(), ByeReason::UserTerminated);
+        deliver(&mut host, &mut client);
+    }
+    assert_eq!(client.state(), SessionState::Idle);
+    assert_eq!(client.events_lost(), 0);
+    // One more session-life event: the oldest (the first Established) goes.
+    client.connect(now);
+    deliver(&mut host, &mut client);
+    assert_eq!(client.events_lost(), 1);
+    let mut events = Vec::new();
+    while let Some(event) = client.poll_event() {
+        events.push(event);
+    }
+    assert_eq!(events.len(), MAX_QUEUED_EVENTS);
+    assert!(matches!(events[0], Event::Closed { .. }));
+    assert!(matches!(
+        events[MAX_QUEUED_EVENTS - 1],
+        Event::Established { .. }
+    ));
+}
+
 // ---- Idle periods ----
 
 fn zero_length(sim: &Sim) -> usize {
     data_commands(sim, Direction::ClientToHost)
         .iter()
-        .filter(|d| d.is_idle())
+        .filter(|d| d.words().is_empty())
         .map(|d| d.sequence())
         .collect::<std::collections::HashSet<_>>()
         .len()
@@ -934,7 +1207,7 @@ fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_number
     assert_eq!(zero_length(&sim), 3);
     let mut idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
         .iter()
-        .filter(|d| d.is_idle())
+        .filter(|d| d.words().is_empty())
         .map(|d| d.sequence().get())
         .collect();
     idle.sort_unstable();
@@ -1017,7 +1290,7 @@ fn quiet_peers_ping_each_other_and_keep_the_session_alive() {
     );
 }
 
-/// Spec: m2-124/6.14#1
+/// Spec: m2-124/6.14#1, m2-124/6.14#4
 #[test]
 fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     let mut sim = Sim::open();
@@ -1118,6 +1391,57 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
         Err(SendError::NotEstablished {
             state: SessionState::Idle
         })
+    );
+}
+
+/// A datagram holding one Bye (reason User Terminated) whose message field is
+/// `text`, padded with zero to a word.
+fn raw_bye(text: &[u8]) -> Vec<u8> {
+    let words = text.len().div_ceil(4);
+    let mut bytes = b"MIDI".to_vec();
+    bytes.extend_from_slice(&[0xF0, u8::try_from(words).unwrap(), 0x01, 0x00]);
+    bytes.extend_from_slice(text);
+    bytes.resize(8 + words * 4, 0);
+    bytes
+}
+
+/// Table 26: a Bye's payload length is 0..255 words, so its message is up to 1020 bytes.
+/// Spec: m2-124/6.16#1, m2-124/6.16#5
+#[test]
+fn a_bye_with_the_longest_message_the_wire_allows_ends_the_session() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &raw_bye(&[b'x'; 1020]), sim.now);
+    sim.flush();
+    assert_eq!(sim.client.state(), SessionState::Idle);
+    assert!(sim.client_events.contains(&Event::Closed {
+        peer: host_addr(),
+        ended_by: EndedBy::Remote,
+        reason: ByeReason::UserTerminated
+    }));
+    assert!(
+        sim.commands(Direction::ClientToHost)
+            .contains(&Command::ByeReply)
+    );
+}
+
+/// The message is advisory: a message that is not UTF-8 does not keep the Session open.
+/// Spec: m2-124/6.16#1, m2-124/6.16#5
+#[test]
+fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &raw_bye(b"ok\xFF\xFEtail"), sim.now);
+    sim.flush();
+    assert_eq!(sim.client.state(), SessionState::Idle);
+    assert!(sim.client_events.contains(&Event::Closed {
+        peer: host_addr(),
+        ended_by: EndedBy::Remote,
+        reason: ByeReason::UserTerminated
+    }));
+    assert!(
+        sim.commands(Direction::ClientToHost)
+            .contains(&Command::ByeReply)
     );
 }
 

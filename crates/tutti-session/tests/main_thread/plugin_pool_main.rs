@@ -85,7 +85,10 @@ fn session() -> Session {
 }
 
 /// Updates, on this (the main) thread, until the key's next pool event.
-fn next_event<C: tutti_session::Clock>(s: &mut Session<C>, key: &'static str) -> PoolEvent {
+fn next_event<K: tutti_session::AppKey, C: tutti_session::Clock>(
+    s: &mut Session<K, C>,
+    key: &'static str,
+) -> PoolEvent {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         for event in s.update() {

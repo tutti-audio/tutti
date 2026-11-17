@@ -96,3 +96,18 @@ fn refilling_past_the_cap_every_block_stays_at_the_cap() {
         assert!(v.is_overflowed());
     }
 }
+
+/// `pop` takes the last item and leaves the overflow flag latched: a pop does
+/// not undo a refused push.
+#[test]
+fn pop_takes_the_last_item_and_keeps_the_flag() {
+    let mut v: RtVec<u8, 2> = RtVec::new();
+    assert_eq!(v.pop(), None);
+    v.extend([1, 2, 3]);
+    assert!(v.is_overflowed());
+    assert_eq!(v.pop(), Some(2));
+    assert_eq!(v.as_slice(), &[1]);
+    assert!(v.is_overflowed(), "still latched");
+    assert!(v.push(9));
+    assert_eq!(v.as_slice(), &[1, 9]);
+}

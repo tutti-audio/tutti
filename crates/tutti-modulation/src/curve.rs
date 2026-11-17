@@ -8,7 +8,7 @@
 //! the trait.
 
 use tutti_curve::{Law, Trajectory};
-use tutti_types::Beat;
+use tutti_types::{Beat, Unit};
 
 /// The piece of a [`Curve`] a beat falls in, between two breakpoints: what a
 /// producer of curve-segment events ([`Curve::segment_at`]) sends once per
@@ -89,9 +89,11 @@ pub trait Curve: Send + Sync {
     }
 }
 
-impl Curve for Trajectory {
+/// A trajectory of any `f32` unit reads at its raw value: the lane that
+/// consumes a `Curve` knows its target's unit.
+impl<U: Unit<Raw = f32> + Send + Sync> Curve for Trajectory<U> {
     fn value_at(&self, beat: Beat) -> Option<f32> {
-        Trajectory::value_at(self, beat)
+        Trajectory::value_at(self, beat).map(U::to_raw)
     }
 
     /// The trajectory's breakpoints, each breakpoint's `curve` the law of the piece it
@@ -104,14 +106,19 @@ impl Curve for Trajectory {
         if points.is_empty() {
             return None;
         }
-        let inside = |v: f32| self.range().is_none_or(|(min, max)| v >= min && v <= max);
+        let inside = |v: U| {
+            self.range()
+                .is_none_or(|(min, max)| v.to_raw() >= min.to_raw() && v.to_raw() <= max.to_raw())
+        };
         // The first point after `beat`: the piece is the one before it.
         let next = points.partition_point(|p| p.time <= beat);
         // Before the first point or from the last on: that point's value,
         // clamped as `value_at` clamps it.
         let hold = |until: Option<Beat>| {
-            self.value_at(beat)
-                .map(|value| CurveSegment::Hold { value, until })
+            self.value_at(beat).map(|value| CurveSegment::Hold {
+                value: value.to_raw(),
+                until,
+            })
         };
         if next == 0 {
             return hold(Some(points[0].time));
@@ -126,8 +133,8 @@ impl Curve for Trajectory {
         Some(CurveSegment::Move {
             start: p.time,
             end: q.time,
-            from: p.value,
-            to: q.value,
+            from: p.value.to_raw(),
+            to: q.value.to_raw(),
             shape: p.law,
         })
     }

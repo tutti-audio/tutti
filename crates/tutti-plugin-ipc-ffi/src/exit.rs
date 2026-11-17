@@ -107,8 +107,17 @@ mod tests {
     /// owner reads the status within a bound all the same.
     #[test]
     fn a_child_that_ended_before_the_wait_was_made_is_learned_of() {
-        let mut child = quick().spawn().expect("the command spawns");
-        std::thread::sleep(Duration::from_millis(100));
+        let mut child = quick()
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("the command spawns");
+        // The child closes its stdout as it ends: the read returns once the
+        // child is gone, and the wait below is made after.
+        std::io::copy(
+            &mut child.stdout.take().expect("piped"),
+            &mut std::io::sink(),
+        )
+        .expect("the pipe reads to its end");
         let wait = ExitWait::of(&child);
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {

@@ -4,27 +4,13 @@
 use core::iter::FusedIterator;
 
 use crate::field::first_non_seven_bit;
-use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
+use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 
-/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) tutti
-/// carries: 64 KiB. It is tutti's cap on one message, used to size a
-/// [`SysexAssembler`] buffer, and **not a limit the spec sets**: M2-104 section
-/// 7.7 lets a message span a Start, any number of Continue UMPs and an End,
-/// and states no maximum.
-///
-/// A cap exists because the hazard is not a large dump but a **lost
-/// terminator**: a device unplugged mid-dump, or a dropped buffer, leaves a
-/// reassembler mid-message with no end ever arriving, and an uncapped buffer
-/// then grows for the lifetime of the connection.
-///
-/// 64 KiB sits above real traffic and below anything alarming: the largest
-/// thing MIDI-CI negotiates is a Property Exchange chunk, and CI's own
-/// `max_sysex_size` is a 28-bit field that devices populate with values in the
-/// hundreds-to-low-thousands of bytes. Synth bulk dumps (a 32-voice DX7 bank
-/// is 4104 bytes) and sample-dump packets are far below it. A message past
-/// this is a fault, not a big message. A path's event caps can be lower: a
-/// plugin node takes at most 256 MIDI events a chunk, so a dump whose packets
-/// arrive in one block reaches a plugin only up to 1536 payload bytes.
+/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
+/// passes a [`SysexAssembler`] as its `max_message` less the two delimiters:
+/// 64 KiB. It is this crate's cap on one message, not a limit the spec sets
+/// (M2-104 §7.7 states no maximum); an assembler drops and counts a message
+/// past its `max_message`.
 pub const SYSEX7_MAX_PAYLOAD: usize = 64 * 1024;
 
 /// The most bytes one SysEx7 packet adds to a buffer: six payload bytes and
@@ -141,11 +127,79 @@ impl<'a> SysexMessage<'a> {
 #[derive(Clone, Debug)]
 pub struct Sysex7Packets<'a> {
     group: MidiGroup,
-    /// The payload not yet packed: every byte below 128, checked by the caller's
-    /// type (`U7`, `SysexMessage`).
-    rest: &'a [u8],
+    /// The payload not yet packed.
+    rest: Rest<'a>,
+    /// Where the run lies in its message.
+    part: SysexPart,
     /// Whether a packet has been yielded, so an empty payload is one packet.
-    started: bool,
+    emitted: bool,
+}
+
+/// The payload of a [`Sysex7Packets`] run, 7-bit by its owner's type.
+#[derive(Clone, Copy, Debug)]
+enum Rest<'a> {
+    /// Plain bytes checked by [`first_non_seven_bit`] or [`SysexMessage`].
+    Bytes(&'a [u8]),
+    /// A part's values, 7-bit by their type.
+    Seven(&'a [U7]),
+}
+
+impl Rest<'_> {
+    const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    const fn len(&self) -> usize {
+        match self {
+            Self::Bytes(b) => b.len(),
+            Self::Seven(s) => s.len(),
+        }
+    }
+
+    /// The first (up to) six values and what follows them.
+    fn split(self) -> ([U7; 6], usize, Self) {
+        let mut chunk = [U7::default(); 6];
+        let n = self.len().min(6);
+        match self {
+            Self::Bytes(b) => {
+                // Every byte is below 128 by the owner's check, so `masked` drops no bit.
+                for (slot, &v) in chunk.iter_mut().zip(&b[..n]) {
+                    *slot = U7::masked(v);
+                }
+                (chunk, n, Self::Bytes(&b[n..]))
+            }
+            Self::Seven(s) => {
+                chunk[..n].copy_from_slice(&s[..n]);
+                (chunk, n, Self::Seven(&s[n..]))
+            }
+        }
+    }
+}
+
+/// Where a run of SysEx7 packets lies in its message (M2-104 section 7.7): the
+/// whole of it, or one of the parts a divided message is sent in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SysexPart {
+    /// The whole message.
+    Only,
+    /// The first part of a divided message.
+    First,
+    /// A part between the first and the last.
+    Middle,
+    /// The last part of a divided message.
+    Last,
+}
+
+impl SysexPart {
+    /// Whether the part's first packet is the message's first.
+    const fn opens(self) -> bool {
+        matches!(self, Self::Only | Self::First)
+    }
+
+    /// Whether the part's last packet is the message's last.
+    const fn closes(self) -> bool {
+        matches!(self, Self::Only | Self::Last)
+    }
 }
 
 impl<'a> Sysex7Packets<'a> {
@@ -164,11 +218,30 @@ impl<'a> Sysex7Packets<'a> {
         }
     }
 
+    /// The packets of one `part` of a message, `data` being the part's bytes.
+    ///
+    /// The first packet of a [`First`](SysexPart::First) part is a `Start`
+    /// (a `Complete` when the part is [`Only`](SysexPart::Only)), the last
+    /// packet of a [`Last`](SysexPart::Last) part an `End`, and every other
+    /// packet a `Continue`; each carries six bytes except a part's last, which
+    /// carries the rest. A part with no bytes is one packet with none. The
+    /// caller sends a divided message's parts in order, `First` through `Last`.
+    #[must_use]
+    pub fn part(group: MidiGroup, data: &'a [U7], part: SysexPart) -> Self {
+        Self {
+            group,
+            rest: Rest::Seven(data),
+            part,
+            emitted: false,
+        }
+    }
+
     fn over(group: MidiGroup, payload: &'a [u8]) -> Self {
         Self {
             group,
-            rest: payload,
-            started: false,
+            rest: Rest::Bytes(payload),
+            part: SysexPart::Only,
+            emitted: false,
         }
     }
 }
@@ -177,27 +250,22 @@ impl Iterator for Sysex7Packets<'_> {
     type Item = Ump;
 
     fn next(&mut self) -> Option<Ump> {
-        if self.started && self.rest.is_empty() {
+        if self.emitted && self.rest.is_empty() {
             return None;
         }
-        let status = match (self.started, self.rest.len() > 6) {
-            (false, false) => SysexStatus::Complete,
-            (false, true) => SysexStatus::Start,
-            (true, true) => SysexStatus::Continue,
-            (true, false) => SysexStatus::End,
-        };
-        let (chunk, rest) = self.rest.split_at(self.rest.len().min(6));
+        let (chunk, n, rest) = self.rest.split();
+        let status = SysexStatus::of_run(
+            !self.part.opens() || self.emitted,
+            !rest.is_empty() || !self.part.closes(),
+        );
         self.rest = rest;
-        self.started = true;
-        let mut data = [0u8; 6];
-        data[..chunk.len()].copy_from_slice(chunk);
-        let packet = Sysex7Packet::new(status, &data[..chunk.len()])
-            .expect("at most six bytes, each below 128");
+        self.emitted = true;
+        let packet = Sysex7Packet::of_chunk(status, &chunk[..n]);
         Some(Ump::from(Message::Sysex7(self.group, packet)))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = match (self.started, self.rest.len()) {
+        let n = match (self.emitted, self.rest.len()) {
             (true, 0) => 0,
             (_, len) => len.div_ceil(6).max(1),
         };
@@ -323,16 +391,10 @@ enum Run {
 /// Mixed Data Set UMP. A Utility or UMP Stream message has no Group and ends
 /// nothing; neither does a reserved type, which names no Group here.
 ///
-/// # Why there is no block guard
+/// # Block contract
 ///
-/// A design where the assembler lends one block (`block() -> Block<'_>`, a
-/// `push` that lends the finished message, the block ending on drop) was
-/// weighed and not built: its six callers (the CLAP, VST2, VST3 and AU hosts,
-/// the plugin intake and MIDI-CI) hand a plugin a pointer to every message of
-/// a block at once, so they keep each [`SysexRef`] until the whole block is
-/// pushed. A lending `push` would make each copy its message first. The
-/// contract stays in prose: read a [`SysexRef`] only before the next
-/// [`begin_block`](Self::begin_block).
+/// A [`SysexRef`] is valid until the next [`begin_block`](Self::begin_block);
+/// read it before then.
 ///
 /// # Policy
 ///
@@ -528,7 +590,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
         if let Some(group) = ump.group() {
             // System Real Time (type 1, status 0xF8..=0xFF) may be inserted
             // between the UMPs of a message; anything else on the Group ends it.
-            let real_time = ump.message_type() == 0x1 && (ump.0[0] >> 16) & 0xFF >= 0xF8;
+            let real_time = ump.is_system_real_time();
             if !real_time {
                 self.end_run(group.index());
             }

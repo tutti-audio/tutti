@@ -187,13 +187,6 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// The OS port layer failed: enumeration, opening a device or its
-    /// watch. Only a session with `midi-hardware` has a fallible MIDI step of
-    /// this kind.
-    #[cfg(feature = "midi-hardware")]
-    #[error("MIDI hardware: {0}")]
-    Hardware(#[from] tutti_midi_hardware::Error),
-
     /// A MIDI file could not be read, built or written.
     #[error("MIDI file: {0}")]
     File(#[from] tutti_midi_file::Error),
@@ -203,13 +196,10 @@ pub enum MidiError {
     #[error("MIDI load: {0}")]
     Job(#[from] crate::WorkerError),
 
-    /// A message was not queued ([`PushError::Full`](tutti_rt::PushError::Full)).
-    #[error("MIDI send: {0}")]
-    Send(#[from] tutti_rt::PushError),
-
-    /// There is no such route rule ([`Midi::unroute`](crate::Midi::unroute)).
-    #[error(transparent)]
-    NoSuchRoute(#[from] crate::NoSuchMidiRoute),
+    /// There is no route rule with this id ([`Midi::unroute`](crate::Midi::unroute)):
+    /// removed already, or never added.
+    #[error("no MIDI route {0:?}")]
+    NoSuchRoute(crate::MidiRouteId),
 
     /// A MIDI call named a target that is not in the graph, or takes no
     /// MIDI (it has no event input): `Midi::play_clip`, `Midi::input`,
@@ -217,16 +207,14 @@ pub enum MidiError {
     #[error("{0:?} takes no MIDI: it is not in the graph, or has no event input")]
     NoEventInput(tutti_graph::NodeKey),
 
+    /// A tap on a MIDI port could not be opened: the port is not in the graph.
+    #[error("MIDI tap")]
+    Tap(#[source] tutti_graph::MissingSource),
+
     /// A follower named a node that is not the ingest node of an input port
     /// (`MidiInput::node`).
     #[error("{0:?} is not the ingest node of a MIDI input port")]
     NotAnInput(tutti_graph::NodeKey),
-
-    /// A call on a port layer that is not there: a session with no OS MIDI
-    /// layer is [`MidiPortError::NoHardware`](crate::MidiPortError::NoHardware).
-    #[cfg(feature = "midi-hardware")]
-    #[error(transparent)]
-    Port(#[from] crate::MidiPortError),
 
     /// `Midi::retarget` named a node that is not a clip of the session's.
     #[error("{0:?} is not a clip of this session's")]
@@ -273,10 +261,6 @@ pub enum MidiError {
     #[error("the session is not following MIDI Machine Control")]
     NotFollowingMachineControl,
 
-    /// `Midi::stop_sending_machine_control` with no Machine Control being sent.
-    #[error("the session is not sending MIDI Machine Control")]
-    NotSendingMachineControl,
-
     /// A tempo has one source: `Midi::follow_tempo` and a Beat Clock
     /// `Midi::follow_clock` each publish the tempo map, so one is refused while
     /// the other is followed.
@@ -313,28 +297,6 @@ impl std::fmt::Display for RouteDeclarer {
         })
     }
 }
-
-#[cfg(feature = "midi")]
-macro_rules! midi_cause_into_error {
-    ($($(#[$m:meta])* $ty:ty),* $(,)?) => {$(
-        $(#[$m])*
-        impl From<$ty> for Error {
-            fn from(e: $ty) -> Self {
-                Self::Midi(e.into())
-            }
-        }
-    )*};
-}
-
-// `?` on a cause reaches the session's one `Error` in a step.
-#[cfg(feature = "midi")]
-midi_cause_into_error!(
-    #[cfg(feature = "midi-hardware")]
-    tutti_midi_hardware::Error,
-    tutti_midi_file::Error,
-    tutti_rt::PushError,
-    crate::NoSuchMidiRoute,
-);
 
 /// Every subsystem's error, so `?` propagates across crate boundaries.
 ///
@@ -460,6 +422,13 @@ pub enum Error {
     #[error(transparent)]
     Midi(#[from] MidiError),
 
+    /// The OS MIDI layer could not start
+    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
+    /// enumeration or the device watch failed.
+    #[cfg(feature = "midi-hardware")]
+    #[error("MIDI hardware: {0}")]
+    MidiHardware(tutti_midi_hardware::Error),
+
     /// [`Session::instrument`](crate::Session::instrument) (or
     /// `add_instrument`) was given a node that cannot be played as an
     /// instrument.
@@ -486,10 +455,6 @@ pub enum Error {
     /// A whole-bus connection was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]
     Connect(#[from] ConnectError),
-
-    /// A param write was refused ([`Graph::set_param`](crate::Graph::set_param)).
-    #[error(transparent)]
-    Param(#[from] crate::ParamError),
 
     /// A modulation range was refused (`Mods::range`).
     #[error(transparent)]

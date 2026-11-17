@@ -32,12 +32,6 @@ pub(crate) fn tempo_in_effect(asked: Bpm, in_force: Bpm) -> Bpm {
     }
 }
 
-/// The loop of a block's transport, as the clock takes it.
-fn loop_of(from: &tutti_graph::TransportPosition) -> Option<tutti_types::LoopRange> {
-    from.looping
-        .and_then(|l| tutti_types::LoopRange::new(l.start, l.end))
-}
-
 /// The untimed transport inputs a graph block is rendered under,
 /// read **once** per block (at the start of the engine's walk): a store from
 /// the control thread lands at the next block, never at a cut in this one.
@@ -314,13 +308,7 @@ impl TransportClock {
             !control.paused,
             self.clock.tempo(),
             self.clock.origin(),
-            control
-                .loop_region
-                .active()
-                .map(|r| tutti_graph::LoopRange {
-                    start: r.start(),
-                    end: r.end(),
-                }),
+            control.loop_region.active(),
         )
         .with_recording(control.recording)
     }
@@ -349,7 +337,7 @@ impl TransportClock {
         map: Option<&TempoMap>,
     ) {
         if from.playing {
-            let region = loop_of(from);
+            let region = from.looping;
             match map {
                 Some(map) => {
                     self.walk.roll(map, &mut self.clock, frames, region, false);
@@ -376,7 +364,7 @@ impl TransportClock {
             return TempoAhead::NONE;
         };
         self.walk
-            .ahead(map, &self.clock, frames, loop_of(from), cap, |clock| {
+            .ahead(map, &self.clock, frames, from.looping, cap, |clock| {
                 tutti_graph::TransportPosition::counted(
                     true,
                     clock.tempo(),

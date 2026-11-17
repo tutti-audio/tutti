@@ -26,8 +26,8 @@ use tutti_modulation::{
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
 use tutti_types::{
-    Amplitude, AtomicF32, Beat, Bpm, ChannelLayout, Depth, Frame, FrameClock, Hz, ParamKey,
-    SampleRate, Samples, Seconds, UnitParam,
+    Amplitude, AtomicF32, Ballistics, Beat, Bpm, ChannelLayout, Depth, Frame, FrameClock, Hz,
+    ParamKey, SampleRate, Samples, Seconds, UnitParam,
 };
 use tutti_ump::NoteVelocity;
 
@@ -465,8 +465,7 @@ fn pole(tau: f32) -> f64 {
 fn follower(source: u32, attack: f32, release: f32, width: ChannelLayout) -> EnvelopeFollowerNode {
     EnvelopeFollowerNode::new(
         SourceId(source),
-        Seconds::from_f32(attack),
-        Seconds::from_f32(release),
+        Ballistics::new(Seconds::from_f32(attack), Seconds::from_f32(release)).unwrap(),
         width,
     )
 }
@@ -1185,12 +1184,13 @@ fn a_zero_attack_and_release_follow_exactly() {
     assert_eq!(all[3][1_024], 0.0, "fell to silence without lag");
 }
 
-/// **An infinite release holds the peak.** 0.6 for 500 frames (attack 0:
-/// followed exactly), then silence into a release of `∞`: every grid piece
+/// **A release too long to move holds the peak.** 0.6 for 500 frames (attack 0:
+/// followed exactly), then silence into a release of 1e30 s, whose per-frame
+/// coefficient is exactly 0 (a `Ballistics` time is finite): every grid piece
 /// after the burst ends at 0.6, and so does the value a lane reads at the
 /// end.
 #[test]
-fn an_infinite_release_holds_the_peak() {
+fn a_release_too_long_to_move_holds_the_peak() {
     let (mut ed, mut exec) = editor(128);
     ed.insert(
         NodeKey(1),
@@ -1203,7 +1203,7 @@ fn an_infinite_release_holds_the_peak() {
     ed.insert(
         NodeKey(2),
         "follower",
-        ForkByClone(follower(1, 0.0, f32::INFINITY, ChannelLayout::MONO)),
+        ForkByClone(follower(1, 0.0, 1e30, ChannelLayout::MONO)),
     );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);

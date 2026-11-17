@@ -3,7 +3,7 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_dsp::{ChannelOutOfRange, Polarity};
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
+use tutti_types::{ChannelIndex, ChannelLayout, MAX_CHANNELS};
 
 use crate::kernel::through_planes;
 
@@ -11,19 +11,19 @@ use crate::kernel::through_planes;
 ///
 /// ```
 /// use tutti_nodes::{PolarityConfig, PolarityNode};
-/// use tutti_types::ChannelLayout;
+/// use tutti_types::{ChannelIndex, ChannelLayout};
 ///
 /// // Invert the right channel of a stereo pair.
-/// let config = PolarityConfig::new(ChannelLayout::STEREO).only([1]);
+/// let config = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);
 /// let node = PolarityNode::try_from(config).unwrap();
 /// // The layout has no third channel.
-/// assert!(PolarityNode::try_from(PolarityConfig::new(ChannelLayout::STEREO).only([2])).is_err());
+/// assert!(PolarityNode::try_from(PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(2)])).is_err());
 /// # let _ = node;
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolarityConfig {
     width: ChannelLayout,
-    only: Option<Vec<usize>>,
+    only: Option<Vec<ChannelIndex>>,
 }
 
 impl PolarityConfig {
@@ -39,7 +39,7 @@ impl PolarityConfig {
     /// Only `channels` inverted, the rest passed. A channel past the width is refused when
     /// the node is made ([`PolarityError::NoSuchChannel`]); naming none inverts none.
     #[must_use]
-    pub fn only(self, channels: impl IntoIterator<Item = usize>) -> Self {
+    pub fn only(self, channels: impl IntoIterator<Item = ChannelIndex>) -> Self {
         Self {
             only: Some(channels.into_iter().collect()),
             ..self
@@ -146,7 +146,7 @@ mod tests {
     /// Only the named channels are negated: of four, channels 1 and 3.
     #[test]
     fn only_the_named_channels_are_negated() {
-        let mut n = node(PolarityConfig::new(4u16).only([1, 3]));
+        let mut n = node(PolarityConfig::new(4u16).only([1, 3].map(ChannelIndex::of)));
         let x = [0.25f32, -0.5, 1.0];
         let out = drive_block(&mut n, &[&x, &x, &x, &x]);
         for (c, o) in out.iter().enumerate() {
@@ -160,10 +160,12 @@ mod tests {
     #[test]
     fn a_channel_outside_the_layout_is_refused() {
         assert_eq!(
-            PolarityNode::try_from(PolarityConfig::new(ChannelLayout::STEREO).only([0, 2]))
-                .unwrap_err(),
+            PolarityNode::try_from(
+                PolarityConfig::new(ChannelLayout::STEREO).only([0, 2].map(ChannelIndex::of))
+            )
+            .unwrap_err(),
             PolarityError::NoSuchChannel(ChannelOutOfRange {
-                channel: 2,
+                channel: ChannelIndex::of(2),
                 width: 2
             })
         );

@@ -87,6 +87,7 @@ mod placements;
 mod taps;
 mod unwired;
 use cells::LiveCells;
+pub use commit::Rewired;
 pub use errors::{CloseError, CommitError, MissingSource};
 use lifecycle::Lifecycle;
 use link::Link;
@@ -225,7 +226,7 @@ pub struct Editor<F: Float = f32> {
     /// whether it is leaving, and its generation count.
     placements: Placements<F>,
     /// The open taps: each reader's width and end latch.
-    taps: Outlets<TapId, TapWriter, TapOpened>,
+    taps: Outlets<TapId, TapWriter<F>, TapOpened>,
     /// The open event taps.
     event_taps: Outlets<EventTapId, EventTapWriter, ()>,
     /// The open meters: each one's lane capacity.

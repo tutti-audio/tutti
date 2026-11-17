@@ -17,8 +17,8 @@ fn lookup(c: &mut Criterion) {
     for n in [1usize, 100, 10_000] {
         for shape in [
             Transition::Step,
-            Transition::RampTime,
-            Transition::RampBeats,
+            Transition::RampTime { end: None },
+            Transition::RampBeats { end: None },
         ] {
             let map = TempoMap::new((0..n).map(|i| TempoPoint {
                 beat: Beat(i as f64 * 4.0),

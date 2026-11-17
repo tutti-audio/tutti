@@ -7,11 +7,14 @@
 //! transposed `(group, channel)` pair does not compile. [`Message`] is one
 //! defined message as a `Copy` value with no lifetime. [`Ump::decode`]
 //! (and `TryFrom<Ump> for Message`) and `From<Message> for Ump` hold the bit
-//! positions of every message; the one other reader is `Ump::is_note_off` (and
-//! `Ump::words`, which reads the type nibble), which a test ties to
-//! `Ump::decode`. MIDI 1.0 on the wire is the other place that knows bit
-//! positions: [`Voice1::bytes`] and [`System::bytes`] write a message's bytes,
-//! [`frame`] adds a SysEx's delimiters, and [`Midi1Parser`] reads a byte stream
+//! positions of every message. The packet-level readers and writers on [`Ump`]
+//! (`words`, `message_type`, `group`, `channel`, `is_note_off`,
+//! `is_system_real_time`, `note_key_event`, `note_off`, `sustain_up`) are the only
+//! other code that shifts a packet's bits, and each agrees with `decode` and
+//! `encode` on every packet (a test holds it). MIDI 1.0 on the wire is the
+//! other place that knows bit positions: [`Voice1::bytes`] and
+//! [`System::bytes`] write a message's bytes, [`frame`] adds a SysEx's
+//! delimiters, and [`Midi1Parser`] reads a byte stream
 //! into [`Message`]s. [`NoteId`] is a note's identity (`channel * 128 + note`,
 //! the plugin formats' wire value), and [`SysexMessage`] and [`SysexAssembler`]
 //! are a checked complete SysEx and the one SysEx7 reassembler (a stream per
@@ -64,7 +67,7 @@
 //! a whole string or SysEx message is reassembled above the codec, off the audio
 //! thread, by [`FlexTextAssembler`] and [`SysexAssembler`]. The limits on a
 //! reassembled name (Endpoint Name, Function Block Name, Product Instance Id)
-//! are not the codec's: `tutti-midi-device` checks them where it builds a name.
+//! are not the codec's: a consumer checks them where it builds a name.
 //!
 //! The fields are typed ([`NoteNumber`], [`U4`], [`U7`], [`U14`], [`Pitch`] and
 //! the address types). A public `new` refuses an out-of-range raw, `of` builds
@@ -119,8 +122,8 @@ pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
     ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-    MonoChannels, MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4,
-    U7, U14, U28, first_non_seven_bit,
+    MonoChannels, MpeChannels, NotSharpsFlats, NoteNumber, OutOfRange, Pitch, SharpsFlats,
+    TicksPerQuarterNote, U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
@@ -133,15 +136,15 @@ pub use flex_write::{
 pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
-    BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
+    BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity,
     DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
     Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
     MixedDataHeader, NotASoftwareRevision, PerNoteManagement, Protocol,
     RegisteredPerNoteController, SoftwareRevision, Stream, StreamConfig, Sysex7Packet,
     Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
-pub use messages::{Join, Span, Spans, spans, spans_joined};
+pub use messages::{Join, PacketSpan, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;
 pub use midi_group::MidiGroup;
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
@@ -158,11 +161,11 @@ pub use orchestral::{
 pub use reserved::{Field, Reserved, ReservedAccents, ReservedAttribute};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
-    SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
-    SysexStep,
+    SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexPart,
+    SysexRef, SysexStep,
 };
 pub use sysex8::{
     Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step, Sysex8Stream, Sysex8StreamIds,
 };
 pub use text::{StreamTextAssembler, TextPackets, text_packets};
-pub use ump::{Key, KeyEvent, Ump, split_stream};
+pub use ump::{NoteKey, NoteKeyEvent, Ump, split_stream};

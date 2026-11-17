@@ -23,10 +23,10 @@ use tutti_graph::{
 use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
-    AudioBufferMut, BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller,
-    EditorError, EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
-    MainWorkHandle, Normalized, Origin, ParamId, ParameterInfo, PluginBus, PluginDescriptor,
-    PluginError, PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused,
+    BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
+    EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
+    MainWorkHandle, Normalized, Origin, ParamId, ParameterInfo, PluginAudio, PluginBus,
+    PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused,
     RenderModeSupport, RestartRules, Samples, Speaker, Stuck, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
@@ -319,24 +319,25 @@ impl InProcess for Rec {
 
 impl Processor for RecProcessor {
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let AudioBufferMut::F32(buffer) = &mut io.buffer else {
+        let PluginAudio::F32(buffer) = &mut io.buffer else {
             unreachable!("the graph is f32");
         };
-        let frames = buffer.num_samples;
-        for (out, input) in buffer.outputs.iter_mut().zip(buffer.inputs) {
-            out[..frames].copy_from_slice(&input[..frames]);
+        let frames = buffer.frames().0;
+        let (input, mut output) = buffer.split();
+        for (mut out, input) in output.iter_mut().zip(input.iter()) {
+            out.samples_mut().copy_from_slice(input.samples());
         }
         if self.rig.record {
             let ctx = io.ctx;
             let transport = ctx.transport.expect("a transport is attached");
             self.rig.seen.lock().unwrap().push(Seen {
                 frames,
-                quarters: transport.position.quarters,
-                tempo: transport.timing.tempo,
+                quarters: transport.position.beat.get(),
+                tempo: transport.timing.tempo.get(),
                 changes: ctx
                     .transport_changes
                     .iter()
-                    .map(|c| (c.offset, c.transport.timing.tempo))
+                    .map(|c| (c.offset, c.transport.timing.tempo.get()))
                     .collect(),
                 moves: ctx
                     .transport_changes
@@ -345,7 +346,7 @@ impl Processor for RecProcessor {
                         (
                             c.offset,
                             c.transport.state.playing,
-                            c.transport.position.quarters,
+                            c.transport.position.beat.get(),
                         )
                     })
                     .collect(),
@@ -814,7 +815,7 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
             TempoPoint {
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
-                transition: Transition::RampTime,
+                transition: Transition::RampTime { end: None },
             },
             TempoPoint {
                 beat: Beat(100.0),

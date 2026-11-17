@@ -15,7 +15,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 /// - a `tutti_graph::ParamNode` (its params a `ParamSet`, forked by
 ///   `tutti_graph::param_parts`), whose impl returns its controls from
 ///   `params`: its params reached by address
-///   ([`Graph::set_param`](crate::Graph::set_param), control-rate
+///   ([`Session::set`](crate::Session::set) on a [`ParamTarget`](crate::ParamTarget), control-rate
 ///   modulation) and forked from what was set;
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
@@ -64,7 +64,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 /// ```
 pub trait SessionNode: IntoNode + Send + 'static {
     /// The node's params by address, read off its controls once it is in:
-    /// what [`Graph::set_param`](crate::Graph::set_param) writes through, and
+    /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and
     /// what a fork of the node starts from. `None`, the default, for a node
     /// with none.
     fn params(controls: &Self::Controls) -> Option<ParamSet> {
@@ -258,10 +258,10 @@ impl SessionNode for tutti_nodes::ClickNode {
     }
 }
 
-/// The MIDI clock as a graph node: its controls are the clock's master side
-/// (read by the session), no params.
+/// The transport sent as MIDI, as a graph node: its controls are its
+/// settings and losses, no params.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::ClockNode {
+impl SessionNode for tutti_midi_runtime::SyncOut {
     fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
@@ -454,7 +454,7 @@ mod tests {
         // A node that publishes nothing keeps none.
         assert!(!keeps_one(
             tutti_nodes::automation::AutomationLaneNode::new(
-                tutti_nodes::automation::Trajectory::new()
+                tutti_nodes::automation::Trajectory::<tutti_types::Hz>::new()
             )
         ));
     }

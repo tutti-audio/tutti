@@ -14,8 +14,10 @@
 //! node without a lock.
 //!
 //! - **Filters** — `SvfFilterNode`, `LadderFilterNode` (both any width, one
-//!   coefficient solve shared across the channels), `EqBandNode`, and `CutFilterNode`, a
-//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave, and
+//!   coefficient solve shared across the channels), `EqBandNode`, `CutFilterNode`, a
+//!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave,
+//!   `BellFilterNode`, a peaking equalizer matched to the analog bell up to Nyquist, and
+//!   `TiltFilterNode`, a first-order tilt about a pivot, and
 //!   `EnvelopeFilterNode`, an SVF whose cutoff follows the input's level.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
@@ -196,8 +198,8 @@
 //! ## Items
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
-//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]),
-//!   [`EnvelopeFilterNode`]; the coefficient solvers
+//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
+//!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
 //!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
 //!   is `tutti_buffers::Float` with [`Lanes`].
@@ -297,9 +299,11 @@ pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
+    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
     CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
-    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, LadderFilterNode, LadderKernel,
-    LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
+    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, EqControls, EqKernel,
+    LadderFilterNode, LadderKernel, LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
+    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
@@ -316,14 +320,15 @@ pub use tutti_dsp::{
 mod dynamics;
 pub use dynamics::{
     BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
-    CompressorNode, CompressorSet, GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode,
-    LimiterSet, MultibandCompressorNode, MultibandControls,
+    CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
+    GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode,
+    MultibandControls,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
-    CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
-    PeakDetection,
+    CompressorControls, DynamicEqControls, DynamicMode, GateControls, KeyFilter, KeySource,
+    LimiterControls, Lookahead, PeakDetection,
 };
 
 // Utilities: polarity, mid/side and stereo width.

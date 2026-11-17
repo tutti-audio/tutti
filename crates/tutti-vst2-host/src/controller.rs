@@ -203,6 +203,7 @@ impl Loaded for Vst2Loaded {
             scratch,
             audio,
             block_size: block,
+            sample_rate: rate,
             double_precision,
             host,
         });

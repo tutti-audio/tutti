@@ -6,10 +6,8 @@
 //! note-off whose note-on never left. [`by_message`] is that loop, and what it
 //! logs, once.
 
-use std::fmt::Display;
-
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::Span;
+use tutti_ump::PacketSpan;
 
 /// Why the OS did not take a message, and how much of it went first.
 #[derive(Debug)]
@@ -36,17 +34,17 @@ pub(super) struct Sent {
 /// sending it again would double it) and its remaining packets are lost.
 ///
 /// `backend` names the OS in the debug log of a refusal.
-pub(super) fn by_message<E: Display>(
+pub(super) fn by_message<E: std::error::Error>(
     events: &[Outgoing],
     backend: &str,
-    mut send: impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<E>>,
+    mut send: impl FnMut(PacketSpan<'_, Outgoing>) -> Result<(), Refused<E>>,
 ) -> Sent {
     let mut taken = Taken::NONE;
     for message in Outgoing::messages(events) {
         match send(message) {
             Ok(()) => taken = taken.through(message),
             Err(Refused { error, sent }) => {
-                tracing::debug!("{backend} send: {error}");
+                tracing::debug!("{backend} send: {}", crate::error::chain(&error));
                 if sent == 0 {
                     return Sent { taken, lost: 0 };
                 }

@@ -49,7 +49,7 @@
 
 use tutti_graph::{Cx, MAX_TRANSPORT_CHANGES, Offset};
 use tutti_tempo::TempoView;
-use tutti_types::{Beat, Samples, Seconds};
+use tutti_types::{Beat, LoopRange, Samples, Seconds};
 
 use crate::transport_source::{ProjectTime, Snapshot, SteadyTime, slope, transport_info};
 use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};
@@ -83,7 +83,7 @@ struct Stretch {
     beat: Beat,
     playing: bool,
     recording: bool,
-    looping: Option<(Beat, Beat)>,
+    looping: Option<LoopRange>,
     /// The map points at or before this beat were told already: a stretch a
     /// point started is at that point even when the engine's beat there is
     /// an ulp short of it (its cells lag a ramp), and must not predict it
@@ -148,8 +148,8 @@ impl Stretch {
             .map(|f| (self.frame + f, Kind::Point(next)));
         let wrap = self
             .looping
-            .filter(|(_, end)| end.get() > self.beat.get())
-            .and_then(|(_, end)| frames_to(end, view))
+            .filter(|l| l.end().get() > self.beat.get())
+            .and_then(|l| frames_to(l.end(), view))
             .map(|f| (self.frame + f, Kind::Wrap));
         match (point, wrap) {
             (Some(p), Some(w)) => Some(if w.0 <= p.0 { w } else { p }),
@@ -169,7 +169,7 @@ impl Stretch {
         view: &mut TempoView<'_>,
     ) -> bool {
         let rate = view.rate().get();
-        let looping = t.looping.map(|l| (l.start, l.end));
+        let looping = t.looping;
         if t.playing != self.playing || t.recording() != self.recording || looping != self.looping {
             return false;
         }
@@ -373,7 +373,7 @@ impl TransportWalk {
                 view,
                 open.start.beat,
                 open.start.playing,
-                open.start.looping.map(|(_, end)| end),
+                open.start.looping.map(|l| l.end()),
                 end.saturating_sub(open.start.frame),
             )
         };

@@ -86,11 +86,6 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: the persisted shape `TryFrom` reads and checks",
     ),
     (
-        "crates/tutti-plugin-db/src/wire.rs",
-        "Raw",
-        "permanent: the persisted shape `TryFrom` reads and checks",
-    ),
-    (
         "crates/tutti-plugin-ipc/src/protocol/wire.rs",
         "Holder",
         "permanent: a test-local codec fixture, never read from a document",

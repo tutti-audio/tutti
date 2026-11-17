@@ -69,7 +69,7 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::{Mono, MonoMut, Sample};
 
 use crate::Complex32;
 use crate::fft::StagedRealFft;
@@ -312,7 +312,7 @@ impl IrSpectra {
                         copy_and_pad(&mut buffer, &ir[lo..hi]);
                         let mut spectrum = zeros(l.part + 1);
                         for step in 0..fft.forward_steps() {
-                            fft.forward_step(step, &buffer, &mut spectrum, &mut scratch);
+                            fft.forward_step(step, Mono::new(&buffer), &mut spectrum, &mut scratch);
                         }
                         spectrum
                     })
@@ -509,7 +509,7 @@ impl LevelState {
         }
         lv.fft.forward_step(
             self.step,
-            &self.buffer,
+            Mono::new(&self.buffer),
             &mut self.history[self.current],
             &mut self.scratch,
         );
@@ -541,8 +541,12 @@ impl LevelState {
         // computed: a non-finite input propagates as through any linear
         // filter, the same in debug and release, and leaves with the
         // partition that carried it.
-        lv.fft
-            .inverse_step(k, &mut self.conv, &mut self.buffer, &mut self.scratch);
+        lv.fft.inverse_step(
+            k,
+            &mut self.conv,
+            MonoMut::new(&mut self.buffer),
+            &mut self.scratch,
+        );
         if k + 1 < lv.steps.len() - lv.forward_steps {
             return;
         }

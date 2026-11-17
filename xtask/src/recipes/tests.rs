@@ -86,6 +86,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
         ("check-session-api", "gate check-session-api"),
+        ("check-values", "gate check-values"),
         ("check-umbrella", "gate check-umbrella"),
         ("check-lints", "gate check-lints"),
         ("check-value-traits", "gate check-value-traits"),
@@ -115,6 +116,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-hosting",
         "gate check-session",
         "gate check-session-api",
+        "gate check-values",
         "gate check-umbrella",
         "gate check-lints",
         "gate check-value-traits",
@@ -205,7 +207,7 @@ fn loom_recipes_carry_their_environment() {
     assert_eq!(
         dry("check-loom", &[]),
         [
-            "RUSTFLAGS='--cfg loom' cargo clippy --locked -p tutti-rt -p tutti-shm-model --all-targets -- -D warnings"
+            "RUSTFLAGS='--cfg loom' cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi --all-targets -- -D warnings"
         ]
     );
 }
