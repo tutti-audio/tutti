@@ -36,7 +36,10 @@
 //! `impl Foo<f32>` and an `impl Foo<f64>` each with `new`) share one row.
 //!
 //! **List.** [`LIST`] holds `<key>  <reason>` lines, `#` lines and blank lines
-//! aside. The reason is `ffi`, `engine-f32`, `pending` or `measured: <why>`.
+//! aside. The reason is `pending`, `engine-f32` (until the engine edge goes
+//! generic), `ffi`, `not-audio: <why>` or `spec-f32: <why>`: a fixed `f32` on
+//! audio stays only where the item is not audio, the spec fixes `f32`, or the
+//! type is C ABI, IPC or wire. A free-text `measured:` row is refused.
 //! The gate fails on a site with no row, a row with no site, a row whose
 //! reason is unknown or empty, and a key listed twice.
 //!
@@ -44,7 +47,7 @@
 //! associated type that hides `f32`, a `pub const`/`static` holding samples, a
 //! macro-generated item, a re-export, whether a `pub` item is reachable
 //! from the crate root, or a raw slice that is not audio (a coefficient
-//! table is a site too and is judged `measured`).
+//! table is a site too and is judged `not-audio`).
 
 use super::lex::{blank, find_word_from, matching, test_ranges};
 use super::{Report, Tree};
@@ -483,7 +486,43 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
         .collect()
 }
 
-const REASONS: &str = "ffi, engine-f32, pending, or `measured: <why>`";
+/// Why `reason` is refused, or `None` when it is one of `allowed`: a bare kind
+/// (`pending`, `engine-f32`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
+pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
+    let (kind, why) = match reason.split_once(':') {
+        Some((k, w)) => (k, Some(w.trim())),
+        None => (reason, None),
+    };
+    let needs_why = matches!(kind, "not-audio" | "spec-f32");
+    let ok = allowed.contains(&kind)
+        && if needs_why {
+            why.is_some_and(|w| !w.is_empty())
+        } else {
+            why.is_none()
+        };
+    if ok {
+        return None;
+    }
+    let allowed = allowed
+        .iter()
+        .map(|k| {
+            if matches!(*k, "not-audio" | "spec-f32") {
+                format!("`{k}: <why>`")
+            } else {
+                (*k).to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(if kind == "measured" {
+        format!("`measured:` is not a reason; a fixed f32 on audio stays only as one of {allowed}")
+    } else {
+        format!("`{reason}` is not a reason; a reason is one of {allowed}")
+    })
+}
+
+/// The reasons `LIST` accepts.
+const KINDS: [&str; 5] = ["pending", "engine-f32", "ffi", "not-audio", "spec-f32"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -499,14 +538,8 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
         };
-        let known = matches!(reason, "ffi" | "engine-f32" | "pending")
-            || reason
-                .strip_prefix("measured:")
-                .is_some_and(|why| !why.trim().is_empty());
-        if !known {
-            errors.push(format!(
-                "  {LIST}:{at}: `{key}` has reason `{reason}`; a reason is {REASONS}"
-            ));
+        if let Some(why) = reason_error(reason, &KINDS) {
+            errors.push(format!("  {LIST}:{at}: `{key}`: {why}"));
         }
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
             errors.push(format!("  {LIST}:{at}: `{key}` is listed twice"));
@@ -631,18 +664,42 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_empty_or_unreasoned_measured_reason_fails() {
-        for reason in ["", "later", "measured:", "measured:   "] {
+    fn a_free_text_measured_an_unknown_or_unreasoned_reason_fails() {
+        for reason in [
+            "",
+            "later",
+            "measured: the spec fixes f32",
+            "measured:",
+            "not-audio",
+            "not-audio:  ",
+            "spec-f32:",
+            "pending: soon",
+            "ffi: wire",
+            "not-audio :x",
+        ] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
             let r = run(&list, "pub fn gain(x: &[f32]) {}\n");
             assert!(!r.passed(), "reason {reason:?}");
             assert!(r.findings[0].contains("malformed"));
         }
-        let ok = run(
-            "crates/a/src/lib.rs::gain  measured: the spec fixes f32\n",
+        for reason in [
+            "pending",
+            "engine-f32",
+            "ffi",
+            "not-audio: a magnitude spectrum",
+            "spec-f32: control values",
+        ] {
+            let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
+            assert!(
+                run(&list, "pub fn gain(x: &[f32]) {}\n").passed(),
+                "{reason}"
+            );
+        }
+        let r = run(
+            "crates/a/src/lib.rs::gain  measured: x\n",
             "pub fn gain(x: &[f32]) {}\n",
         );
-        assert!(ok.passed());
+        assert!(r.findings[1].contains("not-audio"), "{:?}", r.findings);
     }
 
     #[test]
