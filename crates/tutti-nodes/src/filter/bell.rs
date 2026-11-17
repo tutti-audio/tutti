@@ -186,8 +186,8 @@ mod tests {
         )));
     }
 
-    /// The shape is the width in and out, `Moderate`, declares the center, Q and gain and a
-    /// finite tail once prepared; the center starts at the configured one.
+    /// The shape is the width in and out, `Moderate`, declares the center, Q and gain and an
+    /// unbounded tail ceiling; the center starts at the configured one.
     #[test]
     fn the_shape_declares_its_controls_and_an_unbounded_ceiling() {
         let n = node(BellFilterConfig::new(3u16, Hz(120.0), Q(4.0), Db(9.0)));
