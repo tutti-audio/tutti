@@ -339,7 +339,7 @@ fn a_plugin_that_refuses_to_load_is_a_typed_failure() {
     let dir = tempfile::tempdir().unwrap();
     let failure = probe(&clap_named(&dir, "init-refuse")).expect_err("must not probe");
     assert_eq!(failure.kind, ProbeFailureKind::LoadFailed, "{failure:?}");
-    assert!(failure.reason.contains("Entry init failed"), "{failure:?}");
+    assert!(failure.reason.contains("entry init failed"), "{failure:?}");
     assert!(failure.blacklistable());
 }
 

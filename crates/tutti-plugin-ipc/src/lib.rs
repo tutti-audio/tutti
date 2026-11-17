@@ -55,8 +55,8 @@ pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
 pub use protocol::frame::{read_frame, write_frame};
 pub use protocol::{
-    BridgeMessage, HostMessage, MAX_FRAME_BYTES, MAX_STATE_BYTES, PROTOCOL_VERSION,
-    ProcessAudioData, STATE_CHUNK_BYTES, SlabLayout, StagedState,
+    BridgeMessage, HostMessage, MAX_FRAME_BYTES, PROTOCOL_VERSION, ProcessAudioData,
+    STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
 pub use subprocess::{LaunchedServer, Reaped, launch};

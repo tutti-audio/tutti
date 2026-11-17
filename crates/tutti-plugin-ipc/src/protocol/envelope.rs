@@ -146,7 +146,7 @@ pub enum HostMessage {
     /// not what the sender thinks it is, and silently reassembling it would
     /// hand the plugin a corrupt blob it would then try to parse.
     ///
-    /// [`MAX_STATE_BYTES`]: crate::protocol::MAX_STATE_BYTES
+    /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
     /// [`MAX_FRAME_BYTES`]: crate::protocol::MAX_FRAME_BYTES
     LoadStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
@@ -374,7 +374,7 @@ pub enum BridgeMessage {
     /// one chunk with `last: true` and no bytes, not an absent reply. A caller
     /// waiting on a sequence must always see it terminate.
     ///
-    /// [`MAX_STATE_BYTES`]: crate::protocol::MAX_STATE_BYTES
+    /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
     StateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
