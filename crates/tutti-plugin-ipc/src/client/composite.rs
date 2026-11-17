@@ -452,6 +452,11 @@ impl PluginBridge {
         self.audio.is_crashed()
     }
 
+    /// See `AudioBridge::progress`.
+    pub(crate) fn progress(&self) -> &Arc<crate::Wake> {
+        self.audio.progress()
+    }
+
     /// See `AudioBridge::news_settled`.
     pub fn news_settled(&self, within: Duration) -> bool {
         self.audio.news_settled(within)

@@ -12,8 +12,9 @@
 
 use tutti_midi_protocol::{MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti_ump::{
-    Address, Attribute, Bank, BendValue, CCNumber, ControlValue, Direction, Message, Midi1Port,
-    MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn, Stream, U7, Ump, Voice1, Voice2,
+    Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, Message,
+    Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn, Stream, U7, Ump, Voice1,
+    Voice2,
 };
 
 /// A MIDI 2.0 Note On with no attribute.
@@ -248,7 +249,7 @@ fn reserved_block_info(word0: u32) -> tutti_ump::FunctionBlockInfo {
 
 /// The reserved Function Block direction (`0b00`), read from the wire.
 #[must_use]
-pub fn reserved_direction() -> Direction {
+pub fn reserved_direction() -> BlockDirection {
     reserved_block_info(0).direction
 }
 

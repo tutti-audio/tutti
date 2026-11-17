@@ -380,7 +380,7 @@ mod tests {
     fn band_noise(len: usize, seed: u64, low: f32, high: f32) -> Vec<f32> {
         let mut fft = FftScratch::new();
         let mut bins = vec![Complex32::default(); len / 2 + 1];
-        fft.forward(&noise(len, seed), &vec![1.0; len], &mut bins);
+        fft.forward(Mono::new(&noise(len, seed)), &vec![1.0; len], &mut bins);
         for (k, b) in bins.iter_mut().enumerate() {
             let f = k as f32 / len as f32;
             if f < low || f > high {
@@ -388,7 +388,7 @@ mod tests {
             }
         }
         let mut out = vec![0.0; len];
-        fft.inverse(&bins, &mut out);
+        fft.inverse(&bins, tutti_buffers::MonoMut::new(&mut out));
         out
     }
 

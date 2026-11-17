@@ -1,31 +1,31 @@
-//! `Ump::key_event` reads the same facts `decode` does, and the closing
+//! `Ump::note_key_event` reads the same facts `decode` does, and the closing
 //! packets it builds decode back to what they close.
 //!
-//! The expectation comes from `decode`, so the raw bit reads in `key_event`
+//! The expectation comes from `decode`, so the raw bit reads in `note_key_event`
 //! cannot drift from the codec.
 
 use crate::common;
 
 use proptest::prelude::*;
 use tutti_ump::{
-    Address, CCNumber, ControlValue, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, Protocol, Stream, U7, Ump, Voice1, Voice2,
+    Address, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteKey, NoteKeyEvent,
+    NoteNumber, NoteVelocity, Protocol, Stream, U7, Ump, Voice1, Voice2,
 };
 
 const SUSTAIN: u8 = 64;
 
-fn expected(message: Message) -> Option<KeyEvent> {
+fn expected(message: Message) -> Option<NoteKeyEvent> {
     match message {
         Message::Midi1(a, v) => {
-            let key = |note: NoteNumber| Key::new(Protocol::Midi1, a, note).unwrap();
+            let key = |note: NoteNumber| NoteKey::new(Protocol::Midi1, a, note).unwrap();
             match v {
                 Voice1::NoteOn { note, velocity } if velocity.get() == 0 => {
-                    Some(KeyEvent::Off(key(note)))
+                    Some(NoteKeyEvent::Off(key(note)))
                 }
-                Voice1::NoteOn { note, .. } => Some(KeyEvent::On(key(note))),
-                Voice1::NoteOff { note, .. } => Some(KeyEvent::Off(key(note))),
+                Voice1::NoteOn { note, .. } => Some(NoteKeyEvent::On(key(note))),
+                Voice1::NoteOff { note, .. } => Some(NoteKeyEvent::Off(key(note))),
                 Voice1::ControlChange { controller, value } if controller.get() == SUSTAIN => {
-                    Some(KeyEvent::Sustain {
+                    Some(NoteKeyEvent::Sustain {
                         protocol: Protocol::Midi1,
                         address: a,
                         down: value.get() >= 64,
@@ -35,12 +35,12 @@ fn expected(message: Message) -> Option<KeyEvent> {
             }
         }
         Message::Midi2(a, v) => {
-            let key = |note: NoteNumber| Key::new(Protocol::Midi2, a, note).unwrap();
+            let key = |note: NoteNumber| NoteKey::new(Protocol::Midi2, a, note).unwrap();
             match v {
-                Voice2::NoteOn { note, .. } => Some(KeyEvent::On(key(note))),
-                Voice2::NoteOff { note, .. } => Some(KeyEvent::Off(key(note))),
+                Voice2::NoteOn { note, .. } => Some(NoteKeyEvent::On(key(note))),
+                Voice2::NoteOff { note, .. } => Some(NoteKeyEvent::Off(key(note))),
                 Voice2::ControlChange { controller, value } if controller.get() == SUSTAIN => {
-                    Some(KeyEvent::Sustain {
+                    Some(NoteKeyEvent::Sustain {
                         protocol: Protocol::Midi2,
                         address: a,
                         down: value >= ControlValue::new(0x8000_0000),
@@ -95,22 +95,22 @@ proptest! {
     fn key_event_agrees_with_decode(w in words()) {
         let ump = Ump(w);
         let want = ump.decode().ok().and_then(expected);
-        prop_assert_eq!(ump.key_event(), want);
+        prop_assert_eq!(ump.note_key_event(), want);
     }
 
     /// The close of every key is an off of that key, in its own protocol, and
     /// the pedal-up is a pedal event, up.
     #[test]
     fn a_close_decodes_to_the_off_of_its_key(index in any::<u16>(), m2 in any::<bool>(), lane_ in any::<u8>()) {
-        let key = Key::from_index(index);
+        let key = NoteKey::from_index(index);
         let off = Ump::note_off(key);
-        prop_assert_eq!(off.key_event(), Some(KeyEvent::Off(key)));
+        prop_assert_eq!(off.note_key_event(), Some(NoteKeyEvent::Off(key)));
         prop_assert!(off.is_note_off());
         prop_assert!(off.decode().is_ok());
         let protocol = if m2 { Protocol::Midi2 } else { Protocol::Midi1 };
         let address = Address::from_index(usize::from(lane_)).unwrap();
         let up = Ump::sustain_up(protocol, address).unwrap();
-        prop_assert_eq!(up.key_event(), Some(KeyEvent::Sustain { protocol, address, down: false }));
+        prop_assert_eq!(up.note_key_event(), Some(NoteKeyEvent::Sustain { protocol, address, down: false }));
         prop_assert!(up.decode().is_ok());
     }
 
@@ -118,7 +118,7 @@ proptest! {
     /// for the same message: a velocity-0 Note Off of the key, a CC 64 of 0.
     #[test]
     fn the_closing_writers_equal_the_encoded_messages(index in any::<u16>(), m2 in any::<bool>(), lane_ in any::<u8>()) {
-        let key = Key::from_index(index);
+        let key = NoteKey::from_index(index);
         let (address, note) = (key.address(), key.note());
         let want = match key.protocol() {
             Protocol::Midi2 => Message::Midi2(address, Voice2::note_off(note, NoteVelocity::MIN)),
@@ -143,12 +143,12 @@ proptest! {
 #[test]
 fn a_key_carries_its_fields() {
     let address = Address::new(MidiGroup::of(1), MidiChannel::of(0xf));
-    let key = Key::new(Protocol::Midi2, address, NoteNumber::of(0x45)).unwrap();
+    let key = NoteKey::new(Protocol::Midi2, address, NoteNumber::of(0x45)).unwrap();
     assert_eq!(
         (key.protocol(), key.address(), key.note()),
         (Protocol::Midi2, address, NoteNumber::of(0x45))
     );
-    assert_eq!(Key::from_index(key.index()), key);
+    assert_eq!(NoteKey::from_index(key.index()), key);
 }
 
 /// A reserved protocol has no channel voice message, so it opens no key and
@@ -163,7 +163,7 @@ fn a_reserved_protocol_has_no_key_and_no_pedal() {
     };
     let reserved = config.protocol;
     assert!(matches!(reserved, Protocol::Reserved(_)));
-    assert_eq!(Key::new(reserved, a, NoteNumber::of(1)), None);
+    assert_eq!(NoteKey::new(reserved, a, NoteNumber::of(1)), None);
     assert_eq!(Ump::sustain_up(reserved, a), None);
 }
 
@@ -187,9 +187,9 @@ fn an_address_index_is_group_times_sixteen_plus_channel() {
 /// controller index as `decode` does: seven bits, the eighth ignored.
 #[test]
 fn the_midi2_pedal_reads_index_and_value_as_decode_does() {
-    let pedal = |w0: u32, w1: u32| Ump([w0, w1, 0, 0]).key_event();
+    let pedal = |w0: u32, w1: u32| Ump([w0, w1, 0, 0]).note_key_event();
     let sustain = |down| {
-        Some(KeyEvent::Sustain {
+        Some(NoteKeyEvent::Sustain {
             protocol: Protocol::Midi2,
             address: Address::new(MidiGroup::of(3), MidiChannel::of(3)),
             down,
@@ -204,7 +204,7 @@ fn the_midi2_pedal_reads_index_and_value_as_decode_does() {
     let w = [0x43b3_c000, 0xffff_ffff, 0, 0];
     assert_eq!(
         Ump(w).decode().ok().and_then(expected),
-        Ump(w).key_event(),
+        Ump(w).note_key_event(),
         "agrees with decode on an index with bit 7 set"
     );
 }

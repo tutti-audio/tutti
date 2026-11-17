@@ -44,7 +44,7 @@ fn signature_is_midi_in_ascii() {
     assert_eq!(&datagram(&[])[..], b"MIDI");
 }
 
-/// Spec: m2-124/6.4#14, m2-124/6.4#16
+/// Spec: m2-124/6.4#14, m2-124/6.4#17
 #[test]
 fn invitation_matches_the_specification_example_byte_for_byte() {
     // M2-124 A.1.1: capabilities 0, name "MyDev" (padded with zero), id "8shYe3h5".
@@ -457,6 +457,8 @@ fn an_invitation_with_no_product_instance_id_is_refused() {
     );
 }
 
+/// An Invitation's UMP Endpoint Name is never empty.
+/// Spec: m2-124/6.4#16
 #[test]
 fn an_invitation_with_an_all_zero_name_is_refused_as_empty() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, 0, 0, 0, 0, b'i', 0, 0, 0]).unwrap_err();
@@ -501,6 +503,8 @@ fn a_reserved_authentication_state_is_refused() {
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Reserved);
 }
 
+/// A nonce is 16 bytes of ASCII 32-126, so a non-ASCII byte is refused.
+/// Spec: m2-124/6.7#14
 #[test]
 fn a_non_ascii_nonce_is_refused() {
     let c = Command::AuthRequired(AuthChallenge {
@@ -514,6 +518,7 @@ fn a_non_ascii_nonce_is_refused() {
 }
 
 /// The sender's nonce is ASCII 32-126; a received one is only hashed, so any ASCII is read.
+/// Spec: m2-124/6.7#14
 #[test]
 fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
     let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
@@ -592,6 +597,8 @@ fn chunks_split_at_sixty_four_words_without_splitting_a_packet_and_number_on() {
     assert_eq!(chunks[1].sequence(), SequenceNumber::ZERO);
 }
 
+/// A username is never empty.
+/// Spec: m2-124/6.10#11
 #[test]
 fn texts_refuse_a_nul_and_overlong_input() {
     assert!(ByeText::new("a\0b").is_err());

@@ -820,7 +820,7 @@ mod tests {
     use tutti_buffers::Interleaved;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
     use tutti_types::MAX_CHANNELS;
-    use tutti_types::{PlaybackRate, Seconds, SrcRatio};
+    use tutti_types::{LoopRange, PlaybackRate, Seconds, SrcRatio};
 
     /// [`super::read_frame`] with the placement a reader of `out`'s width has.
     fn read_frame(wave: &Arc<Wave>, position: f64, out: &mut [f32]) {
@@ -1542,10 +1542,7 @@ mod tests {
     /// live disk reader — is flushed or crossfaded there.
     #[test]
     fn a_loop_wrap_inside_a_block_reseats_at_the_loop_start() {
-        let looping = Some(tutti_graph::LoopRange {
-            start: Beat(0.0),
-            end: Beat(1.0),
-        });
+        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
         let t = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0 - 20.0 / FPB), looping);
         let env = env(64, t, &[]);
         let got = placed(&env, gate(VoiceWindow::default()));

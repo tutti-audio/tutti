@@ -19,10 +19,10 @@ use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, Executor, LoopRange, Prepare, TransportPosition, WorkerPool};
+use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, Wave};
-use tutti_types::{Beat, Bpm, FrameClock, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, FrameClock, LoopRange, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const MAX_BLOCK: usize = 64;
@@ -104,10 +104,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<u32>> {
         let mut chunk = vec![vec![0.0f32; n]; channels];
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let looping = LoopRange {
-                start: Beat(LOOP.0),
-                end: Beat(LOOP.1),
-            };
+            let looping = LoopRange::new(Beat(LOOP.0), Beat(LOOP.1)).expect("a loop");
             let t = TransportPosition::new(true, Bpm::of(120.0), clock.beat(), Some(looping));
             exec.process(n, &t, &[], &mut outs);
         }

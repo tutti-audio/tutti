@@ -23,8 +23,8 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
-use tutti_graph::{Env, ForkMode, LoopRange, Offset, TransportChanges, TransportPosition};
-use tutti_types::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
+use tutti_graph::{Env, ForkMode, Offset, TransportChanges, TransportPosition};
+use tutti_types::{Beat, Bpm, Frame, Latency, LoopRange, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 /// The pipeline's chunk: what the node ships per submission.
@@ -42,7 +42,7 @@ fn echo_of(t: &TransportPosition) -> [f64; ECHO] {
         + 4.0 * f64::from(u8::from(t.looping.is_some()));
     let (start, end) = t
         .looping
-        .map_or((0.0, 0.0), |l| (l.start.get(), l.end.get()));
+        .map_or((0.0, 0.0), |l| (l.start().get(), l.end().get()));
     [t.beat().get(), t.tempo.get(), flags, start, end, 0.0]
 }
 
@@ -92,10 +92,7 @@ fn scene(b: usize, block: usize) -> (TransportPosition, TransportChanges) {
             true,
             Bpm::of(120.0),
             Beat(base),
-            Some(LoopRange {
-                start: Beat(base),
-                end: Beat(base + 32.0 / 24_000.0),
-            }),
+            Some(LoopRange::new(Beat(base), Beat(base + 32.0 / 24_000.0)).expect("a loop")),
         ),
         // Recording.
         4 => rolling.with_recording(true),
