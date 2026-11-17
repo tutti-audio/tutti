@@ -13,9 +13,10 @@ use std::panic::AssertUnwindSafe;
 
 /// An Objective-C exception raised by a CoreMIDI call.
 ///
-/// Catching one leaks: unwinding skips the releases of the objects the frames
-/// between the `@throw` and the catch retained, and `objc2`'s `exception::catch`
-/// does not give them back. Each catch costs that small, unrecoverable leak.
+/// Catching one leaks: unwinding skips the releases of the objects that the
+/// Objective-C and CoreMIDI frames (not Rust's) between the `@throw` and the
+/// catch retained, and `objc2`'s `exception::catch` does not give them back.
+/// Each catch costs that small, unrecoverable leak.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("Objective-C exception {name}: {reason}")]
 pub struct ObjcException {

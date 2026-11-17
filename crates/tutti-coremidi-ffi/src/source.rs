@@ -154,7 +154,7 @@ impl UmpSource {
             MIDIReceivedEventList(self.source, list.assume_init_ref() as *const MIDIEventList)
         };
 
-        OsStatus::check(status).map_err(|status| Error::call(Operation::SendEventList, status))
+        OsStatus::check(status).map_err(|status| Error::call(Operation::ReceivedEventList, status))
     }
 }
 

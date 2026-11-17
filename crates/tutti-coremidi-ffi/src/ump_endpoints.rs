@@ -94,7 +94,7 @@ pub fn ump_endpoints() -> Result<Vec<UmpEndpointInfo>, UmpEndpointsError> {
             // SAFETY: the class exists (checked above), `sharedInstance` and
             // `UMPEndpoints` take no arguments and are safe to call from any thread
             // (Apple documents the manager as a shared singleton), and the arrays
-            // they return are retained for the length of the pool.
+            // they return are owned (`Retained`), so they outlive the reads.
             let endpoints = unsafe { MIDIUMPEndpointManager::sharedInstance().UMPEndpoints() };
             endpoints.iter().map(|e| endpoint_info(&e)).collect()
         })

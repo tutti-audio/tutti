@@ -12,7 +12,6 @@
 use tracing::debug;
 use tutti_coremidi_ffi::{Protocol, UmpSource};
 
-use super::OsError;
 use crate::error::{Error, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
@@ -64,7 +63,7 @@ impl UmpVirtualSource {
         // client, so the device watch's client starts before the source's own
         // (see `hub_first`).
         super::hub_first();
-        let source = UmpSource::new(name, protocol_of(protocol)).map_err(OsError::Ffi)?;
+        let source = UmpSource::new(name, protocol_of(protocol))?;
         debug!(name, ?protocol, "Created virtual MIDI source");
         Ok(Self {
             source,
@@ -82,7 +81,7 @@ impl SourceBackend for UmpVirtualSource {
     /// [`Error::Os`] when the message will not fit the event list, or when
     /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
     fn send(&self, words: &[u32]) -> Result<()> {
-        Ok(self.source.send(words).map_err(OsError::Ffi)?)
+        Ok(self.source.send(words)?)
     }
 }
 

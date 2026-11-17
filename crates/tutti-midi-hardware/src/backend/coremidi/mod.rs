@@ -50,17 +50,17 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, NotFound, Result};
 use crate::guard::Guard;
-use tutti_coremidi_ffi::{OsStatus, UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints};
+use tutti_coremidi_ffi::{
+    Operation, OsStatus, UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints,
+};
 use tutti_midi_device::{EndpointId, Identity, OsDevice};
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_ump::{Protocol, split_stream};
 
 mod host_time;
-mod os_error;
 mod virtual_destination;
 mod virtual_source;
 mod watch;
-pub(crate) use os_error::OsError;
 pub(crate) use virtual_destination::UmpVirtualDestination;
 pub(crate) use virtual_source::UmpVirtualSource;
 
@@ -207,15 +207,6 @@ fn endpoint_id(id: UniqueId) -> EndpointId {
     EndpointId::from_raw(u64::from(id.get().cast_unsigned()))
 }
 
-/// `kMIDIPropertyUniqueID`, which persists across restarts: it is also the
-/// endpoint's [`Identity`]. The one read of the property in this backend.
-fn unique_id(object: &coremidi::Object) -> Option<UniqueId> {
-    Properties::unique_id()
-        .value_from(object)
-        .ok()
-        .map(UniqueId::new)
-}
-
 /// The macOS [`MidiEndpoints`] implementation.
 pub struct CoreMidiEndpoints {
     /// The process-wide client ([`shared_client`]), or the status CoreMIDI
@@ -253,20 +244,26 @@ impl CoreMidiEndpoints {
     }
 
     fn client(&self) -> Result<&'static Client> {
-        self.client
-            .map_err(|status| Error::Os(OsError::CreateClient(status)))
+        self.client.map_err(|status| {
+            Error::Os(tutti_coremidi_ffi::Error::call(
+                Operation::CreateClient,
+                status,
+            ))
+        })
     }
 
-    fn find_source(id: EndpointId) -> Option<Source> {
-        (0..Sources::count())
-            .filter_map(Source::from_index)
-            .find(|s| unique_id(s).map(endpoint_id) == Some(id))
+    fn find_source(id: EndpointId) -> Option<(Source, UniqueId)> {
+        (0..Sources::count()).find_map(|index| {
+            let unique = UniqueId::of_source(index).filter(|u| endpoint_id(*u) == id)?;
+            Some((Source::from_index(index)?, unique))
+        })
     }
 
     fn find_destination(id: EndpointId) -> Option<coremidi::Destination> {
-        (0..Destinations::count())
-            .filter_map(coremidi::Destination::from_index)
-            .find(|d| unique_id(d).map(endpoint_id) == Some(id))
+        (0..Destinations::count()).find_map(|index| {
+            UniqueId::of_destination(index).filter(|u| endpoint_id(*u) == id)?;
+            coremidi::Destination::from_index(index)
+        })
     }
 }
 
@@ -282,7 +279,8 @@ impl CoreMidiEndpoints {
 /// macOS 15) or CoreMIDI raised (no reachable MIDI server), which leaves each
 /// endpoint's MIDI 1.0 view. The first exception is logged at `debug`.
 ///
-/// Control-thread only: it logs and allocates.
+/// Runs on the hub or a control thread, never the audio thread: it logs and
+/// allocates.
 fn os_umps() -> Vec<UmpEndpointInfo> {
     static LOGGED: AtomicBool = AtomicBool::new(false);
     match ump_endpoints() {
@@ -301,10 +299,9 @@ fn os_umps() -> Vec<UmpEndpointInfo> {
 fn list_inputs() -> Vec<OsEndpoint> {
     let umps = os_umps();
     (0..Sources::count())
-        .filter_map(Source::from_index)
-        .enumerate()
-        .filter_map(|(index, source)| {
-            let unique = unique_id(&source)?;
+        .filter_map(|index| {
+            let unique = UniqueId::of_source(index)?;
+            let source = Source::from_index(index)?;
             Some(OsEndpoint {
                 id: endpoint_id(unique),
                 identity: Identity::CoreMidi(unique.get()),
@@ -318,10 +315,9 @@ fn list_inputs() -> Vec<OsEndpoint> {
 fn list_outputs() -> Vec<OsEndpoint> {
     let umps = os_umps();
     (0..Destinations::count())
-        .filter_map(coremidi::Destination::from_index)
-        .enumerate()
-        .filter_map(|(index, dest)| {
-            let unique = unique_id(&dest)?;
+        .filter_map(|index| {
+            let unique = UniqueId::of_destination(index)?;
+            let dest = coremidi::Destination::from_index(index)?;
             Some(OsEndpoint {
                 id: endpoint_id(unique),
                 identity: Identity::CoreMidi(unique.get()),
@@ -351,7 +347,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         mut producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         let client = self.client()?;
-        let source = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
+        let (source, unique) = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
 
         // The port speaks the source's protocol: a MIDI 1.0 source is delivered
         // as MIDI 1.0 UMP (type 2), which the ingest node's `Translator`
@@ -364,8 +360,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         // (one layer up) rejoins. `tutti_ump::Midi1Parser` is for a transport
         // that delivers raw `F0 … F7` bytes.
         let endpoints = os_umps();
-        let ump = unique_id(&source).and_then(|unique| ump_of(&endpoints, unique, true));
-        let protocol = input_protocol(&source, ump);
+        let protocol = input_protocol(&source, ump_of(&endpoints, unique, true));
         // CoreMIDI calls this closure from its own thread through a block, so
         // a panic must not leave it: the guard catches it and ends the input.
         let died = Arc::new(AtomicBool::new(false));
@@ -388,10 +383,13 @@ impl MidiEndpoints for CoreMidiEndpoints {
                     }
                 });
             })
-            .map_err(|status| OsError::CreateInputPort(OsStatus::new(status)))?;
+            .map_err(|status| {
+                tutti_coremidi_ffi::Error::call(Operation::CreateInputPort, OsStatus::new(status))
+            })?;
 
-        port.connect_source(&source, ())
-            .map_err(|status| OsError::ConnectSource(OsStatus::new(status)))?;
+        port.connect_source(&source, ()).map_err(|status| {
+            tutti_coremidi_ffi::Error::call(Operation::ConnectSource, OsStatus::new(status))
+        })?;
 
         Ok(Box::new(CoreMidiInput { _port: port, died }))
     }
@@ -400,9 +398,9 @@ impl MidiEndpoints for CoreMidiEndpoints {
         let client = self.client()?;
         let destination = Self::find_destination(id).ok_or(NotFound::Endpoint(id))?;
 
-        let port = client
-            .output_port("tutti-out")
-            .map_err(|status| OsError::CreateOutputPort(OsStatus::new(status)))?;
+        let port = client.output_port("tutti-out").map_err(|status| {
+            tutti_coremidi_ffi::Error::call(Operation::CreateOutputPort, OsStatus::new(status))
+        })?;
 
         Ok(Box::new(CoreMidiOutput {
             port,
@@ -455,7 +453,7 @@ impl CoreMidiOutput {
         &self,
         message: &[Outgoing],
         pairing: &mut Option<host_time::Pairing>,
-    ) -> std::result::Result<(), OsError> {
+    ) -> std::result::Result<(), tutti_coremidi_ffi::Error> {
         let cm_protocol = if self.midi2.load(Ordering::Relaxed) {
             CmProtocol::Midi20
         } else {
@@ -473,7 +471,9 @@ impl CoreMidiOutput {
         }
         self.port
             .send(&self.destination, &buffer)
-            .map_err(|status| OsError::SendEventList(OsStatus::new(status)))
+            .map_err(|status| {
+                tutti_coremidi_ffi::Error::call(Operation::SendEventList, OsStatus::new(status))
+            })
     }
 }
 

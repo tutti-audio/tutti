@@ -28,4 +28,4 @@ pub(crate) fn open_virtual_destination(
 }
 
 /// The platform's own error, as [`Error::Os`](crate::Error::Os) carries it.
-pub(crate) use super::coremidi::OsError;
+pub(crate) type OsError = tutti_coremidi_ffi::Error;

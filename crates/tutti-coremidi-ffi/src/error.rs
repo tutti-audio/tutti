@@ -47,7 +47,15 @@ pub enum Operation {
     CreateSource,
     /// `MIDIDestinationCreateWithProtocol`.
     CreateDestination,
-    /// `MIDIReceivedEventList`.
+    /// `MIDIInputPortCreateWithProtocol`.
+    CreateInputPort,
+    /// `MIDIPortConnectSource`.
+    ConnectSource,
+    /// `MIDIOutputPortCreate`.
+    CreateOutputPort,
+    /// `MIDIReceivedEventList`: a virtual source publishing an event list.
+    ReceivedEventList,
+    /// `MIDISendEventList`: an output port sending to a destination.
     SendEventList,
 }
 
@@ -57,7 +65,11 @@ impl fmt::Display for Operation {
             Self::CreateClient => "MIDIClientCreate",
             Self::CreateSource => "MIDISourceCreateWithProtocol",
             Self::CreateDestination => "MIDIDestinationCreateWithProtocol",
-            Self::SendEventList => "MIDIReceivedEventList",
+            Self::CreateInputPort => "MIDIInputPortCreateWithProtocol",
+            Self::ConnectSource => "MIDIPortConnectSource",
+            Self::CreateOutputPort => "MIDIOutputPortCreate",
+            Self::ReceivedEventList => "MIDIReceivedEventList",
+            Self::SendEventList => "MIDISendEventList",
         })
     }
 }
@@ -80,7 +92,8 @@ pub enum Error {
 
 impl Error {
     /// `operation` failed with `status`.
-    pub(crate) fn call(operation: Operation, status: OsStatus) -> Self {
+    #[must_use]
+    pub fn call(operation: Operation, status: OsStatus) -> Self {
         Self::Call { operation, status }
     }
 }

@@ -20,7 +20,9 @@ use coremidi_sys::{
 };
 use std::ffi::c_void;
 use std::fmt;
-use std::sync::Mutex;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::error::{Error, Operation, OsStatus};
 use crate::source::{Protocol, shared_raw_client};
@@ -32,6 +34,16 @@ use crate::source::{Protocol, shared_raw_client};
 /// a pointer is a pointer at the ABI, and the block casts it back.
 type ReceiveBlock = RcBlock<dyn Fn(*const c_void, *mut c_void)>;
 
+type OnPacket = Box<dyn FnMut(MIDITimeStamp, &[u32]) + Send>;
+
+/// What the receive block and its [`UmpDestination`] share: the callback, which
+/// the destination takes on drop or the block takes after a panic, and the
+/// count of panics caught.
+struct Callback {
+    on_packet: Mutex<Option<OnPacket>>,
+    faults: AtomicU64,
+}
+
 /// A CoreMIDI virtual destination that speaks the **MIDI 2.0 (UMP) protocol**:
 /// other apps see a UMP-capable destination, and every packet sent to it is
 /// handed to the callback given at creation, on CoreMIDI's delivery thread, as
@@ -39,34 +51,48 @@ type ReceiveBlock = RcBlock<dyn Fn(*const c_void, *mut c_void)>;
 /// back to back, each one's length in its type nibble). Owns its endpoint,
 /// which is disposed on drop.
 ///
-/// # The callback after a drop
+/// # A panic in the callback
+///
+/// The receive block's invoke function is `extern "C-unwind"`, so a panic
+/// leaving it would unwind through CoreMIDI's frames. The callback runs under
+/// `catch_unwind` instead: a panic drops the callback, so every later packet
+/// delivers nothing, and [`faults`](Self::faults) counts it. Nothing is logged
+/// on CoreMIDI's thread. This guard is local to the crate (layer 0) and moves to
+/// the shared panic guard when one exists at its layer.
+///
+/// # Drop
 ///
 /// `MIDIServices.h` does not say whether a call already running on CoreMIDI's
-/// delivery thread has returned when `MIDIEndpointDispose` does, or whether one
-/// can still start after it, so neither is assumed: the callback may run
-/// concurrently with the drop and briefly after it. CoreMIDI holds its own copy
-/// of the receive block, so the callback closure is dropped by whichever
-/// reference to the block is released last: on the thread that drops this value
-/// if CoreMIDI let go first, otherwise on a CoreMIDI thread. The closure is
-/// `Send + 'static` for that reason, and what it owns must tolerate being
-/// dropped on either thread.
+/// thread has returned when `MIDIEndpointDispose` does, nor whether one can
+/// start after it. The drop therefore disposes the endpoint, then takes the
+/// callback out of the state it shares with the block under the callback's lock:
+/// it waits for a call in progress, and afterwards the callback is neither
+/// running nor callable, and is dropped on the dropping thread. CoreMIDI's own
+/// copy of the block may outlive the drop and only finds the state empty.
+///
+/// Dropping a destination from inside its own callback deadlocks, since the
+/// callback holds that lock.
 pub struct UmpDestination {
     endpoint: MIDIEndpointRef,
-    // Our reference to the block that owns the closure CoreMIDI's copy calls.
+    callback: Arc<Callback>,
+    // Our reference to the block; CoreMIDI holds its own copy.
     _block: ReceiveBlock,
 }
 
 // SAFETY: the endpoint is an opaque `u32` handle into CoreMIDI, whose objects are
 // internally synchronised, and `MIDIEndpointDispose` may run on any thread. The
 // block is never called from Rust: it is only retained by CoreMIDI and released
-// by the drop, both atomic on a block's reference count, and the closure it
-// owns is `Send` (`new` requires it) and is called under a mutex.
+// by the drop, both atomic on a block's reference count. `Callback` is `Send +
+// Sync`: its closure is `Send` (`new` requires it) and sits behind a mutex. The
+// one assumption beyond the header is that CoreMIDI retains the block for the
+// duration of a call; `MIDIServices.h` does not document it.
 unsafe impl Send for UmpDestination {}
 
 impl fmt::Debug for UmpDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UmpDestination")
             .field("endpoint", &self.endpoint)
+            .field("faults", &self.faults())
             .finish_non_exhaustive()
     }
 }
@@ -84,20 +110,16 @@ impl UmpDestination {
     {
         let client =
             shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
-        // The mutex makes the `FnMut` callable through the block's `Fn`, and
-        // serialises any overlap with a call still running at a drop.
-        let on_packet = Mutex::new(on_packet);
+        let callback = Arc::new(Callback {
+            on_packet: Mutex::new(Some(Box::new(on_packet))),
+            faults: AtomicU64::new(0),
+        });
+        let shared = Arc::clone(&callback);
         let block: ReceiveBlock = RcBlock::new(move |list: *const c_void, _: *mut c_void| {
-            // Poisoned only by a panic in `on_packet`, which unwinds into
-            // CoreMIDI's thread, where nothing handles it; a destination whose
-            // callback panicked delivers nothing more.
-            let Ok(mut on_packet) = on_packet.lock() else {
-                return;
-            };
             // SAFETY: CoreMIDI passes a valid event list for the length of the
             // call (MIDIServices.h, `MIDIReceiveBlock`), or null, which
             // `packets` reads as empty.
-            unsafe { packets(list.cast::<MIDIEventList>(), &mut *on_packet) };
+            unsafe { receive(&shared, list.cast::<MIDIEventList>()) };
         });
         let name = CFString::new(name);
         let mut endpoint: MIDIEndpointRef = 0;
@@ -118,8 +140,16 @@ impl UmpDestination {
             .map_err(|status| Error::call(Operation::CreateDestination, status))?;
         Ok(Self {
             endpoint,
+            callback,
             _block: block,
         })
+    }
+
+    /// How many panics in the callback have been caught: 0, or 1 once the
+    /// callback panicked and was dropped.
+    #[must_use]
+    pub fn faults(&self) -> u64 {
+        self.callback.faults.load(Ordering::Relaxed)
     }
 }
 
@@ -129,6 +159,36 @@ impl Drop for UmpDestination {
         unsafe {
             MIDIEndpointDispose(self.endpoint);
         }
+        let taken = self
+            .callback
+            .on_packet
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        drop(taken);
+    }
+}
+
+/// Hands one delivered event list to the callback, if it is still there: a panic
+/// in the callback is caught, drops it, and counts a fault.
+///
+/// # Safety
+///
+/// `list` satisfies [`packets`]'s contract.
+unsafe fn receive(callback: &Callback, list: *const MIDIEventList) {
+    let Ok(mut slot) = callback.on_packet.lock() else {
+        return;
+    };
+    let Some(on_packet) = slot.as_mut() else {
+        return;
+    };
+    // SAFETY: the caller's contract.
+    let ran = catch_unwind(AssertUnwindSafe(|| unsafe { packets(list, on_packet) }));
+    if ran.is_err() {
+        callback.faults.fetch_add(1, Ordering::Relaxed);
+        let dead = slot.take();
+        // The callback's own drop may panic too; it is not allowed out.
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(dead)));
     }
 }
 
@@ -138,7 +198,7 @@ impl Drop for UmpDestination {
 ///
 /// `list` is null or points to a valid `MIDIEventList` whose `numPackets`
 /// packets each hold `wordCount` words, as CoreMIDI delivers it.
-unsafe fn packets(list: *const MIDIEventList, on_packet: &mut impl FnMut(MIDITimeStamp, &[u32])) {
+unsafe fn packets(list: *const MIDIEventList, on_packet: &mut dyn FnMut(MIDITimeStamp, &[u32])) {
     if list.is_null() {
         return;
     }
@@ -160,5 +220,52 @@ unsafe fn packets(list: *const MIDIEventList, on_packet: &mut impl FnMut(MIDITim
         on_packet(stamp, words);
         // SAFETY: `packet` is a valid packet of the list (above).
         packet = unsafe { MIDIEventPacketNext(packet) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coremidi_sys::{ByteCount, MIDIEventListAdd, MIDIEventListInit};
+    use std::mem::MaybeUninit;
+    use std::sync::atomic::AtomicUsize;
+
+    /// A callback that panics on its first packet is never called again, the
+    /// panic is counted once, and it does not leave `receive`.
+    #[test]
+    fn a_panicking_callback_is_dropped_after_one_counted_fault() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let callback = Callback {
+            on_packet: Mutex::new(Some(Box::new(move |_, _| {
+                seen.fetch_add(1, Ordering::Relaxed);
+                panic!("the callback panics");
+            }))),
+            faults: AtomicU64::new(0),
+        };
+        let mut list = MaybeUninit::<MIDIEventList>::uninit();
+        let words = [0x2090_3C64_u32];
+        // SAFETY: `Init` initialises `list`, which `Add` then fills inside its
+        // real size; `words` outlives the call, and `assume_init_ref` follows both.
+        let list = unsafe {
+            let packet = MIDIEventListInit(list.as_mut_ptr(), Protocol::Midi2.id());
+            let packet = MIDIEventListAdd(
+                list.as_mut_ptr(),
+                size_of::<MIDIEventList>() as ByteCount,
+                packet,
+                0,
+                1,
+                words.as_ptr(),
+            );
+            assert!(!packet.is_null());
+            list.assume_init_ref()
+        };
+        for _ in 0..3 {
+            // SAFETY: `list` is a valid event list.
+            unsafe { receive(&callback, list) };
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(callback.faults.load(Ordering::Relaxed), 1);
+        assert!(callback.on_packet.lock().unwrap().is_none());
     }
 }

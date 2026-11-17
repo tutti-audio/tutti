@@ -109,6 +109,9 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
 #[test]
 fn the_os_blocks_are_within_the_spec() {
     let backend = CoreMidiEndpoints::new();
+    // Unsupported is a fact of the OS (the class is absent), so one read of it
+    // holds for every listing below; an exception proves nothing.
+    let unsupported = matches!(ump_endpoints(), Err(UmpEndpointsError::Unsupported));
     let all = backend.inputs().into_iter().chain(backend.outputs());
     for info in all {
         let cap = &info.capability;
@@ -124,7 +127,7 @@ fn the_os_blocks_are_within_the_spec() {
             let end = u16::from(block.first_group().get()) + u16::from(block.groups().get());
             assert!(end <= 16, "{}: Groups run to {end}", info.name);
         }
-        if ump_endpoints().is_err() {
+        if unsupported {
             assert!(cap.blocks.is_empty(), "no UMP endpoint list, no blocks");
         }
     }

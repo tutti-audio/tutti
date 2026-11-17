@@ -23,7 +23,6 @@ use tracing::debug;
 use tutti_coremidi_ffi::UmpDestination;
 use tutti_ump::{Ump, split_stream};
 
-use super::OsError;
 use super::virtual_source::protocol_of;
 use crate::endpoints::InputConnection;
 use crate::error::{Error, Result};
@@ -118,8 +117,7 @@ impl UmpVirtualDestination {
                 for event in split_stream(words) {
                     on_event(event, arrived);
                 }
-            })
-            .map_err(OsError::Ffi)?;
+            })?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");
         Ok(Self {

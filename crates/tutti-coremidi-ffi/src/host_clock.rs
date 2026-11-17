@@ -24,6 +24,18 @@ impl Timebase {
         (denom != 0).then_some(Self { numer, denom })
     }
 
+    /// The numerator of the ratio.
+    #[must_use]
+    pub fn numer(self) -> u32 {
+        self.numer
+    }
+
+    /// The denominator of the ratio, never 0.
+    #[must_use]
+    pub fn denom(self) -> u32 {
+        self.denom
+    }
+
     /// The machine's, read once.
     #[must_use]
     pub fn get() -> Self {
