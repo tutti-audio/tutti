@@ -23,8 +23,10 @@
 //!   A description cell of a table row that says its value is copied or
 //!   echoed from another Command ([`COPY_WORDS`]) and has no conformance word
 //!   is a `required` row too, with the fact `cell=1`; it is numbered after the
-//!   keyword rows of its section, so adding it moves no id. A definition
-//!   list's `shall` sentence is an ordinary keyword row.
+//!   keyword rows of its section, so adding it moves no existing id. A later
+//!   keyword row in the same section renumbers the cell rows after it, as
+//!   keyword rows renumber each other. A definition list's `shall` sentence
+//!   is an ordinary keyword row.
 //! - `m2-104/mt/<mt>`: one per Message Type of the allocation table
 //!   ([`Tables::Messages`]), facts `mt` and `bytes`, the UMP size.
 //! - `m2-104/msg/<mt>/<status>`: one per defined message of the message
@@ -924,7 +926,9 @@ fn keyword_items(lines: &[Line], doc: &Doc) -> Vec<Item> {
 
 /// Words that make a field description state that the field's value is taken
 /// from another Command (`copied from the received Ping Command`): the spec
-/// fixes the field by reference, with no conformance word.
+/// fixes the field by reference, with no conformance word. The list is
+/// closed: a cell that states a derived value (a length, a count) is not
+/// taken.
 const COPY_WORDS: [&str; 2] = ["copied", "echoed"];
 
 /// The `<doc>/<section>#<n>` rows that carry no conformance word: a row of a
@@ -932,7 +936,10 @@ const COPY_WORDS: [&str; 2] = ["copied", "echoed"];
 /// row's wrapped lines) hold one of [`COPY_WORDS`]. A row is the run of lines
 /// between blank lines that starts with a line of two or more cells. A row with
 /// a conformance word is already a keyword row. The rows are numbered after
-/// the keyword rows of their section, so adding this kind moves no existing id.
+/// the keyword rows of their section, so adding this kind moves no existing id;
+/// a later keyword row in a section renumbers the cell rows after it. A table
+/// ends at the first line of prose (a line of one cell that is not a wrapped
+/// line of a row), at a caption or at a heading.
 fn cell_items(lines: &[Line], doc: &Doc, taken: &[Item]) -> Vec<Item> {
     let mut count: BTreeMap<&str, u32> = BTreeMap::new();
     for it in taken {
@@ -982,6 +989,7 @@ fn cell_items(lines: &[Line], doc: &Doc, taken: &[Item]) -> Vec<Item> {
                         in_table = false;
                     }
                     Line::Caption(true, _) => in_table = true,
+                    Line::Text(_) => in_table = false,
                     _ => {}
                 }
             }
@@ -1241,6 +1249,32 @@ mod tests {
             "1 Alpha\nThe value is copied from the request.\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nText     2   string   An optional text.\n\nIt may be sent.\n",
         );
         assert_eq!(ids(&items), [("m2-124/1#1", "permitted")]);
+    }
+
+    #[test]
+    fn a_table_ends_at_the_prose_after_it() {
+        let items = extracted(
+            "1 Alpha\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved     4    word   The id copied from the request.\n\nThe frob then rests.\n\nOther     4    word   The id copied from the reply.\n",
+        );
+        assert_eq!(ids(&items), [("m2-124/1#1", "required")]);
+        assert!(items[0].text.contains("request"));
+    }
+
+    #[test]
+    fn two_copy_cells_in_a_section_follow_its_keyword_rows() {
+        let items = extracted(
+            "1 Alpha\nA frob shall spin.\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved     4    word   The id copied from the request.\n\nOther     4    word   The id echoed from the reply.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [
+                ("m2-124/1#1", "required"),
+                ("m2-124/1#2", "required"),
+                ("m2-124/1#3", "required")
+            ]
+        );
+        assert_eq!(items[0].facts, "");
+        assert_eq!(items[2].facts, "cell=1");
     }
 
     #[test]
