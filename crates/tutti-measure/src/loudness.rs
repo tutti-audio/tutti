@@ -418,13 +418,13 @@ pub fn measure_true_peak<S: Sample>(
 ///
 /// Not routed through [`tutti_types::Amplitude`], which is `f32`: converting first narrows
 /// the input before the `log10`, defeating the reason this path is `f64`. The
-/// arithmetic is [`Db::from_amplitude`]'s, at the width this boundary holds.
+/// arithmetic is [`Db::from_amplitude_f64`]'s, narrowed once at this boundary.
 #[inline]
 fn true_peak_db(peak_linear: f64) -> Db {
     if peak_linear <= 0.0 {
         Db::FLOOR
     } else {
-        Db((20.0 * libm::log10(peak_linear)) as f32)
+        Db(Db::from_amplitude_f64(peak_linear) as f32)
     }
 }
 

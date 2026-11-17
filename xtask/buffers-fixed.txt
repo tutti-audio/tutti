@@ -52,16 +52,6 @@ crates/tutti-graph/src/contract.rs::drive  measured: the param lanes are f32 by 
 crates/tutti-graph/src/contract.rs::drive_input  measured: the param lanes are f32 by spec; the audio edge is generic
 crates/tutti-graph/src/param.rs::ParamInput.Frames  measured: control values are f32 by spec
 crates/tutti-graph/src/param.rs::ParamInput::frames  measured: control values are f32 by spec
-crates/tutti-graph/src/reference.rs::Reference::process  pending
-crates/tutti-graph/src/reference.rs::Reference::process_with_changes  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapReader::pop_planes  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/testing.rs::Pair::block  pending
-crates/tutti-graph/src/testing.rs::Pair::block_at  pending
-crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
-crates/tutti-graph/src/testing.rs::bits  pending
-crates/tutti-graph/src/testing.rs::input_signal  pending
 crates/tutti-measure/src/features.rs::spectral_centroid  measured: a magnitude spectrum, not audio
 crates/tutti-measure/src/features.rs::spectral_flatness  measured: a magnitude spectrum, not audio
 crates/tutti-measure/src/features.rs::spectral_rolloff  measured: a magnitude spectrum, not audio

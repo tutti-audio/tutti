@@ -240,7 +240,7 @@ fn the_member_floors_what_cannot_be_run() {
     // A time under 0 is the follower of time 0: instant.
     assert_eq!(
         Detector::of(&m).ballistics,
-        Ballistics::of(Seconds(0.0), Seconds(0.0), RATE)
+        Follower::of(floored(Seconds(0.0), Seconds(0.0)), RATE)
     );
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(
