@@ -250,8 +250,8 @@ mod tests {
     }
 
     /// **A populated database survives a format with no self-description**:
-    /// postcard reads back exactly what it wrote, a blacklisted row, a measured
-    /// one and a path that is not UTF-8 included.
+    /// postcard reads back exactly what it wrote, a blacklisted row and a
+    /// measured one included.
     #[test]
     fn a_populated_database_round_trips_through_postcard() {
         let mut db = db_of(&["reverb", "delay"]);
@@ -267,12 +267,6 @@ mod tests {
                 measurement(TailVerdict::Honest, LatencyVerdict::Honest),
             ),
         ));
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/plugins/caf\xe9.vst3"));
-            db.blacklist(&odd, "boom".into(), &no_file());
-        }
 
         let bytes = postcard::to_stdvec(&db).unwrap();
         let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
@@ -387,6 +381,20 @@ mod tests {
 
             assert_eq!(back, db);
             assert!(back.is_blacklisted(&odd));
+        }
+
+        /// The same holds in a format with no self-description.
+        #[test]
+        fn a_non_utf8_path_round_trips_through_postcard() {
+            use std::os::unix::ffi::OsStrExt;
+            let mut db = db_of(&["kept"]);
+            let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/plugins/caf\xe9.vst3"));
+            db.blacklist(&odd, "boom".into(), &no_file());
+
+            let bytes = postcard::to_stdvec(&db).unwrap();
+            let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
+
+            assert_eq!(back, db);
         }
     }
 }
