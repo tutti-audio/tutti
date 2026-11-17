@@ -124,7 +124,8 @@ impl TempoMap {
     /// reaches the tempo this map has at `beat`, so every beat before `beat`
     /// keeps its time), and the step follows one ulp of a beat later, because a
     /// map holds one tempo at a beat and a tempo that jumps needs two points. A
-    /// `beat` before 0 is beat 0. The old map is untouched.
+    /// `beat` before 0 is treated as the origin, which is what a pre-roll beat
+    /// wants. The old map is untouched.
     ///
     /// # Errors
     ///

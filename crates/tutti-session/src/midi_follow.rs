@@ -310,6 +310,7 @@ impl Overlay {
                     Err(_) => {}
                 },
                 Followed::Meter(signature) => {
+                    // `at` is a bar line: it comes from `next_bar_line`.
                     let at = self.meter.next_bar_line(beat);
                     if let Some(map) = self.meter.with_change_at(at, signature) {
                         self.meter = Arc::new(map);
