@@ -210,10 +210,7 @@ fn pointer(text: &str) -> JsonPointer {
 #[test]
 fn queued_partial_updates_fold_into_one() {
     let (mut link, target) = subscribed_link(1, custom("X-ProgramEdit"), Some("abcd"));
-    let change = |p: &str, n: i64| {
-        PartialUpdate::new()
-            .with(pointer(p), PartialValue::Integer(n))
-    };
+    let change = |p: &str, n: i64| PartialUpdate::new().with(pointer(p), PartialValue::Integer(n));
     let first = link
         .resp
         .change(&target, change("/lfoSpeed", 10), link.now)
@@ -244,10 +241,7 @@ fn queued_partial_updates_fold_into_one() {
 // too many, is told as a `full` of the data as it is.
 #[test]
 fn partial_updates_that_cannot_fold_are_told_as_a_full() {
-    let one = |p: &str| {
-        PartialUpdate::new()
-            .with(pointer(p), PartialValue::Integer(1))
-    };
+    let one = |p: &str| PartialUpdate::new().with(pointer(p), PartialValue::Integer(1));
     assert!(super::server::merged(&one("/a"), &one("/b")).is_some());
     assert!(super::server::merged(&one("/a"), &one("/a")).is_some());
     assert!(super::server::merged(&one(""), &one("/a")).is_none());
@@ -814,8 +808,7 @@ fn only_an_untyped_resource_holds_binary_data() {
 fn a_partial_change_does_not_apply_to_binary_data() {
     let mut link = Link::new(store(), 256);
     let blob = super::exchange::target(custom("X-Blob"));
-    let update = PartialUpdate::new()
-        .with(pointer("/a"), PartialValue::Integer(1));
+    let update = PartialUpdate::new().with(pointer("/a"), PartialValue::Integer(1));
     assert!(matches!(
         link.resp.change(&blob, update, link.now),
         Err(PublishError::Data(_))

@@ -717,7 +717,13 @@ fn resource_list_reads_table_82() {
 // properties that have their defaults, and a default is the Resource's own.
 #[test]
 fn a_default_entry_is_minimal() {
-    let minimal = |resource: PeResource| ResourceEntry::new(resource).unwrap().to_json().encode();
+    let minimal = |resource: PeResource| {
+        ResourceEntry::builder(resource)
+            .build()
+            .unwrap()
+            .to_json()
+            .encode()
+    };
     assert_eq!(
         minimal(PeResource::ChannelList),
         br#"{"resource":"ChannelList"}"#
@@ -731,13 +737,18 @@ fn a_default_entry_is_minimal() {
         minimal(PeResource::CurrentMode),
         br#"{"resource":"CurrentMode"}"#
     );
-    let programs = ResourceEntry::new(PeResource::ProgramList).unwrap();
+    let programs = ResourceEntry::builder(PeResource::ProgramList)
+        .build()
+        .unwrap();
     assert!(programs.can_paginate() && programs.require_res_id());
-    let mode = ResourceEntry::new(PeResource::CurrentMode).unwrap();
+    let mode = ResourceEntry::builder(PeResource::CurrentMode)
+        .build()
+        .unwrap();
     assert_eq!(mode.can_set(), CanSet::Full);
-    let subscribable = ResourceEntry::new(PeResource::ChannelList)
-        .unwrap()
-        .with_can_subscribe(true);
+    let subscribable = ResourceEntry::builder(PeResource::ChannelList)
+        .can_subscribe(true)
+        .build()
+        .unwrap();
     assert_eq!(
         subscribable.to_json().encode(),
         br#"{"resource":"ChannelList","canSubscribe":true}"#
@@ -749,28 +760,36 @@ fn a_default_entry_is_minimal() {
 /// Spec: m2-103/14.3#3
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
-    let entry = |resource: PeResource| ResourceEntry::new(resource).unwrap();
-    let refused = |e: Result<ResourceEntry, EntryError>| {
+    let entry = ResourceEntry::builder;
+    let refused = |e: ResourceEntryBuilder| {
+        let e = e.build();
         assert!(matches!(e, Err(EntryError::NotOverridable { .. })), "{e:?}");
     };
-    refused(entry(PeResource::ChannelList).with_can_set(CanSet::Full));
-    refused(entry(PeResource::LocalOn).with_can_set(CanSet::None));
-    refused(entry(PeResource::ChannelList).with_can_get(false));
-    refused(entry(PeResource::ChannelList).with_require_res_id(true));
-    refused(entry(PeResource::ProgramList).with_can_paginate(false));
-    refused(entry(PeResource::ChannelList).with_can_paginate(true));
-    refused(entry(PeResource::ChannelList).with_schema(json(r#"{"title":"x"}"#)));
+    refused(entry(PeResource::ChannelList).can_set(CanSet::Full));
+    refused(entry(PeResource::LocalOn).can_set(CanSet::None));
+    refused(entry(PeResource::ChannelList).can_get(false));
+    refused(entry(PeResource::ChannelList).require_res_id(true));
+    refused(entry(PeResource::ProgramList).can_paginate(false));
+    refused(entry(PeResource::ChannelList).can_paginate(true));
+    refused(entry(PeResource::ChannelList).schema(json(r#"{"title":"x"}"#)));
     // The default itself is no override.
     assert!(
         entry(PeResource::LocalOn)
-            .with_can_set(CanSet::Full)
+            .can_set(CanSet::Full)
+            .build()
             .is_ok()
     );
     // What the spec lets an entry declare is open.
-    assert!(entry(PeResource::ChannelList).with_fc_on_get(true).is_ok());
     assert!(
         entry(PeResource::ChannelList)
-            .with_encodings(vec![PeEncoding::Ascii, PeEncoding::ZlibMcoded7])
+            .fc_on_get(true)
+            .build()
+            .is_ok()
+    );
+    assert!(
+        entry(PeResource::ChannelList)
+            .encodings(vec![PeEncoding::Ascii, PeEncoding::ZlibMcoded7])
+            .build()
             .is_ok()
     );
     // On the wire the same rule holds.
@@ -788,7 +807,7 @@ fn a_standard_resource_keeps_its_defaults() {
 #[test]
 fn resource_list_does_not_list_itself_or_repeat() {
     assert_eq!(
-        ResourceEntry::new(PeResource::ResourceList),
+        ResourceEntry::builder(PeResource::ResourceList).build(),
         Err(EntryError::ListsItself)
     );
     assert!(
@@ -807,9 +826,9 @@ fn resource_list_does_not_list_itself_or_repeat() {
 fn only_a_list_resource_paginates_and_has_columns() {
     let x_song = custom("X-Song");
     let schema = json(r#"{"title":"Song"}"#);
-    let entry = || ResourceEntry::custom(x_song.clone(), schema.clone()).unwrap();
+    let entry = || ResourceEntry::builder(x_song.clone()).schema(schema.clone());
     assert!(matches!(
-        entry().with_can_paginate(true),
+        entry().can_paginate(true).build(),
         Err(EntryError::NotAList(_))
     ));
     let columns = vec![PeColumn {
@@ -817,12 +836,12 @@ fn only_a_list_resource_paginates_and_has_columns() {
         title: Some("Title".to_owned()),
     }];
     assert!(matches!(
-        entry().with_columns(columns.clone()),
+        entry().columns(columns.clone()).build(),
         Err(EntryError::NotAList(_))
     ));
-    let list = ResourceEntry::custom(custom("X-SongList"), schema).unwrap();
-    assert!(list.clone().with_can_paginate(true).is_ok());
-    assert!(list.with_columns(columns).is_ok());
+    let list = || ResourceEntry::builder(custom("X-SongList")).schema(schema.clone());
+    assert!(list().can_paginate(true).build().is_ok());
+    assert!(list().columns(columns).build().is_ok());
 }
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
@@ -832,18 +851,21 @@ fn only_a_list_resource_paginates_and_has_columns() {
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");
     assert!(matches!(
-        ResourceEntry::new(wifi.clone()),
+        ResourceEntry::builder(wifi.clone()).build(),
         Err(EntryError::SchemaWithoutTitle(_))
     ));
     assert!(matches!(
-        ResourceEntry::custom(wifi.clone(), json(r#"{"type":"boolean"}"#)),
+        ResourceEntry::builder(wifi.clone())
+            .schema(json(r#"{"type":"boolean"}"#))
+            .build(),
         Err(EntryError::SchemaWithoutTitle(_))
     ));
     let schema =
         json(r#"{"title":"WIFI Enabled","description":"Turn WIFI on or Off","type":"boolean"}"#);
-    let entry = ResourceEntry::custom(wifi, schema.clone())
-        .unwrap()
-        .with_can_set(CanSet::Full)
+    let entry = ResourceEntry::builder(wifi)
+        .schema(schema.clone())
+        .can_set(CanSet::Full)
+        .build()
         .unwrap();
     let text = entry.to_json();
     assert_eq!(
@@ -936,7 +958,7 @@ fn a_set_carries_data_of_its_resource() {
 }
 
 fn entry_of(resource: PeResource) -> ResourceEntry {
-    ResourceEntry::new(resource).unwrap()
+    ResourceEntry::builder(resource).build().unwrap()
 }
 
 // M2-103 §14.2, Table 79: a Get needs `canGet`, a `resId` where `requireResId` says,
@@ -966,10 +988,10 @@ fn a_get_is_checked_against_its_entry() {
         channels.clone().flow_controlled().check_get(&entry),
         Err(RequestRefused::FlowControlNotDeclared(_))
     ));
-    let rich = entry
-        .with_encodings(vec![PeEncoding::Ascii, PeEncoding::Mcoded7])
-        .unwrap()
-        .with_fc_on_get(true)
+    let rich = ResourceEntry::builder(PeResource::ChannelList)
+        .encodings(vec![PeEncoding::Ascii, PeEncoding::Mcoded7])
+        .fc_on_get(true)
+        .build()
         .unwrap();
     assert_eq!(
         channels
@@ -989,9 +1011,10 @@ fn a_get_is_checked_against_its_entry() {
     );
     assert!(matches!(
         ResourceGet::new(ResourceTarget::new(custom("X-A")).unwrap()).check_get(
-            &ResourceEntry::custom(custom("X-A"), json(r#"{"title":"A"}"#))
-                .unwrap()
-                .with_require_res_id(true)
+            &ResourceEntry::builder(custom("X-A"))
+                .schema(json(r#"{"title":"A"}"#))
+                .require_res_id(true)
+                .build()
                 .unwrap()
         ),
         Err(RequestRefused::ResIdDisagrees { .. })
@@ -1028,9 +1051,10 @@ fn a_set_is_checked_against_its_entry() {
         })
     ));
     let x = custom("X-Edit");
-    let editable = ResourceEntry::custom(x.clone(), json(r#"{"title":"Edit"}"#))
-        .unwrap()
-        .with_can_set(CanSet::Partial)
+    let editable = ResourceEntry::builder(x.clone())
+        .schema(json(r#"{"title":"Edit"}"#))
+        .can_set(CanSet::Partial)
+        .build()
         .unwrap();
     assert_eq!(
         ResourceSet::partial(ResourceTarget::new(x).unwrap(), PartialUpdate::new())
@@ -1048,7 +1072,11 @@ fn a_subscription_needs_can_subscribe() {
         get.check_subscribe(&entry),
         Err(RequestRefused::CannotSubscribe(_))
     ));
-    assert_eq!(get.check_subscribe(&entry.with_can_subscribe(true)), Ok(()));
+    let subscribable = ResourceEntry::builder(PeResource::ChannelList)
+        .can_subscribe(true)
+        .build()
+        .unwrap();
+    assert_eq!(get.check_subscribe(&subscribable), Ok(()));
 }
 
 // The Resource of the standard names is the name of M2-103 §8: Pascal Case.

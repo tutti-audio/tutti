@@ -514,16 +514,18 @@ impl ResourceEntry {
     pub fn device_state() -> Self {
         let octets = MediaType::new("application/octet-stream")
             .unwrap_or_else(|| unreachable!("a valid media type"));
-        Self::new(PeResource::State)
-            .and_then(|e| e.with_encodings(vec![PeEncoding::Mcoded7]))
-            .and_then(|e| e.with_media_types(vec![octets]))
+        Self::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![octets])
+            .build()
             .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
     }
 
     /// The entry of StateList.
     #[must_use]
     pub fn state_list() -> Self {
-        Self::new(PeResource::StateList)
+        Self::builder(PeResource::StateList)
+            .build()
             .unwrap_or_else(|_: EntryError| unreachable!("StateList has no custom name"))
     }
 }

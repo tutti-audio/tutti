@@ -2008,7 +2008,7 @@ fn pe_limits() -> PeReassemblyLimits {
 
 fn local_on(on: bool) -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
     store
         .put(None, PeData::LocalOn(PeLocalOn(on)))
         .expect("declared");
@@ -2331,9 +2331,10 @@ fn a_lost_peer_drops_its_property_exchange() {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store
         .put(None, PeData::LocalOn(PeLocalOn(true)))

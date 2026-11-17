@@ -199,8 +199,9 @@ fn the_state_entry_lists_mcoded7_and_octet_stream() {
     assert_eq!(entry.can_set(), CanSet::Full);
     assert!(entry.require_res_id() && entry.can_get() && !entry.can_subscribe());
     // The spec's fixed properties stay fixed.
-    assert!(entry.clone().with_can_set(CanSet::Partial).is_err());
-    assert!(entry.with_require_res_id(false).is_err());
+    let state = || ResourceEntry::builder(PeResource::State);
+    assert!(state().can_set(CanSet::Partial).build().is_err());
+    assert!(state().require_res_id(false).build().is_err());
 }
 
 // M2-111 §2.2, §3.2, §3.3: list the states, get one, and set it back; the body is
@@ -211,10 +212,12 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     let original = stored(3000);
     let mut store = store_with(&[("buffer", original.clone()), ("system", stored(40))]);
     store.declare(
-        ResourceEntry::device_state()
-            .with_fc_on_get(true)
-            .unwrap()
-            .with_fc_on_set(true)
+        ResourceEntry::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![octets()])
+            .fc_on_get(true)
+            .fc_on_set(true)
+            .build()
             .unwrap(),
     );
     let mut link = Link::new(store, 256);
@@ -574,10 +577,12 @@ impl StateDevice for Device {
 fn big_link(device: Option<Box<dyn StateDevice>>) -> Link {
     let mut store = store_with(&[("buffer", stored(3000))]);
     store.declare(
-        ResourceEntry::device_state()
-            .with_fc_on_get(true)
-            .unwrap()
-            .with_fc_on_set(true)
+        ResourceEntry::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![octets()])
+            .fc_on_get(true)
+            .fc_on_set(true)
+            .build()
             .unwrap(),
     );
     Link::judged(store, 256, device)

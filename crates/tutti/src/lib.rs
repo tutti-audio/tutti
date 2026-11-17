@@ -730,10 +730,11 @@ pub mod midi {
             PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
             PeStatusClass, PeTerminator, PeText, PeTransaction, PeUnreadable, PeVersion, Priority,
             PropertyName, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
-            ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
-            ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
-            SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
-            StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
+            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
+            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
+            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
+            UnixSeconds, UpdateKind,
         };
         pub use tutti_midi_hardware::{
             PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer,

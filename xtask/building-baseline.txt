@@ -158,28 +158,6 @@ tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
 # tutti-midi-device
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_subscribe
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_extensions
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
-tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::ArticulationDetails::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::CustomSounds::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/chunk.rs::PeChunk::new
@@ -191,8 +169,6 @@ tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/cont
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/controllers.rs::PeChCtrlList::checked
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/data.rs::PeData::decode
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/data.rs::PeData::decode_bytes
-tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::custom
-tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::new
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::from_selection
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::from_simple_action
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceSet::full
