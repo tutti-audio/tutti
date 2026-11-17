@@ -16,8 +16,8 @@ fn serial(text: &str) -> ProductInstanceId {
 }
 
 fn said(model: u8, id: Option<&str>) -> Learned {
-    let learned = Learned::new().with_identity(identity(model));
-    id.map_or(learned, |id| learned.with_instance_id(serial(id)))
+    let learned = Learned::new().identified(identity(model));
+    id.map_or(learned, |id| learned.instanced(serial(id)))
 }
 
 /// M2-101 §5.8.3.1: the Product Instance Id is unique per unit, so two equal
@@ -29,7 +29,7 @@ fn an_equal_product_instance_id_on_both_sides_is_the_same_unit() {
         Match::SameUnit
     );
     // One side never said its identity: the serial still names the unit.
-    let only_serial = Learned::new().with_instance_id(serial("A1"));
+    let only_serial = Learned::new().instanced(serial("A1"));
     assert_eq!(said(7, Some("A1")).compare(&only_serial), Match::SameUnit);
 }
 
@@ -70,7 +70,7 @@ fn nothing_comparable_is_unknown() {
     assert_eq!(Learned::new().compare(&said(7, Some("A1"))), Match::Unknown);
     assert_eq!(said(7, None).compare(&Learned::new()), Match::Unknown);
     // Each side knows a different field.
-    let only_serial = Learned::new().with_instance_id(serial("A1"));
+    let only_serial = Learned::new().instanced(serial("A1"));
     assert_eq!(said(7, None).compare(&only_serial), Match::Unknown);
 }
 

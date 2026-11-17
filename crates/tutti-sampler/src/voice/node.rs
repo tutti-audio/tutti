@@ -47,7 +47,7 @@ use tutti_types::{Amplitude, ChannelLayout, Param, SampleRate, Tail, UnitParam};
 ///   [`UnitParam::Volume`] through the handle's [`ParamSet`]. The node reads
 ///   it once per block into the voice's `Playback` record and its source.
 /// - window, loop, speed and play state: not scalars, so the handle publishes
-///   them to an `ArcLend` cell the node reads once per block, latest wins,
+///   them to a `Publisher` cell the node reads once per block, latest wins,
 ///   allocation-free. A disk voice's loop is its [`Stream`]'s, which the
 ///   handle owns ([`VoiceNode::streaming`]).
 ///
@@ -68,9 +68,8 @@ pub struct VoiceNode {
     /// Declared rather than inferred from the voice, so an edge wired against
     /// it cannot be re-arityed under a live graph.
     pub(crate) channels: ChannelLayout,
-    /// A reader of the steering the handle publishes, lent once per block; the
-    /// reader owns the cell (`Reader::cell`), which the handle and the fork
-    /// source share. Empty until a handle sets a field, so a node driven
+    /// A reader of the steering the handle publishes, lent once per block,
+    /// registered on the `Publisher` the handle and the fork source share. Empty until a handle sets a field, so a node driven
     /// by hand keeps what it was built with.
     steering: Reader<Steering>,
     /// The steering last applied, so a block applies a field once, when it
@@ -196,14 +195,10 @@ impl VoiceNode {
     /// gain still does: that cell is the node's for life). A streaming node's
     /// stream moves into the handle.
     pub fn with_handle(mut self) -> (Self, VoiceNodeHandle) {
-        self.steering = SteeringCell::default().reader();
+        let steering = SteeringCell::default();
+        self.steering = steering.reader();
         let params = self.param_set();
-        let handle = VoiceNodeHandle::new(
-            Arc::clone(self.steering.cell()),
-            self.gain.handle(),
-            params,
-            self.stream.take(),
-        );
+        let handle = VoiceNodeHandle::new(steering, self.gain.handle(), params, self.stream.take());
         (self, handle)
     }
 
@@ -217,7 +212,7 @@ impl VoiceNode {
     /// Apply the published steering, and the gain. Runs at the top of each
     /// block.
     ///
-    /// Allocation- and free-free by construction: one `ArcLend` read (a
+    /// Allocation- and free-free by construction: one `Publisher` read (a
     /// borrow that cannot free, dropped before the block's read), a `Copy`
     /// value, and a field write when one changed. The pool's drain has to be
     /// more careful because its commands carry owned payloads (a `Voice`, a
@@ -502,7 +497,7 @@ impl IntoNode for VoiceNode {
         let fork = VoiceNodeFork {
             template: node.slot.voice.as_ref().clone(),
             channels: node.channels,
-            steering: Arc::clone(&handle.steering),
+            steering: handle.steering.clone(),
             params: handle.params.clone(),
             tempo: node.tempo.clone(),
         };
