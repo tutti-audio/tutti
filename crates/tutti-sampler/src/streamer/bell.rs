@@ -12,7 +12,7 @@
 //! | shutdown | [`Bell::shut`] |
 //! | the reclaim backstop | the wait's timeout, which stays |
 //!
-//! The wait is [`Doorbell::wait_timeout`] over what each source publishes: a
+//! The wait is [`Sleeper::wait_timeout`] over what each source publishes: a
 //! command is in the queue, the refill flag is set, or the shutdown flag is.
 //! The flag a voice sets and the doorbell's ring are in the order the
 //! doorbell's protocol asks (publish, then ring), so a ring that lands between
@@ -27,7 +27,7 @@ use std::time::Duration;
 #[cfg(test)]
 use crossbeam_channel::TrySendError;
 use crossbeam_channel::{SendError, Sender};
-use tutti_rt::Doorbell;
+use tutti_rt::{Doorbell, Sleeper, doorbell};
 
 use super::command::StreamerCommand;
 
@@ -46,14 +46,18 @@ pub(crate) struct Bell {
 }
 
 impl Bell {
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
-            door: Doorbell::new(),
+    /// The bell and the [`Sleeper`] of its doorbell, which the streamer
+    /// thread alone waits on.
+    pub(crate) fn new() -> (Arc<Self>, Sleeper) {
+        let (door, sleeper) = doorbell();
+        let bell = Arc::new(Self {
+            door,
             refill: AtomicBool::new(false),
             shut: AtomicBool::new(false),
             #[cfg(test)]
             cycles: std::sync::atomic::AtomicU64::new(0),
-        })
+        });
+        (bell, sleeper)
     }
 
     /// Wake the streamer after something was published for it to find (a
@@ -107,8 +111,13 @@ impl Bell {
     /// a command is waiting; it is read after the doorbell is armed, so a push
     /// that lands before the park is seen. May return with nothing to do (a
     /// spurious park return, a ring whose work the last cycle already did).
-    pub(crate) fn sleep(&self, queued: impl FnOnce() -> bool, backstop: Duration) {
-        self.door.wait_timeout(
+    pub(crate) fn sleep(
+        &self,
+        sleeper: &mut Sleeper,
+        queued: impl FnOnce() -> bool,
+        backstop: Duration,
+    ) {
+        sleeper.wait_timeout(
             || queued() || self.is_shut() || self.refill.load(Ordering::Acquire),
             backstop,
         );
@@ -161,7 +170,7 @@ impl StreamerSender {
 #[cfg(test)]
 impl From<Sender<StreamerCommand>> for StreamerSender {
     fn from(tx: Sender<StreamerCommand>) -> Self {
-        Self::new(tx, Bell::new())
+        Self::new(tx, Bell::new().0)
     }
 }
 
