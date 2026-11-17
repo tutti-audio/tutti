@@ -4,9 +4,8 @@
 /// sections 7.4.11 and 7.4.7), centred on [`CENTER`](Self::CENTER).
 ///
 /// Every `u32` is a bend, so there is no refusing constructor. The word is the
-/// wire's integer: a MIDI 1.0 14-bit bend reaches it through
-/// `tutti_midi_protocol::widen_bend`, which scales by M2-115, and the raw
-/// `0x2000` of a 14-bit centre is far below the centre here.
+/// wire's integer, not a MIDI 1.0 14-bit bend: the raw `0x2000` of a 14-bit
+/// centre is far below the centre here.
 ///
 /// # Examples
 ///

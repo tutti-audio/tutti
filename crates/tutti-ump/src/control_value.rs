@@ -6,9 +6,7 @@
 ///
 /// Every `u32` is a value, so there is no refusing constructor, as for
 /// [`NoteVelocity`](crate::NoteVelocity). The word is the wire's integer, not
-/// a MIDI 1.0 value: a 7-bit value reaches it through
-/// `tutti_midi_protocol::widen_value`, which scales by M2-115, and `127` as a
-/// raw word is nearly zero.
+/// a MIDI 1.0 value: `127` as a raw word is nearly zero.
 ///
 /// # Examples
 ///

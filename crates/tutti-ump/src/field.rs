@@ -159,8 +159,7 @@ bits!(
     U28, u32, "u32", 28
 );
 bits!(
-    /// A MIDI note number on the wire (`0..=127`). The musical pitch is
-    /// `tutti_types::Note`, which converts with `u8::try_from`.
+    /// A MIDI note number on the wire (`0..=127`), not a musical pitch.
     NoteNumber, u8, "u8", 7
 );
 bits!(

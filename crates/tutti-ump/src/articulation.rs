@@ -8,8 +8,8 @@
 //! field typed so a value the specification reserves cannot be written;
 //! [`NoteArticulation::from_attribute`] refuses one on the wire with an
 //! [`ArticulationError`]. [`NoteOffArticulation`] is the Note Off's side
-//! (§7, Figure 2). Whether the Profile is enabled is a MIDI-CI matter:
-//! `tutti-midi-device` reads it.
+//! (§7, Figure 2). Whether the Profile is enabled is a MIDI-CI matter, not
+//! this module's.
 
 use crate::{Attribute, NoteNumber, NoteVelocity, U4, Voice2};
 

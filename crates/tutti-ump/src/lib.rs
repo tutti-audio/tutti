@@ -66,7 +66,7 @@
 //! a whole string or SysEx message is reassembled above the codec, off the audio
 //! thread, by [`FlexTextAssembler`] and [`SysexAssembler`]. The limits on a
 //! reassembled name (Endpoint Name, Function Block Name, Product Instance Id)
-//! are not the codec's: `tutti-midi-device` checks them where it builds a name.
+//! are not the codec's: a consumer checks them where it builds a name.
 //!
 //! The fields are typed ([`NoteNumber`], [`U4`], [`U7`], [`U14`], [`Pitch`] and
 //! the address types). A public `new` refuses an out-of-range raw, `of` builds

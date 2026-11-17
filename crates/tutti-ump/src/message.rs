@@ -151,8 +151,7 @@ impl Message {
 
     /// A MIDI 2.0 channel voice message (message type `0x4`) at `address`;
     /// a bare [`MidiChannel`] addresses the first Group. A 7-bit value reaches
-    /// a MIDI 2.0 field through M2-115, in `tutti-midi-protocol`'s
-    /// `widen_velocity`, `widen_value` and `widen_bend`.
+    /// a MIDI 2.0 field through M2-115's scaling, not by a shift.
     ///
     /// ```
     /// use tutti_ump::{
