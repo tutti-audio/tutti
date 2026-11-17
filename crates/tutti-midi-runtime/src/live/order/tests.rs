@@ -4,7 +4,7 @@ use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::widen_velocity;
-use tutti_ump::{KeyEvent, MidiChannel, U7};
+use tutti_ump::{MidiChannel, NoteKeyEvent, U7};
 
 /// A note at `offset`, which may lie past the 64-frame block the placement test
 /// uses.
@@ -32,8 +32,8 @@ fn sorts_stably_and_places_late_offsets_last() {
         .iter()
         .map(|e| {
             (
-                match e.1.key_event() {
-                    Some(KeyEvent::On(key) | KeyEvent::Off(key)) => key.note().get(),
+                match e.1.note_key_event() {
+                    Some(NoteKeyEvent::On(key) | NoteKeyEvent::Off(key)) => key.note().get(),
                     other => panic!("a note, got {other:?}"),
                 },
                 e.0.get(),

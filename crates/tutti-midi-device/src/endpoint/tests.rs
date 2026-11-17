@@ -1,7 +1,7 @@
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockId, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
+    BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
+    FunctionBlockId, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
     StreamConfig, U7, UiHint, Ump,
 };
 
