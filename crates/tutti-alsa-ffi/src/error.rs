@@ -144,6 +144,25 @@ pub enum Error {
         /// The alsa-lib function that returned the null.
         operation: Operation,
     },
+    /// A name with a NUL byte, which a C string cannot hold.
+    #[error("ALSA name has a NUL byte")]
+    NulInName {
+        /// Where the NUL is.
+        #[source]
+        source: std::ffi::NulError,
+    },
+    /// A UMP message is one to four words.
+    #[error("a UMP message is 1 to 4 words, not {len}")]
+    PacketLength {
+        /// The words given.
+        len: usize,
+    },
+    /// A Function Block number the sequencer does not have: blocks are 0 to 31.
+    #[error("Function Block {id} is not a block number (0 to 31)")]
+    BlockId {
+        /// The number given.
+        id: u32,
+    },
     /// The sequencer did not give a queue's real time.
     #[error("the sequencer gave no real time for the queue's status")]
     NoQueueTime,

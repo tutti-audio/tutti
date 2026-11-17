@@ -7,12 +7,37 @@
 //! the ones the device declared (or its Group Terminal Blocks). A user-space
 //! client may publish the same records for itself.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
-use crate::client::Client;
+use crate::client::{Client, c_name};
+use crate::error::{Error, Operation, Result, check};
 use crate::records::{BlockRecord, EndpointRecord};
 use crate::sys;
+
+/// Function Blocks a UMP Endpoint has: numbered 0 to 31.
+const MAX_BLOCKS: u32 = 32;
+
+/// Block `id` as the number alsa-lib takes.
+fn block_number(id: u32) -> Result<i32> {
+    if id >= MAX_BLOCKS {
+        return Err(Error::BlockId { id });
+    }
+    i32::try_from(id).map_err(|_| Error::BlockId { id })
+}
+
+/// A name as a C string; none is the empty name.
+fn c_name_of(name: Option<&str>) -> Result<CString> {
+    name.map_or_else(|| Ok(CString::default()), c_name)
+}
+
+/// Whether a failed record query means the sequencer has none: `ENODEV` for a
+/// user client that never published a UMP Endpoint or block, `EBADFD` for a
+/// kernel client (the System, Midi Through or a hardware port). Any other code,
+/// `ENOENT` for a client that has exited among them, is a failure.
+fn is_absent(rc: i32) -> bool {
+    matches!(-rc, libc::ENODEV | libc::EBADFD)
+}
 
 /// The Endpoint's protocol bits (`SND_UMP_EP_INFO_PROTO_MIDI_MASK`): which of
 /// the two are set, in `protocol` (the one in use) or `protocol_caps` (those
@@ -93,16 +118,21 @@ impl Client {
     /// The UMP Endpoint of `client`, and its blocks; `None` when the sequencer
     /// has none for it: a legacy client, reached through the kernel's
     /// converter, or a UMP client that never published one.
-    #[must_use]
-    pub fn ump_endpoint(&self, client: i32) -> Option<UmpEndpoint> {
-        let info = EndpointRecord::new().ok()?;
+    ///
+    /// # Errors
+    ///
+    /// The code of a query that failed for any other reason than the Endpoint
+    /// being absent.
+    pub fn ump_endpoint(&self, client: i32) -> Result<Option<UmpEndpoint>> {
+        let info = EndpointRecord::new()?;
         // SAFETY: `self.raw()` is open and `info` is a live record; the call's
         // `info` is typed `void *` in alsa-lib's header.
         let rc =
             unsafe { sys::snd_seq_get_ump_endpoint_info(self.raw(), client, info.as_ptr().cast()) };
-        if rc < 0 {
-            return None;
+        if is_absent(rc) {
+            return Ok(None);
         }
+        check(rc, Operation::GetUmpEndpointInfo)?;
         let ptr = info.as_ptr();
         // SAFETY: `info` is a live record the call just filled; each getter
         // reads it and the name is copied before the record is used again.
@@ -115,37 +145,40 @@ impl Client {
             )
         };
         // The UMP limit: blocks are numbered 0 to 31.
-        let blocks = (0..count.min(32))
-            .filter_map(|id| self.ump_block(client, id))
-            .collect();
-        Some(UmpEndpoint {
+        let mut blocks = Vec::new();
+        for id in 0..count.min(MAX_BLOCKS) {
+            blocks.extend(self.ump_block(client, id)?);
+        }
+        Ok(Some(UmpEndpoint {
             protocol,
             protocol_caps,
             name: ep_name,
             blocks,
-        })
+        }))
     }
 
-    /// Block `id` of `client`'s Endpoint, if the sequencer has it.
-    fn ump_block(&self, client: i32, id: u32) -> Option<UmpBlock> {
-        let info = BlockRecord::new().ok()?;
+    /// Block `id` of `client`'s Endpoint; `None` when the sequencer has no such
+    /// block.
+    fn ump_block(&self, client: i32, id: u32) -> Result<Option<UmpBlock>> {
+        let info = BlockRecord::new()?;
         // SAFETY: `self.raw()` is open and `info` is a live record; the call's
         // `info` is typed `void *` in alsa-lib's header.
         let rc = unsafe {
             sys::snd_seq_get_ump_block_info(
                 self.raw(),
                 client,
-                i32::try_from(id).ok()?,
+                block_number(id)?,
                 info.as_ptr().cast(),
             )
         };
-        if rc < 0 {
-            return None;
+        if is_absent(rc) {
+            return Ok(None);
         }
+        check(rc, Operation::GetUmpBlockInfo)?;
         let p = info.as_ptr();
         // SAFETY: `info` is a live record the call just filled.
-        unsafe {
-            Some(UmpBlock {
+        let block = unsafe {
+            UmpBlock {
                 id: sys::snd_ump_block_info_get_block_id(p),
                 active: sys::snd_ump_block_info_get_active(p) != 0,
                 flags: sys::snd_ump_block_info_get_flags(p),
@@ -156,8 +189,9 @@ impl Client {
                 sysex8_streams: sys::snd_ump_block_info_get_sysex8_streams(p),
                 ui_hint: sys::snd_ump_block_info_get_ui_hint(p),
                 name: name(sys::snd_ump_block_info_get_name(p)),
-            })
-        }
+            }
+        };
+        Ok(Some(block))
     }
 
     /// Publishes `endpoint` and its blocks as this client's own UMP Endpoint,
@@ -165,17 +199,21 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// The code of the call that failed.
-    pub fn publish_ump_endpoint(&self, endpoint: &UmpEndpoint) -> crate::Result<()> {
-        use crate::error::{Operation, check};
-        use std::ffi::CString;
+    /// [`Error::NulInName`] for a name with a NUL and [`Error::BlockId`] for a
+    /// block past number 31, both before anything is published; else the code
+    /// of the call that failed.
+    pub fn publish_ump_endpoint(&self, endpoint: &UmpEndpoint) -> Result<()> {
         let info = EndpointRecord::new()?;
         let p = info.as_ptr();
-        let cname = endpoint
-            .name
-            .as_deref()
-            .and_then(|n| CString::new(n).ok())
-            .unwrap_or_default();
+        let cname = c_name_of(endpoint.name.as_deref())?;
+        let mut numbered = Vec::with_capacity(endpoint.blocks.len());
+        for block in &endpoint.blocks {
+            numbered.push((
+                block,
+                block_number(block.id)?,
+                c_name_of(block.name.as_deref())?,
+            ));
+        }
         // The count is the highest block number plus one: the sequencer refuses a
         // block numbered at or past it.
         let count = endpoint
@@ -194,14 +232,9 @@ impl Client {
         // SAFETY: `self.raw()` is open and `info` is a live record.
         let rc = unsafe { sys::snd_seq_set_ump_endpoint_info(self.raw(), p.cast()) };
         check(rc, Operation::SetUmpEndpointInfo)?;
-        for block in &endpoint.blocks {
+        for (block, id, cname) in &numbered {
             let info = BlockRecord::new()?;
             let p = info.as_ptr();
-            let cname = block
-                .name
-                .as_deref()
-                .and_then(|n| CString::new(n).ok())
-                .unwrap_or_default();
             // SAFETY: `info` is a live record; `cname` outlives the call that copies it.
             unsafe {
                 sys::snd_ump_block_info_set_block_id(p, block.id);
@@ -215,11 +248,50 @@ impl Client {
                 sys::snd_ump_block_info_set_sysex8_streams(p, block.sysex8_streams);
                 sys::snd_ump_block_info_set_name(p, cname.as_ptr());
             }
-            let id = i32::try_from(block.id).unwrap_or(0);
             // SAFETY: `self.raw()` is open and `info` is a live record.
-            let rc = unsafe { sys::snd_seq_set_ump_block_info(self.raw(), id, p.cast()) };
+            let rc = unsafe { sys::snd_seq_set_ump_block_info(self.raw(), *id, p.cast()) };
             check(rc, Operation::SetUmpBlockInfo)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Blocks are numbered 0 to 31: a number past that, or one that does not fit
+    /// alsa-lib's int, is refused, never published as another block.
+    #[test]
+    fn a_block_number_past_31_is_refused() {
+        assert_eq!(block_number(0).unwrap(), 0);
+        assert_eq!(block_number(31).unwrap(), 31);
+        assert!(matches!(block_number(32), Err(Error::BlockId { id: 32 })));
+        assert!(matches!(
+            block_number(u32::MAX),
+            Err(Error::BlockId { id: u32::MAX })
+        ));
+    }
+
+    /// A kernel or legacy client has no record (`ENODEV`, `EBADFD`); a client
+    /// that exited (`ENOENT`) or any other code is a failure.
+    #[test]
+    fn only_no_record_codes_mean_absent() {
+        assert!(is_absent(-libc::ENODEV));
+        assert!(is_absent(-libc::EBADFD));
+        assert!(!is_absent(-libc::ENOENT));
+        assert!(!is_absent(-libc::EINVAL));
+        assert!(!is_absent(0));
+    }
+
+    /// A name with a NUL is refused; none is the empty name.
+    #[test]
+    fn a_name_is_nul_free_or_refused() {
+        assert!(matches!(
+            c_name_of(Some("a\0b")),
+            Err(Error::NulInName { .. })
+        ));
+        assert_eq!(c_name_of(None).unwrap().as_bytes(), b"");
+        assert_eq!(c_name_of(Some("ok")).unwrap().as_bytes(), b"ok");
     }
 }

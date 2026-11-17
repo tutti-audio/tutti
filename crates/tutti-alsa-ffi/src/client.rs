@@ -11,9 +11,36 @@ use crate::sys;
 /// `-EAGAIN`: nothing queued yet on a non-blocking client.
 const EAGAIN: i32 = -11;
 
-/// A name as a C string; one with an interior NUL is called `tutti` instead.
-fn c_name(name: &str) -> CString {
-    CString::new(name).unwrap_or_else(|_| c"tutti".to_owned())
+/// A name as a C string.
+///
+/// # Errors
+///
+/// [`Error::NulInName`] when `name` has a NUL, which a C string cannot hold.
+pub(crate) fn c_name(name: &str) -> Result<CString> {
+    CString::new(name).map_err(|source| Error::NulInName { source })
+}
+
+/// One UMP message: one to four words, which is the whole of any UMP message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Packet {
+    /// The message's words, the rest zero: the fixed field of an event.
+    words: [u32; 4],
+}
+
+impl Packet {
+    /// The message in `words`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::PacketLength`] when `words` is empty or has more than four.
+    pub fn new(words: &[u32]) -> Result<Self> {
+        if words.is_empty() || words.len() > 4 {
+            return Err(Error::PacketLength { len: words.len() });
+        }
+        let mut field = [0; 4];
+        field[..words.len()].copy_from_slice(words);
+        Ok(Self { words: field })
+    }
 }
 
 /// What [`Client::read_event`] found.
@@ -23,8 +50,6 @@ pub enum Read {
     Event(Received),
     /// Nothing queued (`-EAGAIN`; only a non-blocking client says so).
     Empty,
-    /// The read succeeded and returned no event; read again.
-    Skipped,
 }
 
 /// Whether a client's reads wait for an event.
@@ -72,12 +97,14 @@ impl UmpVersion {
 pub struct Client {
     seq: *mut sys::snd_seq_t,
     /// The id as an address byte: what a sent event names as its source.
-    id: u8,
+    pub(crate) id: u8,
 }
 
-// SAFETY: `snd_seq_t` is an opaque handle whose operations alsa-lib
-// synchronises internally, and a `Client` is not `Sync`, so it is used from one
-// thread at a time: moving it to another is the same use.
+// SAFETY: a `Client` owns its `snd_seq_t` outright (no other copy of the
+// pointer exists, and `Drop` closes it once), and alsa-lib ties a handle to no
+// thread, so moving the owner to another thread moves every use with it. The
+// `*mut` field keeps it `!Sync`, so two threads never call into the handle at
+// once: it is used by one thread at a time.
 unsafe impl Send for Client {}
 
 impl Client {
@@ -146,7 +173,7 @@ impl Client {
         // Owned from here: any failure below closes it by `Drop`.
         let mut client = Self { seq, id: 0 };
 
-        let cname = c_name(name);
+        let cname = c_name(name)?;
         // SAFETY: `client.seq` is open; `cname` outlives the call.
         unsafe { sys::snd_seq_set_client_name(client.seq, cname.as_ptr()) };
 
@@ -157,6 +184,8 @@ impl Client {
     }
 
     /// This client's sequencer id, for addressing events back to it.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
     #[must_use]
     pub fn id(&self) -> i32 {
         i32::from(self.id)
@@ -170,7 +199,7 @@ impl Client {
     /// `snd_seq_create_simple_port`'s code, or [`Error::Address`] for a number
     /// that is no address byte.
     pub fn open_port(&self, name: &str, caps: u32, kind: u32) -> Result<u8> {
-        let cname = c_name(name);
+        let cname = c_name(name)?;
         // SAFETY: `self.seq` is open; `cname` outlives the call.
         let rc = unsafe { sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps, kind) };
         address_byte("port", check(rc, Operation::CreateSimplePort)?)
@@ -216,7 +245,7 @@ impl Client {
         )
     }
 
-    /// Reads one event. A blocking client waits for one; a non-blocking client
+    /// Reads one event, skipping a read that succeeds with none. A blocking client waits for one; a non-blocking client
     /// answers [`Read::Empty`] when none is queued.
     ///
     /// # Errors
@@ -224,36 +253,37 @@ impl Client {
     /// `snd_seq_ump_event_input`'s code for anything but an empty queue, an
     /// overrun among them.
     pub fn read_event(&self) -> Result<Read> {
-        let mut ev: *mut sys::snd_seq_ump_event_t = std::ptr::null_mut();
-        // SAFETY: `self.seq` is open; `ev` is a valid out-pointer. On success
-        // alsa-lib points it at a buffer it owns, valid until the next call on
-        // this client, which `&self` cannot make while `ev` is read below.
-        let rc = unsafe { sys::snd_seq_ump_event_input(self.seq, &mut ev) };
-        if rc == EAGAIN {
-            return Ok(Read::Empty);
-        }
-        check(rc, Operation::UmpEventInput)?;
-        // SAFETY: `rc >= 0` means alsa-lib wrote a complete event at `ev`, which
-        // `as_ref` checks for NULL; it is copied out by value before any other
-        // call.
-        match unsafe { ev.as_ref() } {
-            Some(ev) => Ok(Read::Event(Received::from_event(ev))),
-            None => Ok(Read::Skipped),
+        loop {
+            let mut ev: *mut sys::snd_seq_ump_event_t = std::ptr::null_mut();
+            // SAFETY: `self.seq` is open; `ev` is a valid out-pointer. On
+            // success alsa-lib points it at a buffer it owns, valid until the
+            // next call on this client, which `&self` cannot make while `ev` is
+            // read below.
+            let rc = unsafe { sys::snd_seq_ump_event_input(self.seq, &mut ev) };
+            if rc == EAGAIN {
+                return Ok(Read::Empty);
+            }
+            check(rc, Operation::UmpEventInput)?;
+            // SAFETY: `rc >= 0` means alsa-lib wrote a complete event at `ev`,
+            // which `as_ref` checks for NULL; it is copied out by value before
+            // any other call.
+            // A success with no event is read again.
+            if let Some(ev) = unsafe { ev.as_ref() } {
+                return Ok(Read::Event(Received::from_event(ev)));
+            }
         }
     }
 
     /// Sends one UMP message to everything subscribed to `port` (see
     /// [`connect_to`](Self::connect_to)), immediately, bypassing any queue.
     ///
-    /// `words` is one complete UMP message; only its first 4 words are sent,
-    /// which is the whole of any UMP message. Empty input is a no-op.
     ///
     /// # Errors
     ///
     /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
     /// [`Blocking::NonBlock`] client whose destination has no room.
-    pub fn send_to_subscribers(&self, port: u8, words: &[u32]) -> Result<()> {
-        self.send_ump_event(port, words, None)
+    pub fn send_to_subscribers(&self, port: u8, packet: Packet) -> Result<()> {
+        self.send_ump_event(port, packet, None)
     }
 
     /// Sends one UMP message to everything subscribed to `port`, held by
@@ -269,18 +299,15 @@ impl Client {
     pub fn send_to_subscribers_at(
         &self,
         port: u8,
-        words: &[u32],
+        packet: Packet,
         queue: &QueueClock,
         at: Duration,
     ) -> Result<()> {
-        self.send_ump_event(port, words, Some((queue.queue, at)))
+        self.send_ump_event(port, packet, Some((queue.queue, at)))
     }
 
     /// The one send: direct, or scheduled on a queue of this client's.
-    fn send_ump_event(&self, port: u8, words: &[u32], on: Option<(u8, Duration)>) -> Result<()> {
-        if words.is_empty() {
-            return Ok(());
-        }
+    fn send_ump_event(&self, port: u8, packet: Packet, on: Option<(u8, Duration)>) -> Result<()> {
         let operation = Operation::UmpEventOutputDirect;
         let mut ev = sys::snd_seq_ump_event_t {
             // `SND_SEQ_EVENT_NONE`. For a UMP event the type field is unused:
@@ -317,7 +344,7 @@ impl Client {
             ev.time[..4].copy_from_slice(&secs.to_ne_bytes());
             ev.time[4..].copy_from_slice(&at.subsec_nanos().to_ne_bytes());
         }
-        copy_words(&mut ev.ump, words);
+        ev.ump = packet.words;
 
         // SAFETY: `self.seq` is open; `ev` is a fully initialised event of the
         // measured layout (the compile-time asserts in `sys`), which alsa-lib
@@ -428,6 +455,7 @@ impl Client {
     ///
     /// The step that failed, with alsa-lib's code.
     #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub fn open_legacy(name: &str, blocking: Blocking) -> Result<Self> {
         Self::open_plain(name, blocking)
     }
@@ -438,6 +466,7 @@ impl Client {
     ///
     /// `snd_seq_event_output_direct`'s code.
     #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub fn send_legacy_to_subscribers(&self, port: u8, event: LegacyEvent) -> Result<()> {
         let operation = Operation::EventOutputDirect;
         let mut ev = sys::snd_seq_event_t {
@@ -484,11 +513,17 @@ impl Client {
     }
 
     /// Renames this client; the sequencer announces the change.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NulInName`] when `name` has a NUL.
     #[cfg(feature = "testing")]
-    pub fn rename(&self, name: &str) {
-        let cname = c_name(name);
+    #[doc(hidden)]
+    pub fn rename(&self, name: &str) -> Result<()> {
+        let cname = c_name(name)?;
         // SAFETY: `self.seq` is open; `cname` outlives the call.
         unsafe { sys::snd_seq_set_client_name(self.seq, cname.as_ptr()) };
+        Ok(())
     }
 
     /// Sets the capability bits of one of this client's ports; the sequencer
@@ -498,6 +533,7 @@ impl Client {
     ///
     /// The code of the call that failed.
     #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub fn set_port_caps(&self, port: u8, caps: u32) -> Result<()> {
         self.edit_port(port, |info| {
             // SAFETY: `info` is a live record, filled from this client's port.
@@ -508,6 +544,7 @@ impl Client {
 
 /// A legacy (byte-oriented) channel event a [`Client::open_legacy`] client sends.
 #[cfg(feature = "testing")]
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LegacyEvent {
     /// A Note On.
@@ -528,13 +565,6 @@ pub enum LegacyEvent {
         /// Value.
         value: i32,
     },
-}
-
-/// Copies a message's words into an event's four, and leaves the rest zero; a
-/// message longer than four words is cut to them.
-fn copy_words(field: &mut [u32; 4], words: &[u32]) {
-    let n = words.len().min(field.len());
-    field[..n].copy_from_slice(&words[..n]);
 }
 
 impl Drop for Client {
@@ -580,22 +610,26 @@ impl QueueClock {
 mod tests {
     use super::*;
 
-    /// A message shorter than four words leaves the rest zero, and a longer
-    /// one is cut to four.
+    /// A message of one to four words is held whole, the rest zero; none or
+    /// five is refused rather than sent short or cut.
     #[test]
-    fn a_message_fills_the_front_of_the_four_words() {
-        let mut field = [9; 4];
-        copy_words(&mut field, &[1, 2]);
-        assert_eq!(field, [1, 2, 9, 9]);
-        let mut field = [0; 4];
-        copy_words(&mut field, &[1, 2, 3, 4, 5]);
-        assert_eq!(field, [1, 2, 3, 4]);
+    fn a_packet_is_one_to_four_words_and_zero_padded() {
+        assert_eq!(Packet::new(&[1, 2]).unwrap().words, [1, 2, 0, 0]);
+        assert_eq!(Packet::new(&[1, 2, 3, 4]).unwrap().words, [1, 2, 3, 4]);
+        assert!(matches!(
+            Packet::new(&[]),
+            Err(Error::PacketLength { len: 0 })
+        ));
+        assert!(matches!(
+            Packet::new(&[1, 2, 3, 4, 5]),
+            Err(Error::PacketLength { len: 5 })
+        ));
     }
 
-    /// A name with a NUL is not refused: the client is called `tutti`.
+    /// A name with a NUL is refused, not renamed.
     #[test]
-    fn a_name_with_a_nul_falls_back() {
-        assert_eq!(c_name("a\0b").to_str(), Ok("tutti"));
-        assert_eq!(c_name("ok").to_str(), Ok("ok"));
+    fn a_name_with_a_nul_is_refused() {
+        assert!(matches!(c_name("a\0b"), Err(Error::NulInName { .. })));
+        assert_eq!(c_name("ok").unwrap().to_str(), Ok("ok"));
     }
 }

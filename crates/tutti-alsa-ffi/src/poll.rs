@@ -5,7 +5,8 @@
 //! the last read and the wait wakes it.
 
 use std::io;
-use std::os::fd::RawFd;
+use std::ops::Deref;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::raw::{c_short, c_uint};
 use std::time::Duration;
 
@@ -13,40 +14,51 @@ use crate::client::Client;
 use crate::error::{Operation, Result, check};
 use crate::sys;
 
-/// Why [`Poller::wait`] returned.
+/// Why a wait returned.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Wait {
     /// The sequencer has input.
     Ready,
-    /// The time given to `wait` passed with nothing ready.
-    TimedOut,
     /// The stop descriptor is readable or closed.
     Stopped,
     /// A sequencer descriptor reports an error or hang-up.
     Broken,
 }
 
-/// A client's descriptors, then a stop descriptor.
+/// A client together with the stop descriptor it is waited on with.
 ///
-/// It holds copies of the numbers, not the descriptors: the client must outlive
-/// it, and so must the stop descriptor (a closed one polls as an error, which
-/// reads as [`Wait::Broken`] or [`Wait::Stopped`], never as memory trouble).
+/// It owns both, so the descriptors it polls cannot be closed under it: the
+/// client closes with it, and so does the stop descriptor. It derefs to the
+/// [`Client`] for reads and sends.
 #[derive(Debug)]
 pub struct Poller {
+    client: Client,
+    /// The client's descriptors, then the stop descriptor last.
     polls: Vec<libc::pollfd>,
+    /// Polled through `polls`: owned here, so the number there stays an open
+    /// descriptor for as long as the client is polled.
+    _stop: OwnedFd,
 }
 
-impl Poller {
-    /// The descriptors of `client` for input, and `stop`, which the owner of
-    /// the other end closes to wake the waiter.
+impl Deref for Poller {
+    type Target = Client;
+
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl Client {
+    /// This client's input descriptors, and `stop`, which the owner of the
+    /// other end closes to wake the waiter, as a [`Poller`] that owns both.
     ///
     /// # Errors
     ///
     /// The code of the descriptor query that failed.
-    pub fn new(client: &Client, stop: RawFd) -> Result<Self> {
+    pub fn into_poller(self, stop: OwnedFd) -> Result<Poller> {
         let events = libc::POLLIN;
-        // SAFETY: `client` is open.
-        let rc = unsafe { sys::snd_seq_poll_descriptors_count(client.raw(), events) };
+        // SAFETY: `self` is open.
+        let rc = unsafe { sys::snd_seq_poll_descriptors_count(self.raw(), events) };
         let count = check(rc, Operation::PollDescriptorsCount)?;
         let space = count as usize;
         let mut polls = vec![
@@ -61,79 +73,89 @@ impl Poller {
         // alsa-lib writes at most that many.
         let rc = unsafe {
             sys::snd_seq_poll_descriptors(
-                client.raw(),
+                self.raw(),
                 polls.as_mut_ptr().cast(),
                 c_uint::try_from(space).unwrap_or(c_uint::MAX),
                 events,
             )
         };
         check(rc, Operation::PollDescriptors)?;
-        Ok(Self::over(polls, stop))
-    }
-
-    /// The sequencer's `polls`, then `stop` for input: the one place the
-    /// stop descriptor goes last, which [`wait`](Self::wait) reads.
-    fn over(mut polls: Vec<libc::pollfd>, stop: RawFd) -> Self {
         polls.push(libc::pollfd {
-            fd: stop,
+            fd: stop.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         });
-        Self { polls }
+        Ok(Poller {
+            client: self,
+            polls,
+            _stop: stop,
+        })
     }
+}
 
-    /// Blocks until the sequencer has input, the stop descriptor fires, or
-    /// `timeout` passes (`None` waits for ever).
+impl Poller {
+    /// Blocks until the sequencer has input or the stop descriptor fires.
     ///
     /// # Errors
     ///
     /// The OS error of `poll`, but an interrupted wait, which is retried.
-    pub fn wait(&mut self, timeout: Option<Duration>) -> io::Result<Wait> {
-        let timeout_ms = timeout_ms(timeout);
+    pub fn wait(&mut self) -> io::Result<Wait> {
         loop {
-            for p in &mut self.polls {
-                p.revents = 0;
+            if let Some(wait) = wait_on(&mut self.polls, -1)? {
+                return Ok(wait);
             }
-            // SAFETY: `polls` is a live array of `polls.len()` `pollfd`s.
-            let ready = unsafe {
-                libc::poll(
-                    self.polls.as_mut_ptr(),
-                    self.polls.len() as libc::nfds_t,
-                    timeout_ms,
-                )
-            };
-            if ready < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(error);
-            }
-            if ready == 0 {
-                return Ok(Wait::TimedOut);
-            }
-            // The stop descriptor is the last, pushed in `new`.
-            let Some((stop, seq)) = self.polls.split_last() else {
-                return Ok(Wait::Broken);
-            };
-            if stop.revents != 0 {
-                return Ok(Wait::Stopped);
-            }
-            let broken = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
-            if seq.iter().any(|p| p.revents & broken != 0) {
-                return Ok(Wait::Broken);
-            }
-            return Ok(Wait::Ready);
         }
+    }
+
+    /// As [`wait`](Self::wait), and `None` when `timeout` passes with nothing
+    /// ready.
+    ///
+    /// # Errors
+    ///
+    /// The OS error of `poll`, but an interrupted wait, which is retried.
+    pub fn wait_for(&mut self, timeout: Duration) -> io::Result<Option<Wait>> {
+        wait_on(&mut self.polls, timeout_ms(timeout))
     }
 }
 
-/// `poll`'s timeout: -1 waits for ever; a time is rounded up to a millisecond
-/// (0 would not wait at all) and saturates at `i32::MAX`.
-fn timeout_ms(timeout: Option<Duration>) -> i32 {
-    timeout.map_or(-1, |t| {
-        i32::try_from(t.as_millis().max(1)).unwrap_or(i32::MAX)
-    })
+/// Polls `polls`, the stop descriptor last, for `timeout_ms` (-1 waits for
+/// ever); `None` when the time passes with nothing ready.
+fn wait_on(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<Option<Wait>> {
+    loop {
+        for p in polls.iter_mut() {
+            p.revents = 0;
+        }
+        // SAFETY: `polls` is a live array of `polls.len()` `pollfd`s.
+        let ready =
+            unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as libc::nfds_t, timeout_ms) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if ready == 0 {
+            return Ok(None);
+        }
+        let Some((stop, seq)) = polls.split_last() else {
+            return Ok(Some(Wait::Broken));
+        };
+        if stop.revents != 0 {
+            return Ok(Some(Wait::Stopped));
+        }
+        let broken = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
+        if seq.iter().any(|p| p.revents & broken != 0) {
+            return Ok(Some(Wait::Broken));
+        }
+        return Ok(Some(Wait::Ready));
+    }
+}
+
+/// `poll`'s timeout: a time is rounded up to a millisecond (0 would not wait
+/// at all) and saturates at `i32::MAX`.
+fn timeout_ms(timeout: Duration) -> i32 {
+    i32::try_from(timeout.as_millis().max(1)).unwrap_or(i32::MAX)
 }
 
 const _: () = {
@@ -147,13 +169,10 @@ mod tests {
 
     #[test]
     fn a_timeout_is_whole_milliseconds_and_never_zero() {
-        assert_eq!(timeout_ms(None), -1);
-        assert_eq!(timeout_ms(Some(Duration::from_micros(10))), 1);
-        assert_eq!(timeout_ms(Some(Duration::from_millis(250))), 250);
-        assert_eq!(
-            timeout_ms(Some(Duration::from_secs(u64::MAX / 2000))),
-            i32::MAX
-        );
+        assert_eq!(timeout_ms(Duration::ZERO), 1);
+        assert_eq!(timeout_ms(Duration::from_micros(10)), 1);
+        assert_eq!(timeout_ms(Duration::from_millis(250)), 250);
+        assert_eq!(timeout_ms(Duration::from_secs(u64::MAX / 2000)), i32::MAX);
     }
 
     /// A socket stands in for the sequencer's descriptor, so the wait is
@@ -163,21 +182,25 @@ mod tests {
     #[test]
     fn the_wait_reports_input_timeout_and_stop_with_stop_first() {
         use std::io::Write;
-        use std::os::fd::AsRawFd;
         use std::os::unix::net::UnixStream;
         let (mut seq_tx, seq_rx) = UnixStream::pair().unwrap();
         let (mut stop_tx, stop_rx) = UnixStream::pair().unwrap();
-        let seq = libc::pollfd {
-            fd: seq_rx.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let mut poller = Poller::over(vec![seq], stop_rx.as_raw_fd());
-        let short = Some(Duration::from_millis(20));
-        assert_eq!(poller.wait(short).unwrap(), Wait::TimedOut);
+        let mut polls = vec![
+            libc::pollfd {
+                fd: seq_rx.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: stop_rx.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        assert_eq!(wait_on(&mut polls, 20).unwrap(), None);
         seq_tx.write_all(b"x").unwrap();
-        assert_eq!(poller.wait(short).unwrap(), Wait::Ready);
+        assert_eq!(wait_on(&mut polls, 20).unwrap(), Some(Wait::Ready));
         stop_tx.write_all(b"x").unwrap();
-        assert_eq!(poller.wait(None).unwrap(), Wait::Stopped);
+        assert_eq!(wait_on(&mut polls, -1).unwrap(), Some(Wait::Stopped));
     }
 }

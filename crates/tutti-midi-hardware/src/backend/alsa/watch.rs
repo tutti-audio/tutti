@@ -44,7 +44,7 @@
 //! wake itself for ever.
 
 use std::collections::BTreeSet;
-use std::os::fd::AsRawFd;
+use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 
 use super::enumerate::{pack_id, unpack_id};
@@ -73,11 +73,9 @@ const THREAD_NAME: &str = "tutti-devwatch";
 
 /// A subscription to the announce port, and the descriptors to wait on.
 struct Announce {
-    seq: Client,
-    /// The sequencer's descriptors, then the stop descriptor.
-    polls: Poller,
-    /// The read end of the stop pair; the owner drops the write end to wake us.
-    _stop: UnixStream,
+    /// The client, and the read end of the stop pair: the owner drops the write
+    /// end to wake us.
+    seq: Poller,
 }
 
 /// What one read of the announce queue found.
@@ -499,22 +497,23 @@ impl Announce {
         let port = seq.open_port("tutti-watch", CAP_WRITE, TYPE_APPLICATION)?;
         seq.connect_from_announce(port)?;
 
-        let polls = Poller::new(&seq, stop.as_raw_fd())?;
         Ok(Self {
-            seq,
-            polls,
-            _stop: stop,
+            seq: seq.into_poller(OwnedFd::from(stop))?,
         })
     }
 
     /// Blocks until the sequencer announces something or the stop pair closes,
     /// or `timeout` passes.
     fn wait(&mut self, timeout: Option<std::time::Duration>) -> Result<Woken> {
-        match self.polls.wait(timeout)? {
-            Wait::TimedOut => Ok(Woken::TimedOut),
-            Wait::Stopped => Ok(Woken::Stopped),
-            Wait::Broken => Err(Error::port("the sequencer descriptor failed")),
-            Wait::Ready => Ok(Woken::Announced(self.drain())),
+        let wait = match timeout {
+            None => Some(self.seq.wait()?),
+            Some(timeout) => self.seq.wait_for(timeout)?,
+        };
+        match wait {
+            None => Ok(Woken::TimedOut),
+            Some(Wait::Stopped) => Ok(Woken::Stopped),
+            Some(Wait::Broken) => Err(Error::port("the sequencer descriptor failed")),
+            Some(Wait::Ready) => Ok(Woken::Announced(self.drain())),
         }
     }
 
@@ -526,10 +525,6 @@ impl Announce {
             let received = match self.seq.read_event() {
                 Ok(Read::Event(received)) => received,
                 Ok(Read::Empty) => return found,
-                Ok(Read::Skipped) => {
-                    errors.read();
-                    continue;
-                }
                 Err(e) => {
                     // An overrun drops announcements and is not a quiet read: it
                     // makes the settle look again. A descriptor that keeps

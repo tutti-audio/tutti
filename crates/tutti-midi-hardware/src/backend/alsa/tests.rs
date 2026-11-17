@@ -64,7 +64,7 @@ struct Virtual(Client);
 
 impl Virtual {
     fn rename(&self, name: &str) {
-        self.0.rename(name);
+        self.0.rename(name).expect("a name without a NUL");
     }
 }
 
@@ -618,7 +618,7 @@ fn a_device_that_takes_a_departed_clients_number_is_added_once() {
 fn send_note(device: &Virtual) {
     device
         .0
-        .send_to_subscribers(0, &[0x2090_3C64])
+        .send_to_subscribers(0, tutti_alsa_ffi::Packet::new(&[0x2090_3C64]).unwrap())
         .expect("send failed");
 }
 
@@ -735,7 +735,11 @@ fn a_midi2_endpoint_arrives_as_midi2_ump() {
     );
     // Note On, group 0, channel 0, note 60, velocity 0xC000, no attribute.
     let note_on = [0x4090_3C00, 0xC000_0000];
-    pumped.device.0.send_to_subscribers(0, &note_on).unwrap();
+    pumped
+        .device
+        .0
+        .send_to_subscribers(0, tutti_alsa_ffi::Packet::new(&note_on).unwrap())
+        .unwrap();
     let got = arrive(&mut pumped, 1);
     assert_eq!(got[0].words(), note_on, "{got:?}");
 }
@@ -1277,7 +1281,8 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
                         let mut answers: Vec<tutti_ump::Ump> = Vec::new();
                         let _ = endpoint.reply(message, &mut answers);
                         for answer in answers {
-                            device.0.send_to_subscribers(0, answer.words()).unwrap();
+                            let packet = tutti_alsa_ffi::Packet::new(answer.words()).unwrap();
+                            device.0.send_to_subscribers(0, packet).unwrap();
                         }
                     }
                     _ => std::thread::sleep(Duration::from_millis(1)),

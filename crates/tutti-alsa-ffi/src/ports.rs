@@ -88,7 +88,7 @@ impl Client {
             }
             // SAFETY: `cinfo` is a live record the query just filled.
             let client = unsafe { sys::snd_seq_client_info_get_client(cinfo.as_ptr()) };
-            if client == self.id() || client == sys::SND_SEQ_CLIENT_SYSTEM {
+            if client == i32::from(self.id) || client == sys::SND_SEQ_CLIENT_SYSTEM {
                 continue;
             }
             // SAFETY: as above; the name is copied before the record changes.
@@ -118,13 +118,25 @@ impl Client {
                 // SAFETY: as above; the name is copied before the record changes.
                 let name = owned(unsafe { sys::snd_seq_port_info_get_name(pinfo.as_ptr()) })
                     .unwrap_or_else(|| format!("Port {port}"));
+                let endpoint = match &ump {
+                    Some(endpoint) => endpoint.clone(),
+                    None => match self.ump_endpoint(client) {
+                        Ok(endpoint) => ump.insert(endpoint).clone(),
+                        // Not knowing a port's Endpoint is not a legacy port: the
+                        // client's ports are left out and the look is short.
+                        Err(_) => {
+                            out.complete = false;
+                            break;
+                        }
+                    },
+                };
                 out.ports.push(PortEntry {
                     client,
                     client_name: client_name.clone(),
                     port,
                     name,
                     caps,
-                    ump: ump.get_or_insert_with(|| self.ump_endpoint(client)).clone(),
+                    ump: endpoint,
                 });
             }
         }

@@ -1,6 +1,6 @@
 //! Reading UMP from a sequencer port.
 
-use std::os::fd::AsRawFd;
+use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,7 +138,7 @@ pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn Inp
     // The record is read on the open client, and the version is set before the
     // port exists and before the subscription, so no event is delivered at the
     // other one.
-    seq.set_ump_version(version_for(seq.ump_endpoint(src_client).as_ref()))?;
+    seq.set_ump_version(version_for(seq.ump_endpoint(src_client)?.as_ref()))?;
     let port = seq.open_port(
         "tutti-in",
         // Not subscribable by others: the engine's pump is not a device, and a
@@ -171,13 +171,13 @@ pub(super) fn start(
 ) -> Result<AlsaInput> {
     let (stop_tx, stop_rx) = UnixStream::pair()
         .map_err(|e| crate::error::Error::device_from("MIDI pump stop pair", e))?;
-    let polls = Poller::new(&seq, stop_rx.as_raw_fd())?;
+    let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
     let died = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&died);
     let thread = spawn_named("tutti-midi-in", None, move |_| {
         // A panic in the pump ends it with the input held, so it is caught
         // and marks the input dead, as an error does.
-        Guard::new(Arc::clone(&flag)).run(|| pump(seq, polls, clock, stop_rx, flag, producer));
+        Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, flag, producer));
     })
     .map_err(|e| crate::error::Error::device_from("spawn MIDI pump", e))?;
 
@@ -199,11 +199,8 @@ pub(super) fn start(
 /// Takes `seq` **by value** so the client is dropped here, on this thread, when
 /// the loop ends — the port unsubscribes exactly when the pump stops.
 fn pump(
-    seq: Client,
-    mut polls: Poller,
+    mut seq: Poller,
     clock: QueueClock,
-    // Held so its descriptor stays open while the pump polls it.
-    _stop: UnixStream,
     died: Arc<AtomicBool>,
     mut producer: InputProducerHandle,
 ) {
@@ -231,13 +228,9 @@ fn pump(
 
         let received = match read {
             Ok(Read::Event(received)) => received,
-            Ok(Read::Skipped) => {
-                errors.read();
-                continue;
-            }
             Ok(Read::Empty) => {
                 // Empty queue is the common case, not a failure.
-                let waited = polls.wait(None);
+                let waited = seq.wait();
                 #[cfg(test)]
                 PUMP_WAKES.fetch_add(1, Ordering::SeqCst);
                 #[cfg(test)]
@@ -253,7 +246,6 @@ fn pump(
                     Ok(Wait::Ready) => continue,
                     Ok(Wait::Stopped) => return,
                     Ok(Wait::Broken) => return die("the sequencer descriptor failed"),
-                    Ok(Wait::TimedOut) => unreachable!("wait(None) has no timeout"),
                     Err(e) => return die(&e.to_string()),
                 }
             }

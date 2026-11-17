@@ -10,7 +10,7 @@
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE,
     CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, Operation, PROTO_MIDI1, PROTO_MIDI2,
-    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
+    Packet, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_rt::LockExt;
@@ -107,7 +107,7 @@ impl SourceBackend for AlsaVirtualSource {
         // A poisoned lock guards a client handle and a port number, which a
         // panic cannot leave half-written.
         let inner = self.inner.lock_recover();
-        inner.0.send_to_subscribers(inner.1, words)?;
+        inner.0.send_to_subscribers(inner.1, Packet::new(words)?)?;
         Ok(())
     }
 }
