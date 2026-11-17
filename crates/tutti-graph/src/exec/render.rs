@@ -358,7 +358,7 @@ impl<F: Float> Executor<F> {
                         event_fb,
                         taps,
                         event_taps,
-                        meters: &*meters,
+                        meters,
                         lanes: &mut lanes[..],
                         inject,
                         has_inject,
@@ -501,7 +501,7 @@ impl<F: Float> Executor<F> {
                             }
                         }
                         Op::Meter { meter, srcs } => {
-                            if let Some(meter) = meters[meter as usize].as_ref() {
+                            if let Some(meter) = meters[meter as usize].as_mut() {
                                 meter_op(
                                     meter,
                                     &*st.arena,

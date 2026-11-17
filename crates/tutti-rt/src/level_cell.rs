@@ -120,12 +120,11 @@ impl LevelWriter {
     /// exclude), its sum of squares and its `frames`. Wait-free, allocates
     /// nothing.
     ///
-    /// Takes `&self` so a writer behind a shared reference can be driven by
-    /// whichever thread runs its op; the caller guarantees **one thread at a
-    /// time** (the executor runs a lane's op once a block). Two at once would
-    /// lose a block, never touch memory unsafely.
+    /// Takes `&mut self`: the slot's words are loaded and stored, not
+    /// read-modify-written, so the one writer is held by the borrow. An
+    /// executor that runs the op on any worker claims the writer first.
     #[inline]
-    pub fn fold(&self, peak: f32, sum_sq: f64, frames: u32) {
+    pub fn fold(&mut self, peak: f32, sum_sq: f64, frames: u32) {
         let s = &*self.shared;
         let i = loop {
             let i = s.active.load(Ordering::Acquire);
