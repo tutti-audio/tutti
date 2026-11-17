@@ -43,7 +43,10 @@ fn current_filter() -> LogFilter {
     if LevelFilter::current() == LevelFilter::OFF {
         return LogFilter::OFF;
     }
-    LogFilter::new(most_verbose!("tutti::graph"), most_verbose!("tutti::plugin"))
+    LogFilter::new(
+        most_verbose!("tutti::graph"),
+        most_verbose!("tutti::plugin"),
+    )
 }
 
 /// One event on `$target` at the record's level: the call sites tracing's
