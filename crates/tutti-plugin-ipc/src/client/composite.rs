@@ -1,6 +1,6 @@
 //! Plugin bridge — composites out-of-process audio with in-process GUI.
 
-use super::audio::{AudioBridge, BridgeListener, BridgeThread, HarmonyInputs, Submitted};
+use super::audio::{AudioBridge, BridgeListener, BridgeThread, Fate, HarmonyInputs, Submitted};
 use super::remote_editor::RemoteEditor;
 use crate::ServerWatch;
 use crate::protocol::{
@@ -383,6 +383,12 @@ impl PluginBridge {
     /// `AudioBridge::skipped_cell`.
     pub fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
         self.audio.skipped_cell()
+    }
+
+    /// What the bridge thread learned of chunk `seq`. See
+    /// `AudioBridge::chunk_fate`.
+    pub(crate) fn chunk_fate(&self, seq: u64) -> Option<Fate> {
+        self.audio.chunk_fate(seq)
     }
 
     /// The bridge thread's count of MIDI events it did not send. See

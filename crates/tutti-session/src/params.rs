@@ -27,7 +27,7 @@ use crate::Key;
 
 /// One native param of a node in the session's graph, with the unit its value
 /// is in: what `key.cutoff()` returns. The typed sibling of
-/// `ParamRef` (feature `modulation`), which it converts
+/// `ParamRef`, which it converts
 /// into, so `mods.route(src, lp.cutoff(), depth)` takes it as it takes the
 /// untyped one; a plugin's param stays a `ParamRef`.
 ///
@@ -101,7 +101,6 @@ impl<U> From<TypedParamRef<U>> for ParamAddr {
     }
 }
 
-#[cfg(feature = "modulation")]
 impl<U> From<TypedParamRef<U>> for crate::ParamRef {
     fn from(param: TypedParamRef<U>) -> Self {
         Self::new(param.node, ParamAddr::unit(param.addr))

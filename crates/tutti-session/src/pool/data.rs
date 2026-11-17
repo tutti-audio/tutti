@@ -10,7 +10,7 @@ use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry};
 /// a disk stream ([`streamed`](Declared::streamed)).
 ///
 /// Its identity is the path and the tier ([`Tier`]).
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Debug)]
 pub struct AudioFile {
     path: PathBuf,
@@ -18,7 +18,7 @@ pub struct AudioFile {
 }
 
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Tier {
@@ -39,7 +39,7 @@ pub enum Tier {
 /// entry, or what a streamed entry's header says.
 ///
 /// A handle is a clone and owns nothing: dropping it leaves the entry loaded.
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum AudioEntry {
@@ -53,14 +53,14 @@ pub enum AudioEntry {
 
 /// What a streamed [`audio_file`] entry's header says: the file and what the
 /// sampler can do with it.
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreamInfo {
     path: PathBuf,
     facts: tutti_sampler::SampleFacts,
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 impl StreamInfo {
     /// The file the entry declared.
     #[must_use]
@@ -76,7 +76,7 @@ impl StreamInfo {
     }
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 impl AudioFile {
     /// The default threshold of [`auto`](Declared::auto): 32 MiB of decoded
     /// `f32` samples, 95 seconds of 44.1 kHz stereo.
@@ -92,7 +92,7 @@ impl AudioFile {
 /// Declares the wave file at `path` under `key`, decoded whole; the entry reads
 /// as [`AudioEntry::Resident`]. Another key declared with the same path shares
 /// the one decode, and every handle is the same `Arc`.
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile> {
     Declared::shared(
         key,
@@ -103,7 +103,7 @@ pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile>
     )
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 impl<K> Declared<K, AudioFile> {
     /// The file played from disk: its entry reads as [`AudioEntry::Streamed`]
     /// and fails with [`LoadError::NotStreamable`] for a file this build cannot
@@ -136,7 +136,7 @@ impl<K> Declared<K, AudioFile> {
     }
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 impl PoolEntry for AudioFile {
     type Identity = (PathBuf, Tier);
     type Loaded = AudioEntry;
@@ -181,17 +181,17 @@ impl PoolEntry for AudioFile {
     }
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 fn probe(path: &std::path::Path) -> Result<tutti_sampler::SampleFacts, LoadError> {
     tutti_sampler::probe(path).map_err(|error| LoadError::Probe(Arc::new(error)))
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 fn streamed(path: PathBuf, facts: tutti_sampler::SampleFacts) -> AudioEntry {
     AudioEntry::Streamed(Arc::new(StreamInfo { path, facts }))
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 fn resident(path: PathBuf) -> Result<AudioEntry, LoadError> {
     tutti_codec::Wave::read(path)
         .map(|wave| AudioEntry::Resident(Arc::new(wave)))

@@ -1,8 +1,8 @@
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockId, GroupSpan, Message, Midi1Port, Protocol, Stream, StreamConfig, U7,
-    UiHint, Ump,
+    FirstGroup, FunctionBlockId, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
+    StreamConfig, U7, UiHint, Ump,
 };
 
 use super::*;
@@ -43,7 +43,7 @@ fn identity() -> DeviceIdentity {
         manufacturer: ManufacturerId::of(0xA109),
         family: [u(1), u(2)],
         model: [u(3), u(4)],
-        revision: [u(5), u(6), u(7), u(8)],
+        revision: SoftwareRevision::from([u(5), u(6), u(7), u(8)]),
     }
 }
 
@@ -201,6 +201,30 @@ fn a_discovery_of_another_version_is_answered() {
         filter: ALL,
     };
     assert_eq!(ask(&mut device(), newer).len(), 7);
+}
+
+// §7.1.1: "If the received version is lower than the Device's supported version,
+// the Device shall only process the fields, values, and bits defined in the
+// received version". Table 5 defines UMP 1.0 with no Stream messages (N/A), so no
+// filter bit is defined in 1.0 or below, and the discovery gets no answer; 1.1,
+// the first version that defines the message, is answered in full.
+/// Spec: m2-104/7.1.1#4
+#[test]
+fn a_discovery_of_a_lower_version_is_read_as_that_version_defines_it() {
+    for (major, minor) in [(1, 0), (0, 255), (0, 0)] {
+        let older = Stream::EndpointDiscovery {
+            version: tutti_ump::UmpVersion { major, minor },
+            filter: ALL,
+        };
+        let mut out = Vec::new();
+        let reply = device().reply(Message::Stream(older), &mut out);
+        assert_eq!(
+            (reply, out.len()),
+            (Reply::Ignored, 0),
+            "version {major}.{minor}"
+        );
+    }
+    assert_eq!(ask(&mut device(), discovery(ALL)).len(), 7);
 }
 
 // Figure 14, §7.1.3: word 1 holds the manufacturer's three bytes, word 2 the

@@ -21,7 +21,7 @@
 //! stays until the new load lands; if that load fails the old value is dropped,
 //! its handles read closed, and the entry reads failed.
 //!
-//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
+//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler` and a `decode-*`) and
 //! `soundfont` (feature `soundfont`) are the data kinds, and
 //! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
 //! then takes (`Session::add_pooled_plugin`). A load's outcome lands
@@ -60,7 +60,7 @@ use std::sync::Arc;
 use crate::Session;
 
 mod config;
-#[cfg(any(feature = "sampler", feature = "soundfont"))]
+#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
 mod data;
 mod entry;
 mod job;
@@ -73,7 +73,7 @@ mod stamp;
 mod table;
 
 pub use config::PoolConfig;
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
@@ -255,7 +255,7 @@ impl<C: crate::Clock> Session<C> {
     }
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 impl<C: crate::Clock> Session<C> {
     /// What the `audio_file` entry under `key` read: its wave, or its stream's
     /// header ([`AudioEntry`]).

@@ -42,7 +42,7 @@ serde = { version = "1", optional = true, features = ["derive"] }
 
 # The sound card. Off: offline only, and no ALSA headers needed.
 tutti-cpal = { version = "0.0.1", path = "../tutti-cpal", default-features = false, optional = true }
-tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false, optional = true }
+tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
 # `MpeMode`, the session builder's one MPE setting.
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
@@ -80,7 +80,6 @@ device = ["dep:tutti-cpal"]
 record = ["dep:tutti-dsp"]
 # The live I/O edge: `record`, and with `device`, the mic capture too.
 audio-io = ["record", "tutti-cpal?/capture", "encode-wav"]
-modulation = ["dep:tutti-modulation"]
 midi = [
     "dep:tutti-midi-protocol",
     "dep:tutti-midi-runtime",
@@ -90,9 +89,9 @@ midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`.
 serde = ["midi", "dep:serde", "tutti-ump/serde"]
-sampler = ["dep:tutti-sampler", "tutti-sampler/decode-wav"]
+sampler = ["dep:tutti-sampler"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2"]
-synth = ["dep:tutti-polysynth"]
+synth = ["midi", "dep:tutti-polysynth"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`). `cargo xtask check-layout` holds that a build
@@ -129,7 +128,7 @@ hound = "3.5"
 serde_json = "1"
 # `testing`'s hand-stepped streamer, and the WAV reader the disk voice's
 # fork reads its file with (`export_fork_sampler`).
-tutti-sampler = { path = "../tutti-sampler", default-features = false, features = ["testing", "decode-wav"] }
+tutti-sampler = { path = "../tutti-sampler", default-features = false, features = ["testing"] }
 # `ManualStreamDriver`, `OutputSpec`: the device-free device tests.
 tutti-cpal = { path = "../tutti-cpal", default-features = false }
 # The reference CLAP plugin `tests/plugin/plugin.rs` loads, in a
@@ -196,4 +195,3 @@ required-features = ["synth", "sampler", "midi"]
 [[bench]]
 name = "mod_update"
 harness = false
-required-features = ["modulation"]

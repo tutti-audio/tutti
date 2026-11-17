@@ -87,6 +87,26 @@ impl Drop for SetOnDrop {
     }
 }
 
+/// The end of a [`StopToken::wait`]: a function of the `now` it is asked at.
+#[derive(Debug, Clone, Copy)]
+struct Deadline(Option<Instant>);
+
+impl Deadline {
+    /// The deadline `timeout` after `now`; a timeout that overflows the clock
+    /// never ends.
+    fn after(now: Instant, timeout: Duration) -> Self {
+        Self(now.checked_add(timeout))
+    }
+
+    /// The time left at `now`, or `None` once the deadline is reached.
+    fn left(self, now: Instant) -> Option<Duration> {
+        match self.0 {
+            Some(end) => end.checked_duration_since(now).filter(|d| !d.is_zero()),
+            None => Some(Duration::MAX),
+        }
+    }
+}
+
 /// A stop request a thread's body polls or sleeps on: a shared flag and a wake.
 ///
 /// Clones share one request. Raising it never waits on the body.
@@ -125,7 +145,7 @@ impl StopToken {
     /// Returns whether the stop was requested.
     #[must_use = "true means the body should return"]
     pub fn wait(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now().checked_add(timeout);
+        let deadline = Deadline::after(Instant::now(), timeout);
         let mut gate = self
             .state
             .gate
@@ -135,12 +155,8 @@ impl StopToken {
             if self.is_stopped() {
                 return true;
             }
-            let left = match deadline {
-                Some(deadline) => match deadline.checked_duration_since(Instant::now()) {
-                    Some(left) if !left.is_zero() => left,
-                    _ => return false,
-                },
-                None => Duration::MAX,
+            let Some(left) = deadline.left(Instant::now()) else {
+                return false;
             };
             gate = self
                 .state
