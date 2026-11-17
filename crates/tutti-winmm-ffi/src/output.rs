@@ -7,6 +7,7 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
+use crate::OutputPort;
 use crate::error::{Error, MmOperation, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
@@ -35,22 +36,33 @@ impl std::fmt::Debug for MidiOut {
 unsafe impl Send for MidiOut {}
 
 impl MidiOut {
-    /// Opens output port `index`.
+    /// Opens `port`.
+    ///
+    /// winmm refuses a handle in the device interface query, so the open
+    /// cannot ask the open handle which device it is. It reads the port's
+    /// position again after `midiOutOpen` and closes the port unless the
+    /// device there is the one listed: a shift of the list before the open is
+    /// refused, and only a second shift, between the open and that read, which
+    /// puts the listed device back at the position, goes unseen.
     ///
     /// # Errors
     ///
-    /// `midiOutOpen`'s: [`MmResult::Allocated`](crate::MmResult::Allocated) when
+    /// [`Error::PortMoved`] when the device at the position is not the one
+    /// listed; otherwise `midiOutOpen`'s: [`MmResult::Allocated`](crate::MmResult::Allocated) when
     /// another application holds the port,
     /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is gone.
-    pub fn open(index: u32) -> Result<Self, Error> {
+    pub fn open(port: &OutputPort) -> Result<Self, Error> {
         let mut handle: HMIDIOUT = std::ptr::null_mut();
         // SAFETY: `handle` is a live out-pointer; no callback is registered.
-        let code = unsafe { midiOutOpen(&raw mut handle, index, 0, 0, CALLBACK_NULL) };
+        let code = unsafe { midiOutOpen(&raw mut handle, port.index(), 0, 0, CALLBACK_NULL) };
         check(MmOperation::MidiOutOpen, code)?;
-        Ok(Self {
+        // Dropping `out` on a refusal resets and closes the port.
+        let out = Self {
             handle,
             leaked: false,
-        })
+        };
+        port.confirm()?;
+        Ok(out)
     }
 
     /// Sends one short message: the status byte, then its data bytes, low

@@ -85,18 +85,18 @@ pub(in crate::backend) fn slot_of(id: EndpointId) -> Slot {
     }
 }
 
-/// The position in the OS's list of the port `slot` names: the
-/// `occurrence`th of `listed` (position and what the driver reports there)
-/// whose digest matches. `None` when the device is not listed.
-pub(in crate::backend) fn locate(
+/// The port `slot` names: the `occurrence`th of `listed` (a port as the OS
+/// edge returns it, and what the driver reports of it) whose digest matches.
+/// `None` when the device is not listed.
+pub(in crate::backend) fn locate<P>(
     slot: Slot,
-    listed: impl IntoIterator<Item = (u32, PortInfo)>,
-) -> Option<u32> {
+    listed: impl IntoIterator<Item = (P, PortInfo)>,
+) -> Option<P> {
     listed
         .into_iter()
         .filter(|(_, info)| fingerprint(info) == slot.fingerprint)
         .nth(slot.occurrence as usize)
-        .map(|(index, _)| index)
+        .map(|(port, _)| port)
 }
 
 /// The endpoint of the `occurrence`th port that `info` describes on `side`: a
