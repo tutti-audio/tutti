@@ -18,7 +18,7 @@ pub enum SmfParseError {
     InvalidFrameRate,
     /// The header's format is not 0, 1 or 2.
     #[error("unknown format")]
-    UnknownFormat,
+    UnknownSmfFormat,
     /// The file does not begin with the header chunk.
     #[error("missing header chunk")]
     MissingHeader,

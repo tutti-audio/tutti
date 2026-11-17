@@ -35,7 +35,7 @@
 use std::vec::Vec;
 
 use winnow::Parser;
-use winnow::combinator::{alt, cut_err, eof, fail, opt, peek, repeat};
+use winnow::combinator::{alt, cut_err, fail, opt, peek, repeat};
 use winnow::error::{ContextError, ModalResult};
 use winnow::token::any;
 
@@ -67,7 +67,15 @@ enum Fault {
     TrailingData,
 }
 
-type Res<T> = ModalResult<T, ContextError<Fault>>;
+/// A [`Fault`] and where the rule that found it began: the packets that were
+/// left of the input then.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cause {
+    fault: Fault,
+    remaining: usize,
+}
+
+type Res<T> = ModalResult<T, ContextError<Cause>>;
 
 /// What a packet is to the grammar, decided once by `Ump::decode`.
 #[derive(Clone, Copy, Debug)]
@@ -124,8 +132,14 @@ struct Timed {
 /// Refuses for `fault`, past every alternative.
 fn halt<'a, T>(
     fault: Fault,
-) -> impl Parser<Input<'a>, T, winnow::error::ErrMode<ContextError<Fault>>> {
-    cut_err(fail.context(fault))
+    remaining: usize,
+) -> impl Parser<Input<'a>, T, winnow::error::ErrMode<ContextError<Cause>>> {
+    cut_err(fail.context(Cause { fault, remaining }))
+}
+
+/// Refuses for `fault` at the packet the input is at.
+fn halt_here<'a, T>(fault: Fault) -> impl FnMut(&mut Input<'a>) -> Res<T> {
+    move |input| halt(fault, input.len()).parse_next(input)
 }
 
 // ---- the gap ---------------------------------------------------------------
@@ -237,15 +251,16 @@ pub(crate) fn leading_profile_len(header: &[(u64, Ump)]) -> usize {
 fn preamble_item(input: &mut Input<'_>) -> Res<Vec<Ump>> {
     let before = gap.parse_next(input)?;
     peek(profile_first).parse_next(input)?;
+    let start = input.len();
     if before.dcs.is_some() {
-        return halt(Fault::ProfileOnDelta).parse_next(input);
+        return halt(Fault::ProfileOnDelta, start).parse_next(input);
     }
     match set_profile_on.parse_next(input) {
         Ok(message) => Ok(message),
         // A message's parts are adjacent: a DCS cut it, or something else did.
         Err(_) => match input.first().map(|p| p.kind) {
-            Some(Kind::Dcs(_)) => halt(Fault::ProfileOnDelta).parse_next(input),
-            _ => halt(Fault::DctpqNotFirst).parse_next(input),
+            Some(Kind::Dcs(_)) => halt(Fault::ProfileOnDelta, start).parse_next(input),
+            _ => halt(Fault::DctpqNotFirst, start).parse_next(input),
         },
     }
 }
@@ -282,13 +297,14 @@ fn dctpq_after_gap(input: &mut Input<'_>) -> Res<(Gap, Option<TicksPerQuarterNot
 /// declaring ticks.
 fn dctpq(input: &mut Input<'_>) -> Res<TicksPerQuarterNote> {
     let fault = fault_before_dctpq(input);
-    let (before, ticks) = alt((dctpq_after_gap, halt(fault))).parse_next(input)?;
+    let start = input.len();
+    let (before, ticks) = alt((dctpq_after_gap, halt_here(fault))).parse_next(input)?;
     if before.dcs != Some(0) || before.ticks() != 0 {
-        return halt(Fault::DctpqDelta).parse_next(input);
+        return halt(Fault::DctpqDelta, start).parse_next(input);
     }
     match ticks {
         Some(ticks) => Ok(ticks),
-        None => halt(Fault::ZeroDctpq).parse_next(input),
+        None => halt(Fault::ZeroDctpq, start).parse_next(input),
     }
 }
 
@@ -308,7 +324,7 @@ fn is_set_time_signature(flex: &Flex) -> bool {
 /// Delta Clockstamp that precedes the DCTPQ or a preceding one of 0 ticks.
 fn flex_at_zero<'a>(
     is: fn(&Flex) -> bool,
-) -> impl Parser<Input<'a>, Timed, winnow::error::ErrMode<ContextError<Fault>>> {
+) -> impl Parser<Input<'a>, Timed, winnow::error::ErrMode<ContextError<Cause>>> {
     (gap, any).verify_map(move |(before, p): (Gap, Packet)| match p.kind {
         Kind::Message(Message::Flex(_, ref flex)) if is(flex) && before.ticks() == 0 => {
             Some(Timed {
@@ -323,7 +339,9 @@ fn flex_at_zero<'a>(
 /// A message of the clip, behind its gap, and what it is. A Property Exchange
 /// message is refused (sections 6.4 and 7.2) and a DCTPQ is a second (section 6:
 /// one); a Start or End of Clip is no message and backtracks to its own rule.
-fn message(input: &mut Input<'_>) -> Res<(Timed, Kind)> {
+/// The packets left where its gap began come with it.
+fn message(input: &mut Input<'_>) -> Res<(Timed, Kind, usize)> {
+    let start = input.len();
     let (before, p) = (gap, any).parse_next(input)?;
     let timed = Timed {
         delta: before.ticks(),
@@ -331,10 +349,10 @@ fn message(input: &mut Input<'_>) -> Res<(Timed, Kind)> {
     };
     match p.kind {
         Kind::Message(m) if property_exchange(&m) => {
-            halt(Fault::PropertyExchange).parse_next(input)
+            halt(Fault::PropertyExchange, start).parse_next(input)
         }
-        Kind::Message(_) | Kind::Raw => Ok((timed, p.kind)),
-        Kind::Dctpq(_) => halt(Fault::DuplicateDctpq).parse_next(input),
+        Kind::Message(_) | Kind::Raw => Ok((timed, p.kind, start)),
+        Kind::Dctpq(_) => halt(Fault::DuplicateDctpq, start).parse_next(input),
         _ => fail.parse_next(input),
     }
 }
@@ -345,24 +363,28 @@ fn message(input: &mut Input<'_>) -> Res<(Timed, Kind)> {
 fn header_message<'a>(
     tempo: bool,
     signature: bool,
-) -> impl Parser<Input<'a>, Timed, winnow::error::ErrMode<ContextError<Fault>>> {
+) -> impl Parser<Input<'a>, Timed, winnow::error::ErrMode<ContextError<Cause>>> {
     move |input: &mut Input<'a>| {
-        let (timed, kind) = message.parse_next(input)?;
+        let (timed, kind, start) = message.parse_next(input)?;
         match kind {
-            Kind::Message(Message::Flex(_, ref flex)) if is_set_tempo(flex) => halt(if tempo {
-                Fault::DuplicateHeaderTempo
-            } else {
-                Fault::MisplacedHeaderTempo
-            })
+            Kind::Message(Message::Flex(_, ref flex)) if is_set_tempo(flex) => halt(
+                if tempo {
+                    Fault::DuplicateHeaderTempo
+                } else {
+                    Fault::MisplacedHeaderTempo
+                },
+                start,
+            )
             .parse_next(input),
-            Kind::Message(Message::Flex(_, ref flex)) if is_set_time_signature(flex) => {
-                halt(if signature {
+            Kind::Message(Message::Flex(_, ref flex)) if is_set_time_signature(flex) => halt(
+                if signature {
                     Fault::DuplicateHeaderTimeSignature
                 } else {
                     Fault::MisplacedHeaderTimeSignature
-                })
-                .parse_next(input)
-            }
+                },
+                start,
+            )
+            .parse_next(input),
             _ => Ok(timed),
         }
     }
@@ -386,10 +408,10 @@ fn config(input: &mut Input<'_>) -> Res<Vec<Timed>> {
 fn bracket<'a>(
     which: fn(&Kind) -> bool,
     missing: Fault,
-) -> impl Parser<Input<'a>, u64, winnow::error::ErrMode<ContextError<Fault>>> {
+) -> impl Parser<Input<'a>, u64, winnow::error::ErrMode<ContextError<Cause>>> {
     alt((
         (gap, any.verify(move |p: &Packet| which(&p.kind))).map(|(before, _)| before.ticks()),
-        halt(missing),
+        halt_here(missing),
     ))
 }
 
@@ -398,17 +420,18 @@ fn bracket<'a>(
 /// An event of the sequence (section 7.2: any UMP message but Property Exchange),
 /// behind its DCS (section 3.2.2).
 fn event(input: &mut Input<'_>) -> Res<Timed> {
-    alt((message.map(|(timed, _)| timed), second_start_of_clip)).parse_next(input)
+    alt((message.map(|(timed, ..)| timed), second_start_of_clip)).parse_next(input)
 }
 
 /// A second Start of Clip: section 7 asks for one.
 fn second_start_of_clip(input: &mut Input<'_>) -> Res<Timed> {
+    let start = input.len();
     (
         gap,
         any.verify(|p: &Packet| matches!(p.kind, Kind::StartOfClip)),
     )
         .parse_next(input)?;
-    halt(Fault::DuplicateStartOfClip).parse_next(input)
+    halt(Fault::DuplicateStartOfClip, start).parse_next(input)
 }
 
 /// A clip as the grammar reads it.
@@ -436,7 +459,9 @@ fn clip(input: &mut Input<'_>) -> Res<Clip> {
     let end_gap =
         bracket(|k| matches!(k, Kind::EndOfClip), Fault::MissingEndOfClip).parse_next(input)?;
     // Section 7.3: no data follows the End of Clip message.
-    eof.context(Fault::TrailingData).parse_next(input)?;
+    if !input.is_empty() {
+        return halt(Fault::TrailingData, input.len()).parse_next(input);
+    }
     Ok(Clip {
         ticks_per_quarter,
         preamble: preamble.concat(),
@@ -449,15 +474,25 @@ fn clip(input: &mut Input<'_>) -> Res<Clip> {
 
 // ---- the edge --------------------------------------------------------------
 
-/// The one place winnow's error becomes ours. A rule that ran out of packets
-/// where a cut-off last packet stands (`torn`) names that instead.
-fn error_of(e: &winnow::error::ErrMode<ContextError<Fault>>, torn: bool) -> ClipFileError {
-    let fault = match e {
+/// The one place winnow's error becomes ours: the rule broken, and the packets
+/// left of the input where the rule began (`None` when a rule ran out of
+/// packets without naming itself). A rule that ran out of packets where a
+/// cut-off last packet stands (`torn`) names that instead.
+fn error_of(
+    e: &winnow::error::ErrMode<ContextError<Cause>>,
+    torn: bool,
+) -> (ClipFileError, Option<usize>) {
+    let cause = match e {
         winnow::error::ErrMode::Backtrack(e) | winnow::error::ErrMode::Cut(e) => {
             e.context().next().copied()
         }
         winnow::error::ErrMode::Incomplete(_) => None,
     };
+    let remaining = cause.map(|c| c.remaining);
+    (rule_of(cause.map(|c| c.fault), torn), remaining)
+}
+
+fn rule_of(fault: Option<Fault>, torn: bool) -> ClipFileError {
     match fault {
         Some(Fault::MissingDctpq | Fault::MissingStartOfClip | Fault::MissingEndOfClip) | None
             if torn =>
@@ -523,12 +558,13 @@ pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
 
     let mut input = &packets[..];
     let clip = clip.parse_next(&mut input).map_err(|e| {
-        let cause = error_of(&e, torn);
-        // A cut-off packet stands past the last whole one.
+        let (cause, remaining) = error_of(&e, torn);
+        // A cut-off packet stands past the last whole one; a rule that named
+        // no start stopped where the input is.
         let at = if cause == ClipFileError::MessageCutOff {
             packets.len()
         } else {
-            packets.len() - input.len()
+            packets.len() - remaining.unwrap_or(input.len())
         };
         refusal(&packets, at, cause)
     })?;
@@ -585,7 +621,7 @@ pub(crate) fn check_header(header: &[(u64, Ump)]) -> Result<(), ClipFileError> {
     config
         .parse_next(&mut &packets[..])
         .map(|_| ())
-        .map_err(|e| error_of(&e, false))
+        .map_err(|e| error_of(&e, false).0)
 }
 
 /// The big-endian 32-bit words of `bytes`, `None` if it is not a whole number

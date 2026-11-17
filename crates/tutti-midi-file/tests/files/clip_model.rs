@@ -79,9 +79,24 @@ fn valid() -> Vec<Ump> {
     ]
 }
 
-fn clip_error(parts: &[Ump]) -> ClipFileError {
+/// What reading a clip made of `parts` refused: the index of the packet whose
+/// first word is the word the error names, and the rule broken.
+fn clip_error(parts: &[Ump]) -> (usize, ClipFileError) {
     match MidiFile::from_bytes(&clip(parts)) {
-        Err(ReadError::Clip { cause, .. }) => cause,
+        Err(ReadError::Clip { word, cause }) => {
+            let mut at = 0;
+            let packet = parts
+                .iter()
+                .position(|ump| {
+                    let found = at == word;
+                    at += ump.words().len();
+                    found
+                })
+                // A word past the last packet is the end of the stream.
+                .or((at == word).then_some(parts.len()))
+                .unwrap_or_else(|| panic!("word {word} is inside a packet"));
+            (packet, cause)
+        }
         other => panic!("expected a clip error, got {other:?}"),
     }
 }
@@ -219,7 +234,7 @@ fn the_tempo_map_is_the_set_tempo_messages() {
 fn a_dctpq_after_a_message_is_refused() {
     // Start of Clip, then the DCTPQ: the DCTPQ is not first.
     let parts = [dcs(0), start(), dcs(0), dctpq(TPQ), dcs(0), end()];
-    assert_eq!(clip_error(&parts), ClipFileError::DctpqNotFirst);
+    assert_eq!(clip_error(&parts), (0, ClipFileError::DctpqNotFirst));
 }
 
 /// Spec: m2-116/3.2.1#1
@@ -227,7 +242,8 @@ fn a_dctpq_after_a_message_is_refused() {
 fn a_second_dctpq_is_refused() {
     let mut parts = valid();
     parts.splice(2..2, [dcs(0), dctpq(TPQ)]);
-    assert_eq!(clip_error(&parts), ClipFileError::DuplicateDctpq);
+    // The second DCTPQ, behind its Delta Clockstamp.
+    assert_eq!(clip_error(&parts), (2, ClipFileError::DuplicateDctpq));
 }
 
 /// Spec: m2-116/7#3
@@ -235,7 +251,7 @@ fn a_second_dctpq_is_refused() {
 fn a_second_start_of_clip_is_refused() {
     let mut parts = valid();
     parts.splice(4..4, [dcs(0), start()]);
-    assert_eq!(clip_error(&parts), ClipFileError::DuplicateStartOfClip);
+    assert_eq!(clip_error(&parts), (4, ClipFileError::DuplicateStartOfClip));
 }
 
 /// Spec: m2-116/7.3#2
@@ -243,14 +259,15 @@ fn a_second_start_of_clip_is_refused() {
 fn data_after_end_of_clip_is_refused() {
     let mut parts = valid();
     parts.extend([dcs(0), on(61, 1)]);
-    assert_eq!(clip_error(&parts), ClipFileError::TrailingData);
+    // The Delta Clockstamp after the ten packets of the clip.
+    assert_eq!(clip_error(&parts), (10, ClipFileError::TrailingData));
 }
 
 /// Spec: m2-116/3.2.1#1, m2-116/6#5
 #[test]
 fn a_clip_without_a_dctpq_is_refused() {
     let parts = [dcs(0), start(), dcs(0), end()];
-    assert_eq!(clip_error(&parts), ClipFileError::MissingDctpq);
+    assert_eq!(clip_error(&parts), (0, ClipFileError::MissingDctpq));
 }
 
 /// The ticks per quarter note run from 1 to 65535, and 0 is reserved
@@ -260,7 +277,7 @@ fn a_clip_without_a_dctpq_is_refused() {
 fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     let mut parts = valid();
     parts[1] = dctpq(0);
-    assert_eq!(clip_error(&parts), ClipFileError::ZeroDctpq);
+    assert_eq!(clip_error(&parts), (0, ClipFileError::ZeroDctpq));
     for ticks in [1, u16::MAX] {
         parts[1] = dctpq(ticks);
         let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
@@ -304,7 +321,7 @@ fn a_wall_clock_clip_has_a_millisecond_tick() {
 #[test]
 fn a_clip_without_start_of_clip_is_refused() {
     let parts = [dcs(0), dctpq(TPQ), dcs(0), end()];
-    assert_eq!(clip_error(&parts), ClipFileError::MissingStartOfClip);
+    assert_eq!(clip_error(&parts), (2, ClipFileError::MissingStartOfClip));
 }
 
 /// Spec: m2-116/7#4, m2-116/7.3#1
@@ -312,7 +329,8 @@ fn a_clip_without_start_of_clip_is_refused() {
 fn a_clip_without_end_of_clip_is_refused() {
     let mut parts = valid();
     parts.truncate(parts.len() - 2);
-    assert_eq!(clip_error(&parts), ClipFileError::MissingEndOfClip);
+    // Where the eight packets end.
+    assert_eq!(clip_error(&parts), (8, ClipFileError::MissingEndOfClip));
 }
 
 /// Timing and padding are not structure: a Delta Clockstamp, a Null and JR
@@ -600,11 +618,11 @@ fn set_profile_on_before_the_dctpq_is_accepted() {
 fn a_message_before_the_dctpq_is_refused() {
     let mut note_first = vec![dcs(0), on(60, 1)];
     note_first.extend(with_header(&[]));
-    assert_eq!(clip_error(&note_first), ClipFileError::DctpqNotFirst);
+    assert_eq!(clip_error(&note_first), (0, ClipFileError::DctpqNotFirst));
     let other_sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7E, 0x7F, 0x06, 0x01]);
     let mut parts = vec![other_sysex];
     parts.extend(with_header(&[]));
-    assert_eq!(clip_error(&parts), ClipFileError::DctpqNotFirst);
+    assert_eq!(clip_error(&parts), (0, ClipFileError::DctpqNotFirst));
 }
 
 /// Section 6: the header may hold other messages that configure a receiver,
@@ -647,7 +665,7 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
 #[test]
 fn two_header_set_tempos_are_refused() {
     let parts = with_header(&[dcs(0), set_tempo(100.0), dcs(0), set_tempo(90.0)]);
-    assert_eq!(clip_error(&parts), ClipFileError::DuplicateHeaderTempo);
+    assert_eq!(clip_error(&parts), (4, ClipFileError::DuplicateHeaderTempo));
 }
 
 /// Section 6.1.1: the Set Tempo is the first message after the DCTPQ,
@@ -658,10 +676,10 @@ fn a_header_set_tempo_not_first_or_not_at_delta_zero_is_misplaced() {
     let after_other = with_header(&[dcs(0), program_change(), dcs(0), set_tempo(100.0)]);
     assert_eq!(
         clip_error(&after_other),
-        ClipFileError::MisplacedHeaderTempo
+        (4, ClipFileError::MisplacedHeaderTempo)
     );
     let late = with_header(&[dcs(7), set_tempo(100.0)]);
-    assert_eq!(clip_error(&late), ClipFileError::MisplacedHeaderTempo);
+    assert_eq!(clip_error(&late), (2, ClipFileError::MisplacedHeaderTempo));
     // Sharing the DCTPQ's DCS (no DCS of its own) is first at delta 0.
     let sharing = with_header(&[set_tempo(100.0)]);
     assert!(MidiFile::from_bytes(&clip(&sharing)).is_ok());
@@ -673,7 +691,7 @@ fn two_header_time_signatures_are_refused() {
     let parts = with_header(&[dcs(0), time_signature(), dcs(0), time_signature()]);
     assert_eq!(
         clip_error(&parts),
-        ClipFileError::DuplicateHeaderTimeSignature
+        (4, ClipFileError::DuplicateHeaderTimeSignature)
     );
 }
 
@@ -692,18 +710,18 @@ fn a_header_time_signature_must_follow_the_set_tempo_immediately() {
     ]);
     assert_eq!(
         clip_error(&behind_other),
-        ClipFileError::MisplacedHeaderTimeSignature
+        (6, ClipFileError::MisplacedHeaderTimeSignature)
     );
     let before_tempo = with_header(&[dcs(0), time_signature(), dcs(0), set_tempo(100.0)]);
     // The tempo is then not first.
     assert_eq!(
         clip_error(&before_tempo),
-        ClipFileError::MisplacedHeaderTempo
+        (4, ClipFileError::MisplacedHeaderTempo)
     );
     let after_other_no_tempo = with_header(&[dcs(0), program_change(), dcs(0), time_signature()]);
     assert_eq!(
         clip_error(&after_other_no_tempo),
-        ClipFileError::MisplacedHeaderTimeSignature
+        (4, ClipFileError::MisplacedHeaderTimeSignature)
     );
     for ok in [
         with_header(&[dcs(0), set_tempo(100.0), dcs(0), time_signature()]),
@@ -824,13 +842,13 @@ fn the_dctpq_has_a_zero_delta_clockstamp_before_it() {
         parts
     };
     assert!(MidiFile::from_bytes(&clip(&with(&[dcs(0)]))).is_ok());
-    assert_eq!(clip_error(&with(&[])), ClipFileError::DctpqDelta);
-    assert_eq!(clip_error(&with(&[dcs(5)])), ClipFileError::DctpqDelta);
+    assert_eq!(clip_error(&with(&[])), (0, ClipFileError::DctpqDelta));
+    assert_eq!(clip_error(&with(&[dcs(5)])), (0, ClipFileError::DctpqDelta));
     // It follows the Set Profile On messages, and its DCS is the one after them.
     assert!(MidiFile::from_bytes(&clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&set_profile_on(), &[dcs(2)]]))),
-        ClipFileError::DctpqDelta
+        (set_profile_on().len(), ClipFileError::DctpqDelta)
     );
 }
 
@@ -848,12 +866,12 @@ fn a_set_profile_on_has_no_delta_clockstamp_before_it() {
     assert!(MidiFile::from_bytes(&clip(&with(&set_profile_on()))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&[dcs(0)], &set_profile_on()]))),
-        ClipFileError::ProfileOnDelta
+        (1, ClipFileError::ProfileOnDelta)
     );
     // Nor before a later packet of one message.
     let parts = set_profile_on();
     let cut = then(&[&parts[..1], &[dcs(0)], &parts[1..]]);
-    assert_eq!(clip_error(&with(&cut)), ClipFileError::ProfileOnDelta);
+    assert_eq!(clip_error(&with(&cut)), (0, ClipFileError::ProfileOnDelta));
 }
 
 /// Section 6.1.2: the header's Set Time Signature uses the Delta
@@ -862,13 +880,13 @@ fn a_set_profile_on_has_no_delta_clockstamp_before_it() {
 /// Spec: m2-116/6.1.2#2
 #[test]
 fn the_header_time_signature_is_at_delta_zero() {
-    for header in [
-        vec![dcs(5), time_signature()],
-        vec![dcs(0), set_tempo(100.0), dcs(5), time_signature()],
+    for (header, packet) in [
+        (vec![dcs(5), time_signature()], 2),
+        (vec![dcs(0), set_tempo(100.0), dcs(5), time_signature()], 4),
     ] {
         assert_eq!(
             clip_error(&with_header(&header)),
-            ClipFileError::MisplacedHeaderTimeSignature,
+            (packet, ClipFileError::MisplacedHeaderTimeSignature),
             "{header:?}"
         );
     }
@@ -910,13 +928,13 @@ fn property_exchange_is_refused_everywhere() {
             ];
             assert_eq!(
                 clip_error(&in_sequence),
-                ClipFileError::PropertyExchange,
+                (4, ClipFileError::PropertyExchange),
                 "{sub_id2:#x}"
             );
             // ...and in the header.
             assert_eq!(
                 clip_error(&with_header(&[dcs(0), pe])),
-                ClipFileError::PropertyExchange
+                (2, ClipFileError::PropertyExchange)
             );
             // The writer's gate refuses it too.
             let track = unsorted(vec![(Tick(0), packet(pe.decode().unwrap()))]);
@@ -1113,7 +1131,7 @@ fn an_unfinished_set_profile_on_is_refused() {
     );
     let mut parts = vec![start_only];
     parts.extend(with_header(&[]));
-    assert_eq!(clip_error(&parts), ClipFileError::ProfileOnDelta);
+    assert_eq!(clip_error(&parts), (0, ClipFileError::ProfileOnDelta));
 }
 
 /// Section 7.3: nothing follows End of Clip, not even half a packet.

@@ -28,7 +28,7 @@ impl std::fmt::Display for TrackPart {
 /// ([`MidiFile::smf`](crate::MidiFile::smf), [`MidiFile::clip`](crate::MidiFile::clip),
 /// and a read): each variant is one rule of the container, with where it was
 /// broken. A `track` is an index into the list given.
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {
     /// The track list is empty.

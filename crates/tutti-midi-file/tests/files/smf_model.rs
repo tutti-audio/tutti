@@ -897,6 +897,23 @@ fn what_an_smf_cannot_hold_is_refused() {
     assert!(matches!(gap, Err(TracksError::Gap { .. })));
 }
 
+/// An event's length is a variable-length quantity of at most 28 bits (SMF 1.0
+/// section 1.1): one byte past it is refused when the file is built, one byte
+/// short of it is not.
+#[test]
+fn an_event_longer_than_28_bits_is_too_large() {
+    let sysex = |len: usize| {
+        MidiFile::smf(
+            SmfFormat::SingleTrack,
+            SMF_DIVISION,
+            vec![track(vec![(0, FileEvent::SysEx(vec![0; len].into()))])],
+        )
+        .map(drop)
+    };
+    assert_eq!(sysex(1 << 28), Err(TracksError::TooLarge));
+    assert_eq!(sysex((1 << 28) - 1), Ok(()));
+}
+
 /// The longest gap the wire holds, 28 bits, round-trips.
 #[test]
 fn the_widest_delta_round_trips() {

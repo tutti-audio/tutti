@@ -873,9 +873,7 @@ impl MidiFile {
             check_run(container, i, TrackPart::Events, &track.events, track.end)?;
         }
         match container {
-            Container::Smf(format, division) => {
-                smf::write(format, division, &tracks)?;
-            }
+            Container::Smf(..) => smf::measure(&tracks)?,
             Container::Clip(_) => {
                 let track = &tracks[0];
                 if clip_file::restart_bytes(track.header_end.max(track.end).0) > u64::from(u32::MAX)
@@ -969,17 +967,10 @@ impl MidiFile {
     ///
     /// The constructors have checked everything the writer needs, so this
     /// cannot fail.
-    ///
-    /// # Panics
-    ///
-    /// Never: every file is built by a constructor that ran the SMF writer
-    /// over its tracks (a Clip File's writer holds no limit past the
-    /// constructor's).
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self.container {
-            Container::Smf(format, division) => smf::write(format, division, &self.tracks)
-                .expect("the constructor ran the writer over these tracks"),
+            Container::Smf(format, division) => smf::write(format, division, &self.tracks),
             Container::Clip(ticks_per_quarter) => {
                 let track = &self.tracks[0];
                 clip_file::write(
@@ -1563,4 +1554,58 @@ fn tempo_map(
             transition: Transition::Step,
         },
     ))?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SmfFormat, TextKind};
+
+    /// The row of `kind` in the wire table: an exhaustive match, so a kind
+    /// without a row here does not compile.
+    fn text_row(kind: TextKind) -> usize {
+        match kind {
+            TextKind::Text => 0,
+            TextKind::Copyright => 1,
+            TextKind::TrackName => 2,
+            TextKind::InstrumentName => 3,
+            TextKind::Lyric => 4,
+            TextKind::Marker => 5,
+            TextKind::CuePoint => 6,
+            TextKind::ProgramName => 7,
+            TextKind::DeviceName => 8,
+        }
+    }
+
+    fn format_row(format: SmfFormat) -> usize {
+        match format {
+            SmfFormat::SingleTrack => 0,
+            SmfFormat::Parallel => 1,
+            SmfFormat::Sequential => 2,
+        }
+    }
+
+    /// SMF 1.0 section 3.3: the text meta types are 01 to 09, in the order of
+    /// the kinds; every kind is in the lookup's list.
+    #[test]
+    fn every_text_kind_round_trips_its_meta_type() {
+        assert_eq!(TextKind::ALL.map(text_row), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        for kind in TextKind::ALL {
+            assert_eq!(kind.meta_type(), 1 + text_row(kind) as u8);
+            assert_eq!(TextKind::from_meta_type(kind.meta_type()), Some(kind));
+        }
+        assert_eq!(TextKind::from_meta_type(0x00), None);
+        assert_eq!(TextKind::from_meta_type(0x0A), None);
+    }
+
+    /// SMF 1.0 section 2.1: the format words are 0, 1 and 2, in the order of
+    /// the formats; every format is in the lookup's list.
+    #[test]
+    fn every_format_round_trips_its_word() {
+        assert_eq!(SmfFormat::ALL.map(format_row), [0, 1, 2]);
+        for format in SmfFormat::ALL {
+            assert_eq!(format.word() as usize, format_row(format));
+            assert_eq!(SmfFormat::from_word(format.word()), Some(format));
+        }
+        assert_eq!(SmfFormat::from_word(3), None);
+    }
 }

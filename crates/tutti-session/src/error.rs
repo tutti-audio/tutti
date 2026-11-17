@@ -189,7 +189,7 @@ pub enum ConnectError {
 pub enum MidiError {
     /// A MIDI file could not be read.
     #[error("MIDI file: {0}")]
-    File(#[from] tutti_midi_file::ReadError),
+    Read(#[from] tutti_midi_file::ReadError),
 
     /// A file has no one timeline to play ([`Midi::play_file`](crate::Midi::play_file)).
     #[error(transparent)]

@@ -139,7 +139,7 @@ fn division(input: &mut &[u8]) -> Res<SmfDivision> {
 fn header_body(input: &mut &[u8]) -> Res<Header> {
     let format = be_u16
         .verify_map(SmfFormat::from_word)
-        .context(malformed(SmfParseError::UnknownFormat))
+        .context(malformed(SmfParseError::UnknownSmfFormat))
         .parse_next(input)?;
     let tracks = be_u16.parse_next(input)?;
     let division = division.parse_next(input)?;

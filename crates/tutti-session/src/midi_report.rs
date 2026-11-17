@@ -69,7 +69,7 @@ pub enum MidiReport {
     FileLoaded {
         /// The id `load_file` returned.
         load: crate::MidiLoad,
-        /// The file read, or the read's error ([`MidiError::File`](crate::MidiError::File))
+        /// The file read, or the read's error ([`MidiError::Read`](crate::MidiError::Read))
         /// or the job's ([`MidiError::Job`](crate::MidiError::Job)).
         file: Result<tutti_midi_file::MidiFile, crate::MidiError>,
     },

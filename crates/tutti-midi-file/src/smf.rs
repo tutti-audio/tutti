@@ -26,7 +26,7 @@ mod read;
 mod write;
 
 pub(crate) use read::read;
-pub(crate) use write::write;
+pub(crate) use write::{measure, write};
 
 use tutti_ump::TicksPerQuarterNote;
 

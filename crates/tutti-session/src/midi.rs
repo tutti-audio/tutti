@@ -1180,7 +1180,7 @@ impl Midi<'_> {
     /// once; the result lands as [`MidiReport::FileLoaded`] with the returned
     /// id in a later [`Session::update`](crate::Session::update), on the
     /// thread that calls `update()`. A file that cannot be read lands as
-    /// [`MidiError::File`], a job that did not finish as [`MidiError::Job`].
+    /// [`MidiError::Read`], a job that did not finish as [`MidiError::Job`].
     #[must_use = "the id matches the event that lands the load"]
     pub fn load_file(&mut self, path: impl Into<std::path::PathBuf>) -> MidiLoad {
         let load = self.next_load();

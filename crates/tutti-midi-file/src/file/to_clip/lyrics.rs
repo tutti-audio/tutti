@@ -33,7 +33,7 @@ use crate::FileEvent;
 /// One syllable and how it ends.
 #[derive(Debug)]
 struct Piece {
-    body: String,
+    body: SyllableBody,
     end: SyllableEnd,
 }
 
@@ -52,11 +52,13 @@ impl Lyrics {
     pub(super) fn push(&mut self, index: usize, text: &str) {
         let (before, syllables, changes) = split(text);
         let raised = before.is_some_and(|end| self.raise_last(end));
-        let placed = if syllables.is_empty() && !raised {
-            Err(DropReason::LyricWithoutSyllable)
-        } else {
-            Ok(syllables)
-        };
+        let placed = syllables.and_then(|syllables| {
+            if syllables.is_empty() && !raised {
+                Err(DropReason::LyricWithoutSyllable)
+            } else {
+                Ok(syllables)
+            }
+        });
         self.events.push((index, placed, changes));
     }
 
@@ -85,12 +87,6 @@ impl Lyrics {
             let events = syllables.and_then(|syllables| {
                 let mut events = Vec::new();
                 for Piece { body, end } in syllables {
-                    let body = SyllableBody::try_from(&*body).map_err(|e| match e {
-                        SyllableError::Text(e) => DropReason::Text(e),
-                        // The split leaves no separator in a body, so a
-                        // refusal that is not the text's leaves no syllable.
-                        _ => DropReason::LyricWithoutSyllable,
-                    })?;
                     let packets = flex_lyric_packets(
                         MidiGroup::FIRST,
                         FlexAddress::Group,
@@ -110,7 +106,13 @@ impl Lyrics {
 /// and spaces, its own syllables, and what the reading changed of the text: a
 /// leading `/` or `\` ([`LyricChange::BreakMark`]) or hyphens at the end of a
 /// syllable ([`LyricChange::HyphenStripped`]).
-fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
+fn split(
+    text: &str,
+) -> (
+    Option<SyllableEnd>,
+    Result<Vec<Piece>, DropReason>,
+    Vec<LyricChange>,
+) {
     let mut chars = text.chars().peekable();
     let mut before = None;
     let mut changes = Vec::new();
@@ -134,10 +136,14 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
         before = before.max(Some(end));
     }
     let mut syllables = Vec::new();
+    let mut refused = None;
     // Each syllable, noting once that hyphens left the text.
     let mut push = |body: &str, end| {
         let (piece, stripped) = syllable(body, end);
-        syllables.extend(piece);
+        match piece {
+            Ok(piece) => syllables.extend(piece),
+            Err(reason) => refused = refused.or(Some(reason)),
+        }
         if stripped && !changes.contains(&LyricChange::HyphenStripped) {
             changes.push(LyricChange::HyphenStripped);
         }
@@ -164,16 +170,24 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
         }
     }
     push(&body, end);
-    (before, syllables, changes)
+    (before, refused.map_or(Ok(syllables), Err), changes)
 }
 
 /// `body` as a syllable without the hyphens that marked its word going on, and
 /// whether there were any; a body of only hyphens is no syllable.
-fn syllable(body: &str, end: SyllableEnd) -> (Option<Piece>, bool) {
+fn syllable(body: &str, end: SyllableEnd) -> (Result<Option<Piece>, DropReason>, bool) {
     let trimmed = body.trim_end_matches('-');
-    let piece = (!trimmed.is_empty()).then(|| Piece {
-        body: trimmed.to_owned(),
-        end,
-    });
+    let piece = if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        match SyllableBody::try_from(trimmed) {
+            Ok(body) => Ok(Some(Piece { body, end })),
+            Err(SyllableError::Text(e)) => Err(DropReason::Text(e)),
+            // The split leaves no separator in a body; `SyllableError` is
+            // `non_exhaustive`, and a refusal that is not the text's leaves
+            // no syllable.
+            Err(_) => Err(DropReason::LyricWithoutSyllable),
+        }
+    };
     (piece, trimmed.len() != body.len())
 }

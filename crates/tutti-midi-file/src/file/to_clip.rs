@@ -17,16 +17,14 @@ use tutti_ump::{
 use unicode_normalization::UnicodeNormalization;
 
 use super::Container;
-use crate::{
-    FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfFormat, TextKind, Tick, Track, TracksError,
-};
+use crate::{FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfFormat, TextKind, Tick, Track};
 
 use lyrics::Lyrics;
 
 mod lyrics;
 
 /// Why a file cannot be a clip.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToClipError {
     /// A format 2 file holds independent sequences, each on its own
@@ -37,10 +35,10 @@ pub enum ToClipError {
     /// The file is a Clip File already.
     #[error("the file is a Clip File already")]
     AlreadyClip,
-    /// The clip made of the file is refused: a gap whose Null restarts alone
-    /// would be over 4 GB of the clip's bytes.
-    #[error(transparent)]
-    Tracks(#[from] TracksError),
+    /// A gap in the file needs more Null restarts than the writer holds
+    /// ([`TracksError::TooLarge`](crate::TracksError::TooLarge)).
+    #[error("the clip is larger than the writer holds")]
+    TooLarge,
 }
 
 /// Why an SMF event has no place in the clip.
@@ -528,7 +526,7 @@ impl MidiFile {
     /// # Errors
     ///
     /// [`ToClipError::Sequential`] for a format 2 file,
-    /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::Tracks`]
+    /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::TooLarge`]
     /// if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
     pub fn to_clip(&self) -> Result<Converted, ToClipError> {
@@ -716,7 +714,10 @@ impl MidiFile {
             events: placed.into_iter().map(|(tick, _, e)| (tick, e)).collect(),
             end,
         };
-        let clip = MidiFile::clip(self.ticks_per_quarter(), sequence)?;
+        // The sequence is ordered, holds packets only and has no header, so
+        // the one rule it can break is the writer's size.
+        let clip = MidiFile::clip(self.ticks_per_quarter(), sequence)
+            .map_err(|_| ToClipError::TooLarge)?;
         Ok(Converted {
             clip,
             dropped,

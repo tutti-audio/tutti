@@ -48,7 +48,9 @@ pub enum ReadError {
     #[error("clip file at word {word}: {cause}")]
     Clip {
         /// The index of the 32-bit word (after the magic) where the rule that
-        /// refused began to match.
+        /// refused began to match: the Delta Clockstamps before a message
+        /// belong to it. A rule that ran out of packets without a start is
+        /// at the word the input had reached.
         word: usize,
         /// The rule broken.
         cause: ClipFileError,

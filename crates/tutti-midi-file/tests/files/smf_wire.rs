@@ -148,12 +148,17 @@ fn a_meta_event_cancels_running_status() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 31,
+            cause: SmfParseError::NoRunningStatus
+        })
     ));
 }
 
 /// A sysex event cancels running status the same way (under a surviving
-/// `F0` status the byte `00` would be a valid empty sysex).
+/// `F0` status the byte `00` would be a valid empty sysex). The sysex is six
+/// bytes with its `F7`, so the refused event starts at byte 32.
 #[test]
 fn a_sysex_cancels_running_status() {
     let bytes = file(vec![
@@ -163,7 +168,11 @@ fn a_sysex_cancels_running_status() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 32,
+            cause: SmfParseError::NoRunningStatus
+        })
     ));
 }
 
@@ -172,7 +181,11 @@ fn a_sysex_cancels_running_status() {
 fn a_first_event_needs_a_status() {
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&[0x00, 0x3C, 0x40])),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 22,
+            cause: SmfParseError::NoRunningStatus
+        })
     ));
 }
 
@@ -194,7 +207,11 @@ fn system_statuses_are_refused() {
         assert!(
             matches!(
                 MidiFile::from_bytes(&raw_track(&[0x00, status, 0x00])),
-                Err(ReadError::Smf { .. })
+                Err(ReadError::Smf {
+                    track: Some(0),
+                    offset: 22,
+                    cause: SmfParseError::SystemStatus
+                })
             ),
             "{status:#x}"
         );
@@ -206,7 +223,11 @@ fn system_statuses_are_refused() {
 fn a_high_data_byte_is_malformed() {
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&[0x00, 0x90, 0x3C, 0x80])),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 22,
+            cause: SmfParseError::ChannelData
+        })
     ));
 }
 
@@ -231,7 +252,11 @@ fn more_tracks_than_declared_is_malformed() {
     bytes[10..12].copy_from_slice(&1u16.to_be_bytes());
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: None,
+            offset: 26,
+            cause: SmfParseError::ExtraTracks
+        })
     ));
     assert!(MidiFile::from_bytes(&two).is_ok());
 }
@@ -324,7 +349,11 @@ fn an_end_of_track_that_is_not_last_is_refused() {
     ]);
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
-        Err(ReadError::Smf { .. })
+        Err(ReadError::Smf {
+            track: Some(0),
+            offset: 22,
+            cause: SmfParseError::EndOfTrackNotLast
+        })
     ));
 }
 
@@ -363,6 +392,56 @@ fn the_writer_restates_a_status_after_a_meta_event() {
             0x00, 0x90, 62, 100, // note, status restated
             0x00, 0xFF, 0x2F, 0x00,
         ]
+    );
+}
+
+/// SMF 1.0 sections 3.1 and 3.3: a SysEx event is `F0`, a length and the bytes
+/// (the closing `F7` among them), an escape is `F7`, a length and the bytes.
+#[test]
+fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
+    assert_eq!(
+        track_body(vec![
+            (
+                0,
+                FileEvent::SysEx(Box::new([0x7E, 0x7F, 0x09, 0x01, 0xF7]))
+            ),
+            (0, FileEvent::Escape(Box::new([1, 2, 3]))),
+        ]),
+        [
+            0x00, 0xF0, 0x05, 0x7E, 0x7F, 0x09, 0x01, 0xF7, //
+            0x00, 0xF7, 0x03, 0x01, 0x02, 0x03, //
+            0x00, 0xFF, 0x2F, 0x00,
+        ]
+    );
+}
+
+/// SMF 1.0 section 1.1: a length of 128 or more is a variable-length quantity
+/// of two bytes or more (200 is `81 48`, 300 is `82 2C`).
+#[test]
+fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
+    let text = vec![b'a'; 200];
+    let want: Vec<u8> = [
+        &[0x00, 0xFF, 0x01, 0x81, 0x48][..],
+        &text,
+        &[0x00, 0xFF, 0x2F, 0x00],
+    ]
+    .concat();
+    let meta = FileEvent::Meta(Meta::Text {
+        kind: TextKind::Text,
+        bytes: text.into_boxed_slice(),
+    });
+    assert_eq!(track_body(vec![(0, meta)]), want);
+
+    let data = vec![0x11; 300];
+    let want: Vec<u8> = [
+        &[0x00, 0xF0, 0x82, 0x2C][..],
+        &data,
+        &[0x00, 0xFF, 0x2F, 0x00],
+    ]
+    .concat();
+    assert_eq!(
+        track_body(vec![(0, FileEvent::SysEx(data.into_boxed_slice()))]),
+        want
     );
 }
 
@@ -439,5 +518,107 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         let converted = read.to_clip().unwrap();
         let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
         assert_eq!(reasons, [DropReason::MalformedMeta], "{kind:#04x} {data:?}");
+    }
+}
+
+/// A second header chunk is refused where it starts: the first chunk after the
+/// header is bytes 14.. of the file.
+#[test]
+fn a_second_header_chunk_is_refused_where_it_starts() {
+    let mut bytes = file(vec![]);
+    bytes.truncate(14);
+    bytes.extend_from_slice(b"MThd");
+    bytes.extend_from_slice(&6u32.to_be_bytes());
+    bytes.extend_from_slice(&[0, 0, 0, 1, 0, TPQ as u8]);
+    assert!(matches!(
+        MidiFile::from_bytes(&bytes),
+        Err(ReadError::Smf {
+            track: None,
+            offset: 14,
+            cause: SmfParseError::SecondHeader
+        })
+    ));
+}
+
+/// A header chunk of four bytes has no division.
+#[test]
+fn a_header_shorter_than_six_bytes_is_refused() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"MThd");
+    bytes.extend_from_slice(&4u32.to_be_bytes());
+    bytes.extend_from_slice(&[0, 0, 0, 1]);
+    assert!(matches!(
+        MidiFile::from_bytes(&bytes),
+        Err(ReadError::Smf {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::ShortHeader
+        })
+    ));
+}
+
+/// Format 0 is one track, and the header's format word is 0, 1 or 2 (SMF 1.0
+/// section 2.1).
+#[test]
+fn a_header_with_the_wrong_format_or_track_count_is_refused_at_the_header() {
+    let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
+    assert!(matches!(
+        MidiFile::from_bytes(&two),
+        Err(ReadError::Smf {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::FormatZeroTracks
+        })
+    ));
+    let three = build_smf(3, Division::Metrical(TPQ), &[vec![]]);
+    assert!(matches!(
+        MidiFile::from_bytes(&three),
+        Err(ReadError::Smf {
+            track: None,
+            offset: 0,
+            cause: SmfParseError::UnknownSmfFormat
+        })
+    ));
+}
+
+/// The text kinds are the meta types 01 to 09 (SMF 1.0 section 3.3): a read of
+/// each gives the kind, and a write the same bytes.
+#[test]
+fn every_text_meta_type_reads_and_writes_back() {
+    for (meta_type, kind) in [
+        (0x01, TextKind::Text),
+        (0x02, TextKind::Copyright),
+        (0x03, TextKind::TrackName),
+        (0x04, TextKind::InstrumentName),
+        (0x05, TextKind::Lyric),
+        (0x06, TextKind::Marker),
+        (0x07, TextKind::CuePoint),
+        (0x08, TextKind::ProgramName),
+        (0x09, TextKind::DeviceName),
+    ] {
+        let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
+        let read = MidiFile::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            read.tracks()[0].events[0].1,
+            FileEvent::Meta(Meta::text(kind, "x")),
+            "{meta_type:#x}"
+        );
+        assert_eq!(read.to_bytes(), bytes, "{meta_type:#x}");
+    }
+}
+
+/// The header's format word is 0, 1 or 2 (SMF 1.0 section 2.1): a read of each
+/// writes the word back.
+#[test]
+fn every_format_word_reads_and_writes_back() {
+    for word in 0u16..=2 {
+        let tracks = if word == 0 {
+            vec![vec![]]
+        } else {
+            vec![vec![], vec![]]
+        };
+        let bytes = build_smf(word, Division::Metrical(TPQ), &tracks);
+        let read = MidiFile::from_bytes(&bytes).unwrap();
+        assert_eq!(read.to_bytes()[8..10], word.to_be_bytes(), "format {word}");
     }
 }
