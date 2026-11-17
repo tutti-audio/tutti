@@ -10,8 +10,7 @@
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PresetError;
-use tutti_session::{DetachedSession, PresetKind, Session};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_session::{PresetKind, Session};
 
 #[cfg(feature = "clap")]
 mod clap {
@@ -144,6 +143,8 @@ mod vst2 {
     use super::*;
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_types::PresetId;
+    use tutti_session::DetachedSession;
+    use tutti_types::{ChannelLayout, SampleRate};
 
     fn probe_with(programs: &str) -> (DetachedSession, tutti_graph::NodeKey, ScopedEnv) {
         let mut env = ScopedEnv::new();
