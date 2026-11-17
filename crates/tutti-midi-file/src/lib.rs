@@ -4,7 +4,7 @@
 //!
 //! ## The model
 //!
-//! A [`MidiFile`] is its container (an SMF's format 0, 1 or 2, or a Clip File),
+//! A [`MidiFile`] is its container (an SMF's format 0, 1, 2 or above, or a Clip File),
 //! its division, its [`Track`]s and the `TempoMap` its tempo events declare. A
 //! track is `(Tick, FileEvent)` in order and where it ends. Ticks are integers,
 //! so a write is exact; [`MidiFile::events`] gives the merged timeline as
@@ -22,7 +22,10 @@
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
-//!   per track ([`MidiFile::tempo_map_of`]).
+//!   per track ([`MidiFile::tempo_map_of`]). So does a format above 2, which
+//!   the specification leaves undefined and a reader may still read as its
+//!   track chunks ([`SmfFormat::Other`]); the format word is written back
+//!   as read.
 //! - **Tempo** is `MidiFile::tempo_map()`, steps at the tick each Set Tempo (an
 //!   SMF's meta event, a Clip File's Flex Data message) lands on; 120 BPM until
 //!   the first if none is at the start. `seconds_at` integrates it. The map is
@@ -44,8 +47,11 @@
 //!   the bar line the pickup's signature makes. The first Set Tempo and Set Time
 //!   Signature at tick 0 are written under the Delta Clockstamp before Start of
 //!   Clip.
-//! - **Metrical timing only.** An SMPTE division is refused with
-//!   [`ReadError::SmpteDivision`]: it has no beat grid to put a tempo map on.
+//! - **SMPTE time is read.** A division with its top bit set
+//!   ([`SmfDivision::Smpte`]) counts ticks of `fps * ticks per frame` a second,
+//!   29.97 being 30000/1001: [`MidiFile::seconds_at`] and [`MidiFile::events`]
+//!   answer in seconds. It has no beat grid, so it has no tempo map or beats
+//!   and [`MidiFile::to_clip`] refuses it ([`ToClipError::Smpte`]).
 //!
 //! - **To a Clip File.** [`MidiFile::to_clip`] converts a format 0 or 1 SMF: its meta
 //!   events become the Flex Data messages of M2-116 Appendix B, and what has no UMP
@@ -62,7 +68,7 @@
 //!
 //! ```rust
 //! use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
-//! use tutti_types::{Beat, Bpm, Seconds};
+//! use tutti_types::{Bpm, Seconds};
 //! use tutti_ump::{MidiChannel, NoteNumber, U7};
 //!
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.
@@ -71,11 +77,11 @@
 //!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
 //!     .note(Tick(0), Tick(1_440), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
 //!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
-//! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
+//! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::per_quarter(480), vec![track])?;
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes())?;
 //! assert_eq!(read, file);
-//! assert_eq!(read.seconds_at(Beat(8.0)), Seconds(6.0));
+//! assert_eq!(read.seconds_at(Tick(8 * 480)), Seconds(6.0));
 //! let notes = read.tracks()[0].notes();
 //! assert_eq!((notes[0].start, notes[0].end), (Tick(0), Tick(1_440)));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -86,7 +92,7 @@
 //! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
 //! own event's beat, meta events left out: the tempo is [`MidiFile::tempo_map`]) and
 //! whose `dropped` lists the SysEx and escape events no packet holds. A format 2
-//! file has no one timeline and is refused with `NoCommonTimeline`.
+//! file has no one timeline and is refused with `TimelineError::NoCommonTimeline`.
 //!
 //! ### Tempo is the wire's
 //!
@@ -125,11 +131,14 @@ pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
 pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, MalformedMeta, Meta,
+    Altered, Converted, DropReason, Dropped, FileEvent, FileTime, LyricChange, MalformedMeta, Meta,
     MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
-    OtherMetaKindOutOfRange, PairedNote, SmfFormat, TextKind, Tick, Timeline, TimelineDrop,
-    ToClipError, Track,
+    OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat,
+    TextKind, Tick, Timeline, TimelineDrop, TimelineError, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
-pub use smf::{SmfDivision, SmfDivisionOutOfRange};
+pub use smf::{
+    SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
+    SmfTicksPerQuarterOutOfRange,
+};
 pub use write::WriteOptions;

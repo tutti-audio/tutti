@@ -666,10 +666,12 @@ pub mod midi {
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
-        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
-        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
-        TextKind, Timeline, TimelineDrop, WriteOptions,
+        Altered, Converted, DropReason, Dropped, FileTime, LyricChange, MalformedMeta,
+        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline,
+        OtherMetaKind, OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange,
+        OutOfOrder, PairedNote, SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
+        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, TextKind, Timeline, TimelineDrop,
+        TimelineError, WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,

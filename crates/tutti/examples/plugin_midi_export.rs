@@ -160,7 +160,7 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use tutti::midi::{Meta, SmfDivision, SmfFormat, TicksPerQuarterNote, U7};
     const TPQ: u16 = 480;
     const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
-    const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+    const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
     let beat = |n| Tick::quarters(n, DIVISION).expect("eight quarters fit");
     let mut track = Track::new()
         .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))

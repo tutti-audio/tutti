@@ -32,7 +32,7 @@ use tutti::{
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(480);
-const SMF_DIVISION: SmfDivision = SmfDivision::of(480);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(480);
 
 /// What the run found, for the test below to hold it to.
 struct Outcome {
