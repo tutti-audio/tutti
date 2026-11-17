@@ -273,7 +273,10 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     let map = s.tempo_map();
     let points = map.points();
     assert_eq!(points.len(), 2, "{points:?}");
-    assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), Bpm::of(60.0)));
+    assert_eq!(
+        (points[0].beat, points[0].tempo),
+        (Beat(0.0), Bpm::of(60.0))
+    );
     assert_eq!(
         points[1].beat, beat,
         "the ramp ends and the step is at one beat"

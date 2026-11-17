@@ -752,7 +752,14 @@ mod tests {
 
         let points = new.points();
         assert_eq!(points.len(), 2, "{points:?}");
-        assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), bpm(60.0)));
+        assert_eq!(
+            points[0],
+            TempoPoint {
+                transition: Transition::RampTime { end: Some(cut) },
+                ..TempoPoint::step(Beat(0.0), bpm(60.0))
+            },
+            "the ramp ends at the cut"
+        );
         assert_eq!(
             points[1].beat, at,
             "the ramp ends and the step is at one beat"
