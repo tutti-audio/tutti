@@ -73,12 +73,12 @@ use super::TimeoutWait;
 use super::handshake::Handshake;
 use super::link::Link;
 
-use tutti_ump::{MidiChannel, U7};
+use tutti_ump::U7;
 
 use super::{
     Ack, CiDeviceId, CiHeader, CiMessage, CiVersion, Decoded, Destination, DetailsData,
     InquiryTarget, Muid, Nak, PEER_REPLY_TIMEOUT, ProfileChannels, ProfileId, ProfileLists,
-    ProfileState, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY,
+    ProfileState, ProfileTarget, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY,
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
 };
 
@@ -86,71 +86,6 @@ use super::{
 /// are zeroes, which a peer with nothing to name sends.
 fn details_name(details: [u8; 5], profile: ProfileId) -> bool {
     details == profile.to_bytes() || details == [0; 5]
-}
-
-/// Where a Set Profile On, Profile Enabled or Profile Disabled is aimed, and how
-/// many Channels it names (§7.8, §7.10, §7.11).
-///
-/// For a Profile Destination of address 0x7E or 0x7F the number of Channels is
-/// the width of the Group or Function Block, and the Number of Channels field
-/// is 0x0000: so only a Channel has a count to give, and a Group or Function
-/// Block has none to get wrong.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProfileTarget {
-    /// A Channel, the Manager Channel of a multi-Channel Profile, and the total
-    /// number of Channels requested (M2-102 §2.5.1: no more than the peer's
-    /// declared maximum).
-    Channel {
-        /// The Channel.
-        channel: MidiChannel,
-        /// The Manager plus Member Channels.
-        channels: ProfileChannels,
-    },
-    /// The whole Group (`0x7E`).
-    Group,
-    /// The whole Function Block (`0x7F`).
-    FunctionBlock,
-}
-
-impl ProfileTarget {
-    /// The Device ID the message goes to.
-    #[must_use]
-    pub const fn address(self) -> CiDeviceId {
-        match self {
-            Self::Channel { channel, .. } => CiDeviceId::Channel(channel),
-            Self::Group => CiDeviceId::Group,
-            Self::FunctionBlock => CiDeviceId::FunctionBlock,
-        }
-    }
-
-    /// The target at `address` with `channels` as the message carries them, or
-    /// the count when a Group or Function Block address carries one other than 0.
-    ///
-    /// # Errors
-    ///
-    /// The count, for a Group or Function Block address.
-    pub(super) const fn from_wire(
-        address: CiDeviceId,
-        channels: ProfileChannels,
-    ) -> Result<Self, u16> {
-        match address {
-            CiDeviceId::Channel(channel) => Ok(Self::Channel { channel, channels }),
-            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
-                Err(channels.get())
-            }
-            CiDeviceId::Group => Ok(Self::Group),
-            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock),
-        }
-    }
-
-    /// The Number of Channels field.
-    #[must_use]
-    pub const fn channels(self) -> ProfileChannels {
-        match self {
-            Self::Channel { channels, .. } => channels,
-            Self::Group | Self::FunctionBlock => ProfileChannels::BY_ADDRESS,
-        }
-    }
 }
 
 /// A request in flight: what [`ProfileAction::Resolved`] names.

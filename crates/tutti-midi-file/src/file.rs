@@ -485,10 +485,10 @@ impl Track {
     /// is built.
     ///
     /// ```
-    /// use tutti_midi_device::{ProfileId, ProfileOnRequest};
+    /// use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
     /// use tutti_midi_file::Track;
     ///
-    /// let on = ProfileOnRequest::Group(ProfileId::MPE);
+    /// let on = ProfileOnRequest { target: ProfileTarget::Group, profile: ProfileId::MPE };
     /// let track = Track::new().profile_on(on);
     /// assert_eq!(track.profiles(), Ok(vec![on]));
     /// ```

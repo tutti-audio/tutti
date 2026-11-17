@@ -211,10 +211,64 @@ fn a_set_on_to_the_group_or_function_block_is_table_24_with_zero_channels() {
     }
 }
 
-/// §7.8, §7.10 and §7.11 notes: a Group or Function Block address names no count.
+/// Tables 26 and 27: a report at the Group or Function Block has `00 00` for
+/// its count and the Broadcast MUID as its destination.
+#[test]
+fn enabled_and_disabled_reports_at_the_group_or_function_block_are_zero_count_bytes() {
+    for (sub, enabled) in [(0x24u8, true), (0x25, false)] {
+        for (device, target) in [
+            (0x7Eu8, ProfileTarget::Group),
+            (0x7F, ProfileTarget::FunctionBlock),
+        ] {
+            let (source, ci_version, profile) = (Muid::of(SRC), CI_VERSION, piano());
+            let message = if enabled {
+                CiMessage::ProfileEnabled {
+                    source,
+                    ci_version,
+                    target,
+                    profile,
+                }
+            } else {
+                CiMessage::ProfileDisabled {
+                    source,
+                    ci_version,
+                    target,
+                    profile,
+                }
+            };
+            let mut want = vec![0x7E, device, 0x0D, sub, 0x02];
+            want.extend(Muid::of(SRC).to_bytes());
+            want.extend([0x7F, 0x7F, 0x7F, 0x7F]);
+            want.extend([0x7E, 1, 2, 3, 4, 0, 0]);
+            assert_eq!(message.encode(), want, "{sub:#x} at {device:#x}");
+            assert_eq!(decoded(&want), message);
+        }
+    }
+}
+
+/// §5.3: a Version 1 Set Profile On has no count field, so a Group address with
+/// none is a Group target.
+#[test]
+fn a_version_1_set_on_to_the_group_has_no_count_bytes() {
+    let mut bytes = vec![0x7E, 0x7E, 0x0D, 0x22, 0x01];
+    bytes.extend(Muid::of(SRC).to_bytes());
+    bytes.extend(to_dst());
+    bytes.extend([0x7E, 1, 2, 3, 4]);
+    assert_eq!(
+        decoded(&bytes),
+        CiMessage::SetProfileOn {
+            source: Muid::of(SRC),
+            ci_version: CiVersion::of(1),
+            to: Muid::of(DST),
+            target: ProfileTarget::Group,
+            profile: piano(),
+        }
+    );
+}
+
+/// §7.8, §7.10 and §7.11 notes: the count is 0x0000 at address 0x7E or 0x7F.
 #[test]
 fn a_group_or_function_block_address_with_channels_is_not_read() {
-    // §7.8, §7.10 and §7.11 notes: the count is 0x0000 at address 0x7E or 0x7F.
     for sub in [0x22u8, 0x24, 0x25] {
         for device in [0x7Eu8, 0x7F] {
             let destination = if sub == 0x22 { to_dst() } else { BROADCAST };
@@ -698,10 +752,12 @@ fn set_profile_on_payload(device: u8, version: u8, source: [u8; 4], body: &[u8])
 /// Spec: m2-116/6.2#3
 #[test]
 fn a_profile_on_request_is_table_24_with_broadcast_muids() {
-    let on = ProfileOnRequest::Channel {
-        channel: MidiChannel::of(2),
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Channel {
+            channel: MidiChannel::of(2),
+            channels: ProfileChannels::of(0x81),
+        },
         profile: ProfileId::MPE,
-        channels: ProfileChannels::of(0x81),
     };
     assert_eq!(
         on.encode(),
@@ -710,30 +766,39 @@ fn a_profile_on_request_is_table_24_with_broadcast_muids() {
             0x31, 0x00, 0x01, 0x01, 0x01, 0x01,
         ]
     );
-    let group = ProfileOnRequest::Group(ProfileId::MPE);
+    let group = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
     assert_eq!(group.encode()[1], 0x7E);
     assert_eq!(group.encode()[18..], [0, 0]);
-    assert_eq!(ProfileOnRequest::FunctionBlock(piano()).encode()[1], 0x7F);
+    assert_eq!(
+        ProfileOnRequest {
+            target: ProfileTarget::FunctionBlock,
+            profile: piano()
+        }
+        .encode()[1],
+        0x7F
+    );
 }
 
 /// The request is the body `CiMessage::SetProfileOn` has, so the two are
 /// one layout: the same message with real MUIDs differs only in them.
 #[test]
 fn a_profile_on_request_has_the_body_of_the_message_on_a_link() {
-    let on = ProfileOnRequest::Channel {
-        channel: MidiChannel::of(2),
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Channel {
+            channel: MidiChannel::of(2),
+            channels: ProfileChannels::of(3),
+        },
         profile: piano(),
-        channels: ProfileChannels::of(3),
     };
     let message = CiMessage::SetProfileOn {
         source: Muid::of(0x0102_0304),
         ci_version: CI_VERSION,
         to: Muid::of(0x0506_0708),
-        target: ProfileTarget::Channel {
-            channel: MidiChannel::of(2),
-            channels: on.channels(),
-        },
-        profile: on.profile(),
+        target: on.target,
+        profile: on.profile,
     };
     assert_eq!(on.encode()[13..], message.encode()[13..]);
     assert_eq!(on.encode()[..5], message.encode()[..5]);
@@ -743,7 +808,10 @@ fn a_profile_on_request_has_the_body_of_the_message_on_a_link() {
 /// are a Start, two Continues and an End on the group asked for.
 #[test]
 fn a_profile_on_request_is_cut_into_sysex7_packets() {
-    let on = ProfileOnRequest::Group(ProfileId::MPE);
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
     let packets: Vec<_> = on.packets(tutti_ump::MidiGroup::of(3)).collect();
     assert_eq!(packets.len(), 4);
     assert!(
@@ -763,15 +831,23 @@ fn a_profile_on_request_is_read_with_any_muids_and_either_version() {
     let real = ProfileOnRequest::try_from(&set_profile_on_payload(0x01, 2, [1, 2, 3, 4], &v2)[..]);
     assert_eq!(
         real,
-        Ok(ProfileOnRequest::Channel {
-            channel: MidiChannel::of(1),
-            profile: ProfileId::MPE,
-            channels: ProfileChannels::of(5),
+        Ok(ProfileOnRequest {
+            target: ProfileTarget::Channel {
+                channel: MidiChannel::of(1),
+                channels: ProfileChannels::of(5)
+            },
+            profile: ProfileId::MPE
         })
     );
     // A Source of Broadcast too: a link would refuse it.
     let v1 = ProfileOnRequest::try_from(&set_profile_on_payload(0x7F, 1, BROADCAST, &id)[..]);
-    assert_eq!(v1, Ok(ProfileOnRequest::FunctionBlock(ProfileId::MPE)));
+    assert_eq!(
+        v1,
+        Ok(ProfileOnRequest {
+            target: ProfileTarget::FunctionBlock,
+            profile: ProfileId::MPE
+        })
+    );
 }
 
 /// Each fault the bytes can have is its own error.
@@ -784,7 +860,10 @@ fn a_profile_on_request_names_what_is_wrong_with_the_bytes() {
     };
     assert_eq!(
         decode(0x7E, 2, &body),
-        Ok(ProfileOnRequest::Group(ProfileId::MPE))
+        Ok(ProfileOnRequest {
+            target: ProfileTarget::Group,
+            profile: ProfileId::MPE
+        })
     );
     assert_eq!(decode(0x7E, 0, &body), Err(NotSetProfileOn::Version(0)));
     assert_eq!(
@@ -824,7 +903,11 @@ fn a_profile_on_request_names_what_is_wrong_with_the_bytes() {
 /// device that can own a MUID (M2-101 section 3.3.3).
 #[test]
 fn a_link_still_refuses_a_set_profile_on_from_the_broadcast_muid() {
-    let bytes = ProfileOnRequest::Group(ProfileId::MPE).encode();
+    let bytes = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    }
+    .encode();
     let Decoded::Unread(unread) = CiMessage::decode(&bytes) else {
         panic!("a Source of Broadcast is not a message on a link");
     };

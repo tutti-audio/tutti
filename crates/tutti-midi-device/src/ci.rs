@@ -73,8 +73,8 @@ pub use drum_map::{
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
-    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable,
-    ProfileTarget, Request, RequestError,
+    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable, Request,
+    RequestError,
 };
 pub use pe::{
     ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
@@ -118,7 +118,7 @@ pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, Repor
 pub use profile::{
     ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
     NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId,
-    ProfileLists, ProfileOnRequest, ProfileState, SUB_ID2_PROFILE_ADDED,
+    ProfileLists, ProfileOnRequest, ProfileState, ProfileTarget, SUB_ID2_PROFILE_ADDED,
     SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED,
     SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED,
     SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF,
