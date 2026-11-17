@@ -17,12 +17,12 @@ use std::sync::{Arc, OnceLock};
 /// lives forever and allocates nothing, for a failure the audio thread finds;
 /// [`fault`](Self::fault), on the control side, boxes it.
 #[derive(Default)]
-pub(crate) struct FaultLatch {
+pub(crate) struct FirstError {
     first: OnceLock<Kept>,
 }
 
-/// The kept error: boxed by [`FaultLatch::latch`], or a `'static` reference
-/// from [`FaultLatch::latch_static`]. One cell, so the first of either wins.
+/// The kept error: boxed by [`FirstError::latch`], or a `'static` reference
+/// from [`FirstError::latch_static`]. One cell, so the first of either wins.
 enum Kept {
     Boxed(Arc<dyn Error + Send + Sync>),
     Static(&'static (dyn Error + Send + Sync)),
@@ -33,7 +33,7 @@ enum Kept {
 #[error("{0}")]
 struct Fixed(&'static (dyn Error + Send + Sync));
 
-impl FaultLatch {
+impl FirstError {
     /// Keep `error` unless an earlier one is already kept.
     pub(crate) fn latch(&self, error: impl Error + Send + Sync + 'static) {
         if self.first.get().is_none() {
@@ -57,11 +57,11 @@ impl FaultLatch {
     }
 }
 
-impl core::fmt::Debug for FaultLatch {
+impl core::fmt::Debug for FirstError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.fault() {
-            Some(e) => write!(f, "FaultLatch({e})"),
-            None => f.write_str("FaultLatch(ok)"),
+            Some(e) => write!(f, "FirstError({e})"),
+            None => f.write_str("FirstError(ok)"),
         }
     }
 }
@@ -83,7 +83,7 @@ mod tests {
     /// untouched latch reports nothing.
     #[test]
     fn the_first_error_is_kept() {
-        let l = FaultLatch::default();
+        let l = FirstError::default();
         assert!(l.fault().is_none());
         l.latch(E("first"));
         l.latch(E("second"));
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn a_static_error_is_kept() {
         static E_STATIC: E = E("fixed");
-        let l = FaultLatch::default();
+        let l = FirstError::default();
         l.latch_static(&E_STATIC);
         assert_eq!(l.fault().expect("latched").to_string(), "fixed");
     }
@@ -104,11 +104,11 @@ mod tests {
     #[test]
     fn the_first_error_wins_across_both_paths() {
         static E_STATIC: E = E("static");
-        let l = FaultLatch::default();
+        let l = FirstError::default();
         l.latch_static(&E_STATIC);
         l.latch(E("boxed"));
         assert_eq!(l.fault().expect("latched").to_string(), "static");
-        let l = FaultLatch::default();
+        let l = FirstError::default();
         l.latch(E("boxed"));
         l.latch_static(&E_STATIC);
         assert_eq!(l.fault().expect("latched").to_string(), "boxed");

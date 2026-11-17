@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::disk_voice::DiskVoice;
-use super::fault::FaultLatch;
+use super::fault::FirstError;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use tutti_graph::{ForkCause, ForkMode, Node, RenderMode};
@@ -293,7 +293,7 @@ impl Voice {
 
     /// A forked disk voice's failure latch, `None` for a memory voice (which
     /// cannot fail) or a live one.
-    pub(crate) fn fault(&self) -> Option<Arc<FaultLatch>> {
+    pub(crate) fn fault(&self) -> Option<Arc<FirstError>> {
         match &self.source {
             VoiceSource::Memory(_) => None,
             VoiceSource::Disk(voice) => voice.fault(),
