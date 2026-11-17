@@ -279,7 +279,7 @@ fn two_tally_writers_add_to_one_exact_total() {
     let total = tally::<u64>();
     let handles: Vec<_> = (0..2)
         .map(|_| {
-            let mut writer = total.writer();
+            let writer = total.writer();
             std::thread::spawn(move || {
                 for _ in 0..50_000 {
                     writer.add(1);
@@ -296,8 +296,8 @@ fn two_tally_writers_add_to_one_exact_total() {
 #[test]
 fn a_tally_adds_each_tally_of_a_two_tally_count() {
     let total = tally::<Two>();
-    let mut a = total.writer();
-    let mut b = a.clone();
+    let a = total.writer();
+    let b = a.clone();
     a.add(Two { lost: 1, late: 10 });
     b.add(Two { lost: 2, late: 0 });
     assert_eq!(total.clone().get(), Two { lost: 3, late: 10 });
@@ -306,7 +306,7 @@ fn a_tally_adds_each_tally_of_a_two_tally_count() {
 #[test]
 fn a_tally_reader_never_sees_a_tally_go_back() {
     let total = tally::<Two>();
-    let mut writers = [total.writer(), total.writer()];
+    let writers = [total.writer(), total.writer()];
     let reader = std::thread::spawn({
         let total = total.clone();
         move || {
@@ -319,7 +319,7 @@ fn a_tally_reader_never_sees_a_tally_go_back() {
         }
     });
     for _ in 0..10_000 {
-        for w in &mut writers {
+        for w in &writers {
             w.add(Two { lost: 1, late: 2 });
         }
     }
@@ -336,7 +336,7 @@ fn a_tally_reader_never_sees_a_tally_go_back() {
 #[test]
 fn a_tally_outlives_every_writer_and_mints_more() {
     let total = tally::<u64>();
-    let mut first = total.writer();
+    let first = total.writer();
     first.add(2);
     drop(first);
     total.writer().add(3);

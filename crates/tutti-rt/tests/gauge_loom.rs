@@ -224,7 +224,7 @@ fn of_two_concurrent_reopens_exactly_one_wins() {
 fn a_two_writer_tally_never_goes_back_and_is_exact_once_joined() {
     loom::model(|| {
         let total = tally::<u64>();
-        let (mut a, mut b) = (total.writer(), total.writer());
+        let (a, b) = (total.writer(), total.writer());
         let observer = {
             let total = total.clone();
             thread::spawn(move || {
@@ -247,7 +247,7 @@ fn a_two_writer_tally_never_goes_back_and_is_exact_once_joined() {
 fn a_two_word_tally_reads_prefix_totals_and_is_exact_once_joined() {
     loom::model(|| {
         let total = tally::<Two>();
-        let (mut a, mut b) = (total.writer(), total.writer());
+        let (a, b) = (total.writer(), total.writer());
         let observer = {
             let total = total.clone();
             thread::spawn(move || {
