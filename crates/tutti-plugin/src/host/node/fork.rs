@@ -464,7 +464,8 @@ mod tests {
     /// both figures — and nothing before `plan` or while the figure holds.
     #[test]
     fn a_latency_moved_after_the_plan_is_a_fault() {
-        let controls = PluginControls::new(Samples(137), PluginTail::default(), SampleRate::SR_48K);
+        let (controls, reports) =
+            PluginControls::new(Samples(137), PluginTail::default(), SampleRate::SR_48K);
         let watch = ForkWatch {
             controls: controls.clone(),
             wait: Arc::new(OfflineWait::new(
@@ -477,7 +478,7 @@ mod tests {
         watch.wait.plan(controls.declared_latency().samples());
         assert!(watch.fault().is_none(), "the plan holds");
         // The plugin reports a new latency, as the bridge listener hands it over.
-        controls.take_report(&tutti_plugin_types::PluginInvalidation::Latency {
+        reports.take_report(&tutti_plugin_types::PluginInvalidation::Latency {
             samples: Samples(161),
         });
         let (kind, cause) = watch.fault().expect("the latency moved");

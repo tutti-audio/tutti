@@ -407,23 +407,26 @@ fn with_compensation_both_paths_land_on_the_same_sample() {
     );
 }
 
-/// **A plugin latency change reaches PDC at the next commit.** The plugin's
-/// figure moves (what its `latency.changed` delivers into its cell), the host
-/// hands the controls' declared latency to `Editor::set_latency` — the node's
-/// `Shape` changes — and the next commit re-plans the graph around it.
+/// **A plugin latency change reaches PDC at the next commit.** The plugin
+/// moves its own latency (told to render offline, it adds `EXTRA` frames to its
+/// delay and announces the change through `clap.latency`), the host hands the
+/// controls' declared latency to `Editor::set_latency` — the node's `Shape`
+/// changes — and the next commit re-plans the graph around it.
 ///
-/// A plugin may raise its latency mid-session — a CLAP host is told so through
-/// `clap.latency`'s host extension, and the controls' latency cell is where
-/// that lands. What that does *not* do on its own is re-run PDC: the node's
+/// What the announcement does *not* do on its own is re-run PDC: the node's
 /// figure is the editor's until told, so the graph is misaligned by exactly
 /// the difference until something re-plans. This is the case a static rig
 /// cannot reach, and the one where a stale compensation is most damaging — the
-/// graph was aligned, so nothing looks broken until you measure it.
+/// graph was aligned, so nothing looks broken until you measure it. The plugin
+/// really delays by its new figure, so a re-plan that carries it leaves the dry
+/// and plugin paths together, and a stale plan separates them by `EXTRA`.
 #[test]
 fn a_latency_change_reaches_pdc_at_the_next_commit() {
     const EXTRA: usize = 64;
     let _lock = machine_lock();
-    let _env = ProbeEnv::new().render_mode(render::LATENCY);
+    let _env = ProbeEnv::new()
+        .render_mode(render::LATENCY)
+        .offline_extra_latency(EXTRA as u32);
     let probe = load_probe(SAMPLE_RATE);
     let handle = probe.handle;
 
@@ -432,16 +435,30 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     ));
     assert_eq!(rig.total_latency(), Samples(EXPECTED_TOTAL_LATENCY));
 
-    // The plugin now claims more latency than it did at load. Its *rendering*
-    // is unchanged — the probe still delays by 137 — which is deliberate: the
-    // question here is whether the planner re-reads the declaration and
-    // re-plans, not whether the audio moved.
-    // The plugin reports a new latency, as the bridge listener hands it over.
-    rig.controls
-        .take_report(&tutti_plugin_types::PluginInvalidation::Latency {
-            samples: Samples(PROBE_LATENCY + EXTRA),
-        });
+    let (reported, heard) = std::sync::mpsc::channel();
+    let _hearing = handle.subscribe(move |notice| {
+        if matches!(
+            notice,
+            tutti_plugin_host::Notice::Invalidate(
+                tutti_plugin_types::PluginInvalidation::Latency { .. }
+            )
+        ) {
+            let _ = reported.send(());
+        }
+    });
+    assert!(
+        handle.announce_render_mode(tutti_plugin_types::RenderMode::Offline),
+        "the plugin takes the offline mode"
+    );
+    heard
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the plugin announced its new latency");
     let declared = rig.controls.declared_latency();
+    assert_eq!(
+        declared.samples(),
+        Samples(EXPECTED_TOTAL_LATENCY + EXTRA),
+        "the controls took the announced figure"
+    );
     rig.graph
         .editor_mut()
         .set_latency(rig.plugin, declared)
@@ -464,21 +481,10 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     );
 
     let hits = arrivals(&out);
-    // The dry path is now delayed by the *claimed* total while the plugin still
-    // renders its real 137, so the two separate again — by exactly the amount
-    // the plugin over-claimed. That is the correct behaviour for a host that
-    // believes its plugin, and asserting it pins that the re-plan used the new
-    // figure rather than silently keeping the old one.
     assert_eq!(
         hits.len(),
-        2,
-        "the plugin over-claims by {EXTRA}, so the paths must separate by that \
-         much: {hits:?}"
-    );
-    assert_eq!(
-        hits[1].0 - hits[0].0,
-        EXTRA,
-        "the separation must be exactly the over-claim. Zero would mean the \
-         re-plan never happened and the graph is still carrying the old delays."
+        1,
+        "the dry path is delayed by the new figure as the plugin is, so the \
+         paths arrive together; a stale plan would separate them by {EXTRA}: {hits:?}"
     );
 }

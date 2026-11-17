@@ -331,7 +331,7 @@ impl PluginClient<Unbound> {
                 ))
             })?;
 
-        let controls = PluginControls::with_chunks(
+        let (controls, reports) = PluginControls::with_chunks(
             loaded.latency_samples,
             loaded.tail,
             rate,
@@ -353,7 +353,6 @@ impl PluginClient<Unbound> {
         // re-plans PDC, which a host does with `Editor::set_latency`). Resync
         // signals split by consequence into the refresh (cosmetic) vs
         // invalidate (structural) sinks via `ResyncKind::classify`.
-        let listener_controls = controls.clone();
         let listener_param_sink = param_sink.clone();
         let listener_refresh_sink = refresh_sink.clone();
         let listener_invalidate_sink = invalidate_sink.clone();
@@ -361,12 +360,12 @@ impl PluginClient<Unbound> {
         ipc.forward_events(Some(Arc::new(move |ev| match ev {
             BridgeEvent::LatencyChanged { samples } => {
                 let reported = PluginInvalidation::Latency { samples };
-                listener_controls.take_report(&reported);
+                reports.take_report(&reported);
                 listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::TailChanged { tail } => {
                 let reported = PluginInvalidation::Tail { tail };
-                listener_controls.take_report(&reported);
+                reports.take_report(&reported);
                 listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::ParameterChanged { edit } => {

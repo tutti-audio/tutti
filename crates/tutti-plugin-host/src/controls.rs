@@ -191,9 +191,45 @@ impl std::ops::Deref for PluginControls {
     }
 }
 
+/// The write half of a plugin's [`PluginControls`]: what the plugin reported
+/// goes into the latency and tail cells the controls read.
+///
+/// Issued once, with the controls, to the plugin's bridge listener, which is
+/// the only writer of the figures the graph compensates for. The controls hold
+/// reads only.
+#[derive(Debug)]
+pub struct PluginReports {
+    latency: Arc<AtomicUsize>,
+    tail: Arc<Mutex<PluginTail>>,
+}
+
+impl PluginReports {
+    /// Takes what the plugin reported into the controls: a new latency reaches
+    /// [`PluginControls::latency`] and [`PluginControls::declared_latency`], a
+    /// new tail reaches [`PluginControls::tail`]. Any other invalidation changes
+    /// no cell.
+    pub fn take_report(&self, reported: &PluginInvalidation) {
+        match *reported {
+            // The atomic is the terminus: `AtomicUsize` needs a primitive, so the
+            // unit type stops here.
+            PluginInvalidation::Latency { samples } => {
+                self.latency.store(samples.get(), Ordering::Release);
+            }
+            PluginInvalidation::Tail { tail } => *lock_tail(&self.tail) = tail,
+            _ => {}
+        }
+    }
+}
+
 impl PluginControls {
     /// Public for `tutti-plugin`'s node of a served plugin, which builds its controls at load.
-    pub fn new(latency: Samples, tail: PluginTail, sample_rate: SampleRate) -> Self {
+    ///
+    /// Returns the controls with the [`PluginReports`] that write their latency and tail.
+    pub fn new(
+        latency: Samples,
+        tail: PluginTail,
+        sample_rate: SampleRate,
+    ) -> (Self, PluginReports) {
         Self::with_chunks(latency, tail, sample_rate, Arc::default())
     }
 
@@ -205,15 +241,22 @@ impl PluginControls {
         tail: PluginTail,
         sample_rate: SampleRate,
         chunks: Arc<ChunkCounters>,
-    ) -> Self {
-        Self {
-            latency: Arc::new(AtomicUsize::new(latency.get())),
-            tail: Arc::new(Mutex::new(tail)),
+    ) -> (Self, PluginReports) {
+        let latency = Arc::new(AtomicUsize::new(latency.get()));
+        let tail = Arc::new(Mutex::new(tail));
+        let reports = PluginReports {
+            latency: Arc::clone(&latency),
+            tail: Arc::clone(&tail),
+        };
+        let controls = Self {
+            latency,
+            tail,
             pipeline: Arc::new(AtomicUsize::new(MAX_CHUNK)),
             node: NodeControls::new(crate::PluginMeter::default(), Arc::default()),
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             chunks,
-        }
+        };
+        (controls, reports)
     }
 
     /// The cells the node's IPC pipeline reports to, for the node.
@@ -294,24 +337,6 @@ impl PluginControls {
     /// is seeded with. Control thread: allocates.
     pub fn delivered(&self) -> Vec<(tutti_plugin_types::ParamId, f64)> {
         self.node.delivery.delivered()
-    }
-
-    /// Takes what the plugin reported into the cells the graph reads: a new
-    /// latency reaches [`latency`](Self::latency) and
-    /// [`declared_latency`](Self::declared_latency), a new tail reaches
-    /// [`tail`](Self::tail). Any other invalidation changes no cell. A served
-    /// plugin's bridge thread calls it for each event it hears, before the event
-    /// reaches the node's listeners.
-    pub fn take_report(&self, reported: &PluginInvalidation) {
-        match *reported {
-            // The atomic is the terminus: `AtomicUsize` needs a primitive, so the
-            // unit type stops here.
-            PluginInvalidation::Latency { samples } => {
-                self.latency.store(samples.get(), Ordering::Release);
-            }
-            PluginInvalidation::Tail { tail } => *lock_tail(&self.tail) = tail,
-            _ => {}
-        }
     }
 
     /// The plugin's reported latency, in **frames** — its own figure, without
@@ -422,7 +447,7 @@ mod tests {
     use tutti_types::MeterMap;
 
     fn controls() -> PluginControls {
-        PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1)
+        PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1).0
     }
 
     /// A handle taken *before* a rate change reads the new rate — the
@@ -447,7 +472,7 @@ mod tests {
         let live = controls();
         let meter = ProjectMeter::new(MeterMap::default());
         live.set_meter(meter.clone());
-        let fork = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_96K);
+        let (fork, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_96K);
         let gathered = live.sources_now();
         live.set_meter(ProjectMeter::new(MeterMap::default()));
         gathered.install(&fork);

@@ -2354,7 +2354,7 @@ mod tests {
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
-        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K)).clone()
+        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K).0).clone()
     }
 
     /// A backend that answers `state` (or declines), counts its saves, and
@@ -2661,7 +2661,8 @@ mod tests {
     #[test]
     fn an_update_frees_a_plugin_meter_cleared_while_a_block_held_it() {
         let mut rig = rig(None);
-        let controls = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+        let (controls, _) =
+            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
         let project = rig.session.click_settings().project_meter();
         controls.set_meter(project);
         let meter = controls.meter();
@@ -2696,11 +2697,14 @@ mod tests {
             .plugins
             .get_mut(&rig.node)
             .expect("hosted")
-            .controls = Some(PluginControls::new(
-            Samples(10_000_000),
-            PluginTail::default(),
-            SampleRate::SR_48K,
-        ));
+            .controls = Some(
+            PluginControls::new(
+                Samples(10_000_000),
+                PluginTail::default(),
+                SampleRate::SR_48K,
+            )
+            .0,
+        );
         rig.plugins_at(0);
         assert_eq!(
             rig.session.graph_ref().node_latency(rig.node).unwrap(),

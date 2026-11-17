@@ -35,7 +35,7 @@ mod wakeups;
 mod walk_tests;
 
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
-pub use controls::{ForkedSources, NodeControls, PluginControls, lock_tail};
+pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports, lock_tail};
 pub use listeners::{
     InvalidateSink, Listener, Notice, ParameterChangeSink, RefreshSink, Subscription, TransportSink,
 };
