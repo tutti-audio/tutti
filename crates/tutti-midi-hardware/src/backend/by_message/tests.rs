@@ -32,7 +32,7 @@ fn batch() -> [Outgoing; 5] {
 fn os(
     fits: usize,
     sent: usize,
-) -> impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<crate::Error>> {
+) -> impl FnMut(PacketSpan<'_, Outgoing>) -> Result<(), Refused<crate::Error>> {
     let mut seen = 0;
     move |_| {
         seen += 1;

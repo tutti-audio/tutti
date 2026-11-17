@@ -11,8 +11,9 @@ use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
     InProcess, KeyEvent, KeyUse, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit,
-    ParamId, PluginError, PluginResult, WindowHandle,
+    PluginError, PluginResult, WindowHandle,
 };
+use tutti_types::ParamId;
 
 use super::loaded::Vst3Loaded;
 
@@ -74,15 +75,15 @@ impl Vst3Editor {
             // The plugin's editor reported one of its own `ParamID`s.
             PluginNotification::Edit(ParameterEditEvent::PerformEdit { param_id, value }) => {
                 edits.push(ParamEdit::change(
-                    param_id.into(),
+                    ParamId::new(param_id),
                     Normalized::clamped(value),
                 ));
             }
             PluginNotification::Edit(ParameterEditEvent::BeginEdit(id)) => {
-                edits.push(ParamEdit::Begin(id.into()));
+                edits.push(ParamEdit::Begin(ParamId::new(id)));
             }
             PluginNotification::Edit(ParameterEditEvent::EndEdit(id)) => {
-                edits.push(ParamEdit::End(id.into()));
+                edits.push(ParamEdit::End(ParamId::new(id)));
             }
             PluginNotification::Edit(ParameterEditEvent::SetDirty(true)) => *dirty = true,
             _ => {}

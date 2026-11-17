@@ -11,11 +11,12 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
     EditorPresence, EditorWindow, Features, Layout, LoadedPlugin, Normalized, OwnBypass,
-    ParamAccess, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo,
-    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse,
-    TimerId, TrackInfo, WindowHandle, Wraps, bypass_parameter,
+    ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
+    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
+    TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
+use tutti_types::ParamId;
 
 use super::ClapLoaded;
 use super::controller::ClapController;
@@ -91,7 +92,7 @@ impl ClapLoaded {
     /// parameter "can't be changed by the host" (`params.h`), and an id the
     /// plugin does not declare has no range to write against.
     fn writable_bounds(&self, id: ParamId) -> Result<ParamBounds, ParamWriteError> {
-        let bounds = self.parameter_bounds(id.get());
+        let bounds = self.parameter_bounds(id);
         ParamWriteError::check(id, bounds.map(|b| ParamAccess::reported(b.read_only)))?;
         bounds.ok_or(ParamWriteError::Undeclared(id))
     }
@@ -347,7 +348,7 @@ impl Control for ClapLoaded {
     /// answers in its plain range and the declared bounds map it back.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
         let plain = self.plain_value(main, id.get())?;
-        Some(self.parameter_bounds(id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id)?.normalized(plain))
     }
 
     /// Applied now, as a flushed `PARAM_VALUE` event. CLAP events carry the
@@ -381,7 +382,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<f64> {
-        Some(self.parameter_bounds(id.get())?.plain(value))
+        Some(self.parameter_bounds(id)?.plain(value))
     }
 
     /// The inverse, [`ParamMapping::normalized`].
@@ -391,7 +392,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         plain: f64,
     ) -> Option<Normalized> {
-        Some(self.parameter_bounds(id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id)?.normalized(plain))
     }
 
     /// The plugin's own display string. `value_to_text` takes a plain value, so
@@ -402,7 +403,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<String> {
-        let plain = self.parameter_bounds(id.get())?.plain(value);
+        let plain = self.parameter_bounds(id)?.plain(value);
         self.value_to_text(main, id.get(), plain)
     }
 
@@ -415,7 +416,7 @@ impl Control for ClapLoaded {
         text: &str,
     ) -> Option<Normalized> {
         let plain = self.text_to_value(main, id.get(), text)?;
-        Some(self.parameter_bounds(id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id)?.normalized(plain))
     }
 
     /// `state-context` for the context `state_use` names when the plugin has

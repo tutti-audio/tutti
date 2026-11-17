@@ -3,10 +3,10 @@
 
 use crate::field::{ChordType, FirstGroup, FunctionBlockId, GroupSpan, U7};
 use crate::message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
-    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
-    Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System,
-    UiHint, Utility, Voice1, Voice2,
+    Accidental, Address, Alteration, AlterationKind, Attribute, BlockDirection, BlockSelect,
+    ChordName, ChordPitch, Data128, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks,
+    KeySignature, Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet,
+    SysexStatus, System, UiHint, Utility, Voice1, Voice2,
 };
 use crate::{MidiGroup, Ump};
 
@@ -502,10 +502,10 @@ fn stream(s: Stream) -> [u32; 4] {
         }
         Stream::FunctionBlockInfo(i) => {
             let direction = match i.direction {
-                Direction::Input => 0b01,
-                Direction::Output => 0b10,
-                Direction::Bidirectional => 0b11,
-                Direction::Reserved(r) => u32::from(r.get()) & 0x3,
+                BlockDirection::Input => 0b01,
+                BlockDirection::Output => 0b10,
+                BlockDirection::Bidirectional => 0b11,
+                BlockDirection::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             let ui_hint = match i.ui_hint {
                 UiHint::Unknown => 0,

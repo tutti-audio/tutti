@@ -8,6 +8,7 @@
 
 use std::ptr;
 use tutti_graph::UmpAt;
+use tutti_types::ParamId;
 
 use crate::support::midi_events;
 use clap_sys::events::{
@@ -189,7 +190,7 @@ fn gesture_and_mod_events_are_held_beside_the_value() {
         "nothing past the room"
     );
     assert_eq!(changes.queues.len(), 1, "only the PARAM_VALUE queued");
-    assert_eq!(changes.queues[0].param_id, 5u32.into());
+    assert_eq!(changes.queues[0].param_id, ParamId::new(5u32));
 }
 
 #[test]
@@ -592,7 +593,7 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     const PARAMS: u32 = 2_000;
     let room = ParameterQueue::chunk_room(512);
     let budget = ParameterChanges::point_budget(PARAMS as usize, room);
-    let ids: Vec<u32> = (0..PARAMS).collect();
+    let ids: Vec<ParamId> = (0..PARAMS).map(ParamId::new).collect();
     let mut output = OutputEventList::new(OutputRooms::new(16).params(budget, &ids));
     let mut changes = ParameterChanges::reserved(PARAMS as usize, room);
     let (floor, _) = ParameterChanges::point_layout(PARAMS as usize, room);
@@ -646,7 +647,7 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     let mut dropped = 0;
     assert_no_alloc::assert_no_alloc(|| dropped = block(&mut output, &mut changes, true));
     assert_eq!(dropped, 1);
-    let last = changes.queue((PARAMS - 1).into()).expect("queued");
+    let last = changes.queue(ParamId::new(PARAMS - 1)).expect("queued");
     assert_eq!(last.points.len(), floor);
     let k = floor;
     assert_eq!(

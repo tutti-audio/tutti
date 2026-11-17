@@ -7,8 +7,9 @@
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::{Normalized, ParamId, ParamUnit};
+use tutti_plugin_types::{Normalized, ParamUnit};
 use tutti_session::{DetachedSession, PluginParamError, Root, Session};
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 /// The probe's parameter that is labelled `Hz` and has an integer range.

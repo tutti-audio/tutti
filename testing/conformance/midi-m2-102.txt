@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-102/<section>#<n>          the nth sentence under the numbered section
@@ -21,122 +24,122 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-102/1.1#1 | both |  | required | M2-102 §1.1 | a Profile fixes how a device answers a chosen set of messages for one purpose |  |  |
-m2-102/1.2#1 | responder |  | required | M2-102 §1.2 | a Profile fixes how a receiving device answers a chosen set of messages for one purpose |  |  |
-m2-102/1.2#2 | both |  | permitted | M2-102 §1.2 | a Profile can also state other device requirements beyond message responses |  |  |
-m2-102/1.2#3 | both |  | permitted | M2-102 §1.2 | a Profile can imply, or require, a matching MIDI implementation on the sender |  |  |
-m2-102/1.2#4 | both |  | recommended | M2-102 §1.2 | this document tells Profile authors how to write a Profile and devices how to use Profile Configuration |  |  |
-m2-102/1.3.1#1 | both |  | permitted | M2-102 §1.3.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-102/1.3.1#2 | both |  | permitted | M2-102 §1.3.1 | either device can start a Transaction at any time |  |  |
-m2-102/1.3.1#3 | both |  | permitted | M2-102 §1.3.1 | a Profile can list mandatory messages and features beside optional or recommended ones |  |  |
-m2-102/1.3.1#4 | both |  | permitted | M2-102 §1.3.1 | glossary: Property Exchange lets one device read another's data, definition only |  |  |
-m2-102/1.3.1#5 | both |  | permitted | M2-102 §1.3.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-102/1.3.1#6 | both |  | permitted | M2-102 §1.3.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
-m2-102/1.3.1#7 | both |  | permitted | M2-102 §1.3.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte-stream systems |  |  |
-m2-102/2.1#1 | initiator |  | permitted | M2-102 §2.1 | an Initiator can use the Profile list to configure the connection automatically |  |  |
-m2-102/2.2#1 | both |  | required | M2-102 §2.2 | the standards bodies keep the list of Standard Defined Profiles and assign each its Profile ID |  | other-side | M2-102 §2.2: duty of the MMA and AMEI, not of a device
-m2-102/2.2#2 | both |  | permitted | M2-102 §2.2 | a manufacturer can run its own proprietary Profile under its three-byte SysEx ID in the Profile ID |  |  |
-m2-102/2.3.3#1 | both |  | permitted | M2-102 §2.3.3 | an all-Channel Profile uses every Channel of a Function Block, which can cross UMP Groups |  |  |
-m2-102/2.3.4#1 | initiator |  | recommended | M2-102 §2.3.4 | when a multi-Channel Profile has no fixed Channel count, Profile Details Inquiry finds how many the Responder will use |  |  |
-m2-102/2.3.4.1#1 | both |  | required | M2-102 §2.3.4.1 | a Profile spanning two or more Channels defines a Manager Channel |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors
-m2-102/2.3.4.1#2 | both |  | required | M2-102 §2.3.4.1 | the Manager Channel is the lowest Channel of the lowest Group in the series |  |  |
-m2-102/2.3.4.1#3 | both |  | required | M2-102 §2.3.4.1 | the Profile spec says how Member Channels are found from the Manager Channel |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors
-m2-102/2.3.4.1#4 | both |  | permitted | M2-102 §2.3.4.1 | with a single-Group or undeclared Function Block the Manager Channel can be placed in a limited low range of Channels |  |  |
-m2-102/2.3.4.1#5 | both |  | permitted | M2-102 §2.3.4.1 | a Manager Channel can double as a Member Channel only when the two sets of functions do not clash |  |  |
-m2-102/2.3.4.1#6 | both |  | required | M2-102 §2.3.4.1 | a Profile spec states which functions of a dual Channel are Manager controls and which Member |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors
-m2-102/2.3.4.1#7 | responder |  | required | M2-102 §2.3.4.1 | if Volume on the Manager Channel scales all Members, the Members ignore Volume on their own Channels |  |  |
-m2-102/2.3.4.1#8 | responder |  | required | M2-102 §2.3.4.1 | if Volume on a Member Channel scales that Channel only, the Manager Channel uses Volume for that Channel alone |  |  |
-m2-102/2.4#1 | both |  | recommended | M2-102 §2.4 | Profile specs and devices support the common Profile messages of MIDI-CI |  |  |
-m2-102/2.4#2 | initiator |  | permitted | M2-102 §2.4 | an Initiator can use the Profile Inquiry reply to configure the connection automatically |  |  |
-m2-102/2.4#3 | initiator |  | permitted | M2-102 §2.4 | a Profile Inquiry can be addressed to a Channel, a Group or a Function Block |  |  |
-m2-102/2.4#4 | responder |  | required | M2-102 §2.4 | a Responder answers Profile Inquiry with one or more Reply to Profile Inquiry messages listing its Profiles |  |  |
-m2-102/2.4#5 | responder |  | permitted | M2-102 §2.4 | the Profile Added Report adds Profiles to the reported list |  |  |
-m2-102/2.4#6 | responder |  | permitted | M2-102 §2.4 | the Profile Removed Report removes Profiles from the reported list |  |  |
-m2-102/2.4#7 | responder |  | permitted | M2-102 §2.4 | Set Profile On and Profile Enabled move a Profile from disabled to enabled |  |  |
-m2-102/2.4#8 | responder |  | permitted | M2-102 §2.4 | Set Profile Off and Profile Disabled move a Profile from enabled to disabled |  |  |
-m2-102/2.4#9 | responder |  | required | M2-102 §2.4 | a Responder with no Profiles on the Channel replies with an empty list |  |  |
-m2-102/2.4#10 | responder |  | required | M2-102 §2.4 | a Responder with no Group Profiles on the Group replies with an empty list |  |  |
-m2-102/2.4#11 | responder |  | required | M2-102 §2.4 | an inquiry on address 0x7F is answered with the Channel replies, then Group, then Function Block replies in that order |  |  |
-m2-102/2.4#12 | responder |  | required | M2-102 §2.4 | the last reply to an inquiry on 0x7F is sent on address 0x7F and lists the Function Block Profiles |  |  |
-m2-102/2.4#13 | responder |  | required | M2-102 §2.4 | with no Function Block Profiles the final 0x7F reply is empty, which marks the end of replies |  |  |
-m2-102/2.4#14 | responder |  | recommended | M2-102 §2.4 | a device that already replied to an inquiry sends a Profile Added Report when it gains a Profile |  |  |
-m2-102/2.4#15 | responder |  | required | M2-102 §2.4 | a Profile Added Report goes to the broadcast MUID |  |  |
-m2-102/2.4#16 | responder |  | required | M2-102 §2.4 | a newly added Profile that is enabled is followed at once by a Profile Enabled Report |  |  |
-m2-102/2.4#17 | responder |  | recommended | M2-102 §2.4 | a device that already replied to an inquiry sends a Profile Removed Report when it loses a Profile |  |  |
-m2-102/2.4#18 | responder |  | required | M2-102 §2.4 | a Profile Removed Report goes to the broadcast MUID |  |  |
-m2-102/2.4#19 | responder |  | required | M2-102 §2.4 | removing an enabled Profile sends its Profile Disabled Report first, then the Removed Report |  |  |
-m2-102/2.4#20 | initiator |  | permitted | M2-102 §2.4 | an Initiator can send Profile Details Inquiry to learn about a Profile before enabling it |  |  |
-m2-102/2.4#21 | initiator |  | permitted | M2-102 §2.4 | Profile Details Inquiry can also be used while the Profile is enabled |  |  |
-m2-102/2.4#22 | both |  | permitted | M2-102 §2.4 | one detail a Profile Details Inquiry can find is how many Channels a multi-Channel Profile can use |  |  |
-m2-102/2.4#23 | both |  | permitted | M2-102 §2.4 | which details exist is set by the specification of the Profile ID asked about |  |  |
-m2-102/2.4#24 | responder |  | recommended | M2-102 §2.4 | a Profile Details Inquiry for an unsupported Profile Id is answered with a NAK carrying status 0x04 |  |  |
-m2-102/2.4#25 | responder |  | required | M2-102 §2.4 | a Responder answers Profile Details Inquiry with a reply whose data fits the Inquiry Target |  |  |
-m2-102/2.4#26 | responder |  | permitted | M2-102 §2.4 | where a Target Data definition allows it, a Responder can send the details reply without being asked |  |  |
-m2-102/2.5#1 | initiator |  | permitted | M2-102 §2.5 | a Profile Details Inquiry asks for one of two kinds of target, Registered or Profile Specific |  |  |
-m2-102/2.5#2 | both |  | required | M2-102 §2.5 | each Registered Target Data definition says whether its reply can double as a notification |  | other-side | M2-102 §2.5: rule on the authors of Registered Target Data definitions
-m2-102/2.5#3 | both |  | required | M2-102 §2.5 | a Profile spec says whether its Profile Specific target replies can double as notifications |  | other-side | M2-102 §2.5: rule on Profile specification authors
-m2-102/2.5#4 | both |  | permitted | M2-102 §2.5 | more Registered Target Data can be defined in later revisions |  |  |
-m2-102/2.5.1#1 | both |  | permitted | M2-102 §2.5.1 | Inquiry Target 0x00 negotiates the Channel count for a variable-width multi-Channel Profile |  |  |
-m2-102/2.5.1#2 | responder |  | required | M2-102 §2.5.1 | a Number of Channels reply is never sent as a notification | neg=1 |  |
-m2-102/2.5.1#3 | initiator |  | required | M2-102 §2.5.1 | an Initiator never requests more Channels in Enable Profile than the Responder's declared maximum | neg=1 |  |
-m2-102/2.5.1#4 | responder |  | required | M2-102 §2.5.1 | the Channel count a Responder reports never exceeds its declared maximum | neg=1 |  |
-m2-102/2.6#1 | responder |  | required | M2-102 §2.6 | a device enables a supported Profile on Set Profile On |  |  |
-m2-102/2.6#2 | responder |  | required | M2-102 §2.6 | after enabling, the device replies with Profile Enabled |  |  |
-m2-102/2.6#3 | responder |  | required | M2-102 §2.6 | a Profile enabled by a local action is reported with Profile Enabled |  |  |
-m2-102/2.6#4 | responder |  | required | M2-102 §2.6 | a Profile enabled by a Program Change is reported with Profile Enabled |  |  |
-m2-102/2.6#5 | responder |  | required | M2-102 §2.6 | if a supported Profile cannot be enabled, the device replies Profile Disabled Report |  |  |
-m2-102/2.6#6 | responder |  | recommended | M2-102 §2.6 | Set Profile On for an unsupported Profile is answered with a NAK |  |  |
-m2-102/2.7#1 | responder |  | recommended | M2-102 §2.7 | a device disables a Profile on Set Profile Off |  |  |
-m2-102/2.7#2 | responder |  | required | M2-102 §2.7 | after disabling, the device replies with Profile Disabled |  |  |
-m2-102/2.7#3 | responder |  | required | M2-102 §2.7 | a Profile that cannot be disabled is answered with Profile Enabled |  |  |
-m2-102/2.7#4 | responder |  | required | M2-102 §2.7 | a Profile disabled by a local action is reported with Profile Disabled |  |  |
-m2-102/2.7#5 | responder |  | required | M2-102 §2.7 | a Profile disabled by a Program Change is reported with Profile Disabled |  |  |
-m2-102/2.7#6 | responder |  | required | M2-102 §2.7 | if a supported Profile cannot be disabled, the device replies Profile Enabled Report |  |  |
-m2-102/2.7#7 | responder |  | recommended | M2-102 §2.7 | Set Profile Off for an unsupported Profile is answered with a NAK |  |  |
-m2-102/2.8#1 | responder |  | permitted | M2-102 §2.8 | a device can report that it cannot run two requested Profiles together |  |  |
-m2-102/2.8#2 | responder |  | permitted | M2-102 §2.8 | many devices cannot run two Profiles at once | neg=1 |  |
-m2-102/2.8#3 | responder |  | permitted | M2-102 §2.8 | some devices can layer two Profiles, such as a combined sound |  |  |
-m2-102/2.8#4 | responder |  | recommended | M2-102 §2.8 | enabling a Profile that clashes with an enabled one switches over and sends two replies, one disabling the old and one enabling the new |  |  |
-m2-102/2.9#1 | both |  | recommended | M2-102 §2.9 | a device that changes Profiles with Programs avoids sending Profile messages for each Program scrolled past |  |  |
-m2-102/2.9#2 | both |  | recommended | M2-102 §2.9 | such a device sends Profile messages only for the user's intended choice |  |  |
-m2-102/3.1#1 | both |  | permitted | M2-102 §3.1 | a Profile spec can set further receiver requirements beyond messages |  |  |
-m2-102/3.1.1#1 | both |  | recommended | M2-102 §3.1.1 | Profiles give no new meanings to Assignable Controllers (NRPN), leaving them for legacy use | neg=1 |  |
-m2-102/3.1.1#2 | both |  | recommended | M2-102 §3.1.1 | new Profiles define Registered Controllers for parameters not defined before, as a general rule |  |  |
-m2-102/3.1.1#3 | both |  | recommended | M2-102 §3.1.1 | manufacturer-specific Profiles use Assignable Controllers for functions that have no CC or Registered Controller |  |  |
-m2-102/3.2#1 | both |  | permitted | M2-102 §3.2 | a Profile can define several levels of compliance |  |  |
-m2-102/3.2#2 | both |  | required | M2-102 §3.2 | a Profile spec states the minimum features needed to claim support |  | other-side | M2-102 §3.2: rule on Profile specification authors
-m2-102/3.2#3 | both |  | permitted | M2-102 §3.2 | a Profile spec can define optional extended features beyond the minimum |  |  |
-m2-102/3.2#4 | initiator |  | recommended | M2-102 §3.2 | a sender treats a Partial Support receiver as if it met the minimum required |  |  |
-m2-102/3.2#5 | both |  | permitted | M2-102 §3.2 | either side can tell the user that full Profile function may not be reached |  |  |
-m2-102/3.2#6 | both |  | permitted | M2-102 §3.2 | a Profile spec can define extended feature sets at other support levels |  |  |
-m2-102/3.2#7 | both |  | recommended | M2-102 §3.2 | the support level of each extended feature is clearly defined |  |  |
-m2-102/3.2#8 | both |  | recommended | M2-102 §3.2 | authors weigh whether extended features form an Extended Feature Set or a separate Profile |  |  |
-m2-102/3.2#9 | responder |  | recommended | M2-102 §3.2 | Set Profile On with Highest Possible Level enables every feature of the Profile the receiver supports |  |  |
-m2-102/3.2.1#1 | both |  | required | M2-102 §3.2.1 | a Profile uses exactly one MIDI Channel structure |  | other-side | M2-102 §3.2.1: rule on Profile specification authors
-m2-102/3.2.1#2 | both |  | permitted | M2-102 §3.2.1 | a device type can be defined under more than one Channel structure, each with its own Profile |  |  |
-m2-102/3.2.1#3 | both |  | permitted | M2-102 §3.2.1 | examples of related Profiles with their own IDs, definition only |  |  |
-m2-102/3.3#1 | both |  | required | M2-102 §3.3 | a variable-width multi-Channel Profile spec says Profile Details Inquiry negotiates the Channel count |  | other-side | M2-102 §3.3: rule on Profile specification authors
-m2-102/3.3#2 | both |  | permitted | M2-102 §3.3 | a Profile spec can use Profile Details Inquiry with Registered Targets for optional features |  |  |
-m2-102/3.3#3 | both |  | required | M2-102 §3.3 | a Profile spec states its Profile Specific Targets and the reply format |  | other-side | M2-102 §3.3: rule on Profile specification authors
-m2-102/3.4#1 | both |  | permitted | M2-102 §3.4 | a Profile spec can define Property Exchange Resources |  |  |
-m2-102/3.4#2 | both |  | permitted | M2-102 §3.4 | those Resources can be existing common ones |  |  |
-m2-102/3.4#3 | both |  | permitted | M2-102 §3.4 | a Profile can instead define new Resources of its own |  |  |
-m2-102/3.5#1 | both |  | recommended | M2-102 §3.5 | Profiles reuse the existing message for a function already defined elsewhere where practicable |  |  |
-m2-102/3.5#2 | both |  | permitted | M2-102 §3.5 | reuse is not always possible for every parameter | neg=1 |  |
-m2-102/3.6#1 | both |  | permitted | M2-102 §3.6 | a Profile can give Note On and Note Off attribute types and their data a meaning |  |  |
-m2-102/3.6#2 | both |  | required | M2-102 §3.6 | for Attribute Type 0x02 the Profile spec defines the Attribute Data format |  | other-side | M2-102 §3.6: rule on Profile specification authors
-m2-102/3.6#3 | responder |  | recommended | M2-102 §3.6 | a device that does not know the active Profile ignores Attribute Data under type 0x02 |  |  |
-m2-102/3.6.1#1 | both |  | required | M2-102 §3.6.1 | Profiles keep the legacy Control Change assignments |  |  |
-m2-102/3.6.1#2 | both |  | recommended | M2-102 §3.6.1 | Appendix A lists the Control Change messages a Profile uses for matching parameters |  |  |
-m2-102/3.6.1#3 | responder |  | required | M2-102 §3.6.1 | enabling a Profile resets these Control Change destination assignments |  |  |
-m2-102/3.6.1#4 | responder |  | required | M2-102 §3.6.1 | a Profile can require certain parameters to reset to defaults |  |  |
-m2-102/3.6.2#1 | both |  | recommended | M2-102 §3.6.2 | new parameters with no Control Change are put on a Registered Controller |  |  |
-m2-102/3.6.2#2 | both |  | permitted | M2-102 §3.6.2 | a Profile can use a Registered Controller for a CC parameter that needs higher resolution or relative control |  |  |
-m2-102/3.6.3#1 | both |  | permitted | M2-102 §3.6.3 | manufacturer-specific Profiles can use Assignable Controllers for unique parameters without approval |  |  |
-m2-102/3.7#1 | both |  | required | M2-102 §3.7 | every Profile defines its response to Reset All Controllers |  | other-side | M2-102 §3.7: rule on Profile specification authors
-m2-102/3.7#2 | both |  | required | M2-102 §3.7 | a Profile for a note-playing device defines its response to all Note messages |  | other-side | M2-102 §3.7: rule on Profile specification authors
-m2-102/3.9#1 | both |  | required | M2-102 §3.9 | a Profile spec states which MIDI protocols it supports |  | other-side | M2-102 §3.9: rule on Profile specification authors
-m2-102/3.9#2 | both |  | recommended | M2-102 §3.9 | a Profile spec describes any performance difference between protocols |  |  |
-m2-102/3.9#3 | both |  | permitted | M2-102 §3.9 | a standard translator may be unable to carry a Profile's unique translation | neg=1 |  |
-m2-102/3.9#4 | both |  | required | M2-102 §3.9 | Profiles keep the default Control Change assignments under both MIDI 1.0 and MIDI 2.0 Protocols |  |  |
-m2-102/a#1 | both |  | recommended | M2-102 §A | Appendix A lists the Control Change messages a Profile uses for its matching parameters |  |  |
+m2-102/1.1#1 | both |  | required | M2-102 §1.1 | a Profile fixes how a device answers a chosen set of messages for one purpose |  |  |  | 2fa90c4527fcb059
+m2-102/1.2#1 | responder |  | required | M2-102 §1.2 | a Profile fixes how a receiving device answers a chosen set of messages for one purpose |  |  |  | 3637f273854e9330
+m2-102/1.2#2 | both |  | permitted | M2-102 §1.2 | a Profile can also state other device requirements beyond message responses |  |  |  | 478aa64a3da1751b
+m2-102/1.2#3 | both |  | permitted | M2-102 §1.2 | a Profile can imply, or require, a matching MIDI implementation on the sender |  |  |  | fb3160a5067f5c18
+m2-102/1.2#4 | both |  | recommended | M2-102 §1.2 | this document tells Profile authors how to write a Profile and devices how to use Profile Configuration |  |  |  | e92d00ca1ebd2c98
+m2-102/1.3.1#1 | both |  | permitted | M2-102 §1.3.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-102/1.3.1#2 | both |  | permitted | M2-102 §1.3.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-102/1.3.1#3 | both |  | permitted | M2-102 §1.3.1 | a Profile can list mandatory messages and features beside optional or recommended ones |  |  |  | bf579e6555af5f31
+m2-102/1.3.1#4 | both |  | permitted | M2-102 §1.3.1 | glossary: Property Exchange lets one device read another's data, definition only |  |  |  | 9157e2b19d116c9f
+m2-102/1.3.1#5 | both |  | permitted | M2-102 §1.3.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-102/1.3.1#6 | both |  | permitted | M2-102 §1.3.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |  | bbe806d164dfe0e4
+m2-102/1.3.1#7 | both |  | permitted | M2-102 §1.3.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte-stream systems |  |  |  | 7feaf7f9d052ffeb
+m2-102/2.1#1 | initiator |  | permitted | M2-102 §2.1 | an Initiator can use the Profile list to configure the connection automatically |  |  |  | e3d1c49b27d8ed4a
+m2-102/2.2#1 | both |  | required | M2-102 §2.2 | the standards bodies keep the list of Standard Defined Profiles and assign each its Profile ID |  | other-side | M2-102 §2.2: duty of the MMA and AMEI, not of a device | a9d1d3b4f78ec424
+m2-102/2.2#2 | both |  | permitted | M2-102 §2.2 | a manufacturer can run its own proprietary Profile under its three-byte SysEx ID in the Profile ID |  |  |  | 9a048fecabe35764
+m2-102/2.3.3#1 | both |  | permitted | M2-102 §2.3.3 | an all-Channel Profile uses every Channel of a Function Block, which can cross UMP Groups |  |  |  | bed3531dba4f15c2
+m2-102/2.3.4#1 | initiator |  | recommended | M2-102 §2.3.4 | when a multi-Channel Profile has no fixed Channel count, Profile Details Inquiry finds how many the Responder will use |  |  |  | b934d03f311a3e57
+m2-102/2.3.4.1#1 | both |  | required | M2-102 §2.3.4.1 | a Profile spanning two or more Channels defines a Manager Channel |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors | 6ec6c53ede3bee8b
+m2-102/2.3.4.1#2 | both |  | required | M2-102 §2.3.4.1 | the Manager Channel is the lowest Channel of the lowest Group in the series |  |  |  | ce03e58a8a61fe04
+m2-102/2.3.4.1#3 | both |  | required | M2-102 §2.3.4.1 | the Profile spec says how Member Channels are found from the Manager Channel |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors | 4be06fcb032f357d
+m2-102/2.3.4.1#4 | both |  | permitted | M2-102 §2.3.4.1 | with a single-Group or undeclared Function Block the Manager Channel can be placed in a limited low range of Channels |  |  |  | 017b9f7e26cb081b
+m2-102/2.3.4.1#5 | both |  | permitted | M2-102 §2.3.4.1 | a Manager Channel can double as a Member Channel only when the two sets of functions do not clash |  |  |  | 0178e89eb2b07110
+m2-102/2.3.4.1#6 | both |  | required | M2-102 §2.3.4.1 | a Profile spec states which functions of a dual Channel are Manager controls and which Member |  | other-side | M2-102 §2.3.4.1: rule on Profile specification authors | 70d883dc044a7da5
+m2-102/2.3.4.1#7 | responder |  | required | M2-102 §2.3.4.1 | if Volume on the Manager Channel scales all Members, the Members ignore Volume on their own Channels |  |  |  | 561fb5290384b023
+m2-102/2.3.4.1#8 | responder |  | required | M2-102 §2.3.4.1 | if Volume on a Member Channel scales that Channel only, the Manager Channel uses Volume for that Channel alone |  |  |  | c3d72a532e5c4dac
+m2-102/2.4#1 | both |  | recommended | M2-102 §2.4 | Profile specs and devices support the common Profile messages of MIDI-CI |  |  |  | 729d75e928c03690
+m2-102/2.4#2 | initiator |  | permitted | M2-102 §2.4 | an Initiator can use the Profile Inquiry reply to configure the connection automatically |  |  |  | 358f3b1d8698313a
+m2-102/2.4#3 | initiator |  | permitted | M2-102 §2.4 | a Profile Inquiry can be addressed to a Channel, a Group or a Function Block |  |  |  | 7ae59f70edbd0527
+m2-102/2.4#4 | responder |  | required | M2-102 §2.4 | a Responder answers Profile Inquiry with one or more Reply to Profile Inquiry messages listing its Profiles |  |  |  | 1b1ae943336f062c
+m2-102/2.4#5 | responder |  | permitted | M2-102 §2.4 | the Profile Added Report adds Profiles to the reported list |  |  |  | c89c8594d0047816
+m2-102/2.4#6 | responder |  | permitted | M2-102 §2.4 | the Profile Removed Report removes Profiles from the reported list |  |  |  | 3524aab8ef36f155
+m2-102/2.4#7 | responder |  | permitted | M2-102 §2.4 | Set Profile On and Profile Enabled move a Profile from disabled to enabled |  |  |  | b8e5225378137f36
+m2-102/2.4#8 | responder |  | permitted | M2-102 §2.4 | Set Profile Off and Profile Disabled move a Profile from enabled to disabled |  |  |  | 48c1933aea43d5c7
+m2-102/2.4#9 | responder |  | required | M2-102 §2.4 | a Responder with no Profiles on the Channel replies with an empty list |  |  |  | 4752dc3d4770421d
+m2-102/2.4#10 | responder |  | required | M2-102 §2.4 | a Responder with no Group Profiles on the Group replies with an empty list |  |  |  | 8cde04e5036366b8
+m2-102/2.4#11 | responder |  | required | M2-102 §2.4 | an inquiry on address 0x7F is answered with the Channel replies, then Group, then Function Block replies in that order |  |  |  | ad30d8bc0c2f3961
+m2-102/2.4#12 | responder |  | required | M2-102 §2.4 | the last reply to an inquiry on 0x7F is sent on address 0x7F and lists the Function Block Profiles |  |  |  | 12041aac08092b90
+m2-102/2.4#13 | responder |  | required | M2-102 §2.4 | with no Function Block Profiles the final 0x7F reply is empty, which marks the end of replies |  |  |  | 031cfdb117173a8a
+m2-102/2.4#14 | responder |  | recommended | M2-102 §2.4 | a device that already replied to an inquiry sends a Profile Added Report when it gains a Profile |  |  |  | 17e02666d52dae75
+m2-102/2.4#15 | responder |  | required | M2-102 §2.4 | a Profile Added Report goes to the broadcast MUID |  |  |  | b0bdf6c831fa14e4
+m2-102/2.4#16 | responder |  | required | M2-102 §2.4 | a newly added Profile that is enabled is followed at once by a Profile Enabled Report |  |  |  | 63e22c8dd436c37d
+m2-102/2.4#17 | responder |  | recommended | M2-102 §2.4 | a device that already replied to an inquiry sends a Profile Removed Report when it loses a Profile |  |  |  | b657da1869e24357
+m2-102/2.4#18 | responder |  | required | M2-102 §2.4 | a Profile Removed Report goes to the broadcast MUID |  |  |  | b6ae90266b2409a6
+m2-102/2.4#19 | responder |  | required | M2-102 §2.4 | removing an enabled Profile sends its Profile Disabled Report first, then the Removed Report |  |  |  | ad42e6c86916f7cc
+m2-102/2.4#20 | initiator |  | permitted | M2-102 §2.4 | an Initiator can send Profile Details Inquiry to learn about a Profile before enabling it |  |  |  | 5050475727519e43
+m2-102/2.4#21 | initiator |  | permitted | M2-102 §2.4 | Profile Details Inquiry can also be used while the Profile is enabled |  |  |  | cfa1cce2115796a4
+m2-102/2.4#22 | both |  | permitted | M2-102 §2.4 | one detail a Profile Details Inquiry can find is how many Channels a multi-Channel Profile can use |  |  |  | 96a6798049febd90
+m2-102/2.4#23 | both |  | permitted | M2-102 §2.4 | which details exist is set by the specification of the Profile ID asked about |  |  |  | 3f3d3f46ecb5ed4f
+m2-102/2.4#24 | responder |  | recommended | M2-102 §2.4 | a Profile Details Inquiry for an unsupported Profile Id is answered with a NAK carrying status 0x04 |  |  |  | f49f65a516bbace0
+m2-102/2.4#25 | responder |  | required | M2-102 §2.4 | a Responder answers Profile Details Inquiry with a reply whose data fits the Inquiry Target |  |  |  | a0ef673fb31f58cd
+m2-102/2.4#26 | responder |  | permitted | M2-102 §2.4 | where a Target Data definition allows it, a Responder can send the details reply without being asked |  |  |  | 5ba149e355956dcb
+m2-102/2.5#1 | initiator |  | permitted | M2-102 §2.5 | a Profile Details Inquiry asks for one of two kinds of target, Registered or Profile Specific |  |  |  | e3960b8e98e52b23
+m2-102/2.5#2 | both |  | required | M2-102 §2.5 | each Registered Target Data definition says whether its reply can double as a notification |  | other-side | M2-102 §2.5: rule on the authors of Registered Target Data definitions | a0d1c85d20dc2023
+m2-102/2.5#3 | both |  | required | M2-102 §2.5 | a Profile spec says whether its Profile Specific target replies can double as notifications |  | other-side | M2-102 §2.5: rule on Profile specification authors | f93fb0b6a4c55468
+m2-102/2.5#4 | both |  | permitted | M2-102 §2.5 | more Registered Target Data can be defined in later revisions |  |  |  | 39b7cb8767b0a46d
+m2-102/2.5.1#1 | both |  | permitted | M2-102 §2.5.1 | Inquiry Target 0x00 negotiates the Channel count for a variable-width multi-Channel Profile |  |  |  | 1f2d64b24cb5596f
+m2-102/2.5.1#2 | responder |  | required | M2-102 §2.5.1 | a Number of Channels reply is never sent as a notification | neg=1 |  |  | 9e6953f7c5b6fa23
+m2-102/2.5.1#3 | initiator |  | required | M2-102 §2.5.1 | an Initiator never requests more Channels in Enable Profile than the Responder's declared maximum | neg=1 |  |  | bdcd8db273d8d9f7
+m2-102/2.5.1#4 | responder |  | required | M2-102 §2.5.1 | the Channel count a Responder reports never exceeds its declared maximum | neg=1 |  |  | b6f8f0cfd0873241
+m2-102/2.6#1 | responder |  | required | M2-102 §2.6 | a device enables a supported Profile on Set Profile On |  |  |  | d9216257d2c7ccae
+m2-102/2.6#2 | responder |  | required | M2-102 §2.6 | after enabling, the device replies with Profile Enabled |  |  |  | 83b883c40bc4cbc2
+m2-102/2.6#3 | responder |  | required | M2-102 §2.6 | a Profile enabled by a local action is reported with Profile Enabled |  |  |  | 07c0cd7f37c414d3
+m2-102/2.6#4 | responder |  | required | M2-102 §2.6 | a Profile enabled by a Program Change is reported with Profile Enabled |  |  |  | 9231db6670294ea8
+m2-102/2.6#5 | responder |  | required | M2-102 §2.6 | if a supported Profile cannot be enabled, the device replies Profile Disabled Report |  |  |  | bca3d6a7f86a5e3b
+m2-102/2.6#6 | responder |  | recommended | M2-102 §2.6 | Set Profile On for an unsupported Profile is answered with a NAK |  |  |  | 7ff8219271064230
+m2-102/2.7#1 | responder |  | recommended | M2-102 §2.7 | a device disables a Profile on Set Profile Off |  |  |  | c1ffd3e21b95e698
+m2-102/2.7#2 | responder |  | required | M2-102 §2.7 | after disabling, the device replies with Profile Disabled |  |  |  | 4dea9bbd4a11d8e6
+m2-102/2.7#3 | responder |  | required | M2-102 §2.7 | a Profile that cannot be disabled is answered with Profile Enabled |  |  |  | 7b0ad5da545df5ea
+m2-102/2.7#4 | responder |  | required | M2-102 §2.7 | a Profile disabled by a local action is reported with Profile Disabled |  |  |  | f0736e6e9dc1c7db
+m2-102/2.7#5 | responder |  | required | M2-102 §2.7 | a Profile disabled by a Program Change is reported with Profile Disabled |  |  |  | 3edf766f475a765e
+m2-102/2.7#6 | responder |  | required | M2-102 §2.7 | if a supported Profile cannot be disabled, the device replies Profile Enabled Report |  |  |  | 81ebc1553d075a4f
+m2-102/2.7#7 | responder |  | recommended | M2-102 §2.7 | Set Profile Off for an unsupported Profile is answered with a NAK |  |  |  | dc95510f8e3cf51e
+m2-102/2.8#1 | responder |  | permitted | M2-102 §2.8 | a device can report that it cannot run two requested Profiles together |  |  |  | ded01adfc3e1a485
+m2-102/2.8#2 | responder |  | permitted | M2-102 §2.8 | many devices cannot run two Profiles at once | neg=1 |  |  | 65e5b6965782ba1e
+m2-102/2.8#3 | responder |  | permitted | M2-102 §2.8 | some devices can layer two Profiles, such as a combined sound |  |  |  | 59d03af71ee15d94
+m2-102/2.8#4 | responder |  | recommended | M2-102 §2.8 | enabling a Profile that clashes with an enabled one switches over and sends two replies, one disabling the old and one enabling the new |  |  |  | 0b12b37926311e9a
+m2-102/2.9#1 | both |  | recommended | M2-102 §2.9 | a device that changes Profiles with Programs avoids sending Profile messages for each Program scrolled past |  |  |  | e3387d93c38ae218
+m2-102/2.9#2 | both |  | recommended | M2-102 §2.9 | such a device sends Profile messages only for the user's intended choice |  |  |  | 1ab5d095190f3c75
+m2-102/3.1#1 | both |  | permitted | M2-102 §3.1 | a Profile spec can set further receiver requirements beyond messages |  |  |  | 34a2975b4b57ebe3
+m2-102/3.1.1#1 | both |  | recommended | M2-102 §3.1.1 | Profiles give no new meanings to Assignable Controllers (NRPN), leaving them for legacy use | neg=1 |  |  | cf21d52804332fc3
+m2-102/3.1.1#2 | both |  | recommended | M2-102 §3.1.1 | new Profiles define Registered Controllers for parameters not defined before, as a general rule |  |  |  | fc48303504169fb8
+m2-102/3.1.1#3 | both |  | recommended | M2-102 §3.1.1 | manufacturer-specific Profiles use Assignable Controllers for functions that have no CC or Registered Controller |  |  |  | c73b3ca1378eb6f6
+m2-102/3.2#1 | both |  | permitted | M2-102 §3.2 | a Profile can define several levels of compliance |  |  |  | 0d3750a2af1403eb
+m2-102/3.2#2 | both |  | required | M2-102 §3.2 | a Profile spec states the minimum features needed to claim support |  | other-side | M2-102 §3.2: rule on Profile specification authors | 36bd6cfbbf0e14bb
+m2-102/3.2#3 | both |  | permitted | M2-102 §3.2 | a Profile spec can define optional extended features beyond the minimum |  |  |  | 74cc068de7b0fce4
+m2-102/3.2#4 | initiator |  | recommended | M2-102 §3.2 | a sender treats a Partial Support receiver as if it met the minimum required |  |  |  | 2f393cef2fbc4eb9
+m2-102/3.2#5 | both |  | permitted | M2-102 §3.2 | either side can tell the user that full Profile function may not be reached |  |  |  | 5bea0b579cf28ada
+m2-102/3.2#6 | both |  | permitted | M2-102 §3.2 | a Profile spec can define extended feature sets at other support levels |  |  |  | 50b52b377833765c
+m2-102/3.2#7 | both |  | recommended | M2-102 §3.2 | the support level of each extended feature is clearly defined |  |  |  | 5b915edc70ae7a2f
+m2-102/3.2#8 | both |  | recommended | M2-102 §3.2 | authors weigh whether extended features form an Extended Feature Set or a separate Profile |  |  |  | cbacdc2623168157
+m2-102/3.2#9 | responder |  | recommended | M2-102 §3.2 | Set Profile On with Highest Possible Level enables every feature of the Profile the receiver supports |  |  |  | f86756693a7942ae
+m2-102/3.2.1#1 | both |  | required | M2-102 §3.2.1 | a Profile uses exactly one MIDI Channel structure |  | other-side | M2-102 §3.2.1: rule on Profile specification authors | bfc5fb65fe422e76
+m2-102/3.2.1#2 | both |  | permitted | M2-102 §3.2.1 | a device type can be defined under more than one Channel structure, each with its own Profile |  |  |  | afff434a9a9188bd
+m2-102/3.2.1#3 | both |  | permitted | M2-102 §3.2.1 | examples of related Profiles with their own IDs, definition only |  |  |  | 7647f25c5668d452
+m2-102/3.3#1 | both |  | required | M2-102 §3.3 | a variable-width multi-Channel Profile spec says Profile Details Inquiry negotiates the Channel count |  | other-side | M2-102 §3.3: rule on Profile specification authors | 84681400c3bb6b14
+m2-102/3.3#2 | both |  | permitted | M2-102 §3.3 | a Profile spec can use Profile Details Inquiry with Registered Targets for optional features |  |  |  | c3fdb56bfb340484
+m2-102/3.3#3 | both |  | required | M2-102 §3.3 | a Profile spec states its Profile Specific Targets and the reply format |  | other-side | M2-102 §3.3: rule on Profile specification authors | e03ab540c87591e6
+m2-102/3.4#1 | both |  | permitted | M2-102 §3.4 | a Profile spec can define Property Exchange Resources |  |  |  | 9edb32114b9ac8fd
+m2-102/3.4#2 | both |  | permitted | M2-102 §3.4 | those Resources can be existing common ones |  |  |  | 5306fbf635640055
+m2-102/3.4#3 | both |  | permitted | M2-102 §3.4 | a Profile can instead define new Resources of its own |  |  |  | 742da95abf1d5290
+m2-102/3.5#1 | both |  | recommended | M2-102 §3.5 | Profiles reuse the existing message for a function already defined elsewhere where practicable |  |  |  | b04a02adc3905fcc
+m2-102/3.5#2 | both |  | permitted | M2-102 §3.5 | reuse is not always possible for every parameter | neg=1 |  |  | d8dc13c796961d29
+m2-102/3.6#1 | both |  | permitted | M2-102 §3.6 | a Profile can give Note On and Note Off attribute types and their data a meaning |  |  |  | 41c7c29b66b7b2b0
+m2-102/3.6#2 | both |  | required | M2-102 §3.6 | for Attribute Type 0x02 the Profile spec defines the Attribute Data format |  | other-side | M2-102 §3.6: rule on Profile specification authors | b02a293d22777e3b
+m2-102/3.6#3 | responder |  | recommended | M2-102 §3.6 | a device that does not know the active Profile ignores Attribute Data under type 0x02 |  |  |  | 16e9c62281eb2473
+m2-102/3.6.1#1 | both |  | required | M2-102 §3.6.1 | Profiles keep the legacy Control Change assignments |  |  |  | 9fda6933b8b7d839
+m2-102/3.6.1#2 | both |  | recommended | M2-102 §3.6.1 | Appendix A lists the Control Change messages a Profile uses for matching parameters |  |  |  | 4bf98db380302f7a
+m2-102/3.6.1#3 | responder |  | required | M2-102 §3.6.1 | enabling a Profile resets these Control Change destination assignments |  |  |  | 1441bc51445a3df1
+m2-102/3.6.1#4 | responder |  | required | M2-102 §3.6.1 | a Profile can require certain parameters to reset to defaults |  |  |  | 25bf5b20392dc5a9
+m2-102/3.6.2#1 | both |  | recommended | M2-102 §3.6.2 | new parameters with no Control Change are put on a Registered Controller |  |  |  | c9f6bdda4b304945
+m2-102/3.6.2#2 | both |  | permitted | M2-102 §3.6.2 | a Profile can use a Registered Controller for a CC parameter that needs higher resolution or relative control |  |  |  | 68a4812f036530e9
+m2-102/3.6.3#1 | both |  | permitted | M2-102 §3.6.3 | manufacturer-specific Profiles can use Assignable Controllers for unique parameters without approval |  |  |  | c4385574401a0aaa
+m2-102/3.7#1 | both |  | required | M2-102 §3.7 | every Profile defines its response to Reset All Controllers |  | other-side | M2-102 §3.7: rule on Profile specification authors | 28f2aec8ea20146d
+m2-102/3.7#2 | both |  | required | M2-102 §3.7 | a Profile for a note-playing device defines its response to all Note messages |  | other-side | M2-102 §3.7: rule on Profile specification authors | d66ec60782615afa
+m2-102/3.9#1 | both |  | required | M2-102 §3.9 | a Profile spec states which MIDI protocols it supports |  | other-side | M2-102 §3.9: rule on Profile specification authors | 15018f2cd3254f78
+m2-102/3.9#2 | both |  | recommended | M2-102 §3.9 | a Profile spec describes any performance difference between protocols |  |  |  | be5b06829b0475fc
+m2-102/3.9#3 | both |  | permitted | M2-102 §3.9 | a standard translator may be unable to carry a Profile's unique translation | neg=1 |  |  | 0beb42280b15bbd9
+m2-102/3.9#4 | both |  | required | M2-102 §3.9 | Profiles keep the default Control Change assignments under both MIDI 1.0 and MIDI 2.0 Protocols |  |  |  | 73f8aba8d0397e50
+m2-102/a#1 | both |  | recommended | M2-102 §A | Appendix A lists the Control Change messages a Profile uses for its matching parameters |  |  |  | cf1c2c4fddd4aa8a

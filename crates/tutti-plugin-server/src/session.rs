@@ -991,9 +991,8 @@ mod tests {
     #[cfg(feature = "clap")]
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
-    use tutti_plugin_types::{
-        MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges,
-    };
+    use tutti_plugin_types::{MidiEventVec, Normalized, NoteExpressionChanges, ParameterChanges};
+    use tutti_types::ParamId;
 
     fn assert_none(r: Reaction) {
         assert!(matches!(r, Reaction::None), "got {r:?}");

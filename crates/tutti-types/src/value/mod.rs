@@ -54,13 +54,14 @@ pub use timeline::{
     FRAME_TOLERANCE, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
     snap_to_whole_frame,
 };
-pub use unit_param::{ParamAddr, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
+pub use unit_param::{ParamAddr, ParamId, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
 pub use units::{
-    Amplitude, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Beat, BeatDuration, BeatsPerCycle,
-    BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents,
-    CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth,
-    DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan,
-    ParkedSampleRate, Phase, PhaseIncrement, PlaybackRate, Q, Radians, ReadRate, Resonance,
-    SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Seconds,
-    Semitones, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Unit, Velocity,
+    Amplitude, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Ballistics, Beat, BeatDuration,
+    BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm,
+    BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
+    Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain,
+    HoldFactor, Hz, Mix, Pan, ParkedSampleRate, Phase, PhaseIncrement, PlaybackRate, Q, Radians,
+    ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
+    SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio, StereoBalance, StereoWidth,
+    StretchFactor, Unit, Velocity,
 };

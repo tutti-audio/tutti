@@ -1,5 +1,5 @@
 //! The unit of every engine node's params, as a [`Key`](tutti_session::Key)'s
-//! methods hand it out (doc 030, N1): `key.cutoff()` is a `TypedParamRef<U>`
+//! methods hand it out (doc 030, N1): `key.cutoff()` is a `ParamTarget<U>`
 //! with `U` the node's [`HasParam`] unit, which the node's own declaration
 //! writes from its cell's type. The table is the spec's: each param is in
 //! the unit a reader of the node's docs expects (the ladder's resonance is
@@ -81,6 +81,10 @@ units! {
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::FreeverbNode { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode { Volume => Amplitude }
+        tutti_nodes::PlateReverbNode {
+            Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Depth,
+            Diffusion => Mix
+        }
         tutti_nodes::FdnNode {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
             Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool

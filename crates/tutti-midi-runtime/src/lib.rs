@@ -223,8 +223,9 @@ pub use schedule::{
     MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
-    ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
-    MachineControlFollower, MidiClockDecoder, MtcDecoder, SegmentFault,
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,
+    MachineControlEvent, MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder,
+    MtcDirection, SegmentFault,
 };
 pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};

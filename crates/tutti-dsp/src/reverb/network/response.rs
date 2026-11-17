@@ -12,12 +12,11 @@
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
 //! and [`Absorption::peak`] is what shows a design never asks for it.
 
-use tutti_types::{Amplitude, Gain, Hz, SampleRate};
+use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate};
 
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
-use crate::level::db_to_ratio_f64;
 use crate::{Complex64, Lti};
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);
@@ -688,7 +687,7 @@ impl Fdn {
             let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
                 return f64::INFINITY;
             };
-            worst = worst.max(db_to_ratio_f64(db_rho + db_sigma));
+            worst = worst.max(Db::to_amplitude_f64(db_rho + db_sigma));
         }
         worst
     }

@@ -10,9 +10,10 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId,
-    ParamMapping, PluginError, PluginResult, Request, RescanScope, WindowHandle,
+    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamMapping,
+    PluginError, PluginResult, Request, RescanScope, WindowHandle,
 };
+use tutti_types::ParamId;
 
 use super::ClapLoaded;
 
@@ -78,7 +79,7 @@ impl Editor for ClapEditor {
         //
         // The mirror follows the host's write policy: the write the host
         // refused (an undeclared or a read-only parameter) is not mirrored.
-        let Some(bounds) = self.inner.parameter_bounds(id.get()) else {
+        let Some(bounds) = self.inner.parameter_bounds(id) else {
             return;
         };
         if bounds.read_only {
@@ -283,10 +284,10 @@ mod tests {
     /// distinguishable from a pass-through. Both halves matter — against
     /// `0..=1` bounds the plain and normalized domains coincide and every
     /// assertion below would hold with the conversion deleted.
-    const CUTOFF: ParamBounds = ParamBounds::continuous(7, 20.0, 20_000.0);
+    const CUTOFF: ParamBounds = ParamBounds::continuous(ParamId::new(7), 20.0, 20_000.0);
 
-    fn change(id: u32, value: f64) -> Option<ParamEdit> {
-        Some(ParamEdit::change(id.into(), Normalized::of(value)))
+    fn change(id: ParamId, value: f64) -> Option<ParamEdit> {
+        Some(ParamEdit::change(id, Normalized::of(value)))
     }
 
     /// The editor's plain value is normalized before it leaves for the audio
@@ -301,20 +302,22 @@ mod tests {
     fn a_plain_editor_value_is_normalized_against_the_declared_range() {
         let ranges = [CUTOFF];
         let ParamBounds { id, min, max, .. } = CUTOFF;
+        // `ClapEvent` carries the plugin's raw `clap_id`.
+        let raw = id.get();
 
         assert_eq!(
-            ClapEvent::param_value(0, id, min).heard(&ranges),
+            ClapEvent::param_value(0, raw, min).heard(&ranges),
             change(id, 0.0)
         );
         assert_eq!(
-            ClapEvent::param_value(0, id, max).heard(&ranges),
+            ClapEvent::param_value(0, raw, max).heard(&ranges),
             change(id, 1.0)
         );
         // Midpoint of the declared span, which is *not* the midpoint of the
         // value: 10010 Hz is halfway between 20 and 20000 linearly, and a
         // pass-through would report 10010.0 rather than 0.5.
         assert_eq!(
-            ClapEvent::param_value(0, id, 10_010.0).heard(&ranges),
+            ClapEvent::param_value(0, raw, 10_010.0).heard(&ranges),
             change(id, 0.5)
         );
     }
@@ -332,7 +335,7 @@ mod tests {
             // What `set_parameter` would hand the plugin...
             let plain = CUTOFF.plain(Normalized::of(host_value));
             // ...and what the editor reporting that same position comes back as.
-            let heard = ClapEvent::param_value(0, id, plain)
+            let heard = ClapEvent::param_value(0, id.get(), plain)
                 .heard(&ranges)
                 .expect("a PARAM_VALUE event yields an edit");
             let got = heard.value().expect("a change has a value").get();
@@ -357,7 +360,7 @@ mod tests {
         let ranges = [CUTOFF];
         assert_eq!(
             ClapEvent::param_value(0, 99, 0.5).heard(&ranges),
-            change(99, 0.5)
+            change(ParamId::new(99), 0.5)
         );
     }
 
@@ -390,11 +393,11 @@ mod tests {
         let ranges = [CUTOFF];
         assert_eq!(
             ClapEvent::ParamGestureBegin(gesture(CLAP_EVENT_PARAM_GESTURE_BEGIN, 7)).heard(&ranges),
-            Some(ParamEdit::Begin(7.into()))
+            Some(ParamEdit::Begin(ParamId::new(7)))
         );
         assert_eq!(
             ClapEvent::ParamGestureEnd(gesture(CLAP_EVENT_PARAM_GESTURE_END, 7)).heard(&ranges),
-            Some(ParamEdit::End(7.into()))
+            Some(ParamEdit::End(ParamId::new(7)))
         );
     }
 

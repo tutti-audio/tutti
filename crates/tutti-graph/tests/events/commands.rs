@@ -14,7 +14,7 @@ use tutti_graph::{
     Reference, ScheduleError, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, Samples, Tail};
+use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, Samples, Tail};
 use tutti_ump::Ump;
 
 /// `(absolute frame, block start, offset, tag)` per event received.
@@ -44,7 +44,9 @@ impl Node for Probe {
                 let tag = match e.kind {
                     EventKind::Midi(Ump(w)) => w[0],
                     EventKind::Ramp(r) => {
-                        self.level = r.foreign_target(0).expect("ramps address id 0");
+                        self.level = r
+                            .foreign_target(tutti_types::ParamId::new(0))
+                            .expect("ramps address id 0");
                         u32::MAX
                     }
                     EventKind::Harmony(_) | EventKind::Segment(_) | EventKind::Resync => {
@@ -192,7 +194,11 @@ fn a_scheduled_ramp_steps_the_output_on_its_frame() {
     let mut rig = rig();
     rig.schedule(
         At::Frame(Frame::new(90)),
-        EventKind::Ramp(ParamRamp::foreign(0, 0.5, Samples(0))),
+        EventKind::Ramp(ParamRamp::foreign(
+            tutti_types::ParamId::new(0),
+            0.5,
+            Samples(0),
+        )),
     );
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for n in [64, 64] {
@@ -664,7 +670,11 @@ fn a_ramp_into_a_coarse_node_is_refused() {
     ed.insert(PROBE, "coarse", Unforkable(Coarse));
     ed.commit().expect("commits");
     exec.apply_pending();
-    let ramp = EventKind::Ramp(ParamRamp::foreign(0, 1.0, Samples(0)));
+    let ramp = EventKind::Ramp(ParamRamp::foreign(
+        tutti_types::ParamId::new(0),
+        1.0,
+        Samples(0),
+    ));
     assert_eq!(
         ed.schedule(At::NextBlock, to(), ramp),
         Err(ScheduleError::ResolutionTooCoarse {
@@ -685,10 +695,7 @@ fn at_beat(beat: f64, playing: bool, tempo: f64, looping: Option<(f64, f64)>) ->
         playing,
         Bpm::of(tempo),
         Beat(beat),
-        looping.map(|(start, end)| tutti_graph::LoopRange {
-            start: Beat(start),
-            end: Beat(end),
-        }),
+        looping.map(|(start, end)| LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
     )
 }
 
@@ -1201,10 +1208,7 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
             true,
             Bpm::of(120.0),
             Beat(beat),
-            Some(tutti_graph::LoopRange {
-                start: Beat(start),
-                end: Beat(end),
-            }),
+            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
         )
     };
     let step = |b: f64| {

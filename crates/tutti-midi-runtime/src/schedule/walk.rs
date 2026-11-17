@@ -12,9 +12,7 @@
 //! next block of the same run.
 
 use tutti_graph::{Due, Env, Offset};
-use tutti_types::{
-    At, FRAME_TOLERANCE, LoopRange, Samples, first_frame_at_or_after, frames_per_beat,
-};
+use tutti_types::{At, FRAME_TOLERANCE, Samples, first_frame_at_or_after, frames_per_beat};
 
 /// An event scheduled at a beat.
 pub(crate) trait Beated {
@@ -92,10 +90,7 @@ impl Walk {
         // the segment ends is where the clock does. A wrap is at least a
         // frame after the last, so the walk is at most one pass a frame
         // however short the loop.
-        let looping = t
-            .looping
-            .filter(|l| now < l.end.get())
-            .and_then(|l| LoopRange::new(l.start, l.end));
+        let looping = t.looping.filter(|l| now < l.end().get());
         let mut clock = t.clock(seg.sample_rate);
         let first = clock.advance_to_wrap(Samples(len), looping);
         let wrap = first.map_or(len, Samples::get);

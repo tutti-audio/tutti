@@ -31,11 +31,12 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Edit, LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents, StableOrder,
-    WireMidi, expression_of_per_note_controller, group_of_port, note_id_to_channel_note,
-    per_note_message, per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
+    Edit, LinearRange, Normalized, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
+    expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
+    per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
+use tutti_types::ParamId;
 
 /// The parameter edits the Controller can have queued to the Processor before
 /// the ring refuses one: one block holds as many, and the Processor reserves
@@ -66,7 +67,7 @@ use tutti_voicing::{NoteControl, NoteEvent, PerNoteState};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamBounds {
     /// The parameter's `clap_id`.
-    pub id: u32,
+    pub id: ParamId,
     /// `min_value`.
     pub min: f64,
     /// `max_value`.
@@ -81,7 +82,7 @@ pub struct ParamBounds {
 impl ParamBounds {
     /// A continuous parameter.
     #[must_use]
-    pub const fn continuous(id: u32, min: f64, max: f64) -> Self {
+    pub const fn continuous(id: ParamId, min: f64, max: f64) -> Self {
         Self {
             id,
             min,
@@ -93,7 +94,7 @@ impl ParamBounds {
 
     /// A `CLAP_PARAM_IS_STEPPED` parameter.
     #[must_use]
-    pub const fn stepped(id: u32, min: f64, max: f64) -> Self {
+    pub const fn stepped(id: ParamId, min: f64, max: f64) -> Self {
         Self {
             id,
             min,
@@ -104,7 +105,7 @@ impl ParamBounds {
     }
 
     /// The entry for `id` in a table sorted by id.
-    pub(crate) fn find(table: &[Self], id: u32) -> Option<&Self> {
+    pub(crate) fn find(table: &[Self], id: ParamId) -> Option<&Self> {
         table
             .binary_search_by_key(&id, |b| b.id)
             .ok()
@@ -346,19 +347,20 @@ impl ClapEvent {
     pub(crate) fn heard(&self, ranges: &[ParamBounds]) -> Option<ParamEdit> {
         match self {
             Self::ParamValue(v) => {
-                let normalized = match ParamBounds::find(ranges, v.param_id) {
+                // `param_id` is the plugin's raw `clap_id`: `ParamId` at this edge.
+                let normalized = match ParamBounds::find(ranges, ParamId::new(v.param_id)) {
                     Some(b) => b.normalized(v.value),
                     None => Normalized::clamped(v.value),
                 };
-                let heard = ParamEdit::change(v.param_id.into(), normalized);
+                let heard = ParamEdit::change(ParamId::new(v.param_id), normalized);
                 Some(if v.header.flags & CLAP_EVENT_DONT_RECORD != 0 {
                     heard.unrecorded()
                 } else {
                     heard
                 })
             }
-            Self::ParamGestureBegin(g) => Some(ParamEdit::Begin(g.param_id.into())),
-            Self::ParamGestureEnd(g) => Some(ParamEdit::End(g.param_id.into())),
+            Self::ParamGestureBegin(g) => Some(ParamEdit::Begin(ParamId::new(g.param_id))),
+            Self::ParamGestureEnd(g) => Some(ParamEdit::End(ParamId::new(g.param_id))),
             _ => None,
         }
     }
@@ -1555,7 +1557,7 @@ impl InputEventList {
     ) -> &mut Self {
         let mut pushed = 0usize;
         for queue in &changes.queues {
-            let param_id = queue.param_id.get();
+            let param_id = queue.param_id;
             let range = ParamBounds::find(ranges, param_id);
             if range.is_none() && plugin_claims_params {
                 continue;
@@ -1578,7 +1580,7 @@ impl InputEventList {
                     // enforced once for the whole list by `clamp_times`, which
                     // is the only place `frames_count` is known.
                     point.sample_offset.max(0) as u32,
-                    param_id,
+                    param_id.get(),
                     value,
                 );
                 if pushed < self.param_room {
@@ -1616,11 +1618,11 @@ impl InputEventList {
         plugin_claims_params: bool,
         drain: impl FnOnce(&mut dyn FnMut(Edit)),
     ) {
-        let mut edits: RtVec<(u32, f64), EDIT_CAPACITY> = RtVec::new();
+        let mut edits: RtVec<(ParamId, f64), EDIT_CAPACITY> = RtVec::new();
         let mut surplus = 0u64;
         drain(&mut |edit| match edit {
             Edit::Param { id, value } => {
-                if !edits.push((id.get(), value.get())) {
+                if !edits.push((id, value.get())) {
                     surplus += 1;
                 }
             }
@@ -1649,7 +1651,7 @@ impl InputEventList {
     /// refused and counted ([`refused`](Self::refused)).
     pub(crate) fn add_param_edit(
         &mut self,
-        param_id: u32,
+        param_id: ParamId,
         value: f64,
         ranges: &[ParamBounds],
         plugin_claims_params: bool,
@@ -1669,7 +1671,7 @@ impl InputEventList {
             self.refused += 1;
             return self;
         }
-        if self.push(ClapEvent::param_value(0, param_id, plain)) {
+        if self.push(ClapEvent::param_value(0, param_id.get(), plain)) {
             self.edits_pushed += 1;
         }
         self
@@ -1907,7 +1909,7 @@ pub struct OutputRooms {
     /// `PARAM_VALUE` events kept in the list.
     param_points: usize,
     /// The plugin's parameter ids, keying the latest-value table.
-    param_ids: Vec<u32>,
+    param_ids: Vec<ParamId>,
 }
 
 impl OutputRooms {
@@ -1930,7 +1932,7 @@ impl OutputRooms {
     /// [`fill_param_changes`](OutputEventList::fill_param_changes) folds in as
     /// its last point. A push for any other id past the room is refused.
     #[must_use]
-    pub fn params(mut self, points: usize, ids: &[u32]) -> Self {
+    pub fn params(mut self, points: usize, ids: &[ParamId]) -> Self {
         self.param_points = points;
         self.param_ids = ids.to_vec();
         self
@@ -1971,7 +1973,7 @@ pub struct OutputEventList {
     /// `PARAM_VALUE` events in the list this block.
     param_pushed: usize,
     /// The plugin's parameter ids, sorted: the keys of `latest`.
-    latest_ids: Vec<u32>,
+    latest_ids: Vec<ParamId>,
     /// Per parameter (index-parallel to `latest_ids`), the latest
     /// `PARAM_VALUE` pushed this block past `param_room`, so a flood still
     /// delivers each parameter's final value.
@@ -2080,7 +2082,7 @@ impl OutputEventList {
     /// parameter's latest value when the id is one of the plugin's (a binary
     /// search, no scan), refused otherwise.
     fn coalesce_param(&mut self, e: &clap_event_param_value) -> bool {
-        let Ok(i) = self.latest_ids.binary_search(&e.param_id) else {
+        let Ok(i) = self.latest_ids.binary_search(&ParamId::new(e.param_id)) else {
             self.refused += 1;
             return false;
         };
@@ -2226,7 +2228,7 @@ impl OutputEventList {
             };
             // Outbound: a CLAP id is opaque, so it is tagged as such rather
             // than travelling as a number the receiver has to guess about.
-            (e.param_id.into(), point)
+            (ParamId::new(e.param_id), point)
         })
     }
 
@@ -2515,7 +2517,7 @@ mod tests {
         let point = changes
             .queues
             .iter()
-            .find(|q| q.param_id == 7u32.into())
+            .find(|q| q.param_id == ParamId::new(7u32))
             .and_then(|q| q.points.first())
             .expect("the param value must survive into a queue");
         assert!(
@@ -2554,13 +2556,13 @@ mod tests {
     #[test]
     fn add_param_changes_finds_each_range_in_a_sorted_list() {
         let ranges = [
-            ParamBounds::continuous(1, 0.0, 1.0),
-            ParamBounds::continuous(5, 0.0, 10.0),
-            ParamBounds::continuous(9, 100.0, 1100.0),
+            ParamBounds::continuous(ParamId::new(1), 0.0, 1.0),
+            ParamBounds::continuous(ParamId::new(5), 0.0, 10.0),
+            ParamBounds::continuous(ParamId::new(9), 100.0, 1100.0),
         ];
         let mut changes = ParameterChanges::reserved(2, 1);
-        changes.add_change(9u32.into(), 0, 0.5);
-        changes.add_change(5u32.into(), 1, 0.25);
+        changes.add_change(ParamId::new(9u32), 0, 0.5);
+        changes.add_change(ParamId::new(5u32), 1, 0.25);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &ranges, true);
         let got: Vec<(u32, f64)> = list
@@ -3116,7 +3118,7 @@ mod tests {
             for k in 0..points {
                 // Every parameter on the same frames: many ties.
                 changes.add_change(
-                    id.into(),
+                    ParamId::new(id),
                     (k * 25) as i32,
                     (id as f64 + k as f64) / 1000.0 % 1.0,
                 );
@@ -3176,12 +3178,12 @@ mod tests {
     fn add_param_changes_stays_within_its_room() {
         let mut changes = ParameterChanges::reserved(3, 4);
         for k in 0..4 {
-            changes.add_change(1u32.into(), k, 0.5);
+            changes.add_change(ParamId::new(1u32), k, 0.5);
         }
         for (k, v) in [0.1, 0.2, 0.3].into_iter().enumerate() {
-            changes.add_change(2u32.into(), k as i32, v);
+            changes.add_change(ParamId::new(2u32), k as i32, v);
         }
-        changes.add_change(3u32.into(), 0, 0.9);
+        changes.add_change(ParamId::new(3u32), 0, 0.9);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(5));
         list.add_param_changes(&changes, &[], false);
         let got: Vec<(u32, f64)> = list
@@ -3252,7 +3254,7 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             list.add_midi_events(&notes);
             for id in 0..5 {
-                list.add_param_edit(id, 0.5, &[], false);
+                list.add_param_edit(ParamId::new(id), 0.5, &[], false);
             }
             list.add_note_expressions(&expressions);
             for time in 0..4 {
@@ -3269,7 +3271,7 @@ mod tests {
         assert_eq!(list.refused(), 2 + 2 + 2);
         // A cleared block has every room back.
         list.clear();
-        list.add_param_edit(1, 0.5, &[], false);
+        list.add_param_edit(ParamId::new(1), 0.5, &[], false);
         assert_eq!(list.refused(), 6);
     }
 
@@ -3281,7 +3283,7 @@ mod tests {
     fn param_points_past_the_lists_room_are_counted_in_the_tally() {
         let mut changes = ParameterChanges::reserved(1, 5);
         for k in 0..5 {
-            changes.add_change(1u32.into(), k, 0.5);
+            changes.add_change(ParamId::new(1), k, 0.5);
         }
         let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
         let tally = list.param_points_tally();
@@ -3377,7 +3379,7 @@ mod tests {
     /// so this is the list the flush fills.)
     #[test]
     fn output_past_the_room_is_in_lost_and_the_room_is_kept() {
-        let mut list = OutputEventList::new(OutputRooms::new(3).params(2, &[7]));
+        let mut list = OutputEventList::new(OutputRooms::new(3).params(2, &[ParamId::new(7)]));
         let note = |t| match ClapEvent::note_on(t, 0, 60, 0.5) {
             ClapEvent::NoteOn(e) => e,
             _ => unreachable!(),
@@ -3442,9 +3444,13 @@ mod tests {
     fn add_param_changes_denormalizes_against_range() {
         // Param 9 has plain range [100, 1100]; a normalized 0.25 → 350.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(9u32.into(), 0, 0.25);
+        changes.add_change(ParamId::new(9u32), 0, 0.25);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
-        list.add_param_changes(&changes, &[ParamBounds::continuous(9, 100.0, 1100.0)], true);
+        list.add_param_changes(
+            &changes,
+            &[ParamBounds::continuous(ParamId::new(9), 100.0, 1100.0)],
+            true,
+        );
         assert!((first_param_value(&list) - 350.0).abs() < 1e-6);
     }
 
@@ -3456,10 +3462,10 @@ mod tests {
     #[test]
     fn a_stepped_parameter_reaches_the_plugin_on_the_step_the_host_named() {
         for n in 2..=199u32 {
-            let bounds = [ParamBounds::stepped(9, 0.0, f64::from(n))];
+            let bounds = [ParamBounds::stepped(ParamId::new(9), 0.0, f64::from(n))];
             for k in 0..=n {
                 let mut changes = ParameterChanges::reserved(1, 1);
-                changes.add_change(9u32.into(), 0, f64::from(k) / f64::from(n));
+                changes.add_change(ParamId::new(9u32), 0, f64::from(k) / f64::from(n));
                 let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
                 list.add_param_changes(&changes, &bounds, true);
                 assert_eq!(
@@ -3476,7 +3482,7 @@ mod tests {
     /// laws of the map are `mapping_contract!`'s, below).
     #[test]
     fn the_host_position_is_the_line_over_the_declared_range() {
-        let cutoff = ParamBounds::continuous(1, 20.0, 20_000.0);
+        let cutoff = ParamBounds::continuous(ParamId::new(1), 20.0, 20_000.0);
         assert_eq!(cutoff.plain(Normalized::of(0.0)), 20.0);
         assert_eq!(cutoff.plain(Normalized::of(1.0)), 20_000.0);
         assert_eq!(cutoff.plain(Normalized::of(0.5)), 10_010.0);
@@ -3494,7 +3500,7 @@ mod tests {
             (3.0, 3.0),
             (5.0, 1.0),
         ] {
-            let bounds = ParamBounds::continuous(1, min, max);
+            let bounds = ParamBounds::continuous(ParamId::new(1), min, max);
             for v in [0.0, 0.5, 1.0] {
                 assert!(
                     bounds.plain(Normalized::of(v)).is_finite(),
@@ -3504,7 +3510,7 @@ mod tests {
             assert_eq!(bounds.normalized(f64::NAN).get(), 0.0);
         }
         assert_eq!(
-            ParamBounds::continuous(1, 3.0, 3.0).plain(Normalized::of(0.5)),
+            ParamBounds::continuous(ParamId::new(1), 3.0, 3.0).plain(Normalized::of(0.5)),
             3.0
         );
     }
@@ -3514,11 +3520,11 @@ mod tests {
     // would not, see `a_stepped_parameter_reaches_the_plugin_on_the_step...`).
     tutti_plugin_types::mapping_contract!(
         continuous_map,
-        ParamBounds::continuous(1, 20.0, 20_000.0)
+        ParamBounds::continuous(ParamId::new(1), 20.0, 20_000.0)
     );
     tutti_plugin_types::mapping_contract!(
         stepped_map,
-        ParamBounds::stepped(2, 0.0, 22.0),
+        ParamBounds::stepped(ParamId::new(2), 0.0, 22.0),
         steps = [
             0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
             16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0
@@ -3529,15 +3535,15 @@ mod tests {
     /// top step needs more than 24 bits is not narrowed to `f32`.
     #[test]
     fn a_stepped_edit_is_computed_in_f64_from_the_plugins_own_range() {
-        let bounds = [ParamBounds::stepped(4, 0.0, 22.0)];
+        let bounds = [ParamBounds::stepped(ParamId::new(4), 0.0, 22.0)];
         let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
-        list.add_param_edit(4, 13.0 / 22.0, &bounds, true);
+        list.add_param_edit(ParamId::new(4), 13.0 / 22.0, &bounds, true);
         assert_eq!(first_param_value(&list).trunc(), 13.0);
 
         // 0..=16_777_217 is not representable in f32 at the top step.
-        let wide = [ParamBounds::stepped(5, 0.0, 16_777_217.0)];
+        let wide = [ParamBounds::stepped(ParamId::new(5), 0.0, 16_777_217.0)];
         let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
-        list.add_param_edit(5, 1.0, &wide, true);
+        list.add_param_edit(ParamId::new(5), 1.0, &wide, true);
         assert_eq!(first_param_value(&list), 16_777_217.0);
     }
 
@@ -3545,9 +3551,13 @@ mod tests {
     fn add_param_changes_clamps_denormalized_value_into_range() {
         // A normalized 1.5 (over-range) must clamp to the plain max, not overshoot.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(9u32.into(), 0, 1.5);
+        changes.add_change(ParamId::new(9u32), 0, 1.5);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
-        list.add_param_changes(&changes, &[ParamBounds::continuous(9, 0.0, 10.0)], true);
+        list.add_param_changes(
+            &changes,
+            &[ParamBounds::continuous(ParamId::new(9), 0.0, 10.0)],
+            true,
+        );
         assert!((first_param_value(&list) - 10.0).abs() < 1e-6);
     }
 
@@ -3557,9 +3567,13 @@ mod tests {
         // plugin reported. A malformed plugin must not take down the audio
         // thread — the value lands inside the range either way round.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(9u32.into(), 0, 0.5);
+        changes.add_change(ParamId::new(9u32), 0, 0.5);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
-        list.add_param_changes(&changes, &[ParamBounds::continuous(9, 10.0, 0.0)], true);
+        list.add_param_changes(
+            &changes,
+            &[ParamBounds::continuous(ParamId::new(9), 10.0, 0.0)],
+            true,
+        );
         let v = first_param_value(&list);
         assert!((0.0..=10.0).contains(&v), "value {v} escaped the range");
     }
@@ -3569,7 +3583,7 @@ mod tests {
         // No range for this param id → value forwarded unchanged (safe fallback
         // for the common normalized-0..1 param).
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(9u32.into(), 0, 0.42);
+        changes.add_change(ParamId::new(9u32), 0, 0.42);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
         assert!((first_param_value(&list) - 0.42).abs() < 1e-6);
@@ -3659,7 +3673,7 @@ mod tests {
     #[test]
     fn negative_sample_offset_does_not_wrap_to_four_billion() {
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(9u32.into(), -1, 0.5);
+        changes.add_change(ParamId::new(9u32), -1, 0.5);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
         assert_eq!(
@@ -4682,7 +4696,7 @@ mod tests {
     fn pooled_chunk(params: u32, room: usize) -> ParameterChanges {
         let mut changes = ParameterChanges::reserved(params as usize, room);
         for id in 0..params {
-            assert!(changes.open_queue(id.into()));
+            assert!(changes.open_queue(ParamId::new(id)));
         }
         for k in 0..room {
             for id in 0..params {

@@ -6,6 +6,7 @@ use crate::events::ParamBounds;
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use tutti_clap_ffi::Plugin;
 use tutti_plugin_types::{MainThreadMarker, ParameterInfo};
+use tutti_types::ParamId;
 
 /// The plugin's parameters as declared: the table every read of them is
 /// answered from, so no read asks the plugin once per parameter.
@@ -46,7 +47,8 @@ impl ParamTable {
             .map(|p| {
                 (
                     ParamBounds {
-                        id: p.id,
+                        // `clap_param_info.id` is the plugin's raw `clap_id`.
+                        id: ParamId::new(p.id),
                         min: p.min_value,
                         max: p.max_value,
                         stepped: p.flags.contains(ClapParamFlags::STEPPED),
@@ -83,13 +85,13 @@ impl ParamTable {
 
     /// The declared bounds of `id`, or `None` for an id the plugin does not
     /// declare (an id past an enumeration hole included).
-    pub(crate) fn bounds(&self, id: u32) -> Option<ParamBounds> {
+    pub(crate) fn bounds(&self, id: ParamId) -> Option<ParamBounds> {
         ParamBounds::find(&self.ranges.ranges, id).copied()
     }
 
     /// Whether `id` carries `CLAP_PARAM_REQUIRES_PROCESS`; `false` for an
     /// unknown id.
-    pub(crate) fn requires_process(&self, id: u32) -> bool {
+    pub(crate) fn requires_process(&self, id: ParamId) -> bool {
         self.ranges
             .ranges
             .binary_search_by_key(&id, |b| b.id)

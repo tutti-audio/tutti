@@ -367,7 +367,7 @@ impl PluginControls {
 
     /// What the node has delivered so far, per listed parameter: what a fork
     /// is seeded with. Control thread: allocates.
-    pub fn delivered(&self) -> Vec<(tutti_plugin_types::ParamId, f64)> {
+    pub fn delivered(&self) -> Vec<(tutti_types::ParamId, f64)> {
         self.node.delivery.delivered()
     }
 

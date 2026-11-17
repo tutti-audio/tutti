@@ -14,7 +14,7 @@ use tutti_graph::{
     Env, Event, Harmony, Node, Offset, ParamRamp, PlayClock, TransportChanges, TransportPosition,
 };
 use tutti_plugin_ipc::{HostMessage, ProcessAudioData};
-use tutti_plugin_types::ParamId;
+use tutti_types::ParamId;
 use tutti_types::{Beat, Bpm, Frame, Samples};
 use tutti_ump::MidiChannel;
 
@@ -186,11 +186,17 @@ fn note_on(o: Offset) -> Event {
 }
 
 fn ramp_7(o: Offset) -> Event {
-    Event::ramp(o, ParamRamp::foreign(PARAMS[0], 0.5, Samples(0)))
+    Event::ramp(
+        o,
+        ParamRamp::foreign(ParamId::new(PARAMS[0]), 0.5, Samples(0)),
+    )
 }
 
 fn ramp_9(o: Offset) -> Event {
-    Event::ramp(o, ParamRamp::foreign(PARAMS[1], 0.25, Samples(0)))
+    Event::ramp(
+        o,
+        ParamRamp::foreign(ParamId::new(PARAMS[1]), 0.25, Samples(0)),
+    )
 }
 
 fn chord(o: Offset) -> Event {
@@ -585,7 +591,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
     };
     let map = tutti_transport::TempoReader::fixed(std::sync::Arc::new(
         TempoMap::new(vec![
-            point(0.0, 120.0, Transition::RampTime),
+            point(0.0, 120.0, Transition::RampTime { end: None }),
             point(100.0, 90.0, Transition::Step),
         ])
         .expect("a map"),

@@ -545,8 +545,9 @@ pub enum RootTopologyStatus {
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
-    /// No `K` is held; `fn() -> K` keeps `Send` following the clock.
-    pub(crate) _key: std::marker::PhantomData<fn() -> K>,
+    /// The value lock and the table every node's params are written through,
+    /// shared with the graph and the session's [`Knobs`](crate::Knobs).
+    pub(crate) values: Arc<crate::value::ValueState<K>>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
@@ -794,7 +795,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     #[cfg(feature = "device")]
     pub(crate) fn with_clock<N: Clock>(self, running: N::Running) -> (Session<K, N>, C::Running) {
         let Session {
-            _key,
+            values,
             #[cfg(feature = "plugin")]
             _early_work,
             running: old_running,
@@ -859,7 +860,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let pool = pool.rebind();
         (
             Session {
-                _key,
+                values,
                 #[cfg(feature = "plugin")]
                 _early_work,
                 running,
@@ -1682,21 +1683,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.transport_handle.clone()
     }
 
-    /// Sends what a followed MIDI clock asked of the transport, at the next
-    /// block, and says whether the transport took it. A command the transport's
-    /// list has no room for is dropped and logged, and the caller counts it
+    /// Sends what a followed MIDI clock asked of the transport, each command at
+    /// the frame it was placed on (`At::NextBlock` for Machine Control), and says
+    /// whether the transport took it. A command the transport's list has no room for is dropped and logged, and the caller counts it
     /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
     /// the source says its position again with the next message.
     #[cfg(feature = "midi")]
-    fn send_clock_action(&self, action: crate::midi_follow::ClockAction) -> bool {
+    fn send_clock_action(&self, placed: crate::midi_follow::Placed) -> bool {
         use crate::midi_follow::ClockAction;
-        let event = match action {
+        let event = match placed.action {
             ClockAction::Play => MotionEvent::Play,
             ClockAction::Stop => MotionEvent::stop(),
             ClockAction::Locate(beat) => MotionEvent::locate(beat),
             ClockAction::PlayFrom(beat) => MotionEvent::play_from(beat),
         };
-        match self.schedule(At::NextBlock, event) {
+        match self.schedule(placed.at, event) {
             Ok(()) => true,
             Err(error) => {
                 tracing::warn!("midi: a followed clock's {event:?} was not sent: {error}");

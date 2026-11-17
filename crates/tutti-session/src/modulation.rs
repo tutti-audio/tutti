@@ -41,7 +41,7 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_types::{Depth, ParamAddr, Unit, UnitAddr, UnitParam};
+use tutti_types::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -94,7 +94,7 @@ impl ParamRef {
     }
 
     /// Parameter `id` of the plugin hosted on `node`.
-    pub fn plugin(node: impl Into<NodeKey>, id: u32) -> Self {
+    pub fn plugin(node: impl Into<NodeKey>, id: ParamId) -> Self {
         Self {
             node: node.into(),
             param: ParamAddr::Id(id),
@@ -177,8 +177,8 @@ impl From<ParamRef> for ModTarget {
     }
 }
 
-impl<U> From<crate::TypedParamRef<U>> for ModTarget {
-    fn from(p: crate::TypedParamRef<U>) -> Self {
+impl<U> From<crate::ParamTarget<U>> for ModTarget {
+    fn from(p: crate::ParamTarget<U>) -> Self {
         Self::Param(p.into())
     }
 }
@@ -208,7 +208,7 @@ impl std::fmt::Display for ModTarget {
 }
 
 /// A modulation target whose value is in a unit tutti knows: what
-/// [`Mods::range`] takes a range of. A [`TypedParamRef`](crate::TypedParamRef) (the unit its node
+/// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
 /// declares), an [`Edge`] ([`Amplitude`](tutti_types::Amplitude)) and a
 /// [`MixRef`] ([`Mix`](tutti_types::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
@@ -220,8 +220,8 @@ mod ranged {
     pub trait Sealed {}
 }
 
-impl<U: crate::Scalar> ranged::Sealed for crate::TypedParamRef<U> {}
-impl<U: crate::Scalar> Ranged for crate::TypedParamRef<U> {
+impl<U: crate::Scalar> ranged::Sealed for crate::ParamTarget<U> {}
+impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
     type Unit = U;
 }
 impl ranged::Sealed for Edge {}
@@ -747,12 +747,10 @@ impl ModState {
     #[cfg(feature = "plugin")]
     pub(crate) fn plugin_lanes(&self, node: NodeKey) -> crate::plugin_params::Knobs {
         self.plugin_targets
-            .range((node, 0)..=(node, u32::MAX))
+            .range((node, ParamId::new(0))..=(node, ParamId::new(u32::MAX)))
             .filter_map(|(&(_, id), &target)| {
                 let (_, lane) = self.lane(target)?;
-                lane.knob()
-                    .is_some()
-                    .then(|| (tutti_plugin_types::ParamId::new(id), lane.clone()))
+                lane.knob().is_some().then(|| (id, lane.clone()))
             })
             .collect()
     }

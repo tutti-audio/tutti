@@ -25,19 +25,20 @@ use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
-    MainWorkHandle, Normalized, Origin, ParamId, ParameterInfo, PluginAudio, PluginBus,
-    PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused,
+    MainWorkHandle, Normalized, Origin, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor,
+    PluginError, PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused,
     RenderModeSupport, RestartRules, Samples, Speaker, Stuck, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
+use tutti_types::ParamId;
 use tutti_types::{Beat, Bpm, Frame, SampleRate};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, U7, Voice2};
 
 const SR: SampleRate = SampleRate::SR_48K;
 /// Quarter notes per frame at 120 BPM and 48 kHz.
 const BEATS_PER_FRAME: f64 = 2.0 / 48_000.0;
-const PARAM: u32 = 7;
+const PARAM: ParamId = ParamId::new(7);
 
 /// What one `process` call was handed.
 #[derive(Debug, Clone, PartialEq)]
@@ -143,7 +144,7 @@ macro_rules! rec_control {
                 wiring
             }
             fn parameters(&self, _: MainThreadMarker) -> Vec<ParameterInfo> {
-                vec![ParameterInfo::new(ParamId::new(PARAM), "p")]
+                vec![ParameterInfo::new(PARAM, "p")]
             }
             fn parameter(&self, _: MainThreadMarker, _: ParamId) -> Option<Normalized> {
                 None
@@ -815,7 +816,7 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
             TempoPoint {
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
-                transition: Transition::RampTime,
+                transition: Transition::RampTime { end: None },
             },
             TempoPoint {
                 beat: Beat(100.0),

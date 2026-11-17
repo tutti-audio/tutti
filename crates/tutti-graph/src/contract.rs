@@ -86,7 +86,7 @@ use tutti_types::MaxBlock;
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples, Tail, UnitAddr,
 };
-use tutti_ump::{KeyEvent, Message, NoteNumber, Ump, Voice2};
+use tutti_ump::{Message, NoteKeyEvent, NoteNumber, Ump, Voice2};
 
 use crate::builder::GraphBuilder;
 use crate::controls::{ParamFork, ParamNode};
@@ -740,8 +740,8 @@ impl Row {
             panic!("{ctx}: an onset-release row is excited by a note");
         };
         // The held key a note-on or off names (protocol, group, channel, note).
-        let key = |u: Ump| match u.key_event() {
-            Some(KeyEvent::On(k) | KeyEvent::Off(k)) => Some(k),
+        let key = |u: Ump| match u.note_key_event() {
+            Some(NoteKeyEvent::On(k) | NoteKeyEvent::Off(k)) => Some(k),
             _ => None,
         };
         assert_eq!(

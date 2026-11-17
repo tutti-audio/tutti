@@ -15,7 +15,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 /// - a `tutti_graph::ParamNode` (its params a `ParamSet`, forked by
 ///   `tutti_graph::param_parts`), whose impl returns its controls from
 ///   `params`: its params reached by address
-///   ([`Graph::set_param`](crate::Graph::set_param), control-rate
+///   ([`Session::set`](crate::Session::set) on a [`ParamTarget`](crate::ParamTarget), control-rate
 ///   modulation) and forked from what was set;
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
@@ -64,7 +64,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 /// ```
 pub trait SessionNode: IntoNode + Send + 'static {
     /// The node's params by address, read off its controls once it is in:
-    /// what [`Graph::set_param`](crate::Graph::set_param) writes through, and
+    /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and
     /// what a fork of the node starts from. `None`, the default, for a node
     /// with none.
     fn params(controls: &Self::Controls) -> Option<ParamSet> {
@@ -220,7 +220,7 @@ impl SessionNode for tutti_nodes::MultibandCompressorNode {
         Reclaims::Nothing
     }
 }
-// The delay, modulation, LFO and oscillator nodes, and the two reverbs (wet only: their
+// The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(
     tutti_nodes::DelayNode,
@@ -230,6 +230,7 @@ param_session_node!(
     tutti_nodes::OscillatorNode,
     tutti_nodes::FreeverbNode,
     tutti_nodes::FdnNode,
+    tutti_nodes::PlateReverbNode,
     tutti_nodes::ConvolverNode,
 );
 

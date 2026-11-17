@@ -114,7 +114,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, Counts>, String> {
 
 /// Whether the whole file is test code: it sits under a `tests` directory or is a
 /// `tests.rs`.
-fn test_file(path: &str) -> bool {
+pub(super) fn test_file(path: &str) -> bool {
     let segs: Vec<&str> = path.split('/').collect();
     let (file, dirs) = segs.split_last().expect("a path has a segment");
     *file == "tests.rs" || dirs.contains(&"tests")
@@ -559,7 +559,9 @@ fn declared(path: &str, base: &str, text: &str, code: &str) -> Vec<(usize, Vec<R
 
 /// The files, among `files`, that are test code because a `cfg(test)` module
 /// declaration reaches them, directly or through another file that is test code.
-fn cfg_test_files(files: &BTreeMap<String, String>) -> std::collections::BTreeSet<String> {
+pub(super) fn cfg_test_files(
+    files: &BTreeMap<String, String>,
+) -> std::collections::BTreeSet<String> {
     // Every declaration, test or not, fixes the module directory of the file it loads;
     // a file no declaration loads is a root and keeps `module_dir`.
     let mut dirs: BTreeMap<&str, String> = BTreeMap::new();

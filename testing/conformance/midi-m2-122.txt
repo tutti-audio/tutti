@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-122/<section>#<n>          the nth sentence under the numbered section
@@ -21,12 +24,12 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-122/1.2.1#1 | both |  | permitted | M2-122 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-122/1.2.1#2 | both |  | permitted | M2-122 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
-m2-122/1.3.1#1 | both |  | permitted | M2-122 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |
-m2-122/1.3.2#1 | both |  | permitted | M2-122 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |
-m2-122/3.2.1#1 | receiver |  | required | M2-122 §3.2.1 | a Rotary Speaker device responds to the required Registered Controllers |  |  |
-m2-122/3.2.1#2 | receiver |  | permitted | M2-122 §3.2.1 | a device can also take Rotary Speed as a continuous slow-to-fast controller |  |  |
-m2-122/3.2.1#3 | sender |  | recommended | M2-122 §3.2.1 | a two position speed switch sends the slow and fast extremes |  |  |
-m2-122/3.2.2#1 | receiver |  | permitted | M2-122 §3.2.2 | a device can respond to any of the optional Registered Controllers |  |  |
-m2-122/3.2.3.1#1 | receiver |  | required | M2-122 §3.2.3.1 | Reset All Controllers sets every supported parameter to its default |  |  |
+m2-122/1.2.1#1 | both |  | permitted | M2-122 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-122/1.2.1#2 | both |  | permitted | M2-122 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |  | 7feaf7f9d052ffeb
+m2-122/1.3.1#1 | both |  | permitted | M2-122 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |  | af5deea687e70964
+m2-122/1.3.2#1 | both |  | permitted | M2-122 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |  | 61692000ea7fbed0
+m2-122/3.2.1#1 | receiver |  | required | M2-122 §3.2.1 | a Rotary Speaker device responds to the required Registered Controllers |  |  |  | ce5becebf6effbaa
+m2-122/3.2.1#2 | receiver |  | permitted | M2-122 §3.2.1 | a device can also take Rotary Speed as a continuous slow-to-fast controller |  |  |  | 88aed11682e8dcb6
+m2-122/3.2.1#3 | sender |  | recommended | M2-122 §3.2.1 | a two position speed switch sends the slow and fast extremes |  |  |  | 1a40cfdb7cfe056c
+m2-122/3.2.2#1 | receiver |  | permitted | M2-122 §3.2.2 | a device can respond to any of the optional Registered Controllers |  |  |  | a64ab954c28941ef
+m2-122/3.2.3.1#1 | receiver |  | required | M2-122 §3.2.3.1 | Reset All Controllers sets every supported parameter to its default |  |  |  | 95010a3f3b664510

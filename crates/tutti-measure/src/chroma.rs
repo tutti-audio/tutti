@@ -587,7 +587,7 @@ impl ChromaFold {
 
     /// Leaves the magnitudes of `samples`, one frame, in `self.magnitudes`.
     fn transform(&mut self, samples: &[f32], fft: &mut FftScratch) {
-        fft.forward(samples, &self.window, &mut self.spectrum);
+        fft.forward(Mono::new(samples), &self.window, &mut self.spectrum);
         for (m, bin) in self.magnitudes.iter_mut().zip(&self.spectrum) {
             *m = bin.norm();
         }
@@ -678,7 +678,7 @@ impl<S: Sample> ChromaMeter<S> {
         // nothing.
         let window = plan.geometry.window().get();
         let mut spectrum = vec![Complex32::default(); window / 2 + 1];
-        fft.forward(&vec![0.0; window], &fold.window, &mut spectrum);
+        fft.forward(Mono::new(&vec![0.0; window]), &fold.window, &mut spectrum);
         Self {
             cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
             fold,
@@ -864,7 +864,7 @@ mod tests {
             let bin = 100.0 + f64::from(step) / 40.0;
             let x = sine(bin * 22_050.0 / 4096.0, 4096, 0.5);
             let mut spectrum = vec![Complex32::default(); 2049];
-            fft.forward(&x, &window, &mut spectrum);
+            fft.forward(Mono::new(&x), &window, &mut spectrum);
             let mags: Vec<f32> = spectrum.iter().map(|b| b.norm()).collect();
             let top = (1..2048).fold(1, |b, i| if mags[i] > mags[b] { i } else { b });
             let (offset, _) = interp(mags[top - 1], mags[top], mags[top + 1]);

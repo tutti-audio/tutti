@@ -464,7 +464,6 @@ tutti-session  setter  crates/tutti-session/src/general_midi.rs::GeneralMidi::se
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mix
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mode
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources

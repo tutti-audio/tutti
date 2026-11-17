@@ -26,7 +26,7 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
-use tutti_types::MaxBlock;
+use tutti_types::{MaxBlock, ParamId};
 
 /// The UMPs one block's input note port holds at the most: a graph event
 /// port's largest capacity and the room behind it for note-offs
@@ -334,7 +334,7 @@ fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
 fn output_rooms(table: &RangeTable, max_frames: usize) -> OutputRooms {
     let queues = table.ranges.len().max(PARAM_QUEUE_CAPACITY);
     let budget = ParameterChanges::point_budget(queues, ParameterQueue::chunk_room(max_frames));
-    let ids: Vec<u32> = table.ranges.iter().map(|b| b.id).collect();
+    let ids: Vec<ParamId> = table.ranges.iter().map(|b| b.id).collect();
     OutputRooms::new(OUTPUT_EVENT_CAPACITY).params(budget, &ids)
 }
 
@@ -386,7 +386,7 @@ mod tests {
             for frames in [512usize, 4096] {
                 let table = RangeTable {
                     ranges: (0..params)
-                        .map(|id| ParamBounds::continuous(id, 0.0, 1.0))
+                        .map(|id| ParamBounds::continuous(ParamId::new(id), 0.0, 1.0))
                         .collect(),
                     claims: true,
                 };
@@ -437,7 +437,7 @@ mod tests {
         const FRAMES: usize = 512;
         let table = RangeTable {
             ranges: (0..PARAMS)
-                .map(|id| ParamBounds::continuous(id, 0.0, 1.0))
+                .map(|id| ParamBounds::continuous(ParamId::new(id), 0.0, 1.0))
                 .collect(),
             claims: true,
         };
@@ -449,7 +449,7 @@ mod tests {
         let room = ParameterQueue::chunk_room(FRAMES);
         let mut chunk = ParameterChanges::reserved_bridged(PARAMS as usize, room);
         for id in 0..PARAMS {
-            assert!(chunk.open_queue(id.into()));
+            assert!(chunk.open_queue(ParamId::new(id)));
         }
         for k in 0..room {
             for i in 0..PARAMS as usize {

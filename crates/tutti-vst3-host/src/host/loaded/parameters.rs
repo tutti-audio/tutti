@@ -481,7 +481,7 @@ pub(super) fn build_param_info(
         .get(&info.unit_id())
         .map(|n| n.to_string())
         .unwrap_or_default();
-    ParameterInfo::new(info.id().into(), info.title_string())
+    ParameterInfo::new(ParamId::new(info.id()), info.title_string())
         .with_unit(info.units_string())
         .with_range(range)
         .with_steps(steps)

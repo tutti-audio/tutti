@@ -38,8 +38,9 @@ use tutti_plugin_host::PluginHandle;
 mod param_reads;
 use param_reads::ParamReads as _;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
+use tutti_types::ParamId;
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -113,7 +114,7 @@ fn read(handle: &PluginHandle, i: u32) -> Option<f32> {
 fn ramp(at: usize, id: u32, value: f32) -> Event {
     Event::ramp(
         Offset::of(Samples(at), Samples(BLOCK)),
-        ParamRamp::foreign(id, value, Samples(0)),
+        ParamRamp::foreign(ParamId::new(id), value, Samples(0)),
     )
 }
 
@@ -221,7 +222,12 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
-    let held = ControlLaneNode::for_foreign(0, ControlProgram::default(), Some(0.25), (0.0, 1.0));
+    let held = ControlLaneNode::for_foreign(
+        ParamId::new(0),
+        ControlProgram::default(),
+        Some(0.25),
+        (0.0, 1.0),
+    );
 
     let stereo = ChannelLayout::from_count(2);
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, stereo);

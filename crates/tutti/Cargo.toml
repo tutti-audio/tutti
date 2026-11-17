@@ -55,6 +55,7 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", option
 # feature below turns on the session's feature of the same name with `?`, so
 # a build without `session` gets no session edge from a feature.
 tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, optional = true }
+tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true }
 
 [dev-dependencies]
 # The `testing` nodes (`Osc`, `Const`) this crate's own tests, examples and README
@@ -62,7 +63,7 @@ tutti-session = { version = "0.0.1", path = "../tutti-session", default-features
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 tempfile = "3.8"
 # The loudness measurement `headless_export` reports; the umbrella does not export
-# `tutti-measure`.
+# `tutti-measure` outside feature `analyze`.
 tutti-measure = { path = "../tutti-measure" }
 # The reference CLAP plugin the `plugin_midi_export` example plays, in a `plugin-server`
 # (built first: `cargo build -p tutti-plugin-server`; not a dev-dependency,
@@ -82,6 +83,7 @@ session = ["dep:tutti-session", "dep:tutti-engine"]
 # Everything a headless host can have. Plugin FORMATS stay opt-in — each
 # links an SDK.
 full = [
+    "analyze",
     "device",
     "decode-wav",
     "decode-flac",
@@ -148,6 +150,8 @@ midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "tu
 synth = ["midi", "dep:tutti-polysynth", "tutti-session?/synth"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "tutti-session?/soundfont"]
 sampler = ["dep:tutti-sampler", "tutti-session?/sampler"]
+# `Session::analyze` and `tutti::measure`.
+analyze = ["session", "dep:tutti-measure", "tutti-session?/analyze"]
 audio-io = ["io", "tutti-cpal?/capture", "tutti-session?/audio-io"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the

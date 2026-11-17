@@ -44,6 +44,7 @@ impl Flushed {
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
+use tutti_types::ParamId;
 
 fn color_to_clap(color: Color) -> clap_sys::color::clap_color {
     clap_sys::color::clap_color {
@@ -75,7 +76,7 @@ impl ClapLoaded {
     /// as pass-through rather than substituting bounds. Inventing a `0..=1`
     /// default here would silently rescale a parameter the plugin never
     /// described.
-    pub fn parameter_range(&self, _main: MainThreadMarker, id: u32) -> Option<(f64, f64)> {
+    pub fn parameter_range(&self, _main: MainThreadMarker, id: ParamId) -> Option<(f64, f64)> {
         let bounds = self.params.bounds(id)?;
         Some((bounds.min, bounds.max))
     }
@@ -83,7 +84,7 @@ impl ClapLoaded {
     /// The declared bounds and steppedness for one parameter: what a
     /// normalized value is denormalized against. [`None`] as for
     /// [`parameter_range`](Self::parameter_range).
-    pub(crate) fn parameter_bounds(&self, id: u32) -> Option<ParamBounds> {
+    pub(crate) fn parameter_bounds(&self, id: ParamId) -> Option<ParamBounds> {
         self.params.bounds(id)
     }
 
@@ -136,7 +137,7 @@ impl ClapLoaded {
     ///
     /// Answered from the same table as `parameter_list`, so the two cannot
     /// drift about which parameters exist.
-    pub fn param_requires_process(&self, _main: MainThreadMarker, param_id: u32) -> bool {
+    pub fn param_requires_process(&self, _main: MainThreadMarker, param_id: ParamId) -> bool {
         self.params.requires_process(param_id)
     }
 
@@ -188,7 +189,7 @@ impl ClapLoaded {
         // One parameter value's worth of points per parameter, as the output
         // of a block is budgeted at least; a flush has no block to size by.
         let ranges = &self.params.ranges().ranges;
-        let ids: Vec<u32> = ranges.iter().map(|b| b.id).collect();
+        let ids: Vec<ParamId> = ranges.iter().map(|b| b.id).collect();
         let points = ParameterChanges::point_budget(ranges.len(), 1);
         let mut output_list =
             OutputEventList::new(OutputRooms::new(FLUSH_EVENT_CAPACITY).params(points, &ids));
@@ -310,7 +311,7 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
     // passes through verbatim: splitting it here would impose a hierarchy the
     // shared vocabulary does not model, and three of the four hosted formats
     // could not fill.
-    tutti_plugin_types::ParameterInfo::new(tutti_plugin_types::ParamId::new(info.id), info.name)
+    tutti_plugin_types::ParameterInfo::new(tutti_types::ParamId::new(info.id), info.name)
         .with_range(ParamRange::Plain {
             min: info.min_value,
             max: info.max_value,

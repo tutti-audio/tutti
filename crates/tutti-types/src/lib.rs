@@ -160,12 +160,12 @@ pub use mint::Mint;
 
 // Value vocabulary.
 pub use value::{
-    Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Balance, Beat, BeatDuration,
-    BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm,
-    BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
+    Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Balance, Ballistics, Beat,
+    BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth,
+    Bpm, BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
     Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Frame, Gain,
     HoldFactor, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment, NotOnMidiScale, Note,
-    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw,
+    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamId, ParamKey, ParamRaw,
     ParkedSampleRate, Phase, PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Q, Radians,
     ReadRate, Resonance, Resyncs, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
     SampleSpanOutOfRange, Samples, Seconds, Semitones, Spread, SrcRatio, StereoBalance,
@@ -182,7 +182,9 @@ pub use value::{
 
 // Channel layout — how many channels.
 pub use bus::{BusTooWide, BusTopology};
-pub use channels::{ChannelLayout, LayoutError, MAX_CHANNELS};
+pub use channels::{
+    ChannelIndex, ChannelIndexOutOfRange, ChannelLayout, LayoutError, MAX_CHANNELS,
+};
 
 // Channel topology — which speaker each channel feeds. Distinct from the count
 // above, and additive to it: a width-only caller keeps using `ChannelLayout`.

@@ -25,7 +25,7 @@ use tutti_modulation::{
     compile,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{At, ParamAddr, ParamCell};
+use tutti_types::{At, ParamAddr, ParamCell, ParamId};
 
 use crate::automation::{ControlLaneNode, LaneControls};
 use crate::signal::{EnvelopeFollowerNode, NoteEnvelopeNode};
@@ -214,7 +214,7 @@ enum Bind {
     },
     Foreign {
         to: EventIn,
-        id: u32,
+        id: ParamId,
         knob: Option<f32>,
         generation: u32,
     },

@@ -1,4 +1,5 @@
 use super::*;
+use crate::Complex32;
 use crate::{CosineWindow, Window};
 
 #[test]
@@ -12,7 +13,7 @@ fn forward_finds_a_tone_in_the_right_bin() {
 
     let mut fft = FftScratch::new();
     let mut out = vec![Complex32::default(); size / 2 + 1];
-    fft.forward(&input, &window, &mut out);
+    fft.forward(Mono::new(&input), &window, &mut out);
 
     let peak = out
         .iter()
@@ -32,10 +33,10 @@ fn forward_and_inverse_round_trip() {
 
     let mut fft = FftScratch::new();
     let mut bins = vec![Complex32::default(); size / 2 + 1];
-    fft.forward(&input, &window, &mut bins);
+    fft.forward(Mono::new(&input), &window, &mut bins);
 
     let mut out = vec![0.0f32; size];
-    fft.inverse(&bins, &mut out);
+    fft.inverse(&bins, MonoMut::new(&mut out));
 
     for (i, (a, b)) in input.iter().zip(&out).enumerate() {
         assert!((a - b).abs() < 1e-4, "sample {i}: {a} != {b}");
@@ -50,20 +51,20 @@ fn inverse_ignores_imaginary_dc_and_nyquist() {
         let window = vec![1.0f32; size];
         let mut fft = FftScratch::new();
         let mut bins = vec![Complex32::default(); size / 2 + 1];
-        fft.forward(&input, &window, &mut bins);
+        fft.forward(Mono::new(&input), &window, &mut bins);
         bins[0].im = 0.0;
         if size % 2 == 0 {
             bins.last_mut().unwrap().im = 0.0;
         }
         let mut clean = vec![0.0f32; size];
-        fft.inverse(&bins, &mut clean);
+        fft.inverse(&bins, MonoMut::new(&mut clean));
 
         bins[0].im = 3.0;
         if size % 2 == 0 {
             bins.last_mut().unwrap().im = -2.0;
         }
         let mut dirty = vec![0.0f32; size];
-        fft.inverse(&bins, &mut dirty);
+        fft.inverse(&bins, MonoMut::new(&mut dirty));
         assert_eq!(clean, dirty, "size {size}");
     }
 }
@@ -78,19 +79,19 @@ fn reused_scratch_gives_identical_results() {
 
     let mut shared = FftScratch::new();
     let mut first = vec![Complex32::default(); size / 2 + 1];
-    shared.forward(&a, &window, &mut first);
+    shared.forward(Mono::new(&a), &window, &mut first);
     // Run something else through the same scratch, then repeat.
     let mut other = vec![Complex32::default(); size / 2 + 1];
-    shared.forward(&b, &window, &mut other);
+    shared.forward(Mono::new(&b), &window, &mut other);
     let mut again = vec![Complex32::default(); size / 2 + 1];
-    shared.forward(&a, &window, &mut again);
+    shared.forward(Mono::new(&a), &window, &mut again);
 
     assert_eq!(first, again);
 
     // And a fresh scratch agrees with the reused one.
     let mut fresh = FftScratch::new();
     let mut clean = vec![Complex32::default(); size / 2 + 1];
-    fresh.forward(&a, &window, &mut clean);
+    fresh.forward(Mono::new(&a), &window, &mut clean);
     assert_eq!(first, clean);
 }
 
@@ -102,10 +103,10 @@ fn switching_sizes_replans() {
         let input: Vec<f32> = (0..size).map(|i| i as f32 / size as f32).collect();
         let window = vec![1.0f32; size];
         let mut out = vec![Complex32::default(); size / 2 + 1];
-        fft.forward(&input, &window, &mut out);
+        fft.forward(Mono::new(&input), &window, &mut out);
 
         let mut back = vec![0.0f32; size];
-        fft.inverse(&out, &mut back);
+        fft.inverse(&out, MonoMut::new(&mut back));
         for (a, b) in input.iter().zip(&back) {
             assert!((a - b).abs() < 1e-4, "round trip failed at size {size}");
         }
@@ -121,7 +122,7 @@ fn tone(size: usize, bin: f32, amp: f32, phase: f32) -> Vec<f32> {
 fn spectrum(input: &[f32]) -> Vec<Complex32> {
     let size = input.len();
     let mut out = vec![Complex32::default(); size / 2 + 1];
-    FftScratch::new().forward(input, &vec![1.0; size], &mut out);
+    FftScratch::new().forward(Mono::new(input), &vec![1.0; size], &mut out);
     out
 }
 
@@ -197,7 +198,7 @@ fn odd_sizes_round_trip_and_find_the_tone() {
         .unwrap();
     assert_eq!(peak, 17);
     let mut back = vec![0.0f32; size];
-    FftScratch::new().inverse(&bins, &mut back);
+    FftScratch::new().inverse(&bins, MonoMut::new(&mut back));
     for (a, b) in input.iter().zip(&back) {
         assert!((a - b).abs() < 1e-4);
     }
@@ -218,4 +219,29 @@ fn the_centroid_of_two_equal_tones_is_their_midpoint() {
             (n + k as f32 * x.norm(), d + x.norm())
         });
     assert!((num / den - 80.0).abs() < 0.05, "centroid {}", num / den);
+}
+
+/// At `f64` a bin-centred cosine of amplitude 1 puts `size / 2` in its bin,
+/// and a forward then an inverse is the identity, both to far below `f32`
+/// precision.
+#[test]
+fn an_f64_scratch_finds_the_tone_and_round_trips_at_f64_precision() {
+    let size = 128;
+    let bin = 9usize;
+    let input: Vec<f64> = (0..size)
+        .map(|i| (2.0 * core::f64::consts::PI * (bin * i) as f64 / size as f64).cos())
+        .collect();
+    let window = vec![1.0f64; size];
+    let mut fft = FftScratch::<f64>::new();
+    let mut bins = vec![Complex::new(0.0, 0.0); size / 2 + 1];
+    fft.forward(Mono::new(&input), &window, &mut bins);
+    for (b, v) in bins.iter().enumerate() {
+        let want = if b == bin { size as f64 / 2.0 } else { 0.0 };
+        assert!((v.re - want).abs() < 1e-11 && v.im.abs() < 1e-11, "bin {b}");
+    }
+    let mut back = vec![0.0f64; size];
+    fft.inverse(&bins, MonoMut::new(&mut back));
+    for (a, b) in input.iter().zip(&back) {
+        assert!((a - b).abs() < 1e-12);
+    }
 }

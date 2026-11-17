@@ -205,7 +205,11 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     };
     for k in 0..200u64 {
         let kind = if k % 3 == 0 {
-            EventKind::Ramp(ParamRamp::foreign(1, 0.5, Samples(16)))
+            EventKind::Ramp(ParamRamp::foreign(
+                tutti_types::ParamId::new(1),
+                0.5,
+                Samples(16),
+            ))
         } else {
             EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)))
         };
