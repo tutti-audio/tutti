@@ -532,8 +532,10 @@ pub mod measure {
         PeakMeter, ScopePoint, TruePeakConfig, TruePeakMeter, VectorscopeConfig, VectorscopeMeter,
         WindowedLoudnessConfig, WindowedMeter, WindowedReading,
     };
-    // What `Error` and the spectrum names.
-    pub use tutti_dsp::{FrameCount, StftError};
+    // The dsp types `Error`, the spectrum and `Chroma` name.
+    pub use tutti_dsp::{
+        BinCount, BinIndex, CosineWindow, FrameCount, FrameIndex, Grid, StftError,
+    };
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
