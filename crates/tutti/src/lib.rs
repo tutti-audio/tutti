@@ -71,6 +71,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
@@ -105,6 +106,7 @@
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
+//! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
 //!   is in `full`. The out-of-process plugin server is a separate binary,
@@ -183,12 +185,19 @@ pub use tutti_session::{
     PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
     RestoreError, RestoreState, SaveState, TypedParam,
 };
+#[cfg(all(feature = "session", feature = "analyze"))]
+pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+#[cfg(feature = "session")]
+pub use tutti_session::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
+    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
     JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
     RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TransportHandle, TypedParamRef, WaitError, Workers,
+    TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -332,12 +341,11 @@ pub mod graph {
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
         Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
         ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, LoopRange as TransportLoop, NodeParts,
-        Offset, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange,
-        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
-        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
-        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamInput, ParamMod,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeReader, ParamSegment,
+        Pass as DryPath, PlayClock, RenderMode, Resolution, SilenceMask, Sink as GraphSink,
+        SortedEvents, Source as GraphSource, SubBlocks, TransportChange, TransportChangeRejected,
+        TransportChanges, TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -385,11 +393,11 @@ pub mod session {
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES,
-        ParamError, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError,
-        Weighted, Wire, root_width,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
+        Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -501,6 +509,39 @@ pub mod sampler {
         feature = "decode-ogg"
     ))]
     pub use tutti_sampler::{ProbeError, SampleFacts};
+}
+
+/// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
+/// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
+/// a `Measure`, whose meter folds chunks into a result: loudness, peaks,
+/// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
+#[cfg(feature = "analyze")]
+pub mod measure {
+    pub use tutti_measure::{Error, Measure, Meter};
+    // Silence and onsets.
+    pub use tutti_measure::{
+        DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
+        OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
+    };
+    // Spectrum and chroma.
+    pub use tutti_measure::{
+        BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, Chroma,
+        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+        HarmonicDecayError, Harmonics, HarmonicsError, PeakDecay, PeakDecayError, PeakFloor,
+        PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
+        SpectrumMeter, SpectrumTime, SpectrumTimeError, Tuning, TuningOffset, TuningOffsetError,
+    };
+    // Loudness, waveform blocks and the vectorscope.
+    pub use tutti_measure::{
+        ChannelBlock, Loudness, LoudnessConfig, LoudnessMeter, PeakBlock, PeakBlocks, PeakConfig,
+        PeakMeter, ScopePoint, TruePeakConfig, TruePeakMeter, VectorscopeConfig, VectorscopeMeter,
+        WindowedLoudnessConfig, WindowedMeter, WindowedReading,
+    };
+    // The dsp types `Error`, the spectrum and `Chroma` name.
+    pub use tutti_dsp::{
+        BinCount, BinIndex, CosineWindow, FrameCount, FrameIndex, Grid, StftError,
+    };
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application

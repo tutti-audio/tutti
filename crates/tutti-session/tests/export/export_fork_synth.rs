@@ -250,7 +250,7 @@ fn an_exported_polysynth_plays_its_clip() {
 /// in its master-volume cell, which the live synth reads on its next block
 /// and an export's fork starts from: the exported note at a quarter volume
 /// peaks at a quarter of the note at unity. (The write is
-/// `Graph::set_param`.)
+/// `Session::set`.)
 #[test]
 fn a_param_on_a_synth_reaches_it_and_its_fork() {
     let peak = |volume: Option<f32>| {
@@ -264,10 +264,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
         session.graph().connect(synth, Root).unwrap();
         let _ = session.update();
         if let Some(v) = volume {
-            session
-                .graph()
-                .set_param(synth.volume(), Amplitude::new(v))
-                .unwrap();
+            session.set(synth.volume().to(Amplitude::new(v))).unwrap();
             let _ = session.update();
             assert_eq!(
                 controls.get(UnitParam::Volume),

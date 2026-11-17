@@ -201,10 +201,9 @@ impl Rig {
     }
 
     fn transport(&self, playing: bool) -> TransportPosition {
-        let looping = self.looping.map(|r| tutti_graph::LoopRange {
-            start: r.start(),
-            end: r.end(),
-        });
+        let looping = self
+            .looping
+            .map(|r| LoopRange::new(r.start(), r.end()).expect("a loop"));
         TransportPosition::new(playing, self.clock.tempo(), self.clock.beat(), looping)
     }
 
@@ -245,10 +244,7 @@ impl Rig {
             true,
             Bpm::of(tempo),
             here.beat(),
-            looping.map(|r| tutti_graph::LoopRange {
-                start: r.start(),
-                end: r.end(),
-            }),
+            looping.map(|r| LoopRange::new(r.start(), r.end()).expect("a loop")),
         );
         let out = self.block(len, Some((at, to)));
         self.clock = to.clock(SampleRate::of(SR));

@@ -265,7 +265,7 @@ impl Playhead {
         };
         let now = env.transport.beat().get();
         match env.transport.looping {
-            Some(l) if self.wrapped => beat >= anchor.min(l.start.get()) && beat < now,
+            Some(l) if self.wrapped => beat >= anchor.min(l.start().get()) && beat < now,
             _ => beat >= anchor && beat < now,
         }
     }
@@ -503,9 +503,7 @@ impl Env {
         let from = start.index();
         let to = from + self.block_len.get();
         let mut clock = t.clock(self.sample_rate);
-        let region = t
-            .looping
-            .and_then(|l| tutti_types::LoopRange::new(l.start, l.end));
+        let region = t.looping;
         for i in from..to {
             f(i, clock.beat());
             if t.playing {
@@ -547,12 +545,11 @@ impl Env {
             // it was reached some other way (a seek), however the distances
             // happen to line up.
             Some(l)
-                if from < l.end.get()
-                    && l.start.get() < l.end.get()
-                    && next >= l.start.get() - slack
-                    && next < l.end.get() + slack =>
+                if from < l.end().get()
+                    && next >= l.start().get() - slack
+                    && next < l.end().get() + slack =>
             {
-                let (start, end) = (l.start.get(), l.end.get());
+                let (start, end) = (l.start().get(), l.end().get());
                 let period = end - start;
                 // Wrapped k + 1 times: unwrapped, `next` sat at
                 // `end + (next - start) + k * period`, for some k >= 0.
@@ -648,8 +645,8 @@ impl Env {
             beat
         };
         let ahead = match self.transport.looping {
-            Some(l) if now < l.end.get() && l.start.get() < l.end.get() => {
-                let (start, end) = (l.start.get(), l.end.get());
+            Some(l) if now < l.end().get() => {
+                let (start, end) = (l.start().get(), l.end().get());
                 if beat >= now && beat < end {
                     beat - now
                 } else if beat >= start && beat < now {
@@ -681,8 +678,8 @@ impl Env {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::{LoopRange, TransportPosition};
-    use tutti_types::{Beat, Bpm, Latency, SampleRate};
+    use crate::node::TransportPosition;
+    use tutti_types::{Beat, Bpm, Latency, LoopRange, SampleRate};
 
     /// `for_each_beat` hands every frame its beat: held while stopped,
     /// rolling from a start inside the block, and agreeing with
@@ -694,10 +691,9 @@ mod tests {
     /// fraction) and a change inside the block.
     #[test]
     fn transport_at_is_for_each_beat_to_the_bit() {
-        let looping = Some(LoopRange {
-            start: Beat(1.1),
-            end: Beat(1.1 + 7.0 * 97.0 / (60.0 * 48_000.0)),
-        });
+        let looping = Some(
+            LoopRange::new(Beat(1.1), Beat(1.1 + 7.0 * 97.0 / (60.0 * 48_000.0))).expect("a loop"),
+        );
         let t = TransportPosition::new(true, Bpm::of(97.0), Beat(1.1), looping);
         let mut e = env(5_000, 64, t);
         e.changes
@@ -897,10 +893,7 @@ mod tests {
             true,
             Bpm::of(120.0),
             Beat(8.0 - 10.0 * spb),
-            Some(LoopRange {
-                start: Beat(4.0),
-                end: Beat(8.0),
-            }),
+            Some(LoopRange::new(Beat(4.0), Beat(8.0)).expect("a loop")),
         );
         let e = env(0, 64, t);
         // Beat 4 plus 5 frames: 10 frames to the wrap, then 5 more.
@@ -948,10 +941,7 @@ mod tests {
         assert!(!ph.crossed(2.0) && !ph.crossed(1.15));
         // Looping [4, 8): start at 3.5, before the loop, in half-beat
         // blocks; play through the loop, wrap, and on to 4.5.
-        let l = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(8.0),
-        });
+        let l = Some(LoopRange::new(Beat(4.0), Beat(8.0)).expect("a loop"));
         let mut ph = Playhead::new();
         for b in [3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5] {
             ph.observe(&block(b, 12_000, true, l));
@@ -1042,10 +1032,7 @@ mod tests {
             Continuity::Jumped
         );
 
-        let l = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(4.5),
-        });
+        let l = Some(LoopRange::new(Beat(4.0), Beat(4.5)).expect("a loop"));
         let near_end = TransportPosition::new(true, Bpm::of(120.0), Beat(4.495), l);
         // 0.010 666 beat on from 4.495, wrapped: 4.0 + 0.005 666.
         let wrapped = near_end.at_beat(Beat(4.0 + 256.0 / 24_000.0 - 0.005));
@@ -1058,10 +1045,7 @@ mod tests {
             true,
             Bpm::of(120.0),
             wrapped.beat(),
-            Some(LoopRange {
-                start: Beat(4.0),
-                end: Beat(8.0),
-            }),
+            Some(LoopRange::new(Beat(4.0), Beat(8.0)).expect("a loop")),
         );
         assert_eq!(
             near_end.continuity(n, rate, &other_loop),
@@ -1105,10 +1089,7 @@ mod tests {
     /// but a wrap leaves the playhead inside the loop, and 3.0 is not.
     #[test]
     fn a_seek_out_of_a_loop_is_not_a_wrap() {
-        let l = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(4.5),
-        });
+        let l = Some(LoopRange::new(Beat(4.0), Beat(4.5)).expect("a loop"));
         let at = |beat: f64| block(beat, 1_200, true, l);
         let mut ph = Playhead::new();
         ph.observe(&at(4.45));
@@ -1130,10 +1111,7 @@ mod tests {
         for (start, end) in [(4.0, 4.0f64.next_up()), (0.0, 1e-300)] {
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let l = Some(LoopRange {
-                    start: Beat(start),
-                    end: Beat(end),
-                });
+                let l = Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
                 // 480 frames is 0.02 beat at 120 BPM: from 0.01 beat before
                 // the loop, the block reaches it halfway through.
                 let mut ph = Playhead::new();
@@ -1306,20 +1284,11 @@ mod tests {
                 host.seat(Beat(1_000.0));
                 host.advance(Samples(3), Some(l));
             }
-            let graph_loop = looping.map(|l| LoopRange {
-                start: l.start(),
-                end: l.end(),
-            });
             let e = Env {
                 frame: Frame::new(0),
                 sample_rate: rate,
                 block_len: Samples(512),
-                transport: TransportPosition::counted(
-                    true,
-                    host.tempo(),
-                    host.origin(),
-                    graph_loop,
-                ),
+                transport: TransportPosition::counted(true, host.tempo(), host.origin(), looping),
                 changes: TransportChanges::NONE,
                 play: crate::PlayClock::ZERO,
             };
