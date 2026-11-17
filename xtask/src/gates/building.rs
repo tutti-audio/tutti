@@ -130,6 +130,7 @@ const NODE_AUTHOR: &str = "tutti-graph's node-author API: what a node declares a
     node is prepared with, not what an app configures";
 
 const CTOR: &[Rule] = &[Rule::CtorResult];
+const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 const WIDTH: &[Rule] = &[Rule::ConfigWidth];
 
@@ -214,6 +215,24 @@ pub(super) const ALLOW: &[Allow] = &[
         "InputOutput::new",
         CTOR,
         "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes_mut",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/audio.rs",
+        "PluginAudio::new",
+        CTOR,
+        "the same validity as `InputOutput::new` over two channel tables: their frame counts must agree",
     ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
@@ -402,6 +421,60 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
+        "crates/tutti-midi-device/src/ci/pe/resource/fields.rs",
+        "",
+        RANGE,
+        "text_enum! writes a closed enum keyed by its spec text, not a number range; `new(text)` returns the variant or `None`",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeData::decode",
+        CTOR,
+        "a parse that needs the Resource it is read as, a second input a `TryFrom` has no place for",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeData::decode_bytes",
+        CTOR,
+        "a parse that needs the Resource it is read as, a second input a `TryFrom` has no place for (the media type too)",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeState::from_wire",
+        CTOR,
+        "a parse that needs the media type the bytes came with, a second input a `TryFrom` has no place for",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceSet::from_selection",
+        CTOR,
+        "a Set is read from a Link and the entry the user chose (two inputs)",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceSet::full",
+        CTOR,
+        "validity depends on the data's Resource and the target's together (two inputs)",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceTarget::entry",
+        CTOR,
+        "validity depends on the Resource and the entry together (two inputs)",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeChunk::new",
+        CTOR,
+        "a header is only in chunk 1 and each field has a 14-bit length: validity of the fields together, which no one field's type can carry",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "Dialect::of",
+        CTOR,
+        "a lookup: the dialect of one block of an Endpoint, read with the Profile table the peer reported, refused when the block is not one the device sends to",
+    ),
+    ty(
         "crates/tutti-sampler/",
         "DiskStreamer::new",
         CTOR,
@@ -449,12 +522,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "WindowedLoudnessConfig",
         WIDTH,
         TOPOLOGY,
-    ),
-    ty(
-        "crates/tutti-measure/",
-        "TruePeakMeter::new",
-        CTOR,
-        "ebur128 refuses a rate or width it cannot meter: the refusal is the library's, not a value's",
     ),
     ty(
         "crates/tutti-dsp/",

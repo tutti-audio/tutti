@@ -248,10 +248,10 @@ impl PluginLoad {
         ) {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
-            // restores the state it was staged (`StateRestoreError`; a failure
+            // restores the state it was staged (`StateRestore`; a failure
             // before that step is a load failure and blames nothing): the state
             // is what the load is held against (the reload's landing withholds it).
-            Err(e @ tutti_plugin_types::BridgeError::StateRestoreError(_))
+            Err(e @ tutti_plugin_types::BridgeError::StateRestore { .. })
                 if self.state.is_some() =>
             {
                 let reason = e.to_string();
@@ -1090,12 +1090,18 @@ impl HostedPlugin {
 
     /// What the node lost: MIDI past a block's capacity, in a block the plugin
     /// did not run, or from a SysEx message that lost a packet (all
-    /// [`lost`](tutti_graph::Losses::lost)), and the parameter points it did not
-    /// deliver as they were.
+    /// [`lost`](tutti_graph::Losses::lost)), the parameter points it did not
+    /// deliver as they were, and, for a served plugin, the commands its
+    /// bridge's queue [refused](tutti_graph::Losses::refused) and the responses
+    /// it [lost](tutti_graph::Losses::lost).
     fn node_losses(&self) -> tutti_graph::Losses {
         use tutti_graph::Losses;
         let points = self.node.param_delivery();
-        Losses::lost(self.node.dropped_midi_in())
+        let bridge = self.controls.as_ref().map_or(Losses::NONE, |c| {
+            Losses::refused(c.refused_commands()) + Losses::lost(c.lost_responses())
+        });
+        bridge
+            + Losses::lost(self.node.dropped_midi_in())
             + Losses::lost(points.grid_points_dropped)
             + Losses::evicted(points.points_merged)
             + Losses::refused(points.points_dropped)
@@ -1470,7 +1476,7 @@ impl Default for RenderModeState {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
     /// place a plugin enters the session, through
     /// [`add_pooled_plugin`](Self::add_pooled_plugin).

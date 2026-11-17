@@ -8,7 +8,6 @@
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls handed back, its params and reclaimer kept ([`SessionNode`]) |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
-//! | `set_param` | the node's [`ParamSet`], when it has one |
 //! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
@@ -27,12 +26,12 @@
 //! back-pressure, and `Session::render_frame`
 //! runs it.
 //!
-//! # `set_param` lands on the next block, never at once
+//! # A param write lands on the next block, never at once
 //!
 //! There is no control-side copy of a node for a setting to land on at once.
-//! A write goes into the node's own `Param` cell through its [`ParamSet`], and
-//! the node reads it at the start of the executor's next block: one block
-//! later, on every graph.
+//! A write (`Session::set` on a [`ParamTarget`](crate::ParamTarget)) goes into
+//! the node's own `Param` cell, and the node reads it at the start of the
+//! executor's next block: one block later, on every graph.
 
 use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
@@ -49,7 +48,7 @@ use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    ParamSet, Prepare, RenderMode, TapWriter,
+    Prepare, RenderMode, TapWriter,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
@@ -74,9 +73,10 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{Bus, BusSink, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Wire};
+use crate::value::ValueTable;
 use crate::{
     ConnectError, Connection, Edge, EdgeGainError, EventInPort, EventOutPort, InPort, InletError,
-    Key, NoSuchNode, OutPort, ParamError, ParamUnit, RemoveError, Root, SessionNode, TypedParamRef,
+    Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
 };
 
 /// The largest block a device's graph is prepared for.
@@ -170,11 +170,8 @@ pub enum CrossfadeRefused {
     Editor(tutti_graph::CommitError),
 }
 
-/// One node's handle, and its params by address when it has any.
+/// One node's handle. Its params by address are the value table's.
 struct Entry {
-    /// What [`set_param`](Graph::set_param) writes through, and what a fork
-    /// of the node starts from.
-    params: Option<ParamSet>,
     /// What frees the values its published cells retired
     /// ([`SessionNode::reclaimer`]), run by [`Graph::reclaim`].
     reclaimer: Option<crate::Reclaimer>,
@@ -302,6 +299,9 @@ pub struct Graph {
     editor: Editor,
     local: Option<Local>,
     nodes: BTreeMap<NodeKey, Entry>,
+    /// What each node's params are written through: the session's value
+    /// table, which the session's `Knobs` share.
+    values: Arc<ValueTable>,
     /// Edited since the last commit: what `update()` commits on, and what a
     /// local render commits first.
     edited: bool,
@@ -523,6 +523,7 @@ impl Graph {
                 scratch: Vec::new(),
             }),
             nodes: BTreeMap::new(),
+            values: ValueTable::new(),
             edited: true,
             refused: None,
             commits: 0,
@@ -737,7 +738,7 @@ impl Graph {
     /// editor, so an export forks it as its type says; it is prepared at the
     /// graph's rate. What the node says of its controls is kept
     /// ([`SessionNode`]): its params are addressed
-    /// ([`SessionNode::params`], so [`set_param`](Self::set_param) and control-rate
+    /// ([`SessionNode::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
     /// [`Reclaim`](crate::Phase::Reclaim) phase ([`SessionNode::reclaimer`]), and
     /// it reads the session's tempo map ([`SessionNode::bind_tempo`]). A node
@@ -759,13 +760,7 @@ impl Graph {
         let id = NodeKey::fresh();
         // A fresh key has no wiring recorded, so nothing is unwired.
         let controls = self.editor.insert(id, N::kind(), node).controls;
-        self.nodes.insert(
-            id,
-            Entry {
-                params: None,
-                reclaimer: None,
-            },
-        );
+        self.nodes.insert(id, Entry { reclaimer: None });
         self.edited = true;
         (Key::new(id), controls)
     }
@@ -869,11 +864,19 @@ impl Graph {
         self.add(node).0
     }
 
+    /// The table the node's params are addressed in: the session's value
+    /// state shares it.
+    pub(crate) fn value_table(&self) -> Arc<ValueTable> {
+        self.values.clone()
+    }
+
     /// Keeps what a [`SessionNode`] says of its controls under `node`: its
     /// params and its reclaimer.
     fn address<N: SessionNode>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
-            entry.params = N::params(controls);
+            if let Some(set) = N::params(controls) {
+                self.values.address(node, std::any::TypeId::of::<N>(), set);
+            }
             entry.reclaimer = N::reclaimer(controls).into_reclaimer();
         }
     }
@@ -922,13 +925,7 @@ impl Graph {
         let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(
-            node,
-            Entry {
-                params: None,
-                reclaimer: None,
-            },
-        );
+        self.nodes.insert(node, Entry { reclaimer: None });
         self.plugins.insert(node, hosted);
         self.write_own_bypass(node);
         self.edited = true;
@@ -1298,7 +1295,7 @@ impl Graph {
         let controls = placed.controls;
         self.note_unwired(node, &placed.unwired);
         if let Some(entry) = self.nodes.get_mut(&node) {
-            entry.params = None;
+            self.values.retire(node);
             entry.reclaimer = None;
         }
         self.edited = true;
@@ -1886,6 +1883,7 @@ impl Graph {
     /// already, or never added); nothing changes.
     pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<(), RemoveError> {
         let node = node.into();
+        self.values.retire(node);
         if self.nodes.remove(&node).is_none() {
             return Err(RemoveError::NoSuchNode(node));
         }
@@ -1948,7 +1946,7 @@ impl Graph {
 
     /// Applies `decl` to the editor through `m` (doc 014 §8.2), resolving the
     /// host's keys through `keys`. A native target's knob is its node's own
-    /// `Param` cell, from the node's [`ParamSet`]. Marks the graph edited
+    /// `Param` cell, from the node's `ParamSet`. Marks the graph edited
     /// when the apply asks for a commit.
     ///
     /// # Errors
@@ -1961,7 +1959,7 @@ impl Graph {
         keys: &dyn ModKeys,
     ) -> Result<(tutti_nodes::Applied, PluginTargets), tutti_nodes::ReconcileError> {
         let host = ModHostOver {
-            nodes: &self.nodes,
+            values: &self.values,
             #[cfg(feature = "plugin")]
             plugins: &self.plugins,
             keys,
@@ -1992,43 +1990,6 @@ impl Graph {
             tracing::debug!("modulation: a resync waits: {e}");
         }
         self.pump_local();
-    }
-
-    /// Writes `value` to the param `param` names, through its node's
-    /// [`ParamSet`] (its controls, which [`add`](Self::add) addresses): the
-    /// cell it reads at the start of its next block, and the value a fork
-    /// starts from. `param` is a [`Key`]'s param method (`lp.cutoff()`) and
-    /// `value` is in the unit it carries, so a figure in the wrong unit does
-    /// not compile.
-    ///
-    /// The cell is an `f32` (a [`Seconds`] value is narrowed to one, the
-    /// `ParamSet`'s one narrowing; a switch is `0.0` or `1.0`), and a node
-    /// that guards a non-finite write keeps its last good value.
-    ///
-    /// # Errors
-    ///
-    /// [`ParamError::NoSuchNode`] when the node is not in the graph,
-    /// [`ParamError::NoSuchParam`] when it has no such param (it does not
-    /// declare it, or has none addressed: a bound plugin, or a node
-    /// [`replace`](Self::replace)d in); nothing is written.
-    #[must_use = "a refused write changed nothing"]
-    pub fn set_param<U: ParamUnit>(
-        &mut self,
-        param: TypedParamRef<U>,
-        value: U,
-    ) -> Result<(), ParamError> {
-        let node = param.node();
-        let entry = self.nodes.get(&node).ok_or(ParamError::NoSuchNode(node))?;
-        let no_such = ParamError::NoSuchParam {
-            node,
-            addr: param.addr(),
-        };
-        let params = entry.params.as_ref().ok_or(no_such)?;
-        if params.set(param.addr(), value.to_cell()) {
-            Ok(())
-        } else {
-            Err(no_such)
-        }
     }
 
     // --- Edges ---
@@ -3800,7 +3761,7 @@ pub trait ModKeys {
 /// the plugin's mirrored value (the session's record of it,
 /// `Plugin::param_values`).
 struct ModHostOver<'a> {
-    nodes: &'a BTreeMap<NodeKey, Entry>,
+    values: &'a ValueTable,
     #[cfg(feature = "plugin")]
     plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     keys: &'a dyn ModKeys,
@@ -3843,11 +3804,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
             // address is the lane's knob.
             Some(addr) => tutti_nodes::Target::Native {
                 node,
-                knob: self
-                    .nodes
-                    .get(&node)
-                    .and_then(|e| e.params.as_ref())
-                    .and_then(|p| p.cell(addr)),
+                knob: self.values.cell(node, addr),
             },
             // A plugin target waits for its mirror: a lane built without
             // a knob could not take one later.

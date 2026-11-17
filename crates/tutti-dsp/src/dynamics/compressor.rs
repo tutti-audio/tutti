@@ -24,9 +24,8 @@ use tutti_types::{Amplitude, ChannelLayout, CompressionRatio, Db, Hz, Q, SampleR
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{CHUNK, Follower, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
 use crate::delay::finite_or;
-use crate::smoother::Smoother;
 use crate::{Glide, Steps};
 
 /// The controls of a [`CompressorBank`].
@@ -81,10 +80,6 @@ impl Default for CompressorControls {
 /// makeup and a reduction stays finite whatever either is.
 const MAX_MAKEUP_DB: f32 = 400.0;
 
-/// The widest knee, in dB, a compressor runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
-/// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
-const MAX_KNEE_DB: f32 = 400.0;
-
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CompressorMember {
@@ -100,18 +95,16 @@ struct CompressorMember {
 }
 
 impl CompressorMember {
-    /// The member for `c` at `rate`: a non-finite control is the default's, a knee and
-    /// the times are floored at 0 and a ratio at 1.
+    /// The member for `c` at `rate`: a non-finite control is the default's, a knee is
+    /// floored at 0 and a ratio at 1; the times are floored at 0 (an infinite one holds).
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
-        // A NaN time reads as 0 (`max` ignores it), instant; an infinite one holds the
-        // follower (a coefficient of 0), as `Seconds::one_pole_coeff` says.
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
             knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            attack: Seconds(c.attack.get().max(0.0)),
-            release: Seconds(c.release.get().max(0.0)),
+            attack: c.attack,
+            release: c.release,
             makeup: Db(
                 finite_or(c.makeup.get(), d.makeup.get()).clamp(-MAX_MAKEUP_DB, MAX_MAKEUP_DB)
             ),
@@ -129,10 +122,8 @@ struct Detector {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
-    /// The one-pole coefficient while the reduction rises.
-    attack: f32,
-    /// The one-pole coefficient while the reduction falls.
-    release: f32,
+    /// The follower on the reduction: the attack while it rises, the release while it falls.
+    ballistics: Follower,
 }
 
 impl Detector {
@@ -143,8 +134,7 @@ impl Detector {
             threshold: m.threshold,
             knee: m.knee,
             ratio: m.ratio,
-            attack: m.attack.one_pole_coeff(m.rate),
-            release: m.release.one_pole_coeff(m.rate),
+            ballistics: Follower::of(floored(m.attack, m.release), m.rate),
         }
     }
 
@@ -153,8 +143,7 @@ impl Detector {
         threshold: Db(0.0),
         knee: Db(0.0),
         ratio: CompressionRatio::UNITY,
-        attack: 0.0,
-        release: 0.0,
+        ballistics: Follower::NEUTRAL,
     };
 
     /// One frame of the compressor: the key's `level` (an amplitude) in dB, the static
@@ -165,12 +154,7 @@ impl Detector {
     fn frame(&self, reduction: &mut f32, level: f32, threshold: Db, makeup_db: f32) -> f32 {
         let input_db = amplitude_to_db(Amplitude::new(level));
         let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
-        let coeff = if target.get() > *reduction {
-            self.attack
-        } else {
-            self.release
-        };
-        *reduction = Smoother::toward(*reduction, target.get(), coeff);
+        *reduction = self.ballistics.follow(*reduction, target.get());
         Db::new(-*reduction + makeup_db).to_amplitude().get()
     }
 }
@@ -257,7 +241,7 @@ impl CompressorBank {
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
     /// the makeup glides over [`GAIN_GLIDE`]. A non-finite control is the default's, a knee
-    /// and the times are floored at 0 and a ratio at 1. The key filter, if any, glides to the
+    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, glides to the
     /// cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
     /// allocation.
     pub fn aim(&mut self, controls: &CompressorControls) {

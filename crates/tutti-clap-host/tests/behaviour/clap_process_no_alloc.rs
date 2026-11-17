@@ -19,8 +19,9 @@ use std::sync::Mutex;
 use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
-use tutti_clap_host::{AudioBuffer32, ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
+use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
 use tutti_graph::Offset;
+use tutti_plugin_types::PluginAudio;
 use tutti_types::Samples;
 
 use crate::support::active::{Activate, Active, ActiveExt};
@@ -202,12 +203,8 @@ fn drive(
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
         let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-        let mut buffer = AudioBuffer32 {
-            inputs: ins,
-            outputs: outs,
-            num_samples: FRAMES,
-            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-        };
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            .expect("equal channels");
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
     last
@@ -227,7 +224,7 @@ fn process_steady_state_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -254,7 +251,7 @@ fn process_with_midi_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     let on_event = [(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
     let off_event = [(at(0), midi::note_off(MidiChannel::FIRST, 60, 0))];
@@ -290,12 +287,8 @@ fn process_with_midi_does_not_allocate() {
             };
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = AudioBuffer32 {
-                inputs: ins,
-                outputs: outs,
-                num_samples: FRAMES,
-                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-            };
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             inst.process(&mut buffer, &ctx).expect("process");
         }
     });
@@ -312,7 +305,7 @@ fn process_with_every_message_kind_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     let sysex8 = Sysex8StreamIds::undiscovered()
         .open()
@@ -401,7 +394,7 @@ fn alternating_continue_tail_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -439,7 +432,7 @@ fn alternating_unknown_status_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -468,7 +461,7 @@ fn alternating_continue_sleep_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -495,9 +488,7 @@ fn alternating_continue_sleep_does_not_allocate() {
 /// `Processor::process` path, not the raw status the tests above read.
 #[test]
 fn the_plugins_status_becomes_the_blocks_status() {
-    use tutti_plugin_types::{
-        AudioBuffer, AudioBufferMut, BlockStatus, ProcessContext, ProcessOutput,
-    };
+    use tutti_plugin_types::{BlockStatus, PluginAudio, ProcessContext, ProcessOutput};
     let _lock = PROBE_LOCK.lock_recover();
     reset_probe();
     let mut inst = load_probe();
@@ -515,12 +506,8 @@ fn the_plugins_status_becomes_the_blocks_status() {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
         let mut out = ProcessOutput::default();
-        let mut buffer = AudioBufferMut::F32(AudioBuffer {
-            inputs: ins,
-            outputs: outs,
-            num_samples: FRAMES,
-            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-        });
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            .expect("equal channels");
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
             .expect("render");
@@ -540,7 +527,7 @@ fn tail_and_sleep_are_observable_by_a_caller() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -591,7 +578,7 @@ fn plugin_error_status_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -623,12 +610,8 @@ fn plugin_error_status_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = AudioBuffer32 {
-                inputs: ins,
-                outputs: outs,
-                num_samples: FRAMES,
-                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-            };
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             // The error is expected; what must not happen is an allocation
             // while producing it.
             let _ = inst.process(&mut buffer, &ctx);
@@ -648,7 +631,7 @@ fn oversized_block_rejection_does_not_allocate() {
     let _lock = PROBE_LOCK.lock_recover();
     reset_probe();
     let mut inst = load_probe();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -673,12 +656,8 @@ fn oversized_block_rejection_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-        let mut buffer = AudioBuffer32 {
-            inputs: ins,
-            outputs: outs,
-            num_samples: OVERSIZE,
-            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-        };
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(OVERSIZE), ins, outs)
+            .expect("equal channels");
         let err = inst
             .process(&mut buffer, &ctx)
             .expect_err("a block past max_frames must be rejected, not truncated");
@@ -698,12 +677,8 @@ fn oversized_block_rejection_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-            let mut buffer = AudioBuffer32 {
-                inputs: ins,
-                outputs: outs,
-                num_samples: OVERSIZE,
-                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-            };
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             let _ = inst.process(&mut buffer, &ctx);
         }
     });
@@ -726,7 +701,7 @@ fn sysex_output_events_do_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -766,7 +741,7 @@ fn drive_and_read_output(
     bufs: &mut StereoBufs,
     midi: &[UmpAt],
 ) -> (Vec<(u32, usize, f64)>, usize) {
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         midi,
         transport: Some(&transport),
@@ -774,12 +749,8 @@ fn drive_and_read_output(
     };
     let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
     let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-    let mut buffer = AudioBuffer32 {
-        inputs: ins,
-        outputs: outs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-    };
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+        .expect("equal channels");
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
         .param_changes
@@ -821,7 +792,7 @@ fn param_output_burst_does_not_allocate() {
         "the probe's parameter count sets the reservation; the burst assumes the floor"
     );
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -879,7 +850,7 @@ fn param_output_past_the_room_is_counted_not_grown() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -949,7 +920,7 @@ fn output_events_past_the_room_are_refused_not_grown() {
     let mut inst = load_probe();
     assert!(inst.loaded().parameter_count(main_thread()) <= OUTPUT_QUEUES as usize);
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1012,7 +983,7 @@ fn a_param_flood_keeps_note_offs_and_final_values() {
     set_switch_u32(b"tutti_test_plugin_set_render_mode\0", 4); // Notes: MIDI thru
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let notes = [
         (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
         (at(0), midi::note_off(MidiChannel::FIRST, 60, 0)),
@@ -1107,7 +1078,7 @@ fn audio_thread_logging_does_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1148,7 +1119,7 @@ fn varying_sysex_payload_sizes_do_not_allocate() {
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1215,7 +1186,7 @@ fn set_sysex_output_no_alloc(count: u32, bytes: u32) {
 /// the gate only reborrows them — building them per block is what the host is
 /// being tested not to do.
 fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
         ..Default::default()
@@ -1229,12 +1200,9 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     for _ in 0..8 {
         let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = AudioBuffer32 {
-            inputs: &ins,
-            outputs: &mut outs,
-            num_samples: FRAMES,
-            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-        };
+        let mut buffer =
+            PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+                .expect("equal channels");
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
 
@@ -1243,14 +1211,11 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
     let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
 
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+        .expect("equal channels");
+
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..iters {
-            let mut buffer = AudioBuffer32 {
-                inputs: &ins,
-                outputs: &mut outs,
-                num_samples: FRAMES,
-                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-            };
             inst.process(&mut buffer, &ctx).expect("process");
         }
     });

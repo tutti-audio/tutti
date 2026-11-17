@@ -261,10 +261,6 @@ pub enum MidiError {
     #[error("the session is not following MIDI Machine Control")]
     NotFollowingMachineControl,
 
-    /// `Midi::stop_sending_machine_control` with no Machine Control being sent.
-    #[error("the session is not sending MIDI Machine Control")]
-    NotSendingMachineControl,
-
     /// A tempo has one source: `Midi::follow_tempo` and a Beat Clock
     /// `Midi::follow_clock` each publish the tempo map, so one is refused while
     /// the other is followed.
@@ -459,10 +455,6 @@ pub enum Error {
     /// A whole-bus connection was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]
     Connect(#[from] ConnectError),
-
-    /// A param write was refused ([`Graph::set_param`](crate::Graph::set_param)).
-    #[error(transparent)]
-    Param(#[from] crate::ParamError),
 
     /// A modulation range was refused (`Mods::range`).
     #[error(transparent)]

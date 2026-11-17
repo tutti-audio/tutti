@@ -27,7 +27,7 @@ pub struct OpenCx<'a> {
 impl<'a> OpenCx<'a> {
     /// What an open needs of `session`, of whatever clock: its rate and, with
     /// `midi`, its MIDI view. Nothing else of the session is reachable.
-    pub(crate) fn new<C: Clock>(session: &'a mut Session<C>) -> Self {
+    pub(crate) fn new<K: crate::AppKey, C: Clock>(session: &'a mut Session<K, C>) -> Self {
         let rate = session.transport.sample_rate();
         #[cfg(feature = "midi")]
         let (midi, ids) = session.midi_and_ids();

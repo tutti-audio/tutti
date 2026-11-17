@@ -146,7 +146,9 @@ pub struct PeJsonError {
     pub offset: usize,
 }
 
-impl PeJson {
+impl TryFrom<&[u8]> for PeJson {
+    type Error = PeJsonError;
+
     /// Reads the JSON text `bytes`: any whitespace between tokens, strings
     /// of 7-bit ASCII with `\u` escapes (§6.1.1), each name once in an object
     /// and a nesting of at most [`PE_JSON_MAX_DEPTH`].
@@ -154,10 +156,12 @@ impl PeJson {
     /// # Errors
     ///
     /// [`PeJsonError`] with the offset where the text stopped being the grammar.
-    pub fn parse(bytes: &[u8]) -> Result<Self, PeJsonError> {
+    fn try_from(bytes: &[u8]) -> Result<Self, PeJsonError> {
         json::document(bytes).map_err(|offset| PeJsonError { offset })
     }
+}
 
+impl PeJson {
     /// The compact text of the value: no whitespace, every character beyond
     /// printable ASCII escaped as UTF-16 (§6.1.1).
     #[must_use]

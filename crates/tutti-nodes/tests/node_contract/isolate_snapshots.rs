@@ -18,17 +18,17 @@ use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
     CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-    EqBandNode, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType,
-    LfoNode, LfoShape, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
-    PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    DynamicEqConfig, DynamicEqNode, EqBandNode, GateControls, GateNode, InterpolationMode,
+    KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls, LimiterNode,
+    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
+    Stages, SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, TransientShaperConfig,
-    TransientShaperNode,
+    BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    TransientShaperConfig, TransientShaperNode,
 };
-use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
+use tutti_nodes::{StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
     Resonance, Seconds, StereoWidth, UnitAddr, UnitParam,
@@ -226,6 +226,53 @@ fn dc_blocker() {
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
+    })
+    .check();
+}
+
+#[test]
+fn bell_filter() {
+    IsolateRow::new("BellFilterNode (stereo)", || {
+        BellFilterNode::from(BellFilterConfig::new(
+            ChannelLayout::STEREO,
+            Hz(2_000.0),
+            Q(2.0),
+            Db(6.0),
+        ))
+    })
+    .control("gain", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, -9.0))
+    })
+    .check();
+}
+
+#[test]
+fn tilt_filter() {
+    IsolateRow::new("TiltFilterNode (stereo)", || {
+        TiltFilterNode::from(TiltFilterConfig::new(
+            ChannelLayout::STEREO,
+            Hz(1_000.0),
+            Db(6.0),
+        ))
+    })
+    .control("gain", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, -9.0))
+    })
+    .check();
+}
+
+#[test]
+fn dynamic_eq() {
+    IsolateRow::new("DynamicEqNode (stereo, side-chain)", || {
+        DynamicEqNode::from(
+            DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).key(KeySource::Sidechain),
+        )
+    })
+    .control("threshold", |d| {
+        assert!(d.param_set().set(UnitParam::Threshold, -40.0))
+    })
+    .control("centre", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 3_000.0))
     })
     .check();
 }

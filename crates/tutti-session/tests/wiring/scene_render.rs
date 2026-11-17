@@ -212,10 +212,7 @@ fn unaligned_blocks_render_per_sample_units_identically() {
 fn a_param_write_lands_on_the_next_blocks_first_frame() {
     let mut s = scene(false);
     let before = render(&mut s.side, 2_048, 256);
-    s.session
-        .graph()
-        .set_param(s.drive.drive(), Drive(6.0))
-        .unwrap();
+    s.session.set(s.drive.drive().to(Drive(6.0))).unwrap();
     let _ = s.session.update();
     let after = render(&mut s.side, 2_048, 256);
 

@@ -2,7 +2,7 @@
 //!
 //! A transient shaper moves the level of a signal's attacks and of its sustain apart. It finds
 //! the signal's level (the loudest channel at each frame), follows it with a **fast** and a
-//! **slow** one-pole envelope ([`PeakFollower`] with one time constant each), and multiplies
+//! **slow** one-pole envelope (a one-pole follower with one time constant each), and multiplies
 //! **every** channel by one gain read from how the fast envelope stands against the slow one:
 //! the gain is linked, so the stereo image does not move.
 //!
@@ -17,14 +17,14 @@
 //! ```
 //!
 //! Each branch is in `[0, 1)` times its amount, and both are 0 where the envelopes meet. A
-//! steady level is left alone to the slow follower's `f32` stall: the follower stops moving
+//! positive `attack` lifts the frames the fast envelope has run ahead of the slow one by the
+//! fraction of the fast envelope that the slow one has not reached. The amount of a branch is
+//! the most that branch adds: a decay that falls to nothing under a slow envelope still
+//! holding level tends to `sustain`. An amount of 0 dB in both is the identity.
+//!
+//! A steady level is left alone to the slow follower's `f32` stall: the follower stops moving
 //! when `c * (L - s)` is under half an ulp of `s`, which leaves `|L - s| / L` near `6e-8 / c`
 //! for the one-pole coefficient `c` (about 2e-3 dB at 24 dB and a 30 ms slow time, rate 48 kHz).
-//! A positive `attack` lifts the
-//! frames the fast envelope has run ahead of the slow one by the fraction of the fast envelope
-//! that the slow one has not reached. The amount of a branch is the most that branch adds: a
-//! decay that falls to nothing under a slow envelope still holding level tends to `sustain`.
-//! An amount of 0 dB in both is the identity.
 //!
 //! After a step from silence to a constant level, `f_n = L (1 - af^n)` and `s_n = L (1 - as^n)`
 //! with `a = exp(-1 / (tau * rate))`, so the gain at frame `n` is
@@ -36,8 +36,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{Db, SampleRate, Seconds};
 
-use super::follower::PeakFollower;
-use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{CHUNK, Follower, GAIN_GLIDE, floored, key_levels};
 use crate::delay::finite_or;
 use crate::{Glide, Lerp};
 
@@ -118,8 +117,10 @@ fn gain_db(fast: f32, slow: f32, attack: f32, sustain: f32) -> f32 {
 /// format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct TransientBank {
-    fast: PeakFollower,
-    slow: PeakFollower,
+    fast: Follower,
+    slow: Follower,
+    /// The fast and the slow envelope, both at 0 until a level is heard.
+    envelopes: (f32, f32),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
     amounts: Glide<Amounts>,
     steps: u32,
@@ -133,15 +134,12 @@ impl TransientBank {
     /// has `slow`, at no change. The times are floored at 0 (instant); a NaN one reads as 0.
     #[must_use]
     pub fn new(rate: SampleRate, fast: Seconds, slow: Seconds) -> Self {
-        let mut fast_follower = PeakFollower::new();
-        let mut slow_follower = PeakFollower::new();
-        let time = |t: Seconds| Seconds(t.get().max(0.0));
-        fast_follower.set(time(fast), time(fast), rate);
-        slow_follower.set(time(slow), time(slow), rate);
+        let follower = |t: Seconds| Follower::of(floored(t, t), rate);
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            fast: fast_follower,
-            slow: slow_follower,
+            fast: follower(fast),
+            slow: follower(slow),
+            envelopes: (0.0, 0.0),
             amounts: Glide::landed(TransientControls::DEFAULT.designed()),
             steps,
         }
@@ -149,8 +147,7 @@ impl TransientBank {
 
     /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
     pub fn reset(&mut self) {
-        self.fast.reset();
-        self.slow.reset();
+        self.envelopes = (0.0, 0.0);
         self.amounts.settle();
     }
 
@@ -194,7 +191,9 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let (fast, slow) = (self.fast.follow(*g), self.slow.follow(*g));
+                let fast = self.fast.follow(self.envelopes.0, *g);
+                let slow = self.slow.follow(self.envelopes.1, *g);
+                self.envelopes = (fast, slow);
                 *g = Db::new(gain_db(fast, slow, a.attack, a.sustain))
                     .to_amplitude()
                     .get();

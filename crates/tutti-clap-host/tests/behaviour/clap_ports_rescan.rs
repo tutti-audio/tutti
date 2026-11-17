@@ -18,9 +18,20 @@ use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;
 
 use assert_no_alloc::assert_no_alloc;
-use tutti_clap_host::{AudioBuffer32, ClapError, ClapLoaded, ClapProcessContext, LoadOptions};
+use tutti_clap_host::{ClapError, ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::{PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, REPORTED_TAIL_SAMPLES};
+use tutti_plugin_types::PluginAudio;
 use tutti_plugin_types::PluginError;
+
+/// The channels the plugin's audio ports declare now, summed over one
+/// direction.
+fn channel_total(loaded: &ClapLoaded, is_input: bool) -> usize {
+    let main = main_thread();
+    (0..loaded.audio_port_count(main, is_input))
+        .filter_map(|i| loaded.audio_port_info(main, i, is_input))
+        .map(|port| usize::from(port.layout.count()))
+        .sum()
+}
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -221,7 +232,7 @@ fn a_rate_change_rereads_the_port_layout() {
         1,
         "fixture: one input port"
     );
-    assert_eq!(active.loaded().info().audio_inputs, 2);
+    assert_eq!(channel_total(active.loaded(), true), 2);
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
     active.reconfigure_at(44_100.0, 512).expect("re-activates");
@@ -232,7 +243,7 @@ fn a_rate_change_rereads_the_port_layout() {
         "the plugin's new layout"
     );
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         3,
         "stereo main + mono aux"
     );
@@ -243,12 +254,12 @@ fn a_rate_change_rereads_the_port_layout() {
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; 3];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = AudioBuffer32 {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-    };
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
     active
         .process(&mut buffer, &ClapProcessContext::default())
         .expect("a block in the new layout processes");
@@ -262,12 +273,12 @@ fn process_f32_block(active: &mut Active<f32>, channels: usize) -> Result<(), Cl
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; channels];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = AudioBuffer32 {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: FRAMES,
-        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-    };
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
     let ctx = ClapProcessContext::default();
     assert_no_alloc(|| active.process(&mut buffer, &ctx).map(|_| ()))
 }
@@ -363,16 +374,16 @@ fn a_successful_rate_change_exposes_the_new_layout() {
         .map_err(|(_, e)| e)
         .expect("activates");
     let before = (
-        active.loaded().info().audio_inputs,
-        active.loaded().info().audio_outputs,
+        channel_total(active.loaded(), true),
+        channel_total(active.loaded(), false),
     );
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
     active.reconfigure_at(44_100.0, 512).expect("re-activates");
 
     let after = (
-        active.loaded().info().audio_inputs,
-        active.loaded().info().audio_outputs,
+        channel_total(active.loaded(), true),
+        channel_total(active.loaded(), false),
     );
     assert_ne!(before, after, "the totals follow the plugin's new layout");
     assert!(active.loaded().is_active());
@@ -390,25 +401,18 @@ fn reactivate_rereads_the_port_layout_in_place() {
         .map_err(|(_, e)| e)
         .expect("activates");
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         2,
         "fixture: one stereo input"
     );
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
-    assert_eq!(
-        active.loaded().info().audio_inputs,
-        2,
-        "nothing was re-read"
-    );
 
     active.reactivate().expect("re-activates");
     assert!(active.loaded().is_active());
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         3,
         "the plugin's new layout"
     );
-    assert_eq!(active.loaded().sample_rate().get(), 48_000.0);
-    assert_eq!(active.loaded().block_size(), 512);
 }

@@ -21,8 +21,8 @@ use crate::field::{
     SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
-    BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
+    BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity,
     DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
     Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
     MixedDataHeader, PerNoteManagement, Protocol, SoftwareRevision, Stream, StreamConfig,
@@ -143,8 +143,9 @@ fn utility(w0: u32) -> Option<Utility> {
 fn system(w0: u32) -> Option<System> {
     match byte(w0, 2) {
         0xF1 => Some(System::TimeCode(data7(w0, 1)?)),
-        0xF2 => Some(System::SongPosition(U14::masked(
-            u16::from(data7(w0, 1)?.get()) | (u16::from(data7(w0, 0)?.get()) << 7),
+        0xF2 => Some(System::SongPosition(U14::from_halves(
+            data7(w0, 0)?,
+            data7(w0, 1)?,
         ))),
         0xF3 => Some(System::SongSelect(data7(w0, 1)?)),
         0xF6 => Some(System::TuneRequest),
@@ -182,9 +183,7 @@ fn voice1(w0: u32) -> Option<Voice1> {
         }),
         0xC => Some(Voice1::ProgramChange(d1)),
         0xD => Some(Voice1::ChannelPressure(d1)),
-        0xE => Some(Voice1::PitchBend(U14::masked(
-            u16::from(d1.get()) | (u16::from(d2.get()) << 7),
-        ))),
+        0xE => Some(Voice1::PitchBend(U14::from_halves(d2, d1))),
         _ => None,
     }
 }
@@ -590,10 +589,10 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
             active: flag(w0, 15),
             id: Field::read(FunctionBlockId::new(byte(w0, 1) & 0x7f), byte(w0, 1) & 0x7f),
             direction: match w0 & 0x3 {
-                0b01 => Direction::Input,
-                0b10 => Direction::Output,
-                0b11 => Direction::Bidirectional,
-                n => Direction::Reserved(Reserved::wire(n as u8)),
+                0b01 => BlockDirection::Input,
+                0b10 => BlockDirection::Output,
+                0b11 => BlockDirection::Bidirectional,
+                n => BlockDirection::Reserved(Reserved::wire(n as u8)),
             },
             ui_hint: match (w0 >> 4) & 0x3 {
                 0 => UiHint::Unknown,

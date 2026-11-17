@@ -25,7 +25,7 @@ use crate::ci::testing::{OURS, PEER};
 use crate::{BodyLimit, CiHeader, CiMessage, Decoded, MaxSysexSize, Muid};
 
 pub(super) fn json(text: &str) -> PeJson {
-    PeJson::parse(text.as_bytes()).unwrap()
+    PeJson::try_from(text.as_bytes()).unwrap()
 }
 
 pub(super) fn id(text: &str) -> ResourceId {
@@ -41,7 +41,7 @@ pub(super) fn custom(name: &str) -> PeResource {
 }
 
 pub(super) fn target(resource: PeResource) -> ResourceTarget {
-    ResourceTarget::new(resource).unwrap()
+    ResourceTarget::try_from(resource).unwrap()
 }
 
 pub(super) fn entry_target(resource: PeResource, res_id: &str) -> ResourceTarget {
@@ -382,7 +382,7 @@ impl Link {
                     && *kind == PeMessageKind::GET_INQUIRY
                     && !chunk.header().is_empty() =>
                 {
-                    match PeHeader::parse(chunk.header()) {
+                    match PeHeader::try_from(chunk.header()) {
                         Ok(PeHeader::Request(request)) => Some(request),
                         _ => None,
                     }
@@ -673,7 +673,7 @@ fn a_page_is_a_slice_of_the_list_with_its_total_count() {
         panic!("not a success");
     };
     assert_eq!(response.header.total_count, Some(7));
-    let page = PeJson::parse(&response.body).unwrap();
+    let page = PeJson::try_from(response.body.as_slice()).unwrap();
     assert_eq!(page.as_array().unwrap().len(), 2);
     // Past the end is an empty page, with the same total.
     let mut past = pe_get("ProgramList");
@@ -687,7 +687,7 @@ fn a_page_is_a_slice_of_the_list_with_its_total_count() {
     };
     assert_eq!(response.header.total_count, Some(7));
     assert_eq!(
-        PeJson::parse(&response.body).unwrap(),
+        PeJson::try_from(response.body.as_slice()).unwrap(),
         PeJson::Array(vec![])
     );
 }
@@ -1208,7 +1208,7 @@ fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
         ResponderAction::Send(CiMessage::PropertyExchange {
             message: PeCiMessage::Chunk { chunk, .. },
             ..
-        }) => PeHeader::parse(chunk.header()).ok(),
+        }) => PeHeader::try_from(chunk.header()).ok(),
         _ => None,
     });
     assert!(matches!(
@@ -1291,7 +1291,7 @@ fn the_responder_ends_a_subscription() {
         CiMessage::PropertyExchange {
             message: PeCiMessage::Chunk { chunk, .. },
             ..
-        } if !to_resp => match PeHeader::parse(chunk.header()) {
+        } if !to_resp => match PeHeader::try_from(chunk.header()) {
             Ok(PeHeader::Subscription(PeSubscription::End { ended_by, .. })) => Some(ended_by),
             _ => None,
         },
@@ -1395,7 +1395,8 @@ fn an_update_that_cannot_be_applied_is_answered_and_the_resource_got_again() {
         CiMessage::PropertyExchange {
             message: PeCiMessage::Chunk { kind, chunk },
             ..
-        } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => match PeHeader::parse(chunk.header()) {
+        } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => match PeHeader::try_from(chunk.header())
+        {
             Ok(PeHeader::Reply(r)) => Some(r.status),
             _ => None,
         },
@@ -1435,7 +1436,8 @@ fn an_update_for_an_unknown_subscription_is_answered_with_400() {
         CiMessage::PropertyExchange {
             message: PeCiMessage::Chunk { kind, chunk },
             ..
-        } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => match PeHeader::parse(chunk.header()) {
+        } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => match PeHeader::try_from(chunk.header())
+        {
             Ok(PeHeader::Reply(r)) => Some(r.status),
             _ => None,
         },

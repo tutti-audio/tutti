@@ -2,9 +2,9 @@ use std::time::{Duration, Instant};
 
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockCount,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision,
-    Stream, StreamConfig, U7, UiHint, Ump,
+    BlockDirection, DeviceIdentity, FirstGroup, Form, FunctionBlockCount, FunctionBlockId,
+    FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
+    StreamConfig, U7, UiHint, Ump,
 };
 
 use super::*;

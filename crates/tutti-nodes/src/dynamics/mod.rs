@@ -1,5 +1,5 @@
-//! Level-dependent gain processors: compressor, gate, limiter and the
-//! multiband compressor.
+//! Level-dependent gain processors: compressor, gate, limiter, the dynamic EQ band (and its
+//! de-esser) and the multiband compressor.
 //!
 //! All of them share one shape — measure a level, decide a gain, apply it — and the dB
 //! conversions and gain curves of `tutti-dsp`. What differs is only the gain decision, which is
@@ -16,6 +16,7 @@
 
 mod brickwall;
 mod compressor;
+mod dynamic_eq;
 mod gate;
 mod limiter;
 mod multiband;
@@ -23,6 +24,7 @@ mod transient;
 
 pub use brickwall::{BrickwallKernel, BrickwallLimiterNode, BrickwallSet};
 pub use compressor::{CompressorKernel, CompressorNode, CompressorSet};
+pub use dynamic_eq::{DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet};
 pub use gate::{GateKernel, GateNode, GateSet};
 pub use limiter::{LimiterKernel, LimiterNode, LimiterSet};
 pub use multiband::{BAND_PARAMS, MultibandCompressorNode, MultibandControls};

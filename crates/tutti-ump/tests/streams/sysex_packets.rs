@@ -4,7 +4,7 @@
 use crate::support::payload;
 use tutti_ump::{
     Message, MidiGroup, Sysex7Packet, Sysex7Packets, SysexAssembler, SysexError, SysexMessage,
-    SysexStatus, SysexStep, Ump,
+    SysexPart, SysexStatus, SysexStep, U7, Ump,
 };
 
 /// The packets of a payload of 7-bit values: the plain-bytes door.
@@ -244,4 +244,131 @@ fn unused_bytes_of_a_packet_are_zero() {
             assert_eq!(ump.0[2..], [0, 0], "{len}");
         }
     }
+}
+
+/// One part of a message as its packets' status and bytes.
+fn part_packets(data: &[u8], part: SysexPart) -> Vec<(SysexStatus, Vec<u8>)> {
+    let data: Vec<U7> = data.iter().map(|&b| U7::new(b).expect("7-bit")).collect();
+    Sysex7Packets::part(MidiGroup::of(0), &data, part)
+        .map(|ump| {
+            let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
+                panic!("not a SysEx7 packet");
+            };
+            (packet.status(), packet.data().to_vec())
+        })
+        .collect()
+}
+
+/// A message sent whole is one `Complete` of up to six bytes, none included;
+/// seven bytes are a `Start` of six and an `End` of one.
+/// Spec: m2-104/7.7#1, m2-104/7.7#2
+#[test]
+fn a_whole_message_part_is_complete_up_to_six_bytes() {
+    assert_eq!(part_packets(&[], SysexPart::Only), [(Complete, vec![])]);
+    let six = raw(&payload(6));
+    assert_eq!(
+        part_packets(&six, SysexPart::Only),
+        [(Complete, six.clone())]
+    );
+    let seven = raw(&payload(7));
+    assert_eq!(
+        part_packets(&seven, SysexPart::Only),
+        [(Start, seven[..6].to_vec()), (End, seven[6..].to_vec())]
+    );
+}
+
+/// The first part of a divided message opens with a `Start` and never ends the
+/// message; a middle part is `Continue`s; the last part closes with an `End`.
+/// Spec: m2-104/7.7#1, m2-104/7.7#2
+#[test]
+fn the_parts_of_a_divided_message_are_start_continue_end() {
+    let seven = raw(&payload(7));
+    assert_eq!(
+        part_packets(&seven, SysexPart::First),
+        [
+            (Start, seven[..6].to_vec()),
+            (Continue, seven[6..].to_vec())
+        ]
+    );
+    assert_eq!(
+        part_packets(&seven, SysexPart::Middle),
+        [
+            (Continue, seven[..6].to_vec()),
+            (Continue, seven[6..].to_vec())
+        ]
+    );
+    assert_eq!(
+        part_packets(&seven, SysexPart::Last),
+        [(Continue, seven[..6].to_vec()), (End, seven[6..].to_vec())]
+    );
+    let three = raw(&payload(3));
+    assert_eq!(
+        part_packets(&three, SysexPart::First),
+        [(Start, three.clone())]
+    );
+    assert_eq!(
+        part_packets(&three, SysexPart::Middle),
+        [(Continue, three.clone())]
+    );
+    assert_eq!(part_packets(&three, SysexPart::Last), [(End, three)]);
+}
+
+/// An empty part is one packet of no bytes.
+/// Spec: m2-104/7.7#1, m2-104/7.7#4
+#[test]
+fn an_empty_part_is_one_packet_of_no_bytes() {
+    assert_eq!(part_packets(&[], SysexPart::First), [(Start, vec![])]);
+    assert_eq!(part_packets(&[], SysexPart::Middle), [(Continue, vec![])]);
+    assert_eq!(part_packets(&[], SysexPart::Last), [(End, vec![])]);
+}
+
+/// `len()` of a part counts its packets.
+#[test]
+fn a_part_reports_its_packet_count() {
+    let data: Vec<U7> = (0..13).map(U7::of).collect();
+    let mut it = Sysex7Packets::part(MidiGroup::of(0), &data, SysexPart::Middle);
+    assert_eq!(it.len(), 3);
+    it.next();
+    assert_eq!(it.len(), 2);
+    let mut it = Sysex7Packets::part(MidiGroup::of(0), &data, SysexPart::First);
+    assert_eq!(it.len(), 3);
+    it.by_ref().for_each(drop);
+    assert_eq!(it.len(), 0);
+    let mut it = Sysex7Packets::part(MidiGroup::of(0), &data, SysexPart::Only);
+    assert_eq!(it.len(), 3);
+    it.next();
+    assert_eq!(it.len(), 2);
+}
+
+/// A part of exactly six bytes is one packet: a First opens (Start, never
+/// Complete), a Middle continues and a Last ends, with no empty packet after.
+/// Spec: m2-104/7.7#1, m2-104/7.7#2
+#[test]
+fn a_six_byte_part_is_one_packet_of_its_place() {
+    let six = raw(&payload(6));
+    assert_eq!(part_packets(&six, SysexPart::First), [(Start, six.clone())]);
+    assert_eq!(
+        part_packets(&six, SysexPart::Middle),
+        [(Continue, six.clone())]
+    );
+    assert_eq!(part_packets(&six, SysexPart::Last), [(End, six)]);
+}
+
+/// Twelve bytes: a whole message is Start and End of six each; a last part is
+/// Continue then End.
+/// Spec: m2-104/7.7#1, m2-104/7.7#2
+#[test]
+fn a_twelve_byte_part_is_two_full_packets() {
+    let twelve = raw(&payload(12));
+    assert_eq!(
+        part_packets(&twelve, SysexPart::Only),
+        [(Start, twelve[..6].to_vec()), (End, twelve[6..].to_vec())]
+    );
+    assert_eq!(
+        part_packets(&twelve, SysexPart::Last),
+        [
+            (Continue, twelve[..6].to_vec()),
+            (End, twelve[6..].to_vec())
+        ]
+    );
 }

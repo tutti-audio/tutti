@@ -1,24 +1,26 @@
 //! Regression gate for RT-safety: the MIDI border nodes process a block
 //! without allocating, events flowing — a device inlet's through the ingest
 //! node's translation onto its ports, a control thread's through the event
-//! inlet into the event tap's ring, and the clock's ticks.
+//! inlet into the event tap's ring, and the sync node's clock, timecode and
+//! Machine Control.
 
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, LoopRange,
-    Prepare, TransportPosition,
+    Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, Prepare,
+    TransportPosition,
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
-    ClockNode, DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode,
-    MidiKeys, MidiOutNode, MpeTransformNode, TimedHarmony, TimedMidiEvent,
+    DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode, MidiKeys,
+    MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
 };
-use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, Frame, FrameClock, LoopRange, Moment, SampleRate, Samples};
 use tutti_types::{MaxBlock, MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
 use crate::common;
 use tutti_fixtures::midi;
-use tutti_ump::{Address, BendValue, ControlValue, Flex, KeyEvent, Message, Voice2};
+use tutti_midi_protocol::{MtcRate, Recipient};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, Message, NoteKeyEvent, System, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -68,23 +70,21 @@ fn the_border_nodes_process_without_allocating() {
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
     let meter = tutti_transport::ProjectMeter::default();
-    let clock = ed
-        .insert(
-            NodeKey(3),
-            "clock",
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                meter.reader(),
-            ),
-        )
-        .controls;
+    let sync_meter = meter.clone();
+    ed.insert(
+        NodeKey(3),
+        "sync",
+        SyncOut::new(MidiGroup::FIRST)
+            .meter(move || sync_meter.reader())
+            .messages(SyncMessages {
+                clock: true,
+                mtc: true,
+                mmc: Some(Recipient::AllCall),
+                flex: true,
+                rate: MtcRate::Fps30,
+            }),
+    );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        flex: true,
-        ..Default::default()
-    });
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -93,6 +93,7 @@ fn the_border_nodes_process_without_allocating() {
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
+    let (mut clocks, mut quarter_frames, mut sysex) = (0usize, 0usize, 0usize);
     let (mut tempos, mut meters) = (0usize, 0usize);
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
@@ -104,10 +105,12 @@ fn the_border_nodes_process_without_allocating() {
                 NoteVelocity::new(0xC800),
             )
             .unwrap();
-            // Every path the Flex output has runs under the gate: a tempo that
+            // Every path of the sync output runs under the gate: a tempo that
             // changes each block (Set Tempo), a meter published off the grid
-            // every 20th block (Set Time Signature on the new bars), and a stop
-            // and start every 50th (the restate).
+            // every 20th block (Set Time Signature on the new bars, the reader
+            // lent over a changing meter), a stop and a start every 50th (Stop,
+            // Start, Play, Stop) and a jump every 30th (Song Position, a Full
+            // Message, a Locate).
             if b % 20 == 0 {
                 assert_no_alloc::permit_alloc(|| {
                     let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
@@ -119,7 +122,7 @@ fn the_border_nodes_process_without_allocating() {
                 });
             }
             let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
-            let at = Beat(f64::from(b) * 512.0 / 24_000.0);
+            let at = Beat(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
             exec.process(
                 512,
                 &TransportPosition::new(b % 50 != 0, tempo, at, None),
@@ -129,6 +132,9 @@ fn the_border_nodes_process_without_allocating() {
             let n = out.poll_into(&mut drain);
             for (_, ump) in &drain[..n] {
                 match ump.decode() {
+                    Ok(Message::System(_, System::TimingClock)) => clocks += 1,
+                    Ok(Message::System(_, System::TimeCode(_))) => quarter_frames += 1,
+                    Ok(Message::Sysex7(..)) => sysex += 1,
                     Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
                     Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
                     _ => {}
@@ -137,8 +143,14 @@ fn the_border_nodes_process_without_allocating() {
         }
     });
     assert_eq!(out.dropped(), 0);
-    // The emit paths ran under the gate: a Set Tempo for the changing tempo, a
-    // Set Time Signature for the published meters.
+    // The emit paths ran under the gate: ticks, quarter-frames, and the Full
+    // Messages and Machine Control commands (SysEx).
+    assert!(
+        clocks > 0 && quarter_frames > 0 && sysex > 0,
+        "{clocks} ticks, {quarter_frames} quarter-frames, {sysex} SysEx packets"
+    );
+    // A Set Tempo for the changing tempo, a Set Time Signature for the meters
+    // published mid-stream.
     assert!(tempos > 0 && meters > 0, "{tempos} tempos, {meters} meters");
 }
 
@@ -149,8 +161,8 @@ fn the_border_nodes_process_without_allocating() {
 fn an_epoch_change_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().following(&epochs));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
@@ -169,20 +181,20 @@ fn an_epoch_change_processes_without_allocating() {
             // A device goes every eighth block and another takes the input two
             // blocks on.
             match b % 8 {
-                0 => epochs.depart(),
-                2 => epochs.arrive(),
+                0 => writer.depart(),
+                2 => writer.arrive(),
                 _ => {}
             }
             exec.process(512, &t, &[], &mut []);
             let n = out.poll_into(&mut drain);
             offs += drain[..n]
                 .iter()
-                .filter(|(_, ump)| matches!(ump.key_event(), Some(KeyEvent::Off(_))))
+                .filter(|(_, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))))
                 .count();
         }
     });
     assert!(offs > 0, "the departures released the keys they held");
-    epochs.depart();
+    writer.depart();
     exec.process(512, &t, &[], &mut []);
     assert!(epochs.is_settled(), "the last departure was handled");
 }
@@ -433,7 +445,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();
     let region = tutti_types::LoopRange::new(start, end).unwrap();
-    let looping = Some(LoopRange { start, end });
+    let looping = Some(LoopRange::new(start, end).expect("a loop"));
     let mut clock = FrameClock::new(start, Bpm::of(120.0), SampleRate::of(RATE));
     let mut drain = [(0, Ump([0; 4])); 256];
     let mut block = |exec: &mut tutti_graph::Executor, clock: &mut FrameClock| {
@@ -574,9 +586,9 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
         exec.process(512, &t, &[], &mut []);
         let n = out.poll_into(&mut drain);
         for e in &drain[..n] {
-            match e.1.key_event() {
-                Some(tutti_ump::KeyEvent::On(_)) => sounding += 1,
-                Some(tutti_ump::KeyEvent::Off(_)) => sounding -= 1,
+            match e.1.note_key_event() {
+                Some(tutti_ump::NoteKeyEvent::On(_)) => sounding += 1,
+                Some(tutti_ump::NoteKeyEvent::Off(_)) => sounding -= 1,
                 _ => {}
             }
         }
@@ -746,14 +758,12 @@ fn the_mpe_transform_node_processes_without_allocating() {
     assert_eq!(out.dropped(), 0);
 }
 
-/// **The Machine Control node processes a block without allocating**, a
+/// **Machine Control out of a sync node processes a block without allocating**, a
 /// transport change inside it included: a start on frame 100, a stop on
 /// frame 300 and a jump with deferred play on frame 400 each send a message.
 #[test]
-fn the_machine_control_node_processes_without_allocating() {
+fn machine_control_out_of_a_sync_node_processes_without_allocating() {
     use tutti_graph::{Offset, TransportChanges};
-    use tutti_midi_protocol::{MtcRate, Recipient};
-    use tutti_midi_runtime::MachineControlNode;
 
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
@@ -761,7 +771,11 @@ fn the_machine_control_node_processes_without_allocating() {
         .insert(
             NodeKey(1),
             "mmc",
-            MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
+            SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
+                mmc: Some(Recipient::AllCall),
+                rate: MtcRate::Fps30,
+                ..SyncMessages::OFF
+            }),
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
@@ -815,4 +829,46 @@ fn the_machine_control_node_processes_without_allocating() {
     );
     assert_eq!(controls.losses().lost, 0);
     assert_eq!(out.dropped(), 0);
+}
+
+/// **`reset` allocates nothing**: the executor calls it on the audio thread as
+/// a node leaves bypass, on the ingest and sync nodes alike, after real
+/// traffic (a sync node that has sent clock, timecode, Machine Control and Flex
+/// holds state in each) and not only on a fresh node.
+#[test]
+fn resetting_the_border_nodes_allocates_nothing() {
+    use tutti_graph::Node;
+    use tutti_graph::contract::Direct;
+
+    let rate = SampleRate::SR_48K;
+    let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
+    let sync = SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
+        clock: true,
+        mtc: true,
+        mmc: Some(Recipient::AllCall),
+        flex: true,
+        rate: MtcRate::Fps30,
+    });
+    let mut sync = Direct::new(sync, rate, 64);
+    let sent = |d: &mut Direct<SyncOut>, playing: bool, beat: f64| {
+        d.set_transport(TransportPosition::new(
+            playing,
+            Bpm::of(120.0),
+            Beat(beat),
+            None,
+        ));
+        d.block();
+        d.events_out(0).len()
+    };
+    let traffic = |d: &mut Direct<SyncOut>| {
+        (0..8)
+            .map(|k| sent(d, k != 5, 1.0 + f64::from(k) * 64.0 / 24_000.0))
+            .sum::<usize>()
+    };
+    assert!(traffic(&mut sync) > 0, "the node has state to forget");
+    assert_no_alloc::assert_no_alloc(|| {
+        ingest.node.reset();
+        sync.node.reset();
+    });
+    assert!(traffic(&mut sync) > 0, "and works after the reset");
 }

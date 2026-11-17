@@ -8,9 +8,10 @@
 #![cfg(feature = "conformance")]
 
 use crate::active;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use active::{Active, ActiveExt};
-use tutti_vst3_host::{AudioBuffer, InputEvents, TransportInfo};
+use tutti_vst3_host::{InputEvents, TransportInfo};
 
 /// **A block skipped for a busy input list is silence, and counted.** The
 /// shared plugin's default mode renders `input + tag`, so a processed block is
@@ -20,13 +21,18 @@ fn a_block_is_skipped_while_the_plugin_holds_the_input_list() {
     let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
     let input = [[1.0f32; 16]; 2];
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let render = |plugin: &mut Active| {
         let mut out = [[9.0f32; 16]; 2];
         let [l, r] = &mut out;
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(ins[0].len()),
+            Planes::new(ins).expect("equal channels"),
+            PlanesMut::new(outs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let _ = plugin.process(&mut buffer, &InputEvents::default(), None, &transport);
         out
     };
@@ -66,7 +72,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
     let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
     let input = [[1.0f32; 16]; 2];
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
     automation.add_change(0u32.into(), 0, 0.5);
     let render = |plugin: &mut Active| {
@@ -74,7 +80,12 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
         let [l, r] = &mut out;
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(ins[0].len()),
+            Planes::new(ins).expect("equal channels"),
+            PlanesMut::new(outs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let _ = plugin.process(
             &mut buffer,
             &InputEvents::default(),
@@ -125,12 +136,17 @@ fn a_refused_set_processing_fails_the_block() {
     let [l, r] = &mut out;
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-    let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(ins[0].len()),
+        Planes::new(ins).expect("equal channels"),
+        PlanesMut::new(outs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     let result = plugin.try_process(
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     assert!(result.is_err(), "the refusal fails the block");
     assert!(

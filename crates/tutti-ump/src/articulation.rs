@@ -8,8 +8,8 @@
 //! field typed so a value the specification reserves cannot be written;
 //! [`NoteArticulation::from_attribute`] refuses one on the wire with an
 //! [`ArticulationError`]. [`NoteOffArticulation`] is the Note Off's side
-//! (§7, Figure 2). Whether the Profile is enabled is a MIDI-CI matter:
-//! `tutti-midi-device` reads it.
+//! (§7, Figure 2). Whether the Profile is enabled is a MIDI-CI matter, not
+//! this module's.
 
 use crate::{Attribute, NoteNumber, NoteVelocity, U4, Voice2};
 
@@ -951,9 +951,32 @@ impl NoteOffArticulation {
 /// let _ = ArticulationAttribute { kind: 0x18, data: 0 };
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "(u8, u16)", into = "(u8, u16)"))]
 pub struct ArticulationAttribute {
     kind: u8,
     data: u16,
+}
+
+// The serde form is the `(kind, data)` pair, read back only for a kind of the
+// articulation range.
+#[cfg(feature = "serde")]
+impl TryFrom<(u8, u16)> for ArticulationAttribute {
+    type Error = &'static str;
+
+    fn try_from((kind, data): (u8, u16)) -> Result<Self, Self::Error> {
+        match kind {
+            0x10..=0x1F => Ok(Self { kind, data }),
+            _ => Err("an articulation attribute type is 0x10 to 0x1F"),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<ArticulationAttribute> for (u8, u16) {
+    fn from(attribute: ArticulationAttribute) -> Self {
+        (attribute.kind, attribute.data)
+    }
 }
 
 impl ArticulationAttribute {

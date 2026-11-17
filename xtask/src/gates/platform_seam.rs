@@ -74,7 +74,7 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("crates/tutti-plugin-ipc/src/ipc/tests.rs", 4, PLUGINS),
     (
         "crates/tutti-plugin-ipc/src/subprocess/launch.rs",
-        10,
+        8,
         PLUGINS,
     ),
     ("crates/tutti-plugin-probe/src/lib.rs", 3, PLUGINS),
@@ -112,11 +112,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("crates/tutti-plugin/src/host/plugin_ref.rs", 2, PLUGINS),
     (
         "crates/tutti-plugin/tests/clap_nodes/clap_fork.rs",
-        2,
-        PLUGINS,
-    ),
-    (
-        "crates/tutti-plugin/tests/clap_nodes/clap_live.rs",
         2,
         PLUGINS,
     ),

@@ -15,7 +15,9 @@ workspace = true
 
 [features]
 default = []
-# `Serialize`/`Deserialize` on the address newtypes.
+# `Serialize`/`Deserialize` on every public value type a stored `Message` can
+# contain, field newtypes included: a range-checked one reads back through its
+# own check. `Ump`, the wire storage, is the one exception.
 serde = ["dep:serde"]
 
 [dependencies]

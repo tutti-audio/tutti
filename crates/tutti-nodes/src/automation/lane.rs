@@ -59,13 +59,13 @@ use super::Curve;
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{Beat, Bpm, SampleRate, Samples};
+/// use tutti_types::{Amplitude, Beat, Bpm, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo, TransportPosition};
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
 ///
-/// let mut trajectory: Trajectory = Trajectory::new();
-/// trajectory.add_breakpoint(Breakpoint::new(Beat(0.0), 0.0));
-/// trajectory.add_breakpoint(Breakpoint::new(Beat(4.0), 1.0));
+/// let mut trajectory: Trajectory<Amplitude> = Trajectory::new();
+/// trajectory.add_breakpoint(Breakpoint::new(Beat(0.0), Amplitude(0.0)));
+/// trajectory.add_breakpoint(Breakpoint::new(Beat(4.0), Amplitude(1.0)));
 ///
 /// // No inputs, one output (the curve's value).
 /// let lane = AutomationLaneNode::new(trajectory);
@@ -200,13 +200,13 @@ mod tests {
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
     use tutti_types::MaxBlock;
-    use tutti_types::{AtomicF32, Bpm, SampleRate, Samples};
+    use tutti_types::{AtomicF32, Bpm, Hz, SampleRate, Samples};
 
-    fn ramp_trajectory() -> Trajectory {
-        let mut env: Trajectory = Trajectory::new();
-        env.add_breakpoint(Breakpoint::new(Beat(0.0), 0.0));
-        env.add_breakpoint(Breakpoint::new(Beat(4.0), 1.0));
-        env.add_breakpoint(Breakpoint::new(Beat(8.0), 0.5));
+    fn ramp_trajectory() -> Trajectory<Hz> {
+        let mut env: Trajectory<Hz> = Trajectory::new();
+        env.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.0)));
+        env.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(1.0)));
+        env.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
         env
     }
 
@@ -277,9 +277,9 @@ mod tests {
 
     #[test]
     fn test_reset_clears_last_value() {
-        let mut flat: Trajectory = Trajectory::new();
-        flat.add_breakpoint(Breakpoint::new(Beat(0.0), 0.5));
-        flat.add_breakpoint(Breakpoint::new(Beat(8.0), 0.5));
+        let mut flat: Trajectory<Hz> = Trajectory::new();
+        flat.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
             AutomationLaneNode::new(flat),
             SampleRate::SR_48K,
@@ -294,10 +294,10 @@ mod tests {
 
     #[test]
     fn test_empty_trajectory_returns_zero() {
-        let empty: Trajectory = Trajectory::new();
+        let empty: Trajectory<Hz> = Trajectory::new();
         let lane = AutomationLaneNode::new(empty);
         assert_eq!(lane.value_at(Beat(5.0)), 0.0);
-        let empty: Trajectory = Trajectory::new();
+        let empty: Trajectory<Hz> = Trajectory::new();
         let out = render(AutomationLaneNode::new(empty), stopped_at(5.0), 1);
         assert_eq!(out[0], 0.0);
     }
@@ -321,9 +321,9 @@ mod tests {
     /// After a block, `last_value` is the block's last frame.
     #[test]
     fn test_process_updates_last_value() {
-        let mut flat: Trajectory = Trajectory::new();
-        flat.add_breakpoint(Breakpoint::new(Beat(0.0), 0.5));
-        flat.add_breakpoint(Breakpoint::new(Beat(8.0), 0.5));
+        let mut flat: Trajectory<Hz> = Trajectory::new();
+        flat.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
             AutomationLaneNode::new(flat),
             SampleRate::SR_48K,

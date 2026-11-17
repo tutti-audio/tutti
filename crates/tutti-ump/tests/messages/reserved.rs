@@ -13,12 +13,12 @@
 
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordBass, ChordName,
-    ChordPitch, ChordType, Direction, Field, FirstGroup, Flex, FlexAddress, FlexTextKind,
-    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
-    KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, UiHint, Ump,
-    Unknown, Utility, Voice2,
+    Accidental, Address, Alteration, AlterationKind, Attribute, BlockDirection, BlockSelect,
+    ChordBass, ChordName, ChordPitch, ChordType, Field, FirstGroup, Flex, FlexAddress,
+    FlexTextKind, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks,
+    GroupSpan, KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber,
+    NoteVelocity, Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4,
+    UiHint, Ump, Unknown, Utility, Voice2,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -441,7 +441,7 @@ fn an_inactive_function_block_with_zeroed_fields_is_still_read() {
     };
     assert!(!info.active);
     assert_eq!(info.id.value().map(FunctionBlockId::get), Some(5));
-    assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0));
+    assert!(matches!(info.direction, BlockDirection::Reserved(r) if r.get() == 0));
     assert!(matches!(info.groups_spanned, Field::Reserved(r) if r.get() == 0));
     assert_eq!(
         Ump::from(Message::Stream(Stream::FunctionBlockInfo(info))),
@@ -451,7 +451,7 @@ fn an_inactive_function_block_with_zeroed_fields_is_still_read() {
 
 #[test]
 fn a_later_revisions_reserved_codes_leave_the_message_readable() {
-    // Direction 0, MIDI 1.0 value 3, a block id above 31, a first group above
+    // BlockDirection 0, MIDI 1.0 value 3, a block id above 31, a first group above
     // 15 and a span of 0 or above 16, one at a time.
     for (words, check) in [
         ([0xF011_8300u32, 0x0402_0110u32], 0),
@@ -471,7 +471,7 @@ fn a_later_revisions_reserved_codes_leave_the_message_readable() {
             words
         );
         match check {
-            0 => assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0)),
+            0 => assert!(matches!(info.direction, BlockDirection::Reserved(r) if r.get() == 0)),
             1 => assert!(matches!(info.midi1, Midi1Port::Reserved(r) if r.get() == 3)),
             2 => assert!(matches!(info.id, Field::Reserved(r) if r.get() == 0x23)),
             3 => assert!(matches!(info.first_group, Field::Reserved(r) if r.get() == 0x10)),
@@ -683,9 +683,9 @@ fn a_constructed_message_encodes_no_reserved_value() {
         }
     }
     for direction in [
-        Direction::Input,
-        Direction::Output,
-        Direction::Bidirectional,
+        BlockDirection::Input,
+        BlockDirection::Output,
+        BlockDirection::Bidirectional,
     ] {
         for midi1 in [
             Midi1Port::No,

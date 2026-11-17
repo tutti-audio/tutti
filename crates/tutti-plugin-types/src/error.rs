@@ -4,8 +4,9 @@
 //! This is the *lean* error the shared traits speak — it carries only the
 //! failure modes a format loader can produce (load, state, process, editor),
 //! never the IPC/host-coupled variants (`ServerNotFound`, `ProtocolMismatch`,
-//! `IpcError`, …) that live on `tutti-plugin`'s `BridgeError`. The host crate
-//! maps `PluginError` into its richer `BridgeError` at the IPC boundary.
+//! `Timeout`, …) that live on [`BridgeError`](crate::BridgeError). The host
+//! crate maps `PluginError` into its richer `BridgeError` at the IPC boundary;
+//! a `BridgeError` with no lean counterpart travels in [`PluginError::Bridge`].
 
 use crate::editor::EditorError;
 use crate::load_stage::LoadStage;
@@ -48,9 +49,22 @@ pub enum PluginError {
     /// Opening / resizing the plugin editor failed.
     #[error("plugin editor error: {0}")]
     Editor(#[from] EditorError),
+    /// A bridge failure with no lean counterpart (the subprocess, the socket,
+    /// the shared memory), kept whole so widening it back to a
+    /// [`BridgeError`](crate::BridgeError) loses nothing.
+    #[error(transparent)]
+    Bridge(Box<crate::BridgeError>),
     /// Any other failure that doesn't fit the categories above.
     #[error("plugin error: {0}")]
     Other(String),
+}
+
+impl From<crate::PluginTooWide> for PluginError {
+    /// A block wider than a channel table: a constant reason, so the audio
+    /// thread builds it without allocating.
+    fn from(_: crate::PluginTooWide) -> Self {
+        Self::Block("the block is wider than the channel tables hold")
+    }
 }
 
 /// Result alias for the plugin-instance capability trait methods.

@@ -12,7 +12,6 @@
 use super::state::{HostState, PosixFdEntry, TRANSPORT_QUEUE, TimerEntry};
 use crate::types::{AudioPortsRescan, ParamRescan};
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 use tutti_clap_ffi::{AudioPortsRescanFlags, HostCallbacks, LogSeverity, ParamsRescanFlags};
 use tutti_plugin_types::{Request, RescanScope, TrackInfo, TransportRequest};
 
@@ -64,7 +63,7 @@ impl HostCallbacks for HostState {
     /// (visible through [`log_lines_dropped`](crate::ClapLoaded::log_lines_dropped)).
     /// That loses the message text, a real cost.
     fn log_dropped_on_audio_thread(&self) {
-        self.log.note_audio_thread_drop();
+        self.log_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
     fn request_restart(&self) {
@@ -99,11 +98,11 @@ impl HostCallbacks for HostState {
     }
 
     fn params_request_flush(&self) {
-        self.params.flush_requested.store(true, Ordering::Release);
+        self.flush_requested.store(true, Ordering::Release);
     }
 
     fn state_mark_dirty(&self) {
-        self.processing.state_dirty.store(true, Ordering::Release);
+        self.state_dirty.store(true, Ordering::Release);
     }
 
     fn latency_changed(&self) {
@@ -114,20 +113,8 @@ impl HostCallbacks for HostState {
         Request::TailChanged.raise(&self.requests);
     }
 
-    fn gui_resize_hints_changed(&self) {
-        self.gui.resize_hints_changed.store(true, Ordering::Release);
-    }
-
     fn gui_request_resize(&self, width: u32, height: u32) -> bool {
-        self.gui
-            .request_resize_width
-            .store(width, Ordering::Release);
-        self.gui
-            .request_resize_height
-            .store(height, Ordering::Release);
-        self.gui
-            .request_resize_pending
-            .store(true, Ordering::Release);
+        self.gui.resize_request.store([width, height]);
         true
     }
 
@@ -152,18 +139,21 @@ impl HostCallbacks for HostState {
         }
     }
 
+    /// The note dialects are read at activation, so a note-port change is
+    /// served as an I/O change: the lifecycle re-activates the plugin.
     fn note_ports_rescan(&self) {
-        self.notes.ports_changed.store(true, Ordering::Release);
+        Request::IoChanged.raise(&self.requests);
     }
 
     fn timer_register(&self, period_ms: u32) -> Option<u32> {
         let id = self.timer.next_id.fetch_add(1, Ordering::Relaxed);
         let mut timers = self.timer.timers.lock().ok()?;
-        let now = Instant::now();
+        // `register_timer` is `[main-thread]`, where reading the clock is
+        // allowed; the entry's period runs from this instant.
         let entry = TimerEntry {
             id,
             period_ms,
-            last_fire: now,
+            last_fire: self.timer.now(),
         };
         self.timer.note_due(entry.wake_at());
         timers.push(entry);
@@ -244,6 +234,27 @@ mod tests {
         state.audio_ports_rescan(AudioPortsRescanFlags::CHANNEL_COUNT);
         let got: Vec<_> = tutti_plugin_types::taken(&state.requests).collect();
         assert_eq!(got, [Request::IoChanged]);
+    }
+
+    /// The note dialects are read at activation, so a note-ports rescan is
+    /// an I/O change the lifecycle serves with a restart.
+    #[test]
+    fn a_note_ports_rescan_asks_for_a_restart() {
+        let state = HostState::new(tutti_fixtures::main_thread());
+        state.note_ports_rescan();
+        let got: Vec<_> = tutti_plugin_types::taken(&state.requests).collect();
+        assert_eq!(got, [Request::IoChanged]);
+    }
+
+    /// A take returns the last resize request once, then none.
+    #[test]
+    fn a_resize_request_is_taken_once() {
+        let state = HostState::new(tutti_fixtures::main_thread());
+        assert_eq!(state.gui.take_resize(), None);
+        assert!(state.gui_request_resize(640, 480));
+        assert!(state.gui_request_resize(800, 600));
+        assert_eq!(state.gui.take_resize(), Some([800, 600]));
+        assert_eq!(state.gui.take_resize(), None);
     }
 
     /// Two rescans between takes keep both requests, each once.

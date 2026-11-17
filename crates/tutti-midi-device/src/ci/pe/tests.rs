@@ -8,7 +8,7 @@ use super::*;
 use crate::MaxSysexSize;
 
 fn parse(text: &str) -> Result<PeHeader, PeHeaderError> {
-    PeHeader::parse(text.as_bytes())
+    PeHeader::try_from(text.as_bytes())
 }
 
 fn request(text: &str) -> PeRequest {
@@ -274,7 +274,7 @@ fn whitespace_outside_a_string_is_refused() {
     ] {
         assert!(
             matches!(
-                PeHeader::parse(bad.as_bytes()),
+                PeHeader::try_from(bad.as_bytes()),
                 Err(PeHeaderError::Malformed { .. })
             ),
             "{bad:?}"
@@ -356,11 +356,11 @@ fn a_non_ascii_byte_is_refused() {
     bytes.extend_from_slice("\u{e9}".as_bytes());
     bytes.extend_from_slice(br#""}"#);
     assert_eq!(
-        PeHeader::parse(&bytes),
+        PeHeader::try_from(bytes.as_slice()),
         Err(PeHeaderError::NotAscii { at: 28 })
     );
     assert!(matches!(
-        PeHeader::parse(b"{\"resource\":\"A\x80\"}"),
+        PeHeader::try_from(b"{\"resource\":\"A\x80\"}".as_slice()),
         Err(PeHeaderError::NotAscii { .. })
     ));
 }
@@ -597,7 +597,7 @@ fn what_the_writer_writes_the_reader_reads() {
     for header in everything() {
         let bytes = header.encode(big()).unwrap();
         assert!(bytes.is_ascii());
-        assert_eq!(PeHeader::parse(&bytes), Ok(header));
+        assert_eq!(PeHeader::try_from(bytes.as_slice()), Ok(header));
     }
 }
 
@@ -635,11 +635,11 @@ fn a_header_is_held_to_the_receivable_sysex_size() {
             limit: PE_MAX_HEADER_LEN
         })
     );
-    assert!(PeHeader::parse(&top).is_ok());
+    assert!(PeHeader::try_from(top.as_slice()).is_ok());
     let mut over = top;
     over.push(b' ');
     assert_eq!(
-        PeHeader::parse(&over),
+        PeHeader::try_from(over.as_slice()),
         Err(PeHeaderError::TooLong {
             len: PE_MAX_HEADER_LEN + 1
         })

@@ -496,7 +496,7 @@ impl<K> fmt::Debug for PoolSet<K> {
     }
 }
 
-/// One entry, declared under the app's key `K`: what a kind's builder
+/// One entry, declared under the pool key `K`: what a kind's builder
 /// (`audio_file(key, path)`) returns.
 #[must_use = "an entry is declared by passing it to Session::pool"]
 #[derive(Clone, Debug)]

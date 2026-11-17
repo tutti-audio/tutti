@@ -8,11 +8,12 @@ use tutti_dsp::{CompressorControls, GateControls, LimiterControls};
 use tutti_graph::contract::{Driven, assert_honest_tail, drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    BrickwallLimiterNode, CompressorNode, GateNode, KeySource, LimiterNode, Lookahead,
+    BrickwallLimiterNode, CompressorNode, DynamicEqConfig, DynamicEqNode, GateNode, KeySource,
+    LimiterNode, Lookahead,
 };
 use tutti_types::{
-    BusTopology, CompressionRatio, Db, Frame, Latency, SampleRate, Samples, Seconds, Tail,
-    UnitParam,
+    BusTopology, ChannelLayout, CompressionRatio, Db, Frame, Hz, Latency, Q, SampleRate, Samples,
+    Seconds, Tail, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -274,6 +275,33 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             }),
         ),
         (
+            // Nothing drives it per frame: the lane is not heard (see the loop).
+            "dynamic eq",
+            Box::new(|block, moved, _| {
+                render(
+                    DynamicEqNode::from(
+                        DynamicEqConfig::new(ChannelLayout::STEREO, Hz(1_000.0), Q(1.5))
+                            .threshold(Db(-30.0))
+                            .ratio(CompressionRatio(4.0))
+                            .knee(Db(6.0))
+                            .attack(Seconds(0.002))
+                            .release(Seconds(0.03))
+                            .key(KeySource::Sidechain),
+                    ),
+                    &[&audio[0], &audio[1], &key[0], &key[1]],
+                    &[],
+                    block,
+                    1_024,
+                    |set| {
+                        if moved {
+                            assert!(set.set(UnitParam::Ratio, 12.0));
+                            assert!(set.set(UnitParam::Cutoff, 2_500.0));
+                        }
+                    },
+                )
+            }),
+        ),
+        (
             "limiter",
             Box::new(|block, moved, driven| {
                 render(
@@ -319,7 +347,9 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             make(1_024, false, false),
             "{name}: the move is heard"
         );
-        assert_ne!(whole, make(1_024, true, false), "{name}: the lane is heard");
+        if *name != "dynamic eq" {
+            assert_ne!(whole, make(1_024, true, false), "{name}: the lane is heard");
+        }
         for block in [1, 16, 64, 128] {
             assert_eq!(make(block, true, true), whole, "{name}: blocks of {block}");
         }

@@ -5,6 +5,7 @@
 //! immutable and shared between clones; the scratch is per vocoder. A
 //! transform allocates nothing.
 
+use tutti_buffers::{Mono, MonoMut};
 pub(crate) use tutti_dsp::Complex32;
 use tutti_dsp::RealFft;
 
@@ -38,7 +39,7 @@ impl Fft {
     /// `real` (`size` samples) to `bins` (`size / 2 + 1`), `DC..=Nyquist`.
     /// DC's and Nyquist's imaginary parts are zero.
     pub(super) fn forward(&mut self, real: &[f32], bins: &mut [Complex32]) {
-        self.plan.forward(real, bins, &mut self.scratch);
+        self.plan.forward(Mono::new(real), bins, &mut self.scratch);
     }
 
     /// `bins` (`size / 2 + 1`) to `real` (`size` samples), unnormalized
@@ -48,6 +49,7 @@ impl Fft {
     /// The imaginary parts of DC and Nyquist do not belong to a real signal and
     /// are ignored.
     pub(super) fn inverse(&mut self, bins: &mut [Complex32], real: &mut [f32]) {
-        self.plan.inverse(bins, real, &mut self.scratch);
+        self.plan
+            .inverse(bins, MonoMut::new(real), &mut self.scratch);
     }
 }

@@ -18,7 +18,7 @@
 //! - a **phase-inverted** pair folds to a flat line — the clip looks like
 //!   silence and is not.
 //!
-//! [`PeakConfig`] carries a [`ChannelLayout`], [`PeakMeter::push`] refuses a
+//! [`PeakConfig`] carries a [`ChannelLayout`], [`Meter::push`] refuses a
 //! mis-strided chunk, and the meter carries a ragged *block* tail so a caller
 //! feeding chunks of any length loses nothing.
 //!
@@ -28,10 +28,12 @@
 //! semantics of folding first.
 
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{Amplitude, ChannelLayout, Samples};
+use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, Samples};
 
-use crate::convert::for_blocks;
-use crate::{Error, Result};
+use core::marker::PhantomData;
+
+use crate::convert::{Discard, for_blocks};
+use crate::{Error, Measure, Meter, Result};
 
 /// One block of a waveform summary, for one channel.
 ///
@@ -230,6 +232,17 @@ impl PeakBlocks {
     }
 }
 
+/// One whole block of a [`PeakMeter`] stream, with where it stands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChannelBlock {
+    /// The channel the block summarizes, from 0.
+    pub channel: ChannelIndex,
+    /// The frame the block starts at, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The block's summary.
+    pub block: PeakBlock,
+}
+
 /// How input is blocked: how many samples of one channel each block
 /// summarizes. The channel layout is the audio's, bound where it is measured
 /// ([`summarize`] takes it from its view, [`PeakConfig::measure`] from its
@@ -249,13 +262,18 @@ impl PeakConfig {
             samples_per_block: samples_per_block.into(),
         }
     }
+}
+
+impl<S: Sample> Measure<S> for PeakConfig {
+    type Context = ChannelLayout;
+    type Meter = PeakMeter<S>;
 
     /// A meter that blocks chunks `layout` wide.
     ///
     /// # Errors
     ///
     /// [`Error::ZeroBlock`] for a block of zero samples.
-    pub fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter> {
+    fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
         if self.samples_per_block.is_zero() {
             return Err(Error::ZeroBlock);
         }
@@ -266,6 +284,7 @@ impl PeakConfig {
             pending: vec![Vec::new(); channels],
             planes: vec![Vec::new(); channels],
             runs: vec![Vec::new(); channels],
+            sample: PhantomData,
         })
     }
 }
@@ -304,7 +323,7 @@ fn block_of(samples: &[f32]) -> PeakBlock {
 /// Not for the audio thread: the summary grows with the audio, so a push
 /// allocates.
 #[derive(Debug, Clone)]
-pub struct PeakMeter {
+pub struct PeakMeter<S: Sample = f32> {
     block: usize,
     layout: ChannelLayout,
     /// Per channel: samples of an incomplete block, all the same length.
@@ -313,36 +332,13 @@ pub struct PeakMeter {
     planes: Vec<Vec<f32>>,
     /// Per channel: the blocks completed so far.
     runs: Vec<Vec<PeakBlock>>,
+    sample: PhantomData<fn(S)>,
 }
 
-impl PeakMeter {
-    /// Blocks a chunk, appending whatever whole blocks it completes.
-    ///
-    /// Chunks need not align to block boundaries; the remainder is carried.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width:
-    /// the carried tail is `layout`-wide, so a chunk of another width spliced
-    /// onto it would realign at the wrong stride.
-    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
-        if chunk.layout() != self.layout {
-            return Err(Error::ChunkLayoutMismatch {
-                chunk: chunk.layout(),
-                config: self.layout,
-            });
-        }
-        for_blocks(chunk.samples(), chunk.channels(), |block| {
-            // `for_blocks` cuts whole frames, so the block is always one.
-            if let Ok(whole) = Interleaved::new(block, self.layout) {
-                self.step(whole);
-            }
-        });
-        Ok(())
-    }
-
-    /// Splits one chunk of whole frames into planes and cuts each into blocks.
-    fn step(&mut self, chunk: Interleaved<'_>) {
+impl<S: Sample> PeakMeter<S> {
+    /// Splits one chunk of whole frames into planes and cuts each into blocks,
+    /// calling `emit` with each whole block, channel by channel.
+    fn step(&mut self, chunk: Interleaved<'_>, emit: &mut impl FnMut(ChannelBlock)) {
         let frames = chunk.frames().get();
         for plane in &mut self.planes {
             plane.clear();
@@ -350,13 +346,25 @@ impl PeakMeter {
         }
         let split = PlanesMut::from_vecs(&mut self.planes).and_then(|out| deinterleave(chunk, out));
         debug_assert!(split.is_ok(), "the chunk is the meter's width: {split:?}");
-        for ((pending, plane), run) in self
+        let layout = self.layout;
+        for (channel, ((pending, plane), run)) in self
             .pending
             .iter_mut()
             .zip(&self.planes)
             .zip(&mut self.runs)
+            .enumerate()
         {
+            let done = run.len();
             cut_blocks(pending, self.block, plane, run);
+            for (i, &block) in run[done..].iter().enumerate() {
+                emit(ChannelBlock {
+                    channel: layout
+                        .index(channel)
+                        .expect("a meter has a plane per channel of its layout"),
+                    frame: Samples((done + i) * self.block),
+                    block,
+                });
+            }
         }
     }
 
@@ -370,14 +378,49 @@ impl PeakMeter {
             run.clear();
         }
     }
+}
+
+impl<S: Sample> Meter for PeakMeter<S> {
+    type Input<'a> = Interleaved<'a, S>;
+    type Item = ChannelBlock;
+    type Output = PeakBlocks;
+
+    /// Blocks a chunk, extending `out` with each whole block it completes as a
+    /// [`ChannelBlock`], channel by channel.
+    ///
+    /// Chunks need not align to block boundaries; the remainder is carried.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width:
+    /// the carried tail is `layout`-wide, so a chunk of another width spliced
+    /// onto it would realign at the wrong stride.
+    fn push(
+        &mut self,
+        chunk: Interleaved<'_, S>,
+        out: &mut impl Extend<ChannelBlock>,
+    ) -> Result<()> {
+        if chunk.layout() != self.layout {
+            return Err(Error::ChunkLayoutMismatch {
+                chunk: chunk.layout(),
+                config: self.layout,
+            });
+        }
+        for_blocks(chunk.samples(), chunk.channels(), |block| {
+            // `for_blocks` cuts whole frames, so the block is always one.
+            if let Ok(whole) = Interleaved::new(block, self.layout) {
+                self.step(whole, &mut |item| out.extend([item]));
+            }
+        });
+        Ok(())
+    }
 
     /// Emits the trailing partial block of every channel, if any, and hands
     /// back the summary, channel-major.
     ///
     /// [`summarize`] keeps a short final block, so the streaming path does too:
     /// the two agree on any input that is not a whole number of blocks.
-    #[must_use]
-    pub fn finish(mut self) -> PeakBlocks {
+    fn finish(mut self) -> PeakBlocks {
         for (pending, run) in self.pending.iter().zip(&mut self.runs) {
             if !pending.is_empty() {
                 run.push(block_of(pending));
@@ -435,14 +478,28 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
 ///
 /// [`Error::ZeroBlock`] for a block of zero samples.
 pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
-    let mut meter = cfg.measure(buffer.layout())?;
-    meter.push(buffer)?;
+    let mut meter = Measure::<S>::measure(cfg, buffer.layout())?;
+    meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
+
+    /// A layout wider than a bus is metered whole: every channel of a 24-channel buffer has
+    /// its blocks, indexed by its position.
+    #[test]
+    fn a_layout_wider_than_a_bus_meters_every_channel() {
+        let wide = ChannelLayout::from(24u16);
+        let samples: Vec<f32> = (0..4 * 24).map(|i| (i % 24) as f32 / 24.0).collect();
+        let blocks = summarize(&mono(4), Interleaved::new(&samples, wide).unwrap());
+        for c in 0..24 {
+            assert_eq!(ch(&blocks, c).len(), 1, "channel {c}");
+            assert_eq!(ch(&blocks, c)[0].max, c as f32 / 24.0, "channel {c}");
+        }
+    }
 
     /// `summarize` of a buffer that is valid for its config.
     fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
@@ -468,7 +525,9 @@ mod tests {
     ) -> PeakBlocks {
         let mut meter = cfg.measure(layout).unwrap();
         for part in samples.chunks(chunk * usize::from(layout.count())) {
-            meter.push(Interleaved::new(part, layout).unwrap()).unwrap();
+            meter
+                .push(Interleaved::new(part, layout).unwrap(), &mut Vec::new())
+                .unwrap();
         }
         meter.finish()
     }
@@ -534,7 +593,10 @@ mod tests {
         let mut meter = cfg.measure(ChannelLayout::STEREO).unwrap();
 
         assert_eq!(
-            meter.push(Interleaved::new(&[1.0f32, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap()),
+            meter.push(
+                Interleaved::new(&[1.0f32, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap(),
+                &mut Vec::new()
+            ),
             Err(Error::ChunkLayoutMismatch {
                 chunk: ChannelLayout::QUAD,
                 config: ChannelLayout::STEREO,
@@ -716,7 +778,9 @@ mod tests {
         assert!(empty.to_mono().is_empty());
         assert!(empty.as_flat().is_empty());
 
-        let blocks = mono(100).measure(ChannelLayout::MONO).unwrap().finish();
+        let blocks = Measure::<f32>::measure(&mono(100), ChannelLayout::MONO)
+            .unwrap()
+            .finish();
         assert!(blocks.is_empty(), "finish on an empty meter emits nothing");
     }
 
@@ -726,7 +790,9 @@ mod tests {
     fn an_empty_summary_has_no_channels_until_a_width_is_measured() {
         assert_eq!(PeakBlocks::default().layout(), ChannelLayout::EMPTY);
         assert_eq!(PeakBlocks::default().channel(0), None);
-        let blocks = mono(64).measure(ChannelLayout::STEREO).unwrap().finish();
+        let blocks = Measure::<f32>::measure(&mono(64), ChannelLayout::STEREO)
+            .unwrap()
+            .finish();
         assert_eq!(blocks.layout(), ChannelLayout::STEREO);
         assert!(blocks.is_empty());
     }
@@ -769,11 +835,17 @@ mod tests {
     fn reset_returns_to_a_fresh_meter() {
         let mut meter = mono(100).measure(ChannelLayout::MONO).unwrap();
         meter
-            .push(Interleaved::new(&[1.0f32; 150], ChannelLayout::MONO).unwrap())
+            .push(
+                Interleaved::new(&[1.0f32; 150], ChannelLayout::MONO).unwrap(),
+                &mut Vec::new(),
+            )
             .unwrap();
         meter.reset();
         meter
-            .push(Interleaved::new(&[2.0f32; 100], ChannelLayout::MONO).unwrap())
+            .push(
+                Interleaved::new(&[2.0f32; 100], ChannelLayout::MONO).unwrap(),
+                &mut Vec::new(),
+            )
             .unwrap();
         let blocks = meter.finish();
 
@@ -797,7 +869,10 @@ mod tests {
         // 50 frames: half a block on both channels, nothing emitted.
         let partial: Vec<f32> = (0..50).flat_map(|_| [1.0f32, -1.0]).collect();
         meter
-            .push(Interleaved::new(&partial, ChannelLayout::STEREO).unwrap())
+            .push(
+                Interleaved::new(&partial, ChannelLayout::STEREO).unwrap(),
+                &mut Vec::new(),
+            )
             .unwrap();
         meter.reset();
 
@@ -805,7 +880,10 @@ mod tests {
         // channel would report the earlier value's excursion too.
         let full: Vec<f32> = (0..100).flat_map(|_| [2.0f32, -2.0]).collect();
         meter
-            .push(Interleaved::new(&full, ChannelLayout::STEREO).unwrap())
+            .push(
+                Interleaved::new(&full, ChannelLayout::STEREO).unwrap(),
+                &mut Vec::new(),
+            )
             .unwrap();
         let blocks = meter.finish();
 
@@ -834,6 +912,69 @@ mod tests {
         assert_eq!(m.max, 2.0, "the upper of the two maxes");
         // sqrt((0² + 1²) / 2), not (0 + 1) / 2.
         assert!((m.rms.0 - 0.5f32.sqrt()).abs() < 1e-6, "got {}", m.rms.0);
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 frames and the rest) yields
+    /// every whole block of each channel as an item, in order, and its output
+    /// is `summarize`: the items are the output less the short final block.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_summarize_with_whole_blocks_as_items() {
+        let layout = ChannelLayout::STEREO;
+        let samples: Vec<f32> = (0..2 * 250).map(|i| ((i * 37) % 101) as f32).collect();
+        let cfg = mono(16);
+        let batch = summarize(&cfg, Interleaved::new(&samples, layout).unwrap());
+        let (items, blocks) = fold_uneven(&cfg, layout, 250, |meter, at, out| {
+            meter.push(
+                Interleaved::new(&samples[at.start * 2..at.end * 2], layout).unwrap(),
+                out,
+            )
+        })
+        .unwrap();
+        assert_eq!(blocks, batch);
+        assert_eq!(
+            batch.blocks_per_channel(),
+            16,
+            "15 whole blocks and a short one"
+        );
+        for channel in 0..2 {
+            let streamed: Vec<PeakBlock> = items
+                .iter()
+                .filter(|item| item.channel.get() == channel)
+                .map(|item| item.block)
+                .collect();
+            assert_eq!(streamed, ch(&batch, channel)[..15], "channel {channel}");
+            let frames: Vec<Samples> = items
+                .iter()
+                .filter(|item| item.channel.get() == channel)
+                .map(|item| item.frame)
+                .collect();
+            let starts: Vec<Samples> = (0..15).map(|i| Samples(i * 16)).collect();
+            assert_eq!(frames, starts, "each block names the frame it starts at");
+        }
+    }
+
+    /// With 3 and 6 channels over 5000 frames (runs that do not divide the
+    /// conversion block), channel `c` holding the constant `c + 1` summarizes to
+    /// blocks of exactly `c + 1` in channel `c`: a run cut off a frame boundary
+    /// moves a sample to another channel and breaks it.
+    #[test]
+    fn an_odd_and_a_wide_layout_keep_every_sample_on_its_channel() {
+        for channels in [3u16, 6] {
+            let layout = ChannelLayout::from(channels);
+            let width = usize::from(channels);
+            let samples: Vec<f32> = (0..5000 * width).map(|i| (i % width + 1) as f32).collect();
+            let blocks = summarize(&mono(100), Interleaved::new(&samples, layout).unwrap());
+            assert_eq!(blocks.blocks_per_channel(), 50);
+            for c in 0..width {
+                let want = (c + 1) as f32;
+                assert!(
+                    ch(&blocks, c)
+                        .iter()
+                        .all(|b| b.min == want && b.max == want && b.rms.0 == want),
+                    "channel {c} of {channels}"
+                );
+            }
+        }
     }
 }
 

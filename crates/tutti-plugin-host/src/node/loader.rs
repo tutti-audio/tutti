@@ -88,7 +88,7 @@ where
     let (inner, rt, restored) =
         Instance::<F>::load(main, work, path, load, sample_rate, MAX_BLOCK_SIZE, restore).map_err(
             |(stage, reason)| BridgeError::LoadFailed {
-                path: path.to_path_buf(),
+                path: Some(path.to_path_buf()),
                 stage,
                 reason,
             },
@@ -106,7 +106,7 @@ where
         loaded,
     } = wire(main, inner, rt, origin, sample_rate, 0).map_err(|(stage, reason)| {
         BridgeError::LoadFailed {
-            path: path.to_path_buf(),
+            path: Some(path.to_path_buf()),
             stage,
             reason,
         }

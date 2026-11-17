@@ -6,7 +6,16 @@ use tutti_midi_device::{EntropyError, random_bytes};
 
 use crate::Username;
 
-/// The 16 ASCII bytes a Host issues to a Client that must authenticate.
+/// The first printable ASCII character, the space.
+const PRINTABLE_FIRST: u8 = 32;
+/// The printable ASCII characters, `32..=126`.
+const PRINTABLE_COUNT: u8 = 95;
+/// The random bytes below this map onto the printable characters evenly: twice
+/// [`PRINTABLE_COUNT`].
+const UNBIASED_BELOW: u8 = 2 * PRINTABLE_COUNT;
+
+/// The 16 bytes of printable ASCII (`32..=126`) a Host issues to a Client that
+/// must authenticate (M2-124 section 6.7).
 ///
 /// A Client hashes it with its secret, so a digest from an earlier session
 /// does not authenticate a new one.
@@ -14,17 +23,48 @@ use crate::Username;
 pub struct Nonce([u8; 16]);
 
 impl Nonce {
-    /// The nonce with these bytes, or `None` when one is not ASCII.
+    /// The nonce with these bytes, or `None` when one is outside `32..=126`.
+    ///
+    /// The nonces this crate issues follow the specification's range for a
+    /// sender (M2-124 section 6.7). A nonce received from a peer is read
+    /// leniently: any ASCII is taken.
     #[must_use]
     pub fn new(bytes: [u8; 16]) -> Option<Self> {
+        bytes
+            .iter()
+            .all(|b| (PRINTABLE_FIRST..PRINTABLE_FIRST + PRINTABLE_COUNT).contains(b))
+            .then_some(Self(bytes))
+    }
+
+    /// A nonce a peer sent: any ASCII bytes. The range is a requirement on the
+    /// sender, and a received nonce is only hashed with the secret, so reading
+    /// one outside it costs nothing; the Client answers with the digest of the
+    /// bytes it was given.
+    pub(crate) fn from_wire(bytes: [u8; 16]) -> Option<Self> {
         bytes.is_ascii().then_some(Self(bytes))
     }
 
-    /// A nonce of printable ASCII (`32..=126`) from arbitrary bytes: each byte
-    /// picks a character.
-    #[must_use]
-    pub fn from_entropy(entropy: [u8; 16]) -> Self {
-        Self(entropy.map(|b| 32 + b % 95))
+    /// A nonce drawn from blocks of random bytes: each byte below 190 picks
+    /// the printable character `b % 95` above the space, and every other byte
+    /// is skipped, so the 95 characters are equally likely (190 is two whole
+    /// turns of 95; a modulo over all 256 values would favour the first 66).
+    /// More blocks are asked for until 16 characters are picked.
+    ///
+    /// # Errors
+    ///
+    /// The error of `next_block`, which ends the draw.
+    fn draw<E>(mut next_block: impl FnMut() -> Result<[u8; 16], E>) -> Result<Self, E> {
+        let mut nonce = [0u8; 16];
+        let mut filled = 0;
+        while filled < nonce.len() {
+            for byte in next_block()? {
+                if byte < UNBIASED_BELOW && filled < nonce.len() {
+                    nonce[filled] = PRINTABLE_FIRST + byte % PRINTABLE_COUNT;
+                    filled += 1;
+                }
+            }
+        }
+        Ok(Self(nonce))
     }
 
     /// A nonce from the operating system's random bytes.
@@ -33,7 +73,7 @@ impl Nonce {
     ///
     /// [`EntropyError`] when the operating system has no random bytes to give.
     pub fn random() -> Result<Self, EntropyError> {
-        random_bytes().map(Self::from_entropy)
+        Self::draw(random_bytes::<16>)
     }
 
     /// The 16 bytes.
@@ -89,5 +129,46 @@ impl Digest {
             hasher.update(part);
         }
         Self(hasher.finalize().into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_drawn_nonce_skips_the_bytes_that_would_bias_it() {
+        // 190 is two turns of 95: bytes from 190 up are skipped, the rest map
+        // to `32 + b % 95`.
+        let blocks = [
+            [
+                0, 94, 95, 189, 190, 191, 255, 254, 100, 101, 102, 103, 104, 105, 106, 107,
+            ],
+            [
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1, 2, 3, 4,
+            ],
+        ];
+        let mut next = blocks.iter();
+        let nonce = Nonce::draw(|| next.next().copied().ok_or(())).unwrap();
+        assert_eq!(
+            nonce.get(),
+            [
+                32, 126, 32, 126, 37, 38, 39, 40, 41, 42, 43, 44, 33, 34, 35, 36
+            ]
+        );
+    }
+
+    #[test]
+    fn a_draw_that_runs_out_of_entropy_fails_with_its_error() {
+        let mut blocks = 0;
+        let result = Nonce::draw(|| {
+            blocks += 1;
+            if blocks == 1 {
+                Ok([255; 16])
+            } else {
+                Err("dry")
+            }
+        });
+        assert_eq!(result, Err("dry"));
     }
 }

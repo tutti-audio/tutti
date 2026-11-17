@@ -1652,7 +1652,7 @@ mod tests {
             },
             body_limit: tutti_midi_device::BodyLimit::of(1 << 16),
         };
-        let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+        let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
         let mut ends = Vec::new();
         for member in &mut running.members {
             member.server.accept(peer, MAX_SYSEX);
@@ -1768,7 +1768,7 @@ mod tests {
                 "{group:?}"
             );
             let call = PropertyCall::Get(ResourceGet::new(
-                ResourceTarget::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
+                ResourceTarget::try_from(tutti_midi_device::PeResource::LocalOn).unwrap(),
             ));
             running.start_properties(
                 &mut vec![PropertyAsk {

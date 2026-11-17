@@ -25,7 +25,8 @@ use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, PropertyAsk, ReportAsk,
 };
 use tutti_midi_runtime::{
-    DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
+    DeviceEpochs, EpochWriter, InputReaders, InputWriters, JrStream, MidiIngestControls,
+    MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_types::{Resyncs, Seconds};
@@ -729,7 +730,7 @@ impl Peer for MidiOutput {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The input port of the `midi_input` entry under `key`.
     ///
     /// # Errors
@@ -738,11 +739,11 @@ impl<C: crate::Clock> Session<C> {
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed (an
     /// ambiguous saved device: the state carries the candidates).
-    pub fn midi_input<K>(&self, key: &K) -> Result<MidiInput, HandleError<K>>
+    pub fn midi_input<P>(&self, key: &P) -> Result<MidiInput, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.handle::<K, MidiInputEntry>(key)
+        self.pool.handle::<P, MidiInputEntry>(key)
     }
 
     /// The output port of the `midi_output` entry under `key`.
@@ -750,11 +751,11 @@ impl<C: crate::Clock> Session<C> {
     /// # Errors
     ///
     /// As [`midi_input`](Self::midi_input).
-    pub fn midi_output<K>(&self, key: &K) -> Result<MidiOutput, HandleError<K>>
+    pub fn midi_output<P>(&self, key: &P) -> Result<MidiOutput, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.handle::<K, MidiOutputEntry>(key)
+        self.pool.handle::<P, MidiOutputEntry>(key)
     }
 }
 
@@ -767,6 +768,9 @@ struct InputPort {
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiIngestControls,
+    /// The one writer of the node's epochs.
+    writer: EpochWriter,
+    /// The node's half of them.
     epochs: DeviceEpochs,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
@@ -1017,7 +1021,7 @@ impl Ports {
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
-                port.epochs.arrive();
+                port.writer.arrive();
                 port.open = Some(info.id.clone());
                 port.shared.open();
                 Ok(())
@@ -1044,7 +1048,7 @@ impl Ports {
             // A host that removed the inlet itself leaves nothing to take.
             let _ = graph.remove(key);
         }
-        port.epochs.depart();
+        port.writer.depart();
         port.controls.clear_mpe_profiles();
         // The device's peers went with its connection.
         port.end_requests(Gate::Away, Ended::Disconnected);
@@ -1482,7 +1486,7 @@ impl crate::Midi<'_> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let epochs = DeviceEpochs::new();
+        let (writer, epochs) = DeviceEpochs::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
@@ -1519,6 +1523,7 @@ impl crate::Midi<'_> {
             shared: Arc::clone(&shared),
             node,
             controls,
+            writer,
             epochs,
             inlet: None,
             saved,
@@ -1662,26 +1667,6 @@ impl Ports {
         for port in &mut self.outputs {
             crate::midi::drain_events(&mut port.tap, port.out.as_mut(), &mut port.losses, timing);
             port.fold_device_losses();
-        }
-    }
-
-    /// Sends `batch` to every output port, each event on its frame; a port with
-    /// no device counts them refused.
-    pub(crate) fn route(
-        &mut self,
-        batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        timing: Option<&crate::midi::OutputTiming>,
-    ) {
-        for port in &mut self.outputs {
-            crate::midi::route_batch(port.out.as_mut(), &mut port.losses, timing, batch);
-            port.fold_device_losses();
-        }
-    }
-
-    /// Counts `n` events as refused by every output port.
-    pub(crate) fn refuse(&mut self, n: u64) {
-        for port in &mut self.outputs {
-            port.losses.refused(n);
         }
     }
 }

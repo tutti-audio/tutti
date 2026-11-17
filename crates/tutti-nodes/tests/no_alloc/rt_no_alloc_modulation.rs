@@ -20,8 +20,8 @@ use tutti_nodes::{
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
-    BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement, SampleRate, Seconds,
-    UnitParam,
+    Ballistics, BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement,
+    SampleRate, Seconds, UnitParam,
 };
 use tutti_ump::{MidiChannel, U7};
 
@@ -406,27 +406,27 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     let mut shaped = Trajectory::new();
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.25),
-        1.0,
+        Hz(1.0),
         Law::PowerOut(Exponent::of(3.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.4),
-        0.2,
+        Hz(0.2),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    shaped.add_breakpoint(Breakpoint::new(Beat(0.55), 0.9));
-    let mut clamped = Trajectory::new().with_range(0.0, 0.5);
+    shaped.add_breakpoint(Breakpoint::new(Beat(0.55), Hz(0.9)));
+    let mut clamped = Trajectory::new().with_range(Hz(0.0), Hz(0.5));
     clamped.add_breakpoint(Breakpoint::with_law(
         Beat(0.1),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
-    clamped.add_breakpoint(Breakpoint::new(Beat(0.45), 1.0));
+    clamped.add_breakpoint(Breakpoint::new(Beat(0.45), Hz(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
         ControlLaneNode::for_unit(key.addr(), ControlProgram::from_curve(curve), None, None)
@@ -481,12 +481,7 @@ fn lane_block(
     bufs: &mut [Vec<f32>; 4],
 ) {
     let looping = tutti_types::LoopRange::new(tutti_types::Beat(0.1), tutti_types::Beat(0.5));
-    let graph_loop = looping.map(|l| tutti_graph::LoopRange {
-        start: l.start(),
-        end: l.end(),
-    });
-    let t =
-        tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), graph_loop);
+    let t = tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), looping);
     let [a, b, c, d] = bufs;
     exec.process(
         n,
@@ -704,10 +699,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
             let mut e = Trajectory::new();
             e.add_breakpoint(Breakpoint::with_law(
                 Beat(0.0),
-                200.0,
+                Hz(200.0),
                 Law::PowerIn(Exponent::of(2.0)),
             ));
-            e.add_breakpoint(Breakpoint::new(Beat(1.3), 800.0));
+            e.add_breakpoint(Breakpoint::new(Beat(1.3), Hz(800.0)));
             let curve: Arc<dyn tutti_modulation::Curve> = Arc::new(e);
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
         }
@@ -826,10 +821,10 @@ fn lanes_transport(clock: &tutti_types::FrameClock) -> tutti_graph::TransportPos
         true,
         clock.tempo(),
         clock.origin(),
-        Some(tutti_graph::LoopRange {
-            start: tutti_types::Beat(0.5),
-            end: tutti_types::Beat(1.7),
-        }),
+        Some(
+            tutti_types::LoopRange::new(tutti_types::Beat(0.5), tutti_types::Beat(1.7))
+                .expect("a loop"),
+        ),
     )
 }
 
@@ -1065,8 +1060,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             );
             let follower = EnvelopeFollowerNode::new(
                 id,
-                Seconds::from_f32(0.001 + 0.0005 * k as f32),
-                Seconds(0.03),
+                Ballistics::new(Seconds::from_f32(0.001 + 0.0005 * k as f32), Seconds(0.03))
+                    .unwrap(),
                 ChannelLayout::STEREO,
             );
             ed.insert(node, "follower", ForkByClone(follower));

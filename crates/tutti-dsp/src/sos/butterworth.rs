@@ -3,7 +3,7 @@
 
 use core::f64::consts::PI;
 
-use tutti_types::{Hz, SampleRate};
+use tutti_types::{Db, Hz, Q, SampleRate};
 
 use super::Sos;
 use crate::{Biquad, Complex64};
@@ -25,8 +25,9 @@ pub enum CutResponse {
     HighPass,
 }
 
-/// What [`Butterworth::design`] and [`LinkwitzRiley::design`] refuse: a cutoff that is not
-/// inside `(0, Nyquist)`, which depends on the rate.
+/// What the [`Sos`] designs refuse: a cutoff or center that is not inside `(0, Nyquist)`,
+/// which depends on the rate, a quality factor that is not above 0, or a gain beyond
+/// [`MAX_GAIN_MAGNITUDE`].
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SosError {
@@ -38,6 +39,46 @@ pub enum SosError {
         /// The Nyquist frequency of the rate.
         nyquist: Hz,
     },
+    /// A quality factor that is not finite and above 0.
+    #[error("quality factor {q:?} is not finite and above 0")]
+    QOutOfRange {
+        /// The rejected quality factor.
+        q: Q,
+    },
+    /// A gain that is not within [`MAX_GAIN_MAGNITUDE`] of 0 dB, or not a number.
+    #[error("gain {gain:?} is not within {} dB of unity", MAX_GAIN_MAGNITUDE.get())]
+    GainOutOfRange {
+        /// The rejected gain.
+        gain: Db,
+    },
+}
+
+/// The largest gain magnitude a bell or tilt design takes: 120 dB, past which a linear
+/// amplitude is no longer a usable figure.
+pub const MAX_GAIN_MAGNITUDE: Db = Db(120.0);
+
+/// `cutoff` in hertz when it is inside `(0, Nyquist)` of `rate`.
+pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<f64, SosError> {
+    let nyquist = rate.get() / 2.0;
+    let fc = f64::from(cutoff.get());
+    if fc > 0.0 && fc < nyquist {
+        Ok(fc)
+    } else {
+        Err(SosError::CutoffOutOfRange {
+            cutoff,
+            nyquist: Hz(nyquist as f32),
+        })
+    }
+}
+
+/// `gain` as a linear amplitude exponent in dB when it is within [`MAX_GAIN_MAGNITUDE`].
+pub(super) fn check_gain(gain: Db) -> Result<f64, SosError> {
+    let db = f64::from(gain.get());
+    if db.abs() <= f64::from(MAX_GAIN_MAGNITUDE.get()) {
+        Ok(db)
+    } else {
+        Err(SosError::GainOutOfRange { gain })
+    }
 }
 
 /// A Butterworth filter, described without a sample rate: maximally flat in the passband,
@@ -156,14 +197,7 @@ fn cascade(
     rate: SampleRate,
     into: &mut Sos,
 ) -> Result<(), SosError> {
-    let nyquist = rate.get() / 2.0;
-    let fc = f64::from(cutoff.get());
-    if !(fc > 0.0 && fc < nyquist) {
-        return Err(SosError::CutoffOutOfRange {
-            cutoff,
-            nyquist: Hz(nyquist as f32),
-        });
-    }
+    let fc = check_cutoff(cutoff, rate)?;
     let g = libm::tan(PI * fc / rate.get());
     let n = usize::from(order);
     let section = |a1: f64, a2: f64, first: bool| {

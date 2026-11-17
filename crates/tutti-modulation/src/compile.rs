@@ -26,8 +26,8 @@ use core::fmt;
 
 use tutti_curve::Law;
 use tutti_types::{
-    Adsr, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading, SamplePosition,
-    SampleRate, Samples, Seconds,
+    Adsr, Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading,
+    SamplePosition, SampleRate, Samples, Seconds,
 };
 
 use crate::curve::Curve;
@@ -717,8 +717,7 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), CompileError> {
             }
         }
         Source::Follower { attack, release } => {
-            let time = |s: Seconds| s.get() >= 0.0 && s.get().is_finite();
-            if time(*attack) && time(*release) {
+            if Ballistics::new(*attack, *release).is_some() {
                 Ok(())
             } else {
                 bad

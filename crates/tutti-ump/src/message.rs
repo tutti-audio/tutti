@@ -26,6 +26,7 @@ use crate::{
 /// new variant. A consumer that matches on it, and on the voice messages, is
 /// made to decide what a new message means when one is added here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Message {
     /// Message type `0x0`.
     Utility(Utility),
@@ -55,6 +56,7 @@ pub struct Unknown(pub Ump);
 
 /// A Group and a Channel within it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Address {
     /// The Group.
     pub group: MidiGroup,
@@ -66,6 +68,7 @@ pub struct Address {
 
 /// Utility messages (M2-104 §7.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Utility {
     /// No operation.
     Noop,
@@ -151,8 +154,7 @@ impl Message {
 
     /// A MIDI 2.0 channel voice message (message type `0x4`) at `address`;
     /// a bare [`MidiChannel`] addresses the first Group. A 7-bit value reaches
-    /// a MIDI 2.0 field through M2-115, in `tutti-midi-protocol`'s
-    /// `widen_velocity`, `widen_value` and `widen_bend`.
+    /// a MIDI 2.0 field through M2-115's scaling, not by a shift.
     ///
     /// ```
     /// use tutti_ump::{
@@ -181,6 +183,7 @@ impl Message {
 
 /// System Common and System Real Time messages (M2-104 §7.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum System {
     /// MIDI Time Code quarter frame: the byte `0nnndddd`.
     TimeCode(U7),
@@ -218,6 +221,7 @@ impl System {
 /// Exhaustive on purpose: MIDI 1.0's channel voice set is closed, and a match
 /// that ignores one is a match that should not compile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Voice1 {
     /// Note Off.
     NoteOff {
@@ -291,6 +295,7 @@ impl Voice1 {
 /// The role of a packet in a System Exclusive message (Tables 18 and 19).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SysexStatus {
     /// The whole message.
     Complete,
@@ -304,13 +309,101 @@ pub enum SysexStatus {
 
 /// One System Exclusive (7-bit) packet: up to 6 data bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        try_from = "(SysexStatus, u8, [U7; 6])",
+        into = "(SysexStatus, u8, [U7; 6])"
+    )
+)]
 pub struct Sysex7Packet {
     status: SysexStatus,
     len: u8,
     bytes: [U7; 6],
 }
 
+// The serde form of a packet is its fields as stored; a length above the
+// packet's capacity is refused on the way in.
+#[cfg(feature = "serde")]
+impl TryFrom<(SysexStatus, u8, [U7; 6])> for Sysex7Packet {
+    type Error = &'static str;
+
+    fn try_from((status, len, bytes): (SysexStatus, u8, [U7; 6])) -> Result<Self, Self::Error> {
+        if len > 6 {
+            return Err("a SysEx7 packet holds at most six bytes");
+        }
+        if bytes[usize::from(len)..].iter().any(|b| b.get() != 0) {
+            return Err("a SysEx7 packet's bytes past its length are zero");
+        }
+        Ok(Self { status, len, bytes })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<Sysex7Packet> for (SysexStatus, u8, [U7; 6]) {
+    fn from(packet: Sysex7Packet) -> Self {
+        (packet.status, packet.len, packet.bytes)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<(SysexStatus, u8, u8, [u8; 13])> for Sysex8Packet {
+    type Error = &'static str;
+
+    fn try_from(
+        (status, stream_id, len, bytes): (SysexStatus, u8, u8, [u8; 13]),
+    ) -> Result<Self, Self::Error> {
+        if len > 13 {
+            return Err("a SysEx8 packet holds at most 13 bytes");
+        }
+        if bytes[usize::from(len)..].iter().any(|&b| b != 0) {
+            return Err("a SysEx8 packet's bytes past its length are zero");
+        }
+        Ok(Self {
+            status,
+            stream_id,
+            len,
+            bytes,
+        })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<Sysex8Packet> for (SysexStatus, u8, u8, [u8; 13]) {
+    fn from(packet: Sysex8Packet) -> Self {
+        (packet.status, packet.stream_id, packet.len, packet.bytes)
+    }
+}
+
+impl SysexStatus {
+    /// The status of the next packet of a run: a first packet is a `Complete`
+    /// when nothing follows it and a `Start` otherwise, a later one an `End`
+    /// or a `Continue`.
+    pub(crate) const fn of_run(started: bool, more: bool) -> Self {
+        match (started, more) {
+            (false, false) => Self::Complete,
+            (false, true) => Self::Start,
+            (true, true) => Self::Continue,
+            (true, false) => Self::End,
+        }
+    }
+}
+
 impl Sysex7Packet {
+    /// The packet of `status` and up to six bytes of `data` (the rest of a
+    /// longer slice is not read).
+    pub(crate) fn of_chunk(status: SysexStatus, data: &[U7]) -> Self {
+        let chunk = &data[..data.len().min(6)];
+        let mut bytes = [U7::default(); 6];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        Self {
+            status,
+            len: chunk.len() as u8,
+            bytes,
+        }
+    }
+
     /// The packet, or `None` for more than 6 bytes or a byte of 128 or more.
     #[must_use]
     pub fn new(status: SysexStatus, data: &[u8]) -> Option<Self> {
@@ -365,6 +458,14 @@ impl Sysex7Packet {
 
 /// One System Exclusive 8 packet: a stream id and up to 13 data bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        try_from = "(SysexStatus, u8, u8, [u8; 13])",
+        into = "(SysexStatus, u8, u8, [u8; 13])"
+    )
+)]
 pub struct Sysex8Packet {
     status: SysexStatus,
     stream_id: u8,
@@ -373,6 +474,21 @@ pub struct Sysex8Packet {
 }
 
 impl Sysex8Packet {
+    /// The packet of the first 13 (or fewer) of `payload`, and the bytes after
+    /// them.
+    pub(crate) fn take(started: bool, stream_id: u8, payload: &[u8]) -> (Self, &[u8]) {
+        let (chunk, rest) = payload.split_at(payload.len().min(13));
+        let mut bytes = [0; 13];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        let packet = Self {
+            status: SysexStatus::of_run(started, !rest.is_empty()),
+            stream_id,
+            len: chunk.len() as u8,
+            bytes,
+        };
+        (packet, rest)
+    }
+
     /// The packet, or `None` for more than 13 data bytes. Only a
     /// [`Sysex8Stream`](crate::Sysex8Stream) writes packets; the others are
     /// decoded.
@@ -412,6 +528,7 @@ impl Sysex8Packet {
 
 /// Message type `0x5` (M2-104 §7.8 and §7.9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Data128 {
     /// A System Exclusive 8 packet.
     Sysex8(Sysex8Packet),
@@ -440,6 +557,7 @@ pub enum Data128 {
 /// A Mixed Data Set chunk header (§7.9): the first UMP of a chunk, which says
 /// how many payload UMPs follow it ([`MdsChunkSize::payload_umps`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MixedDataHeader {
     /// The set this chunk belongs to.
     pub mds_id: U4,
@@ -460,6 +578,7 @@ pub struct MixedDataHeader {
 /// carries no data. Types `0x10` to `0x1F` are the articulation attributes of
 /// the M2-123 Profile; the rest of `0x04` to `0xFF` are reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Attribute {
     /// Type `0x00`.
     None,
@@ -484,6 +603,7 @@ pub enum Attribute {
 /// message re-encodes exactly and no sender names one. [`TryFrom<u8>`] names a
 /// number the table defines and refuses a reserved one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RegisteredPerNoteController {
     /// 1: Modulation.
     Modulation,
@@ -635,6 +755,7 @@ impl Attribute {
 
 /// A Program Change's bank (§7.4.9), present when the Bank Valid bit is set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Bank {
     /// Bank MSB.
     pub msb: U7,
@@ -646,6 +767,7 @@ pub struct Bank {
 /// flags). A message that does neither has no defined function, so it is not a
 /// value of this type, and the decoder refuses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PerNoteManagement {
     /// D: the controllers are detached from the notes that sound, which keep
     /// their values until they end.
@@ -698,6 +820,7 @@ impl PerNoteManagement {
 /// Exhaustive on purpose: a message added to the set should break the match of
 /// an instrument that would otherwise ignore it without anyone choosing to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Voice2 {
     /// Registered Per-Note Controller.
     RegisteredPerNote {
@@ -935,6 +1058,7 @@ impl Voice2 {
 
 /// Where a Flex Data message goes (Table 10): one Channel, or the whole Group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FlexAddress {
     /// The Channel in the packet's Group.
     Channel(MidiChannel),
@@ -947,6 +1071,7 @@ pub enum FlexAddress {
 /// A note letter: `A` is 1 to `G` is 7. The field's `0` is `None` where a
 /// message uses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Letter {
     /// A.
     A,
@@ -970,6 +1095,7 @@ pub enum Letter {
 /// Metronome are Group messages and carry no address.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Flex {
     /// Set Tempo: units of 10 ns per quarter note.
     SetTempo(u32),
@@ -996,6 +1122,7 @@ pub enum Flex {
 
 /// Flex Data Set Time Signature fields (§7.5.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FlexTimeSignature {
     /// The numerator field.
     pub numerator: u8,
@@ -1015,6 +1142,7 @@ pub struct FlexTimeSignature {
 /// bar with a second part. A packet of another shape is read as
 /// [`Reserved`](Self::Reserved), which only the decoder builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BarAccents {
     /// The bar is not divided: Part 1 is the bar's beat count.
     Undivided(NonZeroU8),
@@ -1083,6 +1211,7 @@ impl BarAccents {
 
 /// Set Metronome fields (§7.5.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Metronome {
     /// MIDI clocks per primary click.
     pub clocks_per_click: u8,
@@ -1096,6 +1225,7 @@ pub struct Metronome {
 
 /// Set Key Signature fields (§7.5.7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KeySignature {
     /// Sharps or flats; `None` for the field's `-8`, unknown or non-standard.
     pub sharps_flats: Option<SharpsFlats>,
@@ -1105,6 +1235,7 @@ pub struct KeySignature {
 
 /// An accidental on a chord note (Tables 13 and 15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Accidental {
     /// Two flats.
     DoubleFlat,
@@ -1122,6 +1253,7 @@ pub enum Accidental {
 
 /// What an alteration does to a chord degree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AlterationKind {
     /// No alteration.
     None,
@@ -1139,6 +1271,7 @@ pub enum AlterationKind {
 
 /// A chord alteration: a kind and the degree it acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Alteration {
     /// What it does.
     pub kind: AlterationKind,
@@ -1148,6 +1281,7 @@ pub struct Alteration {
 
 /// A chord note with its accidental.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChordPitch {
     /// The accidental.
     pub accidental: Accidental,
@@ -1157,6 +1291,7 @@ pub struct ChordPitch {
 
 /// A chord's bass note and the chord on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChordBass {
     /// The bass note; `None` is the chord's own tonic (sharps/flats `-8`,
     /// note `0`).
@@ -1169,6 +1304,7 @@ pub struct ChordBass {
 
 /// Set Chord Name fields (§7.5.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChordName {
     /// The tonic's accidental.
     pub tonic_accidental: Accidental,
@@ -1185,6 +1321,7 @@ pub struct ChordName {
 /// The messages that use the Flex text format (Table 16).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FlexTextKind {
     /// Bank 1, status 0.
     UnknownMetadata,
@@ -1228,6 +1365,7 @@ pub enum FlexTextKind {
 
 /// A packet's place in a multi-packet message (Stream and Flex Format).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Form {
     /// The whole message.
     Complete,
@@ -1252,6 +1390,7 @@ pub enum Form {
 /// assert!(UmpVersion::new(1, 255) < UmpVersion::new(2, 0));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UmpVersion {
     /// Major. Declared first, so it orders before the minor.
     pub major: u8,
@@ -1274,6 +1413,7 @@ impl UmpVersion {
 /// reserved count (`33..=127`) as read from the wire, which only the decoder
 /// builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FunctionBlocks {
     /// A count M2-104 defines.
     Count(FunctionBlockCount),
@@ -1300,6 +1440,7 @@ impl From<FunctionBlockCount> for FunctionBlocks {
 
 /// Which notifications an Endpoint Discovery asks for (§7.1.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DiscoveryFilter {
     /// Endpoint Info.
     pub endpoint_info: bool,
@@ -1315,6 +1456,7 @@ pub struct DiscoveryFilter {
 
 /// An Endpoint Info Notification (§7.1.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndpointInfoNotification {
     /// The UMP version.
     pub version: UmpVersion,
@@ -1430,6 +1572,7 @@ impl FromStr for SoftwareRevision {
 /// The MIDI Protocol of a stream (§7.1.6.2).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Protocol {
     /// MIDI 1.0 (`0x01`).
     Midi1,
@@ -1441,6 +1584,7 @@ pub enum Protocol {
 
 /// The payload of Stream Configuration Request and Notification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StreamConfig {
     /// The protocol.
     pub protocol: Protocol,
@@ -1452,6 +1596,7 @@ pub struct StreamConfig {
 
 /// Which Function Block a Discovery asks about (§7.1.7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BlockSelect {
     /// One block.
     One(FunctionBlockId),
@@ -1463,6 +1608,7 @@ pub enum BlockSelect {
 
 /// Which notifications a Function Block Discovery asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockFilter {
     /// Function Block Info.
     pub info: bool,
@@ -1472,7 +1618,8 @@ pub struct BlockFilter {
 
 /// A Function Block's connection direction (§7.1.8); `0b00` is reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BlockDirection {
     /// Receives only.
     Input,
     /// Transmits only.
@@ -1485,6 +1632,7 @@ pub enum Direction {
 
 /// The primary role a Function Block declares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum UiHint {
     /// Unknown or undeclared.
     Unknown,
@@ -1498,6 +1646,7 @@ pub enum UiHint {
 
 /// Whether a Function Block is a MIDI 1.0 port; `0x03` is reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Midi1Port {
     /// Not a MIDI 1.0 port.
     No,
@@ -1511,13 +1660,14 @@ pub enum Midi1Port {
 
 /// A Function Block Info Notification (§7.1.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FunctionBlockInfo {
     /// Whether the block is active.
     pub active: bool,
     /// Which block.
     pub id: Field<FunctionBlockId>,
     /// Its direction.
-    pub direction: Direction,
+    pub direction: BlockDirection,
     /// Its UI hint.
     pub ui_hint: UiHint,
     /// MIDI 1.0 port status.
@@ -1535,6 +1685,7 @@ pub struct FunctionBlockInfo {
 /// UMP Stream messages (M2-104 §7.1). They address the endpoint, so they have
 /// no Group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stream {
     /// Endpoint Discovery.
     EndpointDiscovery {

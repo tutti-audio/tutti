@@ -46,14 +46,15 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int, c_longlong, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use tutti_plugin_types::ParamId;
 use tutti_vst3_host::{
-    AudioBuffer, InputEvents, LoadOptions, ParameterChanges, ProcessMode, TransportInfo,
-    Vst3Loaded, Vst3Sample, host::conformance,
+    InputEvents, LoadOptions, ParameterChanges, ProcessMode, TransportInfo, Vst3Loaded, Vst3Sample,
+    host::conformance,
 };
 #[path = "active.rs"]
 pub mod active;
@@ -472,7 +473,7 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
     }));
 
     let mut per_block = Vec::with_capacity(blocks.len());
-    let default_transport = TransportInfo::default();
+    let default_transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     for block in blocks {
         *seen.lock().unwrap() = false;
@@ -486,12 +487,12 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
         let in_refs: Vec<&[T]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [T]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let mut buffer = AudioBuffer {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: block.frames,
-            sample_rate: tutti_plugin_types::SampleRate::of(sample_rate),
-        };
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            Planes::new(&in_refs).expect("equal channels"),
+            PlanesMut::new(&mut out_refs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let events = InputEvents {
             midi: block.midi,
             ..Default::default()

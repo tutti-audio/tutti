@@ -60,10 +60,10 @@ pub fn parse(datagram: &[u8]) -> Result<Commands<'_>, SignatureError> {
     Ok(Commands { rest })
 }
 
-impl Iterator for Commands<'_> {
-    type Item = Result<Command, Refused>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl Commands<'_> {
+    /// The next command with the header it arrived under, which a NAK of the
+    /// command quotes as received.
+    pub(crate) fn next_received(&mut self) -> Option<Result<(Header, Command), Refused>> {
         if self.rest.is_empty() {
             return None;
         }
@@ -86,7 +86,20 @@ impl Iterator for Commands<'_> {
             }));
         };
         self.rest = after;
-        Some(Command::parse(header, payload).map_err(|error| Refused { header, error }))
+        Some(
+            Command::parse(header, payload)
+                .map(|command| (header, command))
+                .map_err(|error| Refused { header, error }),
+        )
+    }
+}
+
+impl Iterator for Commands<'_> {
+    type Item = Result<Command, Refused>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_received()
+            .map(|received| received.map(|(_, command)| command))
     }
 }
 

@@ -113,8 +113,8 @@ fn time(beat: f64, play: f64, epoch: u32) -> ProgramTime {
 /// A frozen trajectory: what a host hands as automation.
 fn trajectory() -> Arc<dyn Curve> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), 100.0));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), 900.0));
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(100.0)));
+    e.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(900.0)));
     Arc::new(e)
 }
 
