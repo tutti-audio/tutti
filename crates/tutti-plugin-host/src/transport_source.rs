@@ -358,7 +358,7 @@ fn played_across(
 ///
 /// The map's slope, held inside the segment the stretch starts in
 /// ([`TempoView::tempo_slope`]): exact for a
-/// [`RampTime`](tutti_tempo::Transition::RampTime { end: None }) ramp, whose tempo is linear in
+/// [`RampTime`](tutti_tempo::Transition::RampTime) ramp, whose tempo is linear in
 /// time, and a step inside the stretch adds no jump to it (a step is an event
 /// of its own). `0.0` when the transport is stopped, when the stretch reaches
 /// the loop's end (its last frame's beat is past `loop_end`: the beat jumps
