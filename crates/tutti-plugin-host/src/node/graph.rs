@@ -664,8 +664,6 @@ mod owed_tests {
     use tutti_plugin_types::{Load, MainThreadMarker};
     use tutti_vst2_host::Vst2Loaded;
 
-    use std::sync::atomic::Ordering;
-
     use tutti_graph::contract::Direct;
     use tutti_graph::{Event, Offset, ParamRamp};
     use tutti_types::SampleRate;
@@ -768,7 +766,7 @@ mod owed_tests {
             )
         });
         let inner = std::sync::Arc::clone(&client.inner);
-        let unlent = std::sync::Arc::clone(&client.unlent);
+        let unlent = client.unlent.clone();
         let controls = client.controls();
         let mut unit = Direct::new(
             client.bind(tutti_fixtures::tempo()),
@@ -789,11 +787,7 @@ mod owed_tests {
         );
         unit.block();
         pump(&inner);
-        assert_eq!(
-            unlent.load(Ordering::Relaxed),
-            1,
-            "the block had no Processor"
-        );
+        assert_eq!(unlent.get(), 1, "the block had no Processor");
         assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "not yet delivered");
         let stats = controls.param_delivery();
         assert_eq!(stats.chunks_deferred, 1);

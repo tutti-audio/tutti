@@ -15,8 +15,7 @@ use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tutti_rt::Doorbell;
-use tutti_rt::LockExt;
+use tutti_rt::{Doorbell, LockExt, Sleeper, Tally, doorbell, tally};
 use tutti_types::{AtomicSampleRate, SampleRate};
 
 /// How many commands the audio thread can queue before `push_command` fails.
@@ -37,7 +36,7 @@ pub(super) struct Channels {
     /// is empty, and the audio thread rings it after a push. The ring is
     /// wait-free (no lock, no allocation) and cannot be missed
     /// ([`Doorbell`]'s protocol), so the bridge needs no polling timeout.
-    bell: Arc<Doorbell>,
+    bell: Doorbell,
     /// The negotiated sample rate, as `f64::to_bits`. Lives here rather than
     /// only on `AudioBridge` because *both* threads size a timeout from the
     /// block period — the bridge thread its reply timeout, and the staleness
@@ -79,16 +78,16 @@ pub(super) struct Channels {
     /// How many unsolicited parameter events the bridge thread dropped
     /// because more arrived during one command than its inbox holds, ever.
     /// Each drop also raises a `Resync(ParamValues)`, so the host re-reads.
-    dropped_param_events: Arc<AtomicU64>,
+    dropped_param_events: Tally<u64>,
     /// MIDI events the bridge thread did not send, ever: a stale block's,
     /// and the rest of a SysEx that lost packets with it. Shared with the
     /// plugin node's controls, which add it to the node's own count.
-    dropped_midi: Arc<AtomicU64>,
+    dropped_midi: Tally<u64>,
     /// Chunks the bridge thread skipped as stale, ever: more than
     /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
     /// host's again. Shared with the pipeline's counters
     /// (`ChunkCounters::attach_skipped`).
-    skipped: Arc<AtomicU64>,
+    skipped: Tally<u64>,
     /// What became of each of the last [`FATES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
     fates: Arc<Fates>,
@@ -164,24 +163,28 @@ impl Fates {
 }
 
 impl Channels {
-    pub(super) fn new(sample_rate: SampleRate) -> Self {
-        Self {
+    /// The channels and the [`Sleeper`] of the bridge thread's doorbell,
+    /// which that thread alone waits on.
+    pub(super) fn new(sample_rate: SampleRate) -> (Self, Sleeper) {
+        let (bell, sleeper) = doorbell();
+        let channels = Self {
             commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             audio_responses: Arc::new(ArrayQueue::new(RESPONSE_QUEUE_SIZE)),
             newest_seq: Arc::new(AtomicU64::new(0)),
-            bell: Arc::new(Doorbell::new()),
+            bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             settled: Arc::new(AtomicU64::new(0)),
             abandoned: Arc::new(AtomicU64::new(0)),
             replies: Arc::new(AtomicU64::new(0)),
-            dropped_param_events: Arc::new(AtomicU64::new(0)),
-            dropped_midi: Arc::new(AtomicU64::new(0)),
-            skipped: Arc::new(AtomicU64::new(0)),
+            dropped_param_events: tally(),
+            dropped_midi: tally(),
+            skipped: tally(),
             fates: Arc::new(Fates::new()),
             news: Arc::default(),
             probe: Arc::default(),
-        }
+        };
+        (channels, sleeper)
     }
 
     /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so
@@ -217,8 +220,9 @@ impl Channels {
     /// leave, whichever is already true or comes first. May return with
     /// neither (a spurious wake-up): the caller rechecks. `stop` reads what
     /// whoever ends the loop publishes before calling [`wake`](Self::wake).
-    pub(super) fn wait_for_command(&self, stop: impl FnOnce() -> bool) {
-        self.bell.wait(|| !self.commands.is_empty() || stop());
+    /// `sleeper` is the one [`new`](Self::new) returned.
+    pub(super) fn wait_for_command(&self, sleeper: &mut Sleeper, stop: impl FnOnce() -> bool) {
+        sleeper.wait(|| !self.commands.is_empty() || stop());
     }
 
     /// The control connection has bytes to read: publishes it and rings the
@@ -330,26 +334,26 @@ impl Channels {
         self.abandoned.load(Ordering::Relaxed)
     }
 
-    /// Record `n` dropped unsolicited parameter events. Bridge thread only;
-    /// `Relaxed`: a count nothing branches on.
+    /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
+    /// count nothing branches on.
     pub(super) fn note_dropped_param_events(&self, n: u64) {
         if n > 0 {
-            self.dropped_param_events.fetch_add(n, Ordering::Relaxed);
+            self.dropped_param_events.writer().add(n);
         }
     }
 
-    /// Record `n` MIDI events not sent. Bridge thread only; `Relaxed`: a
-    /// count nothing branches on.
+    /// Record `n` MIDI events not sent. Bridge thread only; a count nothing
+    /// branches on.
     pub(super) fn note_dropped_midi(&self, n: u64) {
         if n > 0 {
-            self.dropped_midi.fetch_add(n, Ordering::Relaxed);
+            self.dropped_midi.writer().add(n);
         }
     }
 
-    /// Record a chunk skipped as stale. Bridge thread only; `Relaxed`: a count
-    /// nothing branches on.
+    /// Record a chunk skipped as stale. Bridge thread only; a count nothing
+    /// branches on.
     pub(super) fn note_skipped(&self) {
-        self.skipped.fetch_add(1, Ordering::Relaxed);
+        self.skipped.writer().add(1);
     }
 
     /// Record what became of chunk `seq`. Bridge thread only.
@@ -363,19 +367,19 @@ impl Channels {
     }
 
     /// The cell [`note_skipped`](Self::note_skipped) counts into.
-    pub(super) fn skipped_cell(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.skipped)
+    pub(super) fn skipped_cell(&self) -> Tally<u64> {
+        self.skipped.clone()
     }
 
     /// The cell [`note_dropped_midi`](Self::note_dropped_midi) counts into.
-    pub(super) fn dropped_midi_cell(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.dropped_midi)
+    pub(super) fn dropped_midi_cell(&self) -> Tally<u64> {
+        self.dropped_midi.clone()
     }
 
     /// How many unsolicited parameter events were dropped, over the life of
     /// the bridge.
     pub(super) fn dropped_param_events(&self) -> u64 {
-        self.dropped_param_events.load(Ordering::Relaxed)
+        self.dropped_param_events.get()
     }
 
     /// Pushes, then rings the bridge thread's doorbell, so the socket
@@ -418,7 +422,7 @@ impl Channels {
 mod tests {
     use super::*;
 
-    fn channels() -> Channels {
+    fn channels() -> (Channels, Sleeper) {
         Channels::new(SampleRate::SR_48K)
     }
 
@@ -426,7 +430,7 @@ mod tests {
     /// who sees the first grow while the second does not has a hang.
     #[test]
     fn blocks_abandoned_and_replies_are_counted_apart() {
-        let c = channels();
+        let (c, _) = channels();
         assert_eq!(c.block_counts(), (0, 0));
         for _ in 0..3 {
             c.note_abandoned();
@@ -444,6 +448,7 @@ mod tests {
     /// report it, until `stop`. Returns the handle once it is parked.
     fn bridge(
         c: &Channels,
+        mut sleeper: Sleeper,
         stop: &Arc<std::sync::atomic::AtomicBool>,
     ) -> (
         std::thread::JoinHandle<()>,
@@ -455,7 +460,7 @@ mod tests {
             while !stop.load(Ordering::Acquire) {
                 match c.pop_command() {
                     Some(cmd) => tx.send(cmd).unwrap(),
-                    None => c.wait_for_command(|| stop.load(Ordering::Acquire)),
+                    None => c.wait_for_command(&mut sleeper, || stop.load(Ordering::Acquire)),
                 }
             }
         });
@@ -470,9 +475,9 @@ mod tests {
     /// fence and load.
     #[test]
     fn a_push_wakes_a_parked_bridge_without_allocating() {
-        let c = channels();
+        let (c, sleeper) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, &stop);
+        let (t, rx) = bridge(&c, sleeper, &stop);
         while !c.bell.is_asleep() {
             std::thread::yield_now();
         }
@@ -490,9 +495,9 @@ mod tests {
     /// is no backstop timeout to hide it).
     #[test]
     fn no_pushed_command_waits_on_a_missed_wake_up() {
-        let c = channels();
+        let (c, sleeper) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, &stop);
+        let (t, rx) = bridge(&c, sleeper, &stop);
         for i in 0..20_000u32 {
             // Alternate a spin so the push lands both before and after the park.
             for _ in 0..(i % 64) {
@@ -511,9 +516,9 @@ mod tests {
     /// is how `shutdown` reaches a parked bridge when its queue was full.
     #[test]
     fn wake_ends_a_wait_with_nothing_queued() {
-        let c = channels();
+        let (c, sleeper) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, _rx) = bridge(&c, &stop);
+        let (t, _rx) = bridge(&c, sleeper, &stop);
         while !c.bell.is_asleep() {
             std::thread::yield_now();
         }

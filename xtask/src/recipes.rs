@@ -251,6 +251,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt",
     ),
     (
+        "check-session-api",
+        "",
+        "tutti-session's public API has no `run` or `*_blocking`, and only the rows of xtask/session-api-allow.txt hold a MainThreadMarker",
+    ),
+    (
         "check-building",
         "",
         "a configured thing is built by the one shape, bar the rows of xtask/building-baseline.txt and the gate's allow-list",
@@ -601,6 +606,7 @@ impl Planner<'_> {
             "check-comments" => self.out.push(Step::Gate(Gate::Comments)),
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
+            "check-session-api" => self.out.push(Step::Gate(Gate::SessionApi)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
@@ -733,6 +739,7 @@ impl Planner<'_> {
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
+                    "check-session-api",
                 ] {
                     self.dep(d)?;
                 }
@@ -905,6 +912,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test doorbell_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_word_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test ring_loom"#,

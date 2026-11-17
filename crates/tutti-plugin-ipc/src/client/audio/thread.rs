@@ -12,7 +12,7 @@ use crate::transport::control::{self as ipc, ControlStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_plugin_types::{BridgeError, PluginFailure};
-use tutti_rt::{StopToken, ThreadHandle};
+use tutti_rt::{Sleeper, StopToken, ThreadHandle};
 
 /// The bridge thread of an `AudioBridge`: it speaks to
 /// the server for the queues. Dropping it shuts it down and joins it.
@@ -33,6 +33,7 @@ impl std::fmt::Debug for BridgeThread {
 impl BridgeThread {
     pub(super) fn spawn(
         channels: Channels,
+        sleeper: Sleeper,
         payloads: PayloadPool,
         lifecycle: Lifecycle,
         listener: ListenerSlot,
@@ -44,6 +45,7 @@ impl BridgeThread {
         let handle = tutti_rt::spawn_named("plugin-bridge", None, move |_| {
             run_thread(
                 thread_channels,
+                sleeper,
                 thread_payloads,
                 thread_lifecycle,
                 listener,
@@ -89,6 +91,7 @@ impl Drop for BridgeThread {
 
 fn run_thread(
     channels: Channels,
+    mut sleeper: Sleeper,
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
@@ -168,7 +171,14 @@ fn run_thread(
             None
         }
     };
-    pump(&channels, &payloads, &lifecycle, &listener, &mut lanes);
+    pump(
+        &channels,
+        &mut sleeper,
+        &payloads,
+        &lifecycle,
+        &listener,
+        &mut lanes,
+    );
     // The watcher ends with the pump, whether the bridge was shut down or the
     // connection failed: asked to stop, never waited for (it ends within one
     // slice, and drops its duplicate of the connection then).
@@ -260,6 +270,7 @@ fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
 /// watcher and `shutdown` each ring the doorbell, and a spurious return loops.
 fn pump(
     channels: &Channels,
+    sleeper: &mut Sleeper,
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
@@ -279,7 +290,9 @@ fn pump(
                 // and the watcher rings it when the server speaks. The ring
                 // cannot be lost and `shutdown` rings it too, so there is no
                 // timeout. A spurious return just loops.
-                channels.wait_for_command(|| !lifecycle.is_running() || channels.news_pending());
+                channels.wait_for_command(sleeper, || {
+                    !lifecycle.is_running() || channels.news_pending()
+                });
                 continue;
             }
         };
@@ -377,7 +390,7 @@ mod tests {
     fn a_crash_drain_counts_the_queued_midi() {
         use tutti_plugin_types::WireMidi;
 
-        let channels = Channels::new(SampleRate::SR_48K);
+        let channels = Channels::new(SampleRate::SR_48K).0;
         for n in [3, 0, 2] {
             let mut payload = Box::new(ProcessPayload::empty());
             for _ in 0..n {
@@ -390,12 +403,7 @@ mod tests {
         }
         drain_with_errors(&channels);
         assert!(channels.pop_command().is_none());
-        assert_eq!(
-            channels
-                .dropped_midi_cell()
-                .load(std::sync::atomic::Ordering::Relaxed),
-            5
-        );
+        assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
 
     /// **A bridge that never connects counts the MIDI queued before it
@@ -405,7 +413,7 @@ mod tests {
     fn a_failed_connect_counts_the_queued_midi() {
         use tutti_plugin_types::WireMidi;
 
-        let channels = Channels::new(SampleRate::SR_48K);
+        let (channels, sleeper) = Channels::new(SampleRate::SR_48K);
         let lifecycle = Lifecycle::new(
             Arc::new(crate::ServerWatch::new()),
             tutti_plugin_types::Timeouts::default(),
@@ -422,6 +430,7 @@ mod tests {
             std::env::temp_dir().join(format!("tutti-no-such-bridge-{}.sock", std::process::id()));
         run_thread(
             channels.clone(),
+            sleeper,
             PayloadPool::new(),
             lifecycle.clone(),
             Arc::new(parking_lot::Mutex::new(None)),
@@ -429,12 +438,7 @@ mod tests {
         );
         assert!(lifecycle.is_crashed());
         assert!(channels.pop_command().is_none());
-        assert_eq!(
-            channels
-                .dropped_midi_cell()
-                .load(std::sync::atomic::Ordering::Relaxed),
-            4
-        );
+        assert_eq!(channels.dropped_midi_cell().get(), 4);
     }
 
     /// **A drain hands every held event to the listener and publishes the
@@ -442,7 +446,7 @@ mod tests {
     /// test pins what it keeps; this pins that `pump`'s drain reports it.
     #[test]
     fn a_drain_reports_the_drops() {
-        let channels = Channels::new(SampleRate::SR_48K);
+        let channels = Channels::new(SampleRate::SR_48K).0;
         let heard = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let listener: ListenerSlot = {
             let heard = Arc::clone(&heard);

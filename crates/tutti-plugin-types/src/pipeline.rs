@@ -1,8 +1,9 @@
 //! The audio path's block pipeline: the chunk ceiling both ends of the process
 //! edge size to, and what the path counts of the blocks and chunks it sent.
 
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use tutti_rt::Tally;
 
 /// The largest chunk that crosses the process edge: the largest device
 /// callback a live plugin keeps in step with, and so the ceiling on the
@@ -62,7 +63,7 @@ pub struct ChunkCounters {
     pub unanswered: AtomicU64,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
-    skipped: OnceLock<Arc<AtomicU64>>,
+    skipped: OnceLock<Tally<u64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -94,15 +95,13 @@ impl ChunkCounters {
     }
 
     /// Reads the bridge thread's count of skipped chunks (the node's bind).
-    pub fn attach_skipped(&self, skipped: Arc<AtomicU64>) {
+    pub fn attach_skipped(&self, skipped: Tally<u64>) {
         let _ = self.skipped.set(skipped);
     }
 
     /// See `PluginControls::skipped_chunks`.
     pub fn skipped(&self) -> u64 {
-        self.skipped
-            .get()
-            .map_or(0, |skipped| skipped.load(Ordering::Relaxed))
+        self.skipped.get().map_or(0, Tally::get)
     }
 
     /// See `PluginControls::late_chunks`.

@@ -12,13 +12,13 @@ use tutti_midi_runtime::{
     ClockNode, DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode,
     MidiKeys, MidiOutNode, MpeTransformNode, TimedHarmony, TimedMidiEvent,
 };
-use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
+use tutti_types::{MaxBlock, MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
 use crate::common;
 use tutti_fixtures::midi;
-use tutti_ump::{Address, BendValue, ControlValue, KeyEvent, Message, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, KeyEvent, Message, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -67,15 +67,24 @@ fn the_border_nodes_process_without_allocating() {
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
+    let meter = tutti_transport::ProjectMeter::default();
     let clock = ed
         .insert(
             NodeKey(3),
             "clock",
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                tutti_types::SampleRate::SR_48K,
+                meter.reader(),
+            ),
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
-    clock.set_enabled(true);
+    clock.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        flex: true,
+        ..Default::default()
+    });
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -84,6 +93,7 @@ fn the_border_nodes_process_without_allocating() {
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
+    let (mut tempos, mut meters) = (0usize, 0usize);
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
             busy(&mut dev, u64::from(b));
@@ -94,17 +104,42 @@ fn the_border_nodes_process_without_allocating() {
                 NoteVelocity::new(0xC800),
             )
             .unwrap();
+            // Every path the Flex output has runs under the gate: a tempo that
+            // changes each block (Set Tempo), a meter published off the grid
+            // every 20th block (Set Time Signature on the new bars), and a stop
+            // and start every 50th (the restate).
+            if b % 20 == 0 {
+                assert_no_alloc::permit_alloc(|| {
+                    let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
+                    meter.set_meter(MeterMap::new([
+                        MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
+                        MeterChange::new(Beat(0.1), TimeSignature::of(signature.0, signature.1)),
+                    ]));
+                    meter.reclaim();
+                });
+            }
+            let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
             let at = Beat(f64::from(b) * 512.0 / 24_000.0);
             exec.process(
                 512,
-                &TransportPosition::new(true, Bpm::of(120.0), at, None),
+                &TransportPosition::new(b % 50 != 0, tempo, at, None),
                 &[],
                 &mut [],
             );
-            let _ = out.poll_into(&mut drain);
+            let n = out.poll_into(&mut drain);
+            for (_, ump) in &drain[..n] {
+                match ump.decode() {
+                    Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
+                    Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
+                    _ => {}
+                }
+            }
         }
     });
     assert_eq!(out.dropped(), 0);
+    // The emit paths ran under the gate: a Set Tempo for the changing tempo, a
+    // Set Time Signature for the published meters.
+    assert!(tempos > 0 && meters > 0, "{tempos} tempos, {meters} meters");
 }
 
 /// **A device's departure and arrival process without allocating**: the ingest

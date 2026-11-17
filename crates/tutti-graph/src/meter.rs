@@ -43,7 +43,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
 
 use crate::MeterId;
-use tutti_rt::{LevelReader, LevelSpan, LevelWriter, RtScope, level_cell};
+use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_types::{Amplitude, Samples};
 
 use crate::exec::SILENT;
@@ -128,14 +128,9 @@ fn block_stats(block: &[f32]) -> BlockStats {
 /// `Clone`; one per meter.
 #[derive(Debug)]
 pub struct MeterWriter {
+    _control: ControlDrop<Self>,
     lanes: Box<[LevelWriter]>,
     shared: Arc<Shared>,
-}
-
-impl Drop for MeterWriter {
-    fn drop(&mut self) {
-        RtScope::check_outside("a meter writer");
-    }
 }
 
 /// [`Op::Meter`](crate::Op::Meter): the first `frames` samples of each of
@@ -143,7 +138,7 @@ impl Drop for MeterWriter {
 /// executor knows is silent is not scanned: it adds its frames and no energy.
 #[inline]
 pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Sized>(
-    meter: &MeterWriter,
+    meter: &mut MeterWriter,
     arena: &A,
     flags: &Fl,
     srcs: &[u32],
@@ -157,7 +152,7 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
     let Ok(n) = u32::try_from(frames) else {
         return;
     };
-    for (lane, &src) in meter.lanes.iter().zip(srcs) {
+    for (lane, &src) in meter.lanes.iter_mut().zip(srcs) {
         let stats = if flags.get(src) & SILENT != 0 {
             BlockStats {
                 peak: 0.0,
@@ -201,6 +196,7 @@ impl MeterWriter {
 /// dropped on the audio thread in a debug build.
 #[derive(Debug)]
 pub struct MeterReader {
+    _control: ControlDrop<Self>,
     id: MeterId,
     lanes: Box<[LevelReader]>,
     shared: Arc<Shared>,
@@ -219,12 +215,14 @@ impl MeterReader {
         let (writers, readers): (Vec<_>, Vec<_>) = (0..lanes).map(|_| level_cell()).unzip();
         (
             Self {
+                _control: ControlDrop::new(),
                 id,
                 lanes: readers.into(),
                 shared: Arc::clone(&shared),
                 alive: Arc::new(()),
             },
             MeterWriter {
+                _control: ControlDrop::new(),
                 lanes: writers.into(),
                 shared,
             },
@@ -297,12 +295,6 @@ impl MeterReader {
         let n = self.read_into(&mut out);
         out.truncate(n);
         out
-    }
-}
-
-impl Drop for MeterReader {
-    fn drop(&mut self) {
-        RtScope::check_outside("a meter reader");
     }
 }
 
