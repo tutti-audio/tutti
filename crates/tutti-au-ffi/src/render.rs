@@ -4,8 +4,8 @@
 
 use std::os::raw::c_void;
 
-use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_plugin_types::{ChannelLayout, Samples, convert_channel};
+use tutti_buffers::{Planes, PlanesMut, Sample};
+use tutti_plugin_types::ChannelLayout;
 
 use coreaudio_sys::{AudioBuffer, AudioBufferList, AudioTimeStamp, AudioUnitRenderActionFlags};
 
@@ -172,12 +172,9 @@ impl RenderScratch {
     pub fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {
         for (ch, plane) in input.iter().enumerate() {
             if let Some(dst) = self.inputs.get_mut(ch) {
-                let len = plane.samples().len().min(dst.len());
-                convert_channel(
-                    plane.slice(Samples(0)..Samples(len)),
-                    MonoMut::new(&mut dst[..len]),
-                )
-                .expect("the plane and the scratch row are `len` frames");
+                for (d, &s) in dst.iter_mut().zip(plane.samples()) {
+                    *d = s.convert_to();
+                }
             }
         }
     }
@@ -186,14 +183,11 @@ impl RenderScratch {
     /// plane, widening for a 64-bit caller. A plane past the scratch's
     /// channels keeps what it held.
     pub fn emit_output<S: Sample>(&self, output: &mut PlanesMut<'_, '_, S>) {
-        for (ch, mut plane) in output.iter_mut().enumerate() {
+        for (ch, plane) in output.iter_mut().enumerate() {
             if let Some(src) = self.outputs.get(ch) {
-                let len = plane.samples().len().min(src.len());
-                convert_channel(
-                    Mono::new(&src[..len]),
-                    plane.slice_mut(Samples(0)..Samples(len)),
-                )
-                .expect("the plane and the scratch row are `len` frames");
+                for (d, &s) in plane.into_samples_mut().iter_mut().zip(src) {
+                    *d = s.convert_to();
+                }
             }
         }
     }

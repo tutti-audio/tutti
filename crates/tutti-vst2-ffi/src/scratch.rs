@@ -1,71 +1,78 @@
 //! Pre-allocated scratch buffers for VST2 process calls.
 //!
 //! The `vst` crate's `AudioBuffer` wants contiguous raw pointer tables, which a
-//! caller's planes cannot supply: the channel slices are not adjacent in memory. These buffers are allocated once at load time and reused
-//! on every block, which is what keeps the audio thread allocation-free.
+//! caller's planes cannot supply: the channel slices are not adjacent in memory.
+//! These buffers are allocated once at load time and reused on every block, which
+//! is what keeps the audio thread allocation-free.
 //!
-//! Both widths are resident. VST 2.4 has two render entry points —
-//! `processReplacing` and `processReplacingF64` — and the caller picks per
-//! block, not per instance: the caller picks per block
-//! (`PluginAudio` is either width) and the scratch does not know at construction which it will
-//! be asked for; growing a buffer on the first f64 block would allocate on
-//! the audio thread.
+//! VST 2.4 has two render entry points, `processReplacing` and
+//! `processReplacingF64`, and a plugin is told one precision at activation
+//! (`effSetProcessPrecision`). The scratch is built for that format and holds
+//! rows of that width only: a block of the other width is converted at the
+//! scratch by the [`Sample`] rule, and `processReplacingF64` is entered only
+//! through a scratch built for [`SampleFormat::Float64`].
 
-use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_plugin_types::{ChannelLayout, Samples, convert_channel};
+use num_traits::Float as VstFloat;
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_plugin_types::{ChannelLayout, SampleFormat, Samples};
 
+use crate::buffer::AudioBuffer;
 use crate::host::RenderHandle;
 
 /// Pre-allocated audio buffers that `Vst2Processor::process` renders through.
 ///
 /// VST2 wants contiguous pointer tables, which a caller's planes cannot
 /// supply, so each block is converted into these buffers and back out. One per
-/// activation, sized from the pin counts the plugin has then and the block size
-/// of the [`Prepare`](tutti_plugin_types::Prepare), and reused for every block:
-/// after construction nothing here allocates, so it is safe on the audio thread.
+/// activation, sized from the pin counts the plugin has then, the block size
+/// of the [`Prepare`](tutti_plugin_types::Prepare) and its negotiated format,
+/// and reused for every block: after construction nothing here allocates, so
+/// it is safe on the audio thread.
 ///
-/// Carrying both costs `block_size * (in + out) * 12` bytes over one width —
-/// at a 512-sample block and stereo I/O, 24 KiB.
-///
-/// The pointer tables behind the plugin's buffers are private, and a render is reached only
-/// through `render_piece`, which stages the block, check its length and render in
-/// one step. Safe code cannot read the tables or render a block that was not staged:
+/// The pointer tables behind the plugin's buffers are private, and a render is
+/// reached only through `render_piece`, which stages the block, checks its
+/// length and renders in one step. Safe code cannot read the tables or render a
+/// block that was not staged:
 ///
 /// ```compile_fail,E0616
 /// # use tutti_vst2_ffi::scratch::RenderScratch;
-/// # use tutti_plugin_types::ChannelLayout;
-/// let scratch = RenderScratch::new(ChannelLayout::from(2u8), ChannelLayout::from(2u8), 64);
-/// let _ = &scratch.output_ptrs;
+/// # use tutti_plugin_types::{ChannelLayout, SampleFormat};
+/// let scratch = RenderScratch::new(
+///     ChannelLayout::from(2u8),
+///     ChannelLayout::from(2u8),
+///     64,
+///     SampleFormat::Float32,
+/// );
+/// let _ = &scratch.rows;
 /// ```
 ///
-/// ```compile_fail,E0624
-/// # use tutti_vst2_ffi::scratch::RenderScratch;
-/// # use tutti_plugin_types::ChannelLayout;
-/// # fn go(handle: &mut tutti_vst2_ffi::host::RenderHandle) {
-/// let mut scratch = RenderScratch::new(ChannelLayout::from(2u8), ChannelLayout::from(2u8), 64);
-/// scratch.render_f32(handle, 1 << 20);
-/// # }
+/// ```compile_fail,E0603
+/// use tutti_vst2_ffi::scratch::Rows;
 /// ```
 pub struct RenderScratch {
-    inputs: Vec<Vec<f32>>,
-    outputs: Vec<Vec<f32>>,
-    input_ptrs: Vec<*const f32>,
-    output_ptrs: Vec<*mut f32>,
-    inputs_f64: Vec<Vec<f64>>,
-    outputs_f64: Vec<Vec<f64>>,
-    input_ptrs_f64: Vec<*const f64>,
-    output_ptrs_f64: Vec<*mut f64>,
+    rows: Format,
     /// The most frames a render may be asked for: what every Vec was sized to.
     block_size: usize,
+}
+
+/// The rows of the width the plugin was activated at.
+enum Format {
+    F32(Rows<f32>),
+    F64(Rows<f64>),
+}
+
+/// One width's channel rows and the pointer tables the plugin is handed.
+struct Rows<T> {
+    inputs: Vec<Vec<T>>,
+    outputs: Vec<Vec<T>>,
+    input_ptrs: Vec<*const T>,
+    output_ptrs: Vec<*mut T>,
 }
 
 impl std::fmt::Debug for RenderScratch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RenderScratch")
-            .field("input_ptrs", &self.input_ptrs)
-            .field("output_ptrs", &self.output_ptrs)
-            .field("input_ptrs_f64", &self.input_ptrs_f64)
-            .field("output_ptrs_f64", &self.output_ptrs_f64)
+            .field("format", &self.format())
+            .field("block_size", &self.block_size)
             .finish_non_exhaustive()
     }
 }
@@ -77,43 +84,38 @@ impl std::fmt::Debug for RenderScratch {
 unsafe impl Send for RenderScratch {}
 
 impl RenderScratch {
-    /// Creates scratch buffers for the given channel counts, allocating both
-    /// sample widths up front.
+    /// Creates scratch buffers for the given channel counts at `format`'s width.
     ///
     /// Call once at load time, never on the audio thread: this is the only
     /// allocation on the render path. `block_size` is the maximum block in
-    /// frames; a process call may render fewer, never more.
+    /// frames; a process call may render fewer, never more. `format` is
+    /// [`SampleFormat::Float64`] only for a plugin that installed
+    /// `processReplacingF64` and was told 64-bit precision
+    /// ([`negotiate`](tutti_plugin_types::negotiate)).
     #[must_use]
-    pub fn new(num_inputs: ChannelLayout, num_outputs: ChannelLayout, block_size: usize) -> Self {
-        let inputs: Vec<Vec<f32>> = (0..num_inputs.count())
-            .map(|_| vec![0.0f32; block_size])
-            .collect();
-        let outputs: Vec<Vec<f32>> = (0..num_outputs.count())
-            .map(|_| vec![0.0f32; block_size])
-            .collect();
-        let input_ptrs: Vec<*const f32> = inputs.iter().map(|v| v.as_ptr()).collect();
-        let output_ptrs: Vec<*mut f32> = outputs.iter().map(|v| v.as_ptr() as *mut f32).collect();
+    pub fn new(
+        num_inputs: ChannelLayout,
+        num_outputs: ChannelLayout,
+        block_size: usize,
+        format: SampleFormat,
+    ) -> Self {
+        let (i, o) = (
+            usize::from(num_inputs.count()),
+            usize::from(num_outputs.count()),
+        );
+        let rows = match format {
+            SampleFormat::Float32 => Format::F32(Rows::new(i, o, block_size)),
+            SampleFormat::Float64 => Format::F64(Rows::new(i, o, block_size)),
+        };
+        Self { rows, block_size }
+    }
 
-        let inputs_f64: Vec<Vec<f64>> = (0..num_inputs.count())
-            .map(|_| vec![0.0f64; block_size])
-            .collect();
-        let outputs_f64: Vec<Vec<f64>> = (0..num_outputs.count())
-            .map(|_| vec![0.0f64; block_size])
-            .collect();
-        let input_ptrs_f64: Vec<*const f64> = inputs_f64.iter().map(|v| v.as_ptr()).collect();
-        let output_ptrs_f64: Vec<*mut f64> =
-            outputs_f64.iter().map(|v| v.as_ptr() as *mut f64).collect();
-
-        Self {
-            inputs,
-            outputs,
-            input_ptrs,
-            output_ptrs,
-            inputs_f64,
-            outputs_f64,
-            input_ptrs_f64,
-            output_ptrs_f64,
-            block_size,
+    /// The width the plugin is entered at.
+    #[must_use]
+    pub fn format(&self) -> SampleFormat {
+        match self.rows {
+            Format::F32(_) => SampleFormat::Float32,
+            Format::F64(_) => SampleFormat::Float64,
         }
     }
 
@@ -121,13 +123,11 @@ impl RenderScratch {
     /// `render` and converts the outputs back: the one way in, so the pointer tables handed to
     /// the plugin are always the ones just staged, and `len` is checked against the block size.
     ///
-    /// `double` picks the entry point: `processReplacingF64` over the `f64` scratch, which only
-    /// a plugin known to install it may take (the vendor's `process_f64` zeroes the outputs when
-    /// it installed none, so reaching it unconditionally would render silence rather than fall
-    /// back), or `processReplacing` over the `f32` scratch. A block of the other width is
-    /// converted at the scratch by the [`Sample`] rule, so a 64-bit block
-    /// for a 32-bit plugin is narrowed and widened back: lossy, deliberately. A caller channel
-    /// the scratch lacks is not rendered, and a scratch input the caller lacks is silence.
+    /// The entry point is the scratch's [`format`](Self::format): `processReplacing` over `f32`
+    /// rows, or `processReplacingF64` over `f64` rows. A block of the other width is converted
+    /// at the scratch by the [`Sample`] rule, so a 64-bit block for a 32-bit plugin is narrowed
+    /// and widened back: lossy, deliberately. A caller channel the scratch lacks is not
+    /// rendered, and a scratch input the caller lacks is silence.
     ///
     /// # Panics
     ///
@@ -136,7 +136,6 @@ impl RenderScratch {
     pub fn render_piece<S: Float>(
         &mut self,
         render: &mut RenderHandle,
-        double: bool,
         inputs: Planes<'_, S>,
         outputs: &mut PlanesMut<'_, '_, S>,
         start: usize,
@@ -151,18 +150,9 @@ impl RenderScratch {
             inputs.slice(piece.clone())
         };
         let mut outputs = outputs.slice_mut(piece);
-        if double {
-            stage(&mut self.inputs_f64, &inputs, len);
-            zero(&mut self.outputs_f64, len);
-            self.refresh_ptrs_f64();
-            self.render_f64(render, len);
-            emit(&self.outputs_f64, &mut outputs, len);
-        } else {
-            stage(&mut self.inputs, &inputs, len);
-            zero(&mut self.outputs, len);
-            self.refresh_ptrs();
-            self.render_f32(render, len);
-            emit(&self.outputs, &mut outputs, len);
+        match &mut self.rows {
+            Format::F32(rows) => rows.render(&inputs, &mut outputs, len, |b| render.process(b)),
+            Format::F64(rows) => rows.render(&inputs, &mut outputs, len, |b| render.process_f64(b)),
         }
     }
 
@@ -174,75 +164,64 @@ impl RenderScratch {
             self.block_size
         );
     }
+}
 
-    /// Renders the first `num_samples` of the staged block through `render`, in `f32`.
-    fn render_f32(&mut self, render: &mut RenderHandle, num_samples: usize) {
-        use crate::buffer::AudioBuffer;
+impl<T: Float + VstFloat> Rows<T> {
+    fn new(num_inputs: usize, num_outputs: usize, block_size: usize) -> Self {
+        let inputs: Vec<Vec<T>> = (0..num_inputs)
+            .map(|_| vec![T::SILENCE; block_size])
+            .collect();
+        let outputs: Vec<Vec<T>> = (0..num_outputs)
+            .map(|_| vec![T::SILENCE; block_size])
+            .collect();
+        let input_ptrs = inputs.iter().map(|v| v.as_ptr()).collect();
+        let output_ptrs = outputs.iter().map(|v| v.as_ptr().cast_mut()).collect();
+        Self {
+            inputs,
+            outputs,
+            input_ptrs,
+            output_ptrs,
+        }
+    }
 
-        self.check_block(num_samples);
-        // SAFETY: the tables hold `len()` channel pointers into the scratch's own Vecs, each
-        // `block_size >= num_samples` elements long (`check_block`, just above; the Vecs are
-        // never resized, so the pointers taken from them stay valid, and `prepare_*` refreshes
-        // them anyway). The output Vecs are
-        // distinct allocations from the inputs and from each other, and the
-        // scratch is borrowed mutably for the whole call, so nothing else
-        // touches them.
+    /// Stages `len` frames of `inputs`, hands the plugin the tables through `enter` and emits
+    /// the outputs into `outputs`. `len` is at most the frames every row was sized to.
+    fn render<S: Float>(
+        &mut self,
+        inputs: &Planes<'_, S>,
+        outputs: &mut PlanesMut<'_, '_, S>,
+        len: usize,
+        enter: impl FnOnce(&mut AudioBuffer<'_, T>),
+    ) {
+        stage(&mut self.inputs, inputs, len);
+        zero(&mut self.outputs, len);
+        self.refresh_ptrs();
+        // SAFETY: the tables hold one pointer per channel row, and each row is at least `len`
+        // elements long (`stage` and `zero` just sliced `..len` of every row, and the caller
+        // checked `len` against the block size). The rows are never resized, so the pointers
+        // stay valid; the output rows are distinct allocations from the inputs and from each
+        // other, and `self` is borrowed mutably for the whole call, so nothing else touches
+        // them.
         let mut buffer = unsafe {
             AudioBuffer::from_raw(
                 self.input_ptrs.len(),
                 self.output_ptrs.len(),
                 self.input_ptrs.as_ptr(),
                 self.output_ptrs.as_mut_ptr(),
-                num_samples,
+                len,
             )
         };
-        render.process(&mut buffer);
+        enter(&mut buffer);
+        emit(&self.outputs, outputs, len);
     }
 
-    /// [`render_f32`](Self::render_f32) against `processReplacingF64`.
-    ///
-    /// Only called once `supports_f64` is known true: the vendor's
-    /// `process_f64` zeroes the outputs when the plugin installed no f64
-    /// entry point, so reaching it unconditionally would render silence
-    /// rather than fall back.
-    fn render_f64(&mut self, render: &mut RenderHandle, num_samples: usize) {
-        use crate::buffer::AudioBuffer;
-
-        self.check_block(num_samples);
-        // SAFETY: as `render_f32`, against the f64 tables and Vecs.
-        let mut buffer = unsafe {
-            AudioBuffer::from_raw(
-                self.input_ptrs_f64.len(),
-                self.output_ptrs_f64.len(),
-                self.input_ptrs_f64.as_ptr(),
-                self.output_ptrs_f64.as_mut_ptr(),
-                num_samples,
-            )
-        };
-        render.process_f64(&mut buffer);
-    }
-
-    /// Pointers into the Vecs can become stale after any mutation — refresh
-    /// them before each `vst_buffer.from_raw` call.
-    ///
-    /// In practice the Vec never reallocates (same shape, same capacity),
-    /// so this is paranoia. Cheap paranoia.
+    /// Points each table entry at its row again, before each `from_raw`.
     fn refresh_ptrs(&mut self) {
-        for (ptr, ch) in self.input_ptrs.iter_mut().zip(&self.inputs) {
-            *ptr = ch.as_ptr();
+        for (ptr, row) in self.input_ptrs.iter_mut().zip(&self.inputs) {
+            *ptr = row.as_ptr();
         }
-        for (ptr, ch) in self.output_ptrs.iter_mut().zip(&mut self.outputs) {
-            *ptr = ch.as_mut_ptr();
-        }
-    }
-
-    /// [`refresh_ptrs`](Self::refresh_ptrs) for the f64 tables.
-    fn refresh_ptrs_f64(&mut self) {
-        for (ptr, ch) in self.input_ptrs_f64.iter_mut().zip(&self.inputs_f64) {
-            *ptr = ch.as_ptr();
-        }
-        for (ptr, ch) in self.output_ptrs_f64.iter_mut().zip(&mut self.outputs_f64) {
-            *ptr = ch.as_mut_ptr();
+        for (ptr, row) in self.output_ptrs.iter_mut().zip(&mut self.outputs) {
+            *ptr = row.as_mut_ptr();
         }
     }
 }
@@ -252,10 +231,14 @@ impl RenderScratch {
 /// staged.
 fn stage<T: Sample, S: Sample>(rows: &mut [Vec<T>], from: &Planes<'_, S>, len: usize) {
     for (c, row) in rows.iter_mut().enumerate() {
+        let row = &mut row[..len];
         match from.get_plane(c) {
-            Some(plane) => convert_channel(plane, MonoMut::new(&mut row[..len]))
-                .expect("the piece and the row are `len` frames"),
-            None => row[..len].fill(T::SILENCE),
+            Some(plane) => {
+                for (d, &s) in row.iter_mut().zip(plane.samples()) {
+                    *d = s.convert_to();
+                }
+            }
+            None => row.fill(T::SILENCE),
         }
     }
 }
@@ -272,8 +255,9 @@ fn zero<T: Sample>(rows: &mut [Vec<T>], len: usize) {
 fn emit<T: Sample, S: Sample>(rows: &[Vec<T>], to: &mut PlanesMut<'_, '_, S>, len: usize) {
     for (c, row) in rows.iter().enumerate() {
         if let Some(plane) = to.get_plane_mut(c) {
-            convert_channel(Mono::new(&row[..len]), plane)
-                .expect("the piece and the row are `len` frames");
+            for (d, &s) in plane.into_samples_mut().iter_mut().zip(&row[..len]) {
+                *d = s.convert_to();
+            }
         }
     }
 }
@@ -288,14 +272,26 @@ mod tests {
     #[should_panic(expected = "exceeds the scratch's block size")]
     fn a_render_past_the_block_size_is_refused() {
         let layout = ChannelLayout::from(2u8);
-        RenderScratch::new(layout, layout, 64).check_block(65);
+        RenderScratch::new(layout, layout, 64, SampleFormat::Float32).check_block(65);
     }
 
     /// A render at the block size is accepted.
     #[test]
     fn a_render_at_the_block_size_is_accepted() {
         let layout = ChannelLayout::from(2u8);
-        RenderScratch::new(layout, layout, 64).check_block(64);
+        RenderScratch::new(layout, layout, 64, SampleFormat::Float32).check_block(64);
+    }
+
+    /// **The scratch holds the width it was built for**, and only that one.
+    #[test]
+    fn the_scratch_is_built_for_one_format() {
+        let layout = ChannelLayout::from(2u8);
+        for format in [SampleFormat::Float32, SampleFormat::Float64] {
+            assert_eq!(
+                RenderScratch::new(layout, layout, 8, format).format(),
+                format
+            );
+        }
     }
 
     /// Scratch rows holding a recognizable ramp, so an emit can be checked sample by sample.

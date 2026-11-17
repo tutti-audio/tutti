@@ -16,7 +16,7 @@
 //!   backing a `Planes` or `PlanesMut` borrows;
 //! - [`silence`] and [`sanitize`]: the zeroing a block's output gets.
 
-use tutti_buffers::{BufferError, Float, Mono, MonoMut, Planes, PlanesMut, Sample, convert_planes};
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 
 /// The most channels, per direction, that a block's stack-built channel tables
 /// hold (the `&[&[T]]` and `&mut [&mut [T]]` slice tables of the plugin server's
@@ -142,23 +142,6 @@ impl<S> std::ops::DerefMut for ChannelTable<S> {
     }
 }
 
-/// Converts one channel into another format by [`Sample`]'s rule, through
-/// [`convert_planes`]: the step between a caller's block and a format's scratch,
-/// whose channel counts need not agree.
-///
-/// # Errors
-///
-/// [`BufferError::LengthMismatch`] when the two differ in length; nothing is
-/// written then.
-pub fn convert_channel<A: Sample, B: Sample>(
-    src: Mono<'_, A>,
-    dst: MonoMut<'_, B>,
-) -> Result<(), BufferError> {
-    let from = [src.samples()];
-    let mut to = [dst.into_samples_mut()];
-    convert_planes(Planes::new(&from)?, PlanesMut::new(&mut to)?)
-}
-
 /// Zeroes the first `frames` samples of every channel (all of a shorter one).
 /// Allocation-free and RT-safe.
 pub fn silence<T: Float, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
@@ -189,8 +172,7 @@ pub fn sanitize<T: Float>(samples: &mut [T]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelTable, MAX_BLOCK_CHANNELS, convert_channel, sanitize, silence};
-    use tutti_buffers::{Mono, MonoMut};
+    use super::{ChannelTable, MAX_BLOCK_CHANNELS, sanitize, silence};
 
     #[test]
     fn a_channel_table_holds_the_channels_collected_in_order_without_allocating() {
@@ -219,17 +201,6 @@ mod tests {
         silence(&mut [&mut a[..], &mut b[..]], 3);
         assert_eq!(a, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(b, [0.0, 0.0]);
-    }
-
-    #[test]
-    fn a_channel_converts_by_the_sample_rule_and_an_unequal_pair_is_refused() {
-        let src = [0.5_f32, -1.0, 2.0];
-        let mut wide = [0.0_f64; 3];
-        convert_channel(Mono::new(&src), MonoMut::new(&mut wide)).expect("equal lengths");
-        assert_eq!(wide, [0.5, -1.0, 2.0]);
-        let mut short = [7_i16; 2];
-        assert!(convert_channel(Mono::new(&src), MonoMut::new(&mut short)).is_err());
-        assert_eq!(short, [7, 7], "nothing is written on a refusal");
     }
 
     #[test]

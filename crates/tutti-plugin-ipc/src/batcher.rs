@@ -58,106 +58,201 @@
 //! sequence numbers, not by a reply arriving: a mismatch yields silence. See
 //! `tutti-plugin-ipc`'s `transport::shm::header`.
 //!
-//! # `f32` rows, the plugin's format on the wire
+//! # Rows in the wire's format
 //!
-//! The FIFO and the ring hold `f32`, whatever width the block is. The
-//! wire carries whatever the plugin negotiated at load, so a plugin that
-//! processes in double is converted here, in the wire scratch, and nowhere
-//! else: the `f64` stays inside the node.
+//! The FIFO and the ring hold the format the plugin negotiated at load
+//! ([`SampleFormat`]): `f32` rows for a 32-bit wire, `f64` rows for a 64-bit
+//! one. A call's block, of either width, is converted by the
+//! [`Sample`](tutti_buffers::Sample) rule when it enters the FIFO and when it
+//! leaves the ring, and those are the only conversions: a chunk's write to the
+//! slab and its read back are copies. A 64-bit block through a 64-bit wire is
+//! never narrowed, and a 64-bit block through a 32-bit wire is narrowed once.
 
 use crate::OfflineWait;
 use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use tutti_buffers::{Float, InputOutput, Mono, MonoMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
-    SampleFormat, SlabAccessError, TransportChanges, TransportInfo, WireMidi, convert_channel,
+    SampleFormat, TransportChanges, TransportInfo, WireMidi,
 };
 use tutti_types::{SampleRate, Samples};
 
-/// Single-chunk wire scratch in the plugin-negotiated format. Allocated at
-/// [`Batcher::new`] for the chunk ceiling, because the wire format is known
-/// up-front and no chunk is ever longer.
-enum WireStorage {
-    F32 { input: Vec<f32>, output: Vec<f32> },
-    F64 { input: Vec<f64>, output: Vec<f64> },
+/// The FIFO and the ring in one wire format `T`, each row `ceiling` frames
+/// long.
+struct Rows<T> {
+    /// Input frames not shipped yet, one row per input port (main plus
+    /// sidechain/aux buses, bus-ordered: row `ch` is the slab's input-region
+    /// channel `ch`, so a graph edge into the node's port 2 feeds the plugin's
+    /// sidechain bus).
+    fifo: Vec<Vec<T>>,
+    /// The output of the chunk collected last, one row per output port.
+    ring: Vec<Vec<T>>,
 }
 
-impl WireStorage {
-    fn new(format: SampleFormat, ceiling: usize) -> Self {
-        match format {
-            SampleFormat::Float32 => Self::F32 {
-                input: vec![0.0; ceiling],
-                output: vec![0.0; ceiling],
-            },
-            SampleFormat::Float64 => Self::F64 {
-                input: vec![0.0; ceiling],
-                output: vec![0.0; ceiling],
-            },
+impl<T: Float> Rows<T> {
+    fn new(inputs: usize, outputs: usize, ceiling: usize) -> Self {
+        Self {
+            fifo: vec![vec![T::SILENCE; ceiling]; inputs],
+            ring: vec![vec![T::SILENCE; ceiling]; outputs],
         }
     }
 
-    /// Stage `samples` as channel `ch` of chunk `seq`, converting to the
-    /// wire's format. Staging only — the caller publishes once, after the
-    /// last channel.
-    fn stage(
-        &mut self,
-        slab: &mut SlabWriter,
-        seq: u64,
-        ch: usize,
-        samples: &[f32],
-    ) -> Result<(), SlabAccessError> {
-        let n = samples.len();
-        match self {
-            Self::F32 { input, .. } => {
-                let wire = &mut input[..n];
-                convert_channel(Mono::new(samples), MonoMut::new(&mut *wire))
-                    .expect("the wire row is the chunk's length");
-                slab.write(seq, ch, wire)
-            }
-            Self::F64 { input, .. } => {
-                let wire = &mut input[..n];
-                convert_channel(Mono::new(samples), MonoMut::new(&mut *wire))
-                    .expect("the wire row is the chunk's length");
-                slab.write(seq, ch, wire)
-            }
+    fn clear(&mut self) {
+        for row in self.fifo.iter_mut().chain(self.ring.iter_mut()) {
+            row.fill(T::SILENCE);
         }
     }
 
-    /// Copy channel `ch` of chunk `seq`'s output into `out`, converting from
-    /// the wire's format, and zero-pad past what the slab holds.
+    fn silence_ring(&mut self, chunk: usize) {
+        for row in &mut self.ring {
+            row[..chunk].fill(T::SILENCE);
+        }
+    }
+
+    /// Stage the first `chunk` frames of every FIFO row as chunk `seq`'s input
+    /// channels: a copy. Staging only — the caller publishes once, after the
+    /// last channel. `false` at the first channel the slab refuses.
+    fn stage(&self, slab: &mut SlabWriter, seq: u64, chunk: usize) -> bool {
+        self.fifo
+            .iter()
+            .enumerate()
+            .all(|(ch, row)| slab.write(seq, ch, &row[..chunk]).is_ok())
+    }
+
+    /// Fill the first `chunk` frames of every ring row from chunk `seq`'s
+    /// output channels: a copy, zero-padded past what the slab holds. Returns
+    /// how many rows have no channel in the slab (they are silence).
     ///
     /// Only call this for a `seq` the slab has confirmed (see
     /// [`Batcher::collectable`]): the copy count proves nothing about who
     /// wrote the bytes.
-    ///
-    /// `false` when the slab has no such channel (the batcher's widths and the
-    /// slab's disagree): the channel is silence.
-    fn recv(&mut self, slab: &AudioSlab, seq: u64, ch: usize, out: &mut [f32]) -> bool {
-        let size = out.len();
-        let (n, held) = match self {
-            Self::F32 { output, .. } => {
-                let wire = &mut output[..size];
-                let read = slab.read_output_into(seq, ch, wire);
-                let n = read.as_ref().map_or(0, |&n| n);
-                convert_channel(Mono::new(&wire[..n]), MonoMut::new(&mut out[..n]))
-                    .expect("the read and the row are `n` frames");
-                (n, read.is_ok())
+    fn read_ring(&mut self, slab: &AudioSlab, seq: u64, chunk: usize) -> usize {
+        let mut missing = 0;
+        for (ch, row) in self.ring.iter_mut().enumerate() {
+            let row = &mut row[..chunk];
+            let read = slab.read_output_into(seq, ch, row);
+            let n = read.as_ref().map_or(0, |&n| n);
+            row[n..].fill(T::SILENCE);
+            missing += usize::from(read.is_err());
+        }
+        missing
+    }
+
+    /// Write ring frames `at..to` into the output planes' frames `call`,
+    /// converting by the [`Sample`](tutti_buffers::Sample) rule. An output
+    /// plane without a ring row keeps what it held.
+    fn play<S: Float>(
+        &self,
+        output: &mut PlanesMut<'_, '_, S>,
+        at: usize,
+        to: usize,
+        call: &Range<Samples>,
+    ) {
+        for (c, row) in self.ring.iter().enumerate() {
+            if let Some(mut plane) = output.get_plane_mut(c) {
+                let mut dst = plane.slice_mut(call.clone());
+                for (d, &s) in dst.samples_mut().iter_mut().zip(&row[at..to]) {
+                    *d = s.convert_to();
+                }
             }
-            Self::F64 { output, .. } => {
-                let wire = &mut output[..size];
-                let read = slab.read_output_into(seq, ch, wire);
-                let n = read.as_ref().map_or(0, |&n| n);
-                // The narrowing is the point: the pipeline's rows are `f32`.
-                convert_channel(Mono::new(&wire[..n]), MonoMut::new(&mut out[..n]))
-                    .expect("the read and the row are `n` frames");
-                (n, read.is_ok())
+        }
+    }
+
+    /// Take the input planes' frames `call` into FIFO frames `at..to`,
+    /// converting by the [`Sample`](tutti_buffers::Sample) rule. A row with no
+    /// input plane is silence.
+    fn take<S: Float>(
+        &mut self,
+        input: &Planes<'_, S>,
+        at: usize,
+        to: usize,
+        call: &Range<Samples>,
+    ) {
+        for (ch, row) in self.fifo.iter_mut().enumerate() {
+            match input.get_plane(ch) {
+                Some(plane) => {
+                    let src = plane.slice(call.clone());
+                    for (d, &s) in row[at..to].iter_mut().zip(src.samples()) {
+                        *d = s.convert_to();
+                    }
+                }
+                None => row[at..to].fill(T::SILENCE),
             }
-        };
-        out[n..].fill(0.0);
-        held
+        }
+    }
+}
+
+/// The rows in the format the plugin negotiated at load, chosen once in
+/// [`Batcher::new`]; every method forwards to the one [`Rows`].
+enum Wire {
+    F32(Rows<f32>),
+    F64(Rows<f64>),
+}
+
+impl Wire {
+    fn new(format: SampleFormat, inputs: usize, outputs: usize, ceiling: usize) -> Self {
+        match format {
+            SampleFormat::Float32 => Self::F32(Rows::new(inputs, outputs, ceiling)),
+            SampleFormat::Float64 => Self::F64(Rows::new(inputs, outputs, ceiling)),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::F32(r) => r.clear(),
+            Self::F64(r) => r.clear(),
+        }
+    }
+
+    fn silence_ring(&mut self, chunk: usize) {
+        match self {
+            Self::F32(r) => r.silence_ring(chunk),
+            Self::F64(r) => r.silence_ring(chunk),
+        }
+    }
+
+    fn stage(&self, slab: &mut SlabWriter, seq: u64, chunk: usize) -> bool {
+        match self {
+            Self::F32(r) => r.stage(slab, seq, chunk),
+            Self::F64(r) => r.stage(slab, seq, chunk),
+        }
+    }
+
+    fn read_ring(&mut self, slab: &AudioSlab, seq: u64, chunk: usize) -> usize {
+        match self {
+            Self::F32(r) => r.read_ring(slab, seq, chunk),
+            Self::F64(r) => r.read_ring(slab, seq, chunk),
+        }
+    }
+
+    fn play<S: Float>(
+        &self,
+        output: &mut PlanesMut<'_, '_, S>,
+        at: usize,
+        to: usize,
+        call: &Range<Samples>,
+    ) {
+        match self {
+            Self::F32(r) => r.play(output, at, to, call),
+            Self::F64(r) => r.play(output, at, to, call),
+        }
+    }
+
+    fn take<S: Float>(
+        &mut self,
+        input: &Planes<'_, S>,
+        at: usize,
+        to: usize,
+        call: &Range<Samples>,
+    ) {
+        match self {
+            Self::F32(r) => r.take(input, at, to, call),
+            Self::F64(r) => r.take(input, at, to, call),
+        }
     }
 }
 
@@ -250,7 +345,8 @@ pub trait Chunks {
 /// input FIFO that ships a chunk when full, and an output ring the previous
 /// chunk's output is read from.
 pub(crate) struct Batcher {
-    wire: WireStorage,
+    /// The FIFO and the ring, in the plugin's wire format.
+    wire: Wire,
     /// The slab's input writer: the one in this process, so the node is the
     /// only thing that writes a chunk (`SlabWriter`). Reads go through the
     /// bridge's shared slab, which cannot write.
@@ -262,13 +358,6 @@ pub(crate) struct Batcher {
     /// submission carries, and so the pipeline's latency.
     chunk: usize,
 
-    /// Input frames not shipped yet, one row per input port (main plus
-    /// sidechain/aux buses, bus-ordered: row `ch` is the slab's input-region
-    /// channel `ch`, so a graph edge into the node's port 2 feeds the plugin's
-    /// sidechain bus), `ceiling` long.
-    fifo: Vec<Vec<f32>>,
-    /// The output of the chunk collected last, one row per output port.
-    ring: Vec<Vec<f32>>,
     /// Frames of the current chunk taken so far (`0..chunk`): where the next
     /// input frame goes, and which ring frame the next output reads.
     pos: usize,
@@ -311,7 +400,7 @@ impl std::fmt::Debug for Batcher {
 impl Batcher {
     /// A batcher for a plugin with these widths and wire format, writing
     /// into `slab`, whose chunks hold `ceiling` frames. Control thread:
-    /// allocates the wire scratch, the FIFO and the ring. The chunk starts at
+    /// allocates the FIFO and the ring. The chunk starts at
     /// the ceiling; [`prepare`](Self::prepare) narrows it to the graph's
     /// `MaxBlock`.
     pub fn new(
@@ -322,12 +411,10 @@ impl Batcher {
         slab: SlabWriter,
     ) -> Self {
         Self {
-            wire: WireStorage::new(format, ceiling),
+            wire: Wire::new(format, inputs, outputs, ceiling),
             slab,
             ceiling,
             chunk: ceiling,
-            fifo: vec![vec![0.0; ceiling]; inputs],
-            ring: vec![vec![0.0; ceiling]; outputs],
             pos: 0,
             next_seq: 1,
             expect_seq: None,
@@ -490,9 +577,7 @@ impl Batcher {
         self.counters.in_flight.store(0, Ordering::Release);
         self.pos = 0;
         self.reply.clear();
-        for row in self.fifo.iter_mut().chain(self.ring.iter_mut()) {
-            row.fill(0.0);
-        }
+        self.wire.clear();
     }
 
     /// Whether chunk `expect_seq`'s output is really available to read.
@@ -541,9 +626,7 @@ impl Batcher {
                     self.counters.missed.fetch_add(1, Ordering::Relaxed);
                     self.remember_unanswered(seq);
                 }
-                for row in &mut self.ring {
-                    row[..chunk].fill(0.0);
-                }
+                self.wire.silence_ring(chunk);
             }
         }
         bridge.take_replies(
@@ -566,11 +649,11 @@ impl Batcher {
     /// lacks plays as silence and counts as a missed chunk: the batcher and its
     /// slab disagree.
     fn read_ring(&mut self, seq: u64) {
-        let chunk = self.chunk;
-        for (ch, row) in self.ring.iter_mut().enumerate() {
-            if !self.wire.recv(self.slab.slab(), seq, ch, &mut row[..chunk]) {
-                self.counters.missed.fetch_add(1, Ordering::Relaxed);
-            }
+        let missing = self.wire.read_ring(self.slab.slab(), seq, self.chunk);
+        if missing > 0 {
+            self.counters
+                .missed
+                .fetch_add(missing as u64, Ordering::Relaxed);
         }
     }
 
@@ -634,17 +717,7 @@ impl Batcher {
         self.watch_late(bridge);
         let chunk = self.chunk;
         let seq = self.next_seq;
-        let mut staged = true;
-        for (ch, row) in self.fifo.iter().enumerate() {
-            if self
-                .wire
-                .stage(&mut self.slab, seq, ch, &row[..chunk])
-                .is_err()
-            {
-                staged = false;
-                break;
-            }
-        }
+        let staged = self.wire.stage(&mut self.slab, seq, chunk);
         if !staged {
             self.counters.missed.fetch_add(1, Ordering::Relaxed);
             // The chunk will never be collectable (a channel the slab lacks
@@ -686,7 +759,7 @@ impl Batcher {
     /// frame `t` is the plugin's output for input frame `t - chunk`, exactly,
     /// however the calls are cut.
     ///
-    /// The block is converted to the pipeline's `f32` rows by the
+    /// The block is converted to the pipeline's rows (the wire's format) by the
     /// [`Sample`](tutti_buffers::Sample) rule, and back. An input port past the
     /// input's planes is taken as silence; an output port past the output's planes
     /// is not written.
@@ -710,12 +783,7 @@ impl Batcher {
             let (at, to) = (self.pos, self.pos + n);
             let call = Samples(i)..Samples(i + n);
             host.take(i, n, at);
-            for (c, row) in self.ring.iter().enumerate() {
-                if let Some(mut plane) = output.get_plane_mut(c) {
-                    convert_channel(Mono::new(&row[at..to]), plane.slice_mut(call.clone()))
-                        .expect("the ring rows and the call's frames are `n` long");
-                }
-            }
+            self.wire.play(&mut output, at, to, &call);
             let first = self.reply.partition_point(|e| (e.offset as usize) < at);
             for e in &self.reply[first..] {
                 let o = e.offset as usize;
@@ -724,15 +792,7 @@ impl Batcher {
                 }
                 host.emit(i + o - at, *e);
             }
-            for (ch, row) in self.fifo.iter_mut().enumerate() {
-                match input.get_plane(ch) {
-                    Some(plane) => {
-                        convert_channel(plane.slice(call.clone()), MonoMut::new(&mut row[at..to]))
-                            .expect("the call's frames and the fifo rows are `n` long");
-                    }
-                    None => row[at..to].fill(0.0),
-                }
-            }
+            self.wire.take(&input, at, to, &call);
             self.pos = to;
             i += n;
             if self.pos == chunk {
@@ -753,13 +813,18 @@ mod tests {
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
+        slab_of(samples, SampleFormat::Float32)
+    }
+
+    /// [`slab`] with the wire's format `format`.
+    fn slab_of(samples: usize, format: SampleFormat) -> SlabWriter {
         let name = tutti_fixtures::unique_name("batcher");
         let stereo = tutti_plugin_types::ChannelLayout::STEREO;
         AudioSlab::create(
             name,
             crate::SlabLayout {
                 samples_per_channel: samples,
-                format: SampleFormat::Float32,
+                format,
                 slots: crate::RING_SLOTS as u32,
                 inputs: vec![stereo],
                 outputs: vec![stereo],
@@ -768,30 +833,33 @@ mod tests {
         .unwrap()
     }
 
+    /// The ring's `f32` rows of a batcher built over a 32-bit wire.
+    fn ring32(b: &Batcher) -> &[Vec<f32>] {
+        match &b.wire {
+            Wire::F32(r) => &r.ring,
+            Wire::F64(_) => panic!("a 64-bit wire"),
+        }
+    }
+
     /// **A chunk's output is read from the slab it is given, and a channel the
-    /// slab lacks answers `false` and plays as silence** instead of indexing
-    /// past it. The slab here is not the bridge's: a batcher reads the one it
+    /// slab lacks is counted and plays as silence** instead of indexing past
+    /// it. The slab here is not the bridge's: a batcher reads the one it
     /// writes.
     #[test]
-    fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_refused() {
+    fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_silence() {
         let writer = slab(MAX_CHUNK);
-        let server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
-        let mut server = server;
+        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
         server.write(1, 0, &[0.5f32; 8]).unwrap();
         server.publish(1);
-        let mut wire = WireStorage::new(SampleFormat::Float32, MAX_CHUNK);
-        let mut out = [9.0f32; 8];
-        assert!(wire.recv(writer.slab(), 1, 0, &mut out));
+        let mut rows = Rows::<f32>::new(0, 3, MAX_CHUNK);
+        rows.ring[2].fill(9.0);
+        assert_eq!(rows.read_ring(writer.slab(), 1, 8), 1, "channel 2");
         assert_eq!(
-            out, [0.5; 8],
+            rows.ring[0][..8],
+            [0.5; 8],
             "the slab's own output, as the server wrote it"
         );
-        let mut out = [9.0f32; 8];
-        assert!(
-            !wire.recv(writer.slab(), 1, 2, &mut out),
-            "the slab has two channels"
-        );
-        assert_eq!(out, [0.0; 8], "a channel it lacks is silence");
+        assert_eq!(rows.ring[2][..8], [0.0; 8], "a channel it lacks is silence");
     }
 
     /// **A batcher wider than its slab counts a missed chunk for each channel
@@ -811,19 +879,89 @@ mod tests {
         // thread to report it.
         assert_no_alloc::assert_no_alloc(|| b.read_ring(1));
         assert_eq!(b.counters.missed.load(Ordering::Relaxed), 1);
-        assert_eq!(b.ring[0][..8], [0.25; 8], "the channels it has play");
-        assert_eq!(b.ring[2][..8], [0.0; 8], "the one it lacks is silence");
+        assert_eq!(ring32(&b)[0][..8], [0.25; 8], "the channels it has play");
+        assert_eq!(ring32(&b)[2][..8], [0.0; 8], "the one it lacks is silence");
     }
 
-    /// **A write to a channel the slab lacks is refused without allocating.**
+    /// **A stage to a channel the slab lacks is refused without allocating.**
     #[test]
-    fn a_write_to_a_channel_the_slab_lacks_is_refused_without_allocating() {
+    fn a_stage_to_a_channel_the_slab_lacks_is_refused_without_allocating() {
         let mut writer = slab(MAX_CHUNK);
-        let mut wire = WireStorage::new(SampleFormat::Float32, MAX_CHUNK);
-        let samples = [0.5f32; 8];
-        let refused = assert_no_alloc::assert_no_alloc(|| wire.stage(&mut writer, 1, 2, &samples));
-        assert_eq!(refused, Err(SlabAccessError::Channel));
-        assert_eq!(wire.stage(&mut writer, 1, 1, &samples), Ok(()));
+        // Three input rows over a two-channel slab.
+        let wide = Rows::<f32>::new(3, 0, MAX_CHUNK);
+        assert!(!assert_no_alloc::assert_no_alloc(|| wide.stage(
+            &mut writer,
+            1,
+            8
+        )));
+        let fits = Rows::<f32>::new(2, 0, MAX_CHUNK);
+        assert!(fits.stage(&mut writer, 1, 8));
+    }
+
+    /// 1 + 2^-40: exact in `f64`, rounds to 1.0 in `f32`.
+    const FINE: f64 = 1.0 + 1.0 / (1u64 << 40) as f64;
+
+    /// **An `f64` block through a 64-bit wire arrives, and returns, bit for
+    /// bit**: no hop through `f32` on the way in, in the slab or on the way out.
+    #[test]
+    fn a_64_bit_block_through_a_64_bit_wire_is_bit_exact() {
+        assert_ne!(FINE as f32 as f64, FINE, "the value must not fit in f32");
+        let mut writer = slab_of(MAX_CHUNK, SampleFormat::Float64);
+        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let mut rows = Rows::<f64>::new(2, 2, MAX_CHUNK);
+
+        let src = [FINE; 8];
+        let chans = [&src[..], &src[..]];
+        let call = Samples(0)..Samples(8);
+        rows.take(&Planes::new(&chans).unwrap(), 0, 8, &call);
+        assert!(rows.stage(&mut writer, 1, 8));
+        writer.publish(1);
+        let mut wire = [0.0f64; 8];
+        server.read_input_into(1, 1, &mut wire).unwrap();
+        assert_eq!(wire.map(f64::to_bits), [FINE.to_bits(); 8], "on the wire");
+
+        // The server echoes it on output 0.
+        server.write(1, 0, &wire).unwrap();
+        server.publish(1);
+        assert_eq!(
+            rows.read_ring(writer.slab(), 1, 8),
+            0,
+            "both channels exist"
+        );
+        let (mut l, mut r) = ([0.0f64; 8], [0.0f64; 8]);
+        let mut outs = [&mut l[..], &mut r[..]];
+        rows.play(&mut PlanesMut::new(&mut outs).unwrap(), 0, 8, &call);
+        assert_eq!(l.map(f64::to_bits), [FINE.to_bits(); 8], "played back");
+        assert_eq!(r, [0.0; 8]);
+    }
+
+    /// **An `f64` block through a 32-bit wire is narrowed by the `Sample`
+    /// rule**, once on the way in and widened exactly on the way out.
+    #[test]
+    fn a_64_bit_block_through_a_32_bit_wire_is_narrowed_by_the_sample_rule() {
+        use tutti_buffers::Sample;
+        let mut writer = slab(MAX_CHUNK);
+        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let mut rows = Rows::<f32>::new(1, 1, MAX_CHUNK);
+
+        let src = [FINE, -FINE, 0.1, 0.3];
+        let chans = [&src[..]];
+        let call = Samples(0)..Samples(4);
+        rows.take(&Planes::new(&chans).unwrap(), 0, 4, &call);
+        assert!(rows.stage(&mut writer, 1, 4));
+        writer.publish(1);
+        let mut wire = [0.0f32; 4];
+        server.read_input_into(1, 0, &mut wire).unwrap();
+        assert_eq!(wire, src.map(Sample::convert_to::<f32>), "narrowed once");
+        assert_eq!(wire[0], 1.0, "1 + 2^-40 rounds to 1 in f32");
+
+        server.write(1, 0, &wire).unwrap();
+        server.publish(1);
+        assert_eq!(rows.read_ring(writer.slab(), 1, 4), 0);
+        let mut out = [0.0f64; 4];
+        let mut outs = [&mut out[..]];
+        rows.play(&mut PlanesMut::new(&mut outs).unwrap(), 0, 4, &call);
+        assert_eq!(out, wire.map(f64::from), "widened exactly");
     }
 
     /// A fresh batcher has nothing in flight, so its first chunk must be silence

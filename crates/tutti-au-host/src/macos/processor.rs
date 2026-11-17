@@ -598,7 +598,10 @@ impl AuProcessor {
     /// [`AuError::BlockTooLarge`] if the block exceeds the configured block
     /// size, or [`AuError::RenderFailed`] if `AudioUnitRender` fails.
     pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, '_, '_, S>) -> Result<()> {
+        // A block too long for a `u32` saturates, which no block size admits: it is refused
+        // like any other oversize block, before anything is staged.
         let frames = u32::try_from(io.frames().0).unwrap_or(u32::MAX);
+        self.check_block(frames)?;
         let (input, mut output) = io.split();
         self.rendering.renderer.stage_input(input);
         if self.render_frames(frames)? == Silence::Declared {
@@ -609,18 +612,24 @@ impl AuProcessor {
         Ok(())
     }
 
-    /// The width-agnostic half of a render: bounds-check, `AudioUnitRender`, and
-    /// the silence-flag read.
-    ///
-    /// Split out so the f32 and f64 entry points cannot drift on any of it:
-    /// notably the `OutputIsSilence` handling. Allocation-free on the success path.
-    fn render_frames(&mut self, num_frames: u32) -> Result<Silence> {
+    /// Refuses a block longer than the block size the buffers were sized for.
+    fn check_block(&self, num_frames: u32) -> Result<()> {
         if num_frames > self.block_size {
             return Err(AuError::BlockTooLarge {
                 frames: num_frames,
                 max: self.block_size,
             });
         }
+        Ok(())
+    }
+
+    /// The width-agnostic half of a render: bounds-check, `AudioUnitRender`, and
+    /// the silence-flag read.
+    ///
+    /// Split out so the f32 and f64 entry points cannot drift on any of it:
+    /// notably the `OutputIsSilence` handling. Allocation-free on the success path.
+    fn render_frames(&mut self, num_frames: u32) -> Result<Silence> {
+        self.check_block(num_frames)?;
         // The render callback is installed ONCE at activation off the renderer's
         // stable heap scratch, deliberately NOT here: re-installing per block is
         // an `AudioUnitSetProperty` on the render thread every call. On failure

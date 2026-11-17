@@ -7,7 +7,7 @@ use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_types::{
     Controller, Loaded, PluginError, PluginTail, Prepare, Processor, Refused, RestartRules,
-    SampleFormat, Samples, Stuck, Wraps,
+    SampleFormat, Samples, Stuck, Wraps, negotiate,
 };
 
 use crate::loaded::Vst2Loaded;
@@ -148,8 +148,8 @@ impl Loaded for Vst2Loaded {
             });
         };
 
-        let double_precision =
-            prepare.format() == SampleFormat::Float64 && self.metadata().supports_f64;
+        let format = negotiate(prepare.format(), self.metadata().supports_f64);
+        let double_precision = format == SampleFormat::Float64;
         // Before each dispatch, so a plugin asking `audioMasterGetSampleRate` or
         // `GetBlockSize` from inside it reads the figure being set.
         self.host.set_sample_rate(rate);
@@ -176,7 +176,7 @@ impl Loaded for Vst2Loaded {
         // calls above.
         let (inputs, outputs) = self.pins();
         let render = self.instance.render_handle(main);
-        let scratch = RenderScratch::new(inputs, outputs, block);
+        let scratch = RenderScratch::new(inputs, outputs, block, format);
         let param_count = self.initial_values.len();
         let host = std::sync::Arc::clone(&self.host);
 
@@ -204,7 +204,6 @@ impl Loaded for Vst2Loaded {
             audio,
             block_size: block,
             sample_rate: rate,
-            double_precision,
             host,
         });
         Ok((processor, Vst2Controller::new(self)))

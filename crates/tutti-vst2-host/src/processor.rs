@@ -19,7 +19,7 @@ use vst::host::RenderHandle;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
     Normalized, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext,
-    ProcessOutput, Processor, SampleRate,
+    ProcessOutput, Processor, SampleFormat, SampleRate,
 };
 
 use crate::host::HostState;
@@ -59,9 +59,6 @@ pub struct Vst2Processor {
     block_size: usize,
     /// The rate the plugin was told (`effSetSampleRate`).
     sample_rate: SampleRate,
-    /// Whether the plugin was told `effSetProcessPrecision(64)`: the width
-    /// [`process_planes`](Self::process_planes) enters it at.
-    double_precision: bool,
     /// The host's end of the plugin's callbacks, for its drop counters.
     host: Arc<HostState>,
 }
@@ -70,7 +67,7 @@ impl std::fmt::Debug for Vst2Processor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Vst2Processor")
             .field("block_size", &self.block_size)
-            .field("double_precision", &self.double_precision)
+            .field("format", &self.scratch.format())
             .field("processing", &self.render.is_processing())
             .finish_non_exhaustive()
     }
@@ -84,7 +81,6 @@ pub(crate) struct ProcessorParts {
     pub audio: AudioSide,
     pub block_size: usize,
     pub sample_rate: SampleRate,
-    pub double_precision: bool,
     pub host: Arc<HostState>,
 }
 
@@ -97,7 +93,6 @@ impl Vst2Processor {
             audio,
             block_size,
             sample_rate,
-            double_precision,
             host,
         } = parts;
         Self {
@@ -108,7 +103,6 @@ impl Vst2Processor {
             midi: audio.midi,
             block_size,
             sample_rate,
-            double_precision,
             host,
         }
     }
@@ -150,7 +144,7 @@ impl Vst2Processor {
     /// makes [`process_planes`](Self::process_planes) enter `processReplacingF64`.
     #[must_use]
     pub fn is_double_precision(&self) -> bool {
-        self.double_precision
+        self.scratch.format() == SampleFormat::Float64
     }
 
     /// Returns how many plugin-emitted MIDI events were **dropped** since the
@@ -241,9 +235,6 @@ impl Vst2Processor {
         let host = Arc::clone(&self.host);
         let _in_process = host.enter_process();
 
-        // Native f64 only when the plugin was told 64-bit at activation: a
-        // plugin told 32 is not entered at 64.
-        let double = self.is_double_precision();
         let (input, mut output) = io.split();
         // A block longer than the maximum the plugin was told is rendered in
         // pieces no longer than it: a plugin sizes its internal buffers to the
@@ -253,7 +244,7 @@ impl Vst2Processor {
             let len = (num_samples - start).min(self.block_size.max(1));
             self.begin_piece(ctx, start, len, num_samples);
             self.scratch
-                .render_piece(&mut self.render, double, input, &mut output, start, len);
+                .render_piece(&mut self.render, input, &mut output, start, len);
             self.midi.drain_from(start);
             start += len;
         }
@@ -410,7 +401,7 @@ impl Vst2Processor {
         };
         let emitted = match buffer {
             PluginAudio::F32(io) => {
-                if self.double_precision {
+                if self.is_double_precision() {
                     return Err(PluginError::Block(
                         "the block's sample format is not the one the plugin was activated with",
                     ));
