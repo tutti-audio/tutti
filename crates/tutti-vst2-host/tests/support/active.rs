@@ -147,15 +147,15 @@ impl ActiveExt for Active {
     }
 
     fn dropped_midi_out(&mut self) -> u64 {
-        self.processor().dropped_midi_out()
+        self.processor().dropped_midi_out().get()
     }
 
     fn dropped_sysex(&mut self) -> u64 {
-        self.processor().dropped_sysex()
+        self.processor().dropped_sysex().get()
     }
 
     fn dropped_midi_in(&mut self) -> u64 {
-        self.processor().dropped_midi_in()
+        self.processor().dropped_midi_in().get()
     }
 
     fn is_double_precision(&mut self) -> bool {

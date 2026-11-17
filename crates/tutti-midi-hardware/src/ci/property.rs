@@ -197,7 +197,7 @@ impl Member {
         let owned = if chunk.header().is_empty() {
             self.updates.contains(&key)
         } else {
-            match PeHeader::parse(chunk.header()) {
+            match PeHeader::try_from(chunk.header()) {
                 Ok(PeHeader::Subscription(PeSubscription::Update { .. })) => true,
                 Ok(PeHeader::Subscription(PeSubscription::End { subscribe_id, .. })) => self
                     .properties

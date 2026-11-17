@@ -601,7 +601,9 @@ fn write_extra(out: &mut Object, extra: &PeExtra) {
     }
 }
 
-impl PeHeader {
+impl TryFrom<&[u8]> for PeHeader {
+    type Error = PeHeaderError;
+
     /// Reads the Header Data field `bytes`.
     ///
     /// The reader is strict: ASCII only, no whitespace outside a string, no
@@ -612,7 +614,7 @@ impl PeHeader {
     /// # Errors
     ///
     /// A [`PeHeaderError`] naming what broke.
-    pub fn parse(bytes: &[u8]) -> Result<Self, PeHeaderError> {
+    fn try_from(bytes: &[u8]) -> Result<Self, PeHeaderError> {
         if bytes.len() > PE_MAX_HEADER_LEN {
             return Err(PeHeaderError::TooLong { len: bytes.len() });
         }
@@ -637,7 +639,9 @@ impl PeHeader {
             _ => Err(PeHeaderError::FirstProperty),
         }
     }
+}
 
+impl PeHeader {
     /// Writes the Header Data field: compact JSON with the first property the
     /// shape requires, and every character outside printable ASCII escaped.
     ///

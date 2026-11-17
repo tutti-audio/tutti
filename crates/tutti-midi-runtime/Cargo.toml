@@ -18,8 +18,6 @@ workspace = true
 # source node. No cycle: tutti-graph names no MIDI crate.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
-# Lock-free / concurrent
-atomic_float = "1.1"
 thiserror = { workspace = true, features = ["std"] }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
@@ -28,6 +26,8 @@ tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 [dev-dependencies]
+# The clock tests' shared beat.
+atomic_float = "1.1"
 # `check_range_contract` for `OutputOffset`, whose serde shape the test writes
 # (`Seconds` serialises under `tutti-types`' `serde`).
 serde = "1"

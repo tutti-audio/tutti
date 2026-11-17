@@ -287,8 +287,6 @@ unsafe extern "C" {
     pub fn snd_seq_client_id(seq: *mut snd_seq_t) -> c_int;
     /// Set the name other clients see for this client.
     pub fn snd_seq_set_client_name(seq: *mut snd_seq_t, name: *const c_char) -> c_int;
-    /// Static message for a negative alsa-lib error code.
-    pub fn snd_strerror(errnum: c_int) -> *const c_char;
 
     /// Declare this client's MIDI version — `SND_SEQ_CLIENT_UMP_MIDI_2_0` here.
     /// **This is what makes the client a UMP client** rather than a legacy one.

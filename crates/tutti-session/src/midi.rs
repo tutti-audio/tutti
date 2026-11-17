@@ -1294,7 +1294,7 @@ impl Midi<'_> {
     /// The events are [`TimedMidiEvent`]s, positioned in beats from the
     /// clip's own start, in any order; a clip file's
     /// [`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline) is the
-    /// `(Beat, Ump)` pairs they are built from, and
+    /// `packets` are the `(Beat, Ump)` pairs they are built from, and
     /// [`play_file`](Self::play_file) does that for a file. The clip reads its
     /// block's `Env`, so a note lands on its frame through seeks and loop
     /// wraps, and **a bounce contains it**: an export forks the clip with its
@@ -1378,7 +1378,9 @@ impl Midi<'_> {
     /// file's one timeline
     /// ([`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline)), with
     /// its looping and bounce behaviour. A file arrives from
-    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`].
+    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`]. The
+    /// System Exclusive events the timeline lists as dropped are not played
+    /// and are counted in a `tracing` warning.
     ///
     /// # Errors
     ///
@@ -1391,9 +1393,16 @@ impl Midi<'_> {
         at: Beat,
         file: &tutti_midi_file::MidiFile,
     ) -> Result<()> {
-        let events = file
-            .timeline()
-            .map_err(tutti_midi_file::Error::from)?
+        let timeline = file.timeline().map_err(tutti_midi_file::Error::from)?;
+        if !timeline.dropped.is_empty() {
+            tracing::warn!(
+                dropped = timeline.dropped.len(),
+                "the file's System Exclusive events with no SysEx7 packet are not played"
+            );
+        }
+        let events = timeline
+            .packets
+            .into_iter()
             .map(|(beat, packet)| {
                 TimedMidiEvent::new(beat, packet).ok_or(MidiError::BeatNotFinite(beat))
             })
@@ -1902,10 +1911,18 @@ impl Midi<'_> {
     /// kept rolling is not trailed by more than a block's placement. **A Beat
     /// Clock follower owns the tempo map** as `follow_tempo` does: the map found
     /// now is the one [`unfollow_clock`](Self::unfollow_clock) restores, and
-    /// `Session::set_tempo` refuses while it follows. **It does not correct
-    /// drift**: a tempo estimate moves the map by steps of at least
-    /// `ClockFollower::TEMPO_STEP`, and the beat the source counts and the beat
-    /// the transport counts are matched at each locate and not in between.
+    /// `Session::set_tempo` refuses while it follows.
+    ///
+    /// **Drift is corrected.** In each poll while the transport rolls, the
+    /// beat the source counts is compared with the beat the transport reaches
+    /// at the next block ([`clock_error`](Self::clock_error)), and the tempo
+    /// published is the fit trimmed to close the error in `ClockFollower::CATCH_UP`
+    /// (4 seconds), by at most 2% of the fit. A trim goes into the map as any
+    /// tempo does, a step of at least `ClockFollower::TEMPO_STEP` and one point
+    /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
+    /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
+    /// quarter of a beat) locates to the source's beat once and is reported as
+    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim.
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
@@ -1934,6 +1951,16 @@ impl Midi<'_> {
             self.meter.current(),
         ));
         Ok(())
+    }
+
+    /// The beat error of the Beat Clock the session follows: the source's beat
+    /// less the transport's, read at the last [`Poll`](crate::Phase::Poll) phase
+    /// (positive when the transport is behind). `None` when no clock is followed,
+    /// or the follower could not read one: not locked, not rolling, an MTC
+    /// follower, or a locate that has not landed yet.
+    #[must_use]
+    pub fn clock_error(&self) -> Option<tutti_types::Beat> {
+        self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport

@@ -178,9 +178,9 @@ where
         let (preset, state, live_mode) = {
             let mut instance = live.lock();
             let live_mode = instance.render_mode();
-            let control = instance.control().ok_or_else(|| {
-                PluginForkError::SaveState(StateError::Rejected("the plugin is lost".into()))
-            })?;
+            let control = instance
+                .control()
+                .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
             let preset = if self.features.contains(Features::PRESET_LOAD) {
@@ -190,7 +190,7 @@ where
             };
             let state = control
                 .save_state(main, StateUse::Duplicate)
-                .map_err(|e| PluginForkError::SaveState(StateError::Rejected(e.to_string())))?;
+                .map_err(|e| PluginForkError::SaveState(e.into()))?;
             (preset, state, live_mode)
         };
         drop(live);
@@ -219,7 +219,7 @@ where
             Some(&mut restore),
         )
         .map_err(|source| PluginForkError::Load {
-            path: self.origin.path().to_path_buf(),
+            path: Some(self.origin.path().to_path_buf()),
             source,
         })?;
         // The fork is driven through its node alone: no editor, no parameter
@@ -328,9 +328,9 @@ where
     ) -> Result<PluginNode<F>, PluginForkError> {
         Fork::of(self)
             .ok_or_else(|| PluginForkError::Load {
-                path: std::path::PathBuf::new(),
+                path: None,
                 source: tutti_plugin_types::BridgeError::LoadFailed {
-                    path: std::path::PathBuf::new(),
+                    path: None,
                     stage: tutti_plugin_types::LoadStage::Opening,
                     reason: "this node has no origin to load again".into(),
                 },
