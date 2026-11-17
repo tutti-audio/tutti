@@ -1146,7 +1146,7 @@ impl MidiFile {
     /// use tutti_types::Beat;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
-    /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
+    /// let track = Track::new().note(Tick(480), Tick(960), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
     /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
     /// let clip = file.timeline()?;
     /// assert_eq!(clip.packets.len(), 2);
