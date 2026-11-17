@@ -20,9 +20,8 @@ fn the_node_adopts_the_mode_last_asked_for() {
         mpe_request_cell: controls.request.clone(),
         ..MidiIngestNode::new()
     };
-    let requested = node.mpe_request.lend().mode;
-    adopt_mpe_request(&mut node.mpe_mode, &mut node.device.mpe, requested);
-    assert_eq!(node.mpe_mode, upper, "the node adopts it");
+    node.device.adopt(node.mpe_request.lend().mode);
+    assert_eq!(node.device.mode, upper, "the node adopts it");
 }
 
 /// **A request the node held across the next `set_mpe_mode` is freed by
@@ -32,6 +31,7 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
     let mut node = MidiIngestNode::new();
     let controls = MidiIngestControls {
         request: node.mpe_request_cell.clone(),
+        serial: Arc::clone(&node.request_serial),
         dropped: node.dropped_reader.clone(),
     };
     {

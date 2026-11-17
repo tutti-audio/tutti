@@ -244,10 +244,7 @@ struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
     cell: Publisher<ClipEvents>,
-    /// Serializes `set`'s compare and publish (`Publisher` has no
-    /// compare-and-publish), so two control threads cannot each publish
-    /// against a stale read. The value is the cell's own: the control side
-    /// reads it with `Publisher::current`. The node never takes it.
+    /// Serializes `set`'s compare and publish (`Publisher` has no compare-and-publish), so two control threads cannot each publish against a stale read. The value is the cell's own: the control side reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
 }
 
@@ -463,7 +460,9 @@ pub struct MidiClipNode {
     /// A reader of `shared.cell`, registered in [`over`](Self::over): a
     /// fork's node is built over its own cell and registers there.
     clip: Reader<ClipEvents>,
-    /// The publish number of the clip this node last played.
+    /// The publish number of the clip this node last played. A lend may return
+    /// number `N` while the value is already `N + 1`, so a replacement can be
+    /// seen one block late, never missed and never seen twice.
     last_seq: u64,
     play: Play,
     /// The declared event capacity, from the block the node was prepared for.

@@ -165,17 +165,23 @@ fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
     assert_eq!(heard(&seen), vec![(10, on(60)), (192, off(60))]);
 }
 
-/// **Two publishes between blocks end the held notes once**, on the next
-/// block: the node sees the later clip alone.
+/// **Two publishes between blocks end each held note once**, on the next
+/// block: notes 60 and 62 sounding, two `set`s, one block, exactly one
+/// note-off each.
 #[test]
-fn two_publishes_between_blocks_are_one_replacement() {
-    let clip = MidiClipNode::new([at(10, on(60)), at(100_000, off(60))]);
+fn two_publishes_between_blocks_release_each_held_note_once() {
+    let clip = MidiClipNode::new([at(10, on(60)), at(20, on(62)), at(100_000, off(60))]);
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     controls.set([at(5_000, on(72))]);
     controls.set([at(5_000, on(73))]);
     exec.process(64, &rolling(64), &[], &mut []);
-    assert_eq!(heard(&seen), vec![(10, on(60)), (64, off(60))]);
+    exec.process(64, &rolling(128), &[], &mut []);
+    let offs: Vec<_> = heard(&seen)
+        .into_iter()
+        .filter(|&(_, e)| e == off(60) || e == off(62))
+        .collect();
+    assert_eq!(offs, vec![(64, off(60)), (64, off(62))]);
 }
 
 /// **A fork plays the clip as it was when forked.** The live clip is

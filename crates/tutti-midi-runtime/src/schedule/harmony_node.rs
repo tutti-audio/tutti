@@ -90,10 +90,7 @@ struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
     cell: Publisher<Lanes>,
-    /// Serializes `set`'s compare and publish (`Publisher` has no
-    /// compare-and-publish), so two control threads cannot each publish
-    /// against a stale read. The value is the cell's own: the control side
-    /// reads it with `Publisher::current`. The node never takes it.
+    /// Serializes `set`'s compare and publish (`Publisher` has no compare-and-publish), so two control threads cannot each publish against a stale read. The value is the cell's own: the control side reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
 }
 
@@ -132,7 +129,9 @@ pub struct HarmonyNode {
     /// A reader of `shared.cell`, registered in [`over`](Self::over): a
     /// fork's node is built over its own cell and registers there.
     lanes: Reader<Lanes>,
-    /// The publish number of the lanes this node last walked.
+    /// The publish number of the lanes this node last walked. A lend may return
+    /// number `N` while the value is already `N + 1`, so a replacement can be
+    /// seen one block late, never missed and never seen twice.
     last_seq: u64,
     walk: Walk,
     /// The chord and the scale this node last sent: a loop wrap re-states
