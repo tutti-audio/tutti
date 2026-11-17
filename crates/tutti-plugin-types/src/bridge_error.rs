@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::SlabError;
 use thiserror::Error;
-use tutti_plugin_ipc_ffi::SlabError;
 
 use crate::{
     EditorError, FrameTooLarge, LoadStage, PluginError, PluginFailure, ResultError,

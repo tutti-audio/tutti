@@ -315,6 +315,7 @@ pub use midi::{
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
+pub use tutti_plugin_ipc_ffi::SlabError;
 pub use wakeups::Wakeups;
 pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutError};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller

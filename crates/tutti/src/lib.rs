@@ -578,7 +578,9 @@ pub mod plugin {
         VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
-    pub use tutti_plugin_types::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutError};
+    pub use tutti_plugin_types::{
+        FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
+    };
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it
