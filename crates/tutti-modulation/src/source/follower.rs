@@ -1,6 +1,6 @@
 //! [`LevelFollower`]: an audio level, followed by a one-pole attack and release.
 
-use tutti_types::{Frame, SampleRate, Samples, Seconds};
+use tutti_types::{Ballistics, Frame, SampleRate, Samples};
 
 use super::{CONTROL_GRID, ControlSource, Leg, PlayGrid};
 
@@ -18,8 +18,7 @@ const FLOOR: f64 = 1e-7;
 ///   `env ← (1 − c) · env + c · level`, `c = 1 − exp(−1 / (τ · rate))`
 ///   ([`Seconds::one_pole_coeff`]), the envelope in `f64`, with `τ` the attack
 ///   while the level is above the envelope and the release otherwise. A `τ` of
-///   zero (or below) follows the level exactly, and an infinite one holds (the
-///   envelope never moves that way). Below `1e-7` the envelope is 0, so a
+///   zero follows the level exactly. Below `1e-7` the envelope is 0, so a
 ///   release reaches silence in finite time.
 /// - **On the grid, one step late.** At a grid point `g` it sends a linear leg
 ///   from `env(g − step)` to `env(g)` over the step to the next point, where
@@ -29,8 +28,7 @@ const FLOOR: f64 = 1e-7;
 /// - **A play start** sets the envelope to 0.
 #[derive(Clone, Debug)]
 pub struct LevelFollower {
-    attack: Seconds,
-    release: Seconds,
+    ballistics: Ballistics,
     /// One-pole coefficients at the prepared rate; 0 until `prepare`, so an
     /// unprepared follower's envelope stays at 0.
     attack_coeff: f32,
@@ -44,13 +42,12 @@ pub struct LevelFollower {
 }
 
 impl LevelFollower {
-    /// A follower with time constants `attack` and `release`, at 0. The rate
+    /// A follower with the attack and release of `ballistics`, at 0. The rate
     /// comes at [`prepare`](ControlSource::prepare).
     #[must_use]
-    pub fn new(attack: Seconds, release: Seconds) -> Self {
+    pub fn new(ballistics: Ballistics) -> Self {
         Self {
-            attack,
-            release,
+            ballistics,
             attack_coeff: 0.0,
             release_coeff: 0.0,
             env: 0.0,
@@ -77,8 +74,7 @@ impl ControlSource for LevelFollower {
     const GRID: Option<PlayGrid> = Some(CONTROL_GRID);
 
     fn prepare(&mut self, rate: SampleRate) {
-        self.attack_coeff = self.attack.one_pole_coeff(rate);
-        self.release_coeff = self.release.one_pole_coeff(rate);
+        (self.attack_coeff, self.release_coeff) = self.ballistics.coeffs(rate);
     }
 
     /// The envelope at 0. It sends nothing of its own here: play frame 0 is a

@@ -18,6 +18,9 @@ use super::*;
 /// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
 ///   refuses it; `magnitude` names dropping the sign. (`From<Amplitude> for Gain`
 ///   is present: total and lossless.)
+/// - `Db(f64)`, `Amplitude(f64)`, a method on `Db` taking or returning `f64` — the `f64`
+///   path is the two associated functions `Db::to_amplitude_f64` and `Db::from_amplitude_f64`
+///   over bare `f64`, a working precision for design and analysis, not a second unit.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -247,4 +250,21 @@ fn zero_power_is_negative_infinity_not_the_floor() {
 fn a_negative_power_or_amplitude_is_nan() {
     assert!(Db::from_power(-1.0).get().is_nan());
     assert!(Db::from_amplitude(Amplitude(-0.5)).get().is_nan());
+}
+
+/// The `f64` pair is the amplitude-decibel definition: 20 dB is a ratio of 10, a ratio of 100 is
+/// 40 dB, a half is `20 log10 0.5`, silence is `-inf`, a negative ratio is NaN, and the pair
+/// round-trips to `1e-12`.
+#[test]
+fn the_f64_pair_is_the_amplitude_decibel_definition() {
+    assert_eq!(Db::to_amplitude_f64(20.0), 10.0);
+    assert_eq!(Db::to_amplitude_f64(0.0), 1.0);
+    assert_eq!(Db::from_amplitude_f64(100.0), 40.0);
+    assert!((Db::from_amplitude_f64(0.5) + 6.020_599_913_279_624).abs() < 1e-12);
+    assert_eq!(Db::from_amplitude_f64(0.0), f64::NEG_INFINITY);
+    assert!(Db::from_amplitude_f64(-1.0).is_nan());
+    for db in [-120.0, -60.0, -3.0, 0.0, 12.0] {
+        let round = Db::from_amplitude_f64(Db::to_amplitude_f64(db));
+        assert!((round - db).abs() < 1e-12, "{db}");
+    }
 }

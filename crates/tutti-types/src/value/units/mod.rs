@@ -62,6 +62,7 @@ mod macros;
 
 mod amounts;
 mod angles;
+mod ballistics;
 mod frames;
 mod level;
 mod measures;
@@ -77,6 +78,7 @@ pub use amounts::{
     Balance, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
 };
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
+pub use ballistics::Ballistics;
 pub use frames::{SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};

@@ -5,14 +5,14 @@
 //! block's render does not depend on where blocks fall.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
+use tutti_types::{ChannelIndex, ChannelLayout};
 
 /// A channel an inversion names that the width lacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("channel {channel} is not in a layout of {width} channels")]
+#[error("channel {} is not in a layout of {width} channels", channel.get())]
 pub struct ChannelOutOfRange {
     /// The channel named.
-    pub channel: usize,
+    pub channel: ChannelIndex,
     /// The layout's width.
     pub width: u16,
 }
@@ -24,11 +24,11 @@ pub struct ChannelOutOfRange {
 ///
 /// ```
 /// use tutti_dsp::Polarity;
-/// use tutti_types::ChannelLayout;
+/// use tutti_types::{ChannelIndex, ChannelLayout};
 ///
-/// let flips = Polarity::new(ChannelLayout::STEREO, [1]).unwrap();
+/// let flips = Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(1)]).unwrap();
 /// assert_eq!((flips.inverts(0), flips.inverts(1)), (false, true));
-/// assert!(Polarity::new(ChannelLayout::STEREO, [2]).is_err(), "no third channel");
+/// assert!(Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(2)]).is_err(), "no third channel");
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Polarity {
@@ -54,14 +54,15 @@ impl Polarity {
     /// width's and the channels' together.
     pub fn new(
         width: ChannelLayout,
-        channels: impl IntoIterator<Item = usize>,
+        channels: impl IntoIterator<Item = ChannelIndex>,
     ) -> Result<Self, ChannelOutOfRange> {
         let mut inverted = vec![false; usize::from(width.count())];
         for channel in channels {
-            *inverted.get_mut(channel).ok_or(ChannelOutOfRange {
+            let named = width.index(channel.get()).ok_or(ChannelOutOfRange {
                 channel,
                 width: width.count(),
-            })? = true;
+            })?;
+            inverted[named.get()] = true;
         }
         Ok(Self { width, inverted })
     }

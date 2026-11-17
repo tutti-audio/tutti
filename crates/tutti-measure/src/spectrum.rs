@@ -47,7 +47,7 @@
 //! # Smoothing, peaks, spectrogram
 //!
 //! [`Smoothing`] works on the linear power of each output with
-//! [`Ballistics`]'s one-pole step, so an averaged level is the dB of an
+//! [`Ballistics`](tutti_types::Ballistics)'s one-pole step, so an averaged level is the dB of an
 //! average power, and a released level falls linearly in dB per second. The
 //! first frame seeds the state. The peak of an output is held for
 //! [`hold`](SpectrumConfig::peak_hold) rounded up to a whole number of frames,
@@ -61,16 +61,16 @@
 //! [`reset`](SpectrumMeter::reset) (`tests/alloc/spectrum.rs`).
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
+use tutti_types::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_nyquist};
-use crate::stereo::Ballistics;
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
+use tutti_dsp::Smoother;
 use tutti_dsp::StftGeometry;
 use tutti_types::ranged;
 
@@ -147,11 +147,12 @@ pub enum Smoothing {
 
 impl Smoothing {
     fn ballistics(self) -> Ballistics {
-        match self {
-            Self::None => Ballistics::new(Seconds(0.0), Seconds(0.0)),
-            Self::Release(tau) => Ballistics::new(Seconds(0.0), tau.get()),
-            Self::Average(tau) => Ballistics::new(tau.get(), tau.get()),
-        }
+        let (attack, release) = match self {
+            Self::None => (Seconds(0.0), Seconds(0.0)),
+            Self::Release(tau) => (Seconds(0.0), tau.get()),
+            Self::Average(tau) => (tau.get(), tau.get()),
+        };
+        Ballistics::new(attack, release).expect("a `SpectrumTime` is within 0..=3600 s")
     }
 }
 
@@ -682,14 +683,14 @@ impl SpectrumMeter {
                         .sum::<f64>() as f32,
                 )
             };
-            let coefficient = smoothing.coefficient(raw > self.power[i], dt);
+            let coefficient = smoothing.coeff_over(raw > self.power[i], dt);
             // A coefficient of 1 is no smoothing; assigning keeps the
             // reading exact where `old + (new - old)` would round against
             // a louder previous frame.
             let smoothed = if first || coefficient >= 1.0 {
                 raw
             } else {
-                self.power[i] + (raw - self.power[i]) * coefficient
+                Smoother::toward(self.power[i], raw, coefficient)
             };
             self.power[i] = if smoothed < POWER_EPSILON {
                 0.0
@@ -1059,8 +1060,11 @@ mod tests {
                 / picked.len() as f64;
             stats.push(mean / want);
         }
-        let alpha =
-            f64::from(Ballistics::new(tau, tau).coefficient(true, plan(&cfg).frame_interval()));
+        let alpha = f64::from(
+            Ballistics::new(tau, tau)
+                .expect("a valid time")
+                .coeff_over(true, plan(&cfg).frame_interval()),
+        );
         let b = picked.len() as f64;
         let rel_sigma = (alpha / (2.0 - alpha) / b).sqrt();
         let last = *stats.last().unwrap();

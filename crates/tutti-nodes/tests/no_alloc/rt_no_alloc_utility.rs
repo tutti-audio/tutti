@@ -6,7 +6,7 @@ use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     MidSideConfig, MidSideNode, PolarityConfig, PolarityNode, StereoWidthConfig, StereoWidthNode,
 };
-use tutti_types::{ChannelLayout, SampleRate, UnitParam};
+use tutti_types::{ChannelIndex, ChannelLayout, SampleRate, UnitParam};
 
 /// `node` alone through `BlockRig`: an offset, asymmetric pair of channels, 16 warm-up
 /// blocks, then 2 000 blocks under `assert_no_alloc`, `between` run before each.
@@ -40,7 +40,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 
 #[test]
 fn polarity_process_is_allocation_free() {
-    let config = PolarityConfig::new(ChannelLayout::STEREO).only([1]);
+    let config = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);
     gate(PolarityNode::try_from(config).unwrap(), |_, _| {});
 }
 

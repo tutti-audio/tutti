@@ -87,7 +87,7 @@
 //! | true peak | none: the audio's width is the meter's | [`measure_true_peak`] | [`TruePeakMeter`] | `Result<()>` / `finish` dBTP | no: grows to the longest chunk |
 //! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `Result<()>` / `finish` blocks | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` into the caller's `Vec` / no `finish` | no: grows the caller's `Vec` |
-//! | meter ballistics | [`Ballistics`] | none | [`BallisticsMeter`] | the smoothed reading / `current`, no `finish` | yes: no allocation, a few flops |
+//! | meter ballistics | [`Ballistics`](tutti_types::Ballistics) | none | [`BallisticsMeter`] | the smoothed reading / `current`, no `finish` | yes: no allocation, a few flops |
 //!
 //! A meter has no `finish` where its result is a reading that exists after
 //! every push (spectrum, chroma, windowed loudness, ballistics) or is the
@@ -360,7 +360,7 @@ pub use spectrum::{
     PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
     SpectrumTime, SpectrumTimeError,
 };
-pub use stereo::{Ballistics, BallisticsMeter, StereoLevels, StereoReading, correlate};
+pub use stereo::{BallisticsMeter, StereoLevels, StereoReading, correlate};
 pub use tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
     TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,

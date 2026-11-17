@@ -14,6 +14,15 @@
 /// A width past it is refused where it is stated, never truncated.
 pub const MAX_CHANNELS: usize = 16;
 
+crate::ranged! {
+    /// The index of one channel of a bus, `0..`[`MAX_CHANNELS`]: the most any bus holds. The
+    /// range is static; whether a channel is in a given layout is the layout's check,
+    /// [`ChannelLayout::index`].
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    ChannelIndex(usize), ChannelIndexOutOfRange, "a channel index below MAX_CHANNELS (16)",
+    |raw| raw < MAX_CHANNELS
+}
+
 /// How many audio channels a signal, node port, bus, wave, or device carries.
 ///
 /// The shared "mono vs stereo vs N" vocabulary across the whole engine, in
@@ -101,6 +110,14 @@ impl ChannelLayout {
     /// surround width common enough — and unambiguous enough (4 is 4, no
     /// placement question) — to earn a name.
     pub const QUAD: Self = Self(4);
+
+    /// `channel` as an index into this layout, or `None` when the layout has no such channel
+    /// (an index at or past [`count`](Self::count)): a channel is refused, never wrapped or
+    /// truncated.
+    #[must_use]
+    pub fn index(self, channel: usize) -> Option<ChannelIndex> {
+        ChannelIndex::new(channel).filter(|i| i.get() < usize::from(self.0))
+    }
 
     /// Returns the channel count this layout describes.
     #[must_use]
@@ -355,5 +372,34 @@ mod tests {
             [1, 2, 4, 6],
             "sorting layouts must order them by width"
         );
+    }
+
+    /// A channel index is below `MAX_CHANNELS`: `new`, `TryFrom` and `of` agree.
+    #[test]
+    fn a_channel_index_is_below_the_bus_maximum() {
+        tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+            new: ChannelIndex::new,
+            get: ChannelIndex::get,
+            of: Some(ChannelIndex::of),
+            valid: &[0, 1, MAX_CHANNELS - 1],
+            invalid: &[MAX_CHANNELS, MAX_CHANNELS + 1, usize::MAX],
+        });
+    }
+
+    /// A layout names the channels below its count and refuses the rest, including a channel
+    /// the static range admits and a count past the static range.
+    #[test]
+    fn a_layout_indexes_only_the_channels_it_has() {
+        let stereo = ChannelLayout::STEREO;
+        assert_eq!(stereo.index(1).map(ChannelIndex::get), Some(1));
+        assert_eq!(stereo.index(2), None);
+        assert_eq!(stereo.index(usize::MAX), None);
+        assert_eq!(ChannelLayout::EMPTY.index(0), None);
+        let wide = ChannelLayout::from_count(24);
+        assert_eq!(
+            wide.index(MAX_CHANNELS - 1).map(ChannelIndex::get),
+            Some(15)
+        );
+        assert_eq!(wide.index(MAX_CHANNELS), None, "past every bus");
     }
 }

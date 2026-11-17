@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_types::{SampleRate, Seconds};
+use tutti_types::{Ballistics, SampleRate, Seconds};
 
 use crate::smoother::Smoother;
 
@@ -40,16 +40,27 @@ pub(super) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, ou
 /// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
 pub(super) const MAX_KNEE_DB: f32 = 400.0;
 
-/// The attack and release of a follower on a quantity that grows toward a target and falls
-/// back: one-pole coefficients at the rate, the attack's while the quantity rises and the
-/// release's while it falls.
+/// The attack and release a control pair names, as a valid [`Ballistics`]: a time under 0 or
+/// NaN reads as 0 (instant) and an infinite one holds (coefficient 0), as
+/// [`Seconds::one_pole_coeff`] says. `Ballistics::new` refuses those, so a hostile control is
+/// brought into range here.
+pub(super) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
+    // A time that is not below `f64::MAX` seconds is infinite to the coefficient: its decay
+    // length `t * rate` overflows to infinity at every rate above 1 Hz, which holds.
+    let time = |t: Seconds| Seconds(t.get().max(0.0).min(f64::MAX));
+    Ballistics::new(time(attack), time(release))
+        .expect("a time floored at 0 and capped at f64::MAX is finite and not negative")
+}
+
+/// The one-pole coefficients of a follower on a quantity that grows toward a target and falls
+/// back: the attack's while the quantity rises and the release's while it falls.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Ballistics {
+pub(super) struct Follower {
     pub(super) attack: f32,
     pub(super) release: f32,
 }
 
-impl Ballistics {
+impl Follower {
     /// Holds: a coefficient of 0 closes none of the gap, so a state stays where it is. What a
     /// bank that is not yet aimed starts with; [`of`](Self::of) replaces it before any frame
     /// runs.
@@ -58,14 +69,10 @@ impl Ballistics {
         release: 0.0,
     };
 
-    /// The follower of time constants `attack` and `release` at `rate`: a time under 0 or NaN
-    /// reads as 0 (coefficient 1, instant) and an infinite one holds (coefficient 0), as
-    /// [`Seconds::one_pole_coeff`] says.
-    pub(super) fn of(attack: Seconds, release: Seconds, rate: SampleRate) -> Self {
-        Self {
-            attack: Seconds(attack.get().max(0.0)).one_pole_coeff(rate),
-            release: Seconds(release.get().max(0.0)).one_pole_coeff(rate),
-        }
+    /// The follower of `ballistics` at `rate`.
+    pub(super) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {
+        let (attack, release) = ballistics.coeffs(rate);
+        Self { attack, release }
     }
 
     /// One step of `state` toward `target`, at the attack's coefficient while the target is
