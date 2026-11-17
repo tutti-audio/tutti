@@ -450,6 +450,12 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "ebur128 refuses a rate or width it cannot meter: the refusal is the library's, not a value's",
     ),
+    ty(
+        "crates/tutti-dsp/",
+        "LimiterBank::detecting",
+        CTOR,
+        "a true-peak lookahead is valid only against the up-sampler's delay at the rate, which are two arguments of this call together: the one terminal call that binds both",
+    ),
     ty("crates/tutti-measure/", "YinConfig", WIDTH, MEASURES),
     ty(
         "crates/tutti-midi-network/",

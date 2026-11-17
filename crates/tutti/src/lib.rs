@@ -220,7 +220,9 @@ pub mod nodes {
         Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
         ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
-    pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError};
+    pub use tutti_dsp::{
+        Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, TruePeakError,
+    };
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
