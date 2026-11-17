@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-111/<section>#<n>          the nth sentence under the numbered section
@@ -21,26 +24,26 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-111/1.1.1#1 | responder |  | permitted | M2-111 §1.1.1 | StateList lists the memory regions an Initiator can capture |  |  |
-m2-111/1.3#1 | both |  | permitted | M2-111 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-111/1.3#2 | responder |  | permitted | M2-111 §1.3 | a device can have one or more States |  |  |
-m2-111/1.5#1 | responder |  | required | M2-111 §1.5 | a Responder answers a ResourceList Get with all the Resources it supports |  |  |
-m2-111/1.5#2 | responder |  | required | M2-111 §1.5 | a Responder with StateList and State declares both in its ResourceList reply |  |  |
-m2-111/2.1#1 | initiator |  | permitted | M2-111 §2.1 | the captured Property Data can be sent back to put the device in that State |  |  |
-m2-111/2.1#2 | initiator |  | permitted | M2-111 §2.1 | example: an Initiator restores a device's State when a project opens |  |  |
-m2-111/2.1#3 | responder |  | required | M2-111 §2.1 | a device with several Groups serves StateList on one Group only |  |  |
-m2-111/2.1#4 | responder |  | recommended | M2-111 §2.1 | that Group's State definition holds the state of the other Groups |  |  |
-m2-111/2.2#1 | initiator |  | permitted | M2-111 §2.2 | an Initiator can read StateList with a Get |  |  |
-m2-111/2.3#1 | responder |  | required | M2-111 §2.3 | a Responder with StateList answers a Get with an array of objects |  |  |
-m2-111/2.3#2 | initiator |  | permitted | M2-111 §2.3 | a device can compare State revisions to decide whether to reload |  |  |
-m2-111/3.1#1 | initiator |  | permitted | M2-111 §3.1 | the State Property Data can be sent back to set the device's buffer |  |  |
-m2-111/3.1.1#1 | responder |  | recommended | M2-111 §3.1.1 | a State reply carries the current stateRev in its Header |  |  |
-m2-111/3.1.1#2 | both |  | permitted | M2-111 §3.1.1 | the stateRev tells whether a State changed since the last read or backup |  |  |
-m2-111/3.1.1#3 | initiator |  | recommended | M2-111 §3.1.1 | a stored State keeps the device ids, the State properties and the State data |  |  |
-m2-111/3.2#1 | initiator |  | permitted | M2-111 §3.2 | an Initiator can read State with a Get |  |  |
-m2-111/3.2#2 | initiator |  | recommended | M2-111 §3.2 | an Initiator ends a State Get of unknown size that grows too large with Terminate Inquiry |  |  |
-m2-111/3.2.1#1 | responder |  | required | M2-111 §3.2.1 | the State Property Data matches the compression and encoding its Header declares |  |  |
-m2-111/3.3#1 | initiator |  | recommended | M2-111 §3.3 | an Initiator can write State with a Set, after checking the target is the same device |  |  |
-m2-111/3.3#2 | responder |  | recommended | M2-111 §3.3 | a Responder can tell the State data it receives is meant for it |  |  |
-m2-111/3.3#3 | responder |  | permitted | M2-111 §3.3 | it can tell from the first bytes of the State data |  |  |
-m2-111/3.3#4 | responder |  | recommended | M2-111 §3.3 | a Responder ends a Set whose data is wrong midway with Terminate Inquiry |  |  |
+m2-111/1.1.1#1 | responder |  | permitted | M2-111 §1.1.1 | StateList lists the memory regions an Initiator can capture |  |  |  | 94e91fa871549946
+m2-111/1.3#1 | both |  | permitted | M2-111 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | 32408afa39dcd3a2
+m2-111/1.3#2 | responder |  | permitted | M2-111 §1.3 | a device can have one or more States |  |  |  | 3d82c3e259d59e40
+m2-111/1.5#1 | responder |  | required | M2-111 §1.5 | a Responder answers a ResourceList Get with all the Resources it supports |  |  |  | 0d1c7c4c9fc9533a
+m2-111/1.5#2 | responder |  | required | M2-111 §1.5 | a Responder with StateList and State declares both in its ResourceList reply |  |  |  | a4a5e74244967f9b
+m2-111/2.1#1 | initiator |  | permitted | M2-111 §2.1 | the captured Property Data can be sent back to put the device in that State |  |  |  | 3726bf566d6028f4
+m2-111/2.1#2 | initiator |  | permitted | M2-111 §2.1 | example: an Initiator restores a device's State when a project opens |  |  |  | 7755cf83f7e21cca
+m2-111/2.1#3 | responder |  | required | M2-111 §2.1 | a device with several Groups serves StateList on one Group only |  |  |  | ea2c8dbd735bf5a3
+m2-111/2.1#4 | responder |  | recommended | M2-111 §2.1 | that Group's State definition holds the state of the other Groups |  |  |  | 16b17a3569959ae5
+m2-111/2.2#1 | initiator |  | permitted | M2-111 §2.2 | an Initiator can read StateList with a Get |  |  |  | d11694b5b805772a
+m2-111/2.3#1 | responder |  | required | M2-111 §2.3 | a Responder with StateList answers a Get with an array of objects |  |  |  | bdf2bd351e8b619a
+m2-111/2.3#2 | initiator |  | permitted | M2-111 §2.3 | a device can compare State revisions to decide whether to reload |  |  |  | d49d3a6e7a1da4d0
+m2-111/3.1#1 | initiator |  | permitted | M2-111 §3.1 | the State Property Data can be sent back to set the device's buffer |  |  |  | ca2501471563dd17
+m2-111/3.1.1#1 | responder |  | recommended | M2-111 §3.1.1 | a State reply carries the current stateRev in its Header |  |  |  | 9082e56af5d099ec
+m2-111/3.1.1#2 | both |  | permitted | M2-111 §3.1.1 | the stateRev tells whether a State changed since the last read or backup |  |  |  | f501af1aa6426607
+m2-111/3.1.1#3 | initiator |  | recommended | M2-111 §3.1.1 | a stored State keeps the device ids, the State properties and the State data |  |  |  | eb2ab35112e6d3f4
+m2-111/3.2#1 | initiator |  | permitted | M2-111 §3.2 | an Initiator can read State with a Get |  |  |  | 6ee173822f2f483e
+m2-111/3.2#2 | initiator |  | recommended | M2-111 §3.2 | an Initiator ends a State Get of unknown size that grows too large with Terminate Inquiry |  |  |  | 4cb3b1ce9bf4e67a
+m2-111/3.2.1#1 | responder |  | required | M2-111 §3.2.1 | the State Property Data matches the compression and encoding its Header declares |  |  |  | d30e5b2eefd5b065
+m2-111/3.3#1 | initiator |  | recommended | M2-111 §3.3 | an Initiator can write State with a Set, after checking the target is the same device |  |  |  | 281d43d21942d516
+m2-111/3.3#2 | responder |  | recommended | M2-111 §3.3 | a Responder can tell the State data it receives is meant for it |  |  |  | d94c435709aef28f
+m2-111/3.3#3 | responder |  | permitted | M2-111 §3.3 | it can tell from the first bytes of the State data |  |  |  | 2e15e8223505d8f7
+m2-111/3.3#4 | responder |  | recommended | M2-111 §3.3 | a Responder ends a Set whose data is wrong midway with Terminate Inquiry |  |  |  | d7b05634aa4206e6

@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-113/<section>#<n>          the nth sentence under the numbered section
@@ -19,29 +22,29 @@
 # with the three rows of M2-104's Table 2 (shall is required, should
 # recommended, may permitted), and no negated forms. Sentence rows only.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-113/2.2.1#1 | both |  | required | M2-113 §2.2.1 | the Source or Destination of every Profile message here is a Channel, 0x00 to 0x0F |  |  |
-m2-113/2.3#1 | receiver |  | required | M2-113 §2.3 | on Set Profile On a device routes every Control Change as Appendix A lists |  |  |
-m2-113/2.3#2 | receiver |  | required | M2-113 §2.3 | those routings stay fixed while the Profile is on |  |  |
-m2-113/2.3#3 | receiver |  | required | M2-113 §2.3 | the Sound Controller and Effects numbers keep the default function Appendix A names |  |  |
-m2-113/2.4#1 | receiver |  | recommended | M2-113 §2.4 | Reset All Controllers sets Control Change values to the Appendix A initial values |  |  |
-m2-113/2.5#1 | receiver |  | permitted | M2-113 §2.5 | after Set Profile Off a device can respond as its maker likes |  |  |
-m2-113/2.5#2 | receiver |  | permitted | M2-113 §2.5 | example responses to Set Profile Off: nothing, a prior state, or something else |  |  |
-m2-113/2.6#1 | receiver |  | required | M2-113 §2.6 | a device whose Control Change routing stops matching the Profile sends Profile Disabled |  |  |
-m2-113/2.6#2 | receiver |  | permitted | M2-113 §2.6 | a user setting or another action can change the routing |  |  |
-m2-113/2.7#1 | both |  | recommended | M2-113 §2.7 | with MIDI 2.0 resolution the 7 and 14 bit values are scaled up as M2-104 says |  |  |
-m2-113/a#1 | receiver |  | permitted | M2-113 §A | a device can use Undefined controllers for its own purposes and stay conformant |  |  |
-m2-113/a#2 | receiver |  | recommended | M2-113 §A | a Reset value marked Device Specific takes the device's own default, or the controller ignores Reset |  |  |
-m2-113/b#1 | receiver |  | required | M2-113 §B | Bank Select changes no sound until a Program Change follows | neg=1 |  |
-m2-113/b#2 | receiver |  | recommended | M2-113 §B | a device that makes sound responds to CC 7 |  |  |
-m2-113/b#3 | receiver |  | permitted | M2-113 §B | total volume can also depend on Expression and on Master Volume SysEx |  |  |
-m2-113/b#4 | receiver |  | required | M2-113 §B | panning a sounding note makes no audible artifact |  |  |
-m2-113/b#5 | both |  | recommended | M2-113 §B | Channel Volume sets the base level and Expression shapes the music during playback |  |  |
-m2-113/b#6 | receiver |  | permitted | M2-113 §B | a device can respond to Hold 1 as a continuous controller |  |  |
-m2-113/b#7 | both |  | permitted | M2-113 §B | a damper pedal can send continuous values instead of on and off |  |  |
-m2-113/b#8 | receiver |  | permitted | M2-113 §B | a device can respond to re-damper |  |  |
-m2-113/b#9 | receiver |  | permitted | M2-113 §B | re-damper is typical for pianos, other timbres can use it |  |  |
-m2-113/b#10 | receiver |  | recommended | M2-113 §B | Damper response resembles an acoustic piano's pedal |  |  |
-m2-113/b#11 | receiver |  | required | M2-113 §B | with Damper on, Note Offs are deferred |  |  |
-m2-113/b#12 | receiver |  | required | M2-113 §B | when Damper goes off, deferred notes release; going on leaves sounding notes alone |  |  |
-m2-113/b#13 | receiver |  | recommended | M2-113 §B | a released note above the Sustain level returns to Decay or Sustain |  |  |
-m2-113/b#14 | receiver |  | recommended | M2-113 §B | a released note not above Sustain ignores the Damper change |  |  |
+m2-113/2.2.1#1 | both |  | required | M2-113 §2.2.1 | the Source or Destination of every Profile message here is a Channel, 0x00 to 0x0F |  |  |  | ea0aabaf824f4795
+m2-113/2.3#1 | receiver |  | required | M2-113 §2.3 | on Set Profile On a device routes every Control Change as Appendix A lists |  |  |  | 05a1576a36d90da4
+m2-113/2.3#2 | receiver |  | required | M2-113 §2.3 | those routings stay fixed while the Profile is on |  |  |  | a7e79e5c8b8250c0
+m2-113/2.3#3 | receiver |  | required | M2-113 §2.3 | the Sound Controller and Effects numbers keep the default function Appendix A names |  |  |  | 437f26bcc5642768
+m2-113/2.4#1 | receiver |  | recommended | M2-113 §2.4 | Reset All Controllers sets Control Change values to the Appendix A initial values |  |  |  | b80007c834c1337b
+m2-113/2.5#1 | receiver |  | permitted | M2-113 §2.5 | after Set Profile Off a device can respond as its maker likes |  |  |  | 9bbc1047f854f3bc
+m2-113/2.5#2 | receiver |  | permitted | M2-113 §2.5 | example responses to Set Profile Off: nothing, a prior state, or something else |  |  |  | aa94a3ba7b66c892
+m2-113/2.6#1 | receiver |  | required | M2-113 §2.6 | a device whose Control Change routing stops matching the Profile sends Profile Disabled |  |  |  | 71bab1c0eee30290
+m2-113/2.6#2 | receiver |  | permitted | M2-113 §2.6 | a user setting or another action can change the routing |  |  |  | cf47598d1b17d39c
+m2-113/2.7#1 | both |  | recommended | M2-113 §2.7 | with MIDI 2.0 resolution the 7 and 14 bit values are scaled up as M2-104 says |  |  |  | dd285322b98cb30f
+m2-113/a#1 | receiver |  | permitted | M2-113 §A | a device can use Undefined controllers for its own purposes and stay conformant |  |  |  | 226dbf323739f4cc
+m2-113/a#2 | receiver |  | recommended | M2-113 §A | a Reset value marked Device Specific takes the device's own default, or the controller ignores Reset |  |  |  | 7b280f6fbd2ea4d6
+m2-113/b#1 | receiver |  | required | M2-113 §B | Bank Select changes no sound until a Program Change follows | neg=1 |  |  | a11692b1149fe251
+m2-113/b#2 | receiver |  | recommended | M2-113 §B | a device that makes sound responds to CC 7 |  |  |  | 72dcbc4c0259c0e4
+m2-113/b#3 | receiver |  | permitted | M2-113 §B | total volume can also depend on Expression and on Master Volume SysEx |  |  |  | d90317ca85f8d55c
+m2-113/b#4 | receiver |  | required | M2-113 §B | panning a sounding note makes no audible artifact |  |  |  | 74b60eb056ce75f4
+m2-113/b#5 | both |  | recommended | M2-113 §B | Channel Volume sets the base level and Expression shapes the music during playback |  |  |  | 490c2580fc849656
+m2-113/b#6 | receiver |  | permitted | M2-113 §B | a device can respond to Hold 1 as a continuous controller |  |  |  | 8706f2fefd1db317
+m2-113/b#7 | both |  | permitted | M2-113 §B | a damper pedal can send continuous values instead of on and off |  |  |  | 3019327c2ae3a04e
+m2-113/b#8 | receiver |  | permitted | M2-113 §B | a device can respond to re-damper |  |  |  | 41e9eef98f7c881a
+m2-113/b#9 | receiver |  | permitted | M2-113 §B | re-damper is typical for pianos, other timbres can use it |  |  |  | 0976b24e19fc4a4b
+m2-113/b#10 | receiver |  | recommended | M2-113 §B | Damper response resembles an acoustic piano's pedal |  |  |  | c6f5a05f1be00d4f
+m2-113/b#11 | receiver |  | required | M2-113 §B | with Damper on, Note Offs are deferred |  |  |  | 22fc8207911ed860
+m2-113/b#12 | receiver |  | required | M2-113 §B | when Damper goes off, deferred notes release; going on leaves sounding notes alone |  |  |  | db8a7c0d2c9cd58b
+m2-113/b#13 | receiver |  | recommended | M2-113 §B | a released note above the Sustain level returns to Decay or Sustain |  |  |  | 9ab0cee760b93911
+m2-113/b#14 | receiver |  | recommended | M2-113 §B | a released note not above Sustain ignores the Damper change |  |  |  | 3947a8f69699198b

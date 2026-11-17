@@ -72,7 +72,7 @@ fn the_table_is_frequency_data() {
 #[test]
 fn test_from_cents() {
     // Create quarter-tone scale (24 notes per octave)
-    let cents: Vec<f32> = (0..24).map(|i| i as f32 * 50.0).collect();
+    let cents: Vec<Cents> = (0..24).map(|i| Cents::new(i as f32 * 50.0)).collect();
     let tuning = Tuning::from_cents(&cents);
 
     assert_eq!(tuning.scale_size(), 24);

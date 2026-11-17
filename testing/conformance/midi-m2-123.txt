@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-123/<section>#<n>          the nth sentence under the numbered section
@@ -21,72 +24,72 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-123/1.2.1#1 | both |  | permitted | M2-123 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-123/1.2.1#2 | both |  | permitted | M2-123 §1.2.1 | either device can start a Transaction at any time |  |  |
-m2-123/1.2.1#3 | both |  | permitted | M2-123 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-123/1.2.1#4 | both |  | permitted | M2-123 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
-m2-123/2.2#1 | both |  | permitted | M2-123 §2.2 | goal: articulations written for one library's violin play the same on another library's violin |  |  |
-m2-123/2.2#2 | both |  | permitted | M2-123 §2.2 | goal: articulations written for a violin play the same on a clarinet |  |  |
-m2-123/2.4#1 | both |  | permitted | M2-123 §2.4 | scope: other aspects of articulation can be handled by later specifications |  |  |
-m2-123/4.1#1 | sender |  | recommended | M2-123 §4.1 | Attribute Type 0x10 to 0x1F is shown to users as Classification 1 to 16 |  |  |
-m2-123/4.1#2 | sender |  | recommended | M2-123 §4.1 | the Subclass field names the articulation's Subclass, shown to users as 1 to 16 |  |  |
-m2-123/4.1#3 | sender |  | recommended | M2-123 §4.1 | the Variation field is shown to users as Variation 1 to 16 |  |  |
-m2-123/4.1#4 | sender |  | permitted | M2-123 §4.1 | a note can declare a bowing, plucking or striking direction |  |  |
-m2-123/4.1#5 | receiver |  | required | M2-123 §4.1 | a Note On with Reset Round Robin plays the first round robin sound and restarts the sequence |  |  |
-m2-123/4.1#6 | sender |  | permitted | M2-123 §4.1 | for non-string instruments the string field values 1 to 7 can mean a fingering or other variation |  |  |
-m2-123/4.1#7 | receiver |  | permitted | M2-123 §4.1 | string assignment 0 leaves the choice to the receiver |  |  |
-m2-123/4.2#1 | receiver |  | required | M2-123 §4.2 | a Note On with Attribute Type 0x10 to 0x1F plays the best available sound for the articulation |  |  |
-m2-123/4.2#2 | receiver |  | required | M2-123 §4.2 | a missing sound is replaced by the fallback rules of section 6.1 |  |  |
-m2-123/5#1 | receiver |  | permitted | M2-123 §5 | a designer freely chooses the sound that suits each named Classification and Subclass |  |  |
-m2-123/5.1#1 | sender |  | recommended | M2-123 §5.1 | while the Profile is on a Sender puts articulation Attribute data in every note |  |  |
-m2-123/5.1#2 | sender |  | recommended | M2-123 §5.1 | a DAW puts articulation Attribute data in every note |  |  |
-m2-123/5.1#3 | sender |  | permitted | M2-123 §5.1 | a Sender with no articulation for a note can use Attribute Type 0x00 |  |  |
-m2-123/5.1#4 | receiver |  | required | M2-123 §5.1 | for any other Attribute Type the receiver decides the articulation |  |  |
-m2-123/5.1#5 | both |  | required | M2-123 §5.1 | Attribute Types 0x18 and 0x19 are reserved and not used | neg=1 |  |
-m2-123/5.2.1#1 | receiver |  | recommended | M2-123 §5.2.1 | sounds that last as long as the note is held are Classification 0x10 sustains |  |  |
-m2-123/5.2.1#2 | receiver |  | recommended | M2-123 §5.2.1 | naturally short percussion sounds are Classification 0x10 strikes |  |  |
-m2-123/5.2.1#3 | receiver |  | recommended | M2-123 §5.2.1 | long ringing percussion, chimes and cymbals are Classification 0x10 too |  |  |
-m2-123/5.2.1#4 | receiver |  | recommended | M2-123 §5.2.1 | choked or damped versions of those instruments belong to Classification 0x11 |  |  |
-m2-123/5.2.1#5 | receiver |  | required | M2-123 §5.2.1 | a device or library has the Classification 0x10 Subclass 0 Variation 0 sound for every instrument |  |  |
-m2-123/5.2.1#6 | receiver |  | permitted | M2-123 §5.2.1 | vibrato can differ when instrument types change |  |  |
-m2-123/5.2.1#7 | receiver |  | recommended | M2-123 §5.2.1 | a library fills all 16 Variations of Subclass 0 before using Subclass 1 |  |  |
-m2-123/5.2.2#1 | receiver |  | recommended | M2-123 §5.2.2 | damped timpani or chimes go in Classification 0x11, normal ones in 0x10 |  |  |
-m2-123/5.2.4#1 | receiver |  | permitted | M2-123 §5.2.4 | wide intervallic trills are tremolos that can start on the root or the note above |  |  |
-m2-123/5.2.9#1 | both |  | required | M2-123 §5.2.9 | Attribute Types 0x18 and 0x19 are not used for custom sounds | neg=1 |  |
-m2-123/5.2.10#1 | receiver |  | permitted | M2-123 §5.2.10 | a receiver can use Attribute Types 0x1A to 0x1F for custom sounds |  |  |
-m2-123/5.2.10#2 | receiver |  | permitted | M2-123 §5.2.10 | a maker can index custom sounds in the Subclass field however it likes |  |  |
-m2-123/5.2.10#3 | both |  | required | M2-123 §5.2.10 | for custom sounds the Variation, Direction, Round Robin and String fields keep their meanings | neg=1 |  |
-m2-123/6.1#1 | receiver |  | required | M2-123 §6.1 | a missing sound is replaced by a substitute under the rules that follow |  |  |
-m2-123/6.1#2 | receiver |  | required | M2-123 §6.1 | a missing Variation falls back to a Variation of the same Subclass |  |  |
-m2-123/6.1#3 | receiver |  | required | M2-123 §6.1 | a missing Subclass falls back to Subclass 0 of the same Classification |  |  |
-m2-123/6.1#4 | receiver |  | required | M2-123 §6.1 | a missing Subclass 0 falls back to Classification 0x01 Subclass 0, Attribute Type 0x10 |  |  |
-m2-123/6.1#5 | sender |  | permitted | M2-123 §6.1 | a Sender can learn the available sounds through Profile Details Inquiry |  |  |
-m2-123/6.2#1 | receiver |  | recommended | M2-123 §6.2 | designers weigh the interchange goals listed |  |  |
-m2-123/6.2.1#1 | both |  | permitted | M2-123 §6.2.1 | goal: articulations written for one library's violin play the same on another library's violin |  |  |
-m2-123/6.2.2#1 | both |  | permitted | M2-123 §6.2.2 | goal: articulations written for a violin play the same on a clarinet |  |  |
-m2-123/7.1#1 | sender |  | permitted | M2-123 §7.1 | a Note Off of this Profile can use the Attribute Type values listed |  |  |
-m2-123/7.1#2 | receiver |  | permitted | M2-123 §7.1 | a receiver can ignore a Note Off Subclass it cannot select by |  |  |
-m2-123/7.1#3 | receiver |  | permitted | M2-123 §7.1 | a receiver can ignore a Note Off Variation it cannot select by |  |  |
-m2-123/7.1#4 | receiver |  | required | M2-123 §7.1 | a receiver that declares Note Off Release Velocity sets the release time from it |  |  |
-m2-123/7.1#5 | receiver |  | permitted | M2-123 §7.1 | string assignment 0 leaves the choice to the receiver |  |  |
-m2-123/7.2#1 | receiver |  | permitted | M2-123 §7.2 | a receiver can use Note On articulation to decide how a note ends |  |  |
-m2-123/7.2#2 | receiver |  | permitted | M2-123 §7.2 | Note On articulations such as Legato can set how a note joins the next |  |  |
-m2-123/8.1.1#1 | receiver |  | required | M2-123 §8.1.1 | selecting an Orchestral Mute Type sets the Mute Amount to 0xFFFFFFFF |  |  |
-m2-123/8.1.1#2 | receiver |  | permitted | M2-123 §8.1.1 | later Mute Amount messages can change that value |  |  |
-m2-123/8.1.1#3 | receiver |  | permitted | M2-123 §8.1.1 | a receiver can choose its own response to an unsupported Mute Type |  |  |
-m2-123/8.1.1#4 | receiver |  | permitted | M2-123 §8.1.1 | an example response is another Mute Type or no mute |  |  |
-m2-123/8.1.2#1 | sender |  | recommended | M2-123 §8.1.2 | a mute with one position uses the value 0xFFFFFFFF |  |  |
-m2-123/8.1.2#2 | both |  | permitted | M2-123 §8.1.2 | example: a trumpet player inserts or removes a straight mute |  |  |
-m2-123/8.1.2#3 | both |  | permitted | M2-123 §8.1.2 | example: a trumpet player moves a plunger between open and closed |  |  |
-m2-123/8.2#1 | both |  | permitted | M2-123 §8.2 | instruments can offer several playing positions on the playing surface |  |  |
-m2-123/9#1 | both |  | permitted | M2-123 §9 | Profile Details Inquiry can discover a receiver's implementation details |  |  |
-m2-123/9.1.1#1 | sender |  | permitted | M2-123 §9.1.1 | an Initiator can ask for a report of optional features and sounds |  |  |
-m2-123/9.1.2#1 | receiver |  | recommended | M2-123 §9.1.2 | a Responder answers Profile Details target 0x01 with a reply |  |  |
-m2-123/9.1.2#2 | receiver |  | required | M2-123 §9.1.2 | a receiver with no sounds in a Subclass declares 0 variations there |  |  |
-m2-123/9.2#1 | both |  | permitted | M2-123 §9.2 | a receiver that declares custom sound discovery supports a further inquiry for them |  |  |
-m2-123/9.2.1#1 | sender |  | permitted | M2-123 §9.2.1 | an Initiator can ask for a report of manufacturer specific sounds |  |  |
-m2-123/9.2.2#1 | receiver |  | recommended | M2-123 §9.2.2 | a Responder answers Profile Details target 0x40 with a reply |  |  |
-m2-123/9.2.2#2 | receiver |  | required | M2-123 §9.2.2 | a receiver with no sounds in a Subclass declares 0 variations there |  |  |
-m2-123/10#1 | both |  | recommended | M2-123 §10 | a device with this Profile on also supports the Default Control Change Mapping Profile |  |  |
-m2-123/a#1 | both |  | recommended | M2-123 §A | the appendix's examples are not specification rules | neg=1 |  |
-m2-123/a#2 | both |  | permitted | M2-123 §A | an instrument type can have uses beyond those the appendix lists |  |  |
+m2-123/1.2.1#1 | both |  | permitted | M2-123 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-123/1.2.1#2 | both |  | permitted | M2-123 §1.2.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-123/1.2.1#3 | both |  | permitted | M2-123 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-123/1.2.1#4 | both |  | permitted | M2-123 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |  | 7feaf7f9d052ffeb
+m2-123/2.2#1 | both |  | permitted | M2-123 §2.2 | goal: articulations written for one library's violin play the same on another library's violin |  |  |  | 47280b59c634e29f
+m2-123/2.2#2 | both |  | permitted | M2-123 §2.2 | goal: articulations written for a violin play the same on a clarinet |  |  |  | 08ede39149950b37
+m2-123/2.4#1 | both |  | permitted | M2-123 §2.4 | scope: other aspects of articulation can be handled by later specifications |  |  |  | 598b6ddfe5dd3eb2
+m2-123/4.1#1 | sender |  | recommended | M2-123 §4.1 | Attribute Type 0x10 to 0x1F is shown to users as Classification 1 to 16 |  |  |  | a8d916b009944d51
+m2-123/4.1#2 | sender |  | recommended | M2-123 §4.1 | the Subclass field names the articulation's Subclass, shown to users as 1 to 16 |  |  |  | 63e3ceeb86a4f130
+m2-123/4.1#3 | sender |  | recommended | M2-123 §4.1 | the Variation field is shown to users as Variation 1 to 16 |  |  |  | c4e5c0bf8154ab16
+m2-123/4.1#4 | sender |  | permitted | M2-123 §4.1 | a note can declare a bowing, plucking or striking direction |  |  |  | 3fc38853c6c4c71b
+m2-123/4.1#5 | receiver |  | required | M2-123 §4.1 | a Note On with Reset Round Robin plays the first round robin sound and restarts the sequence |  |  |  | aa2910e39cf2f30c
+m2-123/4.1#6 | sender |  | permitted | M2-123 §4.1 | for non-string instruments the string field values 1 to 7 can mean a fingering or other variation |  |  |  | 469516ff8e1f7d0b
+m2-123/4.1#7 | receiver |  | permitted | M2-123 §4.1 | string assignment 0 leaves the choice to the receiver |  |  |  | cab786add05ada60
+m2-123/4.2#1 | receiver |  | required | M2-123 §4.2 | a Note On with Attribute Type 0x10 to 0x1F plays the best available sound for the articulation |  |  |  | cec15f2673924129
+m2-123/4.2#2 | receiver |  | required | M2-123 §4.2 | a missing sound is replaced by the fallback rules of section 6.1 |  |  |  | 337819411f476e61
+m2-123/5#1 | receiver |  | permitted | M2-123 §5 | a designer freely chooses the sound that suits each named Classification and Subclass |  |  |  | 182aa2df762cd7f5
+m2-123/5.1#1 | sender |  | recommended | M2-123 §5.1 | while the Profile is on a Sender puts articulation Attribute data in every note |  |  |  | 6b0dc389b9dff7b6
+m2-123/5.1#2 | sender |  | recommended | M2-123 §5.1 | a DAW puts articulation Attribute data in every note |  |  |  | 44410430e65d3484
+m2-123/5.1#3 | sender |  | permitted | M2-123 §5.1 | a Sender with no articulation for a note can use Attribute Type 0x00 |  |  |  | f66bf9ff7034988b
+m2-123/5.1#4 | receiver |  | required | M2-123 §5.1 | for any other Attribute Type the receiver decides the articulation |  |  |  | 03324c88ae28cef3
+m2-123/5.1#5 | both |  | required | M2-123 §5.1 | Attribute Types 0x18 and 0x19 are reserved and not used | neg=1 |  |  | fd9b45b55d38dbfe
+m2-123/5.2.1#1 | receiver |  | recommended | M2-123 §5.2.1 | sounds that last as long as the note is held are Classification 0x10 sustains |  |  |  | aa36996dbdda1852
+m2-123/5.2.1#2 | receiver |  | recommended | M2-123 §5.2.1 | naturally short percussion sounds are Classification 0x10 strikes |  |  |  | f3cc249dad89c827
+m2-123/5.2.1#3 | receiver |  | recommended | M2-123 §5.2.1 | long ringing percussion, chimes and cymbals are Classification 0x10 too |  |  |  | 47492e464a9678b2
+m2-123/5.2.1#4 | receiver |  | recommended | M2-123 §5.2.1 | choked or damped versions of those instruments belong to Classification 0x11 |  |  |  | a5f6387ddab87432
+m2-123/5.2.1#5 | receiver |  | required | M2-123 §5.2.1 | a device or library has the Classification 0x10 Subclass 0 Variation 0 sound for every instrument |  |  |  | 4e2b958192467630
+m2-123/5.2.1#6 | receiver |  | permitted | M2-123 §5.2.1 | vibrato can differ when instrument types change |  |  |  | 8ac9a2c0c44b89d9
+m2-123/5.2.1#7 | receiver |  | recommended | M2-123 §5.2.1 | a library fills all 16 Variations of Subclass 0 before using Subclass 1 |  |  |  | 2c145d8302721079
+m2-123/5.2.2#1 | receiver |  | recommended | M2-123 §5.2.2 | damped timpani or chimes go in Classification 0x11, normal ones in 0x10 |  |  |  | 2ea9fa7c95cb6d68
+m2-123/5.2.4#1 | receiver |  | permitted | M2-123 §5.2.4 | wide intervallic trills are tremolos that can start on the root or the note above |  |  |  | 08cd4ee7ba30f5e3
+m2-123/5.2.9#1 | both |  | required | M2-123 §5.2.9 | Attribute Types 0x18 and 0x19 are not used for custom sounds | neg=1 |  |  | 7b5ada7c3be3ae4a
+m2-123/5.2.10#1 | receiver |  | permitted | M2-123 §5.2.10 | a receiver can use Attribute Types 0x1A to 0x1F for custom sounds |  |  |  | e72d593b850438b5
+m2-123/5.2.10#2 | receiver |  | permitted | M2-123 §5.2.10 | a maker can index custom sounds in the Subclass field however it likes |  |  |  | eb9ccffcdad4f95d
+m2-123/5.2.10#3 | both |  | required | M2-123 §5.2.10 | for custom sounds the Variation, Direction, Round Robin and String fields keep their meanings | neg=1 |  |  | befb6bf54d764382
+m2-123/6.1#1 | receiver |  | required | M2-123 §6.1 | a missing sound is replaced by a substitute under the rules that follow |  |  |  | 059a5697277e2b84
+m2-123/6.1#2 | receiver |  | required | M2-123 §6.1 | a missing Variation falls back to a Variation of the same Subclass |  |  |  | 9d0244eabd4cb30d
+m2-123/6.1#3 | receiver |  | required | M2-123 §6.1 | a missing Subclass falls back to Subclass 0 of the same Classification |  |  |  | a55e1bf9cf71ba36
+m2-123/6.1#4 | receiver |  | required | M2-123 §6.1 | a missing Subclass 0 falls back to Classification 0x01 Subclass 0, Attribute Type 0x10 |  |  |  | 80995e3810e440ff
+m2-123/6.1#5 | sender |  | permitted | M2-123 §6.1 | a Sender can learn the available sounds through Profile Details Inquiry |  |  |  | fa193611241e82a4
+m2-123/6.2#1 | receiver |  | recommended | M2-123 §6.2 | designers weigh the interchange goals listed |  |  |  | 2e76d00bd6bed529
+m2-123/6.2.1#1 | both |  | permitted | M2-123 §6.2.1 | goal: articulations written for one library's violin play the same on another library's violin |  |  |  | 47280b59c634e29f
+m2-123/6.2.2#1 | both |  | permitted | M2-123 §6.2.2 | goal: articulations written for a violin play the same on a clarinet |  |  |  | 08ede39149950b37
+m2-123/7.1#1 | sender |  | permitted | M2-123 §7.1 | a Note Off of this Profile can use the Attribute Type values listed |  |  |  | 167880e15a0a8f16
+m2-123/7.1#2 | receiver |  | permitted | M2-123 §7.1 | a receiver can ignore a Note Off Subclass it cannot select by |  |  |  | f2d4f3f31b1aa6b6
+m2-123/7.1#3 | receiver |  | permitted | M2-123 §7.1 | a receiver can ignore a Note Off Variation it cannot select by |  |  |  | c9be41167de3a29d
+m2-123/7.1#4 | receiver |  | required | M2-123 §7.1 | a receiver that declares Note Off Release Velocity sets the release time from it |  |  |  | ea922d93de119304
+m2-123/7.1#5 | receiver |  | permitted | M2-123 §7.1 | string assignment 0 leaves the choice to the receiver |  |  |  | cab786add05ada60
+m2-123/7.2#1 | receiver |  | permitted | M2-123 §7.2 | a receiver can use Note On articulation to decide how a note ends |  |  |  | d6795510d57c5d4c
+m2-123/7.2#2 | receiver |  | permitted | M2-123 §7.2 | Note On articulations such as Legato can set how a note joins the next |  |  |  | 36caf08292c9fae6
+m2-123/8.1.1#1 | receiver |  | required | M2-123 §8.1.1 | selecting an Orchestral Mute Type sets the Mute Amount to 0xFFFFFFFF |  |  |  | c2e6954a72daeef3
+m2-123/8.1.1#2 | receiver |  | permitted | M2-123 §8.1.1 | later Mute Amount messages can change that value |  |  |  | 56ad4964b6fea2e5
+m2-123/8.1.1#3 | receiver |  | permitted | M2-123 §8.1.1 | a receiver can choose its own response to an unsupported Mute Type |  |  |  | 76e1975526c4d7e1
+m2-123/8.1.1#4 | receiver |  | permitted | M2-123 §8.1.1 | an example response is another Mute Type or no mute |  |  |  | f1f96d27d7903f1b
+m2-123/8.1.2#1 | sender |  | recommended | M2-123 §8.1.2 | a mute with one position uses the value 0xFFFFFFFF |  |  |  | f54c1821a867eb03
+m2-123/8.1.2#2 | both |  | permitted | M2-123 §8.1.2 | example: a trumpet player inserts or removes a straight mute |  |  |  | 986d77ccab7beb6d
+m2-123/8.1.2#3 | both |  | permitted | M2-123 §8.1.2 | example: a trumpet player moves a plunger between open and closed |  |  |  | 63f9dc733987f531
+m2-123/8.2#1 | both |  | permitted | M2-123 §8.2 | instruments can offer several playing positions on the playing surface |  |  |  | ad7f476fdbe74722
+m2-123/9#1 | both |  | permitted | M2-123 §9 | Profile Details Inquiry can discover a receiver's implementation details |  |  |  | 9a98c2e3e92e9cf7
+m2-123/9.1.1#1 | sender |  | permitted | M2-123 §9.1.1 | an Initiator can ask for a report of optional features and sounds |  |  |  | 88033d7bcf5162e2
+m2-123/9.1.2#1 | receiver |  | recommended | M2-123 §9.1.2 | a Responder answers Profile Details target 0x01 with a reply |  |  |  | 40f63578c3f1fbf8
+m2-123/9.1.2#2 | receiver |  | required | M2-123 §9.1.2 | a receiver with no sounds in a Subclass declares 0 variations there |  |  |  | ca8abaad1acbb121
+m2-123/9.2#1 | both |  | permitted | M2-123 §9.2 | a receiver that declares custom sound discovery supports a further inquiry for them |  |  |  | 4ba6baa6440b9918
+m2-123/9.2.1#1 | sender |  | permitted | M2-123 §9.2.1 | an Initiator can ask for a report of manufacturer specific sounds |  |  |  | 55a7ddd2ec0a7db9
+m2-123/9.2.2#1 | receiver |  | recommended | M2-123 §9.2.2 | a Responder answers Profile Details target 0x40 with a reply |  |  |  | 8d88deed2f2b822f
+m2-123/9.2.2#2 | receiver |  | required | M2-123 §9.2.2 | a receiver with no sounds in a Subclass declares 0 variations there |  |  |  | ca8abaad1acbb121
+m2-123/10#1 | both |  | recommended | M2-123 §10 | a device with this Profile on also supports the Default Control Change Mapping Profile |  |  |  | cbe1ba26db9a808f
+m2-123/a#1 | both |  | recommended | M2-123 §A | the appendix's examples are not specification rules | neg=1 |  |  | d772e2e7f2a4d4dc
+m2-123/a#2 | both |  | permitted | M2-123 §A | an instrument type can have uses beyond those the appendix lists |  |  |  | 9f8925e7c6fe8735

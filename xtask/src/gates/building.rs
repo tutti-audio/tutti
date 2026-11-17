@@ -156,6 +156,8 @@ const TOPOLOGY: &str = "a loudness config holds the channel topology the weights
     which is the analysis's channel model, not a width choice; the call checks the view's width against it";
 const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are defined on a \
     left and right pair, so the width is not a choice and the config takes none";
+const STEREO_PLATE: &str = "a stereo-only node: the plate's two tank halves feed the left and \
+    right ears, so the width is not a choice and the config takes none";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -501,6 +503,12 @@ pub(super) const ALLOW: &[Allow] = &[
         STEREO_ONLY,
     ),
     ty("crates/tutti-nodes/", "AutoPanConfig", WIDTH, STEREO_ONLY),
+    ty(
+        "crates/tutti-nodes/",
+        "PlateReverbConfig",
+        WIDTH,
+        STEREO_PLATE,
+    ),
     ty("crates/tutti-measure/", "AlignConfig", WIDTH, MEASURES),
     ty("crates/tutti-measure/", "ChordConfig", WIDTH, MEASURES),
     ty("crates/tutti-measure/", "ChromaConfig", WIDTH, MEASURES),
