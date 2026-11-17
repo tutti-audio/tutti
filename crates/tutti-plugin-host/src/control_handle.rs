@@ -10,7 +10,6 @@ use crate::{
 use dpi::Size;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
     Health, Normalized, ParamId, PluginError, PluginFailure, RenderMode, StateError,
@@ -23,6 +22,7 @@ use tutti_plugin_types::{
     LayoutSupport, LoadedPlugin, PluginBus, PluginDescriptor, Preset, PresetError, PresetId,
     PresetSupport,
 };
+use tutti_plugin_types::{MainThreadMarker, StateUse};
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
 
@@ -178,7 +178,7 @@ impl PluginStatus {
 /// The last group is why this type is `Send + Sync + Clone`: clone the handle
 /// into whatever the host already uses for off-thread work and call it there.
 /// With a task pool that is one line —
-/// `pool.spawn(async move { handle.save_state() })` — polled next
+/// `pool.spawn(async move { handle.save_state(StateUse::Project) })` — polled next
 /// frame.
 ///
 /// These are deliberately **not** `async` and do not return futures. That would
@@ -297,13 +297,13 @@ impl PluginHandle {
         self.any_thread.as_ref()
     }
 
-    /// Serializes the plugin's state ([`AnyThread::save_state`]).
+    /// Serializes the plugin's state for `state_use` ([`AnyThread::save_state`]).
     ///
     /// # Errors
     ///
     /// The [`StateError`] of [`AnyThread::save_state`].
-    pub fn save_state(&self) -> Result<Vec<u8>, StateError> {
-        self.any_thread.save_state()
+    pub fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+        self.any_thread.save_state(state_use)
     }
 
     /// Tells the plugin whether it renders offline and returns whether it
@@ -1060,7 +1060,7 @@ mod tests {
             /// `NoStateRoute`: this backend hosts no plugin, so it has no
             /// state to give and must not answer with an empty one, which a
             /// caller would save as the real thing.
-            fn save_state(&self) -> std::result::Result<Vec<u8>, StateError> {
+            fn save_state(&self, _: StateUse) -> std::result::Result<Vec<u8>, StateError> {
                 Err(StateError::NoStateRoute)
             }
             fn set_render_mode(&self, _mode: RenderMode) -> bool {

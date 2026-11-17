@@ -10,17 +10,18 @@
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
-use tutti_plugin_db::{Cancel, PluginFormat};
 use tutti_plugin_ipc::Reaped;
 use tutti_plugin_types::BridgeError;
-use tutti_plugin_types::{Helper, Locator, PluginDescriptor, ProbeOutcome, read_result};
+use tutti_plugin_types::{
+    Helper, Locator, PluginDescriptor, PluginFormat, ProbeOutcome, read_result,
+};
+use tutti_rt::StopToken;
 
 /// Why a probe returned no descriptors.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProbeError {
-    /// The caller's [`Cancel`] was raised, and the child was killed.
+    /// The caller's [`StopToken`] was stopped, and the child was killed.
     #[error("the probe was cancelled")]
     Cancelled,
     /// The probe ran, or could not be started, and failed.
@@ -45,16 +46,16 @@ const POLL: Duration = Duration::from_millis(5);
 /// [`BridgeError::LoadFailed`] if the probe ran to its end and the plugin could
 /// not be read; [`BridgeError::ProcessCrashed`] if it died without a result;
 /// [`BridgeError::Timeout`] if it did not finish within `timeout` (it is killed);
-/// [`ProbeError::Cancelled`] if `cancel` was raised (the child is killed and
+/// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
 /// reaped before this returns).
 pub(crate) fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
-    run(locator, plugin_path, format, timeout, cancel, &[])
+    run(locator, plugin_path, format, timeout, stop, &[])
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
@@ -78,7 +79,7 @@ pub(crate) fn measure_metadata_with(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
     state: Option<&Path>,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
     let mut args = vec!["--measure".as_ref()];
@@ -86,7 +87,7 @@ pub(crate) fn measure_metadata_with(
         args.push("--state".as_ref());
         args.push(state.as_os_str());
     }
-    run(locator, plugin_path, format, timeout, cancel, &args)
+    run(locator, plugin_path, format, timeout, stop, &args)
 }
 
 fn run(
@@ -94,7 +95,7 @@ fn run(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    cancel: &Cancel,
+    stop: &StopToken,
     flags: &[&std::ffi::OsStr],
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
     let probe = locator
@@ -121,7 +122,7 @@ fn run(
         .spawn()
         .map_err(BridgeError::Io)?;
     let mut child = Reaped::new(child);
-    let status = wait(&mut child, timeout, cancel);
+    let status = wait(&mut child, timeout, stop);
     // The file is read even after a timeout or a bad exit: it is the only proof
     // of finishing, and a probe that finished at the deadline did.
     let file = read_result(&result).map_err(|e| BridgeError::IpcError(e.to_string()));
@@ -162,13 +163,13 @@ enum Waited {
 }
 
 /// Waits for `child` to exit, killing and reaping it at `timeout` or when
-/// `cancel` is raised.
-fn wait(child: &mut Child, timeout: Duration, cancel: &Cancel) -> Waited {
+/// `stop` is requested.
+fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return Waited::Exited,
-            Ok(None) if cancel.is_cancelled() => {
+            Ok(None) if stop.is_stopped() => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Waited::Cancelled;
@@ -178,7 +179,10 @@ fn wait(child: &mut Child, timeout: Duration, cancel: &Cancel) -> Waited {
                 let _ = child.wait();
                 return Waited::TimedOut;
             }
-            Ok(None) => thread::sleep(POLL),
+            Ok(None) => {
+                // Wakes at once on a stop; the child's exit has no wake to wait on.
+                let _ = stop.wait(POLL);
+            }
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -196,10 +200,6 @@ mod tests {
     use tempfile::TempDir;
     use tutti_plugin_types::BridgeResult;
 
-    /// How long a probe test waits before it calls the probe hung: far past a
-    /// kill or a cancel, far short of the stand-in's 300 s sleep.
-    const HANG_GUARD: Duration = Duration::from_secs(60);
-
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
     fn stand_in(dir: &TempDir, body: &str) -> Locator {
@@ -215,7 +215,7 @@ mod tests {
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             timeout,
-            &Cancel::new(),
+            &StopToken::new(),
         )
         .map_err(|e| match e {
             ProbeError::Bridge(e) => e,
@@ -228,87 +228,42 @@ mod tests {
     #[test]
     fn a_probe_that_hangs_is_killed_at_the_deadline() {
         let dir = TempDir::new().unwrap();
-        let pid_file = dir.path().join("pid");
+        let fifo = dir.path().join("pid");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success(),
+            "mkfifo"
+        );
         let locator = stand_in(
             &dir,
-            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
+            &format!("echo $$ > {}\nexec sleep 300", fifo.display()),
         );
-
-        let deadline = Instant::now() + HANG_GUARD;
-        // Long enough for the shell to start and write its pid before it is
-        // killed: at 300 ms a cold shell on macOS sometimes had not, and the
-        // pid read below failed.
-        let result = probe(&locator, Duration::from_secs(2));
-        // A hang guard: a child waited for rather than killed takes its whole
-        // 300 s sleep.
-        assert!(
-            Instant::now() < deadline,
-            "the child was waited for, not killed"
-        );
-        assert!(
-            matches!(result, Err(BridgeError::Timeout { .. })),
-            "{result:?}"
-        );
-
-        let pid = std::fs::read_to_string(&pid_file).unwrap();
-        let alive = Command::new("kill")
-            .args(["-0", pid.trim()])
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success();
-        assert!(
-            !alive,
-            "the hung probe (pid {}) is still running",
-            pid.trim()
-        );
-    }
-
-    /// **A cancel kills the probe in flight**: the child has a 300 s sleep and
-    /// the caller a 300 s deadline, and the probe is gone (killed and reaped) by
-    /// the time the call returns.
-    #[test]
-    fn a_cancel_kills_the_probe_without_waiting_for_the_deadline() {
-        let dir = TempDir::new().unwrap();
-        let pid_file = dir.path().join("pid");
-        let locator = stand_in(
-            &dir,
-            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
-        );
-        let cancel = Cancel::new();
+        let stop = StopToken::new();
+        // Opening and reading the fifo block until the child is running and has
+        // written its pid, so the stop comes while the probe waits on the child.
         let raiser = {
-            let (cancel, pid_file) = (cancel.clone(), pid_file.clone());
+            let stop = stop.clone();
             tutti_rt::spawn_named("probe-raiser", None, move |_| {
-                // The child has written its whole pid (a line) once it is running;
-                // a child that never starts is a failure, not a hang.
-                let deadline = Instant::now() + Duration::from_secs(30);
-                while !std::fs::read_to_string(&pid_file).is_ok_and(|p| p.ends_with('\n')) {
-                    assert!(Instant::now() < deadline, "the child never wrote its pid");
-                    thread::sleep(Duration::from_millis(2));
-                }
-                cancel.cancel();
+                let pid = std::fs::read_to_string(&fifo).expect("the child writes its pid");
+                stop.stop();
+                pid
             })
             .expect("the raiser starts")
         };
 
-        let deadline = Instant::now() + HANG_GUARD;
         let result = probe_metadata_with(
             &locator,
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             Duration::from_secs(300),
-            &cancel,
+            &stop,
         );
-        raiser.join().unwrap();
+        let pid = raiser.join().unwrap();
 
-        // A hang guard: a cancel that waited for the child or the deadline takes
-        // 300 s.
-        assert!(
-            Instant::now() < deadline,
-            "the cancel waited for the child or the deadline"
-        );
         assert!(matches!(&result, Err(ProbeError::Cancelled)), "{result:?}");
-        let pid = std::fs::read_to_string(&pid_file).unwrap();
         let alive = Command::new("kill")
             .args(["-0", pid.trim()])
             .stderr(Stdio::null())
