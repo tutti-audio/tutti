@@ -29,10 +29,24 @@
 //! Once a crash is fixed, its input is copied into `corpus/<name>/` as a
 //! regression seed, and the replay test keeps it fixed.
 
+mod ci_decode;
+mod midi1_parse;
+mod midi_file_read;
+mod pe_reassemble;
+mod sysex_assemble;
+mod ump_decode;
 mod wav_decode;
 
 /// Every target by name.
-pub const TARGETS: &[(&str, fn(&[u8]))] = &[("wav_decode", wav_decode::wav_decode)];
+pub const TARGETS: &[(&str, fn(&[u8]))] = &[
+    ("ci_decode", ci_decode::ci_decode),
+    ("midi1_parse", midi1_parse::midi1_parse),
+    ("midi_file_read", midi_file_read::midi_file_read),
+    ("pe_reassemble", pe_reassemble::pe_reassemble),
+    ("sysex_assemble", sysex_assemble::sysex_assemble),
+    ("ump_decode", ump_decode::ump_decode),
+    ("wav_decode", wav_decode::wav_decode),
+];
 
 /// Runs the target `name` over `data`.
 ///
@@ -45,4 +59,13 @@ pub fn run(name: &str, data: &[u8]) {
         .find(|(n, _)| *n == name)
         .unwrap_or_else(|| panic!("no fuzz target `{name}`"));
     target(data);
+}
+
+/// `data` as little-endian 32-bit words; a trailing partial word is dropped.
+fn words(data: &[u8]) -> Vec<u32> {
+    data.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|w| u32::from_le_bytes(*w))
+        .collect()
 }
