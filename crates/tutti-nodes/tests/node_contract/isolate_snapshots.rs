@@ -15,14 +15,15 @@
 
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
-use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
 use tutti_nodes::{
-    BrickwallLimiterNode, BusStripNode, ChannelTimes, CompressorControls, CompressorNode,
-    DelayControls, DelayLayout, DelayNode, DistortionNode, EqBandNode, GateControls, GateNode,
-    InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
-    SvfControls, SvfFilterNode, SvfType,
+    AutoPanConfig, AutoPanNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
+    CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
+    EqBandNode, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType,
+    LfoNode, LfoShape, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
+    PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
+    TremoloConfig, TremoloNode,
 };
+use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
@@ -201,12 +202,51 @@ fn stereo_width() {
 }
 
 #[test]
+fn tremolo() {
+    IsolateRow::new("TremoloNode (stereo)", || {
+        TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO))
+    })
+    .control("rate", |t| {
+        assert!(t.param_set().set(UnitParam::Rate, 40.0))
+    })
+    .control("depth", |t| {
+        assert!(t.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .check();
+}
+
+#[test]
 fn dc_blocker() {
     IsolateRow::new("DcBlockerNode (stereo)", || {
         DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
+    })
+    .check();
+}
+
+#[test]
+fn auto_pan() {
+    IsolateRow::new("AutoPanNode", || {
+        AutoPanNode::from(AutoPanConfig::new().depth(Depth::of(0.2)))
+    })
+    .control("rate", |p| {
+        assert!(p.param_set().set(UnitParam::Rate, 40.0))
+    })
+    .control("depth", |p| {
+        assert!(p.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .check();
+}
+
+#[test]
+fn ring_mod() {
+    IsolateRow::new("RingModNode (stereo)", || {
+        RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 900.0))
     })
     .check();
 }

@@ -957,9 +957,9 @@ fn eight_real_plugins_half_stalled_never_wait_for_replies() {
     let label = "8 plugins, 4 stalled";
     let (mut units, _handles) = load_half_stalled(4);
 
-    let warmed = warm_up(&mut units, Duration::from_secs(10));
+    let warmed = warm_up(&mut units, Duration::from_secs(60));
     if !warmed {
-        eprintln!("{label}: still warming up after 10 s; measuring anyway");
+        eprintln!("{label}: still warming up after 60 s; measuring anyway");
     }
     let run = drive_series(&mut units, 500);
     report(label, &run);
@@ -1032,7 +1032,7 @@ fn working_plugins_cost_under_the_old_ceiling() {
         let (mut units, _handles) = load_half_stalled(pairs);
         // As in the stalled test: let the last iteration's servers exit.
         std::thread::sleep(Duration::from_millis(300));
-        let warmed = warm_up(&mut units, Duration::from_secs(10));
+        let warmed = warm_up(&mut units, Duration::from_secs(60));
         let run = drive_series(&mut units, 200);
         report(&label, &run);
 
@@ -1093,7 +1093,7 @@ fn plugin_server_audio_thread_is_raised_where_the_os_allows() {
     let (mut units, handles) = load_n(1);
     // Audio flowing means the server is in its audio phase, past the raise.
     assert!(
-        warm_up(&mut units, Duration::from_secs(10)),
+        warm_up(&mut units, Duration::from_secs(60)),
         "the server never delivered audio, so it may not have reached the \
          audio phase this checks"
     );

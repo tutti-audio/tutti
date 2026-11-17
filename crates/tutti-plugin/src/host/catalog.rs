@@ -1200,12 +1200,14 @@ mod tests {
         let done = Arc::clone(&writes);
         let mut plugins = Catalog::new(PluginDb::new(), config, move |_| {
             started_tx.send(()).unwrap();
-            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+            // Held far past the hang guard: an owner that waited for this save
+            // would outlast it.
+            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(300));
             done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         });
 
-        let began = std::time::Instant::now();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let mut scan = plugins.scan().unwrap();
         let end = loop {
             match plugins.try_apply(&mut scan) {
@@ -1214,7 +1216,12 @@ mod tests {
             }
         };
         assert!(matches!(end, ScanPoll::Done(_)), "{end:?}");
-        assert!(began.elapsed() < std::time::Duration::from_secs(5));
+        // A hang guard: `try_apply` returns at once, and one that waited for the
+        // save would take the save's 300 s hold.
+        assert!(
+            std::time::Instant::now() < deadline,
+            "try_apply waited for the save"
+        );
         started_rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("the save started");

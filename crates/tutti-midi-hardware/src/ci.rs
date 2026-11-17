@@ -4,7 +4,8 @@
 //! ([`CiPeerInfo`], reported as [`CiChange`]), and Profile Configuration
 //! with those that declare it (reported as [`ProfilesChange`]), Process Inquiry with
 //! those that declare that (reported as [`ProcessChange`]), and Property Exchange with
-//! those that declare it (reported as [`PropertyChange`]).
+//! those that declare it (reported as [`PropertyChange`], and a call's end as an
+//! [`Answer`]).
 //!
 //! # Presenting an identity
 //!
@@ -108,8 +109,8 @@
 //! ResourceList, and a peer that answered is listed
 //! ([`MidiSession::property_peers`](crate::MidiSession::property_peers)). An app's call
 //! ([`MidiSession::ask_property`](crate::MidiSession::ask_property)) is queued and
-//! started by the next poll. Each member device also holds one [`ResourceResponder`]
-//! serving the store the app gave
+//! started by the next poll; its end is an [`Answer::Got`] or [`Answer::Set`]. Each
+//! member device also holds one [`ResourceResponder`] serving the store the app gave
 //! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties), empty
 //! until then) to the peers that declared the category: the member routes it every
 //! message, runs its deadline on the same step as the device's, and sends its replies
@@ -574,9 +575,7 @@ impl Ci {
     /// Asks that the call of `ask` be made of its peer at the next poll, after
     /// checking it is still one that answered its Capabilities.
     pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
-        if !self.property_peers.contains(&ask.peer) {
-            return Err(PropertyError::NoSuchPeer);
-        }
+        ask.check(self.property_peers.iter())?;
         self.calls.push(ask);
         Ok(())
     }
@@ -645,10 +644,11 @@ impl Ci {
                     .properties
                     .iter()
                     .filter(|(_, initiator)| initiator.transactions().capabilities().is_some())
-                    .map(|(&muid, _)| PropertyPeer {
+                    .map(|(&muid, initiator)| PropertyPeer {
                         device: self.device.clone(),
                         group: member.group,
                         muid,
+                        resources: Arc::new(initiator.resource_list().cloned().unwrap_or_default()),
                     })
             })
             .collect()
@@ -1756,7 +1756,7 @@ mod tests {
                 &mut changes,
             );
             assert_eq!(
-                changes.answers[1..],
+                changes.answers[1..2],
                 [(id, Answer::ReportLost)],
                 "{group:?}"
             );
@@ -1769,6 +1769,7 @@ mod tests {
                         device: device.clone(),
                         group,
                         muid,
+                        resources: Arc::default(),
                     },
                     call: call.clone(),
                 }],
@@ -1777,10 +1778,10 @@ mod tests {
                 &mut changes,
             );
             assert_eq!(
-                changes.properties,
+                changes.answers[2..],
                 [(
                     id,
-                    PropertyChange::PeerGone {
+                    Answer::PropertyLost {
                         call: Box::new(call)
                     }
                 )],

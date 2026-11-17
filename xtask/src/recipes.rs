@@ -804,10 +804,12 @@ const NO_STD_TARGET: &str = "aarch64-unknown-none";
 const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-types", &["serde"]),
     ("tutti-ump", &["serde"]),
+    ("tutti-midi-protocol", &["serde"]),
     ("tutti-curve", &[]),
     ("tutti-metering", &[]),
     ("tutti-tempo", &["serde"]),
     ("tutti-modulation", &[]),
+    ("tutti-voicing", &[]),
 ];
 
 const CHECK_FEATURES: &[&str] = &[

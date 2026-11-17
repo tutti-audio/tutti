@@ -229,6 +229,13 @@ pub mod nodes {
         RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
+        AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet, ChannelOutOfRange,
+        MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig, PolarityError,
+        PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode, RingModSet,
+        StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig,
+        TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
+    };
+    pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
         BusStripNode, ChannelTimes, ChannelTimesError, ClickNode, ClickSettings, ClickState,
         CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
@@ -311,7 +318,8 @@ pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamUnit, Params, Prepare, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, Scalar, Shape, Status,
+        Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,

@@ -35,7 +35,10 @@
 //!   note id for each started note, Per-Note Management), which [`Voicing`]
 //!   uses and a plugin host, which allocates no voices, can use as it is.
 
+#![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
+
+extern crate alloc;
 
 mod channel;
 mod controller;

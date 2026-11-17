@@ -82,7 +82,7 @@ impl TuningFrequency {
     /// [`NO_CHANGE`](Self::NO_CHANGE).
     #[must_use]
     pub fn nearest(pitch: Semitones) -> Self {
-        let steps = (f64::from(pitch.get()) * f64::from(FRACTION_STEPS)).round();
+        let steps = libm::round(f64::from(pitch.get()) * f64::from(FRACTION_STEPS));
         if steps.is_nan() || steps <= 0.0 {
             Self(0)
         } else if steps >= f64::from(Self::TOP.0) {

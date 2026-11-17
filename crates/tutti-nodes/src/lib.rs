@@ -49,6 +49,9 @@
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
+//! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
+//!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
+//!   (the input times a sine carrier), from a `TremoloConfig`, `AutoPanConfig` and `RingModConfig`.
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
@@ -319,6 +322,16 @@ pub use polarity::{PolarityConfig, PolarityError, PolarityNode};
 pub use stereo_width::{StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet};
 // The controls a width node starts at, and the channel a polarity config can get wrong.
 pub use tutti_dsp::{ChannelOutOfRange, WidthControls};
+
+// Modulation effects on the level and the signal: tremolo, auto-pan and ring modulation.
+mod auto_pan;
+mod ring_mod;
+mod tremolo;
+pub use auto_pan::{AutoPanConfig, AutoPanKernel, AutoPanNode, AutoPanSet};
+pub use ring_mod::{RingModConfig, RingModKernel, RingModNode, RingModSet};
+pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
+// The controls those start at, the wave of their LFOs and the law an auto-pan places by.
+pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, TremoloControls};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.

@@ -16,6 +16,9 @@ mod midi;
 // A request to a MIDI-CI peer is a typed job: a Profile switch, a Message Report.
 #[cfg(feature = "midi-hardware")]
 mod midi_ci_jobs;
+// Property Exchange with a MIDI-CI peer as typed jobs: a Get and a Set of a listed Resource.
+#[cfg(feature = "midi-hardware")]
+mod midi_ci_property;
 // MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;
