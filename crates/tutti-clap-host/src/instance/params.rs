@@ -11,6 +11,36 @@ use crate::types::ParameterChanges;
 
 /// The events other than parameter values one `params.flush` may output.
 const FLUSH_EVENT_CAPACITY: usize = 256;
+
+/// What one `params.flush` output, and what it could not hold.
+#[derive(Debug, Default)]
+pub struct Flushed {
+    events: Vec<ClapEvent>,
+    lost: u64,
+}
+
+impl Flushed {
+    /// The events the plugin output, in the order it pushed them.
+    #[must_use]
+    pub fn events(&self) -> &[ClapEvent] {
+        &self.events
+    }
+
+    /// The events, owned.
+    #[must_use]
+    pub fn into_events(self) -> Vec<ClapEvent> {
+        self.events
+    }
+
+    /// Events the plugin output that [`events`](Self::events) does not hold,
+    /// for want of room in the flush: refused, or a parameter value past the
+    /// room that a later one replaced or that no list carries. Zero while the
+    /// plugin stays within the room.
+    #[must_use]
+    pub fn lost(&self) -> u64 {
+        self.lost
+    }
+}
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
@@ -114,8 +144,9 @@ impl ClapLoaded {
     /// `clap_plugin_params.flush()`, returning the events the plugin produced in
     /// response.
     ///
-    /// Returns an empty `Vec` if the plugin does not implement params or lacks
-    /// a flush function. The events returned are the caller's to use: the
+    /// Returns no events if the plugin does not implement params or lacks a
+    /// flush function. Events the plugin output past the flush's room are not
+    /// returned and are counted in [`Flushed::lost`]. The events returned are the caller's to use: the
     /// flush a plugin's `request_flush` causes while inactive drops them,
     /// since only a block's output is reported.
     ///
@@ -151,7 +182,7 @@ impl ClapLoaded {
         &mut self,
         main: MainThreadMarker,
         input_events: Vec<ClapEvent>,
-    ) -> Vec<ClapEvent> {
+    ) -> Flushed {
         let mut input_list = FlushEvents::new(input_events);
         input_list.sort_by_time();
         // One parameter value's worth of points per parameter, as the output
@@ -166,10 +197,14 @@ impl ClapLoaded {
             .plugin
             .params_flush(main, &input_list, &mut output_list)
         {
-            return Vec::new();
+            return Flushed::default();
         }
 
-        output_list.take_events()
+        let lost = output_list.lost();
+        Flushed {
+            events: output_list.take_events(),
+            lost,
+        }
     }
 
     /// Sets one parameter by flushing a single `PARAM_VALUE` event.

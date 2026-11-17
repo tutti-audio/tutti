@@ -41,6 +41,7 @@ pub use control::descriptor_of;
 pub use controller::ClapController;
 pub use editor_instance::ClapEditor;
 pub use load::LoadOptions;
+pub use params::Flushed;
 pub use processor::ClapProcessor;
 
 use crate::host::HostState;

@@ -757,7 +757,9 @@ fn host_decodes_plugin_emitted_param_values() {
 
     // The probe drains its output queue in `params.flush`, which is where
     // `flush_params` will pick it up.
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     assert_eq!(out.len(), 1, "the plugin's one output event must survive");
     let hdr = out[0].header();
@@ -783,7 +785,9 @@ fn host_preserves_gesture_and_modulation_events_from_the_plugin() {
     probe.queue_output(OUT_GESTURE_END, p.id, 0.0);
     probe.queue_output(OUT_PARAM_MOD, p.id, 0.125);
 
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     let types: Vec<u16> = out.iter().map(|e| e.header().type_).collect();
     assert_eq!(

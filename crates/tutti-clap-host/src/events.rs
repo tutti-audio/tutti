@@ -2064,6 +2064,13 @@ impl OutputEventList {
         self.refused
     }
 
+    /// Events the plugin pushed that the list does not hold, since the last
+    /// clear: those refused, and the parameter values past the room that only
+    /// the latest-value table keeps (so [`events`](Self::events) lacks them).
+    pub(crate) fn lost(&self) -> u64 {
+        self.refused + self.coalesced + self.touched.len() as u64
+    }
+
     /// Move all events out of the list, leaving it empty.
     pub fn take_events(&mut self) -> Vec<ClapEvent> {
         std::mem::take(&mut self.events)
@@ -3363,6 +3370,36 @@ mod tests {
     /// `SYSEX_POOL_BUFFERS` buffers of `SYSEX_BUFFER_BYTES`: a message longer
     /// than one is refused, so are the ones past the last free buffer, and a
     /// cleared block has every buffer back.
+    /// **A flush's output past its room is counted, not silently cut.** The
+    /// room holds 3 events and 2 parameter points: one more note and two more
+    /// values than that leaves exactly the room's events, and every other push
+    /// is in `lost()`. (The test plugin cannot emit this many from one flush,
+    /// so this is the list the flush fills.)
+    #[test]
+    fn output_past_the_room_is_in_lost_and_the_room_is_kept() {
+        let mut list = OutputEventList::new(OutputRooms::new(3).params(2, &[7]));
+        let note = |t| match ClapEvent::note_on(t, 0, 60, 0.5) {
+            ClapEvent::NoteOn(e) => e,
+            _ => unreachable!(),
+        };
+        for t in 0..4 {
+            list.push(PluginEvent::Note(note(t)));
+        }
+        let value = |v: f64| match ClapEvent::param_value(0, 7, v) {
+            ClapEvent::ParamValue(e) => e,
+            _ => unreachable!(),
+        };
+        for v in [0.1, 0.2, 0.3, 0.4] {
+            list.push(PluginEvent::ParamValue(value(v)));
+        }
+        // 3 notes + 2 values held; one note refused; of the two values past
+        // the room one was replaced by the other (coalesced), one is held
+        // only in the latest-value table.
+        assert_eq!(list.events().len(), 5);
+        assert_eq!(list.events_refused(), 1);
+        assert_eq!(list.lost(), 1 + 2);
+    }
+
     #[test]
     fn output_sysex_is_bounded_by_the_pool_and_counted() {
         let mut list = OutputEventList::new(OutputRooms::new(32));

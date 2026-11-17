@@ -107,11 +107,18 @@ impl Editor for ClapEditor {
         // `ClapLoaded::activate` consumes `self` into a processor and a controller,
         // so a `ClapLoaded` held by value cannot reach the active state. `flush_params` takes the main-thread branch, which is also
         // what the existing `editor_idle` flush above already relies on.
-        let events = self.inner.flush_params(main, vec![]);
+        let flushed = self.inner.flush_params(main, vec![]);
+        if flushed.lost() > 0 {
+            tracing::warn!(
+                lost = flushed.lost(),
+                "a CLAP editor flush output more than its room holds"
+            );
+        }
 
         // Each event as the edit it reports: a value normalized against the
         // declared bounds (`ClapEvent::heard`), and a gesture's ends.
-        events
+        flushed
+            .events()
             .iter()
             .filter_map(|e| e.heard(&self.inner.params.ranges().ranges))
             .collect()

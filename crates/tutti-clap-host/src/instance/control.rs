@@ -239,7 +239,13 @@ impl ClapLoaded {
                     wake.raise();
                 }
             } else {
-                let _ = self.flush_params(main, Vec::new());
+                let flushed = self.flush_params(main, Vec::new());
+                if flushed.lost() > 0 {
+                    tracing::warn!(
+                        lost = flushed.lost(),
+                        "a CLAP flush output more than its room holds"
+                    );
+                }
             }
         }
         out.extend(tutti_plugin_types::taken(&self.host_state.requests));
