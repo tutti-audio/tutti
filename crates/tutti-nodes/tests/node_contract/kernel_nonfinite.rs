@@ -180,3 +180,136 @@ fn one_nan_input_sample_is_heard_in_at_most_one_block() {
 fn one_infinite_input_sample_is_heard_in_at_most_one_block() {
     assert_heard_once(f32::INFINITY);
 }
+
+mod logged {
+    //! A kernel that resets after a non-finite block says so on the realtime log: one warning
+    //! per reset, at the first non-finite frame, naming the first channel that holds one.
+
+    use super::{BLOCK, POISONED, SR};
+    use tutti_graph::{
+        Cx, Editor, Executor, IntoNode, Io, LogFilter, Node, NodeKey, OutPort, Prepare, RtLevel,
+        RtLogReaders, RtRecord, RtValue, Shape, Source, Status, TransportPosition, Unforkable,
+    };
+    use tutti_graph::{Edge, InPort};
+    use tutti_nodes::{
+        CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode, MultibandCompressorNode,
+    };
+    use tutti_types::{ChannelLayout, Frame, MaxBlock, Samples, Tail};
+
+    const MESSAGE: &str = "non-finite output; the node's state resets";
+    /// The frame of the poisoned block that carries the non-finite sample.
+    const AT: usize = 17;
+    const ALL: LogFilter = LogFilter::new(Some(RtLevel::Trace), Some(RtLevel::Trace));
+
+    /// A stereo source of a constant that writes `bad` at frame [`AT`] of its call number
+    /// [`POISONED`] on channel `channel` only, when it has one.
+    struct Poison {
+        bad: f32,
+        channel: Option<usize>,
+        calls: u64,
+    }
+
+    impl Node for Poison {
+        fn shape(&self) -> Shape {
+            Shape::source_unassigned(ChannelLayout::STEREO).with_tail(Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+            for c in 0..2 {
+                io.output(c).fill(0.25);
+            }
+            if let (Some(c), true) = (self.channel, self.calls == POISONED) {
+                io.output(c)[AT] = self.bad;
+            }
+            self.calls += 1;
+            Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// `node` fed by a [`Poison`] source, both channels of `node` the graph's outputs; renders
+    /// `blocks` blocks and returns every record the node logged.
+    fn records(
+        node: impl IntoNode,
+        bad: f32,
+        poisoned_channel: Option<usize>,
+        blocks: u64,
+    ) -> Vec<RtRecord> {
+        let (mut ed, mut exec): (Editor, Executor) =
+            Editor::new(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))));
+        let [src, fx] = [1, 2].map(NodeKey);
+        ed.insert(
+            src,
+            "poison",
+            Unforkable(Poison {
+                bad,
+                channel: poisoned_channel,
+                calls: 0,
+            }),
+        );
+        ed.insert(fx, "fx", node);
+        let topology = &mut ed.spec_mut().topology;
+        for port in 0..2u16 {
+            topology.edges.insert(
+                InPort { node: fx, port },
+                vec![Edge::Direct(Source::Node(OutPort { node: src, port }))],
+            );
+        }
+        topology.set_outputs((0..2).map(|port| Source::Node(OutPort { node: fx, port })));
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        let readers = RtLogReaders::new(&mut exec);
+        // The gate opens from the block after a drain stores the filter.
+        readers.drain(ALL, |_| {});
+        let mut records = Vec::new();
+        for _ in 0..blocks {
+            let mut bufs = vec![vec![0.0f32; BLOCK]; 2];
+            let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
+            exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
+            readers.drain(ALL, |r| records.push(*r));
+        }
+        records
+    }
+
+    /// The one warning a NaN on `channel` leaves, the frame and the channel it names.
+    fn assert_one_warning(records: &[RtRecord], channel: usize, frame: u64) {
+        assert_eq!(records.len(), 1, "one reset, one record: {records:?}");
+        let r = &records[0];
+        assert_eq!(r.level(), RtLevel::Warn);
+        assert_eq!(r.message(), MESSAGE);
+        assert_eq!(r.fields(), &[("channel", RtValue::U64(channel as u64))]);
+        assert_eq!(r.frame(), Frame::new(frame));
+        assert_eq!(r.repeats(), 0, "no repeat of the one reset");
+    }
+
+    fn dc_blocker() -> DcBlockerNode {
+        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+    }
+
+    #[test]
+    fn a_nan_in_the_second_channel_logs_one_warning_at_its_frame_naming_channel_one() {
+        let records = records(dc_blocker(), f32::NAN, Some(1), 8);
+        assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
+    }
+
+    #[test]
+    fn an_infinity_in_the_first_channel_logs_one_warning_naming_channel_zero() {
+        let records = records(dc_blocker(), f32::INFINITY, Some(0), 8);
+        assert_one_warning(&records, 0, POISONED * BLOCK as u64 + AT as u64);
+    }
+
+    #[test]
+    fn a_finite_input_logs_nothing() {
+        assert!(records(dc_blocker(), 0.0, None, 8).is_empty());
+        let compressor = CompressorNode::stereo(CompressorControls::DEFAULT);
+        assert!(records(compressor, 0.0, None, 8).is_empty());
+    }
+
+    #[test]
+    fn the_multiband_compressor_logs_its_reset_once() {
+        let node = MultibandCompressorNode::new(ChannelLayout::STEREO, 3).unwrap();
+        let records = records(node, f32::NAN, Some(1), 8);
+        assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
+    }
+}
