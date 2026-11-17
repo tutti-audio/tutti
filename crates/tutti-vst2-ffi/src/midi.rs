@@ -174,7 +174,7 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 /// (`tutti_midi_protocol::midi1`), so no precision is lost beyond MIDI-1's
 /// inherent width. Translated: NoteOn/Off, CC, channel pitch bend,
 /// channel/poly pressure, program change (everything with a 3-byte MIDI-1
-/// form). SysEx is not a `api::MidiEvent` in VST2: [`MidiSendBuffer::stage_piece`]
+/// form). SysEx is not a `api::MidiEvent` in VST2: `MidiSendBuffer::stage_piece`
 /// reassembles it into a `SysExEvent`.
 /// Returns `None` when the packet is not exactly one MIDI 1.0 message, on a
 /// stream that has sent nothing before it: per-note pitch bend, per-note
@@ -252,7 +252,7 @@ fn midi_event(frame_offset: u32, midi_data: [u8; 3], live: bool) -> crate::api::
 /// Pre-allocated, reusable storage for a VST2 `api::Events` flexible-
 /// array struct.
 ///
-/// One instance lives on each [`MidiIo`]; [`Self::stage_piece`]
+/// One instance lives on each [`MidiIo`]; `Self::stage_piece`
 /// rebuilds the contents in place for the next process call. Every list is
 /// reserved at construction for a block's whole MIDI cap
 /// ([`MIDI_STACK_CAPACITY`]: no caller hands it more) and never grows: an
@@ -391,7 +391,7 @@ impl MidiSendBuffer {
     ///
     /// # Safety
     /// The returned pointer is valid until the next
-    /// [`Self::stage_piece`] call. Caller must hand it to
+    /// `Self::stage_piece` call. Caller must hand it to
     /// `vst::plugin::Plugin::process_events` and not retain it past
     /// that call.
     fn stage_piece(
@@ -576,7 +576,7 @@ impl MidiSendBuffer {
         self.live = live;
     }
 
-    /// Stages the piece (see [`stage_piece`](Self::stage_piece)) and hands it to the plugin
+    /// Stages the piece (see `stage_piece`) and hands it to the plugin
     /// through `render`, if any event is in it.
     pub fn send_piece(
         &mut self,
