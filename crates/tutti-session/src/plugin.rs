@@ -248,10 +248,10 @@ impl PluginLoad {
         ) {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
-            // restores the state it was staged (`StateRestoreError`; a failure
+            // restores the state it was staged (`StateRestore`; a failure
             // before that step is a load failure and blames nothing): the state
             // is what the load is held against (the reload's landing withholds it).
-            Err(e @ tutti_plugin_types::BridgeError::StateRestoreError(_))
+            Err(e @ tutti_plugin_types::BridgeError::StateRestore { .. })
                 if self.state.is_some() =>
             {
                 let reason = e.to_string();
