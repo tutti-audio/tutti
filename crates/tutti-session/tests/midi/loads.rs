@@ -22,7 +22,7 @@ fn session() -> DetachedSession {
 fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile) {
     let track = Track::new().note(
         Tick(0),
-        480,
+        Tick(480),
         MidiChannel::FIRST,
         NoteNumber::of(key),
         U7::of(100),

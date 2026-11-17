@@ -552,8 +552,8 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
-        BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError, PluginEntry,
-        ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
+        Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
@@ -619,12 +619,14 @@ pub mod midi {
     };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
+        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
+        TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
-        PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
+        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
+        Truncated,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -657,11 +659,11 @@ pub mod midi {
         FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
         MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
         MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        OutOfRange, PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController,
-        Reserved, ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet,
-        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
-        SysexMessage, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
-        Utility, Voice2,
+        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
+        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
+        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
+        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
+        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
