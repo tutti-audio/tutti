@@ -1560,7 +1560,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
 /// editor.insert(NodeKey(1), "silence", Silence);
 /// ```
 pub trait IntoNode<F: Float = f32> {
-    /// What the caller keeps: `Param<U>` handles, `ArcLend` cells, or `()`.
+    /// What the caller keeps: `Param<U>` handles, `Publisher` cells, or `()`.
     type Controls;
 
     /// Splits the value into the unit the executor will own, the handles the caller

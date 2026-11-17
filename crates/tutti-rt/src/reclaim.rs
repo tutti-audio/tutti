@@ -1,20 +1,20 @@
 //! The control-side sweep of a published cell.
 
-use arc_lend::ArcLend;
+use arc_lend::Publisher;
 
 /// Something whose retired values a control-thread tick can free.
 ///
 /// The one-sentence boundary: a holder of published cells answers "free what
-/// the audio thread no longer holds". [`ArcLend::reclaim`] is its first
+/// the audio thread no longer holds". [`Publisher::reclaim`] is its first
 /// implementor, and a node's controls (a handle over one or more cells)
 /// implement it by sweeping each. **Control thread only**, like `publish` and
-/// `ArcLend::reclaim`: never call it from the audio thread. With nothing
+/// `Publisher::reclaim`: never call it from the audio thread. With nothing
 /// retired it is a lock and a length check, so a tick can call it every time.
 ///
 /// ```
-/// use tutti_rt::{ArcLend, Reclaim};
+/// use tutti_rt::{Publisher, Reclaim};
 ///
-/// let cell = ArcLend::new(1_u32);
+/// let cell = Publisher::new(1_u32);
 /// cell.publish(2);
 /// assert_eq!(Reclaim::reclaim(&cell), 0, "no reader holds the first value");
 /// ```
@@ -25,7 +25,7 @@ pub trait Reclaim {
     fn reclaim(&self) -> usize;
 }
 
-impl<T> Reclaim for ArcLend<T> {
+impl<T> Reclaim for Publisher<T> {
     fn reclaim(&self) -> usize {
         Self::reclaim(self)
     }

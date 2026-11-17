@@ -65,7 +65,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{BufferError, Fold, FoldError};
 use tutti_graph::{RootError, RootId};
-use tutti_rt::{ArcLend, LockExt};
+use tutti_rt::{LockExt, Publisher};
 use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 
 /// The widest device an engine can render into without being told
@@ -294,9 +294,9 @@ pub struct OutputPlacement {
 /// side only; the audio thread never touches it).
 #[derive(Debug, Clone)]
 pub struct OutputControl {
-    cell: Arc<ArcLend<OutputFolds>>,
+    cell: Publisher<OutputFolds>,
     /// The gain each device output is ramped to, lent beside the folds.
-    stage: Arc<ArcLend<StageTargets>>,
+    stage: Publisher<StageTargets>,
     writer: Arc<Mutex<()>>,
     /// The root of the plan the last block rendered, written by the audio
     /// thread: the older roots' folds are done with.
@@ -309,8 +309,8 @@ pub struct OutputControl {
 impl OutputControl {
     pub(crate) fn new(folds: OutputFolds) -> Self {
         Self {
-            cell: Arc::new(ArcLend::new(folds)),
-            stage: Arc::new(ArcLend::new(StageTargets::UNITY)),
+            cell: Publisher::new(folds),
+            stage: Publisher::new(StageTargets::UNITY),
             writer: Arc::default(),
             installed: Arc::default(),
             routing_ended: Arc::default(),
@@ -326,11 +326,11 @@ impl OutputControl {
         folds.previous.is_some() && self.routing_ended.load(Ordering::Acquire) < folds.generation
     }
 
-    pub(crate) fn cell(&self) -> &Arc<ArcLend<OutputFolds>> {
+    pub(crate) fn cell(&self) -> &Publisher<OutputFolds> {
         &self.cell
     }
 
-    pub(crate) fn stage(&self) -> &Arc<ArcLend<StageTargets>> {
+    pub(crate) fn stage(&self) -> &Publisher<StageTargets> {
         &self.stage
     }
 
