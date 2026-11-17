@@ -12,21 +12,7 @@
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 
-use sync::{AtomicUsize, Ordering};
-
-/// The state word's atomic: `std`'s in a real build, `loom`'s under
-/// `--cfg loom`, so the model in `tests/cell_loom.rs` checks this code rather
-/// than a replica.
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicUsize, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicUsize, Ordering};
-}
-
-/// The state word's writer bit: set while a [`BorrowGuard`] is live. The bits
-/// below it count live [`BorrowRef`]s.
-const WRITER: usize = 1 << (usize::BITS - 1);
+use crate::claim::ClaimWord;
 
 /// An interior-mutability cell for the audio callback: any number of shared
 /// borrows at once, or one mutable borrow, never both.
@@ -74,9 +60,9 @@ const WRITER: usize = 1 << (usize::BITS - 1);
 /// instead of racing.
 pub struct AudioThreadCell<T> {
     inner: UnsafeCell<T>,
-    /// [`WRITER`] while a mutable borrow is live, else the number of live
+    /// Exclusive while a mutable borrow is live, else counting the live
     /// shared borrows.
-    state: AtomicUsize,
+    state: ClaimWord,
 }
 
 impl<T> AudioThreadCell<T> {
@@ -85,7 +71,7 @@ impl<T> AudioThreadCell<T> {
     pub const fn new(val: T) -> Self {
         Self {
             inner: UnsafeCell::new(val),
-            state: AtomicUsize::new(0),
+            state: ClaimWord::new(),
         }
     }
 
@@ -94,7 +80,7 @@ impl<T> AudioThreadCell<T> {
     pub fn new(val: T) -> Self {
         Self {
             inner: UnsafeCell::new(val),
-            state: AtomicUsize::new(0),
+            state: ClaimWord::new(),
         }
     }
 
@@ -119,7 +105,7 @@ impl<T> AudioThreadCell<T> {
     pub fn try_borrow_mut(&self) -> Option<BorrowGuard<'_, T>> {
         // Not `then_some`: that builds the guard eagerly, and dropping the
         // unused one on the `None` path would release a borrow never taken.
-        if self.try_acquire_writer() {
+        if self.state.try_exclusive() {
             Some(BorrowGuard {
                 cell: self,
                 _lent: PhantomData,
@@ -159,7 +145,7 @@ impl<T> AudioThreadCell<T> {
     where
         T: Sync,
     {
-        if self.try_acquire_reader() {
+        if self.state.try_shared() {
             Some(BorrowRef {
                 cell: self,
                 _lent: PhantomData,
@@ -175,63 +161,6 @@ impl<T> AudioThreadCell<T> {
     #[inline]
     pub fn get_mut(&mut self) -> &mut T {
         self.inner.get_mut()
-    }
-
-    /// Sets the writer bit if nothing is borrowed; `false` if anything is.
-    ///
-    /// `Acquire` pairs with both releases' `Release`: a mutable borrow
-    /// granted after a guard's drop happens after it, so the last writer's
-    /// writes are visible, and no reader is still reading what it will
-    /// overwrite. A refused compare-exchange writes nothing, so the word's
-    /// only writers are the borrows that hold it. (A swap would also write
-    /// when refused; loom 0.7 leaves such a write unordered against the
-    /// holder's later release and reports a phantom refusal after every guard
-    /// has dropped, though the C++ model forbids that read. See
-    /// `tests/cell_loom.rs`.)
-    #[inline]
-    fn try_acquire_writer(&self) -> bool {
-        self.state
-            .compare_exchange(0, WRITER, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-    }
-
-    /// Adds a reader unless the writer bit is set; `false` if it is.
-    ///
-    /// A compare-exchange loop rather than `atomic_refcell`'s
-    /// unconditional `fetch_add`, so a refused reader writes nothing (as
-    /// above). It retries only when another *reader* changed the count in
-    /// between, so it is lock-free: some reader always makes progress, and
-    /// a writer never makes a reader wait.
-    #[inline]
-    fn try_acquire_reader(&self) -> bool {
-        let mut seen = self.state.load(Ordering::Relaxed);
-        loop {
-            // The writer bit is set, or the count would reach it.
-            if seen >= WRITER - 1 {
-                return false;
-            }
-            match self.state.compare_exchange_weak(
-                seen,
-                seen + 1,
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return true,
-                Err(now) => seen = now,
-            }
-        }
-    }
-
-    #[inline]
-    fn release_writer(&self) {
-        // Nothing else writes the word while the writer bit is set: every
-        // other borrow's compare-exchange fails without writing.
-        self.state.store(0, Ordering::Release);
-    }
-
-    #[inline]
-    fn release_reader(&self) {
-        self.state.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -265,8 +194,8 @@ impl<T> Deref for BorrowGuard<'_, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        // SAFETY: this guard exists only because `try_acquire_writer` moved
-        // the word from 0 (nothing borrowed) to the writer bit, and no other
+        // SAFETY: this guard exists only because `try_exclusive` took the
+        // word with nothing borrowed, and no other
         // borrow is granted until its drop clears it, so nothing else
         // references the value.
         unsafe { &*self.cell.inner.get() }
@@ -285,7 +214,7 @@ impl<T> DerefMut for BorrowGuard<'_, T> {
 impl<T> Drop for BorrowGuard<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        self.cell.release_writer();
+        self.cell.state.release_exclusive();
     }
 }
 
@@ -302,8 +231,8 @@ impl<T> Deref for BorrowRef<'_, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        // SAFETY: this guard exists only because `try_acquire_reader` counted
-        // it with the writer bit clear, and no mutable borrow is granted while
+        // SAFETY: this guard exists only because `try_shared` counted it
+        // with no exclusive claim held, and no mutable borrow is granted while
         // the count is nonzero, so only `&T`s reference the value.
         unsafe { &*self.cell.inner.get() }
     }
@@ -312,7 +241,7 @@ impl<T> Deref for BorrowRef<'_, T> {
 impl<T> Drop for BorrowRef<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        self.cell.release_reader();
+        self.cell.state.release_shared();
     }
 }
 
