@@ -15,23 +15,27 @@ use super::controller::ClapController;
 use super::processor::{ClapProcessor, ProcessorParts};
 use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
-use crate::events::{EDIT_CAPACITY, ParamBounds};
-use crate::types::{ClapParamFlags, ParameterChanges, ParameterQueue, PluginInfo};
+use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
+use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_clap_ffi::ActivateError;
+use tutti_graph::{MAX_EVENT_PORT_CAPACITY, note_off_room};
 use tutti_plugin_types::{
     Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
-use tutti_types::MaxBlock;
+use tutti_types::{MaxBlock, ParamId};
 
-/// Heap reservation for pooled per-call event scratch on a `ClapProcessor`,
-/// beyond the parameter points each list also has room for.
-///
-/// Sized at activation so steady-state `process` calls avoid the allocator.
-const EVENT_SCRATCH_CAPACITY: usize = 256;
+/// The UMPs one block's input note port holds at the most: a graph event
+/// port's largest capacity and the room behind it for note-offs
+/// ([`note_off_room`]).
+const INPUT_PORT_UMPS: usize = note_off_room(MAX_EVENT_PORT_CAPACITY as usize);
+/// The events the plugin's output list holds besides parameter values, in one
+/// block: notes, MIDI, note expressions, SysEx and gestures. A push past it is
+/// refused and counted ([`ClapProcessor::output_events_refused`]).
+const OUTPUT_EVENT_CAPACITY: usize = 256;
 /// Floor of the queues reserved for the parameter changes the plugin's
 /// output fills (one per distinct param_id it emits in a block). The
 /// reservation is the plugin's parameter count when that is larger.
@@ -152,9 +156,13 @@ impl ClapLoaded {
         }
         self.audio.f64_active = wide;
 
-        let table = self.read_param_ranges(main);
+        let table = self.params.ranges().clone();
         let max_frames = max_block.get();
-        let mut scratch = AudioScratch::new(prepare.format());
+        let mut scratch = AudioScratch::new(
+            prepare.format(),
+            input_rooms(&table, max_frames),
+            output_rooms(&table, max_frames),
+        );
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
         };
@@ -187,8 +195,7 @@ impl ClapLoaded {
         // reserved the same way, one queue per parameter drawing on a shared
         // pool of a chunk's room, and bounded the same way
         // (`ClapProcessor::output_param_points_dropped`).
-        reserve_input_events(&mut scratch, &table, max_frames);
-        reserve_output_params(&mut scratch, &table, max_frames);
+        reserve_output_queues(&mut scratch, &table, max_frames);
         // A UMP Group is an input note port: each port's own dialect.
         scratch
             .input_events
@@ -230,40 +237,6 @@ impl ClapLoaded {
         let controller =
             ClapController::new(self, sink, ranges, pools, (reported, reports_dropped));
         Ok((processor, controller))
-    }
-
-    /// Reads each param's native range for denormalizing incoming automation
-    /// (the host authors normalized 0..1; CLAP wants plain), and whether the
-    /// plugin claims parameters at all. Queries the plugin: control thread only.
-    pub(crate) fn read_param_ranges(&self, main: MainThreadMarker) -> RangeTable {
-        let mut ranges: Vec<ParamBounds> = self
-            .native_parameters(main)
-            .into_iter()
-            // A parameter with no declared bounds has nothing to denormalize
-            // against; dropping it leaves its automation to pass through
-            // untouched, which is what `add_param_changes` does for a param
-            // missing from this table. Every CLAP parameter declares a range, so
-            // this filters nothing today — but inventing bounds if one ever
-            // didn't would write a wrong plain value to the plugin.
-            .map(|p| ParamBounds {
-                id: p.id,
-                min: p.min_value,
-                max: p.max_value,
-                stepped: p.flags.contains(ClapParamFlags::STEPPED),
-                read_only: p.flags.contains(ClapParamFlags::READONLY),
-            })
-            .collect();
-        // Sorted by id: `add_param_changes` finds each queue's range by
-        // binary search.
-        ranges.sort_unstable_by_key(|b| b.id);
-        RangeTable {
-            ranges,
-            // Read the plugin's own count, not the length of the table above:
-            // they differ exactly when the enumeration truncated at a hole,
-            // which is the case `add_param_changes` has to tell apart from a
-            // params-less plugin.
-            claims: self.parameter_count(main) > 0,
-        }
     }
 
     /// Calls the plugin's `activate` FFI. Shared by `activate_now` and the
@@ -319,38 +292,28 @@ impl ClapLoaded {
     }
 }
 
-/// Reserve the input event list for a block of `max_frames`: the MIDI and
-/// note-expression scratch, the parameter points the host's chunk can arrive
-/// with (`ParameterChanges::point_budget` for the plugin's parameters with a
-/// room of `ParameterQueue::chunk_room`: the chunk's pooled points, and one
-/// more in every queue for the value a skipped block carries, which the bridge
-/// prepends), with the parameter events bounded to that room, and the edits the
-/// Controller can queue ([`EDIT_CAPACITY`]), the note expressions
-/// ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
+/// The rooms of the input event list for a block of `max_frames`: the MIDI
+/// the input note port can deliver ([`InputRooms::for_port`] of
+/// [`INPUT_PORT_UMPS`]), the parameter points the host's chunk can arrive with
+/// (`ParameterChanges::point_budget` for the plugin's parameters with a room of
+/// `ParameterQueue::chunk_room`: the chunk's pooled points, and one more in
+/// every queue for the value a skipped block carries, which the bridge
+/// prepends), and the edits the Controller can queue ([`EDIT_CAPACITY`]), the
+/// note expressions ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
 /// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the MIDI
-/// and the parameter points do not count. So a
-/// chunk the host's pool bounded reaches the plugin whole; past it (a set
-/// nothing bounded) the list's own overflow policy applies
-/// (`InputEventList::add_param_changes`). Also reserves the SysEx reassembly
-/// buffer (`InputEventList::reserve_sysex`). Off the audio thread; grows only
-/// (a smaller block keeps the room).
-fn reserve_input_events(scratch: &mut AudioScratch, table: &RangeTable, max_frames: usize) {
+/// and the parameter points do not count. So a chunk the host's pool bounded
+/// reaches the plugin whole; past it (a set nothing bounded) the list's own
+/// overflow policy applies (`InputEventList::add_param_changes`).
+fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
-    let events = &mut scratch.input_events;
-    let wanted = EVENT_SCRATCH_CAPACITY
-        + param_points
-        + EDIT_CAPACITY
-        + INPUT_NOTE_EXPRESSIONS
-        + tutti_graph::MAX_TRANSPORT_CHANGES;
-    events.reserve(wanted);
-    events.set_param_point_room(param_points);
-    events.set_source_rooms(
-        EDIT_CAPACITY,
-        INPUT_NOTE_EXPRESSIONS,
-        tutti_graph::MAX_TRANSPORT_CHANGES,
-    );
-    events.reserve_sysex();
+    InputRooms::for_port(INPUT_PORT_UMPS)
+        .param_points(param_points)
+        .sources(
+            EDIT_CAPACITY,
+            INPUT_NOTE_EXPRESSIONS,
+            tutti_graph::MAX_TRANSPORT_CHANGES,
+        )
 }
 
 /// Reserve the queues the plugin's output parameter events are grouped into
@@ -362,22 +325,27 @@ fn reserve_input_events(scratch: &mut AudioScratch, table: &RangeTable, max_fram
 /// without allocating or freeing. Off the audio thread.
 ///
 /// The output event list the plugin pushes into has two rooms, each reserved
-/// and bounded: [`EVENT_SCRATCH_CAPACITY`] events for notes, MIDI, note
+/// and bounded: [`OUTPUT_EVENT_CAPACITY`] events for notes, MIDI, note
 /// expressions and the rest, and the parameter points the queues can hold
 /// (`ParameterChanges::point_budget`). A parameter flood fills only its own room,
 /// so it never refuses a note-off; past it each of the plugin's parameters
 /// keeps its latest value. A push past either room is refused
 /// (`ClapProcessor::output_events_refused`).
-fn reserve_output_params(scratch: &mut AudioScratch, table: &RangeTable, max_frames: usize) {
+fn output_rooms(table: &RangeTable, max_frames: usize) -> OutputRooms {
+    let queues = table.ranges.len().max(PARAM_QUEUE_CAPACITY);
+    let budget = ParameterChanges::point_budget(queues, ParameterQueue::chunk_room(max_frames));
+    let ids: Vec<ParamId> = table.ranges.iter().map(|b| b.id).collect();
+    OutputRooms::new(OUTPUT_EVENT_CAPACITY).params(budget, &ids)
+}
+
+/// The queues the plugin's parameter output is grouped into: one per
+/// parameter, each with room for a block's points of one. Grows only: a
+/// smaller block keeps the room.
+fn reserve_output_queues(scratch: &mut AudioScratch, table: &RangeTable, max_frames: usize) {
     let queues = table.ranges.len().max(PARAM_QUEUE_CAPACITY);
     let points = ParameterQueue::chunk_room(max_frames);
     let budget = ParameterChanges::point_budget(queues, points);
-    let ids: Vec<u32> = table.ranges.iter().map(|b| b.id).collect();
-    let events = &mut scratch.output_events;
-    events.reserve(EVENT_SCRATCH_CAPACITY);
-    events.set_param_room(budget, &ids);
     let out = &scratch.out_param_changes;
-    // Grows only: a smaller block keeps the room.
     if out.capacity() < queues || out.point_storage() < budget {
         scratch.out_param_changes = ParameterChanges::reserved(queues, points);
     }
@@ -401,7 +369,8 @@ impl Drop for ClapLoaded {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ParamId;
+    use crate::ParamBounds;
+    use tutti_midi_protocol::Narrower;
 
     /// **Activation reserves the pool budget, not parameters × room**: for
     /// 2 000 and 16 384 parameters at 512- and 4096-frame blocks, the input
@@ -415,15 +384,18 @@ mod tests {
     fn activation_reserves_the_pool_budget_not_params_times_room() {
         for params in [2_000u32, 16_384] {
             for frames in [512usize, 4096] {
-                let mut scratch = AudioScratch::new(SampleFormat::Float32);
                 let table = RangeTable {
                     ranges: (0..params)
-                        .map(|id| ParamBounds::continuous(id, 0.0, 1.0))
+                        .map(|id| ParamBounds::continuous(ParamId::new(id), 0.0, 1.0))
                         .collect(),
                     claims: true,
                 };
-                reserve_input_events(&mut scratch, &table, frames);
-                reserve_output_params(&mut scratch, &table, frames);
+                let mut scratch = AudioScratch::new(
+                    SampleFormat::Float32,
+                    input_rooms(&table, frames),
+                    output_rooms(&table, frames),
+                );
+                reserve_output_queues(&mut scratch, &table, frames);
                 let n = params as usize;
                 let room = ParameterQueue::chunk_room(frames);
                 let input = ParameterChanges::point_budget(n, room);
@@ -439,7 +411,7 @@ mod tests {
                 );
                 assert!(
                     scratch.input_events.events.capacity()
-                        >= EVENT_SCRATCH_CAPACITY + input + EDIT_CAPACITY
+                        >= INPUT_PORT_UMPS * Narrower::MAX_MESSAGES + input + EDIT_CAPACITY
                 );
                 assert!(3 * input < n * (room + 1));
                 assert_eq!(scratch.output_events.param_room, output);
@@ -463,14 +435,17 @@ mod tests {
         use tutti_plugin_types::ParameterPoint;
         const PARAMS: u32 = 2_000;
         const FRAMES: usize = 512;
-        let mut scratch = AudioScratch::new(SampleFormat::Float32);
         let table = RangeTable {
             ranges: (0..PARAMS)
-                .map(|id| ParamBounds::continuous(id, 0.0, 1.0))
+                .map(|id| ParamBounds::continuous(ParamId::new(id), 0.0, 1.0))
                 .collect(),
             claims: true,
         };
-        reserve_input_events(&mut scratch, &table, FRAMES);
+        let mut scratch = AudioScratch::new(
+            SampleFormat::Float32,
+            input_rooms(&table, FRAMES),
+            output_rooms(&table, FRAMES),
+        );
         let room = ParameterQueue::chunk_room(FRAMES);
         let mut chunk = ParameterChanges::reserved_bridged(PARAMS as usize, room);
         for id in 0..PARAMS {
