@@ -211,7 +211,7 @@ pub(super) struct State<F: Float = f32> {
     pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
     pub(super) event_fb: Vec<Option<EventFifo>>,
     /// One producer per planned tap lane (`None`: nobody opened it).
-    pub(super) taps: Vec<Option<TapWriter>>,
+    pub(super) taps: Vec<Option<TapWriter<F>>>,
     /// One producer per planned event tap (`None`: nobody opened it).
     pub(super) event_taps: Vec<Option<EventTapWriter>>,
     /// One set of cells per planned meter (`None`: nobody opened it).

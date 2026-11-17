@@ -3,7 +3,7 @@
 
 use tutti_graph::{Cost, Io};
 use tutti_modulation::{LevelFollower, SignalKind, SignalSource, SourceId};
-use tutti_types::{ChannelLayout, Seconds};
+use tutti_types::{Ballistics, ChannelLayout};
 
 use super::{SourceNode, SourcePorts};
 
@@ -29,20 +29,21 @@ pub type EnvelopeFollowerNode = SourceNode<LevelFollower>;
 
 impl SourceNode<LevelFollower> {
     /// A follower of an `input`-wide signal, sending as `source`, with
-    /// time constants `attack` and `release`.
+    /// the attack and release of `ballistics`.
     #[must_use]
-    pub fn new(source: SourceId, attack: Seconds, release: Seconds, input: ChannelLayout) -> Self {
-        Self::with_source(source, LevelFollower::new(attack, release), input)
+    pub fn new(source: SourceId, ballistics: Ballistics, input: ChannelLayout) -> Self {
+        Self::with_source(source, LevelFollower::new(ballistics), input)
     }
 
     /// The node `decl` describes (what `tutti_modulation::compile` gives each
     /// follower), following an `input`-wide signal: `None` when `decl` is
-    /// not a follower. The rate comes at `prepare`.
+    /// not a follower or its times are not valid ones (`compile` refuses those). The rate
+    /// comes at `prepare`.
     #[must_use]
     pub fn from_decl(decl: &SignalSource, input: ChannelLayout) -> Option<Self> {
         match decl.kind {
             SignalKind::Follower { attack, release } => {
-                Some(Self::new(decl.id, attack, release, input))
+                Some(Self::new(decl.id, Ballistics::new(attack, release)?, input))
             }
             SignalKind::NoteEnvelope { .. } => None,
         }

@@ -97,7 +97,7 @@
 //! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
-//! [`StereoSmoother`] (from [`Ballistics`]) is not a [`Meter`]: it is a display
+//! [`StereoSmoother`] (of a [`Ballistics`](tutti_types::Ballistics)) is not a [`Meter`]: it is a display
 //! filter over stereo level readings, with no stream behind it. It allocates
 //! nothing and costs a few flops, so it is fit for the audio thread.
 //!
@@ -378,7 +378,7 @@ pub use spectrum::{
     PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
     SpectrumTime, SpectrumTimeError,
 };
-pub use stereo::{Ballistics, StereoLevels, StereoReading, StereoSmoother, correlate};
+pub use stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
 pub use tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
     TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,

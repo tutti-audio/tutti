@@ -1,5 +1,6 @@
 use super::*;
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_types::{ChannelIndex, MAX_CHANNELS};
 
 fn run(flips: &Polarity, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut out = vec![vec![9.0f32; input[0].len()]; input.len()];
@@ -17,7 +18,7 @@ fn the_chosen_channels_are_negated_exactly_and_the_rest_copied() {
     let input: Vec<Vec<f32>> = (0..4)
         .map(|c| vec![0.0, -0.0, 1.0, -0.25, 1e-30, f32::MAX, 0.1 + c as f32])
         .collect();
-    let flips = Polarity::new(ChannelLayout::from(4u16), [0, 2, 2]).unwrap();
+    let flips = Polarity::new(ChannelLayout::from(4u16), [0, 2, 2].map(ChannelIndex::of)).unwrap();
     let out = run(&flips, &input);
     for c in 0..4 {
         for (y, x) in out[c].iter().zip(&input[c]) {
@@ -45,9 +46,9 @@ fn all_inverts_every_channel_and_twice_is_identity() {
 /// naming none inverts none.
 #[test]
 fn a_channel_past_the_width_is_refused() {
-    for bad in [2, 5, usize::MAX] {
+    for bad in [2, 5, MAX_CHANNELS - 1].map(ChannelIndex::of) {
         assert_eq!(
-            Polarity::new(ChannelLayout::STEREO, [1, bad]),
+            Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(1), bad]),
             Err(ChannelOutOfRange {
                 channel: bad,
                 width: 2

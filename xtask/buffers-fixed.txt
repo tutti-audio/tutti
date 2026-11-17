@@ -47,16 +47,6 @@ crates/tutti-graph/src/contract.rs::drive  measured: the param lanes are f32 by 
 crates/tutti-graph/src/contract.rs::drive_input  measured: the param lanes are f32 by spec; the audio edge is generic
 crates/tutti-graph/src/param.rs::ParamInput.Frames  measured: control values are f32 by spec
 crates/tutti-graph/src/param.rs::ParamInput::frames  measured: control values are f32 by spec
-crates/tutti-graph/src/reference.rs::Reference::process  pending
-crates/tutti-graph/src/reference.rs::Reference::process_with_changes  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapReader::pop_planes  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/testing.rs::Pair::block  pending
-crates/tutti-graph/src/testing.rs::Pair::block_at  pending
-crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
-crates/tutti-graph/src/testing.rs::bits  pending
-crates/tutti-graph/src/testing.rs::input_signal  pending
 crates/tutti-measure/src/features.rs::spectral_centroid  measured: a magnitude spectrum, not audio
 crates/tutti-measure/src/features.rs::spectral_flatness  measured: a magnitude spectrum, not audio
 crates/tutti-measure/src/features.rs::spectral_rolloff  measured: a magnitude spectrum, not audio
@@ -70,16 +60,14 @@ crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir  pending
-crates/tutti-nodes/src/params.rs::ControlSet::assemble  pending
-crates/tutti-nodes/src/params.rs::ControlSet::flatten  pending
-crates/tutti-nodes/src/testing.rs::Const::frame  pending
+crates/tutti-nodes/src/params.rs::ControlSet::assemble  measured: control cells are f32 by spec, one AtomicF32 per control, not audio
+crates/tutti-nodes/src/params.rs::ControlSet::flatten  measured: control cells are f32 by spec, one AtomicF32 per control, not audio
 crates/tutti-plugin-ipc/src/batcher.rs::Batcher::process  pending
 crates/tutti-plugin-types/src/contract.rs::check  pending
 crates/tutti-plugin-types/src/contract.rs::positions  pending
 crates/tutti-plugin-types/src/contract.rs::round_trip  pending
 crates/tutti-plugin-types/src/contract.rs::steps  pending
-crates/tutti-polysynth/src/tuning.rs::Tuning::from_cents  pending
-crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  pending
+crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  measured: a scale's frequency ratios, a tuning table not audio
 crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::process  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::tick  pending
