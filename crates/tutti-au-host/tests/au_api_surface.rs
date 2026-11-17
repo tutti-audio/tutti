@@ -143,20 +143,14 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
-/// How long to wait for a property notification before calling it absent.
-///
-/// The listener's notification interval is 200 ms and the first event was
-/// measured arriving at 202–216 ms across 25 trials, so this is ~14x the observed
-/// latency. Generous deliberately, for the reason `au_notification.rs::SETTLE`
-/// documents: too generous costs a slow *passing* test, too tight costs a flaky
-/// failure on a loaded machine.
-const SETTLE: Duration = Duration::from_secs(3);
+/// The guard on waiting for a property notification: it only fails one that
+/// never comes. The first event was measured arriving at 202–216 ms across 25
+/// trials (the listener's notification interval is 200 ms), so a loaded machine
+/// is nowhere near it.
+const SETTLE: Duration = Duration::from_secs(60);
 
-/// How long to wait before concluding no *further* event will arrive.
-///
-/// Must comfortably exceed one full 200 ms notification interval so an in-flight
-/// event has time to land and be counted — otherwise "nothing arrived" would only
-/// mean "we did not wait long enough". Matches `au_notification.rs::QUIESCE`.
+/// How long [`EventLog::settle_then_clear`] waits with no arrival before it
+/// takes the log as drained: more than one full 200 ms notification interval.
 const QUIESCE: Duration = Duration::from_millis(900);
 
 // -------------------------------------------------------------- the event log
@@ -308,13 +302,24 @@ fn a_property_listener_does_not_receive_properties_it_did_not_watch() {
     listener
         .watch_property(Latency::ID, EventAddress::GLOBAL)
         .expect("watch_property on kAudioUnitProperty_Latency");
+    // A second listener on the same unit, watching the property the writes
+    // change: its hearing them marks the end of their delivery, and it proves
+    // the writes do notify on this machine.
+    let control = EventLog::default();
+    let control_listener =
+        AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
+    control_listener
+        .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
+        .expect("watch BypassEffect on the control");
 
     au.set_bypass(true).expect("bypass on");
     au.set_bypass(false).expect("bypass off");
 
-    // Positive control first: the *same* write, watched, does arrive. Without it
-    // this test would pass on a machine where notifications never work at all.
-    std::thread::sleep(QUIESCE);
+    assert!(
+        control.wait_for_at_least(1),
+        "the control half failed: the watched BypassEffect change did not arrive, \
+         so the silence below proves nothing"
+    );
     assert_eq!(
         log.snapshot(),
         Vec::new(),
@@ -415,7 +420,7 @@ fn two_watched_properties_arrive_under_their_own_ids() {
 #[test]
 fn registration_never_refuses_a_property_id() {
     let _g = lock();
-    let au = DELAY.open(RATE, BLOCK);
+    let mut au = DELAY.open(RATE, BLOCK);
 
     let log = EventLog::default();
     let listener = AuParameterListener::new(au.unit(), log.sink()).expect("create a listener");
@@ -428,8 +433,20 @@ fn registration_never_refuses_a_property_id() {
         );
     }
 
-    // And accepting the registrations does not conjure events out of nothing.
-    std::thread::sleep(QUIESCE);
+    // And accepting the registrations does not conjure events out of nothing: a
+    // control listener on a real property hears a change, and by then the
+    // others would have.
+    let control = EventLog::default();
+    let control_listener =
+        AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
+    control_listener
+        .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
+        .expect("watch BypassEffect on the control");
+    au.set_bypass(true).expect("bypass on");
+    assert!(
+        control.wait_for_at_least(1),
+        "the control half failed: the watched BypassEffect change did not arrive"
+    );
     assert_eq!(
         log.snapshot(),
         Vec::new(),
@@ -487,6 +504,15 @@ fn a_dropped_property_listener_stops_delivering() {
     // post-teardown writes — see this test's docs.
     log.settle_then_clear();
 
+    // A second listener on the same unit, kept: its hearing the writes below
+    // marks the end of their delivery.
+    let control = EventLog::default();
+    let control_listener =
+        AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
+    control_listener
+        .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
+        .expect("watch BypassEffect on the control");
+
     drop(listener);
 
     // Enough writes that a stale registration would almost certainly be hit.
@@ -494,7 +520,10 @@ fn a_dropped_property_listener_stops_delivering() {
         au.set_bypass(i % 2 == 0)
             .expect("bypass write after teardown");
     }
-    std::thread::sleep(QUIESCE);
+    assert!(
+        control.wait_for_at_least(1),
+        "the control listener never heard the writes"
+    );
     assert_eq!(
         log.snapshot(),
         Vec::new(),

@@ -152,6 +152,22 @@ fn served<F: Format>(
     (active, heard)
 }
 
+/// A hang guard for a loop that runs until an event: generous, so a loaded
+/// runner never trips it, and failing a loop whose event never comes.
+struct HangGuard(std::time::Instant);
+
+impl HangGuard {
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+
+    fn check(&self, what: &str) {
+        assert!(self.0.elapsed() < Self::LIMIT, "{what}");
+    }
+}
+
 /// A gesture the plugin makes in the server crosses the wire as the spec's four
 /// edits, in order, begin to end, each with its value: the same figures the
 /// in-process case reads ([`gesture_edits`]), here from the process the plugin
@@ -168,17 +184,21 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
         spec::NOTICE_GESTURE_ON_LOAD,
     );
     // CLAP's plugin says it from `process`, so blocks run while the host waits.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while heard.lock().unwrap().len() < gesture_edits().len()
-        && std::time::Instant::now() < deadline
-    {
+    let guard = HangGuard::new();
+    while heard.lock().unwrap().len() < gesture_edits().len() {
+        guard.check("the gesture never arrived");
         a.silent(BLOCK);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // Let anything else the server would send arrive too.
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Anything else the server sent before its answer to a control request has
+    // arrived by then: the control connection is one ordered stream.
     a.silent(BLOCK);
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    a.controller_mut()
+        .save_state(
+            tutti_fixtures::main_thread(),
+            tutti_plugin_types::StateUse::Project,
+        )
+        .expect("saves");
     assert_eq!(
         *heard.lock().unwrap(),
         gesture_edits(),
@@ -214,13 +234,12 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
     // it travels on the control connection and the blocks on the audio one.
     // So blocks run until the value has moved, and the
     // value it moved to is the one checked.
+    let guard = HangGuard::new();
     let mut got = before;
-    for _ in 0..200 {
+    while got == before {
+        guard.check("the value never moved");
         a.silent(BLOCK);
         got = a.controller().parameter(main, Param::Level.id());
-        if got != before {
-            break;
-        }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(
@@ -254,13 +273,12 @@ fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathB
     );
     // The writes travel on the control connection and the blocks on the audio
     // one: blocks run until the writable one has landed.
+    let guard = HangGuard::new();
     let mut level = a.controller().parameter(main, Param::Level.id());
-    for _ in 0..200 {
+    while level.map(Normalized::get) != Some(spec::WRITE) {
+        guard.check("the writable write never landed");
         a.silent(BLOCK);
         level = a.controller().parameter(main, Param::Level.id());
-        if level.map(Normalized::get) == Some(spec::WRITE) {
-            break;
-        }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(

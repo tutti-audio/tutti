@@ -67,6 +67,22 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
 const DRY_WET: u32 = 0;
 const DELAY_TIME: u32 = 1;
 
+/// The plugin's own edit of the unit's Lowpass Cutoff (id 3) to `value`: told
+/// to every listener, and the barrier a test waits on to know the notifications
+/// due before it have been delivered.
+fn plugin_edits_cutoff(controller: &AuController, value: f32) {
+    tutti_au_ffi::set_parameter_notifying(
+        controller.unit(),
+        CUTOFF,
+        tutti_au_ffi::EventAddress::GLOBAL,
+        value,
+        0,
+    )
+    .unwrap();
+}
+
+const CUTOFF: u32 = 3;
+
 /// The unit's own plain value of `id`.
 fn plain(controller: &AuController, id: u32) -> f32 {
     tutti_au_host::parameters::get(controller.unit(), id).expect("the unit answers")
@@ -144,28 +160,27 @@ fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
         }
     })
     .expect("a listener registers");
-    editor
-        .watch_parameter(DRY_WET, EventAddress::GLOBAL)
-        .unwrap();
+    for id in [DRY_WET, CUTOFF] {
+        editor.watch_parameter(id, EventAddress::GLOBAL).unwrap();
+    }
 
     let mut changes = ParameterChanges::reserved(1, 4);
     assert!(changes.add_change(ParamId::from(DRY_WET), 100, 0.75));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 75.0, "the automation landed");
 
-    // Past the listener's notification interval.
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    // The plugin's edit of another parameter, after the render, is told to the
+    // listener; by the time it is heard, the render's own would have been.
+    plugin_edits_cutoff(&controller, 1000.0);
+    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == CUTOFF));
     assert!(
-        heard.lock().unwrap().is_empty(),
+        heard.lock().unwrap().iter().all(|(id, _)| *id == CUTOFF),
         "the render notified a listener: {:?}",
         heard.lock().unwrap()
     );
 
     Control::flush_edits(&mut controller, main);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while heard.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == DRY_WET));
     let heard = heard.lock().unwrap();
     assert_eq!(
         heard.last().copied(),
@@ -219,7 +234,7 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
         }
     })
     .expect("a listener registers");
-    for id in [DRY_WET, DELAY_TIME] {
+    for id in [DRY_WET, DELAY_TIME, CUTOFF] {
         editor.watch_parameter(id, EventAddress::GLOBAL).unwrap();
     }
 
@@ -235,19 +250,34 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     assert!(last.add_change(ParamId::from(DRY_WET), 100, 0.75));
     render_block(&mut processor, 0.0, &last);
 
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    // The plugin's edit of another parameter, after the renders, is told to the
+    // listener; by the time it is heard, the renders' own would have been.
+    plugin_edits_cutoff(&controller, 1000.0);
+    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == CUTOFF));
     assert!(
-        heard.lock().unwrap().is_empty(),
+        heard.lock().unwrap().iter().all(|(id, _)| *id == CUTOFF),
         "the render notified a listener"
     );
 
     Control::flush_edits(&mut controller, main);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while heard.lock().unwrap().len() < 2 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    // Long enough for a surplus notification to arrive.
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    wait_until(|| {
+        let heard = heard.lock().unwrap();
+        [DRY_WET, DELAY_TIME]
+            .iter()
+            .all(|want| heard.iter().any(|(id, _)| id == want))
+    });
+    // A surplus notification of the tick would be delivered before the plugin's
+    // next edit is.
+    plugin_edits_cutoff(&controller, 2000.0);
+    wait_until(|| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(id, _)| *id == CUTOFF)
+            .count()
+            >= 2
+    });
     let heard = heard.lock().unwrap();
     for id in [DRY_WET, DELAY_TIME] {
         let told: Vec<_> = heard.iter().filter(|(i, _)| *i == id).collect();
@@ -264,13 +294,26 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     );
 }
 
+/// Polls until `holds`, the event a test waits on, or fails after a minute: a
+/// guard against a hang, not a limit on how long delivery takes.
+fn wait_until(holds: impl Fn() -> bool) {
+    let guard = std::time::Instant::now();
+    while !holds() {
+        assert!(
+            guard.elapsed() < std::time::Duration::from_secs(60),
+            "the event never came"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 /// What a listener on another queue is given a moment to deliver.
 fn wait_for_edits(controller: &mut AuController, want: usize) -> Vec<ParamEdit> {
     use tutti_plugin_types::Control;
     let main = tutti_fixtures::main_thread();
     let mut heard = Vec::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while heard.len() < want && std::time::Instant::now() < deadline {
+    let guard = std::time::Instant::now();
+    while heard.len() < want && guard.elapsed() < std::time::Duration::from_secs(60) {
         Control::take_reported_edits(controller, main, &mut heard);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
@@ -368,22 +411,23 @@ fn the_hosts_own_writes_are_not_reported_as_the_plugins_edits() {
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 50.0, "the automation landed");
 
-    // The plugin's own edit, of Lowpass Cutoff (id 3).
+    // The plugin's own edit, of Lowpass Cutoff (id 3), and then of Delay Time:
+    // a delayed report of a host write would be delivered before the second.
+    plugin_edits_cutoff(&controller, 1000.0);
+    let mut all = wait_for_edits(&mut controller, 1);
     tutti_au_ffi::set_parameter_notifying(
         controller.unit(),
-        3,
+        DELAY_TIME,
         tutti_au_ffi::EventAddress::GLOBAL,
-        1000.0,
+        0.25,
         0,
     )
     .unwrap();
-    let heard = wait_for_edits(&mut controller, 1);
-    // Past the listener's notification interval, so a delayed report of a host
-    // write would be here too.
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let mut more = wait_for_edits(&mut controller, 0);
-    let mut all = heard;
-    all.append(&mut more);
+    all.append(&mut wait_for_edits(&mut controller, 1));
     let ids: Vec<u32> = all.iter().map(|e| e.id().get()).collect();
-    assert_eq!(ids, [3], "only the plugin's own edit: {all:?}");
+    assert_eq!(
+        ids,
+        [CUTOFF, DELAY_TIME],
+        "only the plugin's own edits: {all:?}"
+    );
 }

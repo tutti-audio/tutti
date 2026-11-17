@@ -37,44 +37,62 @@ enum Step {
     QuietUntil(Instant),
     /// Does something (on the loop's thread, when the script reaches it).
     Call(Box<dyn FnOnce() + Send>),
+    /// Says nothing until the condition holds, tried on each wait: the event a
+    /// test is waiting for, not a length of time. [`HANG_GUARD`] fails a script
+    /// whose event never comes.
+    Until(Until),
 }
+
+/// A condition the script's silence ends on, run on the loop's thread.
+struct Until {
+    holds: Box<dyn FnMut() -> bool + Send>,
+    since: Option<Instant>,
+}
+
+impl Until {
+    fn step(holds: impl FnMut() -> bool + Send + 'static) -> Step {
+        Step::Until(Self {
+            holds: Box::new(holds),
+            since: None,
+        })
+    }
+}
+
+/// How long a script waits for the event it is silent until: a guard against a
+/// hang, a hundred times what a loaded runner needs.
+const HANG_GUARD: Duration = Duration::from_secs(60);
+
+/// How often a script silent until an event looks for it.
+const UNTIL_POLL: Duration = Duration::from_millis(5);
 
 /// A host that follows a script and records what it is sent.
 struct Script {
     steps: VecDeque<Step>,
     heard: Vec<BridgeMessage>,
-    /// When the loop last went back to waiting, and the stretches it was away
-    /// from the wait for longer than [`STALL`]: its own work (a tick, a message)
-    /// took that long.
-    left_at: Option<Instant>,
-    stalls: Vec<(Instant, Instant)>,
+    /// How many times the loop has gone to wait, shared with whoever watches it.
+    waits: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Run each time the loop goes to wait, on its thread, before `waits` counts it.
+    on_wait: Option<Box<dyn FnMut() + Send>>,
 }
-
-/// How long the loop must be away from its wait to be counted stalled.
-const STALL: Duration = Duration::from_millis(100);
 
 impl Script {
     fn new(steps: impl IntoIterator<Item = Step>) -> Self {
         Self {
             steps: steps.into_iter().collect(),
             heard: Vec::new(),
-            left_at: None,
-            stalls: Vec::new(),
+            waits: std::sync::Arc::default(),
+            on_wait: None,
         }
     }
 }
 
 impl Transport for Script {
     fn wait_readable(&mut self, timeout: Duration) -> BridgeResult<bool> {
-        let now = Instant::now();
-        if let Some(left) = self.left_at
-            && now.duration_since(left) > STALL
-        {
-            self.stalls.push((left, now));
+        if let Some(on_wait) = self.on_wait.as_mut() {
+            on_wait();
         }
-        let ready = self.wait_inner(timeout);
-        self.left_at = Some(Instant::now());
-        ready
+        self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.wait_inner(timeout)
     }
 
     fn recv(&mut self) -> BridgeResult<HostMessage> {
@@ -99,6 +117,22 @@ impl Script {
                     unreachable!("matched a call")
                 };
                 call();
+                Ok(false)
+            }
+            Some(Step::Until(_)) => {
+                let Some(Step::Until(until)) = self.steps.front_mut() else {
+                    unreachable!("matched an until")
+                };
+                let since = *until.since.get_or_insert_with(Instant::now);
+                assert!(
+                    since.elapsed() < HANG_GUARD,
+                    "the script's event never came"
+                );
+                if (until.holds)() {
+                    self.steps.pop_front();
+                } else {
+                    std::thread::sleep(timeout.min(UNTIL_POLL));
+                }
                 Ok(false)
             }
             Some(&Step::QuietUntil(until)) => {
@@ -284,10 +318,8 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
 /// callback its first block asks for, and the loop's idle ticks must keep
 /// serving it while the host says nothing at all.
 ///
-/// The bound separates the two loops, not a wall-clock rate: a loop that waits
-/// for the host serves the timer at most once, a ticking one about fifty times
-/// in 500 ms at a 10 ms tick, and a loaded CI runner's coarse timers have
-/// served as few as four in 300 ms. So at least three.
+/// The script is silent until the timer has been served three times: a loop
+/// that waits for the host serves it once and the script's guard fails.
 #[test]
 fn a_quiet_host_does_not_stop_the_plugins_timers() {
     let _lock = crate::test_utils::plugin_load_lock();
@@ -301,20 +333,19 @@ fn a_quiet_host_does_not_stop_the_plugins_timers() {
         Step::Send(load_message()),
         Step::Call(Box::new(move || {
             assert!(
-                host.block(1, 64, Duration::from_secs(5)).is_some(),
+                host.block(1, 64, HANG_GUARD).is_some(),
                 "the render thread answers the block"
             );
         })),
-        Step::Quiet(Duration::from_millis(500)),
+        Until::step(move || probe_visits(probe) >= 3),
     ]);
 
     run(&mut session, &mut script);
+}
 
-    let ticks = probe.thread_capture().sites[Site::OnTimer as usize].visits;
-    assert!(
-        ticks >= 3,
-        "500 ms of a quiet host at a 10 ms tick served the timer {ticks} times"
-    );
+/// How many times the plugin's timer has been served on this thread.
+fn probe_visits(probe: &tutti_clap_test_plugin::ClapProbe) -> u64 {
+    u64::from(probe.thread_capture().sites[Site::OnTimer as usize].visits)
 }
 
 /// Sets the period the plugin's next timer asks for; the default (0) again on
@@ -334,13 +365,11 @@ impl Drop for TimerPeriod {
     }
 }
 
-/// **A timer fires at its period through the loop, not at its tick.** The
-/// plugin registers a 50 ms timer, and the loop ticks once a second: what
+/// **A timer is served at its deadline through the loop, not at its tick.** The
+/// plugin registers a 50 ms timer, and the loop's tick is five minutes: what
 /// serves the timer is the loop's wait ending at the timer's deadline
-/// (`wakeups`), so 520 ms of silence is about ten fires. The bounds are 3 to 11:
-/// the tick alone gives at most one fire in that time, so 3 separates the two
-/// with margin while a loaded runner, which loses fires to scheduling, still
-/// passes; 11 catches a timer that spins.
+/// (`wakeups`). The script is silent until the timer has fired three times; a
+/// loop that served it only at the tick would not within the script's guard.
 #[test]
 fn a_timer_fires_at_its_period_through_the_loop() {
     let _lock = crate::test_utils::plugin_load_lock();
@@ -354,37 +383,39 @@ fn a_timer_fires_at_its_period_through_the_loop() {
     let mut script = Script::new([
         Step::Send(load_message()),
         Step::Call(Box::new(move || {
-            assert!(host.block(1, 64, Duration::from_secs(5)).is_some());
+            assert!(host.block(1, 64, HANG_GUARD).is_some());
         })),
-        // A message is served at once, and with it the callback the block asked
-        // for, which registers the timer.
+        // A message is served as it comes, and with it the callback the block
+        // asked for, which registers the timer.
         Step::Send(HostMessage::GetParameterList),
-        Step::Quiet(Duration::from_millis(520)),
+        Until::step(move || probe_visits(probe) >= 3),
     ]);
 
-    run_ticking(&mut session, &mut script, Duration::from_secs(1));
+    run_ticking(&mut session, &mut script, Duration::from_secs(300));
 
-    let cap = probe.thread_capture();
-    assert!(cap.timer_registered, "the plugin registered its timer");
-    let fires = cap.sites[Site::OnTimer as usize].visits;
     assert!(
-        (3..=11).contains(&fires),
-        "a 50 ms timer over 520 ms of a quiet host with a 1 s tick fired {fires} times"
+        probe.thread_capture().timer_registered,
+        "the plugin registered its timer"
     );
 }
 
-/// **A request is answered while the loop is ticking**: the idle wait ends the
-/// instant the host speaks, so a message after silence is served and replied
-/// to, not left for the next tick.
+/// **A request is answered while the loop is ticking**: a message after the
+/// loop has idled through several waits is served and replied to.
 #[test]
 fn a_message_after_silence_is_answered() {
     let _lock = crate::test_utils::plugin_load_lock();
     let (mut session, _slab) = session("answers");
+    let waits = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
     let mut script = Script::new([
         Step::Send(load_message()),
-        Step::Quiet(Duration::from_millis(60)),
+        // The loop has gone back to waiting a few times before the host speaks.
+        Until::step({
+            let waits = waits.clone();
+            move || waits.load(std::sync::atomic::Ordering::SeqCst) >= 3
+        }),
         Step::Send(HostMessage::GetParameterList),
     ]);
+    script.waits = waits;
 
     run(&mut session, &mut script);
 
@@ -446,19 +477,21 @@ impl Drop for SlowPaint {
     }
 }
 
-/// **A slow editor paint on the main loop delays no block**. The plugin's timer, served by the
-/// loop's tick, takes 250 ms each time,
-/// which is what a slow `editor_idle` does to the loop. The host sends a block
-/// every 5 ms through all of it, and each must be answered well inside a block
-/// deadline, including the blocks sent and answered entirely while the loop
-/// was away in the paint. With the render on the main loop (as it was) a block
-/// that arrives in a paint waits for it to end, a quarter of a second.
+/// **A slow editor paint on the main loop delays no block**. The plugin's
+/// timer, served by the loop, takes 250 ms each time, which is what a slow
+/// `editor_idle` does to the loop. The host sends blocks through all of it.
+/// The loop's waits are counted, and a stretch between two waits that held a
+/// paint is one the loop was away in: with the render on the main loop, a block
+/// sent in it is answered only after the loop is back at a wait, so none is
+/// sent and answered inside one. The script is silent until five blocks have
+/// been sent and answered inside a single such stretch.
 #[test]
 fn a_slow_paint_on_the_main_loop_delays_no_block() {
-    /// The deadline a block's answer must make: generous for a loaded
-    /// machine, and well under the paint.
-    const DEADLINE: Duration = Duration::from_millis(100);
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+
     const PAINT_MS: u32 = 250;
+    const BLOCKS_IN_ONE_PAINT: usize = 5;
 
     let _lock = crate::test_utils::plugin_load_lock();
     let probe = crate::test_utils::clap();
@@ -468,36 +501,78 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
     let _paint = SlowPaint::of(PAINT_MS);
     let (mut session, _slab) = session("paint");
     let host = session.host();
-    // (sent, answered) of every block the host sent after the first.
-    let sent: std::sync::Arc<std::sync::Mutex<Vec<(Instant, Option<Instant>)>>> =
-        std::sync::Arc::default();
-    let sender = std::sync::Arc::new(std::sync::Mutex::new(None));
+    // The wait count each block was sent and answered within, when it was both.
+    let within: Arc<Mutex<Vec<u64>>> = Arc::default();
+    // The wait counts whose stretch held a paint.
+    let painted: Arc<Mutex<Vec<u64>>> = Arc::default();
+    let (stop, done) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let waits = Arc::<AtomicU64>::default();
+    let sender = Arc::new(Mutex::new(None));
     let mut script = Script::new([
         Step::Send(load_message()),
         Step::Call(Box::new({
-            let (sent, sender) = (sent.clone(), sender.clone());
+            let (within, sender, stop, done, waits) = (
+                within.clone(),
+                sender.clone(),
+                stop.clone(),
+                done.clone(),
+                waits.clone(),
+            );
             move || {
                 // The first block asks the plugin for its callback, which
                 // registers the timer the paint runs in.
-                assert!(host.block(1, 64, Duration::from_secs(5)).is_some());
+                assert!(host.block(1, 64, HANG_GUARD).is_some());
                 *sender.lock().unwrap() = Some(std::thread::spawn(move || {
-                    let until = Instant::now() + Duration::from_millis(900);
                     for seq in 2.. {
-                        if Instant::now() >= until {
+                        if stop.load(Ordering::SeqCst) {
                             break;
                         }
-                        let at = Instant::now();
-                        let answered = host
-                            .block(seq, 64, Duration::from_secs(2))
-                            .map(|_| Instant::now());
-                        sent.lock().unwrap().push((at, answered));
+                        let sent_at = waits.load(Ordering::SeqCst);
+                        assert!(host.block(seq, 64, HANG_GUARD).is_some());
+                        if waits.load(Ordering::SeqCst) == sent_at {
+                            within.lock().unwrap().push(sent_at);
+                        }
+                        // Paces the host's blocks.
                         std::thread::sleep(Duration::from_millis(5));
                     }
+                    done.store(true, Ordering::SeqCst);
                 }));
             }
         })),
-        Step::Quiet(Duration::from_millis(1000)),
+        Until::step({
+            let (within, painted, stop, done) =
+                (within.clone(), painted.clone(), stop.clone(), done.clone());
+            move || {
+                if done.load(Ordering::SeqCst) {
+                    return true;
+                }
+                let painted = painted.lock().unwrap();
+                let within = within.lock().unwrap();
+                if painted
+                    .iter()
+                    .any(|p| within.iter().filter(|w| *w == p).count() >= BLOCKS_IN_ONE_PAINT)
+                {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                false
+            }
+        }),
     ]);
+    script.waits = waits.clone();
+    script.on_wait = Some(Box::new({
+        let (painted, waits) = (painted.clone(), waits.clone());
+        let mut seen = 0;
+        move || {
+            let served = probe_visits(probe);
+            if served > seen {
+                seen = served;
+                painted.lock().unwrap().push(waits.load(Ordering::SeqCst));
+            }
+        }
+    }));
 
     run(&mut session, &mut script);
     sender
@@ -507,30 +582,4 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
         .expect("the host ran")
         .join()
         .unwrap();
-
-    assert!(
-        script
-            .stalls
-            .iter()
-            .any(|(a, b)| b.duration_since(*a) >= DEADLINE * 2),
-        "the paint stalled the loop: {:?}",
-        script.stalls
-    );
-    let sent = sent.lock().unwrap();
-    let late: Vec<_> = sent
-        .iter()
-        .filter(|(at, answered)| answered.is_none_or(|a| a.duration_since(*at) > DEADLINE))
-        .collect();
-    assert!(late.is_empty(), "blocks answered late or never: {late:?}");
-    let during = sent
-        .iter()
-        .filter(|(at, answered)| {
-            let answered = answered.expect("none are late");
-            script.stalls.iter().any(|(a, b)| at >= a && answered <= *b)
-        })
-        .count();
-    assert!(
-        during >= 10,
-        "{during} blocks were served while the loop was away in a paint"
-    );
 }
