@@ -1,6 +1,7 @@
 //! A kernel node solves at the corners of the lanes that drive its slow
 //! controls, as well as on its grid.
 
+use tutti_buffers::Planes;
 use tutti_curve::Law;
 use tutti_graph::{
     Cx, Event, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamIn, ParamSegment,
@@ -80,7 +81,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         .connect_param(at, EventOut { node: s, port: 0 });
     r.editor_mut().commit().expect("commits");
     let input = vec![1.0f32; FRAMES];
-    r.render_input(&[&input]).remove(0)
+    r.render_input(Planes::new(&[&input]).unwrap()).remove(0)
 }
 
 fn step(to: f32) -> ParamSegment {

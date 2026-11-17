@@ -35,6 +35,8 @@ mod timed;
 mod timeline;
 mod walk;
 
+use tutti_buffers::{Float, Planes, PlanesMut};
+
 pub use audio::{Applied, AudioTaken, TransportAudio};
 pub use handle::Transport;
 pub use loop_region::{LoopEdit, LoopRegion};
@@ -59,8 +61,8 @@ pub use walk::TempoAhead;
 /// A renderer driving the graph (`tutti_graph::Executor`) must also *hand*
 /// each block a transport, since
 /// the graph's clock is the executor's `Env`, not a node — that is
-/// [`graph_block`](Self::graph_block), and [`render_graph`](Self::render_graph)
-/// is the one order the two are called in. It is still not a supertrait of
+/// [`graph_block`](Self::graph_block), which [`render_graph`] reads through
+/// [`graph_piece`](Self::graph_piece) and so is the one order they are called in. It is still not a supertrait of
 /// `Timeline`: a clock that does not move (`FrozenClock`) has a transport to
 /// report — stopped, at beat zero — without being a timeline anything reads.
 ///
@@ -80,8 +82,9 @@ pub trait RenderClock: Send + Sync {
 
     /// The block about to be rendered as the graph takes it: the
     /// transport at the block's first frame, and the changes inside it. Read
-    /// **before** the block is processed, as [`render_graph`](Self::render_graph)
-    /// does.
+    /// **before** the block is processed, as [`render_graph`] does through
+    /// [`graph_piece`](Self::graph_piece), whose default is this over the
+    /// whole block.
     ///
     /// Required, not defaulted. The obvious default — stopped, at beat zero —
     /// is right for a clock that does not move and wrong for every clock that
@@ -96,28 +99,85 @@ pub trait RenderClock: Send + Sync {
         tutti_graph::TransportChanges,
     );
 
-    /// Renders `frames` through `exec` under this clock, then advance the
-    /// clock by it: [`graph_block`](Self::graph_block),
-    /// `Executor::process_with_changes`, then [`advance`](Self::advance) —
-    /// the one order that keeps every reader of this clock on the frame the
-    /// graph renders (emit-then-advance, as above). `frames` is one block:
-    /// the executor never splits it, and a node reads a transport change
-    /// inside it from its `Env`.
-    ///
-    /// # Panics
-    ///
-    /// As `Executor::process_with_changes`: if `frames` is zero or past the
-    /// executor's prepared maximum block.
-    fn render_graph(
+    /// The first piece of a render of `frames`: the transport at its first
+    /// frame, the changes inside it, and how many frames it covers. The
+    /// default is [`graph_block`](Self::graph_block) over all `frames`; a
+    /// clock whose block holds only so many changes covers fewer, and
+    /// [`render_graph`] asks again for the rest after
+    /// advancing.
+    fn graph_piece(
         &self,
-        exec: &mut tutti_graph::Executor,
         frames: usize,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+    ) -> (
+        tutti_graph::TransportPosition,
+        tutti_graph::TransportChanges,
+        usize,
     ) {
         let (transport, changes) = self.graph_block();
-        exec.process_with_changes(frames, &transport, &changes, inputs, outputs);
-        self.advance(tutti_types::Samples(frames))
+        (transport, changes, frames)
+    }
+}
+
+/// Renders one block through `exec` under `clock`, then advances the clock by
+/// it: [`graph_piece`](RenderClock::graph_piece),
+/// `Executor::process_with_changes`, then [`advance`](RenderClock::advance),
+/// again for each piece — the one order that keeps every reader of the clock
+/// on the frame the graph renders (emit-then-advance, as above). The block is
+/// the frames of `outputs`, so it needs at least one output plane (a view
+/// has none to give otherwise); a block of zero frames renders nothing and
+/// leaves the clock where it was. `inputs` holds at least as many per channel, or
+/// is [`Planes::default`] for a graph that reads none. A clock whose block
+/// has more changes than the executor takes splits it into pieces, each
+/// narrowed from the views as the executor's slice tables, held in fixed
+/// arrays (the executor ignores slices past the plan's channels), so nothing
+/// allocates; one that does not hands the executor the whole block, and a
+/// node reads a transport change inside it from its `Env`.
+///
+/// # Panics
+///
+/// As `Executor::process_with_changes`: if a piece is past the executor's
+/// prepared maximum block.
+pub fn render_graph<F: Float>(
+    clock: &dyn RenderClock,
+    exec: &mut tutti_graph::Executor<F>,
+    inputs: Planes<'_, F>,
+    mut outputs: PlanesMut<'_, '_, F>,
+) {
+    use tutti_graph::MAX_PORTS;
+    let frames = outputs.frames().get();
+    let mut done = 0;
+    while done < frames {
+        let (transport, changes, n) = clock.graph_piece(frames - done);
+        let piece = tutti_types::Samples(done)..tutti_types::Samples(done + n);
+        // A graph with no inputs hands none.
+        let ins = if inputs.channels() == 0 {
+            Planes::default()
+        } else {
+            inputs.slice(piece.clone())
+        };
+        let mut outs = outputs.slice_mut(piece);
+        let mut table_in: [&[F]; MAX_PORTS] = [&[]; MAX_PORTS];
+        for (to, from) in table_in.iter_mut().zip(ins.iter()) {
+            *to = from.samples();
+        }
+        let (ni, no) = (
+            ins.channels().min(MAX_PORTS),
+            outs.channels().min(MAX_PORTS),
+        );
+        let mut from = outs.iter_mut();
+        let mut table_out: [&mut [F]; MAX_PORTS] = std::array::from_fn(|_| {
+            from.next()
+                .map_or(Default::default(), |o| o.into_samples_mut())
+        });
+        exec.process_with_changes(
+            n,
+            &transport,
+            &changes,
+            &table_in[..ni],
+            &mut table_out[..no],
+        );
+        clock.advance(tutti_types::Samples(n));
+        done += n;
     }
 }
 

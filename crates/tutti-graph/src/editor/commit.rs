@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tutti_buffers::Float;
 
 use tutti_curve::declick_frames;
 
@@ -19,7 +20,7 @@ use crate::{Edge, EdgeId, Sink, Source};
 use crate::{Fade, NodeKey, RootBank};
 use tutti_types::Amplitude;
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
     pub(super) fn check_poisoned(&self) -> Result<(), CommitError> {
         match self.poison_cause() {
@@ -231,7 +232,7 @@ impl Editor {
             return Err(CommitError::MissingUnit { node });
         }
         self.fade_room(&delta)?;
-        let units: BTreeMap<NodeKey, Box<dyn Node>> = needed
+        let units: BTreeMap<NodeKey, Box<dyn Node<F>>> = needed
             .into_iter()
             .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
             .collect();
@@ -395,7 +396,7 @@ impl Editor {
         &mut self,
         plan: Plan,
         delta: Delta,
-        units: BTreeMap<NodeKey, Box<dyn Node>>,
+        units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
     ) -> Result<(), CommitError> {
         self.collect();
         self.check_poisoned()?;
@@ -423,7 +424,7 @@ impl Editor {
         &mut self,
         plan: Plan,
         delta: Delta,
-        units: BTreeMap<NodeKey, Box<dyn Node>>,
+        units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         bus_weights: &BusLanes,
         resume: Option<Resume>,
     ) {

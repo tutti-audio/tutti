@@ -57,6 +57,20 @@ impl PluginParameters for Params {
             _ => false,
         }
     }
+    fn change_preset(&self, preset: i32) {
+        if let Ok(index) = u32::try_from(preset) {
+            self.0.set_program(index);
+        }
+    }
+    fn get_preset_num(&self) -> i32 {
+        self.0.program() as i32
+    }
+    fn get_preset_name(&self, preset: i32) -> String {
+        usize::try_from(preset)
+            .ok()
+            .and_then(|i| core::PROGRAM_LIST.2.get(i))
+            .map_or(String::new(), |name| (*name).to_string())
+    }
     fn get_parameter_name(&self, index: i32) -> String {
         usize::try_from(index)
             .ok()
@@ -112,7 +126,7 @@ impl Plugin for Shared {
             unique_id: UNIQUE_ID,
             version: 1,
             parameters: core::PARAMS as i32,
-            presets: 1,
+            presets: core::PROGRAM_LIST.2.len() as i32,
             inputs: 2,
             outputs: 2,
             midi_inputs: 1,
