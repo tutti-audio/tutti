@@ -4,6 +4,7 @@
 use crate::mode::avoid;
 use crate::scale;
 use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1};
+use alloc::boxed::Box;
 use members::Members;
 use tutti_ump::{
     Address, Bank, CCNumber, ControlValue, Message, Midi1Bytes, MidiChannel, MidiGroup, U7, Ump,
