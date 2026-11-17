@@ -184,20 +184,31 @@ pub(crate) struct Commit<F: Float = f32> {
     /// the resume (`Executor::parked`), with room for every unit.
     pub(super) parked: Vec<(NodeKey, Keys)>,
     /// Tap producers and meter cells the editor opened since the last commit.
-    pub(super) opened: Opened,
+    pub(super) opened: Opened<F>,
 }
 
 /// What the editor hands the executor with a commit: what it opened since its
 /// last one (a tap's producers and a meter's cells), and the cell of every
 /// weighted lane the plan lists (`Plan::sum_lanes`).
-#[derive(Debug, Default)]
-pub(crate) struct Opened {
+#[derive(Debug)]
+pub(crate) struct Opened<F: Float = f32> {
     /// The live base of each weighted lane of the plan, by edge. The editor
     /// owns the cells and keeps one per edge across commits.
     pub(crate) gains: BTreeMap<EdgeId, GainCell>,
-    pub(crate) taps: Vec<(TapId, TapWriter)>,
+    pub(crate) taps: Vec<(TapId, TapWriter<F>)>,
     pub(crate) event_taps: Vec<(EventTapId, EventTapWriter)>,
     pub(crate) meters: Vec<(MeterId, MeterWriter)>,
+}
+
+impl<F: Float> Default for Opened<F> {
+    fn default() -> Self {
+        Self {
+            gains: BTreeMap::new(),
+            taps: Vec::new(),
+            event_taps: Vec::new(),
+            meters: Vec::new(),
+        }
+    }
 }
 
 impl<F: Float> Commit<F> {
@@ -211,7 +222,7 @@ impl<F: Float> Commit<F> {
         mut params: impl FnMut(NodeKey, usize, usize) -> ParamState,
         mut modes: impl FnMut(NodeKey) -> ModeState<F>,
         mut wakes: impl FnMut(NodeKey) -> Wake,
-        opened: Opened,
+        opened: Opened<F>,
     ) -> Box<Commit<F>> {
         let wanted = delta
             .insert

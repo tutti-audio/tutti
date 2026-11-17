@@ -50,8 +50,8 @@ fn a_step_drops_the_points_after_it() {
 }
 
 /// A step inside the ramp cuts it at beat 3 (120 bpm, 2 s): the ramp is kept
-/// to there, the step follows one ulp of a beat later, and the ramp's end and
-/// the point after it are gone.
+/// to there and ends at 120, the step is at that same beat with no sliver
+/// between, and the ramp's own end and the point after it are gone.
 #[test]
 fn a_ramp_a_step_lands_in_is_cut_at_its_beat() {
     let at = Beat(3.0);
@@ -62,18 +62,25 @@ fn a_ramp_a_step_lands_in_is_cut_at_its_beat() {
     assert_eq!(
         new.points(),
         [
-            TempoPoint::ramp_time(Beat(0.0), bpm(60.0)),
-            TempoPoint::step(at, bpm(120.0)),
-            TempoPoint::step(Beat(at.get().next_up()), bpm(100.0)),
+            TempoPoint {
+                transition: Transition::RampTime {
+                    end: Some(bpm(120.0))
+                },
+                ..TempoPoint::step(Beat(0.0), bpm(60.0))
+            },
+            TempoPoint::step(at, bpm(100.0)),
         ]
     );
+    let below = new.tempo_at(Beat(at.get().next_down())).get();
+    assert!((below - 120.0).abs() < 1e-9, "the ramp's own: {below}");
+    assert_eq!(new.tempo_at(at), bpm(100.0));
     assert!((new.seconds_at(at).get() - 2.0).abs() < 1e-12);
     // 2 beats at 100 bpm, 0.6 s each.
     assert!((new.seconds_at(Beat(5.0)).get() - 3.2).abs() < 1e-9);
 }
 
 /// A step at the end of the ramp (beat 8, a point of the map) keeps the whole
-/// ramp: it reaches 180 at beat 8, the step follows one ulp later.
+/// ramp: it reaches 180 at beat 8 and the step is at that beat.
 #[test]
 fn a_step_at_a_ramps_end_keeps_the_ramp() {
     let new = ramp_60_to_180()
@@ -83,9 +90,13 @@ fn a_step_at_a_ramps_end_keeps_the_ramp() {
     assert_eq!(
         new.points(),
         [
-            TempoPoint::ramp_time(Beat(0.0), bpm(60.0)),
-            TempoPoint::step(Beat(8.0), bpm(180.0)),
-            TempoPoint::step(Beat(8.0_f64.next_up()), bpm(100.0)),
+            TempoPoint {
+                transition: Transition::RampTime {
+                    end: Some(bpm(180.0))
+                },
+                ..TempoPoint::step(Beat(0.0), bpm(60.0))
+            },
+            TempoPoint::step(Beat(8.0), bpm(100.0)),
         ]
     );
     assert!((new.seconds_at(Beat(8.0)).get() - 4.0).abs() < 1e-12);
@@ -117,9 +128,17 @@ fn a_beat_linear_ramp_is_cut_too() {
         .build()
         .unwrap();
     let new = old.stepped_to(Beat(5.0), bpm(100.0)).unwrap().unwrap();
-    assert_eq!(new.points()[0].transition, Transition::RampBeats);
-    assert_eq!(new.points()[1], TempoPoint::step(Beat(5.0), bpm(135.0)));
-    assert_eq!(new.points().len(), 3);
+    assert_eq!(
+        new.points()[0].transition,
+        Transition::RampBeats {
+            end: Some(bpm(135.0))
+        }
+    );
+    assert_eq!(new.points()[1], TempoPoint::step(Beat(5.0), bpm(100.0)));
+    assert_eq!(new.points().len(), 2);
+    let below = new.tempo_at(Beat(5.0_f64.next_down())).get();
+    assert!((below - 135.0).abs() < 1e-9, "the ramp's own: {below}");
+    assert_eq!(new.tempo_at(Beat(5.0)), bpm(100.0));
 }
 
 /// A step at beat 0, or before it, replaces the first tempo.
@@ -166,11 +185,11 @@ fn transition_to_is_the_named_call_for_its_kind() {
             TempoMap::builder(bpm(60.0)).step_to(Beat(4.0), bpm(90.0)),
         ),
         (
-            Transition::RampTime,
+            Transition::RampTime { end: None },
             TempoMap::builder(bpm(60.0)).ramp_time_to(Beat(4.0), bpm(90.0)),
         ),
         (
-            Transition::RampBeats,
+            Transition::RampBeats { end: None },
             TempoMap::builder(bpm(60.0)).ramp_beats_to(Beat(4.0), bpm(90.0)),
         ),
     ] {

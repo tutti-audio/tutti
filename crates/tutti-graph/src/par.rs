@@ -288,7 +288,7 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) rings: &'b mut [Option<Ring<F>>],
     pub(crate) audio_fb: &'b mut [Option<crate::kernels::AudioRing<F>>],
     pub(crate) event_fb: &'b mut [Option<crate::kernels::EventFifo>],
-    pub(crate) taps: &'b mut [Option<crate::tap::TapWriter>],
+    pub(crate) taps: &'b mut [Option<crate::tap::TapWriter<F>>],
     pub(crate) event_taps: &'b mut [Option<crate::event_tap::EventTapWriter>],
     pub(crate) meters: &'b mut [Option<crate::meter::MeterWriter>],
     pub(crate) lanes: &'b mut [SumLane],
@@ -323,7 +323,7 @@ struct Shared<'s, 'o, F: Float = f32> {
     rings: SplitMut<'s, Option<Ring<F>>>,
     audio_fb: SplitMut<'s, Option<crate::kernels::AudioRing<F>>>,
     event_fb: SplitMut<'s, Option<crate::kernels::EventFifo>>,
-    taps: SplitMut<'s, Option<crate::tap::TapWriter>>,
+    taps: SplitMut<'s, Option<crate::tap::TapWriter<F>>>,
     event_taps: SplitMut<'s, Option<crate::event_tap::EventTapWriter>>,
     /// Atomics only, one writer a lane by construction: shared, no claim.
     meters: SplitMut<'s, Option<crate::meter::MeterWriter>>,

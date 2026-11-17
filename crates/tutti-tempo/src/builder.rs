@@ -20,7 +20,7 @@ use tutti_types::{Beat, Bpm};
 ///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
 ///     .step_to(Beat(8.0), Bpm::of(90.0))
 ///     .build()?;
-/// assert_eq!(map.points()[0].transition, Transition::RampTime);
+/// assert_eq!(map.points()[0].transition, Transition::RampTime { end: None });
 /// assert_eq!(map.points().last().unwrap().transition, Transition::Step);
 /// # Ok::<(), tutti_tempo::TempoError>(())
 /// ```
@@ -65,13 +65,46 @@ impl TempoMapBuilder {
     /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
     /// linear in time ([`Transition::RampTime`]).
     pub fn ramp_time_to(self, beat: Beat, tempo: Bpm) -> Self {
-        self.transition_to(Transition::RampTime, beat, tempo)
+        self.transition_to(Transition::RampTime { end: None }, beat, tempo)
     }
 
     /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
     /// linear in beats ([`Transition::RampBeats`]).
     pub fn ramp_beats_to(self, beat: Beat, tempo: Bpm) -> Self {
-        self.transition_to(Transition::RampBeats, beat, tempo)
+        self.transition_to(Transition::RampBeats { end: None }, beat, tempo)
+    }
+
+    /// The last point departs with `tempo` at its own beat. When the ramp
+    /// before it has no `end`, that ramp's `end` becomes the last point's
+    /// current tempo (the arrival), so the ramp ends and the tempo steps at one
+    /// beat with no plateau between. When the ramp already has an `end`, only
+    /// the departure is replaced, so a second call keeps the arrival. After a
+    /// step (or on the first point) there is no ramp, and it replaces the last
+    /// point's tempo. Every beat before the last point keeps its time.
+    ///
+    /// ```
+    /// use tutti_tempo::TempoMap;
+    /// use tutti_types::{Beat, Bpm, Seconds};
+    ///
+    /// // 120 to 180 BPM over four beats lasts 1.6 s; the tempo is 90 from there.
+    /// let map = TempoMap::builder(Bpm::of(120.0))
+    ///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+    ///     .then_step(Bpm::of(90.0))
+    ///     .build()?;
+    /// assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(90.0));
+    /// assert!((map.seconds_at(Beat(4.0)) - Seconds(1.6)).get().abs() < 1e-12);
+    /// # Ok::<(), tutti_tempo::TempoError>(())
+    /// ```
+    pub fn then_step(mut self, tempo: Bpm) -> Self {
+        if let Some(last) = self.points.pop() {
+            if let Some(Transition::RampTime { end } | Transition::RampBeats { end }) =
+                self.points.last_mut().map(|p| &mut p.transition)
+            {
+                end.get_or_insert(last.tempo);
+            }
+            self.points.push(TempoPoint { tempo, ..last });
+        }
+        self
     }
 
     /// The map.

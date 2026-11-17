@@ -4,19 +4,31 @@ use tutti_types::{Beat, Bpm};
 ///
 /// Named for the transition between two points (a segment of the map), not for
 /// a drawing: it is the law of the tempo across that segment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Transition {
     /// Hold this tempo until the next point.
     Step,
-    /// Move to the next point's tempo, tempo linear in time.
+    /// Move to `end`, or the next point's tempo when `end` is `None`, tempo
+    /// linear in time.
     ///
     /// This is CLAP's `tempo_inc` (a constant increment per sample), and the
     /// default for import and export.
-    RampTime,
-    /// Move to the next point's tempo, tempo linear in beats.
+    RampTime {
+        /// The tempo the ramp reaches at the next point's beat. `None` reaches
+        /// the next point's own tempo; `Some` ends there and the next point's
+        /// tempo is a step from it: one beat holds the ramp's end and the
+        /// step, with no plateau between. [`TempoMap::new`](crate::TempoMap::new)
+        /// folds an end equal to the next tempo into `None`.
+        end: Option<Bpm>,
+    },
+    /// Move to `end`, or the next point's tempo when `end` is `None`, tempo
+    /// linear in beats.
     ///
     /// Time is a logarithm of the beat. This is the ramp Ardour draws.
-    RampBeats,
+    RampBeats {
+        /// The tempo the ramp reaches, as for [`RampTime`](Self::RampTime).
+        end: Option<Bpm>,
+    },
 }
 
 /// A tempo from `beat` on.
@@ -56,7 +68,7 @@ impl TempoPoint {
         Self {
             beat,
             tempo,
-            transition: Transition::RampTime,
+            transition: Transition::RampTime { end: None },
         }
     }
 
@@ -67,7 +79,7 @@ impl TempoPoint {
         Self {
             beat,
             tempo,
-            transition: Transition::RampBeats,
+            transition: Transition::RampBeats { end: None },
         }
     }
 }

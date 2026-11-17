@@ -815,7 +815,7 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
             TempoPoint {
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
-                transition: Transition::RampTime,
+                transition: Transition::RampTime { end: None },
             },
             TempoPoint {
                 beat: Beat(100.0),

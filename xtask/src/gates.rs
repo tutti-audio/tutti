@@ -49,6 +49,7 @@ mod umbrella;
 mod umbrella_api;
 mod use_tree;
 mod value_traits;
+mod values;
 mod vst3_sdk;
 
 pub(crate) use doc_features::doc_runs;
@@ -153,6 +154,8 @@ pub(crate) enum Gate {
     Buffers,
     /// A configured thing is built one way, bar the rows of the baseline.
     Building,
+    /// A value is written with `set` on a target, bar the rows of the baseline.
+    Values,
     /// The `tutti` umbrella re-exports no crate whole and offers each item at one path.
     Umbrella,
     /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
@@ -187,6 +190,7 @@ impl Gate {
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
+            Gate::Values => "gate check-values".to_owned(),
             Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
             Gate::TestTime => "gate check-test-time".to_owned(),
@@ -222,6 +226,7 @@ impl Gate {
             Gate::Umbrella => umbrella::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
+            Gate::Values => values::check(&tree, values::MIN_FILES, values::MIN_UNITS),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
             Gate::TestTime => test_time::check(&tree),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
