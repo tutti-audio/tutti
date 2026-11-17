@@ -2995,7 +2995,6 @@ dependencies = [
  "tutti-buffers",
  "tutti-clap-host",
  "tutti-clap-test-plugin",
- "tutti-codec",
  "tutti-engine",
  "tutti-export",
  "tutti-fixtures",
@@ -3151,7 +3150,6 @@ name = "tutti-plugin-server"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
- "bytemuck",
  "dpi",
  "interprocess",
  "libc",
@@ -3545,7 +3543,6 @@ dependencies = [
  "dpi",
  "libloading 0.9.1",
  "parking_lot",
- "tempfile",
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",

@@ -1,6 +1,6 @@
 //! The synth as a graph node: MIDI arrives
 //! on an event input port, on its frame, from whatever feeds it — a
-//! [`MidiClipNode`](tutti_midi_runtime::MidiClipNode), an arpeggiator, a
+//! `tutti-midi-runtime`'s `MidiClipNode`, an arpeggiator, a
 //! hardware source — in the same block it was written.
 //!
 //! A keyboard reaches it the same way: through an event inlet

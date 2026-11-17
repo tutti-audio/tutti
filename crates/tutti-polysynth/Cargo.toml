@@ -19,7 +19,6 @@ default = []
 [dependencies]
 thiserror = { workspace = true, features = ["std"] }
 
-tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false }
 
 # `Node`, `ForkSource`: the synth as a graph node, and its own way into a
 # fork of the graph (an export), as `tutti-plugin`'s `PluginClient` has
