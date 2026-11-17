@@ -262,12 +262,21 @@ impl ResourceGet {
         self.check_header(entry)
     }
 
+    /// Refuses a page of a Resource that is no List Resource, which needs no
+    /// entry of the ResourceList (M2-103 §8.6.2).
+    pub(super) fn check_page_target(&self) -> Result<(), RequestRefused> {
+        if self.page.is_some() && !self.target.resource.is_list() {
+            return Err(RequestRefused::NotPaginable(
+                self.target.resource.as_str().to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn check_header(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
         let name = || self.target.resource.as_str().to_owned();
         self.target.agrees_with(entry)?;
-        if self.page.is_some() && !self.target.resource.is_list() {
-            return Err(RequestRefused::NotPaginable(name()));
-        }
+        self.check_page_target()?;
         if self.page.is_some() && !entry.can_paginate() {
             return Err(RequestRefused::NotDeclaredPaginable(name()));
         }

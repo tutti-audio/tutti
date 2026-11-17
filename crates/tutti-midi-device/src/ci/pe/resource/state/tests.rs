@@ -212,9 +212,7 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     let original = stored(3000);
     let mut store = store_with(&[("buffer", original.clone()), ("system", stored(40))]);
     store.declare(
-        ResourceEntry::builder(PeResource::State)
-            .encodings(vec![PeEncoding::Mcoded7])
-            .media_types(vec![octets()])
+        ResourceEntry::device_state_builder()
             .fc_on_get(true)
             .fc_on_set(true)
             .build()
@@ -577,9 +575,7 @@ impl StateDevice for Device {
 fn big_link(device: Option<Box<dyn StateDevice>>) -> Link {
     let mut store = store_with(&[("buffer", stored(3000))]);
     store.declare(
-        ResourceEntry::builder(PeResource::State)
-            .encodings(vec![PeEncoding::Mcoded7])
-            .media_types(vec![octets()])
+        ResourceEntry::device_state_builder()
             .fc_on_get(true)
             .fc_on_set(true)
             .build()

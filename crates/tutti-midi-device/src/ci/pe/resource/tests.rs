@@ -3,6 +3,7 @@
 //! Property Data of a figure is the figure's.
 
 use std::num::NonZeroU32;
+use std::time::Instant;
 
 use tutti_ump::{ManufacturerId, MidiChannel, U7};
 
@@ -10,7 +11,10 @@ use super::super::header::{PeEncoding, PePage};
 use super::super::limits::{MediaType, ResourceId};
 use super::super::partial::PartialUpdate;
 use super::super::tree::PeJson;
+use super::exchange::initiator_settings;
 use super::*;
+use crate::Muid;
+use crate::ci::testing::{OURS, PEER};
 
 fn json(text: &str) -> PeJson {
     PeJson::parse(text.as_bytes()).unwrap()
@@ -946,6 +950,28 @@ fn only_a_list_resource_is_asked_for_a_page() {
     );
 }
 
+// M2-103 §8.6.2: only a List Resource takes `offset` and `limit`, whether or not the
+// peer's ResourceList is known yet.
+/// Spec: m2-103/8.6.2#2
+#[test]
+fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() {
+    let now = Instant::now();
+    let (mut init, _) =
+        ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
+    let paged = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap()).paged(PePage {
+        offset: 0,
+        limit: NonZeroU32::new(5).unwrap(),
+    });
+    assert!(matches!(
+        init.get(&paged, now),
+        Err(CallError::Refused(RequestRefused::NotPaginable(_)))
+    ));
+    assert!(matches!(
+        init.subscribe(&paged, now),
+        Err(CallError::Refused(RequestRefused::NotPaginable(_)))
+    ));
+}
+
 // M2-103 §10: a Set carries the data of the Resource it is for.
 #[test]
 fn a_set_carries_data_of_its_resource() {
@@ -1092,4 +1118,29 @@ fn the_wire_names_of_the_resources_are_the_specs() {
         assert_eq!(resource.as_str(), name);
         assert_eq!(PeResource::from_name(&resource.name()), resource);
     }
+}
+
+// M2-103 §14.4, §14: an entry a peer sent is read as it is, where a device building one
+// is refused.
+#[test]
+fn a_received_entry_is_taken_where_a_built_one_is_refused() {
+    let from_json = |text: &str| ResourceEntry::from_json(&json(text));
+    assert!(from_json(r#"{"resource":"X-NoSchema"}"#).is_ok());
+    assert!(matches!(
+        ResourceEntry::builder(custom("X-NoSchema")).build(),
+        Err(EntryError::SchemaWithoutTitle(_))
+    ));
+    assert!(from_json(r#"{"resource":"ResourceList"}"#).is_ok());
+    assert_eq!(
+        ResourceEntry::builder(PeResource::ResourceList).build(),
+        Err(EntryError::ListsItself)
+    );
+    // The list that holds it refuses it.
+    assert!(
+        decode(
+            &PeResource::ResourceList,
+            r#"[{"resource":"ResourceList"}]"#
+        )
+        .is_err()
+    );
 }

@@ -14,7 +14,7 @@ use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
 use super::data::{OpaqueBody, PeData};
-use super::entry::{EntryError, ResourceEntry};
+use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
 use super::fields::{
     Fields, PeDataError, PeDataFault, PeExtensions, PeText, integer, required_text, text,
 };
@@ -512,13 +512,18 @@ impl ResourceEntry {
     /// one state to each `resId`, Mcoded7 and `application/octet-stream`.
     #[must_use]
     pub fn device_state() -> Self {
+        Self::device_state_builder()
+            .build()
+            .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
+    }
+
+    /// The builder of the entry of State, with those defaults.
+    pub(super) fn device_state_builder() -> ResourceEntryBuilder {
         let octets = MediaType::new("application/octet-stream")
             .unwrap_or_else(|| unreachable!("a valid media type"));
         Self::builder(PeResource::State)
             .encodings(vec![PeEncoding::Mcoded7])
             .media_types(vec![octets])
-            .build()
-            .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
     }
 
     /// The entry of StateList.
