@@ -20,6 +20,7 @@ use crate::node::{Env, TransportChanges, TransportPosition};
 use crate::par::Block;
 use crate::plan::{Op, Plan};
 use crate::play::PlayClock;
+use crate::rtlog::LogLane;
 use crate::slots::{EventSlots, SlotFlags};
 
 /// After a block in which a crossfade reached its end: retire each ended
@@ -225,6 +226,7 @@ impl Executor {
                 root_fade,
                 root_fade_ended,
                 stash: _,
+                logs,
             } = self;
             let mut env = Env {
                 frame: *frame,
@@ -325,6 +327,8 @@ impl Executor {
             }
 
             let due = commands.deliveries();
+            // The level gate, once for the block: every lane's slots take it.
+            logs.begin_block();
             // The cost model's verdict for this plan on this pool, and for a
             // block this long (`Plan::schedule`); either way the same samples.
             let spread = par.as_ref().is_some_and(|p| p.spreads(frames));
@@ -359,6 +363,8 @@ impl Executor {
                         has_inject,
                         has_due,
                         due,
+                        logs: &mut logs.lanes[..],
+                        log_claims: &mut logs.claims,
                     },
                 );
                 fade_ended |= ended;
@@ -366,6 +372,7 @@ impl Executor {
                 // Built once per block, not per op: rebuilt per node call it was
                 // ~20 stack moves a node (measured on `graph_render`'s
                 // `overhead` chains). A node op sets `at`.
+                let LogLane { slots: log, sink } = &mut logs.lanes[0];
                 let mut st = OpState {
                     arena,
                     flags,
@@ -377,6 +384,8 @@ impl Executor {
                     overlay,
                     due,
                     dropped: &mut *dropped,
+                    log,
+                    sink,
                 };
                 for op in &plan.ops {
                     match *op {

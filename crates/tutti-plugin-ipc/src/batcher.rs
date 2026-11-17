@@ -424,7 +424,7 @@ impl Batcher {
                 // No reply is awaited past the live bound from here on: a
                 // hung server must not hold the bridge thread one budget per
                 // chunk the render still submits.
-                bridge.set_reply_wait(None);
+                bridge.set_reply_wait(watch.reply_wait());
                 tracing::warn!(
                     seq,
                     budget = ?watch.budget(),

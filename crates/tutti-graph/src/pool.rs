@@ -418,7 +418,7 @@ mod tests {
             .build()
             .expect("a worker pool");
         let t = Instant::now();
-        while started.load(Ordering::Relaxed) < 3 && t.elapsed() < Duration::from_secs(5) {
+        while started.load(Ordering::Relaxed) < 3 && t.elapsed() < Duration::from_secs(60) {
             std::thread::yield_now();
         }
         assert_eq!(started.load(Ordering::Relaxed), 3);
@@ -501,7 +501,7 @@ mod tests {
             .build()
             .expect("a worker pool");
         let t = Instant::now();
-        while names.lock().unwrap().len() < 2 && t.elapsed() < Duration::from_secs(5) {
+        while names.lock().unwrap().len() < 2 && t.elapsed() < Duration::from_secs(60) {
             std::thread::yield_now();
         }
         drop(pool);

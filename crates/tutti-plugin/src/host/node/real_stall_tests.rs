@@ -1,10 +1,9 @@
 //! The block budget, against a **real plugin that really stops**.
 //!
-//! [`process_pipeline_tests::stalled_plugins_do_not_stall_the_audio_thread`] and
-//! [`a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block`] prove
-//! this with mock servers, and they stay: they are deterministic, they need no
-//! subprocess, and they can construct timings a real plugin cannot be talked
-//! into. What they cannot do is prove the mock resembles the thing it stands in
+//! `a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block` proves
+//! this with a mock server, and it stays: it is deterministic, needs no
+//! subprocess, and can construct timings a real plugin cannot be talked
+//! into. What it cannot do is prove the mock resembles the thing it stands in
 //! for. A mock that sleeps before replying models a *server* that is slow; the
 //! case the design is actually built for is a **plugin** that does not return
 //! from `process()` — a lock it should not have taken, a disk read, a GC pause —

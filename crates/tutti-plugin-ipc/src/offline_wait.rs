@@ -73,6 +73,14 @@ impl OfflineWait {
         self.budget
     }
 
+    /// How long the bridge thread holds a block for its reply while this wait
+    /// is in force: the budget, until a block has missed it or the server has
+    /// died, then `None` (the live bound: nothing is awaited past a few block
+    /// periods, so a hung server costs one budget, not one per chunk).
+    pub(crate) fn reply_wait(&self) -> Option<Duration> {
+        (!self.stopped_waiting()).then_some(self.budget)
+    }
+
     /// Whether the wait should not wait at all any more: a block already
     /// missed its budget, or the server is dead.
     pub(crate) fn stopped_waiting(&self) -> bool {
@@ -117,4 +125,28 @@ impl OfflineWait {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wait() -> OfflineWait {
+        OfflineWait::new(Duration::from_secs(7), Arc::new(ServerWatch::new()))
+    }
+
+    /// The bridge holds a block for the budget while the wait is in force.
+    #[test]
+    fn a_wait_in_force_holds_the_bridge_for_the_budget() {
+        assert_eq!(wait().reply_wait(), Some(Duration::from_secs(7)));
+    }
+
+    /// One missed budget returns the bridge to the live bound for good, so a
+    /// reactivation that reads the latch stays off the budget too.
+    #[test]
+    fn a_missed_budget_returns_the_bridge_to_the_live_bound() {
+        let wait = wait();
+        wait.give_up();
+        assert_eq!(wait.reply_wait(), None);
+    }
 }

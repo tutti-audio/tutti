@@ -9,6 +9,7 @@ use crate::fixtures::{SAMPLE_RATE, fan, graph_engine, rolling_state, spec};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{
     AudioCallbackState, BackendErrorKind, ManualStreamDriver, OutputSpec, OutputStream, StartError,
@@ -171,7 +172,7 @@ fn a_backend_fault_reaches_the_handle_taken_before_it() {
     engine.start_with(state, driver).unwrap();
 
     assert!(!faults.is_faulted());
-    stream.fail(BackendErrorKind::Other, &"xrun");
+    stream.fail(BackendErrorKind::Other, &"xrun", Instant::now());
 
     assert_eq!(faults.count(), 1);
     let fault = faults.last().expect("a recorded fault");
@@ -200,7 +201,11 @@ fn a_disconnect_stops_the_engine_reporting_healthy() {
     engine.start_with(state, driver).unwrap();
     assert!(engine.is_running());
 
-    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
+    stream.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
 
     assert!(faults.is_disconnected());
     assert_eq!(
@@ -223,7 +228,11 @@ fn a_restart_clears_the_fault_state() {
     let faults = engine.faults();
     let (driver, stream) = ManualStreamDriver::new();
     engine.start_with(Arc::clone(&state), driver).unwrap();
-    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
+    stream.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     assert!(!engine.is_running());
 
     engine.stop();
@@ -256,7 +265,11 @@ fn the_fault_handle_survives_a_restart() {
 
     let (d2, s2) = ManualStreamDriver::new();
     engine.start_with(state, d2).unwrap();
-    s2.fail(BackendErrorKind::DeviceGone, &"device not available");
+    s2.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
 
     assert!(
         faults.is_disconnected(),

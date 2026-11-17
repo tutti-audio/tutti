@@ -88,6 +88,7 @@ use crate::history::TransportHistory;
 use crate::loss::Dropped;
 use crate::node::{Env, MAX_PORTS};
 use crate::plan::{Op, Plan, Span};
+use crate::rtlog::LogLane;
 use crate::slots::{ArenaView, EventSlots, EventsView, SharedFlags};
 use tutti_types::MaxBlock;
 
@@ -294,6 +295,10 @@ pub(crate) struct Block<'b, 'o> {
     pub(crate) due: Deliveries<'b>,
     /// Where the block's lost events are added up.
     pub(crate) dropped: &'b mut Dropped,
+    /// The executor's log lanes, one per participant, and the table they are
+    /// claimed through: both the executor's, not this plan's.
+    pub(crate) logs: &'b mut [LogLane],
+    pub(crate) log_claims: &'b mut ClaimTable,
 }
 
 /// What every participant shares while the block runs: `Sync`, so the pool
@@ -327,6 +332,9 @@ struct Shared<'s, 'o> {
     has_due: SplitMut<'s, bool>,
     outputs: SplitMut<'s, &'o mut [f32]>,
     workers: SplitMut<'s, Worker>,
+    /// Each participant's log slots and ring, claimed by its index for the
+    /// whole block.
+    logs: SplitMut<'s, LogLane>,
     due: Deliveries<'s>,
     /// The pool's wait budgets, for each participant's `work`.
     waits: BlockWaits,
@@ -399,6 +407,7 @@ pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -
             has_due: SplitMut::new(b.has_due, has_due),
             outputs: SplitMut::new(b.outputs, outputs),
             workers: SplitMut::new(workers, worker_claims),
+            logs: SplitMut::new(b.logs, b.log_claims),
             due: b.due,
             // The pool's, not the defaults
             // (`tests/executor/parallel.rs`'s `the_executor_waits_by_its_pools_budget`).
@@ -424,7 +433,7 @@ pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -
 impl Shared<'_, '_> {
     /// One participant's share of the block.
     fn participate(&self, w: usize) {
-        if w >= self.workers.len() {
+        if w >= self.workers.len() || w >= self.logs.len() {
             return;
         }
         let _rt = RtScope::enter();
@@ -432,6 +441,9 @@ impl Shared<'_, '_> {
         // cleared it since the last one (doc 013's pitfalls).
         with_no_denormals(|| {
             let Ok(mut ws) = self.workers.try_claim(w) else {
+                return;
+            };
+            let Ok(mut lane) = self.logs.try_claim(w) else {
                 return;
             };
             let who = if w == 0 {
@@ -443,7 +455,7 @@ impl Shared<'_, '_> {
                 self.graph.work(who, self.waits, |t| {
                     let span = self.plan.tasks[t as usize];
                     for &op in &self.plan.task_ops[span.range()] {
-                        self.run_op(&self.plan.ops[op as usize], &mut ws);
+                        self.run_op(&self.plan.ops[op as usize], &mut ws, &mut lane);
                     }
                 });
             }));
@@ -454,7 +466,7 @@ impl Shared<'_, '_> {
     }
 
     /// One op, on claimed state.
-    fn run_op(&self, op: &Op, ws: &mut Worker) {
+    fn run_op(&self, op: &Op, ws: &mut Worker, lane: &mut LogLane) {
         let Worker {
             held_audio,
             held_events,
@@ -574,6 +586,8 @@ impl Shared<'_, '_> {
                     overlay,
                     due: self.due,
                     dropped,
+                    log: &lane.slots,
+                    sink: &mut lane.sink,
                 };
                 *fade_ended |= node_dispatch(u, &head, &mut st);
             }
