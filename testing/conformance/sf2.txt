@@ -8,20 +8,23 @@
 #    sf2.mod.default.<n> (default modulators), sf2.mod.src.<name>,
 #    sf2.mod.srctype.<name>, sf2.mod.transform.<name>, sf2.chunk.info.<ck>,
 #    sf2.chunk.pdta.<ck> and sf2.sampletype.<name>. Their kind, section and facts
-#    columns come from the spec text, and with `TUTTI_SF2_SPEC=<dir>` (a
-#    directory holding the `pdftotext -layout` text, sfspec24.txt, or the PDF)
+#    columns and a digest come from the spec text, and with `TUTTI_SF2_SPEC=<dir>`
+#    (a directory holding the `pdftotext -layout` text, sfspec24.txt, or the PDF)
 #    the gate holds them to it in both directions. `TUTTI_SF2_SPEC=<dir> cargo
-#    xtask conformance-inventory sf2` regenerates those three columns in place,
-#    keeps the hand columns of each row and appends a new id as a `todo` row
-#    with no paraphrase (the gate refuses it until one is written). Without the
-#    text the comparison is skipped and said so; `TUTTI_CONFORMANCE=require-all`
-#    makes the absence a finding.
+#    xtask conformance-inventory sf2` regenerates those columns in place,
+#    keeps the hand columns of each row whose sentence is unchanged (a changed
+#    one is blanked, side `changed`, and the gate refuses it) and appends a new
+#    id as a `todo` row with no paraphrase (the gate refuses it until one is
+#    written). Without the text the comparison is skipped and said so;
+#    `TUTTI_CONFORMANCE=require-all` makes the absence a finding.
 #  - Every other row is written by hand and checked by review. Its kind is the
 #    conformance word of the sentence it paraphrases (must is required, should
 #    recommended, may permitted; empty when the sentence has none). With the text
 #    present the gate holds its section column to a section number the text has.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest: FNV-1a 64 of the row's spec text, whitespace normalised; only an
+# extracted row has one.
 #
 # Sides: reader (what a file reader must do: tutti-sf2), player (what a
 # synthesizer must do: tutti-soundfont) and rom-loader (the loader of a Silicon
@@ -64,17 +67,17 @@ sf2.riff.size.bounds | reader |  |  | SF2 §3.3 | the RIFF size bounds the file:
 sf2.riff.damage.rejected | reader |  | recommended | SF2 §3.3 | a file whose redundant lengths show lost data is structurally unsound and is rejected, never over-read |  |  |
 #
 # ---- INFO list (section 5)
-sf2.chunk.info.ifil | reader |  | required | SF2 §5.1 | mandatory four-byte version of the format | size=4 |  |
-sf2.chunk.info.isng | reader |  | required | SF2 §5.2 | mandatory name of the target sound engine, a zero-terminated string | maxlen=256 |  |
-sf2.chunk.info.inam | reader |  | required | SF2 §5.3 | mandatory name of the bank, a zero-terminated string | maxlen=256 |  |
-sf2.chunk.info.irom | reader |  | permitted | SF2 §5.4 | optional name of the sound ROM that ROM samples refer to | maxlen=256 |  |
-sf2.chunk.info.iver | reader |  | permitted | SF2 §5.5 | optional four-byte version of that ROM | size=4 |  |
-sf2.chunk.info.icrd | reader |  | permitted | SF2 §5.6 | optional creation date string | maxlen=256 |  |
-sf2.chunk.info.ieng | reader |  | permitted | SF2 §5.7 | optional string naming the sound designers | maxlen=256 |  |
-sf2.chunk.info.iprd | reader |  | permitted | SF2 §5.8 | optional string naming the product the bank was made for | maxlen=256 |  |
-sf2.chunk.info.icop | reader |  | permitted | SF2 §5.9 | optional copyright string | maxlen=256 |  |
-sf2.chunk.info.icmt | reader |  | permitted | SF2 §5.10 | optional comments string, the longest INFO string | maxlen=65536 |  |
-sf2.chunk.info.isft | reader |  | permitted | SF2 §5.11 | optional string naming the tools that made and last changed the bank | maxlen=256 |  |
+sf2.chunk.info.ifil | reader |  | required | SF2 §5.1 | mandatory four-byte version of the format | size=4 |  |  | 15b048abbea123ec
+sf2.chunk.info.isng | reader |  | required | SF2 §5.2 | mandatory name of the target sound engine, a zero-terminated string | maxlen=256 |  |  | f4c0d37a35421bd1
+sf2.chunk.info.inam | reader |  | required | SF2 §5.3 | mandatory name of the bank, a zero-terminated string | maxlen=256 |  |  | b5ddf8f6c6cb5123
+sf2.chunk.info.irom | reader |  | permitted | SF2 §5.4 | optional name of the sound ROM that ROM samples refer to | maxlen=256 |  |  | 51b80181ce125675
+sf2.chunk.info.iver | reader |  | permitted | SF2 §5.5 | optional four-byte version of that ROM | size=4 |  |  | 3565da327f08659a
+sf2.chunk.info.icrd | reader |  | permitted | SF2 §5.6 | optional creation date string | maxlen=256 |  |  | 9a28fba6fbeffb70
+sf2.chunk.info.ieng | reader |  | permitted | SF2 §5.7 | optional string naming the sound designers | maxlen=256 |  |  | 69b4d334721452c7
+sf2.chunk.info.iprd | reader |  | permitted | SF2 §5.8 | optional string naming the product the bank was made for | maxlen=256 |  |  | 2bb827ca3370db01
+sf2.chunk.info.icop | reader |  | permitted | SF2 §5.9 | optional copyright string | maxlen=256 |  |  | 32ccd92499fb3879
+sf2.chunk.info.icmt | reader |  | permitted | SF2 §5.10 | optional comments string, the longest INFO string | maxlen=65536 |  |  | 36e0b702d7915fdf
+sf2.chunk.info.isft | reader |  | permitted | SF2 §5.11 | optional string naming the tools that made and last changed the bank | maxlen=256 |  |  | a874ceef11c66a14
 sf2.info.ifil.invalid.rejected | reader |  | recommended | SF2 §5.1 | a missing ifil, or one whose size is not four bytes, makes the file structurally unsound and it is rejected |  |  |
 sf2.info.ifil.version | reader |  |  | SF2 §5.1 | ifil carries the format version as a major word and a minor word, which the reader makes available |  |  |
 sf2.info.enumerators.forward-compatible | reader |  |  | SF2 §5.1 | within one major version new generator, source and transform enumerators and new INFO sub-chunks are ignored when unknown |  |  |
@@ -97,15 +100,15 @@ sf2.sdta.loop.end-point-not-played | player |  |  | SF2 §6.3 | a loop splices i
 sf2.sdta.loop.margin-points | player |  |  | SF2 §6.3 | interpolation near a loop edge reads the data on both sides of both loop points, so those points are surrounded by valid data |  |  |
 #
 # ---- pdta list (section 7)
-sf2.chunk.pdta.phdr | reader |  |  | SF2 §7.2 | preset headers, 38-byte records, at least two with the terminal one | recsize=38 minrecs=2 |  |
-sf2.chunk.pdta.pbag | reader |  |  | SF2 §7.3 | preset zone bags, 4-byte records with a terminal one | recsize=4 |  |
-sf2.chunk.pdta.pmod | reader |  |  | SF2 §7.4 | preset modulators, 10-byte records with a terminal one | recsize=10 |  |
-sf2.chunk.pdta.pgen | reader |  |  | SF2 §7.5 | preset generators, 4-byte records with a terminal one | recsize=4 |  |
-sf2.chunk.pdta.inst | reader |  |  | SF2 §7.6 | instrument headers, 22-byte records, at least two with the terminal one | recsize=22 minrecs=2 |  |
-sf2.chunk.pdta.ibag | reader |  |  | SF2 §7.7 | instrument zone bags, 4-byte records with a terminal one | recsize=4 |  |
-sf2.chunk.pdta.imod | reader |  |  | SF2 §7.8 | instrument modulators, 10-byte records with a terminal one | recsize=10 |  |
-sf2.chunk.pdta.igen | reader |  |  | SF2 §7.9 | instrument generators, 4-byte records with a terminal one | recsize=4 |  |
-sf2.chunk.pdta.shdr | reader |  |  | SF2 §7.10 | sample headers, 46-byte records with a terminal one | recsize=46 |  |
+sf2.chunk.pdta.phdr | reader |  |  | SF2 §7.2 | preset headers, 38-byte records, at least two with the terminal one | recsize=38 minrecs=2 |  |  | 57c343ff33b354c4
+sf2.chunk.pdta.pbag | reader |  |  | SF2 §7.3 | preset zone bags, 4-byte records with a terminal one | recsize=4 |  |  | 83cb55a0eec463b8
+sf2.chunk.pdta.pmod | reader |  |  | SF2 §7.4 | preset modulators, 10-byte records with a terminal one | recsize=10 |  |  | b53357bc41ede48a
+sf2.chunk.pdta.pgen | reader |  |  | SF2 §7.5 | preset generators, 4-byte records with a terminal one | recsize=4 |  |  | d259a288863f5ebc
+sf2.chunk.pdta.inst | reader |  |  | SF2 §7.6 | instrument headers, 22-byte records, at least two with the terminal one | recsize=22 minrecs=2 |  |  | 00291e00e1875cce
+sf2.chunk.pdta.ibag | reader |  |  | SF2 §7.7 | instrument zone bags, 4-byte records with a terminal one | recsize=4 |  |  | 3b27e661e94d09a5
+sf2.chunk.pdta.imod | reader |  |  | SF2 §7.8 | instrument modulators, 10-byte records with a terminal one | recsize=10 |  |  | 5a1360918ac6847f
+sf2.chunk.pdta.igen | reader |  |  | SF2 §7.9 | instrument generators, 4-byte records with a terminal one | recsize=4 |  |  | 7e62be1efbea6e11
+sf2.chunk.pdta.shdr | reader |  |  | SF2 §7.10 | sample headers, 46-byte records with a terminal one | recsize=46 |  |  | 90cef568ffda08db
 sf2.pdta.hydra.mandatory | reader |  |  | SF2 §7.1 | the nine pdta sub-chunks, known as the hydra, are all mandatory |  |  |
 sf2.pdta.phdr.invalid.rejected | reader |  | recommended | SF2 §7.2 | a missing phdr sub-chunk, or one whose size is not a whole number of records, makes the file structurally unsound and it is rejected and a file with fewer than two records is rejected too |  |  |
 sf2.pdta.pbag.invalid.rejected | reader |  | recommended | SF2 §7.3 | a missing pbag sub-chunk, or one whose size is not a whole number of records, makes the file structurally unsound and it is rejected |  |  |
@@ -221,67 +224,67 @@ sf2.pdta.shdr.terminal.not-referenced | reader |  |  | SF2 §7.10 | nothing refe
 sf2.pdta.shdr.orphan.accepted | reader |  |  | SF2 §7.10 | a sample that no instrument names does not make the file unacceptable |  |  |
 #
 # ---- generators (section 8.1, 8.5, 9.4)
-sf2.gen.startAddrsOffset | player |  |  | SF2 §8.1.2 | moves the first played sample point from the header's start by this many points | num=0 min=0 def=0 inst_only=1 |  |
-sf2.gen.endAddrsOffset | player |  |  | SF2 §8.1.2 | moves the last played sample point from the header's end by this many points, negative to stop earlier | num=1 max=0 def=0 inst_only=1 |  |
-sf2.gen.startloopAddrsOffset | player |  |  | SF2 §8.1.2 | moves the first looped point from the header's loop start by this many points | num=2 def=0 inst_only=1 |  |
-sf2.gen.endloopAddrsOffset | player |  |  | SF2 §8.1.2 | moves the loop's end-equivalent point from the header's loop end by this many points | num=3 def=0 inst_only=1 |  |
-sf2.gen.startAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | start offset in steps of 32768 points, added to the fine start offset | num=4 min=0 def=0 inst_only=1 |  |
-sf2.gen.modLfoToPitch | player |  |  | SF2 §8.1.2 | pitch swing of the modulation LFO at full scale, in cents; positive raises pitch on a positive excursion | num=5 min=-12000 max=12000 def=0 |  |
-sf2.gen.vibLfoToPitch | player |  |  | SF2 §8.1.2 | pitch swing of the vibrato LFO at full scale, in cents | num=6 min=-12000 max=12000 def=0 |  |
-sf2.gen.modEnvToPitch | player |  |  | SF2 §8.1.2 | pitch change of the modulation envelope at its peak, in cents | num=7 min=-12000 max=12000 def=0 |  |
-sf2.gen.initialFilterFc | player |  |  | SF2 §8.1.2 | low-pass cutoff in absolute cents, default 13500 which is open; modelled as a resonant pole pair | num=8 min=1500 max=13500 def=13500 |  |
-sf2.gen.initialFilterQ | player |  | permitted | SF2 §8.1.2 | resonance peak height in centibels above the DC gain, which falls by half that amount; zero or less is not resonant | num=9 min=0 max=960 def=0 |  |
-sf2.gen.modLfoToFilterFc | player |  |  | SF2 §8.1.2 | cutoff swing of the modulation LFO at full scale, in cents | num=10 min=-12000 max=12000 def=0 |  |
-sf2.gen.modEnvToFilterFc | player |  |  | SF2 §8.1.2 | cutoff change of the modulation envelope at its peak, in cents | num=11 min=-12000 max=12000 def=0 |  |
-sf2.gen.endAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | end offset in steps of 32768 points, added to the fine end offset | num=12 max=0 def=0 inst_only=1 |  |
-sf2.gen.modLfoToVolume | player |  |  | SF2 §8.1.2 | loudness swing of the modulation LFO at full scale, in centibels | num=13 min=-960 max=960 def=0 |  |
-sf2.gen.unused1 | reader |  | recommended | SF2 §8.1.2 | unused number 14, ignored when met | num=14 |  |
-sf2.gen.chorusEffectsSend | player |  |  | SF2 §8.1.2 | share of the note sent to the chorus unit in 0.1% units, 0% or less sends nothing and 100% or more sends full level | num=15 min=0 max=1000 def=0 |  |
-sf2.gen.reverbEffectsSend | player |  |  | SF2 §8.1.2 | share of the note sent to the reverb unit in 0.1% units, with the same limits as the chorus send | num=16 min=0 max=1000 def=0 |  |
-sf2.gen.pan | player |  |  | SF2 §8.1.2 | position of the dry output in 0.1% units, -50% hard left to +50% hard right, 0 centred | num=17 min=-500 max=500 def=0 |  |
-sf2.gen.unused2 | reader |  | recommended | SF2 §8.1.2 | unused number 18, ignored when met | num=18 |  |
-sf2.gen.unused3 | reader |  | recommended | SF2 §8.1.2 | unused number 19, ignored when met | num=19 |  |
-sf2.gen.unused4 | reader |  | recommended | SF2 §8.1.2 | unused number 20, ignored when met | num=20 |  |
-sf2.gen.delayModLFO | player |  |  | SF2 §8.1.2 | key-on delay before the modulation LFO starts, in absolute timecents, 0 being one second | num=21 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.freqModLFO | player |  |  | SF2 §8.1.2 | modulation LFO frequency in absolute cents, 0 being 8.176 Hz | num=22 min=-16000 max=4500 def=0 |  |
-sf2.gen.delayVibLFO | player |  |  | SF2 §8.1.2 | key-on delay before the vibrato LFO starts, in absolute timecents | num=23 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.freqVibLFO | player |  |  | SF2 §8.1.2 | vibrato LFO frequency in absolute cents, 0 being 8.176 Hz | num=24 min=-16000 max=4500 def=0 |  |
-sf2.gen.delayModEnv | player |  |  | SF2 §8.1.2 | time from key-on until the modulation envelope's attack begins, in absolute timecents | num=25 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.attackModEnv | player |  |  | SF2 §8.1.2 | modulation envelope attack time in absolute timecents, a convex rise | num=26 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.holdModEnv | player |  |  | SF2 §8.1.2 | modulation envelope hold time at the peak, in absolute timecents | num=27 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.decayModEnv | player |  |  | SF2 §8.1.2 | modulation envelope decay time for a full-scale fall, in absolute timecents, linear toward the sustain level | num=28 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.sustainModEnv | player |  |  | SF2 §8.1.2 | modulation envelope sustain as a decrease from full in 0.1% units, clamped to 0 to 1000 | num=29 min=0 max=1000 def=0 |  |
-sf2.gen.releaseModEnv | player |  |  | SF2 §8.1.2 | modulation envelope release time for a full-scale fall, in absolute timecents, linear to zero | num=30 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.keynumToModEnvHold | player |  |  | SF2 §8.1.2 | how much the modulation envelope hold shortens per key above 60, in timecents per key; 100 tracks the keyboard | num=31 min=-1200 max=1200 def=0 |  |
-sf2.gen.keynumToModEnvDecay | player |  |  | SF2 §8.1.2 | how much the modulation envelope decay shortens per key above 60, in timecents per key | num=32 min=-1200 max=1200 def=0 |  |
-sf2.gen.delayVolEnv | player |  |  | SF2 §8.1.2 | time from key-on until the volume envelope's attack begins, in absolute timecents | num=33 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.attackVolEnv | player |  |  | SF2 §8.1.2 | volume envelope attack time in absolute timecents, a convex rise that is linear in amplitude | num=34 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.holdVolEnv | player |  |  | SF2 §8.1.2 | volume envelope hold time at the peak, in absolute timecents | num=35 min=-12000 max=5000 def=-12000 |  |
-sf2.gen.decayVolEnv | player |  |  | SF2 §8.1.2 | volume envelope decay time for a full-scale fall, in absolute timecents, constant dB per unit time | num=36 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.sustainVolEnv | player |  |  | SF2 §8.1.2 | volume envelope sustain as centibels of attenuation reached after the decay, below 0 read as 0 | num=37 min=0 max=1440 def=0 |  |
-sf2.gen.releaseVolEnv | player |  |  | SF2 §8.1.2 | volume envelope release time, in absolute timecents, falling 100 dB from full level in that time | num=38 min=-12000 max=8000 def=-12000 |  |
-sf2.gen.keynumToVolEnvHold | player |  |  | SF2 §8.1.2 | how much the volume envelope hold shortens per key above 60, in timecents per key | num=39 min=-1200 max=1200 def=0 |  |
-sf2.gen.keynumToVolEnvDecay | player |  |  | SF2 §8.1.2 | how much the volume envelope decay shortens per key above 60, in timecents per key | num=40 min=-1200 max=1200 def=0 |  |
-sf2.gen.instrument | reader |  | required | SF2 §8.1.2 | terminal generator of a preset zone, an index into the instrument list; only valid in preset zones | num=41 |  |
-sf2.gen.reserved1 | reader |  | recommended | SF2 §8.1.2 | reserved number 42, ignored when met | num=42 |  |
-sf2.gen.keyRange | player |  | required | SF2 §8.1.2 | lowest and highest key the zone answers, a range generator that comes first in the zone | num=43 min=0 max=127 nonrt=1 |  |
-sf2.gen.velRange | player |  | required | SF2 §8.1.2 | lowest and highest velocity the zone answers, a range generator that follows only a key range | num=44 min=0 max=127 nonrt=1 |  |
-sf2.gen.startloopAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | loop start offset in steps of 32768 points, added to the fine loop start offset | num=45 def=0 inst_only=1 |  |
-sf2.gen.keynum | player |  |  | SF2 §8.1.2 | forces the key number the zone is played as; instrument level only, 0 to 127 | num=46 min=0 max=127 def=-1 inst_only=1 nonrt=1 |  |
-sf2.gen.velocity | player |  |  | SF2 §8.1.2 | forces the velocity the zone is played as; instrument level only, 0 to 127 | num=47 min=1 max=127 def=-1 inst_only=1 nonrt=1 |  |
-sf2.gen.initialAttenuation | player |  |  | SF2 §8.1.2 | attenuation below full scale in centibels, 0 plays at full scale | num=48 min=0 max=1440 def=0 |  |
-sf2.gen.reserved2 | reader |  | recommended | SF2 §8.1.2 | reserved number 49, ignored when met | num=49 |  |
-sf2.gen.endloopAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | loop end offset in steps of 32768 points, added to the fine loop end offset | num=50 def=0 inst_only=1 |  |
-sf2.gen.coarseTune | player |  | recommended | SF2 §8.1.2 | pitch offset in semitones, positive raises pitch | num=51 min=-120 max=120 def=0 |  |
-sf2.gen.fineTune | player |  | recommended | SF2 §8.1.2 | pitch offset in cents, added to the coarse tuning | num=52 min=-99 max=99 def=0 |  |
-sf2.gen.sampleID | reader |  | required | SF2 §8.1.2 | terminal generator of an instrument zone, an index into the sample header list; only valid in instrument zones | num=53 |  |
-sf2.gen.sampleModes | player |  | recommended | SF2 §8.1.2 | loop flags: the two low bits choose no loop, continuous loop, no loop again or loop while the key is down | num=54 def=0 inst_only=1 nonrt=1 |  |
-sf2.gen.reserved3 | reader |  | recommended | SF2 §8.1.2 | reserved number 55, ignored when met | num=55 |  |
-sf2.gen.scaleTuning | player |  |  | SF2 §8.1.2 | how far key number moves pitch in cents per key; 100 is the tempered scale and 0 removes key tracking | num=56 min=0 max=1200 def=100 nonrt=1 |  |
-sf2.gen.exclusiveClass | player |  | recommended | SF2 §8.1.2 | nonzero value makes a new note quickly end other sounding notes of the same class within the preset | num=57 min=1 max=127 def=0 inst_only=1 nonrt=1 |  |
-sf2.gen.overridingRootKey | player |  |  | SF2 §8.1.2 | key at which the sample plays at its own rate, replacing the header's original key when 0 to 127 | num=58 min=0 max=127 def=-1 inst_only=1 nonrt=1 |  |
-sf2.gen.unused5 | reader |  | recommended | SF2 §8.1.2 | unused number 59, ignored when met | num=59 |  |
-sf2.gen.endOper | reader |  | recommended | SF2 §8.1.2 | end-of-list marker number 60, ignored when met | num=60 |  |
+sf2.gen.startAddrsOffset | player |  |  | SF2 §8.1.2 | moves the first played sample point from the header's start by this many points | num=0 min=0 def=0 inst_only=1 |  |  | c3809ae80de987fb
+sf2.gen.endAddrsOffset | player |  |  | SF2 §8.1.2 | moves the last played sample point from the header's end by this many points, negative to stop earlier | num=1 max=0 def=0 inst_only=1 |  |  | 9612baa308a48be1
+sf2.gen.startloopAddrsOffset | player |  |  | SF2 §8.1.2 | moves the first looped point from the header's loop start by this many points | num=2 def=0 inst_only=1 |  |  | fbe3d22a312deee4
+sf2.gen.endloopAddrsOffset | player |  |  | SF2 §8.1.2 | moves the loop's end-equivalent point from the header's loop end by this many points | num=3 def=0 inst_only=1 |  |  | 2ef7463f265d4725
+sf2.gen.startAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | start offset in steps of 32768 points, added to the fine start offset | num=4 min=0 def=0 inst_only=1 |  |  | fdd8b8959ccb8de1
+sf2.gen.modLfoToPitch | player |  |  | SF2 §8.1.2 | pitch swing of the modulation LFO at full scale, in cents; positive raises pitch on a positive excursion | num=5 min=-12000 max=12000 def=0 |  |  | 6d26fbb6716b57bc
+sf2.gen.vibLfoToPitch | player |  |  | SF2 §8.1.2 | pitch swing of the vibrato LFO at full scale, in cents | num=6 min=-12000 max=12000 def=0 |  |  | 46e0ac56f83cd643
+sf2.gen.modEnvToPitch | player |  |  | SF2 §8.1.2 | pitch change of the modulation envelope at its peak, in cents | num=7 min=-12000 max=12000 def=0 |  |  | 494a2a9407126e05
+sf2.gen.initialFilterFc | player |  |  | SF2 §8.1.2 | low-pass cutoff in absolute cents, default 13500 which is open; modelled as a resonant pole pair | num=8 min=1500 max=13500 def=13500 |  |  | a6f3536bc76206f3
+sf2.gen.initialFilterQ | player |  | permitted | SF2 §8.1.2 | resonance peak height in centibels above the DC gain, which falls by half that amount; zero or less is not resonant | num=9 min=0 max=960 def=0 |  |  | fae3c1d32162125c
+sf2.gen.modLfoToFilterFc | player |  |  | SF2 §8.1.2 | cutoff swing of the modulation LFO at full scale, in cents | num=10 min=-12000 max=12000 def=0 |  |  | 80018bea5c52c911
+sf2.gen.modEnvToFilterFc | player |  |  | SF2 §8.1.2 | cutoff change of the modulation envelope at its peak, in cents | num=11 min=-12000 max=12000 def=0 |  |  | fb967ad2e53db87b
+sf2.gen.endAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | end offset in steps of 32768 points, added to the fine end offset | num=12 max=0 def=0 inst_only=1 |  |  | 8f910087af3e53dc
+sf2.gen.modLfoToVolume | player |  |  | SF2 §8.1.2 | loudness swing of the modulation LFO at full scale, in centibels | num=13 min=-960 max=960 def=0 |  |  | cdd5f95dfaa59528
+sf2.gen.unused1 | reader |  | recommended | SF2 §8.1.2 | unused number 14, ignored when met | num=14 |  |  | fb3e04e01f1c09b2
+sf2.gen.chorusEffectsSend | player |  |  | SF2 §8.1.2 | share of the note sent to the chorus unit in 0.1% units, 0% or less sends nothing and 100% or more sends full level | num=15 min=0 max=1000 def=0 |  |  | 49b5084566865e09
+sf2.gen.reverbEffectsSend | player |  |  | SF2 §8.1.2 | share of the note sent to the reverb unit in 0.1% units, with the same limits as the chorus send | num=16 min=0 max=1000 def=0 |  |  | 2ae00a9b4a4e4f01
+sf2.gen.pan | player |  |  | SF2 §8.1.2 | position of the dry output in 0.1% units, -50% hard left to +50% hard right, 0 centred | num=17 min=-500 max=500 def=0 |  |  | 64da2942ca338c24
+sf2.gen.unused2 | reader |  | recommended | SF2 §8.1.2 | unused number 18, ignored when met | num=18 |  |  | fb3e04e01f1c09b2
+sf2.gen.unused3 | reader |  | recommended | SF2 §8.1.2 | unused number 19, ignored when met | num=19 |  |  | fb3e04e01f1c09b2
+sf2.gen.unused4 | reader |  | recommended | SF2 §8.1.2 | unused number 20, ignored when met | num=20 |  |  | fb3e04e01f1c09b2
+sf2.gen.delayModLFO | player |  |  | SF2 §8.1.2 | key-on delay before the modulation LFO starts, in absolute timecents, 0 being one second | num=21 min=-12000 max=5000 def=-12000 |  |  | e4ab5de54d9f5b2c
+sf2.gen.freqModLFO | player |  |  | SF2 §8.1.2 | modulation LFO frequency in absolute cents, 0 being 8.176 Hz | num=22 min=-16000 max=4500 def=0 |  |  | 4fafad6e7d7ff2f5
+sf2.gen.delayVibLFO | player |  |  | SF2 §8.1.2 | key-on delay before the vibrato LFO starts, in absolute timecents | num=23 min=-12000 max=5000 def=-12000 |  |  | bc6c9c14694326cf
+sf2.gen.freqVibLFO | player |  |  | SF2 §8.1.2 | vibrato LFO frequency in absolute cents, 0 being 8.176 Hz | num=24 min=-16000 max=4500 def=0 |  |  | 1d5e3b85961087f6
+sf2.gen.delayModEnv | player |  |  | SF2 §8.1.2 | time from key-on until the modulation envelope's attack begins, in absolute timecents | num=25 min=-12000 max=5000 def=-12000 |  |  | 3ff192c033408f03
+sf2.gen.attackModEnv | player |  |  | SF2 §8.1.2 | modulation envelope attack time in absolute timecents, a convex rise | num=26 min=-12000 max=8000 def=-12000 |  |  | ef4e4f38c2f9d1e8
+sf2.gen.holdModEnv | player |  |  | SF2 §8.1.2 | modulation envelope hold time at the peak, in absolute timecents | num=27 min=-12000 max=5000 def=-12000 |  |  | a9328ac8b5b9a91d
+sf2.gen.decayModEnv | player |  |  | SF2 §8.1.2 | modulation envelope decay time for a full-scale fall, in absolute timecents, linear toward the sustain level | num=28 min=-12000 max=8000 def=-12000 |  |  | 80513192c16c0605
+sf2.gen.sustainModEnv | player |  |  | SF2 §8.1.2 | modulation envelope sustain as a decrease from full in 0.1% units, clamped to 0 to 1000 | num=29 min=0 max=1000 def=0 |  |  | 96701679b9cb4717
+sf2.gen.releaseModEnv | player |  |  | SF2 §8.1.2 | modulation envelope release time for a full-scale fall, in absolute timecents, linear to zero | num=30 min=-12000 max=8000 def=-12000 |  |  | 4b9043c45cbea423
+sf2.gen.keynumToModEnvHold | player |  |  | SF2 §8.1.2 | how much the modulation envelope hold shortens per key above 60, in timecents per key; 100 tracks the keyboard | num=31 min=-1200 max=1200 def=0 |  |  | 00b846cc9afc87d7
+sf2.gen.keynumToModEnvDecay | player |  |  | SF2 §8.1.2 | how much the modulation envelope decay shortens per key above 60, in timecents per key | num=32 min=-1200 max=1200 def=0 |  |  | a017918f38bfa657
+sf2.gen.delayVolEnv | player |  |  | SF2 §8.1.2 | time from key-on until the volume envelope's attack begins, in absolute timecents | num=33 min=-12000 max=5000 def=-12000 |  |  | 47ab33b526ac79df
+sf2.gen.attackVolEnv | player |  |  | SF2 §8.1.2 | volume envelope attack time in absolute timecents, a convex rise that is linear in amplitude | num=34 min=-12000 max=8000 def=-12000 |  |  | 59638c5ccec4a83f
+sf2.gen.holdVolEnv | player |  |  | SF2 §8.1.2 | volume envelope hold time at the peak, in absolute timecents | num=35 min=-12000 max=5000 def=-12000 |  |  | 844a0f94ab1da871
+sf2.gen.decayVolEnv | player |  |  | SF2 §8.1.2 | volume envelope decay time for a full-scale fall, in absolute timecents, constant dB per unit time | num=36 min=-12000 max=8000 def=-12000 |  |  | 1af1f5aa973f1bdc
+sf2.gen.sustainVolEnv | player |  |  | SF2 §8.1.2 | volume envelope sustain as centibels of attenuation reached after the decay, below 0 read as 0 | num=37 min=0 max=1440 def=0 |  |  | 1e75790523c03604
+sf2.gen.releaseVolEnv | player |  |  | SF2 §8.1.2 | volume envelope release time, in absolute timecents, falling 100 dB from full level in that time | num=38 min=-12000 max=8000 def=-12000 |  |  | bdd4b5d8267e24a6
+sf2.gen.keynumToVolEnvHold | player |  |  | SF2 §8.1.2 | how much the volume envelope hold shortens per key above 60, in timecents per key | num=39 min=-1200 max=1200 def=0 |  |  | 9a014c6328d7e52e
+sf2.gen.keynumToVolEnvDecay | player |  |  | SF2 §8.1.2 | how much the volume envelope decay shortens per key above 60, in timecents per key | num=40 min=-1200 max=1200 def=0 |  |  | 52e7fe10f5f9402e
+sf2.gen.instrument | reader |  | required | SF2 §8.1.2 | terminal generator of a preset zone, an index into the instrument list; only valid in preset zones | num=41 |  |  | 81df60607ea25b41
+sf2.gen.reserved1 | reader |  | recommended | SF2 §8.1.2 | reserved number 42, ignored when met | num=42 |  |  | fb3e04e01f1c09b2
+sf2.gen.keyRange | player |  | required | SF2 §8.1.2 | lowest and highest key the zone answers, a range generator that comes first in the zone | num=43 min=0 max=127 nonrt=1 |  |  | 05c04de79528ec6f
+sf2.gen.velRange | player |  | required | SF2 §8.1.2 | lowest and highest velocity the zone answers, a range generator that follows only a key range | num=44 min=0 max=127 nonrt=1 |  |  | c497788e8fbbe481
+sf2.gen.startloopAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | loop start offset in steps of 32768 points, added to the fine loop start offset | num=45 def=0 inst_only=1 |  |  | c96e76db2092e335
+sf2.gen.keynum | player |  |  | SF2 §8.1.2 | forces the key number the zone is played as; instrument level only, 0 to 127 | num=46 min=0 max=127 def=-1 inst_only=1 nonrt=1 |  |  | 9b7abd7a0e585e52
+sf2.gen.velocity | player |  |  | SF2 §8.1.2 | forces the velocity the zone is played as; instrument level only, 0 to 127 | num=47 min=1 max=127 def=-1 inst_only=1 nonrt=1 |  |  | 957e1f00ac976d59
+sf2.gen.initialAttenuation | player |  |  | SF2 §8.1.2 | attenuation below full scale in centibels, 0 plays at full scale | num=48 min=0 max=1440 def=0 |  |  | 55f5c13ce6deef1a
+sf2.gen.reserved2 | reader |  | recommended | SF2 §8.1.2 | reserved number 49, ignored when met | num=49 |  |  | fb3e04e01f1c09b2
+sf2.gen.endloopAddrsCoarseOffset | player |  |  | SF2 §8.1.2 | loop end offset in steps of 32768 points, added to the fine loop end offset | num=50 def=0 inst_only=1 |  |  | bde4127ddce54b74
+sf2.gen.coarseTune | player |  | recommended | SF2 §8.1.2 | pitch offset in semitones, positive raises pitch | num=51 min=-120 max=120 def=0 |  |  | f1cfe87b6311b17d
+sf2.gen.fineTune | player |  | recommended | SF2 §8.1.2 | pitch offset in cents, added to the coarse tuning | num=52 min=-99 max=99 def=0 |  |  | fe74ed53a2448bde
+sf2.gen.sampleID | reader |  | required | SF2 §8.1.2 | terminal generator of an instrument zone, an index into the sample header list; only valid in instrument zones | num=53 |  |  | df698585a037ae02
+sf2.gen.sampleModes | player |  | recommended | SF2 §8.1.2 | loop flags: the two low bits choose no loop, continuous loop, no loop again or loop while the key is down | num=54 def=0 inst_only=1 nonrt=1 |  |  | e39721a01ab9eb17
+sf2.gen.reserved3 | reader |  | recommended | SF2 §8.1.2 | reserved number 55, ignored when met | num=55 |  |  | fb3e04e01f1c09b2
+sf2.gen.scaleTuning | player |  |  | SF2 §8.1.2 | how far key number moves pitch in cents per key; 100 is the tempered scale and 0 removes key tracking | num=56 min=0 max=1200 def=100 nonrt=1 |  |  | e04ab9fa9360ad9c
+sf2.gen.exclusiveClass | player |  | recommended | SF2 §8.1.2 | nonzero value makes a new note quickly end other sounding notes of the same class within the preset | num=57 min=1 max=127 def=0 inst_only=1 nonrt=1 |  |  | 62675fe896aba5eb
+sf2.gen.overridingRootKey | player |  |  | SF2 §8.1.2 | key at which the sample plays at its own rate, replacing the header's original key when 0 to 127 | num=58 min=0 max=127 def=-1 inst_only=1 nonrt=1 |  |  | 3c68ab5486a9648e
+sf2.gen.unused5 | reader |  | recommended | SF2 §8.1.2 | unused number 59, ignored when met | num=59 |  |  | fb3e04e01f1c09b2
+sf2.gen.endOper | reader |  | recommended | SF2 §8.1.2 | end-of-list marker number 60, ignored when met | num=60 |  |  | 935d27638e10bac9
 sf2.genrule.kinds | reader |  |  | SF2 §8.1.1 | generators are of five kinds: index, range, substitution, sample and value; modulator destinations are only the value generators |  |  |
 sf2.genrule.number-table | reader |  |  | SF2 §8.1.2 | the generator operator numbers 0 to 60 read as the generators of the table, in that order, and an operator past 60 is unknown |  |  |
 sf2.genrule.unused.ignored | reader |  | recommended | SF2 §8.1.2 | the generator numbers that are unused or reserved, and endOper, are ignored when found at either level |  |  |
@@ -308,20 +311,20 @@ sf2.genrule.summary.useful-range | player |  |  | SF2 §8.1.3 | each generator h
 sf2.genrule.summary.non-realtime | player |  |  | SF2 §8.1.3 | the generators the table marks as non-real-time are fixed for the note and not driven by real-time controllers |  |  |
 #
 # ---- modulators (sections 8.2 to 8.4, 9.5)
-sf2.mod.src.noController | player |  | recommended | SF2 §8.2.1 | general-palette source: no controller: reads as the constant 1 | index=0 |  |
-sf2.mod.src.noteOnVelocity | player |  |  | SF2 §8.2.1 | general-palette source: the velocity of the note-on | index=2 |  |
-sf2.mod.src.noteOnKeyNumber | player |  |  | SF2 §8.2.1 | general-palette source: the key number of the note-on | index=3 |  |
-sf2.mod.src.polyPressure | player |  |  | SF2 §8.2.1 | general-palette source: polyphonic key pressure | index=10 |  |
-sf2.mod.src.channelPressure | player |  |  | SF2 §8.2.1 | general-palette source: channel pressure | index=13 |  |
-sf2.mod.src.pitchWheel | player |  |  | SF2 §8.2.1 | general-palette source: the pitch wheel | index=14 |  |
-sf2.mod.src.pitchWheelSensitivity | player |  |  | SF2 §8.2.1 | general-palette source: the pitch wheel sensitivity set by RPN 0 | index=16 |  |
-sf2.mod.src.link | player |  |  | SF2 §8.2.1 | general-palette source: the output of another modulator; not allowed as an amount source | index=127 |  |
-sf2.mod.srctype.linear | player |  |  | SF2 §8.2.4 | source type value: moves in a straight line | value=0 |  |
-sf2.mod.srctype.concave | player |  |  | SF2 §8.2.4 | source type value: follows the concave curve | value=1 |  |
-sf2.mod.srctype.convex | player |  |  | SF2 §8.2.4 | source type value: follows the concave curve mirrored | value=2 |  |
-sf2.mod.srctype.switch | player |  |  | SF2 §8.2.4 | source type value: jumps from minimum to maximum at the middle of the range | value=3 |  |
-sf2.mod.transform.linear | player |  |  | SF2 §8.3 | transform value 0: the output passes straight to the destination | value=0 |  |
-sf2.mod.transform.absoluteValue | player |  |  | SF2 §8.3 | transform value 2: the output is the magnitude of the input | value=2 |  |
+sf2.mod.src.noController | player |  | recommended | SF2 §8.2.1 | general-palette source: no controller: reads as the constant 1 | index=0 |  |  | 57db6cb4befbfe93
+sf2.mod.src.noteOnVelocity | player |  |  | SF2 §8.2.1 | general-palette source: the velocity of the note-on | index=2 |  |  | e78f4e130c2ed600
+sf2.mod.src.noteOnKeyNumber | player |  |  | SF2 §8.2.1 | general-palette source: the key number of the note-on | index=3 |  |  | 9cd5decc86873196
+sf2.mod.src.polyPressure | player |  |  | SF2 §8.2.1 | general-palette source: polyphonic key pressure | index=10 |  |  | dcdaab365965ce59
+sf2.mod.src.channelPressure | player |  |  | SF2 §8.2.1 | general-palette source: channel pressure | index=13 |  |  | 49aa10b76d3bbc06
+sf2.mod.src.pitchWheel | player |  |  | SF2 §8.2.1 | general-palette source: the pitch wheel | index=14 |  |  | 04b2a25f8e0a3561
+sf2.mod.src.pitchWheelSensitivity | player |  |  | SF2 §8.2.1 | general-palette source: the pitch wheel sensitivity set by RPN 0 | index=16 |  |  | 15bd98753a43d9df
+sf2.mod.src.link | player |  |  | SF2 §8.2.1 | general-palette source: the output of another modulator; not allowed as an amount source | index=127 |  |  | 6fc7ee2b510a2c33
+sf2.mod.srctype.linear | player |  |  | SF2 §8.2.4 | source type value: moves in a straight line | value=0 |  |  | 5eac052de72bd01f
+sf2.mod.srctype.concave | player |  |  | SF2 §8.2.4 | source type value: follows the concave curve | value=1 |  |  | 912bc1b58166afd1
+sf2.mod.srctype.convex | player |  |  | SF2 §8.2.4 | source type value: follows the concave curve mirrored | value=2 |  |  | 9cbf49f1a0cc7ee5
+sf2.mod.srctype.switch | player |  |  | SF2 §8.2.4 | source type value: jumps from minimum to maximum at the middle of the range | value=3 |  |  | 75c399a0eac1bb50
+sf2.mod.transform.linear | player |  |  | SF2 §8.3 | transform value 0: the output passes straight to the destination | value=0 |  |  | 04f748a137ba87cb
+sf2.mod.transform.absoluteValue | player |  |  | SF2 §8.3 | transform value 2: the output is the magnitude of the input | value=2 |  |  | 6801d6c223bdbd12
 sf2.mod.source.palette | reader |  |  | SF2 §8.2 | a modulator source is a 16-bit word: an index in the low 7 bits, a controller-palette flag, a direction bit, a polarity bit and a type in the high bits |  |  |
 sf2.mod.source.general-palette.reserved | reader |  | recommended | SF2 §8.2.1 | a general-palette index that is not listed is reserved and the whole modulator is ignored |  |  |
 sf2.mod.source.midi-palette | player |  |  | SF2 §8.2.1 | with the palette flag set the index is one of the 128 MIDI continuous controllers |  |  |
@@ -361,16 +364,16 @@ sf2.mod.link.chain | player |  |  | SF2 §9.5.4 | a modulator whose destination 
 sf2.mod.link.summing | player |  |  | SF2 §9.5.4 | several modulators may link into one, whose source is the link value, and list order does not matter |  |  |
 sf2.mod.link.circular.ignored | reader |  | recommended | SF2 §9.5.4 | a circular link is illegal and every modulator in it is ignored |  |  |
 sf2.mod.midi-functions.not-sources | player |  |  | SF2 §9.2 | MIDI commands whose response MIDI itself defines may not be used as modulator sources |  |  |
-sf2.mod.default.1 | player |  |  | SF2 §8.4.1 | note-on velocity to initial attenuation: concave, negative unipolar, 960 centibels | src=0x0502 amtsrc=0x0000 type=1 p=0 d=1 cc=0 index=2 amount=960 transform=0 |  |
-sf2.mod.default.2 | player |  | permitted | SF2 §8.4.2 | note-on velocity to filter cutoff: linear, negative unipolar, -2400 cents | src=0x0102 amtsrc=0x0000 type=0 p=0 d=1 cc=0 index=2 amount=-2400 transform=0 |  |
-sf2.mod.default.3 | player |  |  | SF2 §8.4.3 | channel pressure drives the vibrato depth: linear unipolar, 50 cents at full excursion | src=0x000d amtsrc=0x0000 type=0 p=0 d=0 cc=0 index=13 amount=50 transform=0 |  |
-sf2.mod.default.4 | player |  | permitted | SF2 §8.4.4 | controller 1 drives the vibrato depth: linear unipolar, 50 cents | src=0x0081 amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=1 amount=50 transform=0 |  |
-sf2.mod.default.5 | player |  |  | SF2 §8.4.5 | controller 7 to initial attenuation: concave, negative unipolar, 960 centibels | src=0x0582 amtsrc=0x0000 type=1 p=0 d=1 cc=1 index=7 amount=960 transform=0 |  |
-sf2.mod.default.6 | player |  |  | SF2 §8.4.6 | controller 10 to pan: linear bipolar, 1000 tenths of a percent (the spec's destination line says attenuation but the title and the sense say pan) | src=0x028a amtsrc=0x0000 type=0 p=1 d=0 cc=1 index=10 amount=1000 transform=0 |  |
-sf2.mod.default.7 | player |  |  | SF2 §8.4.7 | controller 11 to initial attenuation: concave, negative unipolar, 960 centibels | src=0x058b amtsrc=0x0000 type=1 p=0 d=1 cc=1 index=11 amount=960 transform=0 |  |
-sf2.mod.default.8 | player |  |  | SF2 §8.4.8 | controller 91 to the reverb send: linear unipolar, 200 tenths of a percent | src=0x00db amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=91 amount=200 transform=0 |  |
-sf2.mod.default.9 | player |  |  | SF2 §8.4.9 | controller 93 to the chorus send: linear unipolar, 200 tenths of a percent | src=0x00dd amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=93 amount=200 transform=0 |  |
-sf2.mod.default.10 | player |  |  | SF2 §8.4.10 | pitch wheel to initial pitch: linear bipolar, 12700 cents scaled by the wheel sensitivity as amount source | src=0x020e amtsrc=0x0010 type=0 p=1 d=0 cc=0 index=14 amount=12700 transform=0 |  |
+sf2.mod.default.1 | player |  |  | SF2 §8.4.1 | note-on velocity to initial attenuation: concave, negative unipolar, 960 centibels | src=0x0502 amtsrc=0x0000 type=1 p=0 d=1 cc=0 index=2 amount=960 transform=0 |  |  | 93f2a33c10133db6
+sf2.mod.default.2 | player |  | permitted | SF2 §8.4.2 | note-on velocity to filter cutoff: linear, negative unipolar, -2400 cents | src=0x0102 amtsrc=0x0000 type=0 p=0 d=1 cc=0 index=2 amount=-2400 transform=0 |  |  | 5cd7a99ff7d67735
+sf2.mod.default.3 | player |  |  | SF2 §8.4.3 | channel pressure drives the vibrato depth: linear unipolar, 50 cents at full excursion | src=0x000d amtsrc=0x0000 type=0 p=0 d=0 cc=0 index=13 amount=50 transform=0 |  |  | e7fd55f5519fcf62
+sf2.mod.default.4 | player |  | permitted | SF2 §8.4.4 | controller 1 drives the vibrato depth: linear unipolar, 50 cents | src=0x0081 amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=1 amount=50 transform=0 |  |  | eca2c1a9582fe8c6
+sf2.mod.default.5 | player |  |  | SF2 §8.4.5 | controller 7 to initial attenuation: concave, negative unipolar, 960 centibels | src=0x0582 amtsrc=0x0000 type=1 p=0 d=1 cc=1 index=7 amount=960 transform=0 |  |  | 68cae5bcf4bfeea1
+sf2.mod.default.6 | player |  |  | SF2 §8.4.6 | controller 10 to pan: linear bipolar, 1000 tenths of a percent (the spec's destination line says attenuation but the title and the sense say pan) | src=0x028a amtsrc=0x0000 type=0 p=1 d=0 cc=1 index=10 amount=1000 transform=0 |  |  | 324c632efe993a5b
+sf2.mod.default.7 | player |  |  | SF2 §8.4.7 | controller 11 to initial attenuation: concave, negative unipolar, 960 centibels | src=0x058b amtsrc=0x0000 type=1 p=0 d=1 cc=1 index=11 amount=960 transform=0 |  |  | 1b202d9fb4a3e6ae
+sf2.mod.default.8 | player |  |  | SF2 §8.4.8 | controller 91 to the reverb send: linear unipolar, 200 tenths of a percent | src=0x00db amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=91 amount=200 transform=0 |  |  | 42fcd15e3d289f9e
+sf2.mod.default.9 | player |  |  | SF2 §8.4.9 | controller 93 to the chorus send: linear unipolar, 200 tenths of a percent | src=0x00dd amtsrc=0x0000 type=0 p=0 d=0 cc=1 index=93 amount=200 transform=0 |  |  | 3811cfbf5b41ee9a
+sf2.mod.default.10 | player |  |  | SF2 §8.4.10 | pitch wheel to initial pitch: linear bipolar, 12700 cents scaled by the wheel sensitivity as amount source | src=0x020e amtsrc=0x0010 type=0 p=1 d=0 cc=0 index=14 amount=12700 transform=0 |  |  | dc59fcd53a62224e
 sf2.mod.defaults.instrument-level | player |  |  | SF2 §8.4 | the default modulators are in force at the instrument level; at the preset level none is, so no extra control exists there |  |  |
 sf2.mod.defaults.supersede | player |  |  | SF2 §8.4 | a default modulator is implicit and is switched off or changed only by an identical modulator at a level of the hierarchy |  |  |
 sf2.mod.defaults.velocity-filter.no-attack-condition | player |  |  | SF2 §8.4.2 | the velocity to filter cutoff default applies whatever the volume envelope attack time is |  |  |

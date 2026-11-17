@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-121/<section>#<n>          the nth sentence under the numbered section
@@ -21,53 +24,53 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-121/1.2.1#1 | both |  | permitted | M2-121 §1.2.1 | glossary: the term Hundred Cent Unit is preferred over semitone, definition only |  |  |
-m2-121/1.2.1#2 | both |  | permitted | M2-121 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-121/1.2.1#3 | both |  | permitted | M2-121 §1.2.1 | either device can start a Transaction at any time |  |  |
-m2-121/1.2.1#4 | both |  | permitted | M2-121 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-121/1.2.1#5 | both |  | permitted | M2-121 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-121/1.2.1#6 | both |  | permitted | M2-121 §1.2.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
-m2-121/1.2.1#7 | both |  | permitted | M2-121 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
-m2-121/1.3.1#1 | both |  | permitted | M2-121 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |
-m2-121/1.3.2#1 | both |  | permitted | M2-121 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |
-m2-121/3.1#1 | receiver |  | required | M2-121 §3.1 | the sound engine has nine adjustable drawbars per voice |  |  |
-m2-121/3.1#2 | receiver |  | recommended | M2-121 §3.1 | the original organ was fully polyphonic, so nine drawbars per voice weigh on a design |  |  |
-m2-121/3.1#3 | receiver |  | permitted | M2-121 §3.1 | several organ types can use the Profile |  |  |
-m2-121/4.2#1 | sender |  | permitted | M2-121 §4.2 | an Initiator can learn the optional features through Profile Details Inquiry |  |  |
-m2-121/4.2.1#1 | sender |  | permitted | M2-121 §4.2.1 | an Initiator can ask for a bitmap of the Responder's optional features |  |  |
-m2-121/4.2.2#1 | receiver |  | required | M2-121 §4.2.2 | a Responder answers Profile Details target 0x01 with the bitmap of its optional features |  |  |
-m2-121/4.2.2#2 | both |  | permitted | M2-121 §4.2.2 | later revisions can add bits to the bitmap |  |  |
-m2-121/5#1 | receiver |  | required | M2-121 §5 | a Drawbar Organ device implements the messages of this section |  |  |
-m2-121/5.1.1#1 | receiver |  | required | M2-121 §5.1.1 | the device sounds notes at least from note 36 to 96 |  |  |
-m2-121/5.1.1#2 | receiver |  | permitted | M2-121 §5.1.1 | user settings, MTS or tuning controllers can change that range |  |  |
-m2-121/5.1.1#3 | receiver |  | required | M2-121 §5.1.1 | by default the device ignores velocity in Note On and Note Off | neg=1 |  |
-m2-121/5.1.1#4 | receiver |  | permitted | M2-121 §5.1.1 | user settings can override the velocity default |  |  |
-m2-121/5.1.2#1 | receiver |  | required | M2-121 §5.1.2 | the device responds to the Registered Controllers listed |  |  |
-m2-121/5.1.2#2 | receiver |  | required | M2-121 §5.1.2 | the device supports nine drawbars as the table gives |  |  |
-m2-121/5.1.2#3 | both |  | recommended | M2-121 §5.1.2 | setting a drawbar uses the discrete value list |  |  |
-m2-121/5.1.2#4 | sender |  | permitted | M2-121 §5.1.2 | a device with smooth drawbar volume can send values between the discrete ones |  |  |
-m2-121/5.1.2#5 | receiver |  | required | M2-121 §5.1.2 | receivers accept the full value ranges |  |  |
-m2-121/5.1.2#6 | receiver |  | permitted | M2-121 §5.1.2 | a receiver can respond continuously or in nine discrete settings |  |  |
-m2-121/5.1.2#7 | sender |  | permitted | M2-121 §5.1.2 | a drawbar control can sit on a rotary knob |  |  |
-m2-121/5.1.3#1 | receiver |  | required | M2-121 §5.1.3 | the device responds to the Control Change messages listed |  |  |
-m2-121/5.1.3.2#1 | both |  | permitted | M2-121 §5.1.3.2 | a device chooses the ranges it sends and recognizes |  |  |
-m2-121/5.1.4#1 | receiver |  | required | M2-121 §5.1.4 | the device runs in Mode 3, Omni Off Poly |  |  |
-m2-121/5.1.4.1#1 | receiver |  | required | M2-121 §5.1.4.1 | All Sound Off releases every sounding note and mutes quickly without a click |  |  |
-m2-121/5.1.4.2#1 | receiver |  | required | M2-121 §5.1.4.2 | Reset All Controllers returns controls, pressure and Pitch Bend to defaults |  |  |
-m2-121/5.1.4.2#2 | receiver |  | required | M2-121 §5.1.4.2 | Reset All Controllers leaves Program, Bank, Volume, Pan and Expression alone | neg=1 |  |
-m2-121/5.1.4.3#1 | receiver |  | required | M2-121 §5.1.4.3 | All Notes Off turns off every sounding note |  |  |
-m2-121/5.1.4.4#1 | receiver |  | required | M2-121 §5.1.4.4 | Omni Off turns off every sounding note |  |  |
-m2-121/5.1.4.4#2 | receiver |  | required | M2-121 §5.1.4.4 | Omni Off does not change the mode | neg=1 |  |
-m2-121/5.1.4.5#1 | receiver |  | required | M2-121 §5.1.4.5 | Omni On turns off every sounding note |  |  |
-m2-121/5.1.4.5#2 | receiver |  | required | M2-121 §5.1.4.5 | Omni On does not change the mode | neg=1 |  |
-m2-121/5.1.4.6#1 | receiver |  | required | M2-121 §5.1.4.6 | Mono Mode On turns off every sounding note |  |  |
-m2-121/5.1.4.6#2 | receiver |  | required | M2-121 §5.1.4.6 | Mono Mode On does not change the mode | neg=1 |  |
-m2-121/5.1.4.7#1 | receiver |  | required | M2-121 §5.1.4.7 | Poly Mode On turns off every note and sets Mode 3 |  |  |
-m2-121/6#1 | receiver |  | permitted | M2-121 §6 | a device can implement the optional messages of this section |  |  |
-m2-121/6.1.1#1 | receiver |  | permitted | M2-121 §6.1.1 | a device can respond to the optional Control Changes |  |  |
-m2-121/6.1.2.7#1 | receiver |  | permitted | M2-121 §6.1.2.7 | a device can use its own controller for the Key Click amount on Note Off |  |  |
-m2-121/6.1.3#1 | receiver |  | recommended | M2-121 §6.1.3 | Poly Pressure is ignored by default | neg=1 |  |
-m2-121/6.1.3#2 | receiver |  | permitted | M2-121 §6.1.3 | user settings can override that |  |  |
-m2-121/6.1.4#1 | receiver |  | recommended | M2-121 §6.1.4 | Channel Pressure is ignored by default | neg=1 |  |
-m2-121/6.1.4#2 | receiver |  | permitted | M2-121 §6.1.4 | user settings can override that |  |  |
-m2-121/6.1.5#1 | receiver |  | permitted | M2-121 §6.1.5 | Pitch Bend Sensitivity can be set with RC 0x00 0x00 |  |  |
+m2-121/1.2.1#1 | both |  | permitted | M2-121 §1.2.1 | glossary: the term Hundred Cent Unit is preferred over semitone, definition only |  |  |  | 3bc720205482076b
+m2-121/1.2.1#2 | both |  | permitted | M2-121 §1.2.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-121/1.2.1#3 | both |  | permitted | M2-121 §1.2.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-121/1.2.1#4 | both |  | permitted | M2-121 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-121/1.2.1#5 | both |  | permitted | M2-121 §1.2.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-121/1.2.1#6 | both |  | permitted | M2-121 §1.2.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |  | bbe806d164dfe0e4
+m2-121/1.2.1#7 | both |  | permitted | M2-121 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |  | 7feaf7f9d052ffeb
+m2-121/1.3.1#1 | both |  | permitted | M2-121 §1.3.1 | a conformant device uses either the MIDI 2.0 or the MIDI 1.0 Protocol |  |  |  | af5deea687e70964
+m2-121/1.3.2#1 | both |  | permitted | M2-121 §1.3.2 | a conformant device uses RC messages in MIDI 2.0 or RPN messages in MIDI 1.0 |  |  |  | 61692000ea7fbed0
+m2-121/3.1#1 | receiver |  | required | M2-121 §3.1 | the sound engine has nine adjustable drawbars per voice |  |  |  | e32d82be4dc0c941
+m2-121/3.1#2 | receiver |  | recommended | M2-121 §3.1 | the original organ was fully polyphonic, so nine drawbars per voice weigh on a design |  |  |  | 1d3108803a4568a8
+m2-121/3.1#3 | receiver |  | permitted | M2-121 §3.1 | several organ types can use the Profile |  |  |  | 4ff28468b56cc80b
+m2-121/4.2#1 | sender |  | permitted | M2-121 §4.2 | an Initiator can learn the optional features through Profile Details Inquiry |  |  |  | 1529a5e90eece905
+m2-121/4.2.1#1 | sender |  | permitted | M2-121 §4.2.1 | an Initiator can ask for a bitmap of the Responder's optional features |  |  |  | fe4d1151e81c4cb8
+m2-121/4.2.2#1 | receiver |  | required | M2-121 §4.2.2 | a Responder answers Profile Details target 0x01 with the bitmap of its optional features |  |  |  | c215b96b80b8ac17
+m2-121/4.2.2#2 | both |  | permitted | M2-121 §4.2.2 | later revisions can add bits to the bitmap |  |  |  | c19b70c873d3a9e8
+m2-121/5#1 | receiver |  | required | M2-121 §5 | a Drawbar Organ device implements the messages of this section |  |  |  | 890cfceb19a3f3c3
+m2-121/5.1.1#1 | receiver |  | required | M2-121 §5.1.1 | the device sounds notes at least from note 36 to 96 |  |  |  | f9dfcb4023d167cc
+m2-121/5.1.1#2 | receiver |  | permitted | M2-121 §5.1.1 | user settings, MTS or tuning controllers can change that range |  |  |  | 71c2ac39cbad564e
+m2-121/5.1.1#3 | receiver |  | required | M2-121 §5.1.1 | by default the device ignores velocity in Note On and Note Off | neg=1 |  |  | 9120c090995130d4
+m2-121/5.1.1#4 | receiver |  | permitted | M2-121 §5.1.1 | user settings can override the velocity default |  |  |  | 6a4c8ffb729e24ee
+m2-121/5.1.2#1 | receiver |  | required | M2-121 §5.1.2 | the device responds to the Registered Controllers listed |  |  |  | 5e63af68724ef42a
+m2-121/5.1.2#2 | receiver |  | required | M2-121 §5.1.2 | the device supports nine drawbars as the table gives |  |  |  | fef912dc1959ed09
+m2-121/5.1.2#3 | both |  | recommended | M2-121 §5.1.2 | setting a drawbar uses the discrete value list |  |  |  | 4deae12c2b7ee50b
+m2-121/5.1.2#4 | sender |  | permitted | M2-121 §5.1.2 | a device with smooth drawbar volume can send values between the discrete ones |  |  |  | 704e894abf3d0274
+m2-121/5.1.2#5 | receiver |  | required | M2-121 §5.1.2 | receivers accept the full value ranges |  |  |  | 7c3ed5cdfec4360b
+m2-121/5.1.2#6 | receiver |  | permitted | M2-121 §5.1.2 | a receiver can respond continuously or in nine discrete settings |  |  |  | b7cef3bd7b042070
+m2-121/5.1.2#7 | sender |  | permitted | M2-121 §5.1.2 | a drawbar control can sit on a rotary knob |  |  |  | 39112cc3701086de
+m2-121/5.1.3#1 | receiver |  | required | M2-121 §5.1.3 | the device responds to the Control Change messages listed |  |  |  | 4b91f3a66ebb3b05
+m2-121/5.1.3.2#1 | both |  | permitted | M2-121 §5.1.3.2 | a device chooses the ranges it sends and recognizes |  |  |  | 837131aa60dc65e1
+m2-121/5.1.4#1 | receiver |  | required | M2-121 §5.1.4 | the device runs in Mode 3, Omni Off Poly |  |  |  | a9b3bc35cf610066
+m2-121/5.1.4.1#1 | receiver |  | required | M2-121 §5.1.4.1 | All Sound Off releases every sounding note and mutes quickly without a click |  |  |  | e57e0db83a6b4712
+m2-121/5.1.4.2#1 | receiver |  | required | M2-121 §5.1.4.2 | Reset All Controllers returns controls, pressure and Pitch Bend to defaults |  |  |  | 89ee32d8ffb1ce35
+m2-121/5.1.4.2#2 | receiver |  | required | M2-121 §5.1.4.2 | Reset All Controllers leaves Program, Bank, Volume, Pan and Expression alone | neg=1 |  |  | 4b5928eb9f286607
+m2-121/5.1.4.3#1 | receiver |  | required | M2-121 §5.1.4.3 | All Notes Off turns off every sounding note |  |  |  | 7fd4e74ba1ef3303
+m2-121/5.1.4.4#1 | receiver |  | required | M2-121 §5.1.4.4 | Omni Off turns off every sounding note |  |  |  | 7fd4e74ba1ef3303
+m2-121/5.1.4.4#2 | receiver |  | required | M2-121 §5.1.4.4 | Omni Off does not change the mode | neg=1 |  |  | 7bd45fb06672339a
+m2-121/5.1.4.5#1 | receiver |  | required | M2-121 §5.1.4.5 | Omni On turns off every sounding note |  |  |  | 7fd4e74ba1ef3303
+m2-121/5.1.4.5#2 | receiver |  | required | M2-121 §5.1.4.5 | Omni On does not change the mode | neg=1 |  |  | 7bd45fb06672339a
+m2-121/5.1.4.6#1 | receiver |  | required | M2-121 §5.1.4.6 | Mono Mode On turns off every sounding note |  |  |  | 7fd4e74ba1ef3303
+m2-121/5.1.4.6#2 | receiver |  | required | M2-121 §5.1.4.6 | Mono Mode On does not change the mode | neg=1 |  |  | 7bd45fb06672339a
+m2-121/5.1.4.7#1 | receiver |  | required | M2-121 §5.1.4.7 | Poly Mode On turns off every note and sets Mode 3 |  |  |  | b09319dee12abe98
+m2-121/6#1 | receiver |  | permitted | M2-121 §6 | a device can implement the optional messages of this section |  |  |  | ea7aa740b4f89fc0
+m2-121/6.1.1#1 | receiver |  | permitted | M2-121 §6.1.1 | a device can respond to the optional Control Changes |  |  |  | e06ad0b1e1c2b893
+m2-121/6.1.2.7#1 | receiver |  | permitted | M2-121 §6.1.2.7 | a device can use its own controller for the Key Click amount on Note Off |  |  |  | dabd6a8144eff111
+m2-121/6.1.3#1 | receiver |  | recommended | M2-121 §6.1.3 | Poly Pressure is ignored by default | neg=1 |  |  | cddecf0014350471
+m2-121/6.1.3#2 | receiver |  | permitted | M2-121 §6.1.3 | user settings can override that |  |  |  | 0ac398e2a807af1a
+m2-121/6.1.4#1 | receiver |  | recommended | M2-121 §6.1.4 | Channel Pressure is ignored by default | neg=1 |  |  | 98bd20cbf4145994
+m2-121/6.1.4#2 | receiver |  | permitted | M2-121 §6.1.4 | user settings can override that |  |  |  | 0ac398e2a807af1a
+m2-121/6.1.5#1 | receiver |  | permitted | M2-121 §6.1.5 | Pitch Bend Sensitivity can be set with RC 0x00 0x00 |  |  |  | 7e15fb5a4c904d70

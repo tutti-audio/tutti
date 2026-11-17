@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-119/<section>#<n>          the nth sentence under the numbered section
@@ -21,8 +24,8 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-119/1.2.1#1 | both |  | permitted | M2-119 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-119/3#1 | receiver |  | required | M2-119 §3 | a device meets every required Melody Channel feature of GM2 |  |  |
-m2-119/3.1#1 | receiver |  | required | M2-119 §3.1 | a device meets every required Melody Channel feature of GM2 |  |  |
-m2-119/3.1.1#1 | receiver |  | permitted | M2-119 §3.1.1 | GM2 lets Bank Select and Program Change switch a Channel between Melody and Rhythm |  |  |
-m2-119/3.3#1 | both |  | permitted | M2-119 §3.3 | the Profile can be carried in the protocols and formats listed after it |  |  |
+m2-119/1.2.1#1 | both |  | permitted | M2-119 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-119/3#1 | receiver |  | required | M2-119 §3 | a device meets every required Melody Channel feature of GM2 |  |  |  | d4c5db19d2b68e67
+m2-119/3.1#1 | receiver |  | required | M2-119 §3.1 | a device meets every required Melody Channel feature of GM2 |  |  |  | 1915c22bbd825c0d
+m2-119/3.1.1#1 | receiver |  | permitted | M2-119 §3.1.1 | GM2 lets Bank Select and Program Change switch a Channel between Melody and Rhythm |  |  |  | 48b1e7dc91f34005
+m2-119/3.3#1 | both |  | permitted | M2-119 §3.3 | the Profile can be carried in the protocols and formats listed after it |  |  |  | 4b2c51947700f50f
