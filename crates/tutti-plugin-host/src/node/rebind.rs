@@ -21,11 +21,10 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tutti_plugin_types::{
-    Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor, Successor,
-};
+use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
 use tutti_rt::Tally;
 use tutti_transport::TempoReader;
+use tutti_types::ParamId;
 use tutti_types::{ParkedSampleRate, Samples};
 
 use super::client::{Declared, InProcClient, PluginNode, Reload};
@@ -336,7 +335,7 @@ mod tests {
         let mut wiring = loaded.wiring(main);
         if own_bypass {
             wiring.own_bypass = Some(tutti_plugin_types::OwnBypass::Parameter(
-                tutti_plugin_types::ParamId::new(4),
+                tutti_types::ParamId::new(4),
             ));
         }
         let descriptor = loaded.info().clone();

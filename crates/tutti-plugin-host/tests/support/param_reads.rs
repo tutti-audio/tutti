@@ -2,7 +2,8 @@
 //! (`PluginParamValues`): the public path, not the plugin handle's raw door.
 
 use tutti_plugin_host::{PluginHandle, PluginParamValues};
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
+use tutti_types::ParamId;
 
 /// What a test reads of a plugin through its handle.
 pub(crate) trait ParamReads {

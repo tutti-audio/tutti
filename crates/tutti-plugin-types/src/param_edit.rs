@@ -11,7 +11,8 @@
 //! wants the value a gesture began or ended at reads it from the neighbouring
 //! change, or from the parameter, itself; nothing is made up here.
 
-use crate::{Normalized, ParamId};
+use crate::Normalized;
+use tutti_types::ParamId;
 
 /// One parameter edit, in the order the plugin made it: the plugin takes hold
 /// of a parameter ([`Begin`](Self::Begin)), moves it

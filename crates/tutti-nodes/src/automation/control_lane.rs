@@ -15,7 +15,7 @@ use tutti_modulation::{
 };
 use tutti_rt::{ArcLend, PackedAtomic, Reader};
 use tutti_types::{
-    AtomicF32, Beat, Frame, ParamAddr, ParamCell, SamplePosition, Samples, Tail, UnitAddr,
+    AtomicF32, Beat, Frame, ParamAddr, ParamCell, ParamId, SamplePosition, Samples, Tail, UnitAddr,
     UnitParam,
 };
 
@@ -418,7 +418,7 @@ impl ControlLaneNode {
     /// no knob), and a range of its own, `range` (`(min, max)`), which the
     /// lane clamps to. Never exact mode.
     pub fn for_foreign(
-        id: u32,
+        id: ParamId,
         program: ControlProgram,
         knob: Option<f32>,
         range: (f32, f32),
@@ -509,7 +509,7 @@ impl Input {
     /// (fractional): the port's own arithmetic on a frame, `f64` between.
     fn value(&self, at: f64, base: Frame) -> f32 {
         let since = base.get() as f64 + at - self.recv.get() as f64;
-        let id = self.source;
+        let id = ParamId::new(self.source);
         let (from, to) = (
             self.seg.foreign_start(id).unwrap_or(0.0),
             self.seg.foreign_target(id).unwrap_or(0.0),
@@ -907,6 +907,7 @@ impl Block<'_> {
         let ParamAddr::Id(id) = seg.addr() else {
             return None;
         };
+        let id = id.get();
         self.reads(id).then_some((id, seg))
     }
 
@@ -1146,7 +1147,12 @@ mod tests {
     /// by the next `reclaim`**, with no further publish.
     #[test]
     fn reclaim_frees_a_program_a_block_held_across_its_replacement() {
-        let mut node = ControlLaneNode::for_foreign(0, ControlProgram::default(), None, (0.0, 1.0));
+        let mut node = ControlLaneNode::for_foreign(
+            ParamId::new(0),
+            ControlProgram::default(),
+            None,
+            (0.0, 1.0),
+        );
         let controls = node.controls();
         let first = program();
         let gone = Arc::downgrade(&first);
@@ -1165,8 +1171,12 @@ mod tests {
     /// unranged lane (and a native one, whose range is its port's) refuses it.
     #[test]
     fn set_range_is_a_plugin_lanes_own() {
-        let plugin =
-            ControlLaneNode::for_foreign(1, ControlProgram::default(), Some(0.25), (0.0, 1.0));
+        let plugin = ControlLaneNode::for_foreign(
+            ParamId::new(1),
+            ControlProgram::default(),
+            Some(0.25),
+            (0.0, 1.0),
+        );
         let c = plugin.controls();
         assert!(c.set_range(0.1, 0.9));
         assert_eq!(c.range(), (0.1, 0.9));

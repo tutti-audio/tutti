@@ -23,10 +23,11 @@ use tutti_rt::RequestWord;
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
     EditorError, EditorWindow, FdId, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
-    ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
-    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
-    Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
+    ParamEdit, ParamFlags, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request,
+    RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
+use tutti_types::ParamId;
 
 /// One call the fake received.
 #[derive(Debug, Clone, Copy, PartialEq)]

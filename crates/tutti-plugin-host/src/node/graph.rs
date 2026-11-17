@@ -670,7 +670,7 @@ mod owed_tests {
 
     use crate::InProcClient;
     use crate::PluginHandle;
-    use tutti_plugin_types::ParamId;
+    use tutti_types::ParamId;
 
     /// The reference VST2 plugin through the generic loader.
     fn load_client(
@@ -782,7 +782,7 @@ mod owed_tests {
             0,
             &[Event::ramp(
                 Offset::of(tutti_types::Samples(0), tutti_types::Samples(BLOCK)),
-                ParamRamp::foreign(1, 0.75, tutti_types::Samples(0)),
+                ParamRamp::foreign(ParamId::new(1), 0.75, tutti_types::Samples(0)),
             )],
         );
         unit.block();

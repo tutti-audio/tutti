@@ -8,6 +8,7 @@
 
 use std::ptr;
 use tutti_graph::UmpAt;
+use tutti_types::ParamId;
 
 use crate::support::midi_events;
 use clap_sys::events::{
@@ -176,7 +177,7 @@ fn fill_gestures_captures_gesture_and_mod_events() {
         "nothing past the room"
     );
     assert_eq!(changes.queues.len(), 1, "only the PARAM_VALUE queued");
-    assert_eq!(changes.queues[0].param_id, 5u32.into());
+    assert_eq!(changes.queues[0].param_id, ParamId::new(5u32));
 
     // Draining clears the pool.
     output.fill_gestures(&mut gestures);
@@ -642,7 +643,7 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     let mut dropped = 0;
     assert_no_alloc::assert_no_alloc(|| dropped = block(&mut output, &mut changes, true));
     assert_eq!(dropped, 1);
-    let last = changes.queue((PARAMS - 1).into()).expect("queued");
+    let last = changes.queue(ParamId::new(PARAMS - 1)).expect("queued");
     assert_eq!(last.points.len(), floor);
     let k = floor;
     assert_eq!(

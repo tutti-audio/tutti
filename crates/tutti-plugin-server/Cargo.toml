@@ -63,14 +63,15 @@ tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true 
 # The OS calls of the host watchdog and the connection wait, behind safe calls.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
+# `ParamId`, and an unchecked `SampleRate` (`Unit::from_raw`) in the tests.
+tutti-types = { version = "0.0.1", path = "../tutti-types" }
+
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # The slab's sample bound (`Pod`) on the generic round-trip helper.
 bytemuck = "1"
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
-# An unchecked `SampleRate` (`Unit::from_raw`), to build the rate a hostile peer sends.
-tutti-types = { path = "../tutti-types" }
 # RT-safety regression: prove the per-block audio path never allocates.
 assert_no_alloc = { version = "1", default-features = false }
 # The reference CLAP plugin the loader tests drive. A dev-dependency rather

@@ -13,7 +13,7 @@ use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::machine_lock;
 use tutti_graph::Exponent;
-use tutti_types::MaxBlock;
+use tutti_types::{MaxBlock, ParamId};
 
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 /// The probe's gain parameter (`GAIN_PARAM_ID`), and its plain range in dB.
-const GAIN: u32 = 77;
+const GAIN: ParamId = ParamId::new(77);
 const GAIN_DB: (f64, f64) = (-60.0, 12.0);
 
 /// A curve holding one value at every beat.

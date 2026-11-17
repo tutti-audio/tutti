@@ -395,13 +395,13 @@ impl PartialEq<UnitAddr> for UnitParam {
 /// a node and one.
 ///
 /// ```
-/// use tutti_types::{ParamAddr, UnitAddr, UnitParam};
+/// use tutti_types::{ParamAddr, ParamId, UnitAddr, UnitParam};
 ///
 /// let band0 = ParamAddr::unit(UnitAddr::new(UnitParam::Threshold, 0));
 /// assert_eq!(band0, ParamAddr::Unit(UnitParam::Threshold));
 /// let band2 = ParamAddr::unit(UnitAddr::new(UnitParam::Threshold, 2));
 /// assert_eq!(band2.as_unit(), Some(UnitAddr::new(UnitParam::Threshold, 2)));
-/// assert_eq!(ParamAddr::Id(7).as_unit(), None);
+/// assert_eq!(ParamAddr::Id(ParamId::new(7)).as_unit(), None);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ParamAddr {
@@ -412,7 +412,7 @@ pub enum ParamAddr {
     /// keeps index 0 in [`Unit`](Self::Unit).
     Indexed(UnitParam, NonZeroU8),
     /// A param addressed by an opaque numeric id, foreign to tutti's vocabulary.
-    Id(u32),
+    Id(ParamId),
 }
 
 impl ParamAddr {
@@ -449,6 +449,93 @@ impl From<UnitAddr> for ParamAddr {
     #[inline]
     fn from(a: UnitAddr) -> Self {
         ParamAddr::unit(a)
+    }
+}
+
+/// A plugin-chosen parameter id: VST3 `ParamID`, CLAP `clap_id`, AU
+/// `AudioUnitParameterID`.
+///
+/// **Opaque.** The number is chosen by the plugin and is meaningful only
+/// against the instance that reported it — plenty of plugins derive it from a
+/// hash of the parameter name. It is not an index, not dense, not ordered, and
+/// two plugins may use the same number for unrelated parameters.
+///
+/// That is the whole reason this is a newtype rather than a `u32`: the type has
+/// no algebra, deliberately. There is no `Add`, no `From<usize>`, no `Step`, so
+/// `id + 1` and `for id in 0..n` do not compile. A `u32` in a struct field
+/// invites exactly those.
+///
+/// VST2's parameter has no id of its own, only a position in `[0, numParams)`,
+/// and that position is what its `ParamId` carries (`tutti-vst2-host` converts at
+/// its boundary). The type's algebra is still absent for it: a caller holding a
+/// `ParamId` does not know which format it came from, and must not rely on the
+/// position.
+///
+/// [`Ord`] is derived and is arbitrary-but-total, for map keys and binary
+/// search only (AU's parameter-bounds table sorts by it on the load path). A
+/// comparison between two ids carries no meaning about the parameters; do not
+/// read one as "earlier" or "lower".
+///
+/// Serializes as the bare `u32` it wraps — conversion happens where a format's
+/// number enters, via [`new`](Self::new) / [`get`](Self::get).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(transparent)
+)]
+pub struct ParamId(u32);
+
+impl ParamId {
+    /// Wraps a format-native parameter id.
+    ///
+    /// The absent algebra is the point, so it is pinned here rather than only
+    /// asserted in the type's docs — each of these is a way a `u32` field
+    /// invites treating an opaque id as a position:
+    ///
+    /// ```compile_fail
+    /// # use tutti_types::ParamId;
+    /// let id = ParamId::new(3);
+    /// let _ = id + ParamId::new(1);
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_types::ParamId;
+    /// for _id in ParamId::new(0)..ParamId::new(4) {}
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_types::ParamId;
+    /// let params = ["a", "b"];
+    /// let _ = params[ParamId::new(0)];
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_types::ParamId;
+    /// // A count is not an id: no `From<usize>` to make enumerate() fit.
+    /// let _: ParamId = 0usize.into();
+    /// ```
+    ///
+    /// What *does* compile is the deliberate crossing at a format boundary:
+    ///
+    /// ```
+    /// # use tutti_types::ParamId;
+    /// let id = ParamId::new(0x4000_0001);
+    /// assert_eq!(id.get(), 0x4000_0001);
+    /// ```
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the underlying number, for handing back to the format that
+    /// issued it.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl core::fmt::Display for ParamId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -915,10 +1002,10 @@ mod tests {
             assert_eq!(a.as_unit(), Some(one));
             assert_ne!(a, ParamAddr::Unit(p));
         }
-        assert_eq!(ParamAddr::Id(3).as_unit(), None);
+        assert_eq!(ParamAddr::Id(ParamId::new(3)).as_unit(), None);
         // Native before foreign, and indices in order, so a map keys on it.
         assert!(
-            ParamAddr::unit(UnitAddr::new(UnitParam::Bypass, 9)) < ParamAddr::Id(0),
+            ParamAddr::unit(UnitAddr::new(UnitParam::Bypass, 9)) < ParamAddr::Id(ParamId::new(0)),
             "native before foreign"
         );
         assert!(

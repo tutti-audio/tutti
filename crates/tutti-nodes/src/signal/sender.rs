@@ -5,7 +5,7 @@ use tutti_graph::{
     Cost, Cx, Event, EventKind, Io, Node, Offset, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
-use tutti_types::{ChannelLayout, Frame, SamplePosition, Samples};
+use tutti_types::{ChannelLayout, Frame, ParamId, SamplePosition, Samples};
 
 use super::PlayWalk;
 
@@ -124,7 +124,7 @@ impl<S: ControlSource> SourceNode<S> {
 
     fn segment(&self, leg: Leg) -> ParamSegment {
         ParamSegment::foreign(
-            self.id,
+            ParamId::new(self.id),
             leg.piece.from,
             leg.piece.to,
             Samples(0),

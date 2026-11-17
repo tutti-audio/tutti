@@ -44,7 +44,9 @@ impl Node for Probe {
                 let tag = match e.kind {
                     EventKind::Midi(Ump(w)) => w[0],
                     EventKind::Ramp(r) => {
-                        self.level = r.foreign_target(0).expect("ramps address id 0");
+                        self.level = r
+                            .foreign_target(tutti_types::ParamId::new(0))
+                            .expect("ramps address id 0");
                         u32::MAX
                     }
                     EventKind::Harmony(_) | EventKind::Segment(_) | EventKind::Resync => {
@@ -192,7 +194,11 @@ fn a_scheduled_ramp_steps_the_output_on_its_frame() {
     let mut rig = rig();
     rig.schedule(
         At::Frame(Frame::new(90)),
-        EventKind::Ramp(ParamRamp::foreign(0, 0.5, Samples(0))),
+        EventKind::Ramp(ParamRamp::foreign(
+            tutti_types::ParamId::new(0),
+            0.5,
+            Samples(0),
+        )),
     );
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for n in [64, 64] {
@@ -664,7 +670,11 @@ fn a_ramp_into_a_coarse_node_is_refused() {
     ed.insert(PROBE, "coarse", Unforkable(Coarse));
     ed.commit().expect("commits");
     exec.apply_pending();
-    let ramp = EventKind::Ramp(ParamRamp::foreign(0, 1.0, Samples(0)));
+    let ramp = EventKind::Ramp(ParamRamp::foreign(
+        tutti_types::ParamId::new(0),
+        1.0,
+        Samples(0),
+    ));
     assert_eq!(
         ed.schedule(At::NextBlock, to(), ramp),
         Err(ScheduleError::ResolutionTooCoarse {

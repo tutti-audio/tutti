@@ -30,8 +30,8 @@ use tutti_fixtures::machine_lock;
 use tutti_graph::{ForkMode, ForkTarget, Prepare, TransportPosition};
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::ParamId;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
+use tutti_types::ParamId;
 use tutti_types::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -208,8 +208,6 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
 
 /// The reference CLAP plugin's gain parameter, and its plain range in dB.
 const GAIN: ParamId = ParamId::new(77);
-/// [`GAIN`]'s number, as a lane carries it.
-const GAIN_ID: u32 = 77;
 const GAIN_DB: (f64, f64) = (-60.0, 12.0);
 
 /// The normalized gain for `db` (exact for whole dB: 72ths).
@@ -240,7 +238,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let held = knob(GAIN_ID, gain_at(-6.0));
+    let held = knob(GAIN, gain_at(-6.0));
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples(FORK_BLOCK)),

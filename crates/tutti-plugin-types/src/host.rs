@@ -29,16 +29,16 @@ use dpi::Size;
 
 use crate::{
     AudioBuffer, AudioBufferMut, AutomationMode, BypassWrite, ChannelTable, ContentScale,
-    EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId,
-    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, Sample, SampleRate, Samples,
-    WindowHandle,
+    EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamWriteError,
+    ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset, PresetId,
+    ProcessContext, ProcessOutput, ProcessWake, Sample, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
     FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
     RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
 };
+use tutti_types::ParamId;
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so

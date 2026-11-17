@@ -9,10 +9,11 @@
 use super::*;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
-    AudioBuffer, AudioBufferMut, HostOp, MaxBlock, Normalized, ParamId, PluginError, PluginIo,
-    PluginResult, PluginTail, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
-    RequestWord, SampleFormat, Samples, Stage, taken,
+    AudioBuffer, AudioBufferMut, HostOp, MaxBlock, Normalized, PluginError, PluginIo, PluginResult,
+    PluginTail, ProcessContext, ProcessOutput, Processor, RenderMode, Request, RequestWord,
+    SampleFormat, Samples, Stage, taken,
 };
+use tutti_types::ParamId;
 
 /// The test process's main thread: nextest runs each test in its own process,
 /// so the claim always succeeds.

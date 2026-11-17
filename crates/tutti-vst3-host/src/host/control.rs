@@ -7,10 +7,11 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, LoadedPlugin, ModifierConvention, Normalized, OwnBypass, ParamAccess, ParamEdit,
-    ParamId, ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request,
-    RescanScope, Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
+    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
+    StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
+use tutti_types::ParamId;
 
 use crate::error::Vst3Error;
 use crate::types::PluginInfo;
@@ -517,17 +518,17 @@ impl Control for Vst3Loaded {
             match notification {
                 PluginNotification::Edit(ParameterEditEvent::PerformEdit { param_id, value }) => {
                     out.push(ParamEdit::change(
-                        param_id.into(),
+                        ParamId::new(param_id),
                         Normalized::clamped(value),
                     ));
                 }
                 PluginNotification::Edit(ParameterEditEvent::BeginEdit(id)) => {
-                    out.push(ParamEdit::Begin(id.into()));
+                    out.push(ParamEdit::Begin(ParamId::new(id)));
                     self.stashed
                         .push(PluginNotification::Edit(ParameterEditEvent::BeginEdit(id)));
                 }
                 PluginNotification::Edit(ParameterEditEvent::EndEdit(id)) => {
-                    out.push(ParamEdit::End(id.into()));
+                    out.push(ParamEdit::End(ParamId::new(id)));
                     self.stashed
                         .push(PluginNotification::Edit(ParameterEditEvent::EndEdit(id)));
                 }

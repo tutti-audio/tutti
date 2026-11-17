@@ -8,10 +8,11 @@ use tutti_graph::UmpAt;
 use vst3::Steinberg::Vst::ProcessSetup;
 
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamId, ParamWriteError,
+    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamWriteError,
     PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::DrainBeat;
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, SampleRate};
 
 use crate::events::{InputEvents, OutputStream, Stager, drain_midi};

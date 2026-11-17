@@ -23,11 +23,12 @@ use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout,
     Lifecycle, Load, LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock,
-    Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
-    PluginDescriptor, PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext,
-    ProcessOutput, ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate,
-    Samples, Seat, Stage, State, StateUse, TrackInfo,
+    Normalized, Notice, OutOfProcess, ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor,
+    PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat,
+    Stage, State, StateUse, TrackInfo,
 };
+use tutti_types::ParamId;
 
 mod any;
 mod format;

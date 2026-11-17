@@ -45,9 +45,8 @@ use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
-use tutti_plugin_types::{
-    Normalized, ParamId, ParameterInfo, PluginFailure, RenderMode, TerminationReason,
-};
+use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, RenderMode, TerminationReason};
+use tutti_types::ParamId;
 
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
@@ -392,9 +391,10 @@ where
 mod off_main_tests {
     use tutti_fixtures::main_thread;
     use tutti_plugin_types::{
-        AutomationMode, AutomationModeError, Load, MainWork, MainWorkHandle, Normalized, ParamId,
+        AutomationMode, AutomationModeError, Load, MainWork, MainWorkHandle, Normalized,
         RenderMode, StateError,
     };
+    use tutti_types::ParamId;
     use tutti_types::SampleRate;
     use tutti_vst2_host::Vst2Loaded;
 

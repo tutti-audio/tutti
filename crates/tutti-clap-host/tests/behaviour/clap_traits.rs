@@ -17,10 +17,11 @@ use tutti_clap_test_plugin::{
     PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, ProcessCapture, Site, ThreadCapture,
 };
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, ParamId,
-    PluginError, PluginIo, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor,
-    SampleFormat, SampleRate, Samples,
+    AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, PluginError,
+    PluginIo, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat,
+    SampleRate, Samples,
 };
+use tutti_types::ParamId;
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 

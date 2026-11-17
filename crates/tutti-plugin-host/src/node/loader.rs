@@ -15,9 +15,10 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{
-    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, ParamId, PluginDescriptor,
-    PluginTooWide, Prepare,
+    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
+    Prepare,
 };
+use tutti_types::ParamId;
 
 /// The maximum block size the plugin is told (`Prepare::max_block`). A graph
 /// block longer than this (the engine renders up to 8192, more with

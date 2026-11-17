@@ -60,7 +60,8 @@ use tutti_fixtures::midi;
 /// such an id has no known range and would otherwise reach the plugin
 /// un-denormalized (see `add_param_changes` in `events.rs`). An invented id
 /// would make these tests fail for a reason unrelated to what they assert.
-use tutti_plugin_types::{Control, ParamId};
+use tutti_plugin_types::Control;
+use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
 
 /// The probe's real `clap_id`. A `ParamId` because that is what a queue

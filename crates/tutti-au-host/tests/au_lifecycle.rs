@@ -393,9 +393,10 @@ mod halves {
     use tutti_au_host::{AuController, AuLoaded, AuProcessor};
     use tutti_plugin_types::{
         AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, ParamFlags,
-        ParamId, ParameterChanges, ParameterQueue, PluginIo, ProcessContext, ProcessOutput,
-        Processor, Request, taken,
+        ParameterChanges, ParameterQueue, PluginIo, ProcessContext, ProcessOutput, Processor,
+        Request, taken,
     };
+    use tutti_types::ParamId;
     use tutti_types::Samples;
 
     fn prepare(rate: tutti_types::SampleRate, block: usize) -> tutti_plugin_types::Prepare {

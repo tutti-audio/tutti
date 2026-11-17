@@ -113,9 +113,10 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{
     BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
-    Normalized, ParamId, ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail,
-    Prepare, ResyncClass, SampleFormat,
+    Normalized, ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare,
+    ResyncClass, SampleFormat,
 };
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 use self::fork::{ForkWatch, ServedFork};

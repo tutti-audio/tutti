@@ -658,6 +658,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_types::ParamId;
 
     use tutti_plugin_types::{PluginTail, Samples};
 
@@ -1451,7 +1452,11 @@ mod tests {
         let mut emitted_params = ParameterChanges::reserved(PARAMS, POINTS);
         for p in 0..PARAMS {
             for pt in 0..POINTS {
-                emitted_params.add_change((p as u32).into(), pt as i32, pt as f64 / POINTS as f64);
+                emitted_params.add_change(
+                    ParamId::new(p as u32),
+                    pt as i32,
+                    pt as f64 / POINTS as f64,
+                );
             }
         }
 

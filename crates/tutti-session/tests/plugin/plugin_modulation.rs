@@ -22,11 +22,12 @@ use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
 use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
 };
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, Depth, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

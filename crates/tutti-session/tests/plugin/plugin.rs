@@ -423,11 +423,11 @@ fn export_leftovers_drop_on_the_main_thread() {
 // --- Recovery ---------------------------------------------------------------
 
 /// The reference plugin's applied `Gain` parameter.
-fn gain_param(_s: &Session, _node: NodeKey) -> tutti_plugin_types::ParamId {
-    tutti_plugin_types::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
+fn gain_param(_s: &Session, _node: NodeKey) -> tutti_types::ParamId {
+    tutti_types::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
 }
 
-fn param(s: &Session, node: NodeKey, id: tutti_plugin_types::ParamId) -> Option<f64> {
+fn param(s: &Session, node: NodeKey, id: tutti_types::ParamId) -> Option<f64> {
     s.plugin_view(node)
         .expect("hosted")
         .handle()

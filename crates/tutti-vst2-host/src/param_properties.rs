@@ -44,9 +44,8 @@
 
 use vst::api;
 
-use tutti_plugin_types::{
-    LinearRange, MainThreadMarker, Normalized, ParamId, ParamMapping, read_c_str,
-};
+use tutti_plugin_types::{LinearRange, MainThreadMarker, Normalized, ParamMapping, read_c_str};
+use tutti_types::ParamId;
 
 use crate::loaded::Vst2Loaded;
 

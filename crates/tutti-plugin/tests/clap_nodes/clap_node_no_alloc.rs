@@ -33,7 +33,7 @@ use tutti_modulation::{
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Law, Trajectory};
 use tutti_types::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_types::{Depth, PhaseIncrement};
+use tutti_types::{Depth, ParamId, PhaseIncrement};
 use tutti_ump::{MidiChannel, U7};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -101,7 +101,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         depth_by: None,
     };
     let program = ControlProgram::new(None, vec![lfo], vec![]).expect("a valid program");
-    let lfo = ControlLaneNode::for_foreign(77, program, Some(0.5), (0.0, 1.0));
+    let lfo = ControlLaneNode::for_foreign(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
     let prepare = tutti_graph::Prepare::new(
         tutti_types::SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples(BLOCK)),
@@ -119,7 +119,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         ));
     }
     let lane = ControlLaneNode::for_foreign(
-        78,
+        ParamId::new(78),
         ControlProgram::from_curve(Arc::new(env)),
         None,
         (0.0, 1.0),

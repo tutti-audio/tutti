@@ -18,7 +18,9 @@
 use std::cell::Cell;
 
 use tutti_curve::{Curvature, Exponent, Law, Piece};
-use tutti_types::{ParamAddr, ParamKey, SamplePosition, Samples, Unit, UnitAddr, UnitParam};
+use tutti_types::{
+    ParamAddr, ParamId, ParamKey, SamplePosition, Samples, Unit, UnitAddr, UnitParam,
+};
 use tutti_ump::Ump;
 
 use crate::time::Offset;
@@ -94,7 +96,7 @@ impl ParamRamp {
     /// on, else the value the node last gave it). On a parameter the node has
     /// never given a value it knows no start, and the ramp is a jump to
     /// `target` on its frame, whatever its duration and shape.
-    pub fn foreign(id: u32, target: f32, duration: Samples) -> Self {
+    pub fn foreign(id: ParamId, target: f32, duration: Samples) -> Self {
         Self::packed(ParamAddr::Id(id), target, duration)
     }
 
@@ -135,7 +137,7 @@ impl ParamRamp {
     }
 
     /// The raw target, if this ramp is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: u32) -> Option<f32> {
+    pub fn foreign_target(&self, id: ParamId) -> Option<f32> {
         (self.addr == ParamAddr::Id(id)).then_some(self.target)
     }
 
@@ -326,8 +328,8 @@ impl ParamSegment {
 
     /// A segment of a foreign unit's parameter `id`, in its own
     /// normalisation, as [`new`](Self::new) otherwise.
-    pub fn foreign(id: u32, from: f32, to: f32, duration: Samples, shape: Law) -> Self {
-        Self::packed(id, true, from, to, duration, shape)
+    pub fn foreign(id: ParamId, from: f32, to: f32, duration: Samples, shape: Law) -> Self {
+        Self::packed(id.get(), true, from, to, duration, shape)
     }
 
     fn packed(id: u32, foreign: bool, from: f32, to: f32, duration: Samples, shape: Law) -> Self {
@@ -360,13 +362,13 @@ impl ParamSegment {
     /// Which parameter this moves — for routing on the address.
     pub fn addr(&self) -> ParamAddr {
         if self.foreign {
-            return ParamAddr::Id(self.id);
+            return ParamAddr::Id(ParamId::new(self.id));
         }
         // Built from a `UnitAddr` by `new`, so it converts back.
         u16::try_from(self.id)
             .ok()
             .and_then(|id| UnitAddr::try_from(id).ok())
-            .map_or(ParamAddr::Id(self.id), ParamAddr::unit)
+            .map_or(ParamAddr::Id(ParamId::new(self.id)), ParamAddr::unit)
     }
 
     /// Whether this segment is for `addr`. No conversion: what the param
@@ -375,7 +377,7 @@ impl ParamSegment {
     pub(crate) fn is_for(&self, addr: ParamAddr) -> bool {
         match addr.as_unit() {
             Some(a) => !self.foreign && self.id == u32::from(a.to_u16()),
-            None => matches!(addr, ParamAddr::Id(id) if self.foreign && self.id == id),
+            None => matches!(addr, ParamAddr::Id(id) if self.foreign && self.id == id.get()),
         }
     }
 
@@ -392,12 +394,12 @@ impl ParamSegment {
     }
 
     /// The raw end value, if this segment is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: u32) -> Option<f32> {
+    pub fn foreign_target(&self, id: ParamId) -> Option<f32> {
         self.is_for(ParamAddr::Id(id)).then_some(self.to)
     }
 
     /// The raw start value, if this segment is for foreign parameter `id`.
-    pub fn foreign_start(&self, id: u32) -> Option<f32> {
+    pub fn foreign_start(&self, id: ParamId) -> Option<f32> {
         self.is_for(ParamAddr::Id(id)).then_some(self.from)
     }
 
@@ -1387,14 +1389,14 @@ mod tests {
     fn foreign_and_builtin_ramps_are_distinct_addresses() {
         use tutti_types::{Hz, ParamKey};
         let foreign = ParamRamp::foreign(
-            ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32,
+            ParamId::new(ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32),
             0.5,
             Samples(0),
         );
         assert_eq!(foreign.target(ParamKey::<Hz>::CUTOFF), None);
-        assert_eq!(foreign.foreign_target(0), Some(0.5));
+        assert_eq!(foreign.foreign_target(ParamId::new(0)), Some(0.5));
         let builtin = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(100.0), Samples(0));
-        assert_eq!(builtin.foreign_target(0), None);
+        assert_eq!(builtin.foreign_target(ParamId::new(0)), None);
     }
 
     /// An event is a note-off when its packet is (`Ump::is_note_off` pins the
@@ -1404,7 +1406,13 @@ mod tests {
         let (c, n, v) = (MidiChannel::FIRST, NoteNumber::of(60), U7::of(0x40));
         assert!(Event::midi(Offset::ZERO, Message::midi1(c, Voice1::note_off(n, v))).is_note_off());
         assert!(!Event::midi(Offset::ZERO, Message::midi1(c, Voice1::note_on(n, v))).is_note_off());
-        assert!(!Event::ramp(Offset::ZERO, ParamRamp::foreign(1, 0.0, Samples(0))).is_note_off());
+        assert!(
+            !Event::ramp(
+                Offset::ZERO,
+                ParamRamp::foreign(ParamId::new(1), 0.0, Samples(0))
+            )
+            .is_note_off()
+        );
     }
 
     /// A segment's address round-trips, built-in and foreign never answer
@@ -1413,7 +1421,7 @@ mod tests {
     fn a_segment_reads_back_as_built() {
         use tutti_types::{Hz, ParamKey};
         let key = ParamKey::<Hz>::CUTOFF;
-        let id = u32::from(key.addr().to_u16());
+        let id = ParamId::new(u32::from(key.addr().to_u16()));
         let foreign =
             ParamSegment::foreign(id, 0.25, 0.75, Samples(8), Law::Exp(Curvature::of(2.0)));
         assert_eq!(foreign.target(key), None);

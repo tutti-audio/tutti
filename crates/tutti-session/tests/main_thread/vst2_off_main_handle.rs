@@ -13,8 +13,9 @@ use std::time::Duration;
 use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::Normalized;
 use tutti_session::Session;
+use tutti_types::ParamId;
 use tutti_types::SampleRate;
 
 /// **A pool thread asks the handle for its state and a parameter while the

@@ -14,10 +14,11 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, AutomationMode, Control, Controller, EditorWindow, Event, Hand,
-    HostOp, Lifecycle, Loaded, MaxBlock, Normalized, Notice, ParamId, ParameterChanges,
-    PluginError, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode,
-    SampleFormat, SampleRate, Samples, Stage,
+    HostOp, Lifecycle, Loaded, MaxBlock, Normalized, Notice, ParameterChanges, PluginError,
+    PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat,
+    SampleRate, Samples, Stage,
 };
+use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
 use tutti_vst2_host::{Vst2Controller, Vst2Loaded, Vst2Processor};
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};

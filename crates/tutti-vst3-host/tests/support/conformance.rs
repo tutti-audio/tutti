@@ -50,7 +50,7 @@ use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
-use tutti_plugin_types::ParamId;
+use tutti_types::ParamId;
 use tutti_vst3_host::{
     AudioBuffer, InputEvents, LoadOptions, ParameterChanges, ProcessMode, TransportInfo,
     Vst3Loaded, Vst3Sample, host::conformance,

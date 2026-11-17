@@ -387,7 +387,8 @@ pub use tutti_plugin_types::Features;
 pub use tutti_plugin_types::{FeatureReport, Preset, PresetId, PresetSupport};
 // `AnyThread::parameter_descriptors` lists `ParamId`s, and
 // `set_parameter_value` takes a `Normalized`.
-pub use tutti_plugin_types::{Normalized, ParamId};
+pub use tutti_plugin_types::Normalized;
+pub use tutti_types::ParamId;
 
 /// Discovering, persisting, and loading plugins.
 ///

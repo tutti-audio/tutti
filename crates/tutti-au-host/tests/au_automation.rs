@@ -17,9 +17,10 @@ use tutti_au_host::component::find_component;
 use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MaxBlock, ParamEdit, ParamId, ParameterChanges, PluginIo,
-    Prepare, ProcessContext, ProcessOutput, Processor,
+    AudioBuffer, AudioBufferMut, Loaded, MaxBlock, ParamEdit, ParameterChanges, PluginIo, Prepare,
+    ProcessContext, ProcessOutput, Processor,
 };
+use tutti_types::ParamId;
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -114,8 +115,8 @@ fn a_non_realtime_parameter_is_written_between_blocks_not_by_the_render() {
     let mix_before = plain(&controller, DRY_WET);
 
     let mut changes = ParameterChanges::reserved(2, 4);
-    assert!(changes.add_change(ParamId::from(DELAY_TIME), 0, 1.0));
-    assert!(changes.add_change(ParamId::from(DRY_WET), 0, 1.0));
+    assert!(changes.add_change(ParamId::new(DELAY_TIME), 0, 1.0));
+    assert!(changes.add_change(ParamId::new(DRY_WET), 0, 1.0));
     render_block(&mut processor, 0.0, &changes);
 
     assert_eq!(
@@ -165,7 +166,7 @@ fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
     }
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::from(DRY_WET), 100, 0.75));
+    assert!(changes.add_change(ParamId::new(DRY_WET), 100, 0.75));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 75.0, "the automation landed");
 
@@ -201,7 +202,7 @@ fn the_tick_does_not_write_the_value_back_over_a_later_one() {
     let (mut processor, mut controller) = activate(delay_loaded());
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::from(DRY_WET), 100, 0.75));
+    assert!(changes.add_change(ParamId::new(DRY_WET), 100, 0.75));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 75.0, "the automation landed");
 
@@ -242,12 +243,12 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     for n in 0..BLOCKS {
         let mut changes = ParameterChanges::reserved(2, 4);
         let level = (n % 100) as f64 / 100.0;
-        assert!(changes.add_change(ParamId::from(DRY_WET), 100, level));
-        assert!(changes.add_change(ParamId::from(DELAY_TIME), 100, 0.5));
+        assert!(changes.add_change(ParamId::new(DRY_WET), 100, level));
+        assert!(changes.add_change(ParamId::new(DELAY_TIME), 100, 0.5));
         render_block(&mut processor, 0.0, &changes);
     }
     let mut last = ParameterChanges::reserved(1, 4);
-    assert!(last.add_change(ParamId::from(DRY_WET), 100, 0.75));
+    assert!(last.add_change(ParamId::new(DRY_WET), 100, 0.75));
     render_block(&mut processor, 0.0, &last);
 
     // The plugin's edit of another parameter, after the renders, is told to the
@@ -338,7 +339,7 @@ fn an_edit_in_the_plugins_own_editor_is_reported() {
 
     let heard = wait_for_edits(&mut controller, 1);
     assert_eq!(heard.len(), 1, "one edit: {heard:?}");
-    assert_eq!(heard[0].id(), ParamId::from(DRY_WET));
+    assert_eq!(heard[0].id(), ParamId::new(DRY_WET));
     let value = heard[0].value().expect("a value change is a Change");
     assert!(
         (value.get() - 0.25).abs() < 1e-6,
@@ -369,7 +370,7 @@ fn a_gesture_in_the_plugins_own_editor_is_reported_in_order() {
     emit_gesture(controller.unit(), DRY_WET, global, false).unwrap();
 
     let heard = wait_for_edits(&mut controller, 3);
-    let id = ParamId::from(DRY_WET);
+    let id = ParamId::new(DRY_WET);
     assert_eq!(heard.len(), 3, "the gesture, in order: {heard:?}");
     assert_eq!(heard[0], ParamEdit::Begin(id));
     assert_eq!(heard[2], ParamEdit::End(id));
@@ -404,7 +405,7 @@ fn the_hosts_own_writes_are_not_reported_as_the_plugins_edits() {
     let (mut processor, mut controller) = activate(au);
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::from(DRY_WET), 0, 0.5));
+    assert!(changes.add_change(ParamId::new(DRY_WET), 0, 0.5));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 50.0, "the automation landed");
 

@@ -12,9 +12,10 @@ use std::path::Path;
 use tutti_fixtures::{Activation, main_thread};
 
 use tutti_plugin_types::{
-    Control, MainThreadMarker, MaxBlock, Normalized, ParamId, PluginError, Prepare, RenderMode,
+    Control, MainThreadMarker, MaxBlock, Normalized, PluginError, Prepare, RenderMode,
     SampleFormat, SampleRate, Samples,
 };
+use tutti_types::ParamId;
 use tutti_vst3_host::{
     AudioBuffer, InputEvents, Library, LoadOptions, ParameterChanges, ProcessFailed, ProcessMode,
     ProcessOutputRef, TransportInfo, Vst3Controller, Vst3Error, Vst3Loaded, Vst3Processor,

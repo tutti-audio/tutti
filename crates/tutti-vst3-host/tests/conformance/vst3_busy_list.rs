@@ -8,6 +8,7 @@
 #![cfg(feature = "conformance")]
 
 use crate::active;
+use tutti_types::ParamId;
 
 use active::{Active, ActiveExt};
 use tutti_vst3_host::{AudioBuffer, InputEvents, TransportInfo};
@@ -68,7 +69,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
     let input = [[1.0f32; 16]; 2];
     let transport = TransportInfo::default();
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
-    automation.add_change(0u32.into(), 0, 0.5);
+    automation.add_change(ParamId::new(0u32), 0, 0.5);
     let render = |plugin: &mut Active| {
         let mut out = [[9.0f32; 16]; 2];
         let [l, r] = &mut out;

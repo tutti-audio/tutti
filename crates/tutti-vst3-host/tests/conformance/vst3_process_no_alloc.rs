@@ -26,6 +26,7 @@
 
 use std::path::Path;
 use tutti_graph::UmpAt;
+use tutti_types::ParamId;
 
 use tutti_graph::Offset;
 use tutti_types::Samples;
@@ -97,7 +98,7 @@ fn unsorted_automation() -> ParameterChanges {
     let lanes: [(u32, &[i32]); 2] = [(100, &[48, 0, 32, 16, 8]), (101, &[56, 24, 60, 4])];
     for (id, offsets) in lanes {
         for (i, off) in offsets.iter().enumerate() {
-            changes.add_change(id.into(), *off, i as f64 / 8.0);
+            changes.add_change(ParamId::new(id), *off, i as f64 / 8.0);
         }
     }
     changes

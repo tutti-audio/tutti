@@ -954,7 +954,8 @@ fn a_refused_connection_does_not_fail_the_load() {
 /// Processor; it is refused `ReadOnly`, as the activation declared it.
 #[test]
 fn a_write_is_answered_from_the_activations_table_not_the_live_info() {
-    use tutti_plugin_types::{Control, Normalized, ParamFlags, ParamId, ParamWriteError};
+    use tutti_plugin_types::{Control, Normalized, ParamFlags, ParamWriteError};
+    use tutti_types::ParamId;
     const OBSERVED_PROCESS_MODE: u32 = 106;
     const REQUEST_IO_CHANGED: u32 = 103;
     let _m = Misbehaviour::set(misbehave::OBSERVED_WRITABLE_LATE);

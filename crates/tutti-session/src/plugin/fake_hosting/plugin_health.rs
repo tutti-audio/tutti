@@ -22,8 +22,9 @@ use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
+use tutti_plugin_types::Normalized;
 use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
-use tutti_plugin_types::{Normalized, ParamId};
+use tutti_types::ParamId;
 use tutti_types::SampleRate;
 
 /// A backend whose liveness is whatever the test says it is.
