@@ -4,6 +4,7 @@
 //! allocating). A node's unit tests and allocation gates lean on them to
 //! play MIDI and read the transport, so each promise is pinned here.
 
+use tutti_buffers::Planes;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{Direct, Emitter, drive_input};
 use tutti_graph::{
@@ -77,7 +78,7 @@ fn drive_in_plays_events_under_the_env() {
             ),
         ),
     ];
-    let got = drive_input(&mut Probe, &env, &[], &[], &[&events]);
+    let got = drive_input(&mut Probe, &env, Planes::default(), &[], &[&events]);
     let marked: Vec<usize> = (0..64).filter(|&i| got.audio[0][i] == 1.0).collect();
     assert_eq!(marked, [3, 40]);
     assert_eq!(got.audio[1][0], 4.0);
@@ -101,15 +102,18 @@ fn direct_plays_events_once_advances_and_rolls() {
     ));
     probe.events(0, &[Event::midi(at(5, 64), m1_note())]);
     probe.block();
-    assert_eq!(probe.output(0)[5], 1.0);
+    assert_eq!(probe.output().plane(0).samples()[5], 1.0);
     assert_eq!(probe.events_out(0).len(), 1);
-    assert_eq!(probe.output(1)[0], 2.0);
+    assert_eq!(probe.output().plane(1).samples()[0], 2.0);
     probe.block();
-    assert!(probe.output(0).iter().all(|&s| s == 0.0), "played once");
+    assert!(
+        probe.output().plane(0).iter().all(|&s| s == 0.0),
+        "played once"
+    );
     assert!(probe.events_out(0).is_empty());
     probe.set_block_len(16);
     probe.block();
-    assert_eq!(probe.output(0).len(), 16);
+    assert_eq!(probe.output().plane(0).samples().len(), 16);
 
     // The emitter writes at absolute frame 70: block 1 of 64-frame blocks,
     // offset 6.

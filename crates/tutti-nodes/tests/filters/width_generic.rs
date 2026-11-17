@@ -9,6 +9,7 @@
 //! ragged block pattern. The check is bit for bit: the channels share a
 //! coefficient table and a block's ramps, and nothing may mix them.
 
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
 use tutti_nodes::{
@@ -89,7 +90,12 @@ fn render<N: Node + ParamNode + 'static>(
             .iter()
             .map(|l| l.as_ref().map(|l| &l[pos..pos + n]))
             .collect();
-        let block = drive(&mut node as &mut dyn Node, SR, &ins, &lanes);
+        let block = drive(
+            &mut node as &mut dyn Node,
+            SR,
+            Planes::new(&ins).unwrap(),
+            &lanes,
+        );
         out.resize(block.len(), Vec::with_capacity(LEN));
         for (o, b) in out.iter_mut().zip(block) {
             o.extend(b);

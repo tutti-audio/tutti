@@ -483,7 +483,7 @@ fn wraps_without_allocating<N: Node>(node: N) {
         ));
         direct.set_block_len(len);
         direct.block();
-        heard.extend_from_slice(direct.output(0));
+        heard.extend_from_slice(direct.output().plane(0).samples());
         clock.advance(tutti_types::Samples(len), Some(region));
         clock.beat() < before
     };
@@ -738,7 +738,14 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
 
     // Every channel carries the material, not just the front pair.
     for c in 0..6 {
-        let energy: f32 = rig.direct.output(c).iter().map(|s| s.abs()).sum();
+        let energy: f32 = rig
+            .direct
+            .output()
+            .plane(c)
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .sum();
         assert!(
             energy > 0.0,
             "channel {c} produced silence — a width was dropped at a seam"
