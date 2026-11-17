@@ -35,8 +35,8 @@
 //!
 //! An in-process plugin changes its ports on the main thread and is ticked
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
-//! not tick an in-process plugin (only `MainSession::update` does, for an open
-//! editor), so this phase does, for each hosted plugin that keeps a rebinder
+//! not tick an in-process plugin (only the editors' service does, for an open
+//! one), so this phase does, for each hosted plugin that keeps a rebinder
 //! (pooled, or inserted or replaced through `Graph`). A served plugin is
 //! ticked the same way: it restarts into a new slab, pipeline and node for its
 //! new buses.
@@ -71,8 +71,11 @@ impl<C: Clock> Session<C> {
     /// replaced through `Graph`); the tick is what reads a change of ports.
     /// Re-inserts the node of each whose ports changed. Called at the end of
     /// `Phase::Plugins`.
-    pub(crate) fn rebind_plugins(&mut self, out: &mut Vec<SessionEvent>) {
-        let main = MainThreadMarker::new();
+    pub(crate) fn rebind_plugins(
+        &mut self,
+        main: Option<MainThreadMarker>,
+        out: &mut Vec<SessionEvent>,
+    ) {
         let nodes: Vec<NodeKey> = self
             .graph
             .plugins

@@ -610,7 +610,7 @@ impl PluginHandle {
     /// (`winit::Window::scale_factor`): a
     /// window handle carries none, and a plugin on Windows or X11 cannot
     /// read it itself. Call on the main thread. A session's host opens an
-    /// editor through `tutti_session::EditorView::open`, which this serves.
+    /// editor through `tutti_session::Editor::open`, which this serves.
     ///
     /// # Errors
     ///

@@ -59,33 +59,31 @@ mod clap {
     /// plugin and the plugin's answer reached the caller.
     #[test]
     fn clap_loads_a_preset_file_and_lists_nothing() {
-        let (mut s, node) = loaded();
-        let mut ui = s.main(tutti_fixtures::main_thread());
-        let plugin = ui.plugin(node).unwrap();
-        let presets = plugin.presets().expect("CLAP has a preset-load extension");
+        let (s, node) = loaded();
+        let main = tutti_fixtures::main_thread();
+        let plugin = s.plugin_view(node).unwrap();
+        let presets = plugin
+            .presets(&main)
+            .expect("CLAP has a preset-load extension");
         assert_eq!(presets.kind(), PresetKind::File);
         assert!(presets.is_empty(), "CLAP enumerates nothing");
         assert_eq!(presets.current(), None, "and has no current-preset query");
 
-        let before = saved(ui.session(), node);
-        let presets_again = ui.plugin(node).unwrap();
-        let presets = presets_again.presets().unwrap();
+        let before = saved(&s, node);
+        let presets_again = s.plugin_view(node).unwrap();
+        let presets = presets_again.presets(&main).unwrap();
         assert_eq!(
             presets.load_file("/nowhere/not-a-preset.txt"),
             Err(PresetError::Refused),
             "the plugin declined a file of the wrong kind"
         );
-        assert_eq!(
-            saved(ui.session(), node),
-            before,
-            "a refused load changes nothing"
-        );
+        assert_eq!(saved(&s, node), before, "a refused load changes nothing");
 
-        let plugin = ui.plugin(node).unwrap();
-        let presets = plugin.presets().unwrap();
+        let plugin = s.plugin_view(node).unwrap();
+        let presets = plugin.presets(&main).unwrap();
         assert_eq!(presets.load_file("/nowhere/bright.tutti-preset"), Ok(()));
         assert_ne!(
-            saved(ui.session(), node),
+            saved(&s, node),
             before,
             "an accepted preset file moved the plugin's own state"
         );
@@ -118,21 +116,21 @@ mod clap {
         }
         let before = cutoff(&s, node).expect("Cutoff is read");
 
-        let mut ui = s.main(tutti_fixtures::main_thread());
-        ui.plugin(node)
+        let main = tutti_fixtures::main_thread();
+        s.plugin_view(node)
             .unwrap()
-            .presets()
+            .presets(&main)
             .unwrap()
             .load_file("/nowhere/bright.tutti-preset")
             .expect("the plugin takes the preset");
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while cutoff(ui.session(), node) == Some(before) {
+        while cutoff(&s, node) == Some(before) {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the mirror still reads {before} after the preset moved Cutoff"
             );
-            let _ = ui.update();
+            let _ = s.update_on(main);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
@@ -172,10 +170,10 @@ mod vst2 {
     /// never listed is not an entry, and a file load is `Unsupported`.
     #[test]
     fn a_listed_preset_loads_by_its_id() {
-        let (mut s, node, _env) = probe_with("3");
-        let mut ui = s.main(tutti_fixtures::main_thread());
-        let plugin = ui.plugin(node).unwrap();
-        let presets = plugin.presets().expect("VST2 programs are presets");
+        let (s, node, _env) = probe_with("3");
+        let main = tutti_fixtures::main_thread();
+        let plugin = s.plugin_view(node).unwrap();
+        let presets = plugin.presets(&main).expect("VST2 programs are presets");
         assert_eq!(presets.kind(), PresetKind::Browse);
         assert_eq!(presets.len(), 3, "the probe declared three programs");
 
@@ -197,9 +195,12 @@ mod vst2 {
     /// empty browser: the format was asked and declined.
     #[test]
     fn a_plugin_with_no_programs_has_no_presets() {
-        let (mut s, node, _env) = probe_with("0");
-        let mut ui = s.main(tutti_fixtures::main_thread());
-        let plugin = ui.plugin(node).unwrap();
-        assert!(matches!(plugin.presets(), Err(PresetError::Unsupported)));
+        let (s, node, _env) = probe_with("0");
+        let main = tutti_fixtures::main_thread();
+        let plugin = s.plugin_view(node).unwrap();
+        assert!(matches!(
+            plugin.presets(&main),
+            Err(PresetError::Unsupported)
+        ));
     }
 }

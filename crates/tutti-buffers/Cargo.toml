@@ -19,16 +19,16 @@ serde = ["dep:serde"]
 
 [dependencies]
 # `Samples`, the frame count every view speaks, and `ChannelLayout`, its width.
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # Pure-Rust `rint`, `sqrt`, `exp` and kin, so a conversion or a `Float`'s math does
 # not depend on the platform's C math library.
 libm = "0.2.15"
 # The `Error` derive of `BufferError` and `I24OutOfRange`.
-thiserror = { workspace = true, features = ["std"] }
-# `Float` is `Pod`: the engine's arena casts lines of it to slices. No std feature.
-bytemuck = "1.16"
+thiserror = { workspace = true }
+# `Float` is `Pod`: the engine's arena casts lines of it to slices.
+bytemuck = { version = "1.16", default-features = false }
 # `I24`'s `Serialize` and `Deserialize`, behind the `serde` feature.
-serde = { version = "1", optional = true, features = ["derive"] }
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 # The fold's allocation gate: the test binary installs `AllocDisabler`.

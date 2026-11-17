@@ -5,6 +5,7 @@
 
 use super::{Fold, FoldError, Row, expr_of_coefficients, narrow, row_coefficients};
 use crate::{BufferError, Float};
+use alloc::vec::Vec;
 use tutti_types::ChannelLayout;
 
 impl<F: Float> Fold<F> {

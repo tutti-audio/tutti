@@ -806,6 +806,7 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-ump", &["serde"]),
     ("tutti-midi-protocol", &["serde"]),
     ("tutti-curve", &[]),
+    ("tutti-buffers", &["serde"]),
     ("tutti-metering", &[]),
     ("tutti-tempo", &["serde"]),
     ("tutti-modulation", &[]),

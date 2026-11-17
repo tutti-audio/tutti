@@ -3,8 +3,8 @@
 //!
 //! The snapshot and parameter-read jobs the session hands out run on a pool
 //! thread and call `AnyThread::save_state` and `AnyThread::parameter_value` on
-//! the handle; the backend posts them to the main thread, and the update's
-//! `MainSession::update` runs them (the session's `MainWork`). The target runs on the
+//! the handle; the backend posts them to the main thread, and the update on the
+//! main thread runs them (the session's `MainWork`). The target runs on the
 //! process's main thread, where the handle's own calls run at once.
 
 use crate::param_reads::ParamReads as _;

@@ -509,10 +509,9 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         params.get(first).unwrap().normalized()
     };
     let before = cutoff(&s);
-    s.main(tutti_fixtures::main_thread())
-        .plugin(node)
+    s.plugin_view(node)
         .unwrap()
-        .presets()
+        .presets(&tutti_fixtures::main_thread())
         .unwrap()
         .load_file("/nowhere/bright.tutti-preset")
         .expect("the plugin takes the preset");

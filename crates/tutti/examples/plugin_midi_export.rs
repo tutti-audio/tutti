@@ -87,7 +87,7 @@ fn load(
     }
     s.pool(declared)?;
     loop {
-        for event in s.main(main).update() {
+        for event in s.update_on(main) {
             match event {
                 SessionEvent::Pool {
                     event: PoolEvent::Loaded,

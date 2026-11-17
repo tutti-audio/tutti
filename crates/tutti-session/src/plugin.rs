@@ -33,8 +33,8 @@
 //! call off the main thread is posted to the session's
 //! [`MainWork`](tutti_plugin_types::MainWork) and the caller waits, for at most two
 //! seconds, for the main thread's next tick to run it
-//! ([`MainSession::update`](crate::MainSession::update), or `Phase::Collect` on the
-//! process's main thread, drains it). A host that calls neither on its main thread
+//! ([`Session::update`], called on the process's main thread, drains it). A host that does not
+//! call it there
 //! has those calls answer "unavailable" at the deadline (`StateError::Unavailable`, `None`,
 //! `false`). A host blocking its main thread on such a job (joining it there)
 //! gets the same.
@@ -42,11 +42,12 @@
 //! What retires an in-process record (a removal, a crossfade to another plugin
 //! or to a native node, a reload's dead plugin) parks it in the graveyard
 //! instead of dropping it, since the drop of a plugin's last owner tears down
-//! its library and instance. `MainSession::update` empties it;
+//! its library and instance. `Session::update` on the main thread empties it;
 //! [`Session::retired_plugins`] counts what waits, and `Phase::Plugins` warns
 //! once when more than a handful do. A served plugin's record drops where it
 //! is retired, on the control thread; only an editor it left open waits for
-//! the main thread, to be closed.
+//! the main thread, to be closed, through the registry of open editors
+//! (`Editors`).
 //!
 //! # `Phase::Plugins`
 //!
@@ -125,7 +126,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MainThreadMarker;
 
-use dpi::Size;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::{
     AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef, PluginState,
@@ -530,13 +530,6 @@ pub enum PluginChange {
         /// Why the ports were refused.
         why: PortsRefusal,
     },
-    /// The plugin asked its editor window to take a size (a zoom control, a
-    /// collapsing panel), found while [`MainSession::update`](crate::MainSession::update)
-    /// serviced the editor. Answer with
-    /// [`EditorView::resize`](crate::EditorView::resize) after sizing the window
-    /// it lives in. The size is in the plugin's format's own unit, as
-    /// [`Opened::Embedded`](crate::Opened::Embedded)'s is.
-    EditorWantsSize(Size),
     /// A hosted plugin was declared dead
     /// (`tutti_plugin_host::Liveness`) with recovery off: a pooled plugin's
     /// node stays at its key, silent, and a host-inserted plugin's node was
@@ -651,8 +644,7 @@ impl Outgoing {
     /// drops here, on the calling (control) thread.
     pub(crate) fn retire(self) -> Retired {
         let Self { handle, placement } = self;
-        let editor = handle.is_editor_open().then(|| handle.clone());
-        Retired::of(placement, editor, handle)
+        Retired::of(placement, handle)
     }
 }
 
@@ -661,34 +653,30 @@ impl Outgoing {
 pub(crate) enum Retired {
     /// An in-process plugin's: its drop waits for the main thread.
     InProcess(InProcessRecord),
-    /// A served plugin's, already dropped; what is left is the handle whose
-    /// editor was open, to close on the main thread.
-    Served { editor: Option<PluginHandle> },
+    /// A served plugin's, already dropped.
+    Served,
 }
 
 impl Retired {
     /// `held` split by `placement`: an in-process owner is kept for the main
     /// thread, a served one drops here.
-    fn of(
-        placement: Placement,
-        editor: Option<PluginHandle>,
-        held: impl std::any::Any + Send,
-    ) -> Self {
+    fn of(placement: Placement, held: impl std::any::Any + Send) -> Self {
         match placement {
             Placement::InProcess => Self::InProcess(InProcessRecord {
-                editor,
                 _held: Box::new(held),
             }),
-            Placement::Served => Self::Served { editor },
+            Placement::Served => Self::Served,
         }
     }
 
     /// Parks an in-process record in `yard`; a served one has dropped, and
-    /// only its open editor waits there.
-    pub(crate) fn settle(self, yard: &mut Graveyard) {
+    /// nothing of it waits. The editors of the plugin at `node` end either
+    /// way: the plugin they were made for no longer serves it.
+    pub(crate) fn settle(self, node: NodeKey, yard: &mut Graveyard) {
+        yard.editors.end(node);
         match self {
-            Self::InProcess(record) => yard.bury(record),
-            Self::Served { editor } => yard.editors.extend(editor),
+            Self::InProcess(record) => yard.retired.push(record),
+            Self::Served => {}
         }
     }
 }
@@ -696,14 +684,12 @@ impl Retired {
 /// What an in-process plugin's retirement holds until the main thread drops
 /// it: the only thing the [`Graveyard`] takes.
 pub(crate) struct InProcessRecord {
-    /// The handle to close the editor through, if it was open.
-    editor: Option<PluginHandle>,
     /// The owner whose drop waits for the main thread.
     _held: Box<dyn std::any::Any + Send>,
 }
 
 /// What a removal or a replacement took out of the session for an in-process
-/// plugin, held until the main thread drops it (`MainSession::update`).
+/// plugin, held until the main thread drops it (`Session::update` there).
 ///
 /// A plugin record owns the plugin's control handle, and dropping the last
 /// owner of an in-process plugin tears its library and instance down, a
@@ -719,9 +705,9 @@ pub(crate) struct Graveyard {
     /// Held to be dropped: a removed in-process plugin's record, or the handle
     /// a crossfade replaced.
     retired: Vec<InProcessRecord>,
-    /// Handles whose editor was open when they were retired: closed by
-    /// [`exhume`](Self::exhume) before the drop.
-    editors: Vec<PluginHandle>,
+    /// The editors that are alive: those of a retired plugin are closed by
+    /// [`exhume`](Self::exhume) before the drop, the open ones are serviced.
+    pub(crate) editors: crate::editor::Editors,
     warned: bool,
 }
 
@@ -729,34 +715,32 @@ impl Graveyard {
     /// How many retired plugins a session holds before it says so.
     pub(crate) const WARN_AT: usize = 16;
 
-    fn bury(&mut self, mut record: InProcessRecord) {
-        self.editors.extend(record.editor.take());
-        self.retired.push(record);
-    }
-
     pub(crate) fn len(&self) -> usize {
         self.retired.len()
     }
 
     /// Drops everything in the yard, on the main thread. Returns how many.
     pub(crate) fn exhume(&mut self, main: MainThreadMarker) -> usize {
-        for handle in self.editors.drain(..) {
-            handle.close_editor(main);
-        }
+        self.editors.close_ended(main);
         let n = self.retired.len();
         self.retired.clear();
         self.warned = false;
         n
     }
 
+    /// The idle tick of every open editor, on the main thread.
+    pub(crate) fn service(&mut self, main: MainThreadMarker) {
+        self.editors.service(main);
+    }
+
     /// Warns once when the yard has grown past [`WARN_AT`](Self::WARN_AT).
     pub(crate) fn warn_if_piling(&mut self) {
-        let waiting = self.retired.len() + self.editors.len();
+        let waiting = self.retired.len() + self.editors.waiting();
         if waiting > Self::WARN_AT && !self.warned {
             self.warned = true;
             tracing::warn!(
                 "{waiting} retired plugins and editors are waiting for the main thread: nothing \
-                 has called `Session::main(..).update()` (a host with no main thread never \
+                 has updated the session on the main thread (a host with no main thread never \
                  frees them)"
             );
         }
@@ -1097,8 +1081,7 @@ impl HostedPlugin {
         self.gate.end();
         // The node over a pool entry is gone: the entry is no longer held.
         self.pooled = None;
-        let editor = self.handle.is_editor_open().then(|| self.handle.clone());
-        Retired::of(self.placement, editor, self)
+        Retired::of(self.placement, self)
     }
 
     /// The node's controls, `node` in place of the ones held: what the held
@@ -1286,6 +1269,22 @@ pub struct Plugin<'a> {
 }
 
 impl<'a> Plugin<'a> {
+    /// The plugin's presets: a list to load from, or a file to load. They are
+    /// the main thread's (VST3, VST2 and AU answer them there), so this takes
+    /// the proof.
+    ///
+    /// # Errors
+    ///
+    /// [`PresetError::Unsupported`](tutti_plugin_types::PresetError::Unsupported)
+    /// when the plugin has no preset surface;
+    /// [`PresetError::Lost`](tutti_plugin_types::PresetError::Lost) when it is gone.
+    pub fn presets(
+        &self,
+        main: &tutti_plugin_types::MainThreadMarker,
+    ) -> Result<crate::Presets<'a>, tutti_plugin_types::PresetError> {
+        crate::Presets::of(self.hosted, *main)
+    }
+
     pub(crate) fn new(node: NodeKey, hosted: &'a HostedPlugin, figures: Figures) -> Self {
         Self {
             node,
@@ -1541,7 +1540,7 @@ impl<C: crate::Clock> Session<C> {
     }
 
     /// How many retired plugins wait for the main thread to drop them: what a
-    /// removal or a replacement parked and no [`MainSession::update`](crate::MainSession::update)
+    /// removal or a replacement parked and no [`Session::update`] on the main thread
     /// has freed yet. Nonzero for good means no one calls it; the session
     /// warns once past a few.
     pub fn retired_plugins(&self) -> usize {
@@ -2781,12 +2780,14 @@ mod tests {
         }
     }
 
-    /// **A swap closes the outgoing plugin's open editor** when the main
+    /// **A swap ends the outgoing plugin's editor and closes it** when the main
     /// thread empties the graveyard: `adopt` installs the incoming plugin's
     /// handle, whose editor is closed, and the outgoing handle's editor is closed
-    /// first, not left to the drop. An editor that was not open is not closed.
+    /// first, not left to the drop. The editor reads closed, and its calls
+    /// answer `Ended` rather than act on the incoming plugin. An editor that was
+    /// not open is not closed.
     #[test]
-    fn a_swap_closes_the_outgoing_editor() {
+    fn a_swap_ends_and_closes_the_outgoing_editor() {
         use tutti_plugin_types::fake::{Call, FakePlugin};
         let main = tutti_fixtures::main_thread();
         for open in [true, false] {
@@ -2811,25 +2812,31 @@ mod tests {
                 PluginRef::file("fake.clap").expect("a plugin file"),
                 node_controls(),
             );
+            let mut yard = Graveyard::default();
+            let node = NodeKey::fresh();
+            let mut editor = yard.editors.make(node, record.handle.clone(), main);
             if open {
-                let window =
-                    tutti_plugin_types::WindowHandle::from_window(&tutti_fixtures::StandInWindow)
-                        .expect("a window handle");
-                record
-                    .handle
-                    .open_editor(main, window, tutti_plugin_types::ContentScale::IDENTITY)
+                editor
+                    .open(
+                        &tutti_fixtures::StandInWindow,
+                        tutti_plugin_types::ContentScale::IDENTITY,
+                    )
                     .expect("the fake opens its editor");
             }
             let (incoming, _) = fake_handle(None, Vec::new());
-            let mut yard = Graveyard::default();
             record
                 .adopt(incoming, Placement::InProcess)
                 .retire()
-                .settle(&mut yard);
+                .settle(node, &mut yard);
             assert!(
                 !record.handle.is_editor_open(),
                 "the incoming plugin has no editor open"
             );
+            assert!(!editor.is_open(), "the editor reads closed after the swap");
+            assert!(matches!(
+                editor.resize(dpi::PhysicalSize::new(1, 1).into()),
+                Err(crate::EditorCallError::Ended)
+            ));
             assert!(
                 !fake.calls().contains(&Call::CloseEditor),
                 "not before the main thread"
