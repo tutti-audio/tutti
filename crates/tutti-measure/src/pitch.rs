@@ -44,6 +44,7 @@ impl PitchResult {
 
 use tutti_types::{Confidence, Hz};
 
+use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::RealFft;
 
 use crate::yin::YinPlan;
@@ -179,10 +180,16 @@ impl PitchDetector {
         head.copy_from_slice(&samples[..usable]);
         tail.fill(0.0);
 
-        self.fft
-            .forward(&self.time_a, &mut self.fft_a, &mut self.fft_scratch);
-        self.fft
-            .forward(&self.time_b, &mut self.fft_buffer, &mut self.fft_scratch);
+        self.fft.forward(
+            Mono::new(&self.time_a),
+            &mut self.fft_a,
+            &mut self.fft_scratch,
+        );
+        self.fft.forward(
+            Mono::new(&self.time_b),
+            &mut self.fft_buffer,
+            &mut self.fft_scratch,
+        );
 
         // Cross-power spectrum: conj(A) * B, over the non-redundant bins.
         for (a, buf) in self.fft_a.iter().zip(self.fft_buffer.iter_mut()) {
@@ -196,7 +203,7 @@ impl PitchDetector {
         // unvoiced, as the NaNs fail every threshold comparison.
         self.fft.inverse(
             &mut self.fft_buffer,
-            &mut self.time_b,
+            MonoMut::new(&mut self.time_b),
             &mut self.fft_scratch,
         );
 

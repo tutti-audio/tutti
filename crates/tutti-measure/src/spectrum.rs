@@ -569,7 +569,7 @@ impl<S: Sample> SpectrumMeter<S> {
         };
         let mut spectrum = vec![Complex32::default(); cfg.bins()];
         // Plans the transform and sizes its scratch.
-        fft.forward(&vec![0.0; size], &vec![0.0; size], &mut spectrum);
+        fft.forward(Mono::new(&vec![0.0; size]), &vec![0.0; size], &mut spectrum);
         let mut state = Self {
             cfg: *cfg,
             fft,
@@ -660,7 +660,7 @@ impl<S: Sample> SpectrumMeter<S> {
         self.frame[..older.len()].copy_from_slice(older);
         self.frame[older.len()..].copy_from_slice(newer);
         self.fft
-            .forward(&self.frame, &self.window, &mut self.spectrum);
+            .forward(Mono::new(&self.frame), &self.window, &mut self.spectrum);
 
         // `4 |X|^2 / (g N)^2`: a sine of amplitude `a` on a bin reads `a^2`. DC,
         // and Nyquist of an even window, have no image: `|X|^2 / (g N)^2`.
