@@ -58,6 +58,7 @@ mod support;
 
 use std::sync::{Mutex, MutexGuard};
 use tutti_graph::UmpAt;
+use tutti_rt::LockExt;
 
 use support::corpus::{AuRef, SAMPLER};
 use tutti_graph::Offset;
@@ -83,7 +84,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// Poison-tolerant: the guard only serializes, so one panicking test must not
 /// convert into N spurious failures.
 fn lock() -> MutexGuard<'static, ()> {
-    AU_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    AU_LOCK.lock_recover()
 }
 
 /// Instruments that survive `MusicDeviceSysEx` on this machine.

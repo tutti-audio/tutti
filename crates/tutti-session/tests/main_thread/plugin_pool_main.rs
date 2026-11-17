@@ -900,11 +900,10 @@ fn render_until(
 fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     // The server inherits these: it renders each output channel's tag, and
     // changes its ports when the file appears.
-    // SAFETY: the harness runs this on its one thread, before any server.
-    unsafe {
-        std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
-        std::env::set_var("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
-    }
+    // Removed when the case ends, so the next case probes with none set.
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
+    env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(
@@ -949,12 +948,11 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
 /// plugin restarts into a new slab and the node follows. The tags of its first
 /// two outputs play before and after.
 fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
-    // SAFETY: the harness runs this on its one thread, before any server.
-    unsafe {
-        std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-        std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
-        std::env::set_var("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
-    }
+    // Removed when the case ends, so the next case probes with none set.
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
+    env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
     let mut s = session();
     let client = tutti_plugin::PluginClient::new(
         tutti_plugin::BridgeConfig::at(

@@ -9,6 +9,7 @@
 use crate::host::loadable::{Hosting, Loadable};
 use crate::host::plugin_ref::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_rt::LockExt;
 
 use crate::host::node::PluginClient;
 #[cfg(any(
@@ -737,9 +738,7 @@ impl PluginRebinder {
     /// The rebinder, whatever a panic left in its lock: it holds no state of
     /// its own.
     fn lock(&self) -> std::sync::MutexGuard<'_, dyn Rebind + 'static> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.lock_recover()
     }
 
     /// The ports the plugin has now, as its lifecycle last read them. `None`

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use tutti_rt::LockExt;
 
 use dpi::{PhysicalSize, Size};
 use tutti_rt::RequestWord;
@@ -250,10 +251,7 @@ struct Shared {
 impl Shared {
     /// The declared parameters, if the fake declares any.
     fn declared(&self) -> Vec<(ParamId, bool)> {
-        self.declared
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.declared.lock_recover().clone()
     }
 
     fn wiring(&self) -> LoadedPlugin {
@@ -457,11 +455,7 @@ impl FakePlugin {
     /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). It declares
     /// nothing until this is called.
     pub fn declare(&self, parameters: &[(ParamId, bool)]) {
-        *self
-            .0
-            .declared
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = parameters.to_vec();
+        *self.0.declared.lock_recover() = parameters.to_vec();
     }
 
     /// Gives the fake an editor: `open_editor` answers 640 by 480 and the

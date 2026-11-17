@@ -1,16 +1,15 @@
 //! The graph's own DSP: PDC rings for audio and for events.
 //!
 //! The graph's own work is a handful of kernels on
-//! planar slices. These are written as straight loops over `&[f32]` so they
+//! planar slices. These are written as straight loops over `&[F]` so they
 //! auto-vectorize where the shape allows; nothing here is on a hot enough path
 //! yet to earn explicit SIMD.
 //!
 //! # No summing kernel here
 //!
 //! The audio fan-in kernel is the executor's `sum_op` (`Op::Sum`), an `f32`
-//! left fold. If the "64-bit audio path" is built it should accumulate in
-//! `f64` and store `f32`: a many-input bus is where `f32`
-//! accumulation error compounds, and the widening is cheap next to the loads.
+//! left fold in the engine's sample format `F`: it accumulates in `f32` in an `f32`
+//! engine and in `f64` in an `f64` one, which is the 64-bit path for a many-input bus.
 //! The event merge is not arithmetic and has no such question.
 //!
 //! # Retuning keeps history
@@ -25,6 +24,7 @@
 
 use std::collections::VecDeque;
 
+use tutti_buffers::Float;
 use tutti_types::Samples;
 
 use crate::event::Event;
@@ -32,8 +32,8 @@ use crate::held::Held;
 use crate::time::Offset;
 
 /// An audio delay line of fixed length.
-pub(crate) struct AudioRing {
-    buf: Vec<f32>,
+pub(crate) struct AudioRing<F: Float> {
+    buf: Vec<F>,
     pos: usize,
     /// Consecutive silent input frames seen, saturating. Once it reaches the
     /// ring length the ring holds only zeros, so a silent input gives a silent
@@ -41,17 +41,17 @@ pub(crate) struct AudioRing {
     quiet: usize,
 }
 
-impl AudioRing {
+impl<F: Float> AudioRing<F> {
     pub(crate) fn new(len: Samples) -> Self {
         Self {
-            buf: vec![0.0; len.get().max(1)],
+            buf: vec![F::ZERO; len.get().max(1)],
             pos: 0,
             quiet: usize::MAX,
         }
     }
 
     /// The ring's inputs, oldest first.
-    fn history(&self) -> impl Iterator<Item = f32> + '_ {
+    fn history(&self) -> impl Iterator<Item = F> + '_ {
         self.buf[self.pos..]
             .iter()
             .chain(&self.buf[..self.pos])
@@ -61,7 +61,7 @@ impl AudioRing {
     /// Take over `old`'s state into this ring, built zeroed on the control
     /// side for the new length: the most recent `min(old, new)` inputs, the
     /// older end zero-filled. Allocates nothing.
-    pub(crate) fn transfer_from(&mut self, old: &AudioRing) {
+    pub(crate) fn transfer_from(&mut self, old: &AudioRing<F>) {
         let (n, m) = (old.buf.len(), self.buf.len());
         let keep = n.min(m);
         for (slot, x) in self.buf[m - keep..]
@@ -75,7 +75,7 @@ impl AudioRing {
     }
 
     /// Delay `src` into `dst`. Returns whether `dst` is known silent.
-    pub(crate) fn run(&mut self, src: &[f32], dst: &mut [f32], src_silent: bool) -> bool {
+    pub(crate) fn run(&mut self, src: &[F], dst: &mut [F], src_silent: bool) -> bool {
         let n = self.buf.len();
         for (o, &x) in dst.iter_mut().zip(src) {
             *o = self.buf[self.pos];
@@ -89,7 +89,7 @@ impl AudioRing {
     }
 
     /// Delay `io` in place. Returns whether it is known silent afterwards.
-    pub(crate) fn run_in_place(&mut self, io: &mut [f32], src_silent: bool) -> bool {
+    pub(crate) fn run_in_place(&mut self, io: &mut [F], src_silent: bool) -> bool {
         let n = self.buf.len();
         for x in io.iter_mut() {
             std::mem::swap(&mut self.buf[self.pos], x);
@@ -114,12 +114,12 @@ impl AudioRing {
     }
 }
 
-impl AudioRing {
+impl<F: Float> AudioRing<F> {
     /// Copy the oldest `dst.len()` samples, without consuming them — the
     /// read half of a fixed-length feedback delay, whose write half
     /// ([`push`](Self::push)) runs later in the same block. Returns whether
     /// they are known silent.
-    pub(crate) fn peek_oldest(&self, dst: &mut [f32]) -> bool {
+    pub(crate) fn peek_oldest(&self, dst: &mut [F]) -> bool {
         let n = self.buf.len();
         debug_assert!(dst.len() <= n, "a feedback read is at most one ring long");
         for (i, o) in dst.iter_mut().enumerate() {
@@ -129,7 +129,7 @@ impl AudioRing {
     }
 
     /// Append `src`, displacing the oldest `src.len()` samples.
-    pub(crate) fn push(&mut self, src: &[f32], src_silent: bool) {
+    pub(crate) fn push(&mut self, src: &[F], src_silent: bool) {
         let n = self.buf.len();
         for &x in src {
             self.buf[self.pos] = x;
@@ -465,7 +465,7 @@ mod tests {
     /// A ring of `n` outputs its input `n` samples later, across blocks.
     #[test]
     fn ring_delays_by_its_length() {
-        let mut r = AudioRing::new(Samples(3));
+        let mut r = AudioRing::<f32>::new(Samples(3));
         let src: Vec<f32> = (1..=8).map(|x| x as f32).collect();
         let mut dst = vec![0.0; 8];
         r.run(&src[..5], &mut dst[..5], false);
@@ -477,15 +477,15 @@ mod tests {
     /// zero-pads the oldest end.
     #[test]
     fn transfer_keeps_recent_history() {
-        let mut r = AudioRing::new(Samples(4));
+        let mut r = AudioRing::<f32>::new(Samples(4));
         let mut sink = vec![0.0; 4];
         r.run(&[1.0, 2.0, 3.0, 4.0], &mut sink, false);
-        let mut shorter = AudioRing::new(Samples(2));
+        let mut shorter = AudioRing::<f32>::new(Samples(2));
         shorter.transfer_from(&r);
         let mut out = vec![0.0; 2];
         shorter.run(&[0.0, 0.0], &mut out, false);
         assert_eq!(out, vec![3.0, 4.0]);
-        let mut longer = AudioRing::new(Samples(4));
+        let mut longer = AudioRing::<f32>::new(Samples(4));
         longer.transfer_from(&shorter);
         let mut out = vec![0.0; 4];
         longer.run(&[0.0; 4], &mut out, false);
@@ -583,7 +583,7 @@ mod tests {
     /// length, whatever the block sizes.
     #[test]
     fn a_feedback_ring_delays_by_its_length_across_ragged_blocks() {
-        let mut r = AudioRing::new(Samples(8));
+        let mut r = AudioRing::<f32>::new(Samples(8));
         let src: Vec<f32> = (1..=40).map(|x| x as f32).collect();
         let mut got = Vec::new();
         let mut at = 0;

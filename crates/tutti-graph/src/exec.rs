@@ -188,6 +188,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use tutti_buffers::Float;
 
 use tutti_rt::{RingReader, RingWriter};
 use tutti_types::PlayReading;
@@ -280,14 +281,18 @@ const EDGE_FADE_CAPACITY: usize = 1024;
 /// event, a loop wrap or a transport change — and skips a node whose inputs
 /// are silent when its last [`Status`](crate::Status) (and, for a node without event
 /// inputs, its declared tail) says it has nothing more to produce.
-pub struct Executor {
+///
+/// `F` is the sample format of the audio it renders: it runs [`Node<F>`](crate::Node)s,
+/// holds its buffers as `F` and sums in `F`. The one an
+/// [`Editor`](crate::Editor) is built with is `f32`.
+pub struct Executor<F: Float = f32> {
     prepare: Prepare,
     event_cap: usize,
     /// The executor's end of the rings to its editor.
-    inbox: Inbox,
+    inbox: Inbox<F>,
     plan: Option<Arc<Plan>>,
-    store: Vec<Option<Unit>>,
-    state: State,
+    store: Vec<Option<Unit<F>>>,
+    state: State<F>,
     /// Where the graph is in time.
     clock: Clock,
     /// Events dropped: the running total, and this block's log of where.
@@ -315,7 +320,7 @@ pub struct Executor {
     root_fade_ended: Arc<AtomicU64>,
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
-    stash: std::collections::VecDeque<Box<Commit>>,
+    stash: std::collections::VecDeque<Box<Commit<F>>>,
     /// One ring and one set of slots per pool participant for the nodes'
     /// log records (`rtlog.rs`), sized with the pool.
     logs: Logs,
@@ -327,11 +332,11 @@ pub struct Executor {
 /// The rings hold boxes, so this end is dropped with the executor on the
 /// control side (`tutti_rt::ring`'s contract): a commit still queued, or one
 /// pushed as the editor dropped, is freed there.
-struct Inbox {
-    queue: RingReader<Box<Commit>>,
-    back: RingWriter<Box<Commit>>,
+struct Inbox<F: Float = f32> {
+    queue: RingReader<Box<Commit<F>>>,
+    back: RingWriter<Box<Commit<F>>>,
     /// Where crossfades go back (see the module docs, "Crossfades").
-    fade_back: RingWriter<Box<Crossfade>>,
+    fade_back: RingWriter<Box<Crossfade<F>>>,
     /// Where each block's log of dropped events goes, for the editor to
     /// drain.
     losses: RingWriter<EventLoss>,
@@ -397,7 +402,7 @@ enum Suspension {
     },
 }
 
-impl std::fmt::Debug for Executor {
+impl<F: Float> std::fmt::Debug for Executor<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Executor")
             .field("prepare", &self.prepare)
@@ -448,11 +453,11 @@ fn tail_elapsed(park_after: Tail, quiet: u64) -> bool {
     }
 }
 
-impl Executor {
+impl<F: Float> Executor<F> {
     pub(crate) fn new(
         prepare: Prepare,
         cap: usize,
-        ends: ExecutorEnds,
+        ends: ExecutorEnds<F>,
         commands: CommandRx,
     ) -> Self {
         Self {
@@ -686,7 +691,7 @@ impl Executor {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use tutti_types::{At, MaxBlock, SampleRate, Samples};
+    use tutti_types::{At, ChannelLayout, MaxBlock, SampleRate, Samples};
 
     use super::*;
     use crate::event::EventKind;
@@ -796,5 +801,122 @@ mod tests {
             !staged_store(&mut ed, &mut exec),
             "eight fit the doubled store"
         );
+    }
+    /// A source of one value, in the format of the executor that runs it.
+    struct Hold<F: Float>(F);
+
+    impl<F: Float> Node<F> for Hold<F> {
+        fn shape(&self) -> crate::node::Shape {
+            crate::node::Shape::source_unassigned(ChannelLayout::MONO)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+            io.output(0).fill(self.0);
+            Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// A mono gain, in the format of the executor that runs it.
+    struct Scale<F: Float>(F);
+
+    impl<F: Float> Node<F> for Scale<F> {
+        fn shape(&self) -> crate::node::Shape {
+            crate::node::Shape::through_unassigned(ChannelLayout::MONO)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+            let g = self.0;
+            io.channel(0).map(|x| x * g);
+            Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// An `f64` executor sums a fan-in and scales it in `f64`: two held
+    /// values whose sum `f32` cannot represent (`1 + 2^-40` rounds to `1`)
+    /// come out as their exact `f64` sum times the gain, `3 * (1 + 1.5 * 2^-40)`.
+    #[test]
+    fn an_f64_executor_sums_and_scales_in_f64() {
+        use crate::graph::{Edge, InPort, NodeSpec, OutPort, Source, Topology};
+        use crate::mode::{ModeCell, ModeState, NodeMode};
+        use crate::param::ParamState;
+        use crate::spec::GraphSpec;
+        use std::collections::BTreeMap;
+        use tutti_types::Mix;
+
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+        let (a, b, g) = (NodeKey(1), NodeKey(2), NodeKey(3));
+        let (big, small) = (1.0 + 2f64.powi(-40), 2f64.powi(-41));
+        let gain = 3.0;
+        let mut units: BTreeMap<NodeKey, Box<dyn Node<f64>>> = BTreeMap::new();
+        units.insert(a, Box::new(Hold(big)));
+        units.insert(b, Box::new(Hold(small)));
+        units.insert(g, Box::new(Scale(gain)));
+        let shapes: crate::Shapes = units.iter().map(|(&k, u)| (k, u.shape())).collect();
+        let mut topology = Topology::default();
+        for (&k, shape) in &shapes {
+            topology.nodes.insert(
+                k,
+                NodeSpec::new("node", shape.audio_in(), shape.audio_out()).with_tail(shape.tail),
+            );
+        }
+        topology.set_outputs(vec![Source::Node(OutPort { node: g, port: 0 })]);
+        let mut spec = GraphSpec::new(topology);
+        for from in [a, b] {
+            let edge = Edge::Direct(Source::Node(OutPort {
+                node: from,
+                port: 0,
+            }));
+            spec.connect(InPort { node: g, port: 0 }, edge);
+        }
+        let (plan, delta) =
+            crate::compile(&spec.validate().expect("valid"), &shapes, &prepare, None)
+                .expect("compiles");
+        let plan = Arc::new(plan);
+
+        let (mut channels, ends) = channels::<f64>();
+        let (_commands, command_rx) = crate::command::command_channel();
+        let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
+        let mut stager = Stager::new(
+            DEFAULT_EVENT_CAPACITY,
+            Arc::clone(&channels.pool),
+            Arc::clone(&channels.rendered),
+        );
+        let declick = tutti_curve::declick_frames(prepare.sample_rate()).get();
+        let mut commit = Commit::build(
+            1,
+            Arc::clone(&plan),
+            delta,
+            units,
+            |_, ports, max| ParamState::new(ports, max, declick, None),
+            |key| {
+                let cell = ModeCell::new(NodeMode::Active, Mix::WET);
+                let shape = &plan.unit(key).expect("placed").shape;
+                ModeState::new(cell, shape, 64, declick)
+            },
+            |_| crate::Wake::default(),
+            Opened::default(),
+        );
+        stager.stage(
+            &mut commit,
+            StageIn {
+                old: None,
+                carry: true,
+                resumed: false,
+                mix_lane: &|_| None,
+            },
+        );
+        assert!(channels.to_executor.push(commit).is_ok(), "queued");
+
+        let mut out = vec![0.0f64; 64];
+        exec.process(64, &TransportPosition::default(), &[], &mut [&mut out[..]]);
+        let want = gain * (big + small);
+        assert_ne!(
+            f64::from(want as f32),
+            want,
+            "the figure is one `f32` cannot hold"
+        );
+        assert!(out.iter().all(|&y| y == want), "{out:?}");
     }
 }

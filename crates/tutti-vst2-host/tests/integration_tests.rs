@@ -15,6 +15,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
+use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
 use tutti_plugin_types::{ContentScale, Control, EditorWindow, Normalized, ParamId};
@@ -40,7 +41,7 @@ const BLOCK: usize = 512;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key a test in this file sets. Listed explicitly

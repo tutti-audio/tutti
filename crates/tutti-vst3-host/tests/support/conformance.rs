@@ -48,6 +48,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
+use tutti_rt::LockExt;
 
 use tutti_plugin_types::ParamId;
 use tutti_vst3_host::{
@@ -101,7 +102,7 @@ static HOSTCHECK: Mutex<()> = Mutex::new(());
 
 /// Acquire the `HostCheck` lock, ignoring poisoning.
 pub fn hostcheck_lock() -> std::sync::MutexGuard<'static, ()> {
-    HOSTCHECK.lock().unwrap_or_else(|p| p.into_inner())
+    HOSTCHECK.lock_recover()
 }
 
 /// Serialises every test of `vst3_conformance_modes`, the one conformance
@@ -113,7 +114,7 @@ pub static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
 /// Acquire [`PLUGIN_LOCK`], ignoring poisoning (a failed test elsewhere must
 /// not cascade into spurious failures here).
 pub fn plugin_guard() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PLUGIN_LOCK.lock_recover()
 }
 
 pub const AVAILABLE: &str = env!("VST3_HOSTCHECK_AVAILABLE");
