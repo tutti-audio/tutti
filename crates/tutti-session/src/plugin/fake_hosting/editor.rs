@@ -291,6 +291,8 @@ fn a_removal_ends_the_editor() {
     let _ = s.update_on(main);
     assert_eq!(closes(&fake), 1, "the main thread's update closed it");
     assert!(!editor.is_open());
+    drop(editor);
+    assert_eq!(closes(&fake), 1, "the drop does not close it again");
 }
 
 /// **Two editors of one plugin share its one open editor**: the second `open`

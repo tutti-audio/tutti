@@ -361,18 +361,27 @@ impl Editor {
         Ok(self.live()?.editor_key(self.main, event)?)
     }
 
-    /// Closes the editor; the plugin stays loaded. Nothing happens when none
-    /// is open.
+    /// Closes the editor this one opened; the plugin stays loaded. Nothing
+    /// happens when this editor opened none, or the plugin's editor is already
+    /// closed (by the main thread's update after the editor ended).
     pub fn close(&mut self) {
-        self.opened = false;
-        self.owner.handle.close_editor(self.main);
+        self.release();
+    }
+
+    /// Closes the plugin's editor once, and only where this editor opened it
+    /// and nothing closed it since.
+    fn release(&mut self) {
+        if std::mem::take(&mut self.opened)
+            && !self.flags.closed.load(Ordering::Acquire)
+            && self.owner.handle.is_editor_open()
+        {
+            self.owner.handle.close_editor(self.main);
+        }
     }
 }
 
 impl Drop for Editor {
     fn drop(&mut self) {
-        if self.opened {
-            self.owner.handle.close_editor(self.main);
-        }
+        self.release();
     }
 }
