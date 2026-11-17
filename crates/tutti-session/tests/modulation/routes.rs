@@ -154,20 +154,21 @@ fn recording_where_nothing_is_automated_is_refused() {
     use std::sync::Arc;
     use tutti_nodes::automation::{RecordMode, Trajectory};
     use tutti_session::{AutomationTake, NoAutomation};
+    use tutti_types::Hz;
 
     let mut s = session();
     let a = filter(&mut s);
     let mut m = s.mods_mut();
-    let take = || AutomationTake::record(RecordMode::Touch, 0.0, 1.0);
+    let take = || AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1.0));
     assert_eq!(
         m.record(a, take()),
         Err(NoAutomation {
             target: ModTarget::from(a)
         })
     );
-    assert!(m.take_mut(a).is_none());
+    assert!(m.take_mut::<Hz>(a).is_none());
 
-    m.automate(a, Arc::new(Trajectory::default()));
+    m.automate(a, Arc::new(Trajectory::<Hz>::default()));
     m.record(a, take()).unwrap();
-    assert!(m.take_mut(a).is_some());
+    assert!(m.take_mut::<Hz>(a).is_some());
 }

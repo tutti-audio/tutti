@@ -133,7 +133,7 @@ fn ragged(total: usize) -> Vec<usize> {
 /// `looping` when set), and checks every frame against `curve` at that
 /// frame's beat. Returns the rendered values.
 fn check_rolling(
-    curve: &Trajectory,
+    curve: &Trajectory<Hz>,
     lane: ControlLaneNode,
     blocks: &[usize],
     looping: Option<LoopRange>,
@@ -150,7 +150,7 @@ fn check_rolling(
         let out = block(&mut ed, &mut exec, &t, &TransportChanges::NONE, n);
         for (i, &v) in out.iter().enumerate() {
             let beat = clock.beat();
-            let want = curve.value_at(beat).expect("a value");
+            let want = curve.value_at(beat).expect("a value").get();
             assert!(
                 (v - want).abs() <= TOL,
                 "frame {} (block of {n}, frame {i}), beat {}: {v} vs the curve's {want}",
@@ -170,25 +170,25 @@ fn frames_per_beat() -> f64 {
 
 /// Exponential (`t²`), cubic-out, S-curve and linear pieces, the
 /// breakpoints between frames.
-fn shaped() -> Trajectory {
+fn shaped() -> Trajectory<Hz> {
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
         Beat(0.25),
-        1.0,
+        Hz(1.0),
         Law::PowerOut(Exponent::of(3.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
         Beat(0.4),
-        0.2,
+        Hz(0.2),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    e.add_breakpoint(Breakpoint::with_law(Beat(0.55), 0.9, Law::Linear));
-    e.add_breakpoint(Breakpoint::new(Beat(0.6), 0.4));
+    e.add_breakpoint(Breakpoint::with_law(Beat(0.55), Hz(0.9), Law::Linear));
+    e.add_breakpoint(Breakpoint::new(Beat(0.6), Hz(0.4)));
     e
 }
 
@@ -259,7 +259,7 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
             } else {
                 t1.beat().get()
             };
-            let want = curve.value_at(Beat(beat)).expect("a value");
+            let want = curve.value_at(Beat(beat)).expect("a value").get();
             assert!(
                 (v - want).abs() <= 1e-4,
                 "case {k}, frame {i}, beat {beat}: {v} vs {want}"
@@ -302,13 +302,13 @@ fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f
 /// between, and the same frames whatever the blocks.
 #[test]
 fn an_unrepresentable_piece_is_linear_on_the_grid() {
-    let mut curve = Trajectory::new().with_range(0.0, 0.5);
+    let mut curve = Trajectory::new().with_range(Hz(0.0), Hz(0.5));
     curve.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
-    curve.add_breakpoint(Breakpoint::new(Beat(0.2), 1.0));
+    curve.add_breakpoint(Breakpoint::new(Beat(0.2), Hz(1.0)));
     let total = (0.15 * frames_per_beat()) as usize;
     let lane = || automation(curve.clone());
     let a = check_grid(&curve, lane(), &ragged(total), 1e-4);

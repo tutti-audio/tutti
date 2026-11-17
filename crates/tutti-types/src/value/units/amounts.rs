@@ -10,6 +10,7 @@ use super::*;
 //   Pan        [-1, 1]    NOT scalable  a position on the left/right axis
 //   Feedback   [0, 0.99]  NOT scalable  a recirculation coefficient
 //   Depth      [-1, 1]    signed, range-checked (hand-written)
+//   Bipolar    [-1, 1]    signed, range-checked, a control's own value
 //   Drive      [0, inf)   NOT scalable  shaper-curve intensity
 //   BitDepth   [1, 32]    NOT scalable  a quantizer's word length, fractional
 //
@@ -392,6 +393,125 @@ impl From<Depth> for f32 {
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 #[error("a depth is within -1..=1, got {0}")]
 pub struct DepthOutOfRange(pub f32);
+
+crate::ranged! {
+    /// A signed amount, `-1..=1`: the value of a control with no target of its
+    /// own, such as a macro's position.
+    ///
+    /// The range of [`Depth`] and [`Pan`] with the algebra of neither: a
+    /// [`Depth`] is the amount of one modulation route and a [`Pan`] a position
+    /// on the stereo axis, while a `Bipolar` is a stored and automated signed
+    /// value. It negates (`-x` is the same amount the other way) and orders.
+    ///
+    /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
+    /// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.
+    /// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
+    /// saturating constructor; [`Unit::from_raw`] is it too, since a parameter
+    /// cell holds any float.
+    ///
+    /// ```
+    /// use tutti_types::Bipolar;
+    ///
+    /// assert_eq!(Bipolar::new(0.25).map(Bipolar::get), Some(0.25));
+    /// assert_eq!(Bipolar::new(1.5), None);
+    /// assert_eq!(-Bipolar::MAX, Bipolar::MIN);
+    /// assert_eq!(Bipolar::clamped(1.5), Bipolar::MAX);
+    /// ```
+    #[repr(transparent)]
+    #[derive(Default)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
+    Bipolar(f32), BipolarOutOfRange, "within -1..=1",
+    |raw| raw >= -1.0 && raw <= 1.0
+}
+
+// NOT `Additive` and NOT `Scalable`: a sum or a scaled amount can leave
+// `-1..=1`. Do the arithmetic on the raw number and call `new` (or
+// `clamped`, where saturating is meant).
+impl Bipolar {
+    /// The negative end.
+    pub const MIN: Bipolar = Bipolar(-1.0);
+    /// The middle.
+    pub const ZERO: Bipolar = Bipolar(0.0);
+    /// The positive end.
+    pub const MAX: Bipolar = Bipolar(1.0);
+
+    /// `raw` constrained into `-1..=1`; NaN is [`ZERO`](Self::ZERO).
+    #[inline]
+    #[must_use]
+    pub const fn clamped(raw: f32) -> Bipolar {
+        if raw.is_nan() {
+            Bipolar::ZERO
+        } else if raw < -1.0 {
+            Bipolar::MIN
+        } else if raw > 1.0 {
+            Bipolar::MAX
+        } else {
+            Bipolar(raw)
+        }
+    }
+
+    /// Returns the smaller of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+
+    /// Returns the larger of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    /// Clamps into `lo..=hi`, in this unit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lo > hi`, matching `f32::clamp`.
+    #[inline]
+    #[must_use]
+    pub fn clamp(self, lo: Self, hi: Self) -> Self {
+        Self(self.0.clamp(lo.0, hi.0))
+    }
+}
+
+impl PartialOrd for Bipolar {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl core::ops::Neg for Bipolar {
+    type Output = Self;
+    #[inline]
+    fn neg(self) -> Self {
+        Self(-self.0)
+    }
+}
+
+impl core::fmt::Display for Bipolar {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// `from_raw` saturates ([`Bipolar::clamped`]): a parameter cell holds any
+/// float, and a unit's `from_raw` cannot refuse.
+impl Unit for Bipolar {
+    type Raw = f32;
+    #[inline]
+    fn from_raw(v: f32) -> Self {
+        Self::clamped(v)
+    }
+    #[inline]
+    fn to_raw(self) -> f32 {
+        self.0
+    }
+}
 
 unit! {
     /// Waveshaper drive — how hard a signal is pushed into a nonlinearity.

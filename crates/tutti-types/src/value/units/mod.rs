@@ -74,7 +74,8 @@ mod transport;
 use super::samples::Samples;
 
 pub use amounts::{
-    Balance, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
+    Balance, Bipolar, BipolarOutOfRange, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix,
+    Pan, Spread, StereoWidth,
 };
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
 pub use frames::{SampleSpan, SampleSpanOutOfRange};
