@@ -230,11 +230,21 @@ pub const HANG_GUARD: Duration = Duration::from_secs(60);
 ///
 /// If it is not answered within [`HANG_GUARD`].
 pub fn await_answer(controls: &PluginControls) {
-    tutti_fixtures::wait_until(
-        "the server to answer the chunk in flight",
-        HANG_GUARD,
-        || controls.chunk_in_flight_answered(),
-    );
+    await_answer_or(controls, "the server to answer the chunk in flight", || {
+        false
+    });
+}
+
+/// [`await_answer`], also ending when `or` holds: the chunk will not be answered
+/// (the plugin is dead or refused, the chunk was counted refused or skipped).
+///
+/// # Panics
+///
+/// If neither happens within [`HANG_GUARD`], naming `what` was waited for.
+pub fn await_answer_or(controls: &PluginControls, what: &str, mut or: impl FnMut() -> bool) {
+    tutti_fixtures::wait_until(what, HANG_GUARD, || {
+        controls.chunk_in_flight_answered() || or()
+    });
 }
 
 /// Absolute path to the `plugin-server` binary these tests spawn.

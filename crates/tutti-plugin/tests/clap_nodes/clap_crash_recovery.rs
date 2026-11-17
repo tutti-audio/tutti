@@ -119,10 +119,10 @@ const EXPECTED_LIVE: f32 = INPUT_DC + TAG_P0C0;
 /// plugin has died and will not.
 fn drive_block(unit: &mut Rig, handle: &tutti_plugin_host::PluginHandle) -> Vec<f32> {
     let out = unit.run(BLOCK, |_, _| INPUT_DC);
-    tutti_fixtures::wait_until(
+    clap_probe::await_answer_or(
+        &unit.controls,
         "the server's answer or the plugin's death",
-        NOTICE_TIMEOUT,
-        || unit.controls.chunk_in_flight_answered() || handle.status().is_dead(),
+        || handle.status().is_dead(),
     );
     out.into_iter().next().expect("the probe has outputs")
 }

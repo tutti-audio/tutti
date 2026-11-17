@@ -45,10 +45,10 @@ const LIVE: f32 = INPUT_DC + 1.0;
 /// nothing, and is not waited for.
 fn drive_block(unit: &mut Rig, handle: &PluginHandle) -> Vec<f32> {
     let out = unit.run(BLOCK, |_, _| INPUT_DC);
-    tutti_fixtures::wait_until(
+    clap_probe::await_answer_or(
+        &unit.controls,
         "the server's answer, or the plugin to stop being alive",
-        NOTICE_TIMEOUT,
-        || unit.controls.chunk_in_flight_answered() || !handle.status().is_alive(),
+        || !handle.status().is_alive(),
     );
     out.into_iter().next().expect("the probe has outputs")
 }

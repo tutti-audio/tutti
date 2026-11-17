@@ -230,6 +230,7 @@ mod stand_in_probe {
         )
     }
 
+    // A stand-in whose pid is never read blocks on opening the fifo.
     const HANG: &str = "echo $$ > $PID_FILE\nexec sleep 600";
 
     /// The pid the stand-in wrote, once it is running. The read blocks until
@@ -324,13 +325,16 @@ mod stand_in_probe {
     }
 
     /// **A registration of a plugin that hangs its probe blacklists it** once
-    /// the deadline passes.
+    /// the deadline passes. The deadline is long enough that the probe is
+    /// running (its pid is read) before it fires.
     #[test]
     fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, file, _) = catalog_probed_by(&dir, HANG, Some(Duration::ZERO));
+        let (mut catalog, file, pid_file) =
+            catalog_probed_by(&dir, HANG, Some(Duration::from_secs(5)));
 
         let task = catalog.register(&file).expect("a plugin file");
+        running_pid(&pid_file);
         let result = finish(&mut catalog, task);
 
         let [failed] = result.failures.as_slice() else {

@@ -155,11 +155,20 @@ fn graph_of(client: PluginClient) -> (Renderer, tutti_plugin_host::PluginControl
 /// run before the answer reads back silence. Not for a parked plugin, which
 /// answers nothing.
 fn await_answer(controls: &tutti_plugin_host::PluginControls) {
-    tutti_fixtures::wait_until(
-        "the server to answer the chunk in flight",
-        Duration::from_secs(60),
-        || controls.chunk_in_flight_answered(),
-    );
+    await_answer_or(controls, "the server to answer the chunk in flight", || {
+        false
+    });
+}
+
+/// [`await_answer`], also ending when `or` holds: the chunk will not be answered.
+fn await_answer_or(
+    controls: &tutti_plugin_host::PluginControls,
+    what: &str,
+    mut or: impl FnMut() -> bool,
+) {
+    tutti_fixtures::wait_until(what, Duration::from_secs(60), || {
+        controls.chunk_in_flight_answered() || or()
+    });
 }
 
 /// Drive one block of DC and return output channel 0.
@@ -255,11 +264,9 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         let _ = drive_block(&mut client, &mut midi_out);
         // The released plugin works through what it was sent; the next block
         // comes once it has answered one, or an owed reply has been collected.
-        tutti_fixtures::wait_until(
-            "the released plugin to answer",
-            Duration::from_secs(60),
-            || controls.chunk_in_flight_answered() || bridge.block_counts().late > late_before,
-        );
+        await_answer_or(&controls, "the released plugin to answer", || {
+            bridge.block_counts().late > late_before
+        });
         collected = bridge.block_counts().late - late_before;
         if collected > 0 {
             break;
@@ -338,7 +345,8 @@ fn an_unstressed_plugin_abandons_few_blocks_and_collects_no_more_than_it_owed() 
 
     let abandoned = bridge.block_counts().abandoned;
     // A quarter of the blocks. The budget is 4 periods (5.3 ms at 64/48k), the
-    // probe's work is a passthrough, and each block follows the server's answer to the one before. So an ordinary block is abandoned only if its
+    // probe's work is a passthrough, and each block follows the server's
+    // answer to the one before. So an ordinary block is abandoned only if its
     // round trip is kept off a core for over 5 ms; idle that is 0 of 12,
     // and it stayed 0 of 12 in every run under bursty load pinned to one core.
     // A machine that keeps it off a core that long on more than 3 widely

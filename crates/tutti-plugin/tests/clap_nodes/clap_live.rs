@@ -161,14 +161,10 @@ fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), S
 /// Waits until the chunk the node submitted last is settled: answered, or
 /// counted refused or skipped since `refused` and `skipped` were read.
 fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: u64) {
-    tutti_fixtures::wait_until(
+    clap_probe::await_answer_or(
+        controls,
         "the chunk in flight to be answered, refused or skipped",
-        clap_probe::HANG_GUARD,
-        || {
-            controls.chunk_in_flight_answered()
-                || controls.refused_chunks() > refused
-                || controls.skipped_chunks() > skipped
-        },
+        || controls.refused_chunks() > refused || controls.skipped_chunks() > skipped,
     );
 }
 
