@@ -457,12 +457,11 @@ impl MidiSendBuffer {
             // bank is CC 0, CC 32, PC; an RPN or NRPN is CC 101 and 100 or 99
             // and 98, then CC 6 and 38): each takes a slot at the same frame,
             // and all of them fit or none is staged (a bank is not sent
-            // without its program). A refusal resets the narrower.
+            // without its program).
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
             let n = narrowed(&mut self.narrower, *ev, &mut messages);
             if self.order.len() + n > self.room {
                 self.events_dropped += n as u64;
-                self.narrower.reset();
                 continue;
             }
             for message in &messages[..n] {
@@ -1403,6 +1402,54 @@ mod tests {
         );
         buf.reset_midi();
         assert_eq!(staged_bytes(&mut buf, &[rpn(12 << 25)]).len(), 4);
+    }
+
+    /// **A refused message leaves an MPE note's member channel as it was**: the
+    /// narrower's note allocation survives a message past the room, so the
+    /// note's per-note bend still goes to its channel (M2-104 D.2.8).
+    #[test]
+    fn a_refused_message_keeps_an_mpe_notes_channel() {
+        use tutti_midi_protocol::{
+            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        };
+        use tutti_ump::{Address, Attribute, BendValue, ControlValue, Message, NoteNumber};
+        use tutti_ump::{NoteVelocity, Voice2};
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        // Room for the note, the bend and one more: the RPN's four do not fit.
+        let mut buf = MidiSendBuffer::with_capacity(3);
+        buf.narrower = Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        });
+        let address = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
+        let note = NoteNumber::of(60);
+        let ump = |voice| at(0, Message::midi2(address, voice).into());
+        let midi = [
+            ump(Voice2::NoteOn {
+                note,
+                velocity: NoteVelocity::new(0x8000),
+                attribute: Attribute::None,
+            }),
+            ump(Voice2::registered(
+                tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
+                ControlValue::new(12 << 25),
+            )),
+            ump(Voice2::PerNotePitchBend {
+                note,
+                value: BendValue::new(0x8000_0000),
+            }),
+        ];
+        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
+        assert_eq!(
+            staged_bytes(&mut buf, &midi),
+            [vec![0x91, 60, 0x40], vec![0xE1, 0x00, 0x40]]
+        );
+        assert_eq!(buf.events_dropped(), 4);
     }
 
     /// **A banked Program Change is three messages every time** (M2-104

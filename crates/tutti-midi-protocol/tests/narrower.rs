@@ -89,7 +89,6 @@ fn an_assignable_controller_selects_with_nrpn_controllers() {
 /// messages**, however often the same parameter is sent: the select (CC 101 and
 /// 100, or 99 and 98) is in every sequence, for the same parameter again, for
 /// another one, for the other kind and on any channel or group.
-/// Spec: m2-104/6.2#4
 #[test]
 fn every_controller_is_the_full_sequence_of_four() {
     let mut n = Narrower::new();
@@ -134,7 +133,6 @@ fn every_controller_is_the_full_sequence_of_four() {
 
 /// **A Control Change that passes through, or `reset`, changes nothing**: the
 /// next controller is the same four messages (D.2.3).
-/// Spec: m2-104/6.2#4
 #[test]
 fn a_passing_select_or_reset_leaves_the_sequence_whole() {
     let full = || {
@@ -214,7 +212,6 @@ fn other_controllers_narrow_by_shift() {
 /// MIDI 1.0 Protocol messages in the following order": Bank Select MSB, Bank
 /// Select LSB, Program Change**, every time, the same bank again included; with
 /// the bit 0, "only translate the Program Change value".
-/// Spec: m2-104/d.3.3#8
 #[test]
 fn a_program_change_with_a_bank_is_always_three_messages() {
     let pc = |program: u8, bank: Option<(u8, u8)>| {

@@ -276,6 +276,62 @@ fn the_accepted_count_is_in_the_callers_events() {
     assert_eq!(counts, [1, 1, 1, 1, 2, 3]);
 }
 
+/// **A change of Protocol drops a held MPE note's allocation**: the stream
+/// restarts, so a per-note message for the note sounding before it has no
+/// member channel and sends nothing, where without the change it is sent on
+/// the note's channel (M2-104 D.2.8, MPE mode).
+#[test]
+fn a_change_of_protocol_drops_an_mpe_notes_channel() {
+    use tutti_midi_protocol::{
+        ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+    };
+    use tutti_ump::{Attribute, BendValue, NoteVelocity};
+    let mpe = || {
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        })
+    };
+    let note = NoteNumber::of(60);
+    let note_on = Ump::from(Message::Midi2(
+        address(0, 0),
+        Voice2::NoteOn {
+            note,
+            velocity: NoteVelocity::new(0x8000),
+            attribute: Attribute::None,
+        },
+    ));
+    let bend = Ump::from(Message::Midi2(
+        address(0, 0),
+        Voice2::PerNotePitchBend {
+            note,
+            value: BendValue::new(0x8000_0000),
+        },
+    ));
+    // A change of JR alone keeps the note: its bend is the member channel's.
+    let mut wire = Wire::new(MIDI1);
+    wire.narrower = mpe();
+    convert(&mut wire, &[note_on]);
+    wire.set_config(StreamConfig {
+        rx_jr: true,
+        ..MIDI1
+    });
+    assert_eq!(convert(&mut wire, &[bend]).len(), 1);
+    // A change of Protocol forgets it.
+    let mut wire = Wire::new(MIDI1);
+    wire.narrower = mpe();
+    convert(&mut wire, &[note_on]);
+    wire.set_config(MIDI2);
+    wire.set_config(MIDI1);
+    assert!(convert(&mut wire, &[bend]).is_empty());
+}
+
 /// **A send time stays with its event through the conversion:** an RPN that
 /// narrows to several MIDI 1.0 packets sends every one of them at the event's
 /// time, and a neighbour keeps its own.

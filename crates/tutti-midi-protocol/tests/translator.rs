@@ -485,6 +485,69 @@ fn the_valid_bank_select_rides_on_every_program_change_until_changed() {
     );
 }
 
+fn program_change(address: Address, p: u8, bank: Option<(u8, u8)>) -> Message {
+    Message::Midi2(
+        address,
+        Voice2::ProgramChange {
+            program: U7::of(p),
+            bank: bank.map(|(msb, lsb)| Bank {
+                msb: U7::of(msb),
+                lsb: U7::of(lsb),
+            }),
+        },
+    )
+}
+
+/// **Only a Bank Select changes the valid bank** (D.3.4: "the current valid
+/// Bank Select values"): Reset All Controllers (CC 121) and other Control
+/// Changes between two Program Changes leave it valid.
+/// Spec: m2-104/d.3.3#8
+#[test]
+fn an_unrelated_control_change_leaves_the_bank_valid() {
+    let mut t = Translator::new();
+    let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
+    let out = run(
+        &mut t,
+        &[
+            cc(CCNumber::BANK_SELECT, 1),
+            cc(CCNumber::BANK_SELECT_LSB, 2),
+            pc(5),
+            cc(CCNumber::RESET_ALL, 0),
+            cc(CCNumber::of(7), 100),
+            pc(6),
+        ],
+    );
+    assert_eq!(out[2], vec![program_change(A, 5, Some((1, 2)))]);
+    assert_eq!(out[5], vec![program_change(A, 6, Some((1, 2)))]);
+}
+
+/// **A Bank Select is valid for its own channel and Group** (D.3.4: "If there
+/// is no current Bank Select value associated with the Program Change ... set
+/// the Bank Valid bit to 0"): a Program Change on another channel, or on the
+/// same channel of another Group, is B=0 while the first channel's bank holds.
+#[test]
+fn the_valid_bank_is_per_channel_and_group() {
+    let mut t = Translator::new();
+    let other_channel = Address::new(MidiGroup::FIRST, MidiChannel::of(1));
+    let other_group = Address::new(MidiGroup::of(1), MidiChannel::FIRST);
+    let pc = |address: Address, p: u8| -> Ump {
+        Message::Midi1(address, Voice1::ProgramChange(U7::of(p))).into()
+    };
+    let out = run(
+        &mut t,
+        &[
+            cc(CCNumber::BANK_SELECT, 1),
+            cc(CCNumber::BANK_SELECT_LSB, 2),
+            pc(other_channel, 3),
+            pc(other_group, 4),
+            pc(A, 5),
+        ],
+    );
+    assert_eq!(out[2], vec![program_change(other_channel, 3, None)]);
+    assert_eq!(out[3], vec![program_change(other_group, 4, None)]);
+    assert_eq!(out[4], vec![program_change(A, 5, Some((1, 2)))]);
+}
+
 /// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1, m2-104/6.2#4
 #[test]
 fn stateless_messages_are_widened() {

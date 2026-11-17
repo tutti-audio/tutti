@@ -1300,9 +1300,7 @@ impl InputEventList {
                 n += 1;
             }
         });
-        if !self.push_bytes(time, port, &staged[..n]) {
-            self.narrower.reset();
-        }
+        self.push_bytes(time, port, &staged[..n]);
     }
 
     /// `bytes` as MIDI events on `port`, all or none; `false` when they did not
@@ -2656,6 +2654,77 @@ mod tests {
             assert_eq!(list.len(), converted);
             assert_eq!(list.midi_dropped(), 0);
         }
+    }
+
+    /// **A refused message leaves an MPE note's member channel as it was**: the
+    /// narrower's note allocation survives a message the list has no port for,
+    /// so the note's per-note bend still goes to its channel (M2-104 D.2.8).
+    #[test]
+    fn a_refused_message_keeps_an_mpe_notes_channel() {
+        use tutti_midi_protocol::{
+            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        };
+        use tutti_ump::{Attribute, BendValue, ControlValue, NoteNumber, NoteVelocity};
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        let mut list = InputEventList::new();
+        list.narrower = Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        });
+        let address = Address::new(tutti_ump::MidiGroup::FIRST, tutti_ump::MidiChannel::FIRST);
+        let note = NoteNumber::of(60);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::NoteOn {
+                    note,
+                    velocity: NoteVelocity::new(0x8000),
+                    attribute: Attribute::None,
+                },
+            ),
+        );
+        // The port takes no MIDI: the RPN is refused whole.
+        list.set_midi_capable_ports(&[false]);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::registered(
+                    tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
+                    ControlValue::new(12 << 25),
+                ),
+            ),
+        );
+        list.set_midi_capable_ports(&[true]);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::PerNotePitchBend {
+                    note,
+                    value: BendValue::new(0x8000_0000),
+                },
+            ),
+        );
+        let bytes: Vec<[u8; 3]> = list
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                ClapEvent::Midi(m) => Some(m.data),
+                _ => None,
+            })
+            .collect();
+        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
+        assert_eq!(bytes, [[0x91, 60, 0x40], [0xE1, 0x00, 0x40]]);
     }
 
     /// **The plugin-output path converts without allocating**: every MIDI 1.0
