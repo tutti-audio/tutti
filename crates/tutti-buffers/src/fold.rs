@@ -2,6 +2,9 @@
 
 use crate::convert::same_frames;
 use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 use tutti_types::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
 
 mod ambisonic;
@@ -250,7 +253,7 @@ fn lane_mut<F>(samples: &mut [F], ch: usize, width: usize) -> impl Iterator<Item
 fn lone_terms<F: Float, const N: usize>(e: &Expr<F>) -> Option<[(F, u16); N]> {
     match e {
         Expr::Sum(terms) if terms.len() == N && terms.iter().all(|t| t.srcs.len() == 1) => {
-            Some(std::array::from_fn(|k| (terms[k].gain, terms[k].srcs[0])))
+            Some(core::array::from_fn(|k| (terms[k].gain, terms[k].srcs[0])))
         }
         _ => None,
     }

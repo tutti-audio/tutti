@@ -1,6 +1,6 @@
 //! The downmix levels of a [`Fold`] and the spec that states them.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use super::{Fold, FoldError};
 use crate::Float;
