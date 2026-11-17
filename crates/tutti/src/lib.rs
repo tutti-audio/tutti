@@ -237,7 +237,7 @@ pub mod nodes {
         HrtfBinauralNode, InterpolationMode, IrLayout, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
         ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, PhaserControls, PhaserNode, PortSide,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
         Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
         ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
         SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
