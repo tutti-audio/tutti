@@ -16,9 +16,12 @@
 //!
 //! # What each model asserts
 //!
-//! Each model runs at `i16`, `I24`, `f32` and `f64` (`models!` at the foot):
-//! the slot is a 16-bit, a 32-bit (two mappings) and a 64-bit atomic word, and the protocol must hold
-//! at each width.
+//! Every model runs at `f32`, the default format (`models!` at the foot). The
+//! protocol does not depend on the slot's width: loom explores the same
+//! interleavings for a 16-, 32- or 64-bit word, and the per-format conversions
+//! are pinned bit-exact by `PosRing`'s readback tests. So one model, a write
+//! round the ring under a claim, also runs at `i16`, `I24` and `f64`
+//! (`widths!`), which puts each slot mapping's store and load under loom.
 //!
 //! A ring of 4 slots, 2 channels. (The slot map, `s mod N` by a
 //! reciprocal multiply, is a pure function the protocol only needs both
@@ -216,21 +219,32 @@ fn a_partly_capped_push_then_reset_keeps_the_claim<S: RingSample>() {
     });
 }
 
-/// Runs each model once per slot mapping: a 16-bit word, a 32-bit word holding
-/// an `I24`, a 32-bit float and a 64-bit float.
+/// Runs each model at `f32`.
 macro_rules! models {
     ($($name:ident),* $(,)?) => {
-        mod i24_slots {
-            $(#[test] fn $name() { super::$name::<tutti_buffers::I24>() })*
-        }
-        mod i16_slots {
-            $(#[test] fn $name() { super::$name::<i16>() })*
-        }
         mod f32_slots {
             $(#[test] fn $name() { super::$name::<f32>() })*
         }
-        mod f64_slots {
-            $(#[test] fn $name() { super::$name::<f64>() })*
+    };
+}
+
+/// Runs one model at each other slot mapping: a 16-bit word, a 32-bit word
+/// holding an `I24` and a 64-bit float.
+macro_rules! widths {
+    ($name:ident) => {
+        mod other_slots {
+            #[test]
+            fn i16_slots() {
+                super::$name::<i16>()
+            }
+            #[test]
+            fn i24_slots() {
+                super::$name::<tutti_buffers::I24>()
+            }
+            #[test]
+            fn f64_slots() {
+                super::$name::<f64>()
+            }
         }
     };
 }
@@ -246,3 +260,5 @@ models!(
     a_capped_push_then_reset_keeps_the_claim,
     a_partly_capped_push_then_reset_keeps_the_claim,
 );
+
+widths!(a_write_round_the_ring_never_lands_under_a_claim);
