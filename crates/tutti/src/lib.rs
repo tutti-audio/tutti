@@ -71,6 +71,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, onsets, pitch, tempo, key | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
@@ -105,6 +106,7 @@
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
+//! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
 //!   is in `full`. The out-of-process plugin server is a separate binary,
@@ -182,6 +184,8 @@ pub use tutti_session::{
     PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
     RestoreError, RestoreState, SaveState, TypedParam,
 };
+#[cfg(all(feature = "session", feature = "analyze"))]
+pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
@@ -498,6 +502,45 @@ pub mod sampler {
         feature = "decode-ogg"
     ))]
     pub use tutti_sampler::{ProbeError, SampleFacts};
+}
+
+/// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
+/// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
+/// a `Measure`, whose meter folds chunks into a result; the one-shot functions
+/// (`summarize`, `detect_onsets`, ...) run the same analysis over a buffer you
+/// hold. Feature `analyze`.
+#[cfg(feature = "analyze")]
+pub mod measure {
+    pub use tutti_measure::{
+        AlignConfig, Alignment, Alternatives, AlternativesError, Ballistics, BandCount,
+        BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, BeatGrid, ChannelBlock,
+        ChordConfig, ChordQuality, ChordSpan, Chroma, ChromaConfig, ChromaFrame, ChromaMeter,
+        ChromaSummary, CorrelationPeak, CrossCorrelation, DetectionFunction, Error, FiniteLevel,
+        FiniteLevelError, Framing, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
+        HarmonicsError, HopPolicy, Key, KeyEstimate, KeyProfile, Loudness, LoudnessConfig,
+        LoudnessMeter, Mode, NormalizedMagnitudes, NoteConfig, NoteEvent, NoteSpan, NoteSpanError,
+        Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity,
+        OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, PeakBlock, PeakBlocks,
+        PeakConfig, PeakDecay, PeakDecayError, PeakFloor, PeakFloorError, PeakMeter, Pitch,
+        PitchEstimate, PitchHop, PitchHopError, PitchSplit, PitchSplitError, PriorSpread,
+        PriorSpreadError, RawMagnitudes, Region, SampleRange, ScopePoint, SelfTransition,
+        SelfTransitionError, Sharpness, SharpnessError, SilenceConfig, SilenceMeter, Smoothing,
+        SpectralFeatures, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
+        SpectrumTime, SpectrumTimeError, StereoLevels, StereoReading, StereoSmoother, Stft,
+        StftMagnitude, StftPolar, StftRequest, Tempo, TempoCandidate, TempoConfig, TempoRange,
+        Tightness, TightnessError, TruePeakConfig, TruePeakMeter, Tuning, TuningOffset,
+        TuningOffsetError, VectorscopeConfig, VectorscopeMeter, VelocityRange,
+        WindowedLoudnessConfig, WindowedMeter, WindowedReading, YinConfig, YinThreshold,
+        YinThresholdError, align, chroma, complex_domain_deviation, correlate, cross_correlate,
+        detect_chords, detect_onsets, estimate_key, estimate_key_from_mean, estimate_tempo,
+        estimate_tempo_from_novelty, frame_levels, high_frequency_content, istft_transform,
+        measure_loudness, measure_true_peak, median_filter, notes_from_track, penalize_jumps,
+        spectral_centroid, spectral_energy, spectral_features, spectral_flatness, spectral_flux,
+        spectral_rolloff, stft, stft_magnitude, stft_polar, strip_silence, summarize,
+        summarize_block, suppress_close_onsets, track_beats, track_beats_from_novelty, transcribe,
+        vectorscope_points, yin, yin_track,
+    };
+    pub use tutti_measure::{Measure, Meter};
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
