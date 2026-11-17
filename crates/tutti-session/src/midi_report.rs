@@ -113,6 +113,16 @@ pub enum MidiReport {
         /// The clock followed.
         kind: tutti_midi_runtime::ClockKind,
     },
+    /// The transport was further from the Beat Clock the session follows than
+    /// `ClockFollower::SLIP` (a quarter of a beat), more than a tempo trim is
+    /// asked to close: the transport locates to the source's beat at the next
+    /// block.
+    ClockSlipped {
+        /// The clock followed.
+        kind: tutti_midi_runtime::ClockKind,
+        /// The source's beat less the transport's, when found.
+        error: tutti_types::Beat,
+    },
     /// The session stopped following its MIDI clock
     /// ([`Midi::unfollow_clock`](crate::Midi::unfollow_clock)); the transport
     /// keeps the motion it had, and the project's tempo and meter are published

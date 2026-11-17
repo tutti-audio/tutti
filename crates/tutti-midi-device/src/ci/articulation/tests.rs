@@ -121,7 +121,7 @@ fn the_details_reply_is_130_bytes_a_bitmap_then_16_counts_per_classification() {
     // D0, D3 and D4: 0b001_1001.
     let data = details(features).to_data();
     assert_eq!(data.as_bytes(), standard_bytes([0x19, 0x00]));
-    assert_eq!(ArticulationDetails::from_data(&data), Ok(details(features)));
+    assert_eq!(ArticulationDetails::try_from(&data), Ok(details(features)));
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn a_reserved_feature_bit_is_refused() {
     ] {
         let data = DetailsData::new(standard_bytes(bytes)).unwrap();
         assert_eq!(
-            ArticulationDetails::from_data(&data),
+            ArticulationDetails::try_from(&data),
             Err(ArticulationDetailsError::ReservedFeatures(bits))
         );
     }
@@ -166,7 +166,7 @@ fn a_reserved_feature_bit_is_refused() {
 fn the_counts_are_read_by_classification_and_subclass() {
     // M2-123 Tables 22 and 23.
     let data = DetailsData::new(standard_bytes([0, 0])).unwrap();
-    let read = ArticulationDetails::from_data(&data).unwrap();
+    let read = ArticulationDetails::try_from(&data).unwrap();
     let at = |class, subclass| read.counts(class).unwrap().get(u4(subclass)).get();
     assert_eq!(at(Classification::Core, 0), 16);
     assert_eq!(at(Classification::Core, 2), 4);
@@ -192,7 +192,7 @@ fn the_counts_are_read_by_classification_and_subclass() {
 fn a_details_reply_of_the_wrong_length_or_with_a_count_above_16_is_refused() {
     let short = DetailsData::new(vec![0; 129]).unwrap();
     assert_eq!(
-        ArticulationDetails::from_data(&short),
+        ArticulationDetails::try_from(&short),
         Err(ArticulationDetailsError::Length {
             expected: 130,
             got: 129
@@ -202,7 +202,7 @@ fn a_details_reply_of_the_wrong_length_or_with_a_count_above_16_is_refused() {
     let mut bytes = standard_bytes([0, 0]);
     bytes[2 + 16 + 3] = 17;
     assert_eq!(
-        ArticulationDetails::from_data(&DetailsData::new(bytes).unwrap()),
+        ArticulationDetails::try_from(&DetailsData::new(bytes).unwrap()),
         Err(ArticulationDetailsError::Count {
             index: 21,
             value: 17
@@ -225,7 +225,7 @@ fn the_custom_reply_is_96_bytes_one_declaration_per_custom_classification() {
     expected[2 * 16 + 5] = 9;
     expected[5 * 16 + 15] = 16;
     assert_eq!(data.as_bytes(), expected);
-    assert_eq!(CustomSounds::from_data(&data), Ok(custom.clone()));
+    assert_eq!(CustomSounds::try_from(&data), Ok(custom.clone()));
     assert_eq!(custom.counts(CustomClassification::C1C).get(u4(5)).get(), 9);
     assert_eq!(
         custom.counts(CustomClassification::C1F).get(u4(0xF)).get(),
@@ -237,7 +237,7 @@ fn the_custom_reply_is_96_bytes_one_declaration_per_custom_classification() {
 #[test]
 fn a_custom_reply_of_the_wrong_length_or_with_a_count_above_16_is_refused() {
     assert_eq!(
-        CustomSounds::from_data(&DetailsData::new(vec![0; 130]).unwrap()),
+        CustomSounds::try_from(&DetailsData::new(vec![0; 130]).unwrap()),
         Err(ArticulationDetailsError::Length {
             expected: 96,
             got: 130
@@ -246,7 +246,7 @@ fn a_custom_reply_of_the_wrong_length_or_with_a_count_above_16_is_refused() {
     let mut bytes = vec![0u8; 96];
     bytes[40] = 100;
     assert_eq!(
-        CustomSounds::from_data(&DetailsData::new(bytes).unwrap()),
+        CustomSounds::try_from(&DetailsData::new(bytes).unwrap()),
         Err(ArticulationDetailsError::Count {
             index: 40,
             value: 100

@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::os::raw::c_void;
+use std::ptr::NonNull;
 
 use tutti_plugin_types::{c_str_prefix, read_c_str, write_c_str};
 
@@ -26,7 +27,12 @@ const LANGUAGE_ENGLISH: isize = 1;
 /// [`c_str_prefix`]`(src, max)` and a NUL: always terminated, cut at a char boundary, and
 /// nothing is written past that NUL, so a destination that is shorter than `max` but holds
 /// the string is not overrun by a clearing pass.
-pub fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
+///
+/// # Safety
+///
+/// A non-null `dst` is writable for `max` bytes, and nothing else accesses them during the
+/// call.
+pub unsafe fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
     if dst.is_null() || max == 0 {
         return 0;
     }
@@ -47,9 +53,14 @@ pub fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
 /// Takes `&dyn Host`, not `&mut`: every `Host` method takes `&self`, and this
 /// runs on the plugin's audio thread as often as the UI thread — see
 /// [`crate::host::PluginLoader::load`] for why no lock guards it.
-pub fn host_dispatch(
+///
+/// # Safety
+///
+/// `ptr` is what the plugin passed `audioMasterCallback` for `opcode`: the opcode's
+/// structure or string, valid for the call, or null.
+pub(crate) unsafe fn host_dispatch(
     host: &dyn Host,
-    effect: *mut AEffect,
+    _effect: *mut AEffect,
     opcode: i32,
     index: i32,
     value: isize,
@@ -58,6 +69,7 @@ pub fn host_dispatch(
 ) -> isize {
     use crate::host::OpCode;
 
+    let opcode_number = opcode;
     let opcode = OpCode::try_from(opcode);
     match opcode {
         Ok(OpCode::Version) => return 2400,
@@ -72,11 +84,16 @@ pub fn host_dispatch(
         // is a malformed query and answers "don't know".
         Ok(OpCode::CanDo) => {
             if ptr.is_null() {
+                host.refused_callback(opcode_number);
                 return 0;
             }
-            let query = read_string(ptr);
-            info!("Plugin is asking if host can: {}.", query);
-            return match host.can_do(&query) {
+            let mut buf = [0u8; MAX_QUERY_LEN];
+            // SAFETY: `ptr` is non-null and the plugin's NUL-terminated query string, valid
+            // for the call (this fn's contract).
+            let bytes = unsafe { read_bytes(ptr, &mut buf) };
+            // A query that is no UTF-8 names no capability the host knows: "don't know".
+            let query = std::str::from_utf8(bytes).unwrap_or("");
+            return match host.can_do(query) {
                 Supported::Yes => 1,
                 Supported::Maybe => 0,
                 Supported::No => -1,
@@ -86,22 +103,26 @@ pub fn host_dispatch(
 
         Ok(OpCode::GetVendorVersion) => return host.get_info().0,
         Ok(OpCode::GetVendorString) => {
-            return copy_string(ptr, &host.get_info().1, MAX_VENDOR_STR_LEN);
+            // SAFETY: the plugin's buffer for the string, of the SDK's size for the opcode.
+            return unsafe { copy_string(ptr, host.get_info().1, MAX_VENDOR_STR_LEN) };
         }
         Ok(OpCode::GetProductString) => {
-            return copy_string(ptr, &host.get_info().2, MAX_PRODUCT_STR_LEN);
+            // SAFETY: as above.
+            return unsafe { copy_string(ptr, host.get_info().2, MAX_PRODUCT_STR_LEN) };
         }
         Ok(OpCode::ProcessEvents) => {
             // A null or misaligned `VstEvents` is a malformed call: not handled.
-            if ptr.is_null() || !(ptr as *const api::Events).is_aligned() {
+            let events = NonNull::new(ptr.cast::<api::Events>()).filter(|e| e.is_aligned());
+            let Some(events) = events else {
+                host.refused_callback(opcode_number);
                 return 0;
-            }
+            };
             // SAFETY: VST2 ABI: for `audioMasterProcessEvents`, `ptr` is the plugin's
-            // `VstEvents`, valid for the call; non-null and aligned (checked above). What
-            // it holds beyond the header (the count's worth of event pointers) is the
-            // plugin's word, which the view reads and `PluginEvents::iter` bounds as it can.
-            let events = unsafe { &*(ptr as *const api::Events) };
-            host.process_plugin_events(api::PluginEvents::new(events));
+            // `VstEvents`, valid for the call; non-null and aligned (checked above). The
+            // pointer keeps the provenance of the plugin's whole list, and what it holds
+            // beyond the header (the count's worth of event pointers) is the plugin's word,
+            // which `PluginEvents::iter` bounds as it can.
+            host.process_plugin_events(unsafe { api::PluginEvents::new(events) });
         }
 
         Ok(OpCode::GetTime) => {
@@ -167,13 +188,9 @@ pub fn host_dispatch(
         // host has no file dialog; `0` declines, and `canDo` answers No.
         Ok(OpCode::OpenFileSelector | OpCode::CloseFileSelector) => return 0,
 
-        _ => {
-            trace!("VST: Got unimplemented host opcode ({:?})", opcode);
-            trace!(
-                "Arguments; effect: {:?}, index: {}, value: {}, ptr: {:?}, opt: {}",
-                effect, index, value, ptr, opt
-            );
-        }
+        // An opcode the host does not answer: counted by the host, never logged (this runs
+        // on the plugin's audio thread).
+        _ => host.refused_callback(opcode_number),
     }
     0
 }
@@ -184,12 +201,28 @@ const MAX_QUERY_LEN: usize = 256;
 
 /// Read a string from the `ptr` buffer, up to its first NUL or `MAX_QUERY_LEN` (256) bytes. A
 /// null `ptr` reads as the empty string.
-pub fn read_string(ptr: *mut c_void) -> String {
+///
+/// # Safety
+///
+/// A non-null `ptr` is a NUL-terminated C string, readable up to its NUL for the call.
+pub unsafe fn read_string(ptr: *mut c_void) -> String {
+    let mut buf = [0u8; MAX_QUERY_LEN];
+    // SAFETY: this fn's contract is `read_bytes`'s.
+    read_c_str(unsafe { read_bytes(ptr, &mut buf) })
+}
+
+/// The bytes of the string at `ptr`, up to its first NUL or `MAX_QUERY_LEN`, in `buf`. Empty
+/// for a null `ptr`. Allocates nothing, so the audio thread may call it.
+///
+/// # Safety
+///
+/// As [`read_string`].
+unsafe fn read_bytes(ptr: *mut c_void, buf: &mut [u8; MAX_QUERY_LEN]) -> &[u8] {
     if ptr.is_null() {
-        return String::new();
+        return &[];
     }
     let ptr = ptr.cast::<u8>().cast_const();
-    let mut bytes = Vec::new();
+    let mut len = 0;
     for at in 0..MAX_QUERY_LEN {
         // SAFETY: `ptr` is non-null (checked above), and the VST2 ABI has every opcode that
         // passes a string send a NUL-terminated C string that the sender keeps valid for the
@@ -201,15 +234,39 @@ pub fn read_string(ptr: *mut c_void) -> String {
         if byte == 0 {
             break;
         }
-        bytes.push(byte);
+        buf[len] = byte;
+        len += 1;
     }
-    read_c_str(&bytes)
+    &buf[..len]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// [`super::copy_string`] over the test's own buffers, each at least `max` bytes (or
+    /// untouched, for a `max` of 0 and a null `dst`).
+    fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
+        // SAFETY: the callers pass a null `dst`, a `max` of 0, or a buffer of `max` bytes.
+        unsafe { super::copy_string(dst, src, max) }
+    }
+
+    /// [`super::host_dispatch`] with the test's own pointers: null, misaligned (never
+    /// followed) or absent.
+    fn host_dispatch(
+        host: &dyn Host,
+        effect: *mut AEffect,
+        opcode: i32,
+        index: i32,
+        value: isize,
+        ptr: *mut c_void,
+        opt: f32,
+    ) -> isize {
+        // SAFETY: the callers pass null or a misaligned pointer, which the dispatch refuses
+        // before reading.
+        unsafe { super::host_dispatch(host, effect, opcode, index, value, ptr, opt) }
+    }
 
     /// **`copy_string` writes the string, a NUL, and nothing past it.**
     #[test]
@@ -285,5 +342,129 @@ mod tests {
         ] {
             assert_eq!(host_dispatch(&host, no_effect, opcode, 0, 0, null, 0.0), 0);
         }
+    }
+
+    /// A host that counts the callbacks it refuses.
+    struct Refusing(AtomicUsize);
+
+    impl Host for Refusing {
+        fn refused_callback(&self, _opcode: i32) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// **Each callback the host does not answer is reported to the host**: an opcode it does
+    /// not implement, a null `VstEvents` and a null `canDo` string.
+    #[test]
+    fn each_unanswered_callback_is_counted() {
+        let host = Refusing(AtomicUsize::new(0));
+        let null: *mut c_void = std::ptr::null_mut();
+        let no_effect: *mut AEffect = std::ptr::null_mut();
+        let opcode = |op: crate::host::OpCode| op as i32;
+
+        assert_eq!(host_dispatch(&host, no_effect, 9999, 0, 0, null, 0.0), 0);
+        assert_eq!(host.0.load(Ordering::SeqCst), 1, "an unknown opcode");
+        let process_events = opcode(crate::host::OpCode::ProcessEvents);
+        host_dispatch(&host, no_effect, process_events, 0, 0, null, 0.0);
+        assert_eq!(host.0.load(Ordering::SeqCst), 2, "a null event list");
+        let can_do = opcode(crate::host::OpCode::CanDo);
+        host_dispatch(&host, no_effect, can_do, 0, 0, null, 0.0);
+        assert_eq!(host.0.load(Ordering::SeqCst), 3, "a null canDo string");
+
+        // An answered callback is not counted.
+        let version = opcode(crate::host::OpCode::Version);
+        assert_eq!(
+            host_dispatch(&host, no_effect, version, 0, 0, null, 0.0),
+            2400
+        );
+        assert_eq!(host.0.load(Ordering::SeqCst), 3);
+    }
+
+    struct Answering;
+
+    impl Host for Answering {
+        fn can_do(&self, can_do: &str) -> Supported {
+            if can_do == "sendVstEvents" {
+                Supported::Yes
+            } else {
+                Supported::Maybe
+            }
+        }
+        fn get_time_info(&self, _mask: i32) -> Option<TimeInfo> {
+            Some(TimeInfo::default())
+        }
+        fn process_plugin_events(&self, events: api::PluginEvents<'_>) {
+            assert_eq!(events.iter().count(), 0);
+        }
+    }
+
+    /// **The callbacks a plugin makes from its audio thread allocate nothing**: the `canDo`
+    /// query is read into the stack, the vendor and product strings are the host's own
+    /// `&str`s, and the event list and time info are views.
+    #[test]
+    fn the_audio_thread_callbacks_allocate_nothing() {
+        use crate::host::OpCode;
+        let no_effect: *mut AEffect = std::ptr::null_mut();
+        let null: *mut c_void = std::ptr::null_mut();
+        let mut query = *b"sendVstEvents\0";
+        let mut strings = [0u8; 64];
+        let mut events = api::Events {
+            num_events: 0,
+            _reserved: 0,
+            events: [std::ptr::null_mut(); 2],
+        };
+        let events_ptr: *mut c_void = (&raw mut events).cast();
+        let query_ptr: *mut c_void = query.as_mut_ptr().cast();
+        let strings_ptr: *mut c_void = strings.as_mut_ptr().cast();
+        let calls: [(OpCode, *mut c_void); 20] = [
+            (OpCode::Automate, null),
+            (OpCode::Version, null),
+            (OpCode::CurrentId, null),
+            (OpCode::Idle, null),
+            (OpCode::GetTime, null),
+            (OpCode::ProcessEvents, events_ptr),
+            (OpCode::IOChanged, null),
+            (OpCode::SizeWindow, null),
+            (OpCode::GetSampleRate, null),
+            (OpCode::GetBlockSize, null),
+            (OpCode::GetInputLatency, null),
+            (OpCode::GetOutputLatency, null),
+            (OpCode::GetCurrentProcessLevel, null),
+            (OpCode::GetAutomationState, null),
+            (OpCode::UpdateDisplay, null),
+            (OpCode::GetLanguage, null),
+            (OpCode::CanDo, query_ptr),
+            (OpCode::GetVendorString, strings_ptr),
+            (OpCode::GetProductString, strings_ptr),
+            (OpCode::GetVendorVersion, null),
+        ];
+        let answered = std::cell::Cell::new(0);
+        assert_no_alloc::assert_no_alloc(|| {
+            for (op, ptr) in calls {
+                // SAFETY: `ptr` is null or the test's own buffer of the size the opcode needs.
+                let _ = unsafe {
+                    super::host_dispatch(&Answering, no_effect, op as i32, 0, 0, ptr, 0.0)
+                };
+                answered.set(answered.get() + 1);
+            }
+            // An opcode the host does not implement is refused without allocating too.
+            // SAFETY: a null pointer is never followed.
+            let _ = unsafe { super::host_dispatch(&Answering, no_effect, 9999, 0, 0, null, 0.0) };
+        });
+        assert_eq!(answered.get(), calls.len());
+        assert_eq!(
+            host_dispatch(
+                &Answering,
+                no_effect,
+                OpCode::CanDo as i32,
+                0,
+                0,
+                query_ptr,
+                0.0
+            ),
+            1,
+            "the query read off the stack is answered"
+        );
+        assert_eq!(&strings[..8], b"product ", "the last string copied");
     }
 }
