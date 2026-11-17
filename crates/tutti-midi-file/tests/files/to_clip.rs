@@ -1115,6 +1115,7 @@ fn lyric_texts(lyrics: &[&str]) -> Vec<String> {
 /// syllable with no space, CR or LF at its end is followed by the rest of its
 /// word, so the karaoke hyphen that says the same is not carried. A hyphen
 /// inside a word stays.
+/// Spec: m2-104/7.5.10#12
 #[test]
 fn a_karaoke_hyphen_ends_no_syllable_in_the_clip() {
     assert_eq!(lyric_texts(&["Hel-", "lo "]), ["Hel", "lo "]);

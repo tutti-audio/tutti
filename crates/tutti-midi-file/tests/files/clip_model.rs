@@ -1450,7 +1450,7 @@ fn written_after_start(events: Vec<Ump>, header_end: u64) -> (Vec<Ump>, MidiFile
 /// ticks has a Delta Clockstamp of 5 before Start of Clip and none between it,
 /// the Set Tempo and the Set Time Signature, and the sequence still reads
 /// them at tick 0, where the first bar starts. What follows has its own.
-/// Spec: m2-116/7.1.1#2, m2-116/7.1.1#3, m2-116/7.1.2#2, m2-116/7.1#2, m2-116/3.2.2#1
+/// Spec: m2-116/7.1.1#2, m2-116/7.1.1#3, m2-116/7.1.2#2, m2-116/7.1#2, m2-116/3.2.2#1, m2-104/7.1.10#2
 #[test]
 fn the_first_tempo_and_signature_use_the_delta_clockstamp_before_start_of_clip() {
     let (packets, file) =
