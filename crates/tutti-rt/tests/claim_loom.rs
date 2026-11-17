@@ -49,7 +49,6 @@ fn two_try_claims_are_never_both_holders() {
         };
         let mine = claim.try_claim().map(|_g| thing.bump()).is_some();
         let theirs = other.join().unwrap();
-        assert!(mine || theirs || thing.get() == 0);
         assert_eq!(thing.get(), u32::from(mine) + u32::from(theirs));
     });
 }

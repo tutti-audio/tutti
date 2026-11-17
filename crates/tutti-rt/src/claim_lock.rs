@@ -14,8 +14,9 @@
 //!   loop with a `Backoff` between tries: a spin, yields, then sleeps of at
 //!   most a millisecond. It returns `None` on seeing `DEAD`.
 //! - **Release** is one `Release` store of `FREE`, or of `DEAD` for
-//!   [`kill`](ClaimGuard::kill) and a guard dropped while panicking (as a
-//!   `Mutex` poisons). Only the holder writes the word while it is `HELD`, so a
+//!   [`kill`](ClaimGuard::kill) and a guard dropped by a panic that began
+//!   while it was held (a `Mutex`'s poison rule: panicking now, and not
+//!   panicking when the guard was taken). Only the holder writes the word while it is `HELD`, so a
 //!   store is exact. The audio side that releases signals nothing: waiters poll,
 //!   because a wake-up that cannot lock would need a doorbell per waiter and
 //!   the wait is a control-side rarity.
@@ -88,14 +89,18 @@ impl Default for Claim {
 
 /// The claim held until it drops ([`Claim::try_claim`], [`Claim::claim`]).
 ///
-/// Dropping it frees the claim, or kills it when the thread is panicking, as
-/// a `Mutex` poisons.
+/// Dropping it frees the claim, or kills it when a panic began while it was
+/// held: the thread is panicking now and was not when the guard was taken (a
+/// `Mutex`'s poison rule). A guard taken and dropped during an unrelated unwind
+/// frees the claim.
 #[derive(Debug)]
 #[must_use = "the claim is held only while the guard is held"]
 pub struct ClaimGuard<'a> {
     claim: &'a Claim,
     published: bool,
     kill: bool,
+    /// Whether the thread was panicking when the guard was taken.
+    panicking_at_take: bool,
 }
 
 impl Claim {
@@ -118,12 +123,14 @@ impl Claim {
                 claim: self,
                 published: false,
                 kill: false,
+                panicking_at_take: std::thread::panicking(),
             })
     }
 
     /// Takes the claim, waiting while it is held (module docs: it backs off,
     /// never spins hot). `None` once the claim is dead, including when it dies
-    /// during the wait. Control side.
+    /// during the wait. Control side. It never returns when called from the
+    /// thread that holds the claim: that thread is the one waiting.
     pub fn claim(&self) -> Option<ClaimGuard<'_>> {
         let mut backoff = Backoff::new();
         loop {
@@ -174,7 +181,7 @@ impl Drop for ClaimGuard<'_> {
         if self.published {
             self.claim.owner.store(0, Ordering::Release);
         }
-        let next = if self.kill || std::thread::panicking() {
+        let next = if self.kill || (std::thread::panicking() && !self.panicking_at_take) {
             DEAD
         } else {
             FREE
@@ -256,7 +263,7 @@ mod tests {
         });
     }
 
-    /// **A guard dropped during a panic kills the claim**, as a `Mutex` poisons.
+    /// **A guard dropped by a panic that began while held kills the claim.**
     #[test]
     fn a_guard_dropped_while_panicking_kills_the_claim() {
         let claim = Claim::new();
@@ -267,5 +274,24 @@ mod tests {
         assert!(caught.is_err());
         assert!(claim.is_dead());
         assert!(claim.try_claim().is_none());
+    }
+
+    /// **A guard taken and dropped during an unrelated unwind leaves the claim usable.**
+    #[test]
+    fn a_guard_taken_during_an_unwind_does_not_kill_the_claim() {
+        struct TakesDuringUnwind<'a>(&'a Claim);
+        impl Drop for TakesDuringUnwind<'_> {
+            fn drop(&mut self) {
+                drop(self.0.try_claim().expect("free"));
+            }
+        }
+        let claim = Claim::new();
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _taker = TakesDuringUnwind(&claim);
+            panic!("an unrelated panic");
+        }));
+        assert!(caught.is_err());
+        assert!(!claim.is_dead());
+        assert!(claim.try_claim().is_some());
     }
 }

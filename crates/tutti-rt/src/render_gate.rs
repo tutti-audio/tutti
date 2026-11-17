@@ -178,7 +178,10 @@ impl RenderGate {
     /// refused, then waits until the renders already admitted have dropped.
     /// Returns `None` only when the gate is not `Open`; renders never refuse
     /// it. Control side: it waits (module docs, "Waiting"). Uninitialise the
-    /// plugin after it returns, then finish.
+    /// plugin after it returns, then finish. Dropped unfinished, the guard
+    /// reopens the gate, so leave the plugin renderable before dropping it.
+    /// Called from a render, or while its own thread holds a [`GateGuard`], it
+    /// never returns: it waits for that render.
     pub fn close(&self) -> Option<Closing<'_>> {
         if !self.acquire(OPEN, CLOSING) {
             return None;

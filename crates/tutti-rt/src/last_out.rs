@@ -76,9 +76,9 @@ pub struct LastOut<T> {
 }
 
 // SAFETY: `value` is touched by `leave` only after the `fetch_or` that proves
-// the caller is the single later party (see `leave`), and by `drop` through
-// `&mut self`; so no two threads access it at once, and the value moves to
-// one thread, which needs `T: Send`.
+// the caller is the single later party (see `leave`), and by the field's own
+// drop, which has exclusive access; so no two threads access it at once, and
+// the value moves to one thread, which needs `T: Send`.
 unsafe impl<T: Send> Sync for LastOut<T> {}
 
 impl<T> LastOut<T> {

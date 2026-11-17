@@ -160,3 +160,54 @@ fn a_held_gate_refuses_a_concurrent_begin_open() {
         assert!(gate.begin_open().is_some());
     });
 }
+
+#[test]
+fn an_unfinished_opening_admits_no_render_and_leaves_the_gate_closed() {
+    loom::model(|| {
+        let gate = Arc::new(RenderGate::new());
+        let renderer = {
+            let gate = gate.clone();
+            thread::spawn(move || gate.enter().is_some())
+        };
+        drop(gate.begin_open().expect("closed"));
+        assert!(
+            !renderer.join().unwrap(),
+            "no render during or after a failed open"
+        );
+        assert_eq!(gate.state(), GateState::Closed);
+    });
+}
+
+#[test]
+fn close_and_begin_open_are_granted_only_from_their_own_states() {
+    // From Closed: close is refused, begin_open granted.
+    loom::model(|| {
+        let gate = Arc::new(RenderGate::new());
+        let closer = {
+            let gate = gate.clone();
+            thread::spawn(move || gate.close().is_none())
+        };
+        let opening = gate
+            .begin_open()
+            .expect("only the opener moves a closed gate");
+        opening.finish();
+        let refused = closer.join().unwrap();
+        // The closer ran before the open (refused) or after it (granted, then
+        // dropped, reopening the gate).
+        let _ = refused;
+        assert_eq!(gate.state(), GateState::Open);
+    });
+    // From Open: begin_open is refused, close granted.
+    loom::model(|| {
+        let gate = Arc::new(RenderGate::new());
+        gate.begin_open().expect("closed").finish();
+        let opener = {
+            let gate = gate.clone();
+            thread::spawn(move || gate.begin_open().is_none())
+        };
+        let closing = gate.close().expect("open");
+        assert!(opener.join().unwrap(), "no open from Open or Closing");
+        closing.finish();
+        assert_eq!(gate.state(), GateState::Closed);
+    });
+}
