@@ -16,6 +16,7 @@ use tutti_ump::U7;
 ///     clock: true,
 ///     mtc: true,
 ///     mmc: Some(Recipient::AllCall),
+///     flex: false,
 ///     rate: MtcRate::Fps30,
 /// };
 /// assert_ne!(messages, SyncMessages::OFF);
@@ -32,6 +33,12 @@ pub struct SyncMessages {
     /// MIDI Machine Control: Play, Stop and Locate to this recipient, each on
     /// the frame the transport changes. `None` sends none.
     pub mmc: Option<Recipient>,
+    /// The Flex Data tempo and meter: a Set Tempo (M2-104 §7.5.3) when the
+    /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
+    /// does, each on the Group at the times the clock's docs give. Sent with or
+    /// without the Beat Clock. The meter is the node's
+    /// ([`SyncOut::meter`](crate::SyncOut::meter)).
+    pub flex: bool,
     /// The SMPTE frame rate every time code is stated at: the quarter-frames,
     /// the Full Messages and an MMC Locate, so they cannot disagree.
     pub rate: MtcRate,
@@ -43,12 +50,14 @@ impl SyncMessages {
         clock: false,
         mtc: false,
         mmc: None,
+        flex: false,
         rate: MtcRate::Fps25,
     };
 
     const CLOCK: u64 = 1;
     const MTC: u64 = 1 << 1;
     const MMC: u64 = 1 << 2;
+    const FLEX: u64 = 1 << 3;
     const RATE_SHIFT: u32 = 8;
     const DEVICE_SHIFT: u32 = 16;
 }
@@ -59,7 +68,7 @@ impl Default for SyncMessages {
     }
 }
 
-/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bits 8 to 15
+/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bit 3 Flex Data, bits 8 to 15
 /// the rate's two-bit code ([`MtcRate::code`]), bits 16 to 22 the MMC
 /// recipient's device byte (`0x7F` the all-call; zero while MMC is absent).
 ///
@@ -76,6 +85,9 @@ impl SettingWord for SyncMessages {
         if self.mtc {
             word |= Self::MTC;
         }
+        if self.flex {
+            word |= Self::FLEX;
+        }
         if let Some(to) = self.mmc {
             word |= Self::MMC | u64::from(to.device_byte()) << Self::DEVICE_SHIFT;
         }
@@ -88,6 +100,7 @@ impl SettingWord for SyncMessages {
             mtc: word & Self::MTC != 0,
             mmc: (word & Self::MMC != 0)
                 .then(|| Recipient::of_byte(U7::masked((word >> Self::DEVICE_SHIFT) as u8))),
+            flex: word & Self::FLEX != 0,
             rate: MtcRate::masked((word >> Self::RATE_SHIFT) as u8),
         })
     }

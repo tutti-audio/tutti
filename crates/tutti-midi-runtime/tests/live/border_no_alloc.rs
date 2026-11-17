@@ -76,6 +76,7 @@ fn the_border_nodes_process_without_allocating() {
             clock: true,
             mtc: true,
             mmc: Some(Recipient::AllCall),
+            flex: true,
             rate: MtcRate::Fps30,
         }),
     );

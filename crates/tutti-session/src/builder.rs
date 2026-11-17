@@ -906,9 +906,11 @@ impl<C: Clock> SessionBuilder<C> {
         // each output.
         #[cfg(feature = "midi")]
         let midi = {
-            let (sync, sync_controls) = graph.add(tutti_midi_runtime::SyncOut::new(
-                tutti_ump::MidiGroup::FIRST,
-            ));
+            let meter = click_settings.project_meter();
+            let (sync, sync_controls) = graph.add(
+                tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
+                    .meter(move || meter.reader()),
+            );
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,
                 sync: sync.erase(),

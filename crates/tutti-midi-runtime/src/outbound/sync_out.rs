@@ -15,6 +15,8 @@
 //!   start and a stop in one block both go. The first block after MMC is turned
 //!   on only looks. A loop wrap inside a block is a locate on the next block's
 //!   first frame, where the position is first seen to have moved.
+//! - Flex Data tempo and meter are the clock's too ([`SyncMessages::flex`]): the
+//!   meter is read from the cell [`meter`](SyncOut::meter) names (4/4 until one is).
 //! - **One rate**: MTC and an MMC LOCATE state time codes at
 //!   [`SyncMessages::rate`], so the two cannot disagree.
 //!
@@ -40,8 +42,8 @@ use tutti_graph::{
     Offset, Prepare, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_rt::{Counter, CounterWriter, RtVec, Setting, counter};
-use tutti_types::{Beat, SampleRate};
+use tutti_rt::{Counter, CounterWriter, Publisher, Reader, RtVec, Setting, counter};
+use tutti_types::{Beat, MeterMap, SampleRate};
 use tutti_ump::{MidiGroup, Sysex7Packets};
 
 use super::clock_master::ClockMaster;
@@ -94,11 +96,33 @@ impl SyncOutControls {
     }
 }
 
+/// Where a [`SyncOut`] gets a reader of the project meter: a function that
+/// registers one (control side), called for the node and again for each fork.
+#[derive(Clone)]
+struct MeterSource(Arc<dyn Fn() -> Reader<MeterMap> + Send + Sync>);
+
+impl MeterSource {
+    /// A source of a constant meter, 4/4.
+    fn constant() -> Self {
+        Self(Arc::new(|| Publisher::new(MeterMap::default()).reader()))
+    }
+}
+
+impl std::fmt::Debug for MeterSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeterSource")
+    }
+}
+
 /// The transport sent to other gear, as a graph node with one event output.
 /// See the module docs.
 #[derive(Debug)]
 pub struct SyncOut {
     clock: ClockMaster,
+    /// The reader of the project meter, lent once per block when Flex is on.
+    meter: Reader<MeterMap>,
+    /// Registers another reader on the same meter: a fork's.
+    meter_source: MeterSource,
     sender: MachineControlSender,
     group: MidiGroup,
     controls: Arc<SyncOutControls>,
@@ -134,8 +158,11 @@ impl SyncOut {
     #[must_use]
     pub fn new(group: MidiGroup) -> Self {
         let (losses, reader) = counter();
+        let meter_source = MeterSource::constant();
         Self {
             clock: ClockMaster::new(group, UNPREPARED_RATE),
+            meter: (meter_source.0)(),
+            meter_source,
             sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
             group,
             controls: Arc::new(SyncOutControls {
@@ -145,6 +172,19 @@ impl SyncOut {
             losses,
             pending: RtVec::new(),
         }
+    }
+
+    /// The project meter the Flex time signatures state: `register` makes a
+    /// reader on its cell (control side), called now and again for each fork.
+    /// 4/4 until set.
+    #[must_use]
+    pub fn meter(
+        mut self,
+        register: impl Fn() -> Reader<MeterMap> + Send + Sync + 'static,
+    ) -> Self {
+        self.meter_source = MeterSource(Arc::new(register));
+        self.meter = (self.meter_source.0)();
+        self
     }
 
     /// What the node sends from its first block.
@@ -197,6 +237,7 @@ impl Node for SyncOut {
             let pending = &mut self.pending;
             self.clock.tick(
                 messages,
+                &mut self.meter,
                 &seg.transport,
                 seg.block_len,
                 &mut |(at, ump): UmpAt| {
@@ -251,11 +292,15 @@ impl Node for SyncOut {
 struct SyncFork {
     group: MidiGroup,
     controls: Arc<SyncOutControls>,
+    meter: MeterSource,
 }
 
 impl ForkSource for SyncFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
-        let node = SyncOut::new(self.group).messages(self.controls.messages.get());
+        let meter = self.meter.clone();
+        let node = SyncOut::new(self.group)
+            .meter(move || (meter.0)())
+            .messages(self.controls.messages.get());
         Ok(Forked::new(Box::new(node)))
     }
 }
@@ -269,6 +314,7 @@ impl IntoNode for SyncOut {
         let fork = SyncFork {
             group: self.group,
             controls: Arc::clone(&controls),
+            meter: self.meter_source.clone(),
         };
         NodeParts {
             node: Box::new(self),

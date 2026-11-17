@@ -47,11 +47,12 @@ struct Rig {
 
 impl Rig {
     fn new(group: MidiGroup, messages: SyncMessages) -> Self {
+        Self::over(SyncOut::new(group).messages(messages))
+    }
+
+    fn over(node: SyncOut) -> Self {
         let mut rig = EventRig::events_only(RATE, BLOCK, 1);
-        let controls = rig
-            .editor
-            .insert(NodeKey(1), "sync", SyncOut::new(group).messages(messages))
-            .controls;
+        let controls = rig.editor.insert(NodeKey(1), "sync", node).controls;
         rig.feed(NodeKey(1), 0, 0);
         rig.commit();
         Self {
@@ -302,6 +303,7 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
             clock: true,
             mtc: true,
             mmc: Some(Recipient::AllCall),
+            flex: false,
             rate: MtcRate::Fps25,
         },
     );
@@ -330,8 +332,8 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
     );
 }
 
-/// **Every message is on the node's Group**: the clock's System messages and
-/// the SysEx packets of Machine Control and MTC alike.
+/// **Every message is on the node's Group**: the clock's System messages, the
+/// Flex Data and the SysEx packets of Machine Control and MTC alike.
 #[test]
 fn every_message_is_on_the_nodes_group() {
     let group = MidiGroup::of(5);
@@ -341,6 +343,7 @@ fn every_message_is_on_the_nodes_group() {
             clock: true,
             mtc: true,
             mmc: Some(Recipient::AllCall),
+            flex: true,
             rate: MtcRate::Fps30,
         },
     );
@@ -410,4 +413,57 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     assert_eq!(got[0], system(G, System::Start));
     assert_eq!(got[1], system(G, System::TimingClock));
     let _ = SyncOut::new(MidiGroup::FIRST).into_node();
+}
+
+/// **Flex Data states the tempo and the node's meter (M2-104 7.5.3 and 7.5.4)**
+/// on the first tick and bar line of a start, with no Beat Clock: Set Tempo for
+/// 120 BPM (500 000 µs a quarter, in 10 ns units 50 000 000) and Set Time
+/// Signature 3/4 (numerator 3, denominator 2^2, 8 thirty-seconds a beat),
+/// both on the start's frame, and nothing more while the transport rolls on.
+#[test]
+fn flex_states_the_tempo_and_the_nodes_meter_once() {
+    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
+        Beat(0.0),
+        TimeSignature::of(3, 4),
+    )])));
+    let mut rig = Rig::over(
+        SyncOut::new(G)
+            .meter(move || meter.reader())
+            .messages(SyncMessages {
+                flex: true,
+                ..SyncMessages::OFF
+            }),
+    );
+    let flexes = |events: &[(u64, Ump)]| -> Vec<(u64, tutti_ump::Flex)> {
+        events
+            .iter()
+            .filter_map(|&(frame, ump)| match ump.decode() {
+                Ok(Message::Flex(_, flex)) => Some((frame, flex)),
+                _ => None,
+            })
+            .collect()
+    };
+    let started = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    assert_eq!(
+        flexes(&started),
+        [
+            (0, tutti_ump::Flex::SetTempo(50_000_000)),
+            (
+                0,
+                tutti_ump::Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
+                    numerator: 3,
+                    denominator: 2,
+                    thirty_seconds: 8,
+                })
+            )
+        ]
+    );
+    assert!(
+        started
+            .iter()
+            .all(|e| e.1 != system(G, System::TimingClock)),
+        "no clock bytes"
+    );
+    assert!(flexes(&rig.block(BLOCK, rolling(beat(0.0, BLOCK)), &[])).is_empty());
 }
