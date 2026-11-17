@@ -9,7 +9,7 @@
 //! and `disable` return a [`Job<SwitchProfile>`](Job), [`ReportPeer::request`]
 //! a [`Job<RequestReport>`](Job). The job lands in the [`update`](crate::Session::update)
 //! after the poll that reads the peer's answer, as
-//! [`SessionEvent::Landed`](crate::SessionEvent::Landed).
+//! [`SessionEvent::Landed`].
 //!
 //! A peer's Property Exchange Resources
 //! ([`MidiInputInfo::resource_peers`](crate::MidiInputInfo::resource_peers)) are
