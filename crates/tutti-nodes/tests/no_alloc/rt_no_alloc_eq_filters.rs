@@ -10,6 +10,7 @@ use tutti_types::{ChannelLayout, Db, Hz, Q, SampleRate, UnitParam};
 fn run<N: IntoNode>(node: N, moves: impl Fn(&N::Controls, usize)) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
+        let ch = ch.into_samples_mut();
         for (i, x) in ch.iter_mut().enumerate() {
             let side = if (i / 8) % 2 == 0 { 0.5 } else { -0.5 };
             *x = 0.25 + side * (c as f32 + 1.0) * 0.5;
@@ -20,7 +21,11 @@ fn run<N: IntoNode>(node: N, moves: impl Fn(&N::Controls, usize)) {
         rig.block();
     }
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
     assert_no_alloc::assert_no_alloc(|| {
