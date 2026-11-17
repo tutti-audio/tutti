@@ -47,13 +47,13 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
     ///
     /// # Errors
     ///
-    /// [`BufferError::LengthMismatch`] when `input` has channels and holds a
-    /// different frame count from `output`.
+    /// [`BufferError::BlockLengthMismatch`] when `input` has channels and holds
+    /// a different frame count from `output`.
     pub fn new(input: Planes<'i, S>, output: PlanesMut<'s, 'a, S>) -> Result<Self, BufferError> {
         if input.channels() > 0 && input.frames() != output.frames() {
-            return Err(BufferError::LengthMismatch {
-                src: input.frames(),
-                dst: output.frames(),
+            return Err(BufferError::BlockLengthMismatch {
+                input: input.frames(),
+                output: output.frames(),
             });
         }
         Ok(Self { input, output })
@@ -68,19 +68,28 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
 
     /// The input planes; empty for a processor with no input.
     #[must_use]
-    pub const fn input(&self) -> &Planes<'i, S> {
-        &self.input
+    pub const fn input(&self) -> Planes<'i, S> {
+        self.input
     }
 
-    /// The output planes.
-    pub fn output(&mut self) -> &mut PlanesMut<'s, 'a, S> {
-        &mut self.output
+    /// The output planes, reborrowed: their samples are writable, the views
+    /// themselves are not replaceable, so the frame counts stay equal.
+    #[must_use]
+    pub fn output(&mut self) -> PlanesMut<'_, 'a, S> {
+        self.output.reborrow()
     }
 
     /// The input and the output at once, for a processor that reads one while
     /// it writes the other.
-    pub fn split(&mut self) -> (&Planes<'i, S>, &mut PlanesMut<'s, 'a, S>) {
-        (&self.input, &mut self.output)
+    #[must_use]
+    pub fn split(&mut self) -> (Planes<'i, S>, PlanesMut<'_, 'a, S>) {
+        (self.input, self.output.reborrow())
+    }
+
+    /// The input and the output, taken apart.
+    #[must_use]
+    pub fn into_parts(self) -> (Planes<'i, S>, PlanesMut<'s, 'a, S>) {
+        (self.input, self.output)
     }
 }
 

@@ -13,7 +13,8 @@
 //! - [`Interleaved`] / [`InterleavedMut`]: whole frames in one slice, carrying
 //!   their [`ChannelLayout`](tutti_types::ChannelLayout);
 //! - [`Planes`] / [`PlanesMut`]: one equal-length slice per channel, and
-//!   [`StereoPlanes`], exactly two.
+//!   [`StereoPlanes`], exactly two;
+//! - [`InputOutput`]: one block's input and output planes at one frame count.
 //!
 //! Construction checks once and returns a [`BufferError`] for a zero width, a
 //! length that is not whole frames or a ragged plane; nothing truncates. Every
