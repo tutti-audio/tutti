@@ -22,6 +22,8 @@
 /// assert_eq!(ControlValue::MAX.get(), u32::MAX);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ControlValue(u32);
 
 impl ControlValue {

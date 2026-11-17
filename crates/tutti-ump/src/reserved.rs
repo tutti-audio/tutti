@@ -15,6 +15,7 @@
 /// let _ = Reserved(2);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Reserved(u8);
 
 impl Reserved {
@@ -38,6 +39,7 @@ impl Reserved {
 /// let _ = ReservedAttribute { kind: 4, data: 0 };
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReservedAttribute {
     kind: u8,
     data: u16,
@@ -71,6 +73,7 @@ impl ReservedAttribute {
 /// let _ = ReservedAccents([3, 0, 2]);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReservedAccents([u8; 3]);
 
 impl ReservedAccents {
@@ -94,6 +97,7 @@ impl ReservedAccents {
 /// let _: Field<FunctionBlockId> = Field::Reserved(Reserved(40));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Field<T> {
     /// A value in range.
     Value(T),

@@ -273,8 +273,8 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
-// `From` into the raw and `TryFrom` from it, for a bounded type with an
-// unsigned raw.
+// `From` into the raw, `TryFrom` from it, and (under `serde`) the bare number
+// read back through `TryFrom`, for a bounded type.
 macro_rules! bounded_conversions {
     ($name:ident, $repr:ty, $max:expr) => {
         impl From<$name> for $repr {
@@ -289,9 +289,26 @@ macro_rules! bounded_conversions {
             fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
                 Self::new(raw).ok_or(OutOfRange {
                     what: stringify!($name),
-                    value: u32::from(raw),
+                    value: (raw as i32).unsigned_abs(),
                     max: $max as u32,
                 })
+            }
+        }
+
+        // Serialized as the bare number, read back through `TryFrom`, so a
+        // document cannot carry a value the type refuses.
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                self.get().serialize(serializer)
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let raw = <$repr as serde::Deserialize>::deserialize(deserializer)?;
+                Self::try_from(raw).map_err(serde::de::Error::custom)
             }
         }
     };
@@ -322,6 +339,7 @@ bounded!(
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
     MpeChannels, u8, 2, 16
 );
+bounded_conversions!(MpeChannels, u8, 16);
 bounded!(
     /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
@@ -367,6 +385,7 @@ bounded!(
     /// (M2-104 §7.4.6.1).
     MonoChannels, u8, 0, 16
 );
+bounded_conversions!(MonoChannels, u8, 16);
 
 impl MonoChannels {
     /// `0`: one channel for each voice of the receiver.
@@ -405,6 +424,7 @@ bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
     SharpsFlats, i8, -7, 7
 );
+bounded_conversions!(SharpsFlats, i8, 7);
 
 /// An unsigned fixed-point pitch: a MIDI note number with a fraction of a
 /// semitone, stored as Q7.25 (7 integer bits, 25 fractional bits). Note On
@@ -412,6 +432,8 @@ bounded!(
 /// Controller #3 as Q7.25 (§7.4.15.2). Q7.9 widens by zero extension, which is
 /// exact (M2-115 §4), so one type holds both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Pitch(u32);
 
 impl Pitch {

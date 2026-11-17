@@ -17,6 +17,8 @@
 /// assert_eq!(BendValue::CENTER.get(), 0x8000_0000);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct BendValue(u32);
 
 impl BendValue {

@@ -128,6 +128,7 @@ impl From<MdsChunkSize> for u16 {
 /// Set"): a count, or unknown for streaming data, which the last chunk
 /// resolves by declaring its own number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MdsChunks {
     /// Zero on the wire: not known yet.
     Unknown,
@@ -159,6 +160,7 @@ impl MdsChunks {
 /// zero in a final chunk of a set whose data the sender cannot vouch for
 /// (section 7.9.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MdsChunk {
     /// Zero on the wire: the set ends here and its data is not verified.
     Unverified,
@@ -191,6 +193,7 @@ impl MdsChunk {
 /// manufacturer id the device id and sub ids are the MMA/AMEI specification's;
 /// with a manufacturer's own they are the manufacturer's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MdsIdentity {
     /// The 16-bit manufacturer id (section 7.10).
     pub manufacturer: ManufacturerId,
