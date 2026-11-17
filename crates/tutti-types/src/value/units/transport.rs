@@ -108,6 +108,19 @@ impl Bpm {
         Bpm::new(60.0 / period.get())
     }
 
+    /// How long one beat lasts at this tempo: 60 over its beats per minute,
+    /// the inverse of [`from_beat_period`](Self::from_beat_period).
+    ///
+    /// ```
+    /// use tutti_types::{Bpm, Seconds};
+    /// assert_eq!(Bpm::of(120.0).beat_period(), Seconds::new(0.5));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn beat_period(self) -> Seconds {
+        Seconds::new(60.0 / self.0)
+    }
+
     /// Whether this tempo differs from `other` by more than `epsilon`, a
     /// tolerance in beats per minute (the unit is the tolerance's, not a tempo
     /// that is played).
