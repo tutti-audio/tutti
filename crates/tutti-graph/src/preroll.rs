@@ -2,8 +2,9 @@
 //! displays it. Nothing in this crate uses it; it lives here because the
 //! session that writes it and a host that reads it both depend on this crate.
 
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::Mutex;
 
+use tutti_rt::LockExt;
 use tutti_types::Samples;
 
 /// The per-channel compensation of the plan sent last, indexed by output
@@ -43,16 +44,10 @@ impl PrerollTable {
         Self(Mutex::new(channels))
     }
 
-    fn lock(&self) -> MutexGuard<'_, Vec<Samples>> {
-        // A poisoned lock still holds a whole table: `set` copies `Copy`
-        // values, and nothing in it panics part-way.
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
     /// Replaces the table with `channels`. Not for the audio thread: it
     /// locks, and allocates when the table grows.
     pub fn set(&self, channels: &[Samples]) {
-        let mut table = self.lock();
+        let mut table = self.0.lock_recover();
         table.clear();
         table.extend_from_slice(channels);
     }
@@ -60,18 +55,18 @@ impl PrerollTable {
     /// `channel`'s pre-roll, or `None` past the end of the table (no
     /// compensation needed).
     pub fn preroll(&self, channel: usize) -> Option<Samples> {
-        self.lock().get(channel).copied()
+        self.0.lock_recover().get(channel).copied()
     }
 
     /// The whole table, copied.
     pub fn to_vec(&self) -> Vec<Samples> {
-        self.lock().clone()
+        self.0.lock_recover().clone()
     }
 
     /// `f` over the table under one lock: a consistent view for a pass over
     /// several channels. Keep `f` short; [`set`](Self::set) waits on it.
     pub fn with<R>(&self, f: impl FnOnce(&[Samples]) -> R) -> R {
-        f(&self.lock())
+        f(&self.0.lock_recover())
     }
 }
 

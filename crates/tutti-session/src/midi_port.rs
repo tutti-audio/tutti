@@ -17,7 +17,7 @@
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
 //! whose events the session sends to the device each update.
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
@@ -27,7 +27,7 @@ use tutti_midi_hardware::{
 use tutti_midi_runtime::{
     DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
 };
-use tutti_rt::{Counter, Gauge};
+use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
@@ -353,7 +353,7 @@ impl InputShared {
     ) where
         J: crate::JobKind<Error = PeerError<E>>,
     {
-        let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inbox = self.requests.lock_recover();
         let refused = match inbox.gate {
             Gate::Released => Some(Ended::Released),
             Gate::Away => Some(Ended::Disconnected),
@@ -375,18 +375,12 @@ impl InputShared {
 
     /// The session takes what the handles queued.
     fn drain(&self) -> Vec<InputRequest> {
-        std::mem::take(
-            &mut self
-                .requests
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .queue,
-        )
+        std::mem::take(&mut self.requests.lock_recover().queue)
     }
 
     /// The device is open: requests are taken again.
     fn open(&self) {
-        let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut inbox = self.requests.lock_recover();
         if inbox.gate == Gate::Away {
             inbox.gate = Gate::Open;
         }
@@ -397,7 +391,7 @@ impl InputShared {
     /// again.
     fn shut(&self, gate: Gate, why: Ended) {
         let queued = {
-            let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut inbox = self.requests.lock_recover();
             if inbox.gate != Gate::Released {
                 inbox.gate = gate;
             }
@@ -409,7 +403,7 @@ impl InputShared {
     }
 
     fn read<R>(&self, read: impl FnOnce(&Cell<MidiInputInfo>) -> R) -> R {
-        read(&self.cell.lock().unwrap_or_else(PoisonError::into_inner))
+        read(&self.cell.lock_recover())
     }
 }
 
@@ -423,7 +417,7 @@ pub(crate) struct OutputShared {
 
 impl OutputShared {
     fn read<R>(&self, read: impl FnOnce(&Cell<MidiOutputInfo>) -> R) -> R {
-        read(&self.cell.lock().unwrap_or_else(PoisonError::into_inner))
+        read(&self.cell.lock_recover())
     }
 }
 
@@ -850,7 +844,7 @@ fn set_presence<I>(
     presence: Presence<PortCause>,
     out: &mut Vec<SessionEvent>,
 ) {
-    let mut cell = cell.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut cell = cell.lock_recover();
     if cell.presence != presence {
         cell.presence = presence;
         changed(out, id, ResourceFact::Presence);
@@ -923,11 +917,7 @@ impl InputPort {
             return;
         };
         let info = input_info(io, &device, &self.shared.link, &self.pending);
-        let mut cell = self
-            .shared
-            .cell
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut cell = self.shared.cell.lock_recover();
         let same = cell.info.device == info.device
             && cell.info.stream == info.stream
             && cell.info.learned == info.learned
@@ -1203,11 +1193,7 @@ impl Ports {
             let presence = match result {
                 Ok(()) => {
                     let info = input_info(io, arrived, &shared.link, &self.inputs[at].pending);
-                    shared
-                        .cell
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .info = Arc::new(info);
+                    shared.cell.lock_recover().info = Arc::new(info);
                     changed(out, shared.id, ResourceFact::Info);
                     Presence::Live
                 }
@@ -1437,11 +1423,7 @@ impl OutputPort {
             return;
         };
         let config = device.config();
-        let mut cell = self
-            .shared
-            .cell
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut cell = self.shared.cell.lock_recover();
         if cell.info.config != config || cell.info.device.id != *device.id() {
             cell.info = Arc::new(MidiOutputInfo {
                 device: cell.info.device.clone(),
@@ -1542,7 +1524,7 @@ impl crate::Midi<'_> {
                 return Err(error);
             }
             let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
-            let mut cell = shared.cell.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut cell = shared.cell.lock_recover();
             cell.info = Arc::new(input_info(
                 io,
                 &info,

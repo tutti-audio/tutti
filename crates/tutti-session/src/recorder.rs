@@ -29,7 +29,7 @@
 
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use thiserror::Error;
@@ -281,7 +281,7 @@ pub struct PumpLoop<I: Source, O> {
     source_failed: bool,
     /// Set by the first [`PumpPass::Failed`]; a [`Recorder`] holds the other
     /// end.
-    failed: Arc<AtomicBool>,
+    failed: Arc<tutti_rt::FaultLatch>,
     /// Frames the source discarded, summed ([`Source::take_lost`]); a
     /// [`Recorder`] holds the other end.
     lost: Arc<AtomicU64>,
@@ -335,7 +335,7 @@ where
             sink,
             scratch: vec![I::Sample::SILENCE; frames.interleaved_len(layout)],
             source_failed: false,
-            failed: Arc::new(AtomicBool::new(false)),
+            failed: Arc::new(tutti_rt::FaultLatch::new()),
             lost: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -361,7 +361,7 @@ where
         self.lost
             .fetch_add(self.src.take_lost().get() as u64, Ordering::Relaxed);
         if pass == PumpPass::Failed {
-            self.failed.store(true, Ordering::Release);
+            self.failed.raise();
         }
         pass
     }
@@ -369,7 +369,7 @@ where
     /// Whether a pass has failed: the source broke or the sink did.
     #[must_use]
     pub fn failed(&self) -> bool {
-        self.failed.load(Ordering::Acquire)
+        self.failed.is_raised()
     }
 
     /// The frames the source discarded so far ([`Source::take_lost`]), summed
@@ -470,7 +470,7 @@ pub struct Recorder<K = Live> {
     /// `finish`, `wait`, `finish_in_place` and `drop` runs first leaves `None`.
     handle: Option<ThreadHandle<Result<(), RecorderError>>>,
     /// Raised by the pump on its first failed pass; see [`failed`](Self::failed).
-    failed: Arc<AtomicBool>,
+    failed: Arc<tutti_rt::FaultLatch>,
     /// Frames the source discarded; see [`lost`](Self::lost).
     lost: Arc<AtomicU64>,
     kind: PhantomData<fn() -> K>,
@@ -671,7 +671,7 @@ impl<K> Recorder<K> {
     /// [`finish_in_place`](Self::finish_in_place).
     #[must_use]
     pub fn failed(&self) -> bool {
-        self.failed.load(Ordering::Acquire)
+        self.failed.is_raised()
     }
 
     /// The frames the source discarded so far ([`Source::take_lost`]): a

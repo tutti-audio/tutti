@@ -8,6 +8,7 @@ use tutti_cpal::{DeviceId, DeviceSelector};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
+use tutti_rt::LockExt;
 use tutti_session::{
     Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
 };
@@ -599,10 +600,7 @@ impl tutti_graph::Node for Renderer {
             !self.inside.swap(true, std::sync::atomic::Ordering::SeqCst),
             "two threads in process at once"
         );
-        self.log
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(std::thread::current().id());
+        self.log.lock_recover().push(std::thread::current().id());
         io.output(0).fill(0.0);
         self.inside
             .store(false, std::sync::atomic::Ordering::SeqCst);

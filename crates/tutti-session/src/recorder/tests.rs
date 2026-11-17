@@ -3,6 +3,7 @@
 //! park, the join) is `tests/io/recorder_thread.rs`.
 
 use super::*;
+use std::sync::atomic::AtomicBool;
 use tutti_buffers::Interleaved;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_types::SampleRate;

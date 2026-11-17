@@ -1,10 +1,11 @@
 //! A Subscription to a peer's Resource (M2-103 §11): the lease an app holds and
 //! the record the session keeps current under it.
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use tutti_midi_device::{PeData, PeResource, SubscribeId};
 use tutti_midi_hardware::{PeerId, PropertyAsk, PropertyCall, PropertyPeer};
+use tutti_rt::LockExt;
 
 use super::{PeFailure, PortLink, ResourcePeer, listed_peer};
 use crate::job::job_kind;
@@ -46,12 +47,12 @@ pub(crate) struct Lease {
 
 impl Lease {
     fn presence(&self) -> Presence<SubscriptionCause> {
-        *self.presence.lock().unwrap_or_else(PoisonError::into_inner)
+        *self.presence.lock_recover()
     }
 
     /// Reads [`Presence::Lost`] with `cause`, once: whether it changed.
     fn lose(&self, cause: SubscriptionCause) -> bool {
-        let mut presence = self.presence.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut presence = self.presence.lock_recover();
         let live = presence.is_live();
         if live {
             *presence = Presence::Lost(cause);

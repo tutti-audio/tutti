@@ -62,10 +62,10 @@
 
 use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use tutti_buffers::{BufferError, Fold, FoldError};
 use tutti_graph::{RootError, RootId};
-use tutti_rt::ArcLend;
+use tutti_rt::{ArcLend, LockExt};
 use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 
 /// The widest device an engine can render into without being told
@@ -341,7 +341,7 @@ impl OutputControl {
     /// Publishes the current set as `edit` leaves it, unless `edit` finds
     /// nothing to do (`Ok(false)`). Nothing is published on an error.
     fn update<E>(&self, edit: impl FnOnce(&mut OutputFolds) -> Result<bool, E>) -> Result<(), E> {
-        let _writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let _writer = self.writer.lock_recover();
         let mut folds = (*self.cell.current()).clone();
         if edit(&mut folds)? {
             self.cell.publish(folds);
@@ -571,7 +571,7 @@ impl OutputControl {
     /// change never clicks and no fold is swapped. Control side.
     pub fn set_levels(&self, levels: &OutputLevels) {
         let targets = levels.targets();
-        let _writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let _writer = self.writer.lock_recover();
         if *self.stage.current() != targets {
             self.stage.publish(targets);
             self.stage.reclaim();

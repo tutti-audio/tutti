@@ -28,7 +28,7 @@
 use std::cell::RefCell;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use tutti_plugin::catalog::{
     AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
@@ -37,6 +37,7 @@ use tutti_plugin::catalog::{
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
+use tutti_rt::LockExt;
 use tutti_types::{ChannelLayout, SampleRate};
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
@@ -61,10 +62,6 @@ struct Install {
     plugin: HostPlugin,
     mirror: Option<Mirror>,
     origin: Origin,
-}
-
-fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// A value that drops on the main thread when it must.
@@ -134,8 +131,10 @@ impl Standing {
     /// The bridge is dead: seen by the session at the node, or by the handle
     /// while the plugin is still in the entry.
     fn crashed(&self) -> bool {
-        locked(&self.dead).is_some()
-            || locked(&self.handle)
+        self.dead.lock_recover().is_some()
+            || self
+                .handle
+                .lock_recover()
                 .as_ref()
                 .is_some_and(|handle| handle.get().is_crashed())
     }
@@ -145,18 +144,19 @@ impl Standing {
     /// plugin for recovery to act on). A plugin that recovery reloads in place
     /// reads live throughout.
     fn lost(&self) -> bool {
-        locked(&self.gave_up).is_some()
+        self.gave_up.lock_recover().is_some()
             || (self.crashed() && !(self.recovery && self.hosted.load(Ordering::Acquire)))
     }
 
     /// Why the plugin is not live: that recovery gave up, else the failure of
     /// the bridge the session or the entry's handle saw.
     fn cause(&self) -> PluginCause {
-        if let Some(why) = locked(&self.gave_up).clone() {
+        if let Some(why) = self.gave_up.lock_recover().clone() {
             return PluginCause::GaveUp(why);
         }
-        let failure = locked(&self.dead).clone().or_else(|| {
-            locked(&self.handle)
+        let failure = self.dead.lock_recover().clone().or_else(|| {
+            self.handle
+                .lock_recover()
                 .as_ref()
                 .and_then(|handle| handle.get().status().cause().cloned())
         });
@@ -165,7 +165,7 @@ impl Standing {
 
     /// The node has the plugin: its death is seen there from now on.
     fn release_handle(&self) {
-        let released = locked(&self.handle).take();
+        let released = self.handle.lock_recover().take();
         drop(released);
     }
 }
@@ -182,12 +182,12 @@ pub(crate) struct PooledLink {
 impl PooledLink {
     /// Recovery gave up on the plugin.
     pub(crate) fn gave_up(&self, why: GiveUp) {
-        *locked(&self.standing.gave_up) = Some(why);
+        *self.standing.gave_up.lock_recover() = Some(why);
     }
 
     /// The session saw the plugin's bridge dead, for `failure`.
     pub(crate) fn died(&self, failure: PluginFailure) {
-        locked(&self.standing.dead).get_or_insert(failure);
+        self.standing.dead.lock_recover().get_or_insert(failure);
     }
 }
 
