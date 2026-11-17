@@ -209,6 +209,12 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[],
         reason: "an FFI crate's raw types mirror a C ABI or an OS call, not an app's configuration",
     },
+    ty(
+        "crates/tutti-buffers/src/input_output.rs",
+        "InputOutput::new",
+        CTOR,
+        "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
+    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",

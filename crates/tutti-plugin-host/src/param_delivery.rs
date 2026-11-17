@@ -121,7 +121,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{Normalized, ParamId, ParameterChanges, ParameterQueue};
-use tutti_rt::{Tally, tally};
+use tutti_rt::{Tally, TallyWriter, tally};
 
 /// A slot with no queue in the chunk being filled.
 const NO_QUEUE: u32 = u32::MAX;
@@ -182,12 +182,20 @@ pub struct DeliveryCounters {
     sent: AtomicU64,
     deferred: AtomicU64,
     dropped: Tally<u64>,
+    /// The audio thread's writer of `dropped`, minted with it in `default`.
+    dropped_writer: TallyWriter<u64>,
     merged: AtomicU64,
     grid_dropped: Tally<u64>,
+    /// The audio thread's writer of `grid_dropped`.
+    grid_dropped_writer: TallyWriter<u64>,
     /// MIDI events the node did not deliver (`midi_intake`).
     pub(super) midi_dropped: Tally<u64>,
+    /// The audio thread's writer of `midi_dropped`.
+    midi_dropped_writer: TallyWriter<u64>,
     /// Transport changes past the chunk's room (`transport_walk`).
     transport_dropped: Tally<u64>,
+    /// The audio thread's writer of `transport_dropped`.
+    transport_dropped_writer: TallyWriter<u64>,
     /// The bridge thread's count of the MIDI events it did not send, set
     /// once at bind (an out-of-process node only).
     pub(super) bridge_midi_dropped: OnceLock<Tally<u64>>,
@@ -242,14 +250,22 @@ impl DeliveredRecord {
 
 impl Default for DeliveryCounters {
     fn default() -> Self {
+        let dropped = tally();
+        let grid_dropped = tally();
+        let midi_dropped = tally();
+        let transport_dropped = tally();
         Self {
             sent: AtomicU64::default(),
             deferred: AtomicU64::default(),
-            dropped: tally(),
+            dropped_writer: dropped.writer(),
+            dropped,
             merged: AtomicU64::default(),
-            grid_dropped: tally(),
-            midi_dropped: tally(),
-            transport_dropped: tally(),
+            grid_dropped_writer: grid_dropped.writer(),
+            grid_dropped,
+            midi_dropped_writer: midi_dropped.writer(),
+            midi_dropped,
+            transport_dropped_writer: transport_dropped.writer(),
+            transport_dropped,
             bridge_midi_dropped: OnceLock::new(),
             record: OnceLock::new(),
         }
@@ -627,7 +643,7 @@ impl ParamDelivery {
     /// counted dropped. Allocation-free.
     pub(crate) fn refused(&self, n: u64) {
         if n > 0 {
-            self.counters.dropped.writer().add(n);
+            self.counters.dropped_writer.add(n);
         }
     }
 
@@ -656,7 +672,7 @@ impl ParamDelivery {
     pub(crate) fn knows(&mut self, address: ParamId) -> bool {
         let known = self.slot(address).is_some();
         if !known {
-            self.counters.dropped.writer().add(1);
+            self.counters.dropped_writer.add(1);
         }
         known
     }
@@ -733,7 +749,7 @@ impl ParamDelivery {
 
     fn point_kind(&mut self, address: ParamId, offset: i32, value: f32, grid: bool) -> bool {
         let Some(i) = self.slot(address) else {
-            self.counters.dropped.writer().add(1);
+            self.counters.dropped_writer.add(1);
             return false;
         };
         self.place(i, offset, Normalized::clamped(f64::from(value)).get(), grid);
@@ -755,7 +771,7 @@ impl ParamDelivery {
                     // Impossible by construction: a queue per slot, and the
                     // chunk has room for every slot. Refused rather than
                     // grown.
-                    self.counters.dropped.writer().add(1);
+                    self.counters.dropped_writer.add(1);
                     return;
                 }
                 self.slots[i].queue = queue;
@@ -783,7 +799,7 @@ impl ParamDelivery {
             // Full: at its room, or at its floor with the pool spent. Grid
             // points go first.
             if grid {
-                self.counters.grid_dropped.writer().add(1);
+                self.counters.grid_dropped_writer.add(1);
                 return;
             }
             let len = self.changes.queues[q].points.len();
@@ -791,7 +807,7 @@ impl ParamDelivery {
                 Some(k) => {
                     self.changes.queues[q].points.remove(k);
                     self.grid.remove(q, k, len);
-                    self.counters.grid_dropped.writer().add(1);
+                    self.counters.grid_dropped_writer.add(1);
                 }
                 None => {
                     // A queue of corners: the latest value replaces the
@@ -886,10 +902,10 @@ impl ParamDelivery {
 
 impl DeliveryCounters {
     /// `n` MIDI events the node did not deliver. RT-safe: one relaxed add
-    /// through a writer minted from the held cell.
+    /// through the stored writer.
     pub(crate) fn count_midi_dropped(&self, n: u64) {
         if n > 0 {
-            self.midi_dropped.writer().add(n);
+            self.midi_dropped_writer.add(n);
         }
     }
 
@@ -897,7 +913,7 @@ impl DeliveryCounters {
     /// add.
     pub(crate) fn count_transport_dropped(&self, n: u64) {
         if n > 0 {
-            self.transport_dropped.writer().add(n);
+            self.transport_dropped_writer.add(n);
         }
     }
 
