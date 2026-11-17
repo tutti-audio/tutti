@@ -34,11 +34,11 @@ use std::mem::size_of;
 
 use tutti_buffers::Float;
 
-/// `f32` lanes per line: 64 bytes.
+/// `f32` samples a line holds: 16, filling its 64 bytes.
 pub(crate) const LANES: usize = 16;
 
-/// One cache line of samples. The alignment is the type's, so every slot the
-/// arena hands out starts 64-byte aligned.
+/// One cache line of samples: 64 bytes, 16 `f32` or 8 `f64`. The alignment is
+/// the type's, so every slot the arena hands out starts 64-byte aligned.
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(64))]
 pub(crate) struct Line([f32; LANES]);
@@ -299,6 +299,22 @@ mod tests {
             for s in 0..5 {
                 assert_eq!(a.slot_mut(s, 1).as_ptr() as usize % 64, 0, "slot {s}");
                 assert!(a.stride * LANES >= max_block);
+            }
+        }
+    }
+
+    /// The same at `f64`: a line holds 8 samples, so a slot of `stride` lines
+    /// holds at least `max_block` of them when `max_block` is no multiple of 8.
+    #[test]
+    fn f64_slots_are_cache_line_aligned_and_hold_a_block() {
+        for max_block in [1, 7, 9, 63, 100, 1001] {
+            let mut a = Arena::<f64>::new(5, max_block);
+            assert_eq!(a.base() as usize % 64, 0);
+            assert!(a.stride * (size_of::<Line>() / size_of::<f64>()) >= max_block);
+            for s in 0..5 {
+                let slot = a.slot_mut(s, max_block);
+                assert_eq!(slot.as_ptr() as usize % 64, 0, "slot {s}");
+                assert_eq!(slot.len(), max_block);
             }
         }
     }

@@ -532,3 +532,28 @@ impl Source for TapReader {
         TapReader::take_lost(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arena::Arena;
+
+    /// An `f64` block of 600 frames crosses `for_f32`'s 256-sample chunks
+    /// twice and ends on a short one (88): the tap holds the block narrowed
+    /// to `f32`, sample by sample, in order.
+    #[test]
+    fn an_f64_block_reaches_the_tap_narrowed_to_f32_across_chunks() {
+        const FRAMES: usize = 600;
+        let mut arena = Arena::<f64>::new(1, FRAMES);
+        // Not representable in `f32`: the narrowing is visible.
+        let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
+        arena.slot_mut(0, FRAMES).copy_from_slice(&block);
+        let (mut reader, mut writer) = TapReader::pair(1, Samples(1024));
+        tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
+        let mut out = vec![0.0f32; FRAMES];
+        assert_eq!(reader.pop_into(&mut out), Samples(FRAMES));
+        let want: Vec<f32> = block.iter().map(|&x| x as f32).collect();
+        assert_eq!(out, want);
+        assert_ne!(f64::from(out[0]), block[0], "the block was narrowed");
+    }
+}
