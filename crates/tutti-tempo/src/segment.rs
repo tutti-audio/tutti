@@ -58,11 +58,11 @@ impl Seg {
         };
         let (k, dsec) = match transition {
             Transition::Step => (0.0, dbeats / r0),
-            Transition::RampTime => {
+            Transition::RampTime { .. } => {
                 let t = 2.0 * dbeats / (r0 + r1);
                 ((r1 - r0) / t, t)
             }
-            Transition::RampBeats => {
+            Transition::RampBeats { .. } => {
                 let g = (r1 - r0) / dbeats;
                 (g, ln_ratio(g, dbeats, r0))
             }
@@ -98,10 +98,10 @@ impl Seg {
         }
         match self.transition {
             Transition::Step => db / self.r0,
-            Transition::RampTime => {
+            Transition::RampTime { .. } => {
                 2.0 * db / (self.r0 + libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db))
             }
-            Transition::RampBeats => ln_ratio(self.k, db, self.r0),
+            Transition::RampBeats { .. } => ln_ratio(self.k, db, self.r0),
         }
     }
 
@@ -116,8 +116,8 @@ impl Seg {
         }
         match self.transition {
             Transition::Step => self.r0 * ds,
-            Transition::RampTime => ds * (self.r0 + 0.5 * self.k * ds),
-            Transition::RampBeats => {
+            Transition::RampTime { .. } => ds * (self.r0 + 0.5 * self.k * ds),
+            Transition::RampBeats { .. } => {
                 let y = self.k * ds;
                 if y == 0.0 {
                     self.r0 * ds
@@ -138,8 +138,8 @@ impl Seg {
         let bpm0 = self.bpm0.get();
         self.in_range(match self.transition {
             Transition::Step => bpm0,
-            Transition::RampTime => bpm0 + 60.0 * self.k * ds,
-            Transition::RampBeats => bpm0 * libm::exp(self.k * ds),
+            Transition::RampTime { .. } => bpm0 + 60.0 * self.k * ds,
+            Transition::RampBeats { .. } => bpm0 * libm::exp(self.k * ds),
         })
     }
 
@@ -154,11 +154,11 @@ impl Seg {
         let bpm0 = self.bpm0.get();
         self.in_range(match self.transition {
             Transition::Step => bpm0,
-            Transition::RampTime => {
+            Transition::RampTime { .. } => {
                 let root = libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db);
                 bpm0 + 60.0 * (2.0 * self.k * db) / (root + self.r0)
             }
-            Transition::RampBeats => bpm0 + 60.0 * self.k * db,
+            Transition::RampBeats { .. } => bpm0 + 60.0 * self.k * db,
         })
     }
 

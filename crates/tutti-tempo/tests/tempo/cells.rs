@@ -9,9 +9,9 @@ use tutti_types::{Beat, Bpm, Frame};
 /// multiple of anything), a beat ramp, and a step 12.00003 beats in.
 fn mixed() -> TempoMap {
     TempoMap::new([
-        pt(0.0, 60.0, Transition::RampTime),
+        pt(0.0, 60.0, Transition::RampTime { end: None }),
         pt(8.0, 240.0, Transition::Step),
-        pt(10.000_01, 100.0, Transition::RampBeats),
+        pt(10.000_01, 100.0, Transition::RampBeats { end: None }),
         pt(12.000_03, 90.0, Transition::Step),
         pt(16.0, 180.0, Transition::Step),
     ])
@@ -267,21 +267,21 @@ fn chord_error_stays_under_a_fraction_of_a_frame() {
     // (shape, from, to, beats, [(grid, ceiling in frames)])
     let cases: [(Transition, f64, f64, f64, [(u64, f64); 3]); 3] = [
         (
-            Transition::RampTime,
+            Transition::RampTime { end: None },
             60.0,
             240.0,
             8.0,
             [(32, 0.0032), (128, 0.05), (512, 0.8)],
         ),
         (
-            Transition::RampBeats,
+            Transition::RampBeats { end: None },
             60.0,
             240.0,
             8.0,
             [(32, 0.0013), (128, 0.02), (512, 0.33)],
         ),
         (
-            Transition::RampTime,
+            Transition::RampTime { end: None },
             120.0,
             140.0,
             16.0,
@@ -373,7 +373,7 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
     let r44 = tutti_types::SampleRate::SR_44K1;
     // A 105 BPM beat ramp of 4.3e-6 beats (0.1 frame), then 351 BPM.
     let map = TempoMap::new([
-        pt(0.0, 105.0, Transition::RampBeats),
+        pt(0.0, 105.0, Transition::RampBeats { end: None }),
         pt(4.3e-6, 351.0, Transition::Step),
     ])
     .unwrap();
@@ -384,7 +384,7 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
     // 120 BPM to beat 5, a 16e-6 beat ramp 189 to 51, then 51: the ramp is under a frame.
     let map = TempoMap::new([
         pt(0.0, 120.0, Transition::Step),
-        pt(5.0, 189.0, Transition::RampTime),
+        pt(5.0, 189.0, Transition::RampTime { end: None }),
         pt(5.000_016, 51.0, Transition::Step),
     ])
     .unwrap();
@@ -404,8 +404,8 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
             .map(|i| {
                 let shape = [
                     Transition::Step,
-                    Transition::RampTime,
-                    Transition::RampBeats,
+                    Transition::RampTime { end: None },
+                    Transition::RampBeats { end: None },
                 ][(rng.next() * 3.0) as usize];
                 let p = pt(
                     beat,

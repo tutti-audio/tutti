@@ -308,7 +308,10 @@ mod tests {
             ])
             .unwrap()
         };
-        for shape in [Transition::RampTime, Transition::RampBeats] {
+        for shape in [
+            Transition::RampTime { end: None },
+            Transition::RampBeats { end: None },
+        ] {
             s.set_tempo_map(Arc::new(constant_of(75.5)));
             s.set_tempo_map(Arc::new(two(shape)));
             assert_eq!(s.tempo_map().constant_tempo(), None);
