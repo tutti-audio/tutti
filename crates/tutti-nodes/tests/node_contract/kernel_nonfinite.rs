@@ -11,8 +11,8 @@ use tutti_nodes::{
     CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, DynamicEqConfig,
     DynamicEqNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
     LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection,
-    PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode, TremoloConfig,
-    TremoloNode,
+    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -174,6 +174,10 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 room: Mix(0.9),
                 damp: Mix(0.2),
             })),
+        ),
+        (
+            "plate",
+            Box::new(PlateReverbNode::from(PlateReverbConfig::new())),
         ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.
