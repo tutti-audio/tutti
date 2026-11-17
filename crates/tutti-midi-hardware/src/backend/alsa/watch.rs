@@ -47,17 +47,16 @@ use std::collections::BTreeSet;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 
-use super::enumerate::{pack_id, unpack_id};
 use super::poll::ErrorRun;
 #[cfg(test)]
 use super::poll::MAX_DRAIN_ERRORS;
+use super::{address_of, handle_of};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{Error, Result};
 use tutti_alsa_ffi::{
-    Announced as Event, Blocking, CAP_WRITE, Client, Poller, Read, TYPE_APPLICATION, UmpVersion,
-    Wait,
+    Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_rt::{ThreadHandle, spawn_named};
@@ -82,7 +81,7 @@ struct Announce {
 #[derive(Debug, Default)]
 struct Drained {
     /// The announcements, in the order the kernel posted them.
-    events: Vec<Event>,
+    events: Vec<Announced>,
     /// Whether the queue held any event at all, or a read failed: a failed read
     /// is not a quiet one (an overrun, `-ENOSPC`, has lost announcements).
     any: bool,
@@ -107,7 +106,7 @@ struct Settled<T> {
     /// The last look, if one succeeded.
     seen: Option<T>,
     /// Every announcement read on the way.
-    events: Vec<Event>,
+    events: Vec<Announced>,
     /// Whether the last look was followed by a read that found nothing.
     quiet: bool,
 }
@@ -174,7 +173,7 @@ struct Tracker {
     /// quiet look can list a port whose start is yet to come.
     port_pending: BTreeSet<EndpointId>,
     /// Announcements read while no look succeeded; they precede the next look.
-    pending: Vec<Event>,
+    pending: Vec<Announced>,
     /// Wakes in a row that had no look. The watch asks to be woken again until
     /// one has.
     failures: u32,
@@ -213,7 +212,7 @@ impl Tracker {
     }
 
     /// Keeps `events` for the next look, within [`MAX_PENDING`].
-    fn keep(&mut self, mut events: Vec<Event>) {
+    fn keep(&mut self, mut events: Vec<Announced>) {
         self.failures = self.failures.saturating_add(1);
         if events.len() > MAX_PENDING {
             tracing::debug!("ALSA device watch: dropping {} announcements", events.len());
@@ -308,16 +307,16 @@ impl Tracker {
         last: &BTreeSet<EndpointId>,
         changed: &BTreeSet<EndpointId>,
         handles: &BTreeSet<EndpointId>,
-        events: &[Event],
+        events: &[Announced],
         quiet: bool,
     ) -> BTreeSet<EndpointId> {
         if quiet {
             return BTreeSet::new();
         }
         let started = |h: EndpointId| {
-            unpack_id(h).is_some_and(|(client, port)| {
+            address_of(h).is_some_and(|at| {
                 events.iter().any(|&e| {
-                    e == Event::ClientStart(client) || e == Event::PortStart(client, port)
+                    e == Announced::ClientStart(at.client()) || e == Announced::PortStart(at)
                 })
             })
         };
@@ -339,13 +338,13 @@ impl Tracker {
     /// if it says: a change is a rename of the occupant, and the exit of its port
     /// or the start of its client a replacement (the exit is posted before the
     /// number is free).
-    fn told(handle: EndpointId, events: &[Event]) -> Option<Told> {
-        let (n, p) = unpack_id(handle)?;
+    fn told(handle: EndpointId, events: &[Announced]) -> Option<Told> {
+        let at = address_of(handle)?;
         events.iter().find_map(|&e| match e {
-            Event::ClientChange(c) if c == n => Some(Told::Renamed),
-            Event::PortChange(c, q) if (c, q) == (n, p) => Some(Told::Renamed),
-            Event::PortExit(c, q) if (c, q) == (n, p) => Some(Told::Replaced),
-            Event::ClientStart(c) if c == n => Some(Told::Replaced),
+            Announced::ClientChange(c) if c == at.client() => Some(Told::Renamed),
+            Announced::PortChange(a) if a == at => Some(Told::Renamed),
+            Announced::PortExit(a) if a == at => Some(Told::Replaced),
+            Announced::ClientStart(c) if c == at.client() => Some(Told::Replaced),
             _ => None,
         })
     }
@@ -358,7 +357,7 @@ impl Tracker {
         last: &BTreeSet<EndpointId>,
         changed: &BTreeSet<EndpointId>,
         handles: &BTreeSet<EndpointId>,
-        events: &[Event],
+        events: &[Announced],
     ) -> BTreeSet<EndpointId> {
         let listed = handles
             .iter()
@@ -379,11 +378,10 @@ impl Tracker {
         kept: BTreeSet<EndpointId>,
         last: &BTreeSet<EndpointId>,
         handles: &BTreeSet<EndpointId>,
-        events: &[Event],
+        events: &[Announced],
     ) -> BTreeSet<EndpointId> {
         let started = |h: EndpointId| {
-            unpack_id(h)
-                .is_some_and(|(client, port)| events.contains(&Event::PortStart(client, port)))
+            address_of(h).is_some_and(|at| events.contains(&Announced::PortStart(at)))
         };
         let listed_first = handles
             .iter()
@@ -403,7 +401,7 @@ impl Tracker {
     /// A `PORT_START` for a reported handle is that owner's own when the handle
     /// is pending one, and otherwise a port made again on a client that lives:
     /// a new occupant too.
-    fn replaced(&self, events: &[Event]) -> Fold {
+    fn replaced(&self, events: &[Announced]) -> Fold {
         let mut fold = Fold {
             replaced: BTreeSet::new(),
             unconfirmed: self.unconfirmed.clone(),
@@ -412,11 +410,11 @@ impl Tracker {
         };
         for &event in events {
             match event {
-                Event::ClientStart(n) => {
+                Announced::ClientStart(n) => {
                     for &h in self
                         .last
                         .iter()
-                        .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
+                        .filter(|&&h| address_of(h).is_some_and(|at| at.client() == n))
                     {
                         fold.undecided.remove(&h);
                         if !fold.unconfirmed.remove(&h) {
@@ -425,8 +423,8 @@ impl Tracker {
                         fold.port_pending.insert(h);
                     }
                 }
-                Event::PortStart(n, p) => {
-                    let handle = pack_id(n, p);
+                Announced::PortStart(at) => {
+                    let handle = handle_of(at);
                     if self.last.contains(&handle) {
                         fold.unconfirmed.remove(&handle);
                         if !fold.port_pending.remove(&handle) {
@@ -434,27 +432,27 @@ impl Tracker {
                         }
                     }
                 }
-                Event::PortChange(n, p) => {
-                    let handle = pack_id(n, p);
+                Announced::PortChange(at) => {
+                    let handle = handle_of(at);
                     if fold.undecided.remove(&handle) {
                         fold.unconfirmed.remove(&handle);
                     }
                 }
-                Event::ClientChange(n) => {
+                Announced::ClientChange(n) => {
                     for &h in self
                         .last
                         .iter()
-                        .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
+                        .filter(|&&h| address_of(h).is_some_and(|at| at.client() == n))
                     {
                         if fold.undecided.remove(&h) {
                             fold.unconfirmed.remove(&h);
                         }
                     }
                 }
-                Event::PortExit(n, p) => {
-                    fold.undecided.remove(&pack_id(n, p));
+                Announced::PortExit(at) => {
+                    fold.undecided.remove(&handle_of(at));
                 }
-                Event::ClientExit(_) => {}
+                Announced::ClientExit(_) => {}
             }
         }
         fold
@@ -494,7 +492,7 @@ impl Announce {
     fn open(stop: UnixStream) -> Result<Self> {
         let seq = super::client::open("tutti-watch", Blocking::NonBlock, UmpVersion::Midi2)?;
         // Write-only and not subscribable: nobody lists this port as a device.
-        let port = seq.open_port("tutti-watch", CAP_WRITE, TYPE_APPLICATION)?;
+        let port = seq.open_port("tutti-watch", PortCaps::WRITE, PortKind::APPLICATION)?;
         seq.connect_from_announce(port)?;
 
         Ok(Self {
@@ -522,8 +520,8 @@ impl Announce {
         let mut found = Drained::default();
         let mut errors = ErrorRun::default();
         loop {
-            let received = match self.seq.client().read_event() {
-                Ok(Read::Event(received)) => received,
+            let read = match self.seq.client().read_event() {
+                Ok(Read::Event(event)) => event,
                 Ok(Read::Empty) => return found,
                 Err(e) => {
                     // An overrun drops announcements and is not a quiet read: it
@@ -539,8 +537,9 @@ impl Announce {
             };
             errors.read();
             found.any = true;
-            let event = received.announced();
-            found.events.extend(event);
+            if let Event::Announce(announced) = read {
+                found.events.push(announced);
+            }
             if found.full() {
                 return found;
             }

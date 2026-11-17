@@ -32,12 +32,6 @@ impl SequenceNumber {
         Self(self.0.wrapping_add(1))
     }
 
-    /// The number `count` steps on, wrapping.
-    #[must_use]
-    pub const fn advanced(self, count: u16) -> Self {
-        Self(self.0.wrapping_add(count))
-    }
-
     /// How far `self` is ahead of `earlier`: positive when it is newer, zero
     /// when equal, negative when older. Defined over half the number space
     /// each way; a gap of exactly `0x8000` reads as behind.

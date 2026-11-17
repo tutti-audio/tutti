@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use super::enumerate::unpack_id;
 use super::poll::ErrorRun;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
@@ -14,8 +13,7 @@ use crate::error::Result;
 use crate::guard::Guard;
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Blocking, CAP_WRITE, Client, Poller, QueueClock, Read, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
-    UmpVersion, Wait,
+    Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
 use tutti_rt::PushError;
@@ -127,7 +125,7 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 /// spawned. A source client that exits while the open reads its Endpoint record
 /// fails the open (`ENOENT`) rather than opening as a legacy port.
 pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
-    let (src_client, src_port) = unpack_id(id).ok_or(crate::error::NotFound::Endpoint(id))?;
+    let source = super::address_of(id).ok_or(crate::error::NotFound::Endpoint(id))?;
 
     // Non-blocking, so the pump reads until the queue is empty and then waits in
     // `poll`, which the stop descriptor can interrupt. One client per connection
@@ -139,21 +137,21 @@ pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn Inp
     // The record is read on the open client, and the version is set before the
     // port exists and before the subscription, so no event is delivered at the
     // other one.
-    seq.set_ump_version(version_for(seq.ump_endpoint(src_client)?.as_ref()))?;
+    seq.set_ump_version(version_for(seq.ump_endpoint(source.client())?.as_ref()))?;
     let port = seq.open_port(
         "tutti-in",
         // Not subscribable by others: the engine's pump is not a device, and a
         // port nobody else can connect to is never listed as one. This client
         // makes its own subscription below, which needs no such capability.
-        CAP_WRITE,
-        TYPE_MIDI_GENERIC | TYPE_APPLICATION,
+        PortCaps::WRITE,
+        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
 
     // The kernel stamps each event as it delivers it, so the time an event
     // is given is when it arrived, not when this pump got round to reading it.
     let clock = seq.stamp_port(port)?;
 
-    seq.connect_from(port, src_client, src_port)?;
+    seq.connect_from(port, source)?;
     Ok(Box::new(start(seq, clock, producer)?))
 }
 
@@ -228,7 +226,7 @@ fn pump(
         };
 
         let received = match read {
-            Ok(Read::Event(received)) => received,
+            Ok(Read::Event(event)) => event,
             Ok(Read::Empty) => {
                 // Empty queue is the common case, not a failure.
                 let waited = seq.wait();
@@ -263,11 +261,11 @@ fn pump(
         errors.read();
         // A subscription to the port, or a change of its Endpoint, is the
         // sequencer's notice and not music.
-        if !received.is_ump() {
+        let Event::Ump { packet, stamp } = received else {
             continue;
-        }
-        let words = received.ump;
-        let now = match received.stamp {
+        };
+        let words = packet.words();
+        let now = match stamp {
             Some(t) => arrivals.at(seq.client(), t),
             // A port that is not stamping: the read is the best there is.
             None => Instant::now(),
