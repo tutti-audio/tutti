@@ -19,6 +19,7 @@ mod tests {
     use crate::parameters::ParamAddress;
     use crate::processor::AuProcessor;
     use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+    use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_plugin_types::{Loaded, MaxBlock, Prepare, SampleRate};
 
     /// `ScheduleAddress::GLOBAL` must name the same place the other two address
@@ -68,7 +69,13 @@ mod tests {
         let mut output = vec![vec![0.0f32; 512]; 2];
         let ins: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-        au.render_f32(&ins, &mut outs, 512).unwrap();
+        let mut block = InputOutput::new(
+            tutti_types::Samples(512),
+            Planes::new(&ins).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap();
+        au.render_planes(&mut block).unwrap();
     }
 
     /// The dispatch counter rises by exactly the pre/post pair per render while
