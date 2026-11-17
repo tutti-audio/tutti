@@ -38,7 +38,7 @@ tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 # `Ump`, the packet an event carries, and its note-off test. No other tutti
 # crate and no codec: this is why the packet is not in `tutti-types`.
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-# Safe casts between the 64-byte-aligned arena lines and the `f32` slices a
+# Safe casts between the 64-byte-aligned arena lines and the sample slices a
 # node is handed. This is what keeps the executor free of `unsafe`: alignment
 # comes from the element type, the reinterpretation from a checked `Pod` cast,
 # and the disjoint borrows from `split_at_mut`. See `src/arena.rs`.

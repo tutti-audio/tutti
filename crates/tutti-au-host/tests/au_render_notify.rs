@@ -36,6 +36,7 @@
 
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 mod support;
 use support::corpus::{
@@ -57,7 +58,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// one real failure into N spurious ones. The guard is only a serializer — there
 /// is no shared state to be left inconsistent — so recover.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    AU_LOCK.lock_recover()
 }
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;

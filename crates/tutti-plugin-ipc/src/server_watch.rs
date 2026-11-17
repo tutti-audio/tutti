@@ -15,9 +15,9 @@
 //! follow-on errors, and the first is the diagnosis.
 
 use std::sync::Mutex;
-use std::sync::PoisonError;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::PluginFailure;
+use tutti_rt::LockExt;
 
 /// The latch for "this server is gone": set once, with the cause that set it.
 ///
@@ -41,7 +41,7 @@ impl ServerWatch {
     /// the latch; `false` when it was set already, in which case the first
     /// cause stands.
     pub fn declare(&self, cause: PluginFailure) -> bool {
-        let mut slot = self.cause.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut slot = self.cause.lock_recover();
         if slot.is_some() {
             return false;
         }
@@ -61,10 +61,7 @@ impl ServerWatch {
     /// every [`declare`](Self::declare) passes one.
     #[must_use]
     pub fn cause(&self) -> Option<PluginFailure> {
-        self.cause
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.cause.lock_recover().clone()
     }
 }
 

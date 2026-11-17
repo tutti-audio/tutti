@@ -14,6 +14,7 @@
 #![cfg(target_os = "macos")]
 
 use std::sync::Mutex;
+use tutti_rt::LockExt;
 
 use tutti_au_ffi::{EventList, Pushed, Wire};
 use tutti_au_host::AuMidiMapping;
@@ -66,7 +67,7 @@ fn cc(group: u8, value: u32) -> tutti_graph::UmpAt {
 /// instruments answer no protocol.
 #[test]
 fn an_installed_instrument_reports_no_protocol_and_is_legacy() {
-    let _g = AU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = AU_LOCK.lock_recover();
     let au = SAMPLER.open(RATE, BLOCK);
     assert_eq!(au.midi_protocol(), None);
 }
@@ -76,7 +77,7 @@ fn an_installed_instrument_reports_no_protocol_and_is_legacy() {
 /// Group 0's does.
 #[test]
 fn the_legacy_path_drops_another_group_and_counts_it() {
-    let _g = AU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = AU_LOCK.lock_recover();
     let (mut au, before) = mapped_sampler();
 
     au.send_midi(&[cc(1, widen_value(U7::of(127)).get())]);
@@ -98,7 +99,7 @@ fn the_legacy_path_drops_another_group_and_counts_it() {
 /// not silently.
 #[test]
 fn the_legacy_path_counts_a_message_it_cannot_narrow() {
-    let _g = AU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = AU_LOCK.lock_recover();
     let (au, _) = mapped_sampler();
     au.send_midi(&[(
         Offset::ZERO,
@@ -115,7 +116,7 @@ fn the_legacy_path_counts_a_message_it_cannot_narrow() {
 /// Spec: au.midi.MusicDeviceMIDIEventList
 #[test]
 fn a_ump_list_moves_a_mapped_parameter() {
-    let _g = AU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = AU_LOCK.lock_recover();
     let (mut au, before) = mapped_sampler();
 
     let mut list = EventList::with_capacity(64);

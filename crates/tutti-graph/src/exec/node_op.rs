@@ -2,6 +2,7 @@
 //! into the node.
 
 use std::cell::Cell;
+use tutti_buffers::Float;
 
 use tutti_types::{MaxBlock, Tail};
 
@@ -24,10 +25,15 @@ use crate::slots::{AudioSlots, EventSlots, SlotFlags};
 /// nothing of it, else the one that applies its mode. Returns whether a
 /// crossfade running there reached its end this block.
 #[inline(always)]
-pub(crate) fn node_dispatch<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(crate) fn node_dispatch<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
     if u.mode.is_plain() {
         return run_node_op(u, head, st);
@@ -38,10 +44,15 @@ pub(crate) fn node_dispatch<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots 
 /// The node op by its borrow form (a crossfade running there takes its own).
 /// Returns whether that crossfade reached its end this block.
 #[inline(always)]
-pub(super) fn run_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn run_node_op<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
     let (rec, plan, frames) = (head.rec, head.plan, head.frames);
     debug_assert_eq!(
@@ -91,10 +102,10 @@ pub(super) fn run_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + 
         Form::Direct(d) => {
             let slots = &plan.nodes.slots[..];
             match (d.ins, d.outs) {
-                (0, 2) => direct_op::<0, 2, A, F, E>(u, head, st, &d, slots),
-                (1, 2) => direct_op::<1, 2, A, F, E>(u, head, st, &d, slots),
-                (2, 1) => direct_op::<2, 1, A, F, E>(u, head, st, &d, slots),
-                (2, 2) => direct_op::<2, 2, A, F, E>(u, head, st, &d, slots),
+                (0, 2) => direct_op::<0, 2, F, A, Fl, E>(u, head, st, &d, slots),
+                (1, 2) => direct_op::<1, 2, F, A, Fl, E>(u, head, st, &d, slots),
+                (2, 1) => direct_op::<2, 1, F, A, Fl, E>(u, head, st, &d, slots),
+                (2, 2) => direct_op::<2, 2, F, A, Fl, E>(u, head, st, &d, slots),
                 _ => unreachable!("rule 7 admits only `Direct::SHAPES`"),
             }
         }
@@ -105,9 +116,9 @@ pub(super) fn run_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + 
             let ports = rec.ports(&plan.nodes.slots);
             node_op(u, head, st, ports, |call, node, st| {
                 match rec.ain.max(rec.aout) {
-                    0..=4 => call.run_audio::<4, A>(node, &mut *st.arena, borrows),
-                    5..=16 => call.run_audio::<16, A>(node, &mut *st.arena, borrows),
-                    _ => call.run_audio::<MAX_PORTS, A>(node, &mut *st.arena, borrows),
+                    0..=4 => call.run_audio::<4, F, A>(node, &mut *st.arena, borrows),
+                    5..=16 => call.run_audio::<16, F, A>(node, &mut *st.arena, borrows),
+                    _ => call.run_audio::<MAX_PORTS, F, A>(node, &mut *st.arena, borrows),
                 }
             });
         }
@@ -122,12 +133,12 @@ pub(super) fn run_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + 
                 let dropped = &mut *st.dropped;
                 match (a, e) {
                     (0..=4, 0..=4) => {
-                        call.run::<4, 4, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<4, 4, F, A, E>(node, arena, events, borrows, extra, dropped)
                     }
                     (0..=16, 0..=4) => {
-                        call.run::<16, 4, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<16, 4, F, A, E>(node, arena, events, borrows, extra, dropped)
                     }
-                    _ => call.run::<MAX_PORTS, MAX_PORTS, A, E>(
+                    _ => call.run::<MAX_PORTS, MAX_PORTS, F, A, E>(
                         node, arena, events, borrows, extra, dropped,
                     ),
                 }
@@ -150,10 +161,15 @@ pub(super) fn run_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + 
 /// cover the fade too.
 #[cold]
 #[inline(never)]
-pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn fading_node_op<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     h: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     [ain, aout, ein, eout]: [&[u32]; 4],
     borrows: &[(u32, Role)],
 ) -> bool {
@@ -169,14 +185,14 @@ pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots
     let x = u.fade.as_mut().expect("a fading unit");
     let status = {
         let (silent, constant) = in_masks(ain, &*st.flags);
-        let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
+        let mut ins: [&[F]; MAX_PORTS] = [&[]; MAX_PORTS];
         for (i, &s) in ins.iter_mut().zip(ain) {
             *i = st.arena.slot(s, frames);
         }
-        let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
+        let mut outs: [&mut [F]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
         x.scratch.leading_mut(frames, &mut outs[..aout.len()]);
         for o in &mut outs[..aout.len()] {
-            o.fill(0.0);
+            o.fill(F::ZERO);
         }
         let evin = [SortedEvents::EMPTY; MAX_PORTS];
         let mut evout: [EventWriter<'_>; MAX_PORTS] =
@@ -210,14 +226,14 @@ pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots
         let o = x.scratch.slot_mut(c as u32, frames);
         match status {
             Status::Modified | Status::Masked { .. } => {}
-            Status::Silent | Status::Idle => o.fill(0.0),
+            Status::Silent | Status::Idle => o.fill(F::ZERO),
             Status::Constant => {
                 let v = o[0];
                 o.fill(v);
             }
             Status::Bypass => match ain.get(c) {
                 Some(&i) => o.copy_from_slice(st.arena.slot(i, frames)),
-                None => o.fill(0.0),
+                None => o.fill(F::ZERO),
             },
         }
     }
@@ -233,7 +249,7 @@ pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots
             let extra = Extra { inject, overlay };
             let (arena, events) = (&mut *st.arena, &mut *st.events);
             let dropped = &mut *st.dropped;
-            call.run::<MAX_PORTS, MAX_PORTS, A, E>(node, arena, events, borrows, extra, dropped)
+            call.run::<MAX_PORTS, MAX_PORTS, F, A, E>(node, arena, events, borrows, extra, dropped)
         },
     );
 
@@ -246,7 +262,7 @@ pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
             let (g_out, g_in) = x.law.gains(x.done + i, x.len);
-            *y = *y * g_in + o * g_out;
+            *y = *y * F::from_f32(g_in) + o * F::from_f32(g_out);
         }
         st.flags.set(s, 0);
     }
@@ -272,9 +288,9 @@ pub(super) fn flag(silent: bool, constant: bool) -> u8 {
 /// shifts per channel. Channels past 63 are never set (the masks are 64
 /// wide, and `compile` refuses a wider node anyway).
 #[inline]
-pub(super) fn in_masks<F: SlotFlags + ?Sized>(
+pub(super) fn in_masks<Fl: SlotFlags + ?Sized>(
     ain: &[u32],
-    flags: &F,
+    flags: &Fl,
 ) -> (SilenceMask, ConstantMask) {
     let (mut silent, mut constant) = (0u64, 0u64);
     for (c, &s) in (0..64u32).zip(ain) {
@@ -303,9 +319,9 @@ pub(crate) struct Head<'p, 'e> {
 /// What a node op may write besides its own unit: every buffer through `A`
 /// and `E` (the arena and event slots themselves serially, a claimed view
 /// of them in parallel), and only its own unit's per-block flags.
-pub(crate) struct OpState<'s, A: ?Sized, F: ?Sized, E: ?Sized> {
+pub(crate) struct OpState<'s, A: ?Sized, Fl: ?Sized, E: ?Sized> {
     pub(crate) arena: &'s mut A,
-    pub(crate) flags: &'s mut F,
+    pub(crate) flags: &'s mut Fl,
     pub(crate) events: &'s mut E,
     /// Flushed events waiting for their sinks: every entry serially, only
     /// this unit's in parallel. Either way, entries are matched by unit.
@@ -338,12 +354,17 @@ pub(crate) struct OpState<'s, A: ?Sized, F: ?Sized, E: ?Sized> {
 /// folds to straight-line code. That, and not the borrow alone, is most of
 /// what the direct forms save.
 #[inline(always)]
-pub(super) fn node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn node_op<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     h: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     ports: [&[u32]; 4],
-    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node, &mut OpState<'_, A, F, E>) -> Status,
+    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     node_op_with(u, h, st, ports, false, call_node);
 }
@@ -353,10 +374,15 @@ pub(super) fn node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Siz
 /// the unit's param buffers. Off the hot path: only a unit with a driven
 /// param, or one mid-declick, gets here.
 #[inline(never)]
-pub(super) fn run_params<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn run_params<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     h: &Head<'_, '_>,
-    st: &OpState<'_, A, F, E>,
+    st: &OpState<'_, A, Fl, E>,
 ) {
     let (rec, frames, plan) = (h.rec, h.frames, h.plan);
     let Unit { node, params, .. } = u;
@@ -382,13 +408,18 @@ pub(super) fn run_params<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?
 /// [`node_op`], with the unit's params already run this block when
 /// `params_done` (a crossfade runs them once for both units).
 #[inline(always)]
-pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn node_op_with<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     h: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     [ain, aout, ein, eout]: [&[u32]; 4],
     params_done: bool,
-    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node, &mut OpState<'_, A, F, E>) -> Status,
+    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     let (rec, frames) = (h.rec, h.frames);
     let unit = rec.unit;
@@ -443,7 +474,7 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
     }
     if skip {
         for &s in aout {
-            st.arena.slot_mut(s, frames).fill(0.0);
+            st.arena.slot_mut(s, frames).fill(F::ZERO);
             st.flags.set(s, SILENT | CONSTANT);
         }
         for &s in eout {
@@ -599,13 +630,14 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
 pub(super) fn direct_op<
     const I: usize,
     const O: usize,
-    A: AudioSlots,
-    F: SlotFlags + ?Sized,
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
     E: EventSlots + ?Sized,
 >(
-    u: &mut Unit,
+    u: &mut Unit<F>,
     h: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     d: &Direct,
     slots: &[u32],
 ) {
@@ -655,11 +687,11 @@ pub(super) struct Call<'p, 'e> {
 impl<'p> Call<'p, '_> {
     /// Run an event-free node on buffers already borrowed.
     #[inline]
-    fn process<'a>(
+    fn process<'a, F: Float>(
         &self,
-        node: &mut dyn Node,
-        ins: &'a [&'a [f32]],
-        outs: &'a mut [&'a mut [f32]],
+        node: &mut dyn Node<F>,
+        ins: &'a [&'a [F]],
+        outs: &'a mut [&'a mut [F]],
     ) -> Status
     where
         'p: 'a,
@@ -696,16 +728,16 @@ impl<'p> Call<'p, '_> {
     /// Borrow an event-free node's audio buffers by its presorted requests
     /// (`borrows` is the plan's whole list; the record names its run) and
     /// run it. `N` must hold the wider of its two sides.
-    fn run_audio<const N: usize, A: AudioSlots>(
+    fn run_audio<const N: usize, F: Float, A: AudioSlots<F>>(
         &self,
-        node: &mut dyn Node,
+        node: &mut dyn Node<F>,
         arena: &mut A,
         borrows: &[(u32, Role)],
     ) -> Status {
         let (n_in, n_out) = (self.rec.ain as usize, self.rec.aout as usize);
         debug_assert!(n_in <= N && n_out <= N);
-        let mut ins: [&[f32]; N] = [&[]; N];
-        let mut outs: [&mut [f32]; N] = std::array::from_fn(|_| &mut [][..]);
+        let mut ins: [&[F]; N] = [&[]; N];
+        let mut outs: [&mut [F]; N] = std::array::from_fn(|_| &mut [][..]);
         arena.borrow(
             self.frames,
             &borrows[self.rec.borrows.range()],
@@ -719,9 +751,9 @@ impl<'p> Call<'p, '_> {
     /// wider audio side and `M` the wider event side. Returns the node's
     /// status, and charges the events its writers refused to `dropped`, by
     /// port.
-    fn run<const N: usize, const M: usize, A: AudioSlots, E: EventSlots + ?Sized>(
+    fn run<const N: usize, const M: usize, F: Float, A: AudioSlots<F>, E: EventSlots + ?Sized>(
         &self,
-        node: &mut dyn Node,
+        node: &mut dyn Node<F>,
         arena: &mut A,
         events: &mut E,
         borrows: &[(u32, Role)],
@@ -735,8 +767,8 @@ impl<'p> Call<'p, '_> {
         let (e_in, e_out) = (rec.ein as usize, rec.eout as usize);
         debug_assert!(n_in.max(n_out) <= N && e_in.max(e_out) <= M);
 
-        let mut ins: [&[f32]; N] = [&[]; N];
-        let mut outs: [&mut [f32]; N] = std::array::from_fn(|_| &mut [][..]);
+        let mut ins: [&[F]; N] = [&[]; N];
+        let mut outs: [&mut [F]; N] = std::array::from_fn(|_| &mut [][..]);
         arena.borrow(frames, &borrows[rec.borrows.range()], &mut ins, &mut outs);
 
         let mut evin: [SortedEvents<'_>; M] = [SortedEvents::EMPTY; M];
@@ -800,14 +832,14 @@ impl<'p> Call<'p, '_> {
 
 /// Apply a node's [`Status`] to its output slots and their flags.
 #[inline(always)]
-pub(super) fn finish<A: AudioSlots, F: SlotFlags + ?Sized>(
+pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     status: Status,
     frames: usize,
     ain: &[u32],
     aout: &[u32],
     in_place: InPlaceMask,
     arena: &mut A,
-    flags: &mut F,
+    flags: &mut Fl,
 ) {
     match status {
         Status::Modified => {
@@ -825,7 +857,7 @@ pub(super) fn finish<A: AudioSlots, F: SlotFlags + ?Sized>(
         }
         Status::Silent | Status::Idle => {
             for &s in aout {
-                arena.slot_mut(s, frames).fill(0.0);
+                arena.slot_mut(s, frames).fill(F::ZERO);
                 flags.set(s, SILENT | CONSTANT);
             }
         }
@@ -834,7 +866,7 @@ pub(super) fn finish<A: AudioSlots, F: SlotFlags + ?Sized>(
                 let buf = arena.slot_mut(s, frames);
                 let v = buf[0];
                 buf.fill(v);
-                flags.set(s, flag(v == 0.0 && v.is_sign_positive(), true));
+                flags.set(s, flag(v == F::ZERO && v.to_f64().is_sign_positive(), true));
             }
         }
         Status::Bypass => {
@@ -846,7 +878,7 @@ pub(super) fn finish<A: AudioSlots, F: SlotFlags + ?Sized>(
                         flags.set(s, flags.get(i));
                     }
                     None => {
-                        arena.slot_mut(s, frames).fill(0.0);
+                        arena.slot_mut(s, frames).fill(F::ZERO);
                         flags.set(s, SILENT | CONSTANT);
                     }
                 }

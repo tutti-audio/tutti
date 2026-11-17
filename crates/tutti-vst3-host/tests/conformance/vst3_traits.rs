@@ -8,6 +8,7 @@
 use crate::probe::probe_path;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
+use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_plugin_types::{
@@ -54,7 +55,7 @@ impl Probe {
     }
 
     fn enter(code: Option<&str>) -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         let previous = std::env::var("TUTTI_PROBE_MISBEHAVIOUR").ok();
         // SAFETY: `PROBE_LOCK` is held for the life of this guard, and this
         // binary's tests are its only readers of the variable.

@@ -177,9 +177,10 @@ pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId};
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, Diagnostics, Opened, Plugin, PluginBuses, PluginChange, PluginDeclaration,
-    PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginParamError, PooledPlugin, PortCounts,
-    PresetEntry, PresetKind, Presets, RestoreState, SaveState, TypedParam,
+    AddPluginError, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
+    RestoreState, SaveState, TypedParam,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -551,8 +552,8 @@ pub mod soundfont {
 pub mod plugin {
     pub use tutti_plugin::catalog::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin::{
-        AutomationMode, BridgeConfig, FeatureReport, Features, MainThreadMarker, MainWork,
-        MainWorkHandle, PluginRenderFault, Preset, PresetSupport,
+        AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
+        PluginRenderFault, Preset,
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
@@ -562,7 +563,9 @@ pub mod plugin {
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
+    pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
+    pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,

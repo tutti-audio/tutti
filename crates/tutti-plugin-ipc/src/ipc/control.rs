@@ -15,6 +15,7 @@ use tutti_plugin_types::{
     RenderMode, RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason,
     TrackInfo, WindowHandle, bypass_value,
 };
+use tutti_rt::LockExt;
 
 use super::{Ipc, IpcController};
 
@@ -305,12 +306,7 @@ macro_rules! served_control {
             /// What the plugin re-reported since the last call (a latency or
             /// a tail), as the requests the lifecycle answers by re-reading.
             fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
-                let mut asked = self
-                    .link
-                    .events
-                    .requests
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut asked = self.link.events.requests.lock_recover();
                 out.append(&mut asked);
             }
 

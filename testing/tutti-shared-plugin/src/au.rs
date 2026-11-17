@@ -46,6 +46,7 @@
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use tutti_rt::LockExt;
 
 use core_foundation::base::{CFGetTypeID, CFRetain, TCFType};
 use core_foundation::data::{CFData, CFDataGetTypeID};
@@ -266,7 +267,7 @@ struct Instance {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock_recover()
 }
 
 impl Instance {

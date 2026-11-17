@@ -1,6 +1,7 @@
 //! Host specific structures.
 
 use num_traits::Float;
+use tutti_rt::LockExt;
 
 use libloading::Library;
 use std::cell::{Cell, UnsafeCell};
@@ -591,11 +592,7 @@ impl Core {
         // (the no-alloc gate of `a_callback_from_a_render_takes_no_lock_during_a_load` aborts
         // on it). Linux and Windows use a futex or SRW lock that never allocates. One
         // uncontended lock now means no later `lock`/`try_lock` on any thread allocates.
-        drop(
-            core.gate
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-        );
+        drop(core.gate.lock_recover());
         core
     }
 }
@@ -636,16 +633,8 @@ impl Closer {
         }
         // Waits for an off-main dispatcher call in flight (a parameter read), and then
         // for an audio entry in flight; after this none starts.
-        let _dispatching = self
-            .core
-            .dispatcher
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut closed = self
-            .core
-            .gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _dispatching = self.core.dispatcher.lock_recover();
+        let mut closed = self.core.gate.lock_recover();
         // `effStopProcess`, which the SDK puts before the suspend, is the render handle's;
         // when no one stopped it, it is stopped here, once.
         if self.core.processing.swap(false, Ordering::AcqRel) {
@@ -2040,16 +2029,8 @@ impl PluginInstance {
     /// meanwhile. That is the convention of the SDK's `suspend`/`resume` bracket; the header
     /// itself states no exclusion for any opcode (authority 3, `aeffect.h` is silent).
     fn exclusive<R>(&self, call: impl FnOnce() -> R) -> R {
-        let _dispatching = self
-            .core
-            .dispatcher
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _gate = self
-            .core
-            .gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _dispatching = self.core.dispatcher.lock_recover();
+        let _gate = self.core.gate.lock_recover();
         call()
     }
 
@@ -2063,11 +2044,7 @@ impl PluginInstance {
     /// text races its own `process` is the plugin's to make safe, as it is under every other
     /// host.
     fn concurrent<R>(&self, call: impl FnOnce() -> R) -> R {
-        let _dispatching = self
-            .core
-            .dispatcher
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _dispatching = self.core.dispatcher.lock_recover();
         call()
     }
 
@@ -2601,9 +2578,7 @@ static REGISTRY_LOCKS: AtomicUsize = AtomicUsize::new(0);
 fn adopted() -> std::sync::MutexGuard<'static, BTreeSet<usize>> {
     #[cfg(test)]
     REGISTRY_LOCKS.fetch_add(1, Ordering::SeqCst);
-    ADOPTED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    ADOPTED.lock_recover()
 }
 
 fn adopt(effect: *mut AEffect) {

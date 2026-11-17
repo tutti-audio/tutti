@@ -166,6 +166,7 @@ pub(crate) mod test_utils {
     use std::sync::{Mutex, MutexGuard};
     #[cfg(feature = "clap")]
     use tutti_clap_test_plugin::{ClapProbe, ClapSwitch};
+    use tutti_rt::LockExt;
 
     /// The reference CLAP plugin's probe, opened once on its two images and
     /// kept for the process: a switch set before a load must stay resident
@@ -658,8 +659,6 @@ pub(crate) mod test_utils {
         feature = "vst3"
     ))]
     pub fn plugin_load_lock() -> MutexGuard<'static, ()> {
-        PLUGIN_LOAD_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        PLUGIN_LOAD_LOCK.lock_recover()
     }
 }

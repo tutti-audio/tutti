@@ -19,6 +19,7 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
+use tutti_rt::LockExt;
 
 use tutti_plugin_types::{Control, Normalized, ParamFlags, ParamId, ParamSteps};
 
@@ -40,7 +41,7 @@ const BLOCK: usize = 512;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// Call one of the probe's `#[no_mangle]` switch functions.

@@ -2555,6 +2555,7 @@ name = "tutti-buffers"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "bytemuck",
  "libm",
  "serde",
  "serde_json",
@@ -2615,6 +2616,7 @@ dependencies = [
  "clap-sys",
  "libc",
  "libloading 0.9.1",
+ "tutti-rt",
 ]
 
 [[package]]
@@ -3322,6 +3324,7 @@ dependencies = [
  "core-foundation",
  "coreaudio-sys",
  "num-traits",
+ "tutti-rt",
  "tutti-vst2-author",
  "vst3",
 ]
@@ -3468,6 +3471,7 @@ dependencies = [
  "tutti-graph",
  "tutti-midi-protocol",
  "tutti-plugin-types",
+ "tutti-rt",
  "tutti-ump",
 ]
 
@@ -3507,6 +3511,7 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.9.1",
  "num-traits",
+ "tutti-rt",
  "tutti-vst2-author",
 ]
 

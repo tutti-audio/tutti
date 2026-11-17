@@ -118,6 +118,7 @@ use crate::node::Shape;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::pass::Pass;
 use crate::spec::EventOut;
+use tutti_buffers::Float;
 
 /// What the graph does with a node (doc 013, "Bypass and mute are graph
 /// state"): a state the graph holds for any node, a plugin included. See the
@@ -512,10 +513,10 @@ impl Segments {
     /// `Mix::WET` it leaves `out` alone and at `Mix::DRY` it copies `x`.
     /// `lane` is the driving lane's value at each frame of a driven block
     /// (empty otherwise).
-    pub(crate) fn blend(&self, out: &mut [f32], x: Option<&[f32]>, lane: &[f32]) {
-        let put = |out: &mut [f32], range: std::ops::Range<usize>| match x {
+    pub(crate) fn blend<F: Float>(&self, out: &mut [F], x: Option<&[F]>, lane: &[f32]) {
+        let put = |out: &mut [F], range: std::ops::Range<usize>| match x {
             Some(x) => out[range.clone()].copy_from_slice(&x[range]),
-            None => out[range].fill(0.0),
+            None => out[range].fill(F::ZERO),
         };
         put(out, 0..self.warm);
         let mut at = self.warm;
@@ -527,24 +528,25 @@ impl Segments {
                 let w = r.from.toward(to, gain(r.k + j, r.declick));
                 let node_on = r.from.node != 0.0 || to.node != 0.0;
                 let input_on = input && (r.from.input != 0.0 || to.input != 0.0);
+                let (node, input) = (F::from_f32(w.node), F::from_f32(w.input));
                 out[i] = match (node_on, input_on) {
-                    (true, true) => out[i] * w.node + x.map_or(0.0, |x| x[i]) * w.input,
-                    (true, false) => out[i] * w.node,
-                    (false, true) => x.map_or(0.0, |x| x[i]) * w.input,
-                    (false, false) => 0.0,
+                    (true, true) => out[i] * node + x.map_or(F::ZERO, |x| x[i]) * input,
+                    (true, false) => out[i] * node,
+                    (false, true) => x.map_or(F::ZERO, |x| x[i]) * input,
+                    (false, false) => F::ZERO,
                 };
             }
             at += r.len;
         }
         match self.steady {
             NodeMode::Active => self.blend_active(out, x, at, lane),
-            NodeMode::Muted => out[at..].fill(0.0),
+            NodeMode::Muted => out[at..].fill(F::ZERO),
             NodeMode::Bypassed => put(out, at..out.len()),
         }
     }
 
     /// The steady Active frames from `at` on, against the block's mix.
-    fn blend_active(&self, out: &mut [f32], x: Option<&[f32]>, at: usize, lane: &[f32]) {
+    fn blend_active<F: Float>(&self, out: &mut [F], x: Option<&[F]>, at: usize, lane: &[f32]) {
         let m = self.mix;
         if m.is_wet() {
             return;
@@ -554,14 +556,16 @@ impl Segments {
             match x {
                 _ if w == 1.0 => {}
                 Some(x) if w == 0.0 => out[at..].copy_from_slice(&x[at..]),
-                None if w == 0.0 => out[at..].fill(0.0),
+                None if w == 0.0 => out[at..].fill(F::ZERO),
                 Some(x) => {
-                    let wx = 1.0 - w;
+                    let wx = F::from_f32(1.0 - w);
+                    let w = F::from_f32(w);
                     for (o, &x) in out[at..].iter_mut().zip(&x[at..]) {
                         *o = *o * w + x * wx;
                     }
                 }
                 None => {
+                    let w = F::from_f32(w);
                     for o in &mut out[at..] {
                         *o *= w;
                     }
@@ -572,8 +576,8 @@ impl Segments {
         for i in at..out.len() {
             let w = m.at(i, lane);
             out[i] = match x {
-                Some(x) => out[i] * w + x[i] * (1.0 - w),
-                None => out[i] * w,
+                Some(x) => out[i] * F::from_f32(w) + x[i] * F::from_f32(1.0 - w),
+                None => out[i] * F::from_f32(w),
             };
         }
     }
@@ -587,16 +591,16 @@ fn gain(k: usize, declick: usize) -> f32 {
 /// The aligned-input path of a latent node: one ring of its declared latency
 /// per channel the node passes (`min(inputs, outputs)`), fed every block with
 /// the node's input. Built on the control side, never grown.
-pub(crate) struct BypassLine {
-    rings: Vec<AudioRing>,
+pub(crate) struct BypassLine<F: Float> {
+    rings: Vec<AudioRing<F>>,
 }
 
-impl BypassLine {
+impl<F: Float> BypassLine<F> {
     /// The line `shape` needs: none for a node with no latency, or with no
     /// channel to pass. Control side: allocates.
     pub(crate) fn for_shape(shape: &Shape) -> Option<Self> {
         let latency = shape.latency.samples();
-        let main = Pass::of_or_nothing(shape).inputs();
+        let main = Pass::<F>::of_or_nothing(shape).inputs();
         (!latency.is_zero() && main > 0).then(|| Self {
             rings: (0..main).map(|_| AudioRing::new(latency)).collect(),
         })
@@ -605,7 +609,7 @@ impl BypassLine {
 
 /// A unit's mode as the executor keeps it. Lives in the unit's record in the
 /// store, as its crossfade does, and is cut by a hard edit as one is.
-pub(crate) struct ModeState {
+pub(crate) struct ModeState<F: Float> {
     cell: ModeCell,
     /// The node bypasses itself ([`Shape::own_bypass`]): `Bypassed` in the cell
     /// is read as `Active`.
@@ -634,14 +638,14 @@ pub(crate) struct ModeState {
     latency: usize,
     /// Which input channel feeds which output channel when the node is not
     /// called ([`Pass`]).
-    pass: Pass,
-    line: Option<BypassLine>,
+    pass: Pass<F>,
+    line: Option<BypassLine<F>>,
     /// The aligned input of a block that needs it away from the node's own
     /// slots: one slot per passed channel.
-    scratch: Option<Arena>,
+    scratch: Option<Arena<F>>,
     /// The fold of that aligned input onto the outputs, one slot per output
     /// channel: only for a pass that folds.
-    folded: Option<Arena>,
+    folded: Option<Arena<F>>,
     /// What each event input has been sent and not ended, to close when the
     /// node is bypassed.
     held_in: Vec<Held>,
@@ -660,7 +664,7 @@ pub(crate) struct ModeState {
     declick: usize,
 }
 
-impl ModeState {
+impl<F: Float> ModeState<F> {
     /// The state of a unit about to be placed: steady in `cell`'s mode, with
     /// no fade (a fork, a new unit). Control side: allocates its line, its
     /// scratch and its tables.
@@ -668,7 +672,7 @@ impl ModeState {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
         let mix = cell.load_mix().get();
-        let pass = Pass::of_or_nothing(shape);
+        let pass = Pass::<F>::of_or_nothing(shape);
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
         Self {
@@ -802,8 +806,8 @@ impl ModeState {
     pub(crate) fn relined(
         &mut self,
         latency: usize,
-        line: Option<BypassLine>,
-    ) -> Option<BypassLine> {
+        line: Option<BypassLine<F>>,
+    ) -> Option<BypassLine<F>> {
         self.latency = latency;
         std::mem::replace(&mut self.line, line)
     }
@@ -916,7 +920,7 @@ impl ModeState {
 
     /// Fold the aligned inputs into output channel `c`'s own slot `out`
     /// (a parked node's output). Only for a pass that [`folds`](Self::folds).
-    pub(crate) fn fold_aligned_into(&self, c: usize, out: &mut [f32], frames: usize) {
+    pub(crate) fn fold_aligned_into(&self, c: usize, out: &mut [F], frames: usize) {
         let src = self
             .scratch
             .as_ref()
@@ -936,7 +940,7 @@ impl ModeState {
     pub(crate) fn align(
         &mut self,
         c: usize,
-        src: &[f32],
+        src: &[F],
         silent: bool,
         keep: bool,
         frames: usize,
@@ -957,7 +961,7 @@ impl ModeState {
         }
     }
 
-    fn slot(scratch: &mut Option<Arena>, c: usize, frames: usize) -> &mut [f32] {
+    fn slot(scratch: &mut Option<Arena<F>>, c: usize, frames: usize) -> &mut [F] {
         scratch
             .as_mut()
             .expect("a node with a channel to pass has a scratch")
@@ -966,7 +970,7 @@ impl ModeState {
 
     /// Output channel `c`'s aligned input, as [`align`](Self::align) (and
     /// [`fold_aligned`](Self::fold_aligned), when the pass folds) left it.
-    pub(crate) fn passed(&self, c: usize, frames: usize) -> &[f32] {
+    pub(crate) fn passed(&self, c: usize, frames: usize) -> &[F] {
         self.folded
             .as_ref()
             .or(self.scratch.as_ref())
@@ -975,7 +979,7 @@ impl ModeState {
     }
 
     /// Channel `c`'s ring of the bypass line, for a parked node's output.
-    pub(crate) fn ring(&mut self, c: usize) -> Option<&mut AudioRing> {
+    pub(crate) fn ring(&mut self, c: usize) -> Option<&mut AudioRing<F>> {
         self.line.as_mut().and_then(|l| l.rings.get_mut(c))
     }
 
@@ -1041,7 +1045,7 @@ mod tests {
     }
 
     /// A unit of `shape` at `mix`, steady Active, after the block's snapshot.
-    fn at(shape: &Shape, mix: f32) -> (ModeCell, ModeState) {
+    fn at(shape: &Shape, mix: f32) -> (ModeCell, ModeState<f32>) {
         let cell = ModeCell::new(NodeMode::Active, Mix::new(mix));
         let mut state = ModeState::new(cell.clone(), shape, 64, DECLICK_FRAMES);
         state.snapshot();

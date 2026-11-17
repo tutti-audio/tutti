@@ -19,7 +19,7 @@
 //!
 //! Built on the control side (a fold allocates); applied without allocating.
 
-use tutti_buffers::{Fold, FoldError, MonoMut, Planes};
+use tutti_buffers::{Float, Fold, FoldError, MonoMut, Planes};
 use tutti_types::{ChannelTopology, MAX_CHANNELS, Speaker};
 
 /// Why a node has no pass: what it would need to declare to be bypassed or
@@ -50,19 +50,19 @@ use crate::node::Shape;
 /// The dry path of a node: where each input channel goes when the node does
 /// not run (a bypass, the dry side of a mix). [`Shape::pass`] builds it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Pass {
+pub struct Pass<F: Float = f32> {
     /// Input channels the aligned path carries (one ring each).
     inputs: usize,
     /// Output channels it writes; the rest are silent.
     outputs: usize,
     /// The fold, when the mapping is not output `c` = input `c`.
-    fold: Option<Fold>,
+    fold: Option<Fold<F>>,
     /// Per output channel, the input channels it reads (bit `i`), for the
     /// silence flag. Empty when there is no fold.
     reads: Vec<u16>,
 }
 
-impl Pass {
+impl<F: Float> Pass<F> {
     /// Nothing passes: no channel, no line.
     fn nothing() -> Self {
         Self {
@@ -174,11 +174,11 @@ impl Pass {
     /// The input channels output `c` reads, each with its gain: input `c` at
     /// 1.0 where the path goes by index, the fold's terms where it folds, and
     /// nothing for an output past [`outputs`](Self::outputs).
-    pub fn contributions(&self, c: usize) -> impl Iterator<Item = (usize, f32)> + use<> {
-        let terms: Vec<(usize, f32)> = match (&self.fold, c < self.outputs) {
+    pub fn contributions(&self, c: usize) -> impl Iterator<Item = (usize, F)> + use<F> {
+        let terms: Vec<(usize, F)> = match (&self.fold, c < self.outputs) {
             (_, false) => Vec::new(),
             (Some(fold), true) => fold.contributions(c),
-            (None, true) => vec![(c, 1.0)],
+            (None, true) => vec![(c, F::ONE)],
         };
         terms.into_iter()
     }
@@ -203,12 +203,7 @@ impl Pass {
     /// # Panics
     ///
     /// If there is no fold (check [`folds`](Self::folds)).
-    pub(crate) fn fold_into<'a>(
-        &self,
-        src: impl Fn(usize) -> &'a [f32],
-        c: usize,
-        out: &mut [f32],
-    ) {
+    pub(crate) fn fold_into<'a>(&self, src: impl Fn(usize) -> &'a [F], c: usize, out: &mut [F]) {
         let fold = self.fold.as_ref().expect("a pass that folds");
         // The aligned slots are separate slices; the table of them is a stack
         // array, at most one bus wide: `width` is clamped to
@@ -219,7 +214,7 @@ impl Pass {
             "a fold's source is at most a bus wide"
         );
         let width = usize::from(fold.src_layout().count()).min(MAX_CHANNELS);
-        let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+        let mut table: [&[F]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (i, slot) in table.iter_mut().enumerate().take(width) {
             *slot = src(i);
         }
@@ -231,7 +226,7 @@ impl Pass {
         );
         if folded.is_err() {
             // Not folded: silent, never the block's previous contents.
-            out.fill(0.0);
+            out.fill(F::ZERO);
         }
     }
 }

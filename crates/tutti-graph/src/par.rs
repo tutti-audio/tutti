@@ -70,6 +70,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
+use tutti_buffers::Float;
 
 use tutti_rt::{
     BlockWaits, ClaimTable, Held, Participant, RtScope, SplitMut, SplitRw, TaskGraph,
@@ -268,7 +269,7 @@ impl Par {
 }
 
 /// Everything one block's parallel run reads or claims.
-pub(crate) struct Block<'b, 'o> {
+pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) plan: &'b Plan,
     pub(crate) env: &'b Env,
     /// Observed before the block, read-only while it runs.
@@ -276,14 +277,14 @@ pub(crate) struct Block<'b, 'o> {
     pub(crate) frames: usize,
     pub(crate) max: MaxBlock,
     pub(crate) cap: usize,
-    pub(crate) inputs: &'b [&'b [f32]],
-    pub(crate) outputs: &'b mut [&'o mut [f32]],
-    pub(crate) arena: &'b mut Arena,
+    pub(crate) inputs: &'b [&'b [F]],
+    pub(crate) outputs: &'b mut [&'o mut [F]],
+    pub(crate) arena: &'b mut Arena<F>,
     pub(crate) flags: &'b mut [u8],
     pub(crate) events: &'b mut [Vec<Event>],
-    pub(crate) store: &'b mut [Option<Unit>],
-    pub(crate) rings: &'b mut [Option<Ring>],
-    pub(crate) audio_fb: &'b mut [Option<crate::kernels::AudioRing>],
+    pub(crate) store: &'b mut [Option<Unit<F>>],
+    pub(crate) rings: &'b mut [Option<Ring<F>>],
+    pub(crate) audio_fb: &'b mut [Option<crate::kernels::AudioRing<F>>],
     pub(crate) event_fb: &'b mut [Option<crate::kernels::EventFifo>],
     pub(crate) taps: &'b mut [Option<crate::tap::TapWriter>],
     pub(crate) event_taps: &'b mut [Option<crate::event_tap::EventTapWriter>],
@@ -303,7 +304,7 @@ pub(crate) struct Block<'b, 'o> {
 
 /// What every participant shares while the block runs: `Sync`, so the pool
 /// can hand `&Shared` to its threads.
-struct Shared<'s, 'o> {
+struct Shared<'s, 'o, F: Float = f32> {
     plan: &'s Plan,
     env: &'s Env,
     /// The executor's, shared read-only by every participant.
@@ -311,14 +312,14 @@ struct Shared<'s, 'o> {
     frames: usize,
     max: MaxBlock,
     cap: usize,
-    inputs: &'s [&'s [f32]],
+    inputs: &'s [&'s [F]],
     graph: &'s TaskGraph,
     arena: SplitRw<'s, Line>,
     flags: &'s [AtomicU8],
     events: SplitRw<'s, Vec<Event>>,
-    store: SplitMut<'s, Option<Unit>>,
-    rings: SplitMut<'s, Option<Ring>>,
-    audio_fb: SplitMut<'s, Option<crate::kernels::AudioRing>>,
+    store: SplitMut<'s, Option<Unit<F>>>,
+    rings: SplitMut<'s, Option<Ring<F>>>,
+    audio_fb: SplitMut<'s, Option<crate::kernels::AudioRing<F>>>,
     event_fb: SplitMut<'s, Option<crate::kernels::EventFifo>>,
     taps: SplitMut<'s, Option<crate::tap::TapWriter>>,
     event_taps: SplitMut<'s, Option<crate::event_tap::EventTapWriter>>,
@@ -330,7 +331,7 @@ struct Shared<'s, 'o> {
     inject_spans: &'s [Span],
     has_inject: SplitMut<'s, bool>,
     has_due: SplitMut<'s, bool>,
-    outputs: SplitMut<'s, &'o mut [f32]>,
+    outputs: SplitMut<'s, &'o mut [F]>,
     workers: SplitMut<'s, Worker>,
     /// Each participant's log slots and ring, claimed by its index for the
     /// whole block.
@@ -347,7 +348,11 @@ struct Shared<'s, 'o> {
 ///
 /// If a node panicked on any participant (after every participant has left
 /// the block).
-pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -> bool {
+pub(crate) fn run_block<F: Float>(
+    par: &mut Par,
+    pool: &Arc<dyn Pool>,
+    b: Block<'_, '_, F>,
+) -> bool {
     par.graph.begin();
     for w in &mut par.workers {
         w.dropped.reset();
@@ -430,7 +435,7 @@ pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -
     ended
 }
 
-impl Shared<'_, '_> {
+impl<F: Float> Shared<'_, '_, F> {
     /// One participant's share of the block.
     fn participate(&self, w: usize) {
         if w >= self.workers.len() || w >= self.logs.len() {
@@ -498,7 +503,7 @@ impl Shared<'_, '_> {
                 let e = EventsView {
                     view: self.events.view(held_events),
                 };
-                sum_op(
+                sum_op::<F, _, _, _>(
                     &mut a,
                     flags,
                     &e,
@@ -524,7 +529,7 @@ impl Shared<'_, '_> {
                 };
                 // The lanes of this op are its own: no other op names them.
                 let mut lanes = self.lanes.claim_run(span.range());
-                sum_op(
+                sum_op::<F, _, _, _>(
                     &mut a,
                     flags,
                     &e,
@@ -615,7 +620,7 @@ impl Shared<'_, '_> {
                     let a = ArenaView {
                         view: self.arena.view(held_audio),
                     };
-                    crate::tap::tap_op(
+                    crate::tap::tap_op::<F, _>(
                         tap,
                         &a,
                         &self.plan.audio_list[srcs.range()],
@@ -638,7 +643,7 @@ impl Shared<'_, '_> {
                     let a = ArenaView {
                         view: self.arena.view(held_audio),
                     };
-                    crate::meter::meter_op(
+                    crate::meter::meter_op::<F, _, _>(
                         meter,
                         &a,
                         flags,
