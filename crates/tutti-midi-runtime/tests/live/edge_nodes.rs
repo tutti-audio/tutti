@@ -27,7 +27,7 @@ use tutti_midi_runtime::{
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
-    Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan,
+    Address, CCNumber, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteNumber, System, U7, U14, Ump, Voice2,
 };
 
@@ -477,9 +477,9 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
         .unwrap()
         .iter()
         .map(|&(_, frame, ump)| {
-            let what = match (ump.key_event(), ump.decode()) {
-                (Some(KeyEvent::On(k)), _) => format!("on {}", k.note().get()),
-                (Some(KeyEvent::Off(k)), _) => format!("off {}", k.note().get()),
+            let what = match (ump.note_key_event(), ump.decode()) {
+                (Some(NoteKeyEvent::On(k)), _) => format!("on {}", k.note().get()),
+                (Some(NoteKeyEvent::Off(k)), _) => format!("off {}", k.note().get()),
                 (_, Ok(Message::Midi2(_, Voice2::ControlChange { controller, value }))) => {
                     format!("cc {} {:#x}", controller.get(), value.get())
                 }
@@ -952,7 +952,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
     }
     let notes: Vec<(usize, u64)> = seen
         .iter()
-        .filter(|s| matches!(s.2.key_event(), Some(KeyEvent::On(_))))
+        .filter(|s| matches!(s.2.note_key_event(), Some(NoteKeyEvent::On(_))))
         .map(|s| (s.0, s.1))
         .collect();
     assert_eq!(notes, vec![(1, 5)]);

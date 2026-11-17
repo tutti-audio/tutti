@@ -39,7 +39,7 @@
 use crate::held::Controllers;
 use tutti_graph::{Event, EventWriter, Offset};
 use tutti_ump::{
-    Address, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
+    Address, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, Ump, Voice2,
 };
 
 /// A note's place on the wire: its Group, Channel and Note Number.
@@ -71,18 +71,18 @@ pub(crate) enum Class {
 
 impl Class {
     pub(crate) fn of(ump: Ump) -> Self {
-        let (Some(address), Some(event)) = (ump.address(), ump.key_event()) else {
+        let (Some(address), Some(event)) = (ump.address(), ump.note_key_event()) else {
             return Self::Other;
         };
-        let key = |key: Key| NoteKey {
+        let key = |key: tutti_ump::NoteKey| NoteKey {
             group: address.group,
             channel: address.channel,
             note: key.note(),
         };
         match event {
-            KeyEvent::On(k) => Self::On(key(k)),
-            KeyEvent::Off(k) => Self::Off(key(k)),
-            KeyEvent::Sustain { .. } => Self::Other,
+            NoteKeyEvent::On(k) => Self::On(key(k)),
+            NoteKeyEvent::Off(k) => Self::Off(key(k)),
+            NoteKeyEvent::Sustain { .. } => Self::Other,
         }
     }
 }

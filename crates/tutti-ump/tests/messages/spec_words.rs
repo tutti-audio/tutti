@@ -6,9 +6,9 @@
 
 use core::num::NonZeroU8;
 use tutti_ump::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
-    BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks,
-    DeviceIdentity, Direction, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
+    BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128,
+    DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
     FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
     GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
     Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
@@ -880,7 +880,7 @@ fn stream_function_blocks() {
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: true,
             id: FunctionBlockId::new(3).unwrap().into(),
-            direction: Direction::Bidirectional,
+            direction: BlockDirection::Bidirectional,
             ui_hint: UiHint::Both,
             midi1: Midi1Port::Restricted,
             first_group: FirstGroup::new(4).unwrap().into(),
@@ -894,7 +894,7 @@ fn stream_function_blocks() {
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: false,
             id: FunctionBlockId::new(1).unwrap().into(),
-            direction: Direction::Input,
+            direction: BlockDirection::Input,
             ui_hint: UiHint::Unknown,
             midi1: Midi1Port::Unrestricted,
             first_group: FirstGroup::new(15).unwrap().into(),

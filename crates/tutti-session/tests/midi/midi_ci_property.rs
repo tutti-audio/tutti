@@ -59,10 +59,10 @@ struct PePeer {
 impl PePeer {
     fn new(store: ResourceStore, requests: u8) -> Self {
         use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
-        use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
+        use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
             FunctionBlockId::new(0).unwrap(),
-            Direction::Bidirectional,
+            BlockDirection::Bidirectional,
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
