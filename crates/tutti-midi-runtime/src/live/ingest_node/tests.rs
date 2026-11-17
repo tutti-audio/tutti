@@ -20,7 +20,8 @@ fn the_node_adopts_the_mode_last_asked_for() {
         mpe_request_cell: controls.request.clone(),
         ..MidiIngestNode::new()
     };
-    node.adopt_mpe_request();
+    let requested = node.mpe_request.lend().mode;
+    adopt_mpe_request(&mut node.mpe_mode, &mut node.device.mpe, requested);
     assert_eq!(node.mpe_mode, upper, "the node adopts it");
 }
 

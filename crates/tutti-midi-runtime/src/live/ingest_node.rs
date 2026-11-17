@@ -267,8 +267,9 @@ pub struct MidiIngestNode {
     /// The Profile zones in force on the device's Groups: what the requests
     /// last read set.
     profiles: GroupProfiles,
-    /// The generation of the requests `profiles` was read from.
-    profiles_generation: u64,
+    /// The publish number of the requests `profiles` was read from (0 for
+    /// the cell's first value, which holds none).
+    profiles_seq: u64,
     /// Translated events a block had no room for in `out`
     /// ([`MidiIngestControls::losses`]).
     dropped: CounterWriter<Losses>,
@@ -289,9 +290,6 @@ struct Requests {
     mode: Option<MpeMode>,
     /// The MPE Profile zones the device enabled.
     profiles: GroupProfiles,
-    /// Counts the changes of `profiles`, so the node reads them only when
-    /// there is one.
-    generation: u64,
 }
 
 impl Requests {
@@ -299,7 +297,6 @@ impl Requests {
         Self {
             mode: None,
             profiles: NO_PROFILES,
-            generation: 0,
         }
     }
 }
@@ -433,7 +430,7 @@ impl MidiIngestNode {
             mpe_request_cell: cell,
             device: Device::new(MpeMode::Disabled),
             profiles: NO_PROFILES,
-            profiles_generation: 0,
+            profiles_seq: 0,
             epochs: None,
             out: vec![BLANK; tutti_graph::note_off_room(MIDI_INPUT_EVENT_CAPACITY)]
                 .into_boxed_slice(),
@@ -478,27 +475,31 @@ impl MidiIngestNode {
         self.device.mpe = MpeIngest::new(mode);
         self
     }
+}
 
-    /// Adopt a requested MPE mode that differs from the one in force; `true`
-    /// when it did, and the block then sends the new zones' default bend
-    /// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
-    /// Message resets a receiver to, as this node sends an MCM's).
-    ///
-    /// **The comparison is load-bearing**: the request latches (the audio
-    /// thread cannot clear it without publishing), and `set_mode` rebuilds
-    /// the ingest, so re-adopting it every block would drop every sounding
-    /// note's voice mapping, and re-send the ranges, every block.
-    fn adopt_mpe_request(&mut self) -> bool {
-        let Some(mode) = self.mpe_request.lend().mode else {
-            return false;
-        };
-        if self.mpe_mode == mode {
-            return false;
-        }
-        self.mpe_mode = mode;
-        self.device.mpe.set_mode(mode);
-        true
+/// Adopt a requested MPE mode that differs from the one in force; `true`
+/// when it did, and the block then sends the new zones' default bend
+/// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
+/// Message resets a receiver to, as this node sends an MCM's).
+///
+/// **The comparison is load-bearing**: the request latches (the audio
+/// thread cannot clear it without publishing), and `set_mode` rebuilds
+/// the ingest, so re-adopting it every block would drop every sounding
+/// note's voice mapping, and re-send the ranges, every block.
+fn adopt_mpe_request(
+    in_force: &mut MpeMode,
+    ingest: &mut MpeIngest,
+    requested: Option<MpeMode>,
+) -> bool {
+    let Some(mode) = requested else {
+        return false;
+    };
+    if *in_force == mode {
+        return false;
     }
+    *in_force = mode;
+    ingest.set_mode(mode);
+    true
 }
 
 /// The host's handle on a [`MidiIngestNode`]: its MPE mode and the MPE Profile
@@ -556,7 +557,6 @@ impl MidiIngestControls {
     fn edit_profiles(&self, edit: impl FnOnce(&mut GroupProfiles) -> bool) {
         let mut request = (*self.request.current()).clone();
         if edit(&mut request.profiles) {
-            request.generation += 1;
             self.request.publish(request);
         }
     }
@@ -599,7 +599,10 @@ impl Node for MidiIngestNode {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         // Before any event is translated, stated or not.
-        let reset = self.adopt_mpe_request();
+        // One lend: the mode and the Profile zones are read from the same
+        // requests.
+        let requests = self.mpe_request.lend();
+        let reset = adopt_mpe_request(&mut self.mpe_mode, &mut self.device.mpe, requests.mode);
         let mode = self.mpe_mode;
         let block_len = cx.env.block_len;
         let first = cx.env.frame;
@@ -625,9 +628,8 @@ impl Node for MidiIngestNode {
         // stops and resets the channels it moves, and starts the zones at their
         // bend ranges.
         {
-            let requests = self.mpe_request.lend();
-            if requests.generation != self.profiles_generation {
-                self.profiles_generation = requests.generation;
+            if requests.seq() != self.profiles_seq {
+                self.profiles_seq = requests.seq();
                 for group in MidiGroup::all() {
                     let want = requests.profiles[group.index()];
                     let held = &mut self.profiles[group.index()];
@@ -738,10 +740,9 @@ impl Node for MidiIngestNode {
         self.device.sensing.forget_all();
         self.device.owing = 0;
         self.profiles = NO_PROFILES;
-        // A published request's generation is at least 1 (`edit_profiles`
-        // bumps it before publishing), so generation 0 reads the requests again
-        // whenever one was published.
-        self.profiles_generation = 0;
+        // The cell's first value holds no zones, so number 0 reads the requests
+        // again whenever one was published.
+        self.profiles_seq = 0;
     }
 }
 

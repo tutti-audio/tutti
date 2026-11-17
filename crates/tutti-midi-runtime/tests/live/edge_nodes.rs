@@ -786,6 +786,45 @@ fn a_devices_profile_zones_switch_its_rules() {
     assert_eq!(heard(1024), 2);
 }
 
+/// **A Profile zone is started once, by the publish that enabled it**: the
+/// blocks after it, with no further request, send no more of its resets.
+#[test]
+fn a_profile_zone_starts_once_per_request() {
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
+    let (_ed, mut exec, controls, seen) = ingest(
+        following(Script::new(vec![vec![], vec![], vec![], vec![]]), &epochs),
+        MIDI_INPUT_PORTS as u16,
+        512,
+    );
+    let zone = MpeZones::single(MpeZoneConfig::profile(
+        MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
+        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
+    ));
+    // The first block takes the device's slot over; the zones come after it.
+    block(&mut exec, 512);
+    controls.set_mpe_profile(MidiGroup::FIRST, Some(zone));
+    for _ in 0..3 {
+        block(&mut exec, 512);
+    }
+    let resets = |range: std::ops::Range<u64>| {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|s| {
+                range.contains(&s.1)
+                    && matches!(
+                        s.2.decode(),
+                        Ok(Message::Midi2(_, Voice2::ControlChange { controller, .. }))
+                            if controller == CCNumber::RESET_ALL
+                    )
+            })
+            .count()
+    };
+    assert_eq!(resets(512..1024), 4, "read on the block after the publish");
+    assert_eq!(resets(1024..2048), 0, "not again without a publish");
+}
+
 /// Clearing the device's zones sets each of its Groups to none: the device's
 /// Reset All Controllers on a Member Channel, ignored under the Profile, is
 /// heard again.

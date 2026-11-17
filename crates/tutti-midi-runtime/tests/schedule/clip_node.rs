@@ -146,6 +146,38 @@ fn a_new_clip_ends_the_old_clips_notes() {
     );
 }
 
+/// **Without a publish the node keeps its notes across blocks; each publish
+/// ends them once.** Note 60 sounds from frame 10 through three blocks with
+/// no `set` (no note-off), one `set` between the third and fourth ends it on
+/// the fourth block's first frame, and two more blocks send nothing more.
+#[test]
+fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
+    let clip = MidiClipNode::new([at(10, on(60)), at(100_000, off(60))]);
+    let (_ed, mut exec, controls, seen) = rig(clip, 64);
+    for f in [0, 64, 128] {
+        exec.process(64, &rolling(f), &[], &mut []);
+    }
+    assert_eq!(heard(&seen), vec![(10, on(60))], "no publish, no release");
+    controls.set([at(5_000, on(72))]);
+    for f in [192, 256, 320] {
+        exec.process(64, &rolling(f), &[], &mut []);
+    }
+    assert_eq!(heard(&seen), vec![(10, on(60)), (192, off(60))]);
+}
+
+/// **Two publishes between blocks end the held notes once**, on the next
+/// block: the node sees the later clip alone.
+#[test]
+fn two_publishes_between_blocks_are_one_replacement() {
+    let clip = MidiClipNode::new([at(10, on(60)), at(100_000, off(60))]);
+    let (_ed, mut exec, controls, seen) = rig(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.set([at(5_000, on(72))]);
+    controls.set([at(5_000, on(73))]);
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(heard(&seen), vec![(10, on(60)), (64, off(60))]);
+}
+
 /// **A fork plays the clip as it was when forked.** The live clip is
 /// replaced after the fork; the forked node still plays the original's note,
 /// at its frame, on the `Env` it is rendered with.

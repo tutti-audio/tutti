@@ -58,7 +58,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
@@ -104,11 +103,8 @@ const LEDGER_CAPACITY: usize = 2048;
 /// capacity ([`note_off_room`](tutti_graph::note_off_room)).
 pub const CLIP_EVENT_DENSITY: EventDensity = EventDensity::per_frame(1);
 
-/// A published clip: its events sorted by beat, its chase table, and a
-/// generation that tells the node a new clip replaced the one it was
-/// playing.
+/// A published clip: its events sorted by beat and its chase table.
 struct ClipEvents {
-    generation: u64,
     events: Box<[ClipEvent]>,
     /// For each state a channel holds (a program, a controller, a registered
     /// or assignable controller, pressure, bend), the messages that set it,
@@ -119,13 +115,9 @@ struct ClipEvents {
 
 impl ClipEvents {
     /// Control thread: builds the chase table.
-    fn new(generation: u64, events: Box<[ClipEvent]>) -> Self {
+    fn new(events: Box<[ClipEvent]>) -> Self {
         let chase = chase_table(&events);
-        Self {
-            generation,
-            events,
-            chase,
-        }
+        Self { events, chase }
     }
 }
 
@@ -252,21 +244,19 @@ struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
     cell: Publisher<ClipEvents>,
-    /// Serializes `set`'s compare, generation and publish (`Publisher` has no
+    /// Serializes `set`'s compare and publish (`Publisher` has no
     /// compare-and-publish), so two control threads cannot each publish
     /// against a stale read. The value is the cell's own: the control side
     /// reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
-    next_generation: AtomicU64,
 }
 
 impl Shared {
     fn new(events: Box<[ClipEvent]>) -> Arc<Self> {
-        let first = Arc::new(ClipEvents::new(0, events));
+        let first = Arc::new(ClipEvents::new(events));
         Arc::new(Self {
             cell: Publisher::from_arc(Arc::clone(&first)),
             publish: Mutex::new(()),
-            next_generation: AtomicU64::new(1),
         })
     }
 
@@ -428,8 +418,7 @@ impl MidiClipControls {
         if current.events == events {
             return;
         }
-        let generation = self.shared.next_generation.fetch_add(1, Ordering::Relaxed);
-        let clip = Arc::new(ClipEvents::new(generation, events));
+        let clip = Arc::new(ClipEvents::new(events));
         self.shared.cell.publish(clip);
     }
 
@@ -474,8 +463,8 @@ pub struct MidiClipNode {
     /// A reader of `shared.cell`, registered in [`over`](Self::over): a
     /// fork's node is built over its own cell and registers there.
     clip: Reader<ClipEvents>,
-    /// The generation of the clip this node last played.
-    generation: u64,
+    /// The publish number of the clip this node last played.
+    last_seq: u64,
     play: Play,
     /// The declared event capacity, from the block the node was prepared for.
     capacity: u32,
@@ -485,7 +474,7 @@ impl std::fmt::Debug for MidiClipNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MidiClipNode")
             .field("clip", &self.clip)
-            .field("generation", &self.generation)
+            .field("last_seq", &self.last_seq)
             .field("play", &self.play)
             .finish_non_exhaustive()
     }
@@ -507,11 +496,10 @@ impl MidiClipNode {
     /// A node over `shared`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
     fn over(shared: Arc<Shared>) -> Self {
-        let generation = shared.current().generation;
         Self {
             clip: shared.cell.reader(),
+            last_seq: shared.cell.seq(),
             shared,
-            generation,
             play: Play {
                 walk: Walk::default(),
                 held: NoteLedger::new(LEDGER_CAPACITY),
@@ -593,7 +581,8 @@ impl Node for MidiClipNode {
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
         };
-        let replaced = std::mem::replace(&mut self.generation, clip.generation) != clip.generation;
+        let seq = clip.seq();
+        let replaced = std::mem::replace(&mut self.last_seq, seq) != seq;
         let Play { walk, held } = &mut self.play;
         let mut playing = Playing {
             sending: held.block(io.event_out(0), first),
@@ -647,7 +636,6 @@ impl ForkSource for ClipFork {
         let shared = Arc::new(Shared {
             cell: Publisher::from_arc(Arc::clone(&clip)),
             publish: Mutex::new(()),
-            next_generation: AtomicU64::new(0),
         });
         Ok(Forked::new(Box::new(MidiClipNode::over(shared))))
     }
