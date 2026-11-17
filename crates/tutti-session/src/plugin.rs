@@ -640,10 +640,9 @@ pub(crate) enum Placement {
     Served,
 }
 
-/// A plugin handle a swap replaced, and whether its editor was open.
+/// A plugin handle a swap replaced.
 pub(crate) struct Outgoing {
     handle: PluginHandle,
-    editor_open: bool,
     placement: Placement,
 }
 
@@ -651,12 +650,8 @@ impl Outgoing {
     /// The handle, split by where its plugin ran. A served plugin's handle
     /// drops here, on the calling (control) thread.
     pub(crate) fn retire(self) -> Retired {
-        let Self {
-            handle,
-            editor_open,
-            placement,
-        } = self;
-        let editor = editor_open.then(|| handle.clone());
+        let Self { handle, placement } = self;
+        let editor = handle.is_editor_open().then(|| handle.clone());
         Retired::of(placement, editor, handle)
     }
 }
@@ -772,9 +767,6 @@ impl Graveyard {
 pub(crate) struct HostedPlugin {
     /// Where the plugin runs: whether its record may drop off the main thread.
     placement: Placement,
-    /// Whether the editor was opened through the view and not closed since:
-    /// what `MainSession::update` services.
-    pub(crate) editor_open: bool,
     /// The plugin this is: from the load's ref, with the id the loaded plugin
     /// reports.
     plugin: PluginRef,
@@ -1012,7 +1004,6 @@ impl HostedPlugin {
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         Self {
             placement,
-            editor_open: false,
             plugin,
             handle,
             controls: None,
@@ -1106,7 +1097,7 @@ impl HostedPlugin {
         self.gate.end();
         // The node over a pool entry is gone: the entry is no longer held.
         self.pooled = None;
-        let editor = self.editor_open.then(|| self.handle.clone());
+        let editor = self.handle.is_editor_open().then(|| self.handle.clone());
         Retired::of(self.placement, editor, self)
     }
 
@@ -1155,7 +1146,6 @@ impl HostedPlugin {
         self.rebind = None;
         let outgoing = Outgoing {
             handle: std::mem::replace(&mut self.handle, handle),
-            editor_open: std::mem::replace(&mut self.editor_open, false),
             placement: std::mem::replace(&mut self.placement, placement),
         };
         self.liveness = Liveness::new();
@@ -1451,7 +1441,7 @@ impl<'a> StateView<'a> {
     /// The plugin's [`StateError`]: it is gone, busy, refused, or has no state
     /// route.
     pub fn save(&self) -> Result<PluginState, StateError> {
-        let bytes = self.hosted.handle.any_thread().save_state()?;
+        let bytes = self.hosted.handle.save_state()?;
         Ok(PluginState::new(self.hosted.plugin.clone(), bytes))
     }
 
@@ -2299,7 +2289,7 @@ impl<C: crate::Clock> Session<C> {
             if let Some((handle, token)) = snapshot {
                 let asked = now;
                 self.jobs.submit(
-                    move || handle.any_thread().save_state(),
+                    move || handle.save_state(),
                     move |session, ended, _| match ended {
                         Ok(state) => {
                             session.land_plugin_snapshot(node, &token, asked, state);
@@ -2340,7 +2330,7 @@ impl<C: crate::Clock> Session<C> {
                 // `false` means the plugin declined (a CLAP plugin without
                 // `clap.render`): it renders the same either way, so there is
                 // nothing to retry.
-                let _ = hosted.handle.any_thread().set_render_mode(wanted);
+                let _ = hosted.handle.announce_render_mode(wanted);
                 hosted.told = true;
             }
             self.render_mode.announced = wanted;
@@ -2364,7 +2354,7 @@ mod tests {
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
-        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K)).clone()
+        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K).0).clone()
     }
 
     /// A backend that answers `state` (or declines), counts its saves, and
@@ -2671,7 +2661,8 @@ mod tests {
     #[test]
     fn an_update_frees_a_plugin_meter_cleared_while_a_block_held_it() {
         let mut rig = rig(None);
-        let controls = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+        let (controls, _) =
+            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
         let project = rig.session.click_settings().project_meter();
         controls.set_meter(project);
         let meter = controls.meter();
@@ -2706,11 +2697,14 @@ mod tests {
             .plugins
             .get_mut(&rig.node)
             .expect("hosted")
-            .controls = Some(PluginControls::new(
-            Samples(10_000_000),
-            PluginTail::default(),
-            SampleRate::SR_48K,
-        ));
+            .controls = Some(
+            PluginControls::new(
+                Samples(10_000_000),
+                PluginTail::default(),
+                SampleRate::SR_48K,
+            )
+            .0,
+        );
         rig.plugins_at(0);
         assert_eq!(
             rig.session.graph_ref().node_latency(rig.node).unwrap(),
@@ -2788,9 +2782,9 @@ mod tests {
     }
 
     /// **A swap closes the outgoing plugin's open editor** when the main
-    /// thread empties the graveyard: `adopt` clears the record's flag for the
-    /// incoming plugin, and the outgoing handle's editor is closed first, not
-    /// left to the drop. An editor that was not open is not closed.
+    /// thread empties the graveyard: `adopt` installs the incoming plugin's
+    /// handle, whose editor is closed, and the outgoing handle's editor is closed
+    /// first, not left to the drop. An editor that was not open is not closed.
     #[test]
     fn a_swap_closes_the_outgoing_editor() {
         use tutti_plugin_types::fake::{Call, FakePlugin};
@@ -2817,7 +2811,15 @@ mod tests {
                 PluginRef::file("fake.clap").expect("a plugin file"),
                 node_controls(),
             );
-            record.editor_open = open;
+            if open {
+                let window =
+                    tutti_plugin_types::WindowHandle::from_window(&tutti_fixtures::StandInWindow)
+                        .expect("a window handle");
+                record
+                    .handle
+                    .open_editor(main, window, tutti_plugin_types::ContentScale::IDENTITY)
+                    .expect("the fake opens its editor");
+            }
             let (incoming, _) = fake_handle(None, Vec::new());
             let mut yard = Graveyard::default();
             record
@@ -2825,7 +2827,7 @@ mod tests {
                 .retire()
                 .settle(&mut yard);
             assert!(
-                !record.editor_open,
+                !record.handle.is_editor_open(),
                 "the incoming plugin has no editor open"
             );
             assert!(

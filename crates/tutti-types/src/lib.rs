@@ -161,11 +161,11 @@ pub use mint::Mint;
 // Value vocabulary.
 pub use value::{
     Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Balance, Beat, BeatDuration,
-    BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, Cents, CentsSpan,
+    BeatsPerCycle, BeatsPerCycleOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents, CentsSpan,
     CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth, DepthOutOfRange,
-    Direction, Drive, Elevation, Feedback, Frame, Gain, Hz, InvalidMaxBlock, Latency, MaxBlock,
-    Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr,
-    ParamCell, ParamKey, ParamRaw, ParkedSampleRate, Phase, PhaseIncrement, PitchClass,
+    Direction, Drive, Elevation, Feedback, Frame, Gain, HoldFactor, Hz, InvalidMaxBlock, Latency,
+    MaxBlock, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange, Pan, Param, Param64,
+    ParamAddr, ParamCell, ParamKey, ParamRaw, ParkedSampleRate, Phase, PhaseIncrement, PitchClass,
     PlayReading, PlaybackRate, Q, Radians, ReadRate, Resonance, Resyncs, SamplePosition,
     SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Samples, Seconds,
     Semitones, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr,

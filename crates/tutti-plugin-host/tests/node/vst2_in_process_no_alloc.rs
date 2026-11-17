@@ -12,6 +12,7 @@
 //! means the in-process backend (or the `vst2-host` codec) introduced a
 //! per-block alloc.
 
+use crate::param_reads::ParamReads as _;
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
@@ -203,9 +204,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
 
     for id in 0..PARAMS {
         assert_eq!(
-            handle
-                .any_thread()
-                .parameter_value(tutti_plugin_types::ParamId::new((id as i32) as u32)),
+            handle.parameter_value(tutti_plugin_types::ParamId::new((id as i32) as u32)),
             Some(tutti_plugin_types::Normalized::clamped(f64::from(value(
                 71, 1, id
             )))),

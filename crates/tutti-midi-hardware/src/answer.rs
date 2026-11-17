@@ -10,7 +10,8 @@
 //! [`ProcessChange`](crate::ProcessChange).
 
 use tutti_midi_device::{
-    CallError, Nak, Outcome, PeData, PeResource, PeStatus, Request, ResourceFailure, ResourceTarget,
+    CallError, Nak, Outcome, PeData, PeResource, PeStatus, Request, ResourceFailure,
+    ResourceTarget, SubscribeId,
 };
 
 use crate::properties::PropertyCall;
@@ -54,6 +55,29 @@ pub enum Answer {
         /// The Resource set.
         resource: PeResource,
         /// The status, or why not.
+        result: Result<PeStatus, ResourceFailure>,
+    },
+    /// A Subscription to a Resource started: the peer accepted it and the Resource
+    /// is being got. Its updates are [`PropertyChange::Event`](crate::PropertyChange::Event)s.
+    Subscribed {
+        /// The Resource subscribed to.
+        target: ResourceTarget,
+        /// The Subscription.
+        subscribe_id: SubscribeId,
+    },
+    /// A Subscription did not start: the peer refused it or did not answer.
+    SubscribeFailed {
+        /// The Resource asked for.
+        target: ResourceTarget,
+        /// Why not.
+        failure: ResourceFailure,
+    },
+    /// The Initiator ended a Subscription: the peer's reply, or why it did not
+    /// come. The Subscription is over either way.
+    Unsubscribed {
+        /// The Subscription.
+        subscribe_id: SubscribeId,
+        /// The status of the reply, or why not.
         result: Result<PeStatus, ResourceFailure>,
     },
     /// A Property Exchange call was not started: the Initiator refused it.

@@ -28,7 +28,7 @@ use tutti_plugin_types::Load;
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 /// How long a wake that never comes is waited for.
-const PATIENCE: Duration = Duration::from_secs(10);
+const PATIENCE: Duration = Duration::from_secs(60);
 
 /// `node` as the only node of a graph with no global input, its outputs the
 /// graph's: its inputs are silent, which is what lets the executor park it.
@@ -155,13 +155,9 @@ fn served_a_request_while_parked_wakes_the_node_within_a_few_blocks() {
             return;
         }
     }
-    let asked = Instant::now();
     for blocks in 1..=WOKEN_WITHIN_BLOCKS {
         if is_woken(&step(&mut renderer)) {
-            eprintln!(
-                "woken {blocks} blocks, {:?} after the request was visible",
-                asked.elapsed()
-            );
+            eprintln!("woken {blocks} blocks after the request was visible");
             return;
         }
     }

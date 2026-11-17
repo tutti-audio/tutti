@@ -7,6 +7,7 @@
 //! **Build `plugin-server` first** (`cargo build -p tutti-plugin-server`); the
 //! tests fail without it, by design.
 
+use crate::param_reads::ParamReads as _;
 use crate::support;
 
 use std::time::{Duration, Instant};
@@ -57,7 +58,6 @@ fn told(s: &Session, node: tutti_graph::NodeKey) -> Option<f64> {
     s.plugin_view(node)
         .expect("hosted")
         .handle()
-        .any_thread()
         .parameter_value(BYPASS)
         .map(Normalized::get)
 }
@@ -148,9 +148,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         let _ = s.update();
     }
     let handle = s.plugin_view(node).expect("hosted").handle().clone();
-    handle
-        .any_thread()
-        .set_parameter_value(BYPASS, Normalized::of(1.0));
+    handle.send_parameter(BYPASS, Normalized::of(1.0));
     assert!(
         until_told(&mut s, node, 1.0),
         "the plugin's own bypass went on"

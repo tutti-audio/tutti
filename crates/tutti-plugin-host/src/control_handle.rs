@@ -9,10 +9,12 @@ use crate::{
 };
 use dpi::Size;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, PluginError, PluginFailure, StateError, TerminationReason, WindowHandle,
+    Health, Normalized, ParamId, PluginError, PluginFailure, RenderMode, StateError,
+    TerminationReason, WindowHandle,
 };
 use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -176,7 +178,7 @@ impl PluginStatus {
 /// The last group is why this type is `Send + Sync + Clone`: clone the handle
 /// into whatever the host already uses for off-thread work and call it there.
 /// With a task pool that is one line —
-/// `pool.spawn(async move { handle.any_thread().save_state() })` — polled next
+/// `pool.spawn(async move { handle.save_state() })` — polled next
 /// frame.
 ///
 /// These are deliberately **not** `async` and do not return futures. That would
@@ -196,6 +198,9 @@ pub struct PluginHandle {
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
     server_pid: Option<u32>,
+    /// Whether an editor this handle opened is open: shared by every clone, set
+    /// by a successful open and cleared by `close_editor`.
+    editor_open: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for PluginHandle {
@@ -241,6 +246,7 @@ impl PluginHandle {
             transport_sink: TransportSink::default(),
             // No subprocess to name unless `with_server_pid` says so.
             server_pid: None,
+            editor_open: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -285,10 +291,55 @@ impl PluginHandle {
 
     // ---- Accessors ---------------------------------------------------------
 
-    /// What the plugin answers from any thread: the parameter catalog, reads
-    /// and writes, `save_state`. See [`AnyThread`].
-    pub fn any_thread(&self) -> &dyn AnyThread {
+    /// What the plugin answers from any thread: the parameter catalog, reads and
+    /// writes, `save_state`. A host reaches it through the named methods below.
+    pub(crate) fn any_thread(&self) -> &dyn AnyThread {
         self.any_thread.as_ref()
+    }
+
+    /// Serializes the plugin's state ([`AnyThread::save_state`]).
+    ///
+    /// # Errors
+    ///
+    /// The [`StateError`] of [`AnyThread::save_state`].
+    pub fn save_state(&self) -> Result<Vec<u8>, StateError> {
+        self.any_thread.save_state()
+    }
+
+    /// Tells the plugin whether it renders offline and returns whether it
+    /// accepted the mode ([`AnyThread::set_render_mode`]).
+    pub fn announce_render_mode(&self, mode: RenderMode) -> bool {
+        self.any_thread.set_render_mode(mode)
+    }
+
+    /// Sends one parameter value to the plugin ([`AnyThread::set_parameter_value`]);
+    /// updates no mirror and raises no notice.
+    pub fn send_parameter(&self, id: ParamId, value: Normalized) {
+        self.any_thread.set_parameter_value(id, value);
+    }
+
+    /// The plugin's display string for `value` ([`AnyThread::parameter_text`]).
+    #[must_use]
+    pub fn parameter_text(&self, id: ParamId, value: Normalized) -> Option<String> {
+        self.any_thread.parameter_text(id, value)
+    }
+
+    /// The value the plugin reads in `text` ([`AnyThread::parameter_value_from_text`]).
+    #[must_use]
+    pub fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized> {
+        self.any_thread.parameter_value_from_text(id, text)
+    }
+
+    /// The plain value `value` stands for ([`AnyThread::parameter_plain`]).
+    #[must_use]
+    pub fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
+        self.any_thread.parameter_plain(id, value)
+    }
+
+    /// The normalized value `plain` stands for ([`AnyThread::parameter_normalized`]).
+    #[must_use]
+    pub fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
+        self.any_thread.parameter_normalized(id, plain)
     }
 
     /// Returns what this plugin's preset surface can do, combining the preset
@@ -573,7 +624,9 @@ impl PluginHandle {
         scale: ContentScale,
     ) -> Result<Size, EditorError> {
         let control = self.editor_route()?;
-        Self::editor_call(control, |c| c.open_editor(main, parent, scale))
+        let size = Self::editor_call(control, |c| c.open_editor(main, parent, scale))?;
+        self.editor_open.store(true, Ordering::Relaxed);
+        Ok(size)
     }
 
     /// Opens the editor as a floating window the plugin owns.
@@ -592,7 +645,16 @@ impl PluginHandle {
     /// such as a format without floating editors.
     pub fn open_floating_editor(&self, main: MainThreadMarker) -> Result<(), EditorError> {
         let control = self.editor_route()?;
-        Self::editor_call(control, |c| c.open_floating_editor(main))
+        Self::editor_call(control, |c| c.open_floating_editor(main))?;
+        self.editor_open.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Whether an editor opened through this handle (or a clone of it) is open:
+    /// what a session's update services.
+    #[must_use]
+    pub fn is_editor_open(&self) -> bool {
+        self.editor_open.load(Ordering::Relaxed)
     }
 
     /// Tells the open editor its window's backing-store scale changed.
@@ -635,6 +697,7 @@ impl PluginHandle {
     /// not first ask whether there was one. Returns `&Self` for chaining with
     /// the other editor calls.
     pub fn close_editor(&self, main: MainThreadMarker) -> &Self {
+        self.editor_open.store(false, Ordering::Relaxed);
         if let Some(control) = self.control.as_deref() {
             let _ = lent(control, |c| c.close_editor(main));
         }

@@ -48,7 +48,8 @@ struct Counters {
 
 impl Counters {
     fn new() -> Self {
-        let controls = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+        let (controls, _) =
+            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
         let delivery_counters = controls.delivery_counters();
         let bridge_midi = Arc::new(AtomicU64::new(0));
         delivery_counters.attach_bridge_midi(Arc::clone(&bridge_midi));

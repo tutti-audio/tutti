@@ -27,7 +27,7 @@ pub(super) fn host<C: Clock>(
     plugin: PluginRef,
 ) -> Key<PluginNode> {
     let node = node.into();
-    let controls = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+    let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session
         .graph
         .plugins

@@ -17,6 +17,7 @@
 
 use crate::clap_probe;
 use crate::param_probe;
+use crate::param_reads::ParamReads as _;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,10 +48,7 @@ fn value(i: usize) -> f32 {
 
 /// The plugin's value for extra parameter `i`, read from the plugin-server.
 fn read(handle: &PluginHandle, i: usize) -> Option<f32> {
-    handle
-        .any_thread()
-        .parameter_value(extra(i))
-        .map(|v| v.get() as f32)
+    handle.parameter_value(extra(i)).map(|v| v.get() as f32)
 }
 
 /// A rolling graph with the plugin fed by `lanes`.
@@ -167,9 +165,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         },
         || read(&handle, p) == Some(0.25),
     ));
-    handle
-        .any_thread()
-        .set_parameter_value(extra(p), tutti_plugin_types::Normalized::of(0.75));
+    handle.send_parameter(extra(p), tutti_plugin_types::Normalized::of(0.75));
     // The edit is queued to the plugin's Processor and reaches the plugin at
     // the head of its next block, so blocks run until it has.
     assert!(
@@ -277,7 +273,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     );
 
     // The edit, behind the node's back.
-    probe.handle.any_thread().set_parameter_value(
+    probe.handle.send_parameter(
         GAIN,
         tutti_plugin_types::Normalized::clamped(f64::from(gain_at(-15.0))),
     );

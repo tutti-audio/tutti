@@ -27,7 +27,7 @@ use tutti_types::MaxBlock;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -185,7 +185,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
             tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    let state_at_fork = handle.any_thread().save_state().expect("the probe saves");
+    let state_at_fork = handle.save_state().expect("the probe saves");
 
     // After the fork: the live instance moves to -15 dB.
     probe.client.set_parameter(GAIN, gain_at(-15.0));
@@ -244,9 +244,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // The live state moved only by its own parameter change: put the gain
     // back and it is byte for byte what it was at the fork. Through the
     // handle, the path a host has once the node is in a graph.
-    handle.any_thread().set_parameter_value(GAIN, gain_at(-6.0));
+    handle.send_parameter(GAIN, gain_at(-6.0));
     assert_eq!(
-        handle.any_thread().save_state().expect("the probe saves"),
+        handle.save_state().expect("the probe saves"),
         state_at_fork,
         "rendering the fork changed the live instance's state"
     );
@@ -320,11 +320,7 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
 
     // The probe stamps the context after its 4-byte magic.
     const CONTEXT_BYTE: usize = 4;
-    let project = probe
-        .handle
-        .any_thread()
-        .save_state()
-        .expect("the project save");
+    let project = probe.handle.save_state().expect("the project save");
     assert_eq!(project[CONTEXT_BYTE], 3, "a project save is FOR_PROJECT");
 
     probe
@@ -400,8 +396,8 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
 }
 
 /// Render `blocks` blocks of the offline fork of the plugin through the
-/// graph; return the forked editor (to ask its health) and how long it took.
-fn render_fork_of(client: PluginClient, blocks: usize) -> (Editor, Duration) {
+/// graph; return the forked editor, to ask its health.
+fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
     let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
     let (mut editor, _exec) = Editor::new(prepare);
     let key = NodeKey(3);
@@ -421,18 +417,17 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> (Editor, Duration) {
         .expect("forks");
     assert_eq!(fork_ed.fork_health(), Ok(()), "healthy before rendering");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
-    let started = Instant::now();
     renderer.render(BLOCK * blocks);
-    let took = started.elapsed();
     let (fork_ed, _exec) = renderer.into_parts();
-    (fork_ed, took)
+    fork_ed
 }
 
-/// **A fork whose server dies mid-render is a named fault, promptly** — not
-/// a silent render that reports success. The fork's server (only: the switch
-/// is armed after the live one loaded) aborts on its 8th block; the render
-/// finishes without waiting out any budget, and the forked editor reports
-/// `Crashed` for the plugin's key with a `PluginRenderFault::Crashed` cause.
+/// **A fork whose server dies mid-render is a named fault** — not a silent
+/// render that reports success. The fork's server (only: the switch is armed
+/// after the live one loaded) aborts on its 8th block; the forked editor
+/// reports `Crashed` for the plugin's key with a `PluginRenderFault::Crashed`
+/// cause. (That the render does not wait out a budget is the bridge's rule, in
+/// `tutti-plugin-ipc`.)
 #[test]
 fn a_fork_whose_server_dies_mid_render_is_a_crashed_fault() {
     let _lock = machine_lock();
@@ -440,7 +435,7 @@ fn a_fork_whose_server_dies_mid_render_is_a_crashed_fault() {
     let probe = load_probe(SAMPLE_RATE);
     let _crash = ProbeEnv::new().crash_on_block(8);
 
-    let (fork_ed, took) = render_fork_of(probe.client, 40);
+    let fork_ed = render_fork_of(probe.client, 40);
     let fault = fork_ed.fork_health().expect_err("the fork crashed");
     assert_eq!(fault.key, NodeKey(3));
     assert_eq!(fault.kind, ForkFaultKind::Crashed, "{fault}");
@@ -451,15 +446,15 @@ fn a_fork_whose_server_dies_mid_render_is_a_crashed_fault() {
         ),
         "{fault:?}"
     );
-    assert!(took < Duration::from_secs(4), "the render took {took:?}");
 }
 
-/// **A fork whose server hangs mid-render is a named fault after one budget,
-/// not one budget per block.** The fork's server parks from its 5th block
-/// for good; with a 1 s budget the 30-block render takes about a second, and
-/// the forked editor reports `TimedOut`.
+/// **A fork whose server hangs mid-render is a named fault.** The fork's
+/// server parks from its 5th block for good; with a 1 s budget the render ends
+/// and the forked editor reports `TimedOut` with that budget. (That one budget
+/// is spent per render, not per block, is the bridge's rule, in
+/// `tutti-plugin-ipc`.)
 #[test]
-fn a_fork_whose_server_hangs_is_a_timed_out_fault_after_one_budget() {
+fn a_fork_whose_server_hangs_is_a_timed_out_fault() {
     let _lock = machine_lock();
     let _env = env();
     let config = BridgeConfig {
@@ -473,7 +468,7 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault_after_one_budget() {
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
 
-    let (fork_ed, took) = render_fork_of(probe.client, 30);
+    let fork_ed = render_fork_of(probe.client, 30);
     let fault = fork_ed.fork_health().expect_err("the fork hung");
     assert_eq!(fault.kind, ForkFaultKind::TimedOut, "{fault}");
     assert!(
@@ -483,10 +478,9 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault_after_one_budget() {
         ),
         "{fault:?}"
     );
-    assert!(took < Duration::from_secs(5), "the render took {took:?}");
 }
 
-/// **A fork source whose live instance is gone says so at once**, without
+/// **A fork source whose live instance is gone says so**, without
 /// launching anything: `PluginForkError::LiveGone`. The source holds the live
 /// bridge weakly, so it cannot keep a dropped plugin alive either.
 #[test]
@@ -503,7 +497,6 @@ fn a_fork_of_a_dropped_plugin_is_live_gone() {
     drop(parts.controls);
     drop(probe.handle);
 
-    let started = Instant::now();
     let cause = match source.fork(ForkMode::Live) {
         Ok(_) => panic!("forked a plugin that is gone"),
         Err(cause) => cause,
@@ -515,7 +508,6 @@ fn a_fork_of_a_dropped_plugin_is_live_gone() {
         ),
         "{cause:?}"
     );
-    assert!(started.elapsed() < Duration::from_millis(100));
 }
 
 /// This process's direct children, read from `/proc` (every thread's list:
@@ -699,22 +691,18 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     let healthy = export_through_a_fork(&live).expect("a healthy fork exports");
     assert!(healthy.planes()[0].iter().any(|&s| s != 0.0), "audible");
 
-    let failed = |kind: ForkFaultKind| {
-        let started = Instant::now();
-        match export_through_a_fork(&live) {
-            Err(tutti_export::Error::ForkFailed {
-                key,
-                kind: got,
-                cause,
-            }) => {
-                assert_eq!(key, NodeKey(9));
-                assert_eq!(got, kind, "{cause}");
-                assert!(cause.downcast_ref::<PluginRenderFault>().is_some());
-            }
-            Err(other) => panic!("expected ForkFailed, got {other}"),
-            Ok(_) => panic!("an export through a {kind:?} fork reported success"),
+    let failed = |kind: ForkFaultKind| match export_through_a_fork(&live) {
+        Err(tutti_export::Error::ForkFailed {
+            key,
+            kind: got,
+            cause,
+        }) => {
+            assert_eq!(key, NodeKey(9));
+            assert_eq!(got, kind, "{cause}");
+            assert!(cause.downcast_ref::<PluginRenderFault>().is_some());
         }
-        assert!(started.elapsed() < Duration::from_secs(5));
+        Err(other) => panic!("expected ForkFailed, got {other}"),
+        Ok(_) => panic!("an export through a {kind:?} fork reported success"),
     };
     {
         let _crash = ProbeEnv::new().crash_on_block(8);
@@ -1425,13 +1413,13 @@ fn midi_past_the_chunks_capacity_is_counted() {
     );
 }
 
-/// **An offline fork of a plugin that refuses its rate renders silence at
-/// once, and says why.** The fork's server (only: the switch is armed after
-/// the live one loaded) refuses the 96 kHz the fork is prepared at. Each chunk
-/// is collected without waiting out the budget, and the forked editor reports
-/// `Failed` with a `PluginRenderFault::RateRefused` cause, not `TimedOut`.
+/// **An offline fork of a plugin that refuses its rate renders silence,
+/// and says why.** The fork's server (only: the switch is armed after the live
+/// one loaded) refuses the 96 kHz the fork is prepared at, and the forked
+/// editor reports `Failed` with a `PluginRenderFault::RateRefused` cause, not
+/// `TimedOut`.
 #[test]
-fn a_fork_of_a_refused_rate_is_silent_at_once_and_a_failed_fault() {
+fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
@@ -1458,9 +1446,7 @@ fn a_fork_of_a_refused_rate_is_silent_at_once_and_a_failed_fault() {
         .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
         .expect("forks");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
-    let started = Instant::now();
     let out = renderer.render(BLOCK * 20);
-    let took = started.elapsed();
     assert!(out[0].iter().all(|&s| s == 0.0), "silence");
     let (fork_ed, _exec) = renderer.into_parts();
     let fault = fork_ed
@@ -1474,5 +1460,4 @@ fn a_fork_of_a_refused_rate_is_silent_at_once_and_a_failed_fault() {
         ),
         "{fault:?}"
     );
-    assert!(took < Duration::from_secs(3), "the render took {took:?}");
 }

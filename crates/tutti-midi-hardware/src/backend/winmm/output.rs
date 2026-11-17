@@ -9,7 +9,7 @@ use crate::endpoints::DeviceOut;
 use crate::error::{Error, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_rt::{CounterWriter, ThreadHandle, spawn_named};
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, Sleeper};
 
@@ -104,8 +104,8 @@ impl Drop for WinMmOutput {
 
 /// The sender thread: the loop of [`run`], with winmm for the send and the
 /// timer for the wait.
-fn thread(mut port: Port, shared: &Shared) {
-    run(&shared.mailbox, || {
+fn thread(mut port: Port, losses: CounterWriter<Losses>, shared: &Shared) {
+    run(&shared.mailbox, losses, || {
         let mut bytes = ByteOut::new();
         (
             move |ump| {
@@ -127,14 +127,15 @@ fn thread(mut port: Port, shared: &Shared) {
 /// [`Error::MidiDevice`] if the thread cannot be spawned.
 pub(super) fn open(index: u32) -> Result<WinMmOutput> {
     let port = Port::open(index)?;
+    let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared {
-        mailbox: Mailbox::new(),
+        mailbox,
         sleeper: Sleeper::new()?,
     });
     let thread = spawn_named("tutti-midi-out", None, {
         let shared = Arc::clone(&shared);
         move |_| {
-            thread(port, &shared);
+            thread(port, losses, &shared);
         }
     })
     .map_err(|e| Error::device_from("spawn MIDI output thread", e))?;

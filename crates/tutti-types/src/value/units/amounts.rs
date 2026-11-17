@@ -2,7 +2,7 @@ use super::*;
 
 // ── Dimensionless amounts ───────────────────────────────────────────────────
 //
-// Six types (`Amplitude` is in `level`), because the roles differ in both
+// Seven types (`Amplitude` is in `level`), because the roles differ in both
 // range and algebra, which is this module's own test for whether two quantities are the same type:
 //
 //   Amplitude  [0, inf)   scalable      a gain multiplier
@@ -11,6 +11,7 @@ use super::*;
 //   Feedback   [0, 0.99]  NOT scalable  a recirculation coefficient
 //   Depth      [-1, 1]    signed, range-checked (hand-written)
 //   Drive      [0, inf)   NOT scalable  shaper-curve intensity
+//   BitDepth   [1, 32]    NOT scalable  a quantizer's word length, fractional
 //
 // `Mix` declines scaling because half of a blend position is not a blend
 // position; `Feedback` declines it because scaling a coefficient walks it
@@ -457,6 +458,39 @@ impl StereoWidth {
     #[must_use]
     pub fn new_clamped(v: f32) -> StereoWidth {
         StereoWidth(if v < 0.0 { 0.0 } else { v })
+    }
+}
+
+unit! {
+    /// A word length in bits, `1..=32`: the resolution a quantizer keeps. A depth of
+    /// `b` bits has the step `1 / 2^(b-1)` over a signal of peak 1 (`2^b + 1` levels
+    /// across `-1..=1`).
+    ///
+    /// Fractional depths are values: the step is `2^-(b-1)` for any real `b`, so
+    /// `3.5` bits is a step between those of 3 and 4 bits, and a depth moves
+    /// smoothly. A value outside the range, or not finite, is not a depth:
+    /// [`new_clamped`](Self::new_clamped) is the way in from a raw number.
+    ///
+    /// Not an [`Amplitude`] or a [`Drive`]: it is a resolution, a count of bits and
+    /// not a factor on a signal.
+    pub struct BitDepth(pub f32): Unit, Ordered, Bounded;
+}
+// NOT `Additive`: two word lengths do not sum into a third; the bits a quantizer
+// keeps are chosen, not accumulated.
+// NOT `Scalable`: twice the bits is not twice anything audible (each bit is
+// about 6 dB of signal-to-noise ratio, so the scale is logarithmic).
+
+impl BitDepth {
+    /// One bit: three levels, `-1`, `0` and `1`.
+    pub const MIN: BitDepth = BitDepth(1.0);
+    /// Thirty-two bits: finer than an `f32` signal's own resolution.
+    pub const MAX: BitDepth = BitDepth(32.0);
+
+    /// Constrain into `1..=32`. NaN stays NaN.
+    #[inline]
+    #[must_use]
+    pub fn new_clamped(v: f32) -> BitDepth {
+        BitDepth(v).clamp(Self::MIN, Self::MAX)
     }
 }
 

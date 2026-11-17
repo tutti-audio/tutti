@@ -353,7 +353,7 @@ impl SessionBuilder<Offline> {
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
         session.load = load;
-        session.clock = Some(clock);
+        session.transport_handle.set_clock(clock);
         session.heard = Some((heard, layout));
         Ok(session)
     }
@@ -470,7 +470,7 @@ impl SessionBuilder<SystemClock> {
             .set_output_clock(crate::midi::OutputClockSource::new(clock.clone(), latency));
         #[cfg(not(feature = "midi"))]
         let _ = latency;
-        session.clock = Some(clock);
+        session.transport_handle.set_clock(clock);
         Ok(session)
     }
 }
@@ -564,7 +564,7 @@ impl SessionBuilder<crate::DeviceClock> {
                 clock.clone(),
                 audio_engine.latency(),
             ));
-        session.clock = Some(clock);
+        session.transport_handle.set_clock(clock);
         #[cfg(feature = "audio-io")]
         session.inputs.set_output_latency(audio_engine.latency());
         let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
@@ -940,10 +940,10 @@ impl<C: Clock> SessionBuilder<C> {
             pool: crate::Pool::new(self.opts.pool),
             #[cfg(feature = "plugin")]
             pooled_swaps: std::collections::BTreeSet::new(),
+            transport_handle: crate::TransportHandle::new(parts.transport.clone()),
             transport: parts.transport,
             load: None,
             heard: None,
-            clock: None,
             root_request: self.opts.root.clone(),
             root_refusal: None,
             output_policy: crate::OutputPolicy::default(),
@@ -954,7 +954,6 @@ impl<C: Clock> SessionBuilder<C> {
             latency: Samples(0),
             resumed: false,
             silenced_seen: 0,
-            rolling_sent: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "midi")]
             midi: parts.midi,
             #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]

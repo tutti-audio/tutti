@@ -1,0 +1,24 @@
+//! A plugin's parameter list and values, read the way a host's mirror reads them
+//! (`PluginParamValues`): the public path, not the plugin handle's raw door.
+
+use tutti_plugin_host::{PluginHandle, PluginParamValues};
+use tutti_plugin_types::{Normalized, ParamId};
+
+/// What a test reads of a plugin through its handle.
+pub(crate) trait ParamReads {
+    /// The plugin's value for `id`: `None` when the list is unavailable or the plugin
+    /// does not list `id`.
+    fn parameter_value(&self, id: ParamId) -> Option<Normalized>;
+}
+
+fn mirror(handle: &PluginHandle) -> Option<PluginParamValues> {
+    let (mut values, read) = PluginParamValues::start(handle);
+    values.land(read.run().ok()?);
+    Some(values)
+}
+
+impl ParamReads for PluginHandle {
+    fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
+        mirror(self)?.get(id)?
+    }
+}
