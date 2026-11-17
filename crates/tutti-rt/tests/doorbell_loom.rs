@@ -43,22 +43,22 @@
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::thread;
-use tutti_rt::Doorbell;
+use tutti_rt::{Doorbell, doorbell};
 
 #[test]
 fn a_ring_before_the_park_is_not_lost() {
     loom::model(|| {
-        let bell = Arc::new(Doorbell::new());
+        let (bell, mut sleeper) = doorbell();
         let work = Arc::new(AtomicUsize::new(0));
         let ringer = {
-            let (bell, work) = (Arc::clone(&bell), Arc::clone(&work));
+            let work = Arc::clone(&work);
             thread::spawn(move || {
                 work.store(1, Ordering::Release);
                 bell.ring();
             })
         };
         while work.load(Ordering::Acquire) == 0 {
-            bell.wait(|| work.load(Ordering::Acquire) != 0);
+            sleeper.wait(|| work.load(Ordering::Acquire) != 0);
         }
         ringer.join().unwrap();
     });
@@ -67,10 +67,10 @@ fn a_ring_before_the_park_is_not_lost() {
 #[test]
 fn several_rings_wake_one_sleeper_for_each_round() {
     loom::model(|| {
-        let bell = Arc::new(Doorbell::new());
+        let (bell, mut sleeper) = doorbell();
         let work = Arc::new(AtomicUsize::new(0));
         let ringer = {
-            let (bell, work) = (Arc::clone(&bell), Arc::clone(&work));
+            let work = Arc::clone(&work);
             thread::spawn(move || {
                 for round in 1..=2 {
                     work.store(round, Ordering::Release);
@@ -85,7 +85,7 @@ fn several_rings_wake_one_sleeper_for_each_round() {
                 seen = now;
                 continue;
             }
-            bell.wait(|| work.load(Ordering::Acquire) > seen);
+            sleeper.wait(|| work.load(Ordering::Acquire) > seen);
         }
         ringer.join().unwrap();
     });
@@ -94,11 +94,11 @@ fn several_rings_wake_one_sleeper_for_each_round() {
 #[test]
 fn two_ringers_one_sleeper() {
     loom::model(|| {
-        let bell = Arc::new(Doorbell::new());
+        let (bell, mut sleeper) = doorbell();
         let work = Arc::new(AtomicUsize::new(0));
         let ringers: Vec<_> = (0..2)
             .map(|_| {
-                let (bell, work) = (Arc::clone(&bell), Arc::clone(&work));
+                let (bell, work) = (bell.clone(), Arc::clone(&work));
                 thread::spawn(move || {
                     work.fetch_add(1, Ordering::Release);
                     bell.ring();
@@ -106,7 +106,7 @@ fn two_ringers_one_sleeper() {
             })
             .collect();
         while work.load(Ordering::Acquire) < 2 {
-            bell.wait(|| work.load(Ordering::Acquire) >= 2);
+            sleeper.wait(|| work.load(Ordering::Acquire) >= 2);
         }
         for r in ringers {
             r.join().unwrap();
@@ -119,20 +119,21 @@ fn two_ringers_one_sleeper() {
 #[test]
 fn ring_first_wakes_every_sleeper_it_is_asked_to() {
     loom::model(|| {
-        let bells = Arc::new(vec![Doorbell::new(), Doorbell::new()]);
+        let (bells, sleepers): (Vec<_>, Vec<_>) = (0..2).map(|_| doorbell()).unzip();
         let work = Arc::new(AtomicUsize::new(0));
-        let sleepers: Vec<_> = (0..2)
-            .map(|i| {
-                let (bells, work) = (Arc::clone(&bells), Arc::clone(&work));
+        let sleepers: Vec<_> = sleepers
+            .into_iter()
+            .map(|mut sleeper| {
+                let work = Arc::clone(&work);
                 thread::spawn(move || {
                     while work.load(Ordering::Acquire) == 0 {
-                        bells[i].wait(|| work.load(Ordering::Acquire) != 0);
+                        sleeper.wait(|| work.load(Ordering::Acquire) != 0);
                     }
                 })
             })
             .collect();
         work.store(1, Ordering::Release);
-        Doorbell::ring_first(&bells[..], 2);
+        Doorbell::ring_first(&bells, 2);
         for s in sleepers {
             s.join().unwrap();
         }
