@@ -259,6 +259,22 @@ fn replaced_lanes_restate_and_the_same_lanes_do_not() {
     assert_eq!(controls.len(), 1);
 }
 
+/// **Blocks without a publish send nothing again; two publishes between
+/// blocks restate once.**
+#[test]
+fn a_restate_follows_a_publish_and_only_a_publish() {
+    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
+    block(&mut exec, 512, rolling(0));
+    block(&mut exec, 512, rolling(512));
+    block(&mut exec, 512, rolling(1_024));
+    assert_eq!(seen.lock().unwrap().len(), 2, "no publish, no restate");
+    controls.set([at(0, G)]);
+    controls.set([at(0, F_OVER_A)]);
+    block(&mut exec, 512, rolling(1_536));
+    block(&mut exec, 512, rolling(2_048));
+    assert_eq!(seen.lock().unwrap()[2..], [(1_536, F_OVER_A)]);
+}
+
 /// **A fork sends the lanes as they stood.** A fork taken, then the live
 /// lanes replaced: the fork re-states C and C major on its first block.
 #[test]
