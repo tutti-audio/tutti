@@ -53,7 +53,7 @@
 //! that belongs to no note-on is written as it comes, and ends whatever note
 //! holds its key.
 //!
-//! The clip itself is published to the node with [`ArcLend`]
+//! The clip itself is published to the node with [`Publisher`]
 //! ([`MidiClipControls::set`]); the node reads it once per block.
 
 use std::collections::{BTreeMap, HashMap};
@@ -67,7 +67,7 @@ use tutti_graph::{
     MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape, Status,
 };
 use tutti_midi_protocol::Translator;
-use tutti_rt::{ArcLend, Reader};
+use tutti_rt::{Publisher, Reader};
 use tutti_ump::{Bank, CCNumber, Message, MidiChannel, MidiGroup, Ump, Voice1, Voice2};
 
 use crate::ledger::{Class, NoteKey, NoteLedger, Sending};
@@ -251,11 +251,11 @@ impl ClipNote {
 struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
-    cell: Arc<ArcLend<ClipEvents>>,
-    /// Serializes `set`'s compare, generation and publish (`ArcLend` has no
+    cell: Publisher<ClipEvents>,
+    /// Serializes `set`'s compare, generation and publish (`Publisher` has no
     /// compare-and-publish), so two control threads cannot each publish
     /// against a stale read. The value is the cell's own: the control side
-    /// reads it with `ArcLend::current`. The node never takes it.
+    /// reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
     next_generation: AtomicU64,
 }
@@ -264,7 +264,7 @@ impl Shared {
     fn new(events: Box<[ClipEvent]>) -> Arc<Self> {
         let first = Arc::new(ClipEvents::new(0, events));
         Arc::new(Self {
-            cell: Arc::new(ArcLend::from_arc(Arc::clone(&first))),
+            cell: Publisher::from_arc(Arc::clone(&first)),
             publish: Mutex::new(()),
             next_generation: AtomicU64::new(1),
         })
@@ -645,7 +645,7 @@ impl ForkSource for ClipFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
         let clip = self.shared.current();
         let shared = Arc::new(Shared {
-            cell: Arc::new(ArcLend::from_arc(Arc::clone(&clip))),
+            cell: Publisher::from_arc(Arc::clone(&clip)),
             publish: Mutex::new(()),
             next_generation: AtomicU64::new(0),
         });

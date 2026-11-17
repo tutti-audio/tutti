@@ -421,7 +421,7 @@
 //!   the serial one. Share through an edge, or make it one node.
 //! - **Allocate, lock or block in `process`.** It runs on the audio thread:
 //!   size every buffer in `prepare` (against [`Prepare::max_block`]), and
-//!   publish non-scalar state to it through `tutti_rt`'s `ArcLend`, never by
+//!   publish non-scalar state to it through `tutti_rt`'s `Publisher`, never by
 //!   swapping an `Arc` the audio thread then drops.
 //! - **Report a musical delay as latency.** Latency is processing delay only.
 //! - **Read a driven param by port index.** Use the declaration

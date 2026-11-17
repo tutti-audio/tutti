@@ -55,7 +55,7 @@
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
-//! - [`ArcLend`] / [`Loan`] / [`Reader`] — the publish cell, re-exported from
+//! - [`Publisher`] / [`Loan`] / [`Reader`] — the publish cell, re-exported from
 //!   `arc-lend`: a control thread publishes non-scalar state, the audio thread
 //!   only borrows it.
 //!
@@ -133,12 +133,12 @@
 //!   one module per OS (on Windows, a `.CRT$XCU` initializer entry), and `MainThreadMarker::new_unchecked`, whose `# Safety` names the
 //!   caller's duty (a test harness's constructor).
 //!
-//! `arc-lend`'s `ArcLend` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
+//! `arc-lend`'s `Publisher` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
 //! pointer that a `Loan` dereferences under a hazard-slot protocol, so the audio
 //! thread can never free a value (the reason it exists instead of `ArcSwap`).
 //!
 //! What checks it: a loom model per lock-free structure, run against the shipped
-//! code (`tests/*_loom.rs` here, and arc-lend's own loom model for `ArcLend`), and miri
+//! code (`tests/*_loom.rs` here, and arc-lend's own loom model for `Publisher`), and miri
 //! over this crate's unit tests (arc-lend's CI runs its own), in CI's `loom` and
 //! `miri` jobs (`cargo xtask loom`, `cargo xtask miri`). Miri executes no FFI and no x86 intrinsics,
 //! so the denormal register tests are skipped under it, and it perturbs libm
@@ -149,6 +149,7 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod cell;
+mod claim;
 mod clock;
 mod denormals;
 mod dirty_set;
@@ -215,8 +216,8 @@ pub use vec::RtVec;
 // The cell non-scalar state reaches the audio thread through: a control
 // thread publishes, the audio thread only borrows (`Loan`), so it never frees.
 // The external `arc-lend` crate, which names nothing of tutti's; re-exported here
-// so the engine spells it `tutti_rt::ArcLend`.
-pub use arc_lend::{ArcLend, Loan, Reader};
+// so the engine spells it `tutti_rt::Publisher`.
+pub use arc_lend::{Loan, Publisher, Reader};
 
 #[cfg(test)]
 mod error_bounds {

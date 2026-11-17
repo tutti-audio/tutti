@@ -24,37 +24,23 @@
 //! # Ordering
 //!
 //! A claim is an `Acquire` read-modify-write and a release is a `Release`
-//! one, so whatever a thread wrote through a claim happens-before whatever
-//! the next claimer of that word reads. The `loom` model in
-//! `tests/split_loom.rs` checks this against the shipped code, and that a
-//! refused claim leaves the word as it found it once it returns. A shared
-//! claim adds one to the word before it looks for the exclusive bit and
-//! subtracts it again on refusal, so for that instant a concurrent exclusive
-//! claim on the same word is refused too; only a schedule that already
-//! conflicts can see it.
+//! write, so whatever a thread wrote through a claim happens-before whatever
+//! the next claimer of that word reads. A refused claim leaves the word as it found it. The
+//! words are `ClaimWord`s, whose module docs state the protocol; the `loom`
+//! model in `tests/split_loom.rs` checks it against the shipped code.
 //!
 //! # Cost
 //!
 //! One uncontended atomic per borrow and one per release. The claim words are
 //! a separate table ([`ClaimTable`]), preallocated on the control thread and
-//! reset per [`SplitMut::new`] / [`SplitRw::new`] (plain stores through
-//! `&mut`), so building a split per block never allocates.
+//! cleared per [`SplitMut::new`] / [`SplitRw::new`] (`ClaimWord::clear`, a
+//! plain store through `&mut`), so building a split per block never allocates.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use sync::{AtomicU32, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, Ordering};
-}
-
-/// The exclusive bit of a claim word. Below it: the number of shared claims.
-const WRITE: u32 = 1 << 31;
+use crate::claim::ClaimWord;
 
 /// A borrow refused because another claim on the same element (or chunk)
 /// is held.
@@ -68,7 +54,7 @@ pub struct ClaimConflict {
 /// One claim word per element or chunk, allocated on the control thread and
 /// reused by every [`SplitMut`] / [`SplitRw`] built over it.
 pub struct ClaimTable {
-    words: Box<[AtomicU32]>,
+    words: Box<[ClaimWord]>,
 }
 
 impl ClaimTable {
@@ -76,7 +62,7 @@ impl ClaimTable {
     #[must_use]
     pub fn new(len: usize) -> Self {
         Self {
-            words: (0..len).map(|_| AtomicU32::new(0)).collect(),
+            words: (0..len).map(|_| ClaimWord::new()).collect(),
         }
     }
 
@@ -96,15 +82,15 @@ impl ClaimTable {
     /// earlier split is alive (every guard and view borrows its split, which
     /// borrowed this table), so clearing them discards only claims whose
     /// holders were leaked with `mem::forget`.
-    fn reset(&mut self, n: usize) -> &[AtomicU32] {
+    fn reset(&mut self, n: usize) -> &[ClaimWord] {
         assert!(
             n <= self.words.len(),
             "a claim table of {} words for {n} elements",
             self.words.len()
         );
-        let words = &self.words[..n];
-        for w in words {
-            w.store(0, Ordering::Relaxed);
+        let words = &mut self.words[..n];
+        for w in words.iter_mut() {
+            w.clear();
         }
         words
     }
@@ -118,37 +104,29 @@ impl std::fmt::Debug for ClaimTable {
     }
 }
 
-fn claim_shared(word: &AtomicU32, index: usize) -> Result<(), ClaimConflict> {
-    let prev = word.fetch_add(1, Ordering::Acquire);
-    if prev & WRITE != 0 {
-        // Leave the word as found: the writer's release subtracts only its
-        // own bit.
-        word.fetch_sub(1, Ordering::Relaxed);
-        return Err(ClaimConflict { index });
+fn claim_shared(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
+    if word.try_shared() {
+        Ok(())
+    } else {
+        Err(ClaimConflict { index })
     }
-    assert!(prev + 1 < WRITE, "shared claim count overflow");
-    Ok(())
 }
 
-fn claim_exclusive(word: &AtomicU32, index: usize) -> Result<(), ClaimConflict> {
-    word.compare_exchange(0, WRITE, Ordering::Acquire, Ordering::Relaxed)
-        .map(drop)
-        .map_err(|_| ClaimConflict { index })
+fn claim_exclusive(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
+    if word.try_exclusive() {
+        Ok(())
+    } else {
+        Err(ClaimConflict { index })
+    }
 }
 
 /// A sole shared claim, made exclusive.
-fn upgrade(word: &AtomicU32, index: usize) -> Result<(), ClaimConflict> {
-    word.compare_exchange(1, WRITE, Ordering::Acquire, Ordering::Relaxed)
-        .map(drop)
-        .map_err(|_| ClaimConflict { index })
-}
-
-fn release_shared(word: &AtomicU32) {
-    word.fetch_sub(1, Ordering::Release);
-}
-
-fn release_exclusive(word: &AtomicU32) {
-    word.fetch_sub(WRITE, Ordering::Release);
+fn upgrade(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
+    if word.try_upgrade() {
+        Ok(())
+    } else {
+        Err(ClaimConflict { index })
+    }
 }
 
 /// A slice whose elements can be claimed one at a time, exclusively, from
@@ -158,7 +136,7 @@ fn release_exclusive(word: &AtomicU32) {
 pub struct SplitMut<'a, T> {
     base: *mut T,
     len: usize,
-    words: &'a [AtomicU32],
+    words: &'a [ClaimWord],
     _borrow: PhantomData<&'a mut [T]>,
 }
 
@@ -249,7 +227,7 @@ impl<'a, T> SplitMut<'a, T> {
         for i in range.clone() {
             if let Err(e) = claim_exclusive(&self.words[i], i) {
                 for w in &self.words[range.start..i] {
-                    release_exclusive(w);
+                    w.release_exclusive();
                 }
                 panic!("{e}");
             }
@@ -270,7 +248,7 @@ impl<'a, T> SplitMut<'a, T> {
 #[must_use = "the claim is released when it drops"]
 pub struct Claimed<'s, T> {
     elem: &'s mut T,
-    word: &'s AtomicU32,
+    word: &'s ClaimWord,
 }
 
 impl<T> std::fmt::Debug for Claimed<'_, T> {
@@ -294,7 +272,7 @@ impl<T> DerefMut for Claimed<'_, T> {
 
 impl<T> Drop for Claimed<'_, T> {
     fn drop(&mut self) {
-        release_exclusive(self.word);
+        self.word.release_exclusive();
     }
 }
 
@@ -302,7 +280,7 @@ impl<T> Drop for Claimed<'_, T> {
 #[must_use = "the claims are released when it drops"]
 pub struct ClaimedRun<'s, T> {
     run: &'s mut [T],
-    words: &'s [AtomicU32],
+    words: &'s [ClaimWord],
 }
 
 impl<T> std::fmt::Debug for ClaimedRun<'_, T> {
@@ -329,7 +307,7 @@ impl<T> DerefMut for ClaimedRun<'_, T> {
 impl<T> Drop for ClaimedRun<'_, T> {
     fn drop(&mut self) {
         for w in self.words {
-            release_exclusive(w);
+            w.release_exclusive();
         }
     }
 }
@@ -342,7 +320,7 @@ pub struct SplitRw<'a, T> {
     base: *mut T,
     chunks: usize,
     stride: usize,
-    words: &'a [AtomicU32],
+    words: &'a [ClaimWord],
     _borrow: PhantomData<&'a mut [T]>,
 }
 
@@ -675,9 +653,9 @@ impl<T> Drop for RwView<'_, T> {
             let e = e.get();
             let word = &self.split.words[(e & !HELD_WRITE) as usize];
             if e & HELD_WRITE != 0 {
-                release_exclusive(word);
+                word.release_exclusive();
             } else {
-                release_shared(word);
+                word.release_shared();
             }
         }
         self.held.len.set(0);

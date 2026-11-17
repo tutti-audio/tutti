@@ -1,0 +1,20 @@
+[package]
+name = "tutti-fuzz"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Fuzz targets over the public decoders and parsers, replayed from seed corpora in the test suite and driven by libFuzzer through cargo xtask fuzz"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tutti-audio/tutti"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The decoder `wav_decode` feeds; the feature is on here so the replay suite
+# always runs.
+tutti-codec = { path = "../../crates/tutti-codec", features = ["decode-wav"] }
+
+[dev-dependencies]
+tutti-fixtures = { path = "../tutti-fixtures" }

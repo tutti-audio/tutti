@@ -27,12 +27,13 @@ use std::fmt;
 
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::PluginRefresh;
+use tutti_plugin_types::{PluginRefresh, StateUse};
 
 use super::entry::{Hosted, PluginEntry};
-use super::{Notice, PluginRef, PluginState, queue};
+use super::{Notice, PluginRef, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
+use crate::{OtherPeer, PeerState, SavedPeer};
 
 /// Why [`Session::save_state`] or [`Session::restore_state`] started no job.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -45,9 +46,9 @@ pub enum StateJobError<K: fmt::Debug> {
     /// restore ([`Session::add_pooled_plugin`]).
     #[error("the plugin of {0:?} has no node")]
     NoNode(K),
-    /// The state was saved from another plugin: nothing is sent to the plugin.
+    /// The state was saved from another peer: nothing is sent to the plugin.
     #[error(transparent)]
-    OtherPlugin(StateError),
+    OtherPeer(OtherPeer),
 }
 
 /// Why a key names no plugin node: shared by the plugin jobs that need one.
@@ -72,7 +73,7 @@ impl<K: fmt::Debug> From<NodeLookup<K>> for StateJobError<K> {
 
 job_kind! {
     /// A plugin's saved state ([`Session::save_state`]).
-    pub SaveState => PluginState, StateJobFailed
+    pub SaveState => PeerState, StateJobFailed
 }
 
 job_kind! {
@@ -98,7 +99,8 @@ pub enum StateJobFailed {
 }
 
 impl<C: crate::Clock> Session<C> {
-    /// Saves the state of the plugin in the node over the entry under `key`.
+    /// Saves the state of the plugin in the node over the entry under `key`,
+    /// for `state_use` ([`StateUse::Project`] is the state a project keeps).
     /// The round trip starts on the session's spawner and the state lands in a
     /// later [`update`](Self::update), or [`Job::wait`] returns it. An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
@@ -111,7 +113,11 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`StateJobError::Entry`] when the key has no loaded plugin entry;
     /// [`StateJobError::NoNode`] when the plugin is in no node.
-    pub fn save_state<K>(&mut self, key: &K) -> Result<Job<SaveState>, StateJobError<K>>
+    pub fn save_state<K>(
+        &mut self,
+        key: &K,
+        state_use: StateUse,
+    ) -> Result<Job<SaveState>, StateJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -121,11 +127,11 @@ impl<C: crate::Clock> Session<C> {
                 if cancel.is_cancelled() {
                     return Err(StateError::Unavailable);
                 }
-                handle.save_state()
+                handle.save_state(state_use)
             },
             move |_, done, ticket| {
                 ticket.land(match done {
-                    Ok(Ok(bytes)) => Ok(PluginState::new(plugin, bytes)),
+                    Ok(Ok(bytes)) => Ok(PeerState::of_plugin(plugin, bytes)),
                     Ok(Err(refused)) => Err(StateJobFailed::State(refused)),
                     Err(failed) => Err(StateJobFailed::Worker(failed)),
                 });
@@ -150,20 +156,20 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`StateJobError::Entry`] when the key has no loaded plugin entry;
     /// [`StateJobError::NoNode`] when the plugin is in no node;
-    /// [`StateJobError::OtherPlugin`] when `state` was saved from another
-    /// plugin (nothing is sent).
+    /// [`StateJobError::OtherPeer`] when `state` was saved from another
+    /// peer than this plugin (nothing is sent).
     pub fn restore_state<K>(
         &mut self,
         key: &K,
-        state: PluginState,
+        state: PeerState,
     ) -> Result<Job<RestoreState>, StateJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let (handle, plugin, notices, _) = self.state_parts(key)?;
         state
-            .check_for(&plugin)
-            .map_err(StateJobError::OtherPlugin)?;
+            .check_for(&SavedPeer::Plugin(plugin))
+            .map_err(StateJobError::OtherPeer)?;
         let (job, ticket) = self.jobs.new_job();
         ticket.waiting_for_main_thread();
         self.work.defer(move |main| {

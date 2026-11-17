@@ -9,10 +9,9 @@
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use tutti_plugin_types::{Controller, MainThreadMarker, PluginTail, Samples};
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 
 use crate::error::Result;
 use crate::instance::AuLoaded;
@@ -25,7 +24,7 @@ pub struct AuController {
     pub(crate) loaded: AuLoaded,
     /// The range table the Processor lends once per block; republished when the
     /// unit says its parameter list moved.
-    pub(crate) ranges: Arc<ArcLend<RangeTable>>,
+    pub(crate) ranges: Publisher<RangeTable>,
     _not_sync: PhantomData<Cell<()>>,
 }
 
@@ -52,7 +51,7 @@ impl DerefMut for AuController {
 }
 
 impl AuController {
-    pub(crate) fn new(loaded: AuLoaded, ranges: Arc<ArcLend<RangeTable>>) -> Self {
+    pub(crate) fn new(loaded: AuLoaded, ranges: Publisher<RangeTable>) -> Self {
         Self {
             loaded,
             ranges,
