@@ -87,7 +87,7 @@ const STATE: u64 = 0b111;
 const ONE: u64 = 1 << 3;
 
 /// Where a [`RenderGate`] is in its lifecycle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GateState {
     /// Shut; renders are refused. The initial state.
     Closed,

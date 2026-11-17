@@ -44,7 +44,7 @@ mod sync {
 }
 
 /// One of the two parties of a [`LastOut`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Party {
     /// The first party.
     A,
