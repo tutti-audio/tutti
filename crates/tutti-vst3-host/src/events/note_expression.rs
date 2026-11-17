@@ -1,6 +1,6 @@
 //! Note-expression events and their type-id mapping.
 
-use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue, is_usable};
+use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
 
 use super::{Event, ExpressionInt, ExpressionValue, NoteExpressionIntValue, Payload, ToEvent};
@@ -63,10 +63,10 @@ impl ToEvent for NoteExpressionValue {
     /// non-finite value. The SDK says expression values are "always absolute
     /// normalized [0.0, 1.0]" and addresses the host, so a finite value outside
     /// the range is clamped here; a NaN has no nearest legal value, and
-    /// `f64::clamp` passes it through, so it is dropped ([`is_usable`]).
+    /// `f64::clamp` passes it through, so it is dropped.
     fn to_event(&self) -> Option<Event> {
         let type_id = expression_type_id(self.expression_type)?;
-        if !is_usable(self.value) {
+        if !self.value.is_finite() {
             return None;
         }
         Some(Event::at(

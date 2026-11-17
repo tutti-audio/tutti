@@ -216,6 +216,24 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
     ),
+    ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes_mut",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/audio.rs",
+        "PluginAudio::new",
+        CTOR,
+        "the same validity as `InputOutput::new` over two channel tables: their frame counts must agree",
+    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",
@@ -504,12 +522,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "WindowedLoudnessConfig",
         WIDTH,
         TOPOLOGY,
-    ),
-    ty(
-        "crates/tutti-measure/",
-        "TruePeakMeter::new",
-        CTOR,
-        "ebur128 refuses a rate or width it cannot meter: the refusal is the library's, not a value's",
     ),
     ty(
         "crates/tutti-dsp/",

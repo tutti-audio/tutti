@@ -5,7 +5,7 @@
 
 use super::*;
 use tutti_graph::MAX_NODE_TAIL;
-use tutti_plugin_types::{AudioBufferMut, PluginResult, Processing};
+use tutti_plugin_types::{PluginAudio, PluginResult, Processing};
 
 /// A processor that answers a trigger with `delay` frames of nothing, then a
 /// held `LEVEL` for `ring` more frames. An effect is triggered by any non-zero
@@ -56,11 +56,13 @@ impl Fake {
 
 impl Processor for Fake {
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let AudioBufferMut::F32(buf) = &mut io.buffer else {
+        let PluginAudio::F32(buf) = &mut io.buffer else {
             unreachable!("the probe renders 32-bit");
         };
+        let frames = buf.frames().0;
+        let (input, mut output) = buf.split();
         let mut events = io.ctx.midi_events.iter().peekable();
-        for i in 0..buf.num_samples {
+        for i in 0..frames {
             while let Some((offset, ump)) = events.next_if(|(o, _)| o.index() == i) {
                 let _ = offset;
                 // A note-on is a status nibble 9 (MIDI 2.0 type 4 word 0, bits 20..24).
@@ -71,12 +73,12 @@ impl Processor for Fake {
                     self.age = Some(0);
                 }
             }
-            if buf.inputs.iter().any(|ch| ch[i] != 0.0) {
+            if input.iter().any(|ch| ch.samples()[i] != 0.0) {
                 self.age = Some(0);
             }
             let v = self.tick();
-            for ch in buf.outputs.iter_mut() {
-                ch[i] = v;
+            for mut ch in output.iter_mut() {
+                ch.samples_mut()[i] = v;
             }
         }
         Ok(())

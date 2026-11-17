@@ -18,8 +18,9 @@ use std::sync::Arc;
 
 use tutti_plugin_types::BlockStatus;
 use tutti_plugin_types::{
-    AudioBufferMut, ChordValue, ParameterChanges, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, WireMidi,
+    ChannelTable, ChordValue, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo,
+    WireMidi,
 };
 
 use super::Link;
@@ -49,9 +50,9 @@ impl IpcProcessor {
     pub(super) fn new(link: Arc<Link>, batcher: Batcher) -> Self {
         let (queues, points) = link.param_room(batcher.chunk());
         Self {
+            pending: BlockPayload::new(link.rate()),
             link,
             batcher,
-            pending: BlockPayload::default(),
             params: ParameterChanges::reserved_bridged(queues, points),
         }
     }
@@ -65,24 +66,24 @@ impl IpcProcessor {
 
 impl Processor for IpcProcessor {
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let AudioBufferMut::F32(buffer) = &mut io.buffer else {
+        let PluginAudio::F32(buffer) = &mut io.buffer else {
             return Err(PluginError::Block("the served pipeline takes f32 blocks"));
         };
+        let frames = buffer.frames().0;
+        let (input, mut output) = buffer.split();
+        let inputs = ChannelTable::of_planes(input)?;
+        let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
         let mut piece = Piece {
             ctx: io.ctx,
             out: &mut *io.out,
             pending: &mut self.pending,
+            rate: self.link.rate(),
             params: &mut self.params,
             over: 0,
             said: BlockStatus::Continue,
         };
-        self.batcher.process(
-            &self.link.bridge,
-            buffer.num_samples,
-            buffer.inputs,
-            buffer.outputs,
-            &mut piece,
-        );
+        self.batcher
+            .process(&self.link.bridge, frames, &inputs, &mut outputs, &mut piece);
         let over = piece.over;
         let said = piece.said;
         // **A sleep is applied only to a piece that gave the plugin nothing.**
@@ -92,7 +93,7 @@ impl Processor for IpcProcessor {
         // would park the node and that chunk with it, so a piece that carries
         // anything (an event, a parameter, a note expression, a non-silent
         // input frame) does not get the sleep, and the node stays called.
-        if said == BlockStatus::Sleep && !carries_input(io.ctx, buffer.inputs, buffer.num_samples) {
+        if said == BlockStatus::Sleep && !carries_input(io.ctx, &inputs, frames) {
             io.out.set_status(BlockStatus::Sleep);
         }
         if over > 0 {
@@ -112,7 +113,7 @@ impl Processor for IpcProcessor {
     /// graph node's own reset counts the SysEx it cuts.)
     fn reset(&mut self) {
         self.batcher.reset();
-        self.pending = BlockPayload::default();
+        self.pending = BlockPayload::new(self.link.rate());
         self.params.clear();
         // A refused reset is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.reset_rt();
@@ -136,7 +137,7 @@ impl Processor for IpcProcessor {
         self.link.reserve(chunk);
         let (queues, points) = self.link.param_room(chunk);
         self.params = ParameterChanges::reserved_bridged(queues, points);
-        self.pending = BlockPayload::default();
+        self.pending = BlockPayload::new(rate);
         // A refused rate command is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.set_sample_rate_rt(rate);
         self.link.set_rate(rate);
@@ -163,6 +164,8 @@ struct Piece<'a, 'c> {
     ctx: &'a ProcessContext<'c>,
     out: &'a mut ProcessOutput,
     pending: &'a mut BlockPayload,
+    /// The rate the chunk's placeholder transport is at.
+    rate: SampleRate,
     params: &'a mut ParameterChanges,
     /// MIDI the chunk had no room for.
     over: usize,
@@ -192,7 +195,7 @@ impl Chunks for Piece<'_, '_> {
     /// The chunk begins empty: its transport and changes are the node's, read
     /// when it completes ([`payload`](Chunks::payload)).
     fn begin(&mut self, _at: usize, _chunk: usize) {
-        *self.pending = BlockPayload::default();
+        *self.pending = BlockPayload::new(self.rate);
     }
 
     /// The piece's MIDI and harmony join the chunk at `at`, the piece's first
@@ -244,13 +247,17 @@ impl Chunks for Piece<'_, '_> {
         // that completes it (this call) the transport is the chunk's first
         // frame's, slope included, and the changes are the chunk's, on its
         // frames (`Processor::chunk`'s contract).
-        self.pending.transport = self.ctx.transport.cloned().unwrap_or_default();
+        self.pending.transport = self
+            .ctx
+            .transport
+            .cloned()
+            .unwrap_or_else(|| TransportInfo::new(self.rate));
         for change in self.ctx.transport_changes {
             // The node's list and this one hold the same most: none is lost.
             let _ = self.pending.changes.try_push(*change);
         }
         tutti_plugin_types::insertion_sort_by_key(&mut self.pending.midi, |e| e.offset);
-        std::mem::take(self.pending)
+        std::mem::replace(self.pending, BlockPayload::new(self.rate))
     }
 
     /// The node's chunk so far, copied into the buffer the bridge swaps.
@@ -362,12 +369,13 @@ mod tests {
             ..ExpressiveContext::default()
         });
         let mut out = ProcessOutput::default();
-        let mut pending = BlockPayload::default();
+        let mut pending = BlockPayload::new(SampleRate::SR_48K);
         let mut params = ParameterChanges::reserved(1, 4);
         let mut piece = Piece {
             ctx: &ctx,
             out: &mut out,
             pending: &mut pending,
+            rate: SampleRate::SR_48K,
             params: &mut params,
             over: 0,
             said: BlockStatus::Continue,

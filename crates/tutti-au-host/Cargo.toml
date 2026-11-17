@@ -53,6 +53,8 @@ tutti-au-ffi = { path = "../tutti-au-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 tutti-graph = { path = "../tutti-graph" }
+# The block views the suites build (`InputOutput`, `Planes`, `PlanesMut`).
+tutti-buffers = { path = "../tutti-buffers" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "au"] }
 assert_no_alloc = { version = "1", default-features = false }
 

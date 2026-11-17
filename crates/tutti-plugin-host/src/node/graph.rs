@@ -282,7 +282,7 @@ where
                     }
                     this.params.count_transport_dropped(over);
                 } else if phase == 0 {
-                    this.chunk_info = TransportInfo::default();
+                    this.chunk_info = TransportInfo::new(cx.env.sample_rate);
                 }
 
                 let piece_midi = this.midi.len();
@@ -310,7 +310,6 @@ where
                     &ins,
                     &mut outs,
                     n,
-                    this.sample_rate,
                 );
                 if rendered != Rendered::Ran {
                     silence(&mut outs, n);
@@ -447,7 +446,6 @@ where
                 &ins,
                 &mut outs,
                 size,
-                this.sample_rate,
             );
             if rendered != Rendered::Ran {
                 silence(&mut outs, size);

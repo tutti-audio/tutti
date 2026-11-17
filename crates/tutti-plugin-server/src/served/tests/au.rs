@@ -203,8 +203,8 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
 }
 
 use tutti_plugin_types::{
-    AudioBuffer as TuttiAudioBuffer, AudioBufferMut, Features, ParamFlags, ParameterChanges,
-    ParameterQueue, TimeSignature, TransportInfo,
+    Features, ParamFlags, ParameterChanges, ParameterQueue, PluginAudio, TimeSignature,
+    TransportInfo,
 };
 
 const SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
@@ -235,17 +235,17 @@ fn run(
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = TuttiAudioBuffer {
-        inputs: &inputs,
-        outputs: &mut outputs,
-        num_samples: frames,
-        sample_rate: SAMPLE_RATE,
-    };
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(inputs[0].len()),
+        &inputs,
+        &mut outputs,
+    )
+    .expect("equal channels");
     let mut ctx = ProcessContext::new();
     ctx.transport = transport;
     ctx.param_changes = changes;
     let mut out = ProcessOutput::default();
-    au.render(AudioBufferMut::F32(buffer), &ctx, &mut out)
+    au.render(buffer, &ctx, &mut out)
 }
 
 #[test]
@@ -354,12 +354,11 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
 
     // Playing, 137.5 BPM, 3/4, a quarter of the way past beat 2.
     let beat0 = 2.25;
-    let start = TransportInfo::new()
-        .with_sample_rate(RATE)
-        .with_tempo(137.5)
+    let start = TransportInfo::new(tutti_plugin_types::SampleRate::of(RATE))
+        .with_tempo(tutti_types::Bpm::of(137.5))
         .with_time_signature(TimeSignature::of(3, 4))
         .with_playing(true)
-        .with_position_beats(beat0, tutti_plugin_types::Seconds(0.0));
+        .with_beat(tutti_types::Beat(beat0));
     run(&mut au, FRAMES, Some(&start), None).expect("process");
     let (status, beat, tempo, delta, num, den, changed, playing) = pull(&au);
     assert_eq!(status, 0);
@@ -371,15 +370,14 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     assert!(changed, "the first block is a start");
 
     // The next block is where playing leaves the playhead: no locate.
-    let next = start.with_position_beats(
+    let next = start.with_beat(tutti_types::Beat(
         beat0 + FRAMES as f64 / RATE * 137.5 / 60.0,
-        tutti_plugin_types::Seconds(0.0),
-    );
+    ));
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     assert!(!pull(&au).6, "a continuous block is not a locate");
 
     // A seek is one.
-    let seek = next.with_position_beats(32.0, tutti_plugin_types::Seconds(0.0));
+    let seek = next.with_beat(tutti_types::Beat(32.0));
     run(&mut au, FRAMES, Some(&seek), None).expect("process");
     let (_, beat, _, delta, _, _, changed, _) = pull(&au);
     assert_eq!(beat, 32.0);
@@ -397,10 +395,7 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     run(&mut au, FRAMES, None, None).expect("process");
     assert_eq!(pull(&au).0, CANNOT_DO, "no frozen beat after a gap");
-    let resumed = next.with_position_beats(
-        next.position.beats + 0.026,
-        tutti_plugin_types::Seconds(0.0),
-    );
+    let resumed = next.with_beat(tutti_types::Beat(next.position.beat.get() + 0.026));
     run(&mut au, FRAMES, Some(&resumed), None).expect("process");
     let (status, _, _, _, _, _, changed, _) = pull(&au);
     assert_eq!(status, 0);
@@ -456,7 +451,9 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         au.drive(main_thread(), Event::Op(HostOp::Activate(prepare)))
             .is_none()
     );
-    let transport = TransportInfo::new().with_tempo(150.0).with_playing(true);
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(150.0))
+        .with_playing(true);
     run(&mut au, 512, Some(&transport), None).expect("a block with a transport renders");
     assert!(au.loaded_ref().and_then(|l| l.transport()).is_none());
 }

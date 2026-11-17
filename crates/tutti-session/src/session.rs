@@ -460,21 +460,21 @@ impl std::fmt::Debug for SessionEvent {
     }
 }
 
-/// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
-/// and MTC, off until a host enables it), with its controls. An input port's
-/// ingest node is not here: each `midi_input` entry makes its own
-/// (`MidiInput::node`), and each output its own (`MidiSink::node`,
-/// `MidiOutput::node`), fed by the clock.
+/// The engine's MIDI, as graph nodes the builder inserts: the sync node (Beat
+/// Clock, MTC and Machine Control, sending nothing until a host sets its
+/// messages), with its controls. An input port's ingest node is not here: each
+/// `midi_input` entry makes its own (`MidiInput::node`), and each output its own
+/// (`MidiSink::node`, `MidiOutput::node`), fed by the sync node.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
     /// Which of an input port's event outputs carries which Group and channel
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
     pub input_ports: tutti_midi_runtime::MidiInputPorts,
-    /// The clock's node.
-    pub clock: NodeKey,
-    /// The clock master: enable it, pick MTC and its frame rate.
-    pub clock_master: tutti_midi_runtime::ClockControls,
+    /// The sync node, on Group 1.
+    pub sync: NodeKey,
+    /// What the sync node sends (`messages()`) and could not send (`losses()`).
+    pub sync_controls: std::sync::Arc<tutti_midi_runtime::SyncOutControls>,
 }
 
 /// The bound on an app's key type, the name an app gives a node in its model.
@@ -1239,11 +1239,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             Phase::MidiOut => {
                 #[cfg(feature = "midi")]
                 {
-                    let playhead = self.playhead();
-                    if self
-                        .midi_state
-                        .midi_out_phase(&mut self.graph, &playhead, cx.now)
-                    {
+                    if self.midi_state.midi_out_phase(&mut self.graph, cx.now) {
                         self.commit();
                     }
                 }

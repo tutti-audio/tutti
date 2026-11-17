@@ -39,6 +39,7 @@
 #![cfg(feature = "conformance")]
 
 use crate::probe::probe_path;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
@@ -47,7 +48,7 @@ use tutti_rt::LockExt;
 use crate::active;
 #[allow(unused_imports)]
 use active::{Activate, Active, ActiveExt, LoadError, ParamExt, StateExt};
-use tutti_vst3_host::{AudioBuffer, InputEvents, LoadOptions, TransportInfo, Vst3Loaded};
+use tutti_vst3_host::{InputEvents, LoadOptions, TransportInfo, Vst3Loaded};
 
 /// Guards `TUTTI_PROBE_MISBEHAVIOUR`, which is process-global.
 static PROBE_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -184,19 +185,19 @@ fn drive_block_with(inst: &mut Active, input: f32) -> Vec<Vec<f32>> {
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: BLOCK,
-        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     // A plugin that fails the block leaves the outputs cleared; the failure
     // itself is `try_process`'s to report.
     let _ = inst.try_process(
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     outs
 }

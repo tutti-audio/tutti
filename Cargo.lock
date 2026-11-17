@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "arc-lend"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17e01608ff396d9faa8e721d6964584d0a2374ed1c9770ff3c4ddaa47f4b74c"
+checksum = "b94dbb4c0028396379c0f3cc9bcf0d5bea204746b7ba52f7fa7fbcd261f14646"
 dependencies = [
  "loom",
 ]
@@ -2539,6 +2539,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-au-ffi",
  "tutti-au-host",
+ "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
@@ -2770,6 +2771,10 @@ version = "0.0.0"
 dependencies = [
  "tutti-codec",
  "tutti-fixtures",
+ "tutti-midi-device",
+ "tutti-midi-file",
+ "tutti-midi-protocol",
+ "tutti-ump",
 ]
 
 [[package]]
@@ -2995,7 +3000,6 @@ dependencies = [
  "tutti-buffers",
  "tutti-clap-host",
  "tutti-clap-test-plugin",
- "tutti-codec",
  "tutti-engine",
  "tutti-export",
  "tutti-fixtures",
@@ -3038,6 +3042,7 @@ dependencies = [
  "tutti-plugin-ipc",
  "tutti-plugin-types",
  "tutti-shared-plugin",
+ "tutti-types",
  "tutti-ump",
  "tutti-vst2-host",
  "tutti-vst2-shell-plugin",
@@ -3122,6 +3127,7 @@ name = "tutti-plugin-ipc-ffi"
 version = "0.0.1"
 dependencies = [
  "crossbeam-utils",
+ "loom",
  "memmap2",
  "rustix",
  "thiserror 2.0.21",
@@ -3152,7 +3158,6 @@ name = "tutti-plugin-server"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
- "bytemuck",
  "dpi",
  "interprocess",
  "libc",
@@ -3354,13 +3359,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tutti-shm-model"
-version = "0.0.1"
-dependencies = [
- "loom",
-]
-
-[[package]]
 name = "tutti-soundfont"
 version = "0.0.1"
 dependencies = [
@@ -3507,6 +3505,7 @@ dependencies = [
  "raw-window-handle",
  "tempfile",
  "thiserror 2.0.21",
+ "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-plugin-types",
@@ -3546,7 +3545,6 @@ dependencies = [
  "dpi",
  "libloading 0.9.1",
  "parking_lot",
- "tempfile",
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",

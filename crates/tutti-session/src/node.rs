@@ -258,10 +258,10 @@ impl SessionNode for tutti_nodes::ClickNode {
     }
 }
 
-/// The MIDI clock as a graph node: its controls are the clock's master side
-/// (read by the session), no params.
+/// The transport sent as MIDI, as a graph node: its controls are its
+/// settings and losses, no params.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::ClockNode {
+impl SessionNode for tutti_midi_runtime::SyncOut {
     fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
@@ -454,7 +454,7 @@ mod tests {
         // A node that publishes nothing keeps none.
         assert!(!keeps_one(
             tutti_nodes::automation::AutomationLaneNode::new(
-                tutti_nodes::automation::Trajectory::new()
+                tutti_nodes::automation::Trajectory::<tutti_types::Hz>::new()
             )
         ));
     }

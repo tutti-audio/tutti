@@ -26,7 +26,7 @@
 //! `tutti-plugin-server`, which give every format one interface. Use it directly
 //! when you want a VST3 host without the rest of the engine.
 //!
-//! The other types you will meet first: [`AudioBuffer`] (the per-block audio),
+//! The other types you will meet first: [`InputOutput`](tutti_buffers::InputOutput) (the per-block audio),
 //! [`InputEvents`] (per-block MIDI and other events), [`PluginInfo`] (the class
 //! metadata read at load) and [`Vst3Error`] (with [`LoadStage`] for load failures).
 //!
@@ -65,9 +65,8 @@
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //! use tutti_plugin_types::{MaxBlock, Prepare, SampleRate, Samples};
-//! use tutti_vst3_host::{
-//!     AudioBuffer, InputEvents, LoadOptions, TransportInfo, Vst3Loaded,
-//! };
+//! use tutti_buffers::{InputOutput, Planes, PlanesMut};
+//! use tutti_vst3_host::{InputEvents, LoadOptions, TransportInfo, Vst3Loaded};
 //! use tutti_graph::Offset;
 //! use tutti_ump::Ump;
 //!
@@ -90,10 +89,13 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let mut buffer = AudioBuffer::new(&inputs, &mut outputs, tutti_plugin_types::SampleRate::SR_48K);
+//! let mut buffer = InputOutput::new(
+//!     Samples(512),
+//!     Planes::new(&inputs).expect("two equal planes"),
+//!     PlanesMut::new(&mut outputs).expect("two equal planes"),
+//! )
+//! .expect("equal lengths");
 //!
-//! // The sample rate stays a raw `f64` here: this is a C ABI, which is where
-//! // the engine's unit newtypes deliberately stop.
 //! let midi: [(Offset, Ump); 1] = [(
 //!     Offset::ZERO,
 //!     midi::note_on(MidiChannel::FIRST, 60, 0xC000),
@@ -102,7 +104,7 @@
 //!     midi: &midi,
 //!     ..Default::default()
 //! };
-//! let transport = TransportInfo::default().with_tempo(120.0).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
 //!
 //! let out = processor
 //!     .process(&mut buffer, &events, None, &transport)
@@ -283,7 +285,6 @@
 //! [`Vst3Processor::process`]: crate::Vst3Processor::process
 //! [`Vst3Processor::set_prefetch`]: crate::Vst3Processor::set_prefetch
 //! [`Vst3Controller`]: crate::Vst3Controller
-//! [`AudioBuffer`]: crate::AudioBuffer
 //! [`InputEvents`]: crate::InputEvents
 //! [`PluginInfo`]: crate::PluginInfo
 //! [`Vst3Error`]: crate::Vst3Error
@@ -319,13 +320,12 @@ pub use host::{
     descriptor_of,
 };
 pub use types::{
-    AudioBuffer, BusInfo, BusType, ContentScale, EditorCapabilities, KeyswitchKind,
-    NoteExpressionFlags, NoteExpressionIntValue, NoteExpressionType, NoteExpressionValue,
-    ParameterChanges, ParameterFlags, ParameterPoint, ParameterQueue, PhysicalUiType, PlainRange,
-    PluginInfo, PrefetchSupport, ProcessContextRequirements, ProcessMode, ProcessOutput,
-    ProcessOutputRef, TransportInfo, UnitId, Vst3KeyswitchInfo, Vst3NoteExpressionInfo,
-    Vst3ParameterInfo, Vst3ProgramListInfo, Vst3Sample, Vst3UnitInfo, WindowHandle, WireMidi,
-    to_process_context,
+    BusInfo, BusType, ContentScale, EditorCapabilities, KeyswitchKind, NoteExpressionFlags,
+    NoteExpressionIntValue, NoteExpressionType, NoteExpressionValue, ParameterChanges,
+    ParameterFlags, ParameterPoint, ParameterQueue, PhysicalUiType, PlainRange, PluginInfo,
+    PrefetchSupport, ProcessContextRequirements, ProcessMode, ProcessOutput, ProcessOutputRef,
+    TransportInfo, UnitId, Vst3KeyswitchInfo, Vst3NoteExpressionInfo, Vst3ParameterInfo,
+    Vst3ProgramListInfo, Vst3Sample, Vst3UnitInfo, WindowHandle, WireMidi, to_process_context,
 };
 
 pub use tutti_vst3_ffi::{

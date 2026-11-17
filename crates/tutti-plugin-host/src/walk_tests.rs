@@ -84,7 +84,7 @@ impl Rig {
             source,
             tempo,
             arrival: Latency::ZERO,
-            info: TransportInfo::default(),
+            info: TransportInfo::new(SampleRate::of(RATE)),
             changes: WireChanges::default(),
         }
     }
@@ -156,15 +156,19 @@ impl Rig {
 
 /// The `(frame, tempo, slope)` of every entry of a payload, first included.
 fn entries(p: &Told) -> Vec<(u32, f64, f64)> {
-    std::iter::once((0, p.transport.timing.tempo, p.transport.timing.tempo_inc))
-        .chain(p.changes.iter().map(|c| {
-            (
-                c.offset,
-                c.transport.timing.tempo,
-                c.transport.timing.tempo_inc,
-            )
-        }))
-        .collect()
+    std::iter::once((
+        0,
+        p.transport.timing.tempo.get(),
+        p.transport.timing.tempo_inc,
+    ))
+    .chain(p.changes.iter().map(|c| {
+        (
+            c.offset,
+            c.transport.timing.tempo.get(),
+            c.transport.timing.tempo_inc,
+        )
+    }))
+    .collect()
 }
 
 /// 120 BPM, then 90 from beat 4 (a step).
@@ -213,7 +217,7 @@ fn a_step_inside_a_chunk_is_an_entry_at_its_frame() {
     let env = block(512, rolling(120.0, 3.99), &[(240, rolling(90.0, 4.0))]);
     let p = rig.chunk(512, &[env]);
     assert_eq!(entries(&p), [(0, 120.0, 0.0), (240, 90.0, 0.0)]);
-    assert_eq!(p.changes[0].transport.position.quarters, 4.0);
+    assert_eq!(p.changes[0].transport.position.beat.get(), 4.0);
     assert_eq!(rig.dropped(), 0);
 }
 
@@ -292,7 +296,7 @@ fn a_stop_a_start_a_seek_and_a_wrap_are_entries() {
             (
                 c.offset,
                 c.transport.state.playing,
-                c.transport.position.quarters,
+                c.transport.position.beat.get(),
             )
         })
         .collect();
@@ -307,7 +311,7 @@ fn a_stop_a_start_a_seek_and_a_wrap_are_entries() {
         (flags[3].2 - 1.0).abs() < 1e-6,
         "wrapped to the start: {flags:?}"
     );
-    assert!(p.changes.iter().all(|c| c.transport.state.cycle_active));
+    assert!(p.changes.iter().all(|c| c.transport.loop_region.is_some()));
 }
 
 /// **A chunk spanning two calls sees the second call's `Env` changes**: a
@@ -328,7 +332,7 @@ fn a_chunk_spanning_two_calls_sees_the_second_calls_seek() {
     let p = rig.chunk(128, &[first, second]);
     assert_eq!(p.changes.len(), 1);
     assert_eq!(p.changes[0].offset, 74);
-    assert_eq!(p.changes[0].transport.position.quarters, 8.0);
+    assert_eq!(p.changes[0].transport.position.beat.get(), 8.0);
 }
 
 /// **A seek the second call's `Env` does not list, because the node reads
@@ -343,7 +347,7 @@ fn a_seek_the_second_call_does_not_list_is_told_at_its_first_frame() {
     let p = rig.chunk(128, &[first, second]);
     assert_eq!(p.changes.len(), 1);
     assert_eq!(p.changes[0].offset, 64);
-    assert_eq!(p.changes[0].transport.position.quarters, 8.0);
+    assert_eq!(p.changes[0].transport.position.beat.get(), 8.0);
     // And a second call that does continue is no entry.
     let first = block(64, rolling(120.0, 1.0 + 128.0 / 24_000.0), &[]);
     let second = block(64, rolling(120.0, 1.0 + 192.0 / 24_000.0), &[]);
@@ -435,7 +439,7 @@ fn nine_changes_send_eight_count_one_and_the_ninth_waits_for_the_next_chunk() {
     let beats: Vec<_> = p
         .changes
         .iter()
-        .map(|c| (c.offset, c.transport.position.quarters))
+        .map(|c| (c.offset, c.transport.position.beat.get()))
         .collect();
     let want: Vec<_> = (0..8)
         .map(|i| (4 + 8 * i as u32, 10.0 + i as f64))
@@ -446,7 +450,7 @@ fn nine_changes_send_eight_count_one_and_the_ninth_waits_for_the_next_chunk() {
     let third = block(64, rolling(120.0, 50.0 + 54.0 / 24_000.0), &[]);
     let fourth = block(64, rolling(120.0, 50.0 + 118.0 / 24_000.0), &[]);
     let next = rig.chunk(128, &[third, fourth]);
-    assert!((next.transport.position.quarters - (50.0 + 54.0 / 24_000.0)).abs() < 1e-9);
+    assert!((next.transport.position.beat.get() - (50.0 + 54.0 / 24_000.0)).abs() < 1e-9);
     assert!(next.changes.is_empty());
     assert_eq!(rig.dropped(), 1, "counted once");
 }
