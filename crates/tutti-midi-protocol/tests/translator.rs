@@ -432,9 +432,16 @@ fn groups_keep_their_own_runs() {
     );
 }
 
+/// **The valid Bank Select stays until a Bank Select changes it** (D.3.4:
+/// "include the current valid Bank Select values in the MIDI 2.0 Protocol
+/// Program Change message. If there is no current Bank Select value associated
+/// with the Program Change, then ... set the Bank Valid bit to 0"): a Program
+/// Change before any Bank Select has no bank, bank select then two Program
+/// Changes sends the same bank (B=1) on both, and a lone CC 32 pairs with the
+/// CC 0 last sent.
 /// Spec: m2-104/7.4.6#3, m2-104/7.4.6#4, m2-104/d.3.3#8
 #[test]
-fn bank_select_rides_on_the_next_program_change_only() {
+fn the_valid_bank_select_rides_on_every_program_change_until_changed() {
     let mut t = Translator::new();
     let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
     let program = |p: u8, bank: Option<(u8, u8)>| {
@@ -452,24 +459,28 @@ fn bank_select_rides_on_the_next_program_change_only() {
     let out = run(
         &mut t,
         &[
+            pc(4),
             cc(CCNumber::BANK_SELECT, 1),
             cc(CCNumber::BANK_SELECT_LSB, 2),
             pc(5),
             pc(6),
             cc(CCNumber::BANK_SELECT_LSB, 3),
             pc(7),
+            pc(8),
         ],
     );
     assert_eq!(
         out,
         vec![
+            vec![program(4, None)],
             vec![],
             vec![],
             vec![program(5, Some((1, 2)))],
-            vec![program(6, None)],
+            vec![program(6, Some((1, 2)))],
             vec![],
             // A lone CC 32 pairs with the CC 0 last sent.
             vec![program(7, Some((1, 3)))],
+            vec![program(8, Some((1, 3)))],
         ]
     );
 }
