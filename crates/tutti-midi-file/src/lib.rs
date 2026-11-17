@@ -123,7 +123,7 @@ pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal, TickOverflow};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Alteration, Altered, Converted, DropReason, Dropped, FileEvent, Meta, MicrosPerQuarter,
+    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, Meta, MicrosPerQuarter,
     MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
     OtherMetaKindOutOfRange, PairedNote, SmfFormat, TextKind, Tick, Timeline, ToClipError, Track,
 };

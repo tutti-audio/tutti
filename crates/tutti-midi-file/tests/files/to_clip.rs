@@ -11,7 +11,7 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    Alteration, DropReason, Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
+    DropReason, Error, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
     SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
@@ -1218,17 +1218,14 @@ fn a_lyric_whose_text_changes_is_listed_as_altered() {
         (40, text(TextKind::Lyric, "-")),
     ]);
     let done = smf.to_clip().unwrap();
-    let altered: Vec<(u64, Alteration)> = done
-        .altered
-        .iter()
-        .map(|a| (a.tick.0, a.alteration))
-        .collect();
+    let altered: Vec<(u64, LyricChange)> =
+        done.altered.iter().map(|a| (a.tick.0, a.change)).collect();
     assert_eq!(
         altered,
         [
-            (0, Alteration::HyphenStripped),
-            (20, Alteration::BreakMark),
-            (20, Alteration::HyphenStripped),
+            (0, LyricChange::HyphenStripped),
+            (20, LyricChange::BreakMark),
+            (20, LyricChange::HyphenStripped),
         ]
     );
     assert_eq!(done.altered[1].event, text(TextKind::Lyric, "/\\world-"));

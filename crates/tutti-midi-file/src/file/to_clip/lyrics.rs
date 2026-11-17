@@ -27,7 +27,7 @@ use tutti_ump::{
     flex_lyric_packets,
 };
 
-use super::{Alteration, DropReason, event};
+use super::{DropReason, LyricChange, event};
 use crate::FileEvent;
 
 /// One syllable and how it ends.
@@ -44,20 +44,20 @@ struct Piece {
 pub(super) struct Lyrics {
     /// The syllables of each lyric event, by the event's index, and what
     /// reading them changed of its text.
-    events: Vec<(usize, Result<Vec<Piece>, DropReason>, Vec<Alteration>)>,
+    events: Vec<(usize, Result<Vec<Piece>, DropReason>, Vec<LyricChange>)>,
 }
 
 impl Lyrics {
     /// Takes the lyric `text` of the event at `index`.
     pub(super) fn push(&mut self, index: usize, text: &str) {
-        let (before, syllables, alterations) = split(text);
+        let (before, syllables, changes) = split(text);
         let raised = before.is_some_and(|end| self.raise_last(end));
         let placed = if syllables.is_empty() && !raised {
             Err(DropReason::LyricWithoutSyllable)
         } else {
             Ok(syllables)
         };
-        self.events.push((index, placed, alterations));
+        self.events.push((index, placed, changes));
     }
 
     /// Takes the event at `index`, which has no lyric text to read.
@@ -80,41 +80,39 @@ impl Lyrics {
     /// reading its text changed.
     pub(super) fn into_events(
         self,
-    ) -> impl Iterator<Item = (usize, Result<Vec<FileEvent>, DropReason>, Vec<Alteration>)> {
-        self.events
-            .into_iter()
-            .map(|(index, syllables, alterations)| {
-                let events = syllables.and_then(|syllables| {
-                    let mut events = Vec::new();
-                    for Piece { body, end } in syllables {
-                        let body = SyllableBody::try_from(&*body).map_err(|e| match e {
-                            SyllableError::Text(e) => DropReason::Text(e),
-                            // The split leaves no separator in a body.
-                            other => unreachable!("{other:?} in a syllable the split made"),
-                        })?;
-                        let packets = flex_lyric_packets(
-                            MidiGroup::FIRST,
-                            FlexAddress::Group,
-                            LyricKind::Lyrics,
-                            &Syllable { body, end },
-                        );
-                        events.extend(packets.map(event));
-                    }
-                    Ok(events)
-                });
-                (index, events, alterations)
-            })
+    ) -> impl Iterator<Item = (usize, Result<Vec<FileEvent>, DropReason>, Vec<LyricChange>)> {
+        self.events.into_iter().map(|(index, syllables, changes)| {
+            let events = syllables.and_then(|syllables| {
+                let mut events = Vec::new();
+                for Piece { body, end } in syllables {
+                    let body = SyllableBody::try_from(&*body).map_err(|e| match e {
+                        SyllableError::Text(e) => DropReason::Text(e),
+                        // The split leaves no separator in a body.
+                        other => unreachable!("{other:?} in a syllable the split made"),
+                    })?;
+                    let packets = flex_lyric_packets(
+                        MidiGroup::FIRST,
+                        FlexAddress::Group,
+                        LyricKind::Lyrics,
+                        &Syllable { body, end },
+                    );
+                    events.extend(packets.map(event));
+                }
+                Ok(events)
+            });
+            (index, events, changes)
+        })
     }
 }
 
 /// The end the text asks of the syllable before it with its leading breaks
 /// and spaces, its own syllables, and what the reading changed of the text: a
-/// leading `/` or `\` ([`Alteration::BreakMark`]) or hyphens at the end of a
-/// syllable ([`Alteration::HyphenStripped`]).
-fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<Alteration>) {
+/// leading `/` or `\` ([`LyricChange::BreakMark`]) or hyphens at the end of a
+/// syllable ([`LyricChange::HyphenStripped`]).
+fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
     let mut chars = text.chars().peekable();
     let mut before = None;
-    let mut alterations = Vec::new();
+    let mut changes = Vec::new();
     while let Some(end) = chars.peek().and_then(|&c| match c {
         '/' | '\r' | '\n' => Some(SyllableEnd::Line),
         '\\' => Some(SyllableEnd::Paragraph),
@@ -122,8 +120,8 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<Alteration>) {
         _ => None,
     }) {
         let c = chars.next();
-        if matches!(c, Some('/' | '\\')) && !alterations.contains(&Alteration::BreakMark) {
-            alterations.push(Alteration::BreakMark);
+        if matches!(c, Some('/' | '\\')) && !changes.contains(&LyricChange::BreakMark) {
+            changes.push(LyricChange::BreakMark);
         }
         // A carriage return and a line feed are a paragraph.
         let end = if c == Some('\r') && chars.peek() == Some(&'\n') {
@@ -150,32 +148,27 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<Alteration>) {
             end = end.max(separator);
         } else {
             if end != SyllableEnd::None {
-                push_syllable(
-                    &mut syllables,
-                    std::mem::take(&mut body),
-                    end,
-                    &mut alterations,
-                );
+                push_syllable(&mut syllables, std::mem::take(&mut body), end, &mut changes);
                 end = SyllableEnd::None;
             }
             body.push(c);
         }
     }
-    push_syllable(&mut syllables, body, end, &mut alterations);
-    (before, syllables, alterations)
+    push_syllable(&mut syllables, body, end, &mut changes);
+    (before, syllables, changes)
 }
 
 /// Adds `body` as a syllable, without the hyphens that marked its word going
-/// on (noted in `alterations`); a body of only hyphens is no syllable.
+/// on (noted in `changes`); a body of only hyphens is no syllable.
 fn push_syllable(
     syllables: &mut Vec<Piece>,
     body: String,
     end: SyllableEnd,
-    alterations: &mut Vec<Alteration>,
+    changes: &mut Vec<LyricChange>,
 ) {
     let trimmed = body.trim_end_matches('-');
-    if trimmed.len() != body.len() && !alterations.contains(&Alteration::HyphenStripped) {
-        alterations.push(Alteration::HyphenStripped);
+    if trimmed.len() != body.len() && !changes.contains(&LyricChange::HyphenStripped) {
+        changes.push(LyricChange::HyphenStripped);
     }
     let body = trimmed;
     if !body.is_empty() {

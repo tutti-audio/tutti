@@ -121,7 +121,7 @@ pub struct Dropped {
 /// What reading a lyric as karaoke text changed of it ([`Altered`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Alteration {
+pub enum LyricChange {
     /// A `/` (line break) or `\` (paragraph break) at the start of the text
     /// became the end of the syllable before it, and left the text.
     BreakMark,
@@ -142,7 +142,7 @@ pub struct Altered {
     /// The event.
     pub event: FileEvent,
     /// What the clip's text changes of it.
-    pub alteration: Alteration,
+    pub change: LyricChange,
 }
 
 /// A Set Tempo or Time Signature that conversion moved onto the grid the
@@ -431,7 +431,7 @@ enum Source {
     Event,
     Lyric(
         std::result::Result<Vec<FileEvent>, DropReason>,
-        Vec<Alteration>,
+        Vec<LyricChange>,
     ),
 }
 
@@ -642,8 +642,8 @@ impl MidiFile {
             }
         }
         let mut sources: Vec<Source> = landings.iter().map(|_| Source::Event).collect();
-        for (index, events, alterations) in lyrics.into_events() {
-            sources[index] = Source::Lyric(events, alterations);
+        for (index, events, changes) in lyrics.into_events() {
+            sources[index] = Source::Lyric(events, changes);
         }
         let mut dropped = Vec::new();
         let mut moved = Vec::new();
@@ -659,14 +659,14 @@ impl MidiFile {
             source,
         ) in landings.into_iter().zip(sources)
         {
-            let mut alterations = Vec::new();
+            let mut changes = Vec::new();
             let converted = if superseded {
                 Err(DropReason::Superseded)
             } else {
                 match source {
                     Source::Event => convert(track, format, event),
-                    Source::Lyric(events, changes) => {
-                        alterations = changes;
+                    Source::Lyric(events, made) => {
+                        changes = made;
                         events.map(|events| (Rank::Other, events))
                     }
                 }
@@ -681,11 +681,11 @@ impl MidiFile {
                             event: event.clone(),
                         });
                     }
-                    altered.extend(alterations.into_iter().map(|alteration| Altered {
+                    altered.extend(changes.into_iter().map(|change| Altered {
                         track,
                         tick: from,
                         event: event.clone(),
-                        alteration,
+                        change,
                     }));
                     // Only tick 0 is ordered by rank; a later tempo is where it was.
                     let rank = if to == Tick(0) { rank } else { Rank::Other };

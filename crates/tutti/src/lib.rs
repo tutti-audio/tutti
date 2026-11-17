@@ -623,7 +623,7 @@ pub mod midi {
     };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
-        Alteration, Altered, Converted, DropReason, Dropped, MicrosPerQuarter,
+        Altered, Converted, DropReason, Dropped, LyricChange, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
         OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
         TextKind, Timeline, WriteOptions,

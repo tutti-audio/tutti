@@ -42,7 +42,7 @@ mod to_clip;
 pub use meta_kind::{
     MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind, OtherMetaKindOutOfRange,
 };
-pub use to_clip::{Alteration, Altered, Converted, DropReason, Dropped, Moved, ToClipError};
+pub use to_clip::{Altered, Converted, DropReason, Dropped, LyricChange, Moved, ToClipError};
 use tutti_ump::Voice1;
 
 /// A position in a file, in ticks of its division: whole numbers, so a file

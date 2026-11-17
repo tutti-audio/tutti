@@ -184,11 +184,11 @@ tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/limits.rs::te
 tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/resource/fields.rs::text_enum
 
 # tutti-midi-file
+tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::note
 tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::push
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::clip
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::from_bytes
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read_from
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::smf
 
 # tutti-midi-hardware
