@@ -124,6 +124,7 @@ mod session;
 mod switch;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
+mod transport_handle;
 #[cfg(feature = "device")]
 mod watch;
 
@@ -255,6 +256,7 @@ pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
     TakeError, TakeEvent, TakeId, TakeTarget, Terms, Window,
 };
+pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]

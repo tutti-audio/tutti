@@ -189,7 +189,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind, JobStatus,
     Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
-    SessionBuilder, SessionEvent, SystemClock, SystemSession, TypedParamRef, WaitError, Workers,
+    SessionBuilder, SessionEvent, SystemClock, SystemSession, TransportHandle, TypedParamRef,
+    WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
