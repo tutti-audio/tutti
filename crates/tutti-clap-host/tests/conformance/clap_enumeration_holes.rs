@@ -42,12 +42,11 @@ use crate::support;
 use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
 
-use tutti_clap_host::{
-    AudioBuffer32, ClapLoaded, ClapProcessContext, LoadOptions, ParameterChanges,
-};
+use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, ParameterChanges};
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{HOLE_NONE, ProcessCapture};
 use tutti_plugin_types::ParamId;
+use tutti_plugin_types::PluginAudio;
 
 /// CLAP's `PARAM_VALUE` wire type, pinned rather than imported: it is the value
 /// the host puts on the FFI, so a failure names what the plugin actually saw.
@@ -197,12 +196,8 @@ fn drive_block(
     let ins_owned: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0f32; frames]).collect();
     let mut outs: Vec<&mut [f32]> = outs_owned.iter_mut().map(|v| &mut v[..]).collect();
     let ins: Vec<&[f32]> = ins_owned.iter().map(|v| &v[..]).collect();
-    let mut buffer = AudioBuffer32 {
-        inputs: &ins,
-        outputs: &mut outs,
-        num_samples: frames,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+        .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }
 

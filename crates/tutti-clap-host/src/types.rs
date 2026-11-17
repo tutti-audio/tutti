@@ -10,9 +10,8 @@ use bitflags::bitflags;
 use std::fmt;
 
 pub use tutti_plugin_types::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, ChannelLayout, ContentScale, EditorCapabilities,
-    NoteExpressionType, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion,
-    TransportInfo, WindowHandle, WireMidi,
+    ChannelLayout, ContentScale, EditorCapabilities, NoteExpressionType, ParameterChanges,
+    ParameterPoint, ParameterQueue, PluginVersion, TransportInfo, WindowHandle, WireMidi,
 };
 
 /// Metadata describing a loaded plugin, returned from
