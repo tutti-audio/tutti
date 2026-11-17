@@ -6,9 +6,9 @@ use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind,
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls, CompressorNode,
-    CrossoverNode, DelayControls, DelayNode, DistortionNode, FdnNode, FreeverbNode, GateControls,
-    GateNode, LadderFilterNode, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
+    Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls,
+    CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, FdnNode, FreeverbNode,
+    GateControls, GateNode, LadderFilterNode, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
     MultibandCompressorNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode,
     TremoloConfig, TremoloNode,
 };
@@ -65,6 +65,22 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "distortion",
             Box::new(DistortionNode::new(ShapeKind::Tanh, Drive(4.0))),
+        ),
+        // The antialiasing's history is the shaper's own state: a non-finite sample enters it
+        // as 0, so it is heard at its own frame.
+        (
+            "distortion first order",
+            Box::new(
+                DistortionNode::new(ShapeKind::Tanh, Drive(4.0))
+                    .antialiasing(Antialiasing::FirstOrder),
+            ),
+        ),
+        (
+            "distortion second order",
+            Box::new(
+                DistortionNode::new(ShapeKind::Softsign, Drive(4.0))
+                    .antialiasing(Antialiasing::SecondOrder),
+            ),
         ),
         (
             "compressor",

@@ -27,7 +27,7 @@
 1 4 crates/tutti-plugin-ipc/src/subprocess/launch.rs
 0 1 crates/tutti-plugin-ipc/src/transport/control.rs
 0 1 crates/tutti-plugin-server/src/served/tests/clap.rs
-0 5 crates/tutti-plugin-server/src/session.rs
+0 2 crates/tutti-plugin-server/src/session.rs
 2 0 crates/tutti-plugin-server/src/transport.rs
 0 1 crates/tutti-plugin-server/tests/load_reply.rs
 0 1 crates/tutti-plugin-server/tests/orphan_watchdog.rs

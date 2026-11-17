@@ -46,7 +46,8 @@
 //!   `SweepRange` and `Stagger`; one `Glide` per channel's coefficient and one for the
 //!   feedback).
 //! - **Waveshaping** — `ShapeKind`, six memoryless curves, and `WaveshaperBank`, which runs
-//!   one over a block at a gliding or per-frame drive.
+//!   one over a block at a gliding or per-frame drive, with `Antialiasing` of the first or
+//!   second order.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
 //!   (RT60, tail, stability, densities), `FreeverbBank`, Freeverb's combs and
 //!   all-passes over buffers views, and `FdnBank`, the feedback delay network.
@@ -258,5 +259,5 @@ pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
-pub use waveshape::{ShapeKind, WaveshaperBank, WaveshaperControls};
+pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
 pub use xorshift::Xorshift32;

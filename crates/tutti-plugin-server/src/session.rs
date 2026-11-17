@@ -1065,6 +1065,9 @@ mod tests {
         // from before the save are always in it.
         const WARM_UP: usize = 10;
         const SETTLED: usize = 10;
+        // Blocks the player renders between two snapshots, and after the last.
+        const BETWEEN_SAVES: usize = 3;
+        const AFTER_SAVES: usize = 30;
 
         const FRAMES: usize = 64;
         // The probe's `Gain` parameter (`params_state::GAIN_PARAM_ID`).
@@ -1128,15 +1131,20 @@ mod tests {
                 blocks
             }
         });
+        // Waits until the player has rendered `count` blocks in all; the
+        // deadline only guards a hang.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while rendered.load(Ordering::Acquire) < WARM_UP + SETTLED {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the player rendered {} blocks in 30 s",
-                rendered.load(Ordering::Acquire)
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
+        let rendered_to = |count: usize| {
+            while rendered.load(Ordering::Acquire) < count {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the player rendered {} of {count} blocks",
+                    rendered.load(Ordering::Acquire)
+                );
+                std::thread::yield_now();
+            }
+        };
+        rendered_to(WARM_UP + SETTLED);
         if write {
             let r = s
                 .handle(
@@ -1151,13 +1159,13 @@ mod tests {
         }
         let after = save_state_bytes(&mut s);
         let saved_at = std::time::Instant::now();
-        // Snapshots come round after round in a session; each one must leave
-        // the blocks alone.
+        // Snapshots come round after round in a session, with blocks between
+        // them; each one must leave the blocks alone.
         for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(8));
+            rendered_to(rendered.load(Ordering::Acquire) + BETWEEN_SAVES);
             save_state_bytes(&mut s);
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        rendered_to(rendered.load(Ordering::Acquire) + AFTER_SAVES);
         stop.store(true, Ordering::Release);
         let blocks: Vec<_> = player.join().unwrap().into_iter().skip(WARM_UP).collect();
         SteadySave {
@@ -1186,7 +1194,6 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_during_playback_sees_it_and_silences_no_block() {
         let r = save_during_playback("save_write", true);
-        assert!(r.silent.len() > 50, "the player ran: {}", r.silent.len());
         assert_ne!(r.before, r.after, "the save has the write");
         let silent = r.silent.iter().filter(|&&s| s).count();
         assert_eq!(silent, 0, "{silent} blocks were silent around the save");
@@ -1208,7 +1215,6 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_save_with_no_write_pending_recalls_nothing() {
         let r = save_during_playback("save_plain", false);
-        assert!(r.silent.len() > 50, "the player ran: {}", r.silent.len());
         assert_eq!(r.before, r.after);
         let silent = r.silent.iter().filter(|&&s| s).count();
         assert_eq!(silent, 0, "{silent} blocks were silent around the save");
