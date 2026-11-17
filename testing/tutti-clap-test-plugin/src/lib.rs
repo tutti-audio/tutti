@@ -185,10 +185,15 @@ pub const SECOND_PLUGIN_ID: &CStr = c"tutti.conformance-probe.second";
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CapturedEvent {
+    /// The event time in frames from the start of the block.
     pub time: u32,
+    /// The CLAP event type.
     pub event_type: u16,
+    /// Padding that keeps `param_id` aligned in the `repr(C)` layout.
     pub _pad: u16,
+    /// The parameter id.
     pub param_id: u32,
+    /// The parameter value.
     pub value: f64,
 }
 
@@ -201,9 +206,13 @@ pub const MAX_CAPTURED_EVENTS: usize = 64;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessCapture {
+    /// Whether `process` has been called at least once.
     pub valid: bool,
+    /// The `frames_count` of the most recent `process` call.
     pub frames_count: u32,
+    /// The number of input buses the host presented.
     pub audio_inputs_count: u32,
+    /// The number of output buses the host presented.
     pub audio_outputs_count: u32,
     /// Channel count of input bus 0 (0 if no input bus present).
     pub in0_channels: u32,
@@ -219,7 +228,9 @@ pub struct ProcessCapture {
     pub transport_tempo: f64,
     /// Transport `tempo_inc` (only meaningful when `transport_present`).
     pub transport_tempo_inc: f64,
+    /// The number of input events seen, which may exceed `MAX_CAPTURED_EVENTS`.
     pub event_count: u32,
+    /// The first events seen, in arrival order.
     pub events: [CapturedEvent; MAX_CAPTURED_EVENTS],
 }
 
@@ -791,6 +802,7 @@ static FEATURES: SyncPtrs<[*const c_char; 2]> = SyncPtrs([c"audio-effect".as_ptr
 /// `repr(transparent)` because one of these **is** the exported `clap_entry`
 /// symbol — the host reads a `clap_plugin_entry` at that address, so the
 /// wrapper must not perturb the layout.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct SyncCell<T>(std::cell::UnsafeCell<T>);
 unsafe impl<T> Sync for SyncCell<T> {}

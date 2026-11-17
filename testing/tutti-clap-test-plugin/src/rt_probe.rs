@@ -53,11 +53,16 @@ pub const GARBAGE_STATUS: clap_process_status = 0x7EED_BEEF;
 pub mod status {
     use super::clap_process_status;
 
+    /// `CLAP_PROCESS_ERROR`.
     pub const ERROR: clap_process_status = super::CLAP_PROCESS_ERROR;
+    /// `CLAP_PROCESS_CONTINUE`.
     pub const CONTINUE: clap_process_status = super::CLAP_PROCESS_CONTINUE;
+    /// `CLAP_PROCESS_CONTINUE_IF_NOT_QUIET`.
     pub const CONTINUE_IF_NOT_QUIET: clap_process_status =
         super::CLAP_PROCESS_CONTINUE_IF_NOT_QUIET;
+    /// `CLAP_PROCESS_TAIL`.
     pub const TAIL: clap_process_status = super::CLAP_PROCESS_TAIL;
+    /// `CLAP_PROCESS_SLEEP`.
     pub const SLEEP: clap_process_status = super::CLAP_PROCESS_SLEEP;
 }
 

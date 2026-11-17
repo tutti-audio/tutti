@@ -211,6 +211,10 @@ impl ClapProbe {
     /// [`hostext_command`](Self::hostext_command) in the cargo artifact's
     /// image, with the plugin asking its host for `on_main_thread` at once:
     /// for a host that runs the callback on its own tick.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no plugin instance is loaded.
     pub fn hostext_command_via_callback(&self, cmd: u32, a: i64, b: i64) {
         // SAFETY: `tutti_test_plugin_hostext_command_via_callback` is
         // `#[no_mangle] pub unsafe extern "C" fn(u32, i64, i64) -> bool` in
@@ -225,6 +229,10 @@ impl ClapProbe {
     }
 
     /// The host-extension probe's capture, from the cargo artifact's image.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no plugin instance is loaded.
     #[must_use]
     pub fn hostext_capture(&self) -> crate::HostExtCapture {
         let mut out = std::mem::MaybeUninit::<crate::HostExtCapture>::zeroed();

@@ -30,6 +30,10 @@ pub fn transcript<F: Format, C: Control + ?Sized>(c: &mut C) -> Transcript {
 /// plugin's blob and loading it back. A mode parameter would not do: a write to
 /// a VST3 separate controller reaches the component only inside a block, after
 /// setup has read the mode.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn set_mode<F: Format, C: Control + ?Sized>(c: &mut C, mode: Mode) {
     let state = c
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
@@ -45,6 +49,10 @@ pub fn set_mode<F: Format, C: Control + ?Sized>(c: &mut C, mode: Mode) {
 
 /// Selects the plugin's `level` the same way: through the state, so it reaches
 /// the component itself and not a controller that a host delivers separately.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn set_level<F: Format, C: Control + ?Sized>(c: &mut C, level: f64) {
     let state = c
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
@@ -62,6 +70,10 @@ pub fn set_level<F: Format, C: Control + ?Sized>(c: &mut C, level: f64) {
 /// bytes of the mode word, which the plugin documents in its `core`), keeping
 /// its mode, through the state like [`set_mode`]. A load that selects a notice
 /// raises one.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn select<F: Format, C: Control + ?Sized>(c: &mut C, editor: u32, notice: u32) {
     let state = c
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
@@ -104,6 +116,10 @@ pub fn select_tail<F: Format, C: Control + ?Sized>(c: &mut C, tail: u32) {
 /// behaviour selected (the high and low nibbles of the fourth byte of the mode
 /// word), as the format's own `save_state` writes it: what a probe given
 /// `--state` is told to load. Nothing is loaded into a plugin here.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 #[must_use]
 pub fn state_with_rings<F: Format>(rings: u32, tail: u32) -> Vec<u8> {
     let state = F::load()
@@ -121,6 +137,10 @@ pub fn state_with_rings<F: Format>(rings: u32, tail: u32) -> Vec<u8> {
 /// The state of a fresh plugin of format `F` with its fault behaviour selected
 /// (the high nibble of the mode word's low byte), as the format's own
 /// `save_state` writes it. Nothing is loaded into a plugin here.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 #[must_use]
 pub fn state_with_fault<F: Format>(fault: u32) -> Vec<u8> {
     let state = F::load()

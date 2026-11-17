@@ -22,3 +22,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tutti-vst2-author = { path = "../tutti-vst2-author" }
+
+[lints]
+workspace = true

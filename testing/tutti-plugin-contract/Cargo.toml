@@ -61,3 +61,6 @@ tutti-vst2-shell-plugin = { path = "../tutti-vst2-shell-plugin" }
 # (`tests/au.rs`), so the host is a macOS dependency only.
 [target.'cfg(target_os = "macos")'.dependencies]
 tutti-au-host = { path = "../../crates/tutti-au-host" }
+
+[lints]
+workspace = true

@@ -748,6 +748,7 @@ pub const PROBE_MIDI_PROGRAM: (u8, u8, u8) = (32, 1, 3);
 
 /// The key the probe names, and the name. 36 is GM's kick drum.
 pub const PROBE_NAMED_KEY: i32 = 36;
+/// The name the probe gives [`PROBE_NAMED_KEY`].
 pub const PROBE_KEY_NAME: &str = "Kick";
 
 /// Write a `&str` into a plugin-side NUL-padded fixed field.
