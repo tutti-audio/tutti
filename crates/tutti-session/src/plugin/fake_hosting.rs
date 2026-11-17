@@ -13,8 +13,8 @@ use crate::plugin::HostedPlugin;
 use crate::{Clock, Key, PluginNode, Session};
 use tutti_plugin::catalog::PluginRef;
 
+mod editor;
 mod losses;
-mod main_view;
 mod plugin_health;
 mod plugin_params;
 
@@ -32,6 +32,25 @@ pub(super) fn host<C: Clock>(
         .graph
         .plugins
         .insert(node, HostedPlugin::new(handle, plugin, (*controls).clone()));
+    assert!(previous.is_none(), "{node:?} hosts one plugin");
+    session.graph.write_own_bypass(node);
+    Key::new(node)
+}
+
+/// [`host`] for a plugin served from a plugin server: its record drops where it
+/// is retired.
+pub(super) fn host_served<C: Clock>(
+    session: &mut Session<C>,
+    node: impl Into<NodeKey>,
+    handle: PluginHandle,
+    plugin: PluginRef,
+) -> Key<PluginNode> {
+    let node = node.into();
+    let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+    let previous = session
+        .graph
+        .plugins
+        .insert(node, HostedPlugin::served(handle, plugin, controls));
     assert!(previous.is_none(), "{node:?} hosts one plugin");
     session.graph.write_own_bypass(node);
     Key::new(node)

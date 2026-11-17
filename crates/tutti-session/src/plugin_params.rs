@@ -45,7 +45,7 @@
 //! None of the calls takes the main thread: a value reaches the plugin through
 //! its handle's token-free calls (a parameter set goes to the plugin's edit ring
 //! from any thread), so the views belong on the read-only `Plugin<'_>`, which
-//! `MainPlugin::view` also lends. A call that asks the plugin something
+//! `Session::plugin_view` lends. A call that asks the plugin something
 //! (`text`, `set_text`, `plain`, `set_plain`) may be a round trip to the
 //! plugin, and for an in-process plugin an answer from its main thread, so a
 //! host does not make one per frame per parameter.
