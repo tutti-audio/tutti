@@ -538,6 +538,12 @@ jobs:
         with:
           toolchain: nightly-2026-10-14
       - run: cargo +nightly-2026-10-14 doc --locked --workspace --no-deps
+      # Every type in the signatures of what `tutti` exports has a path in `tutti`: the public-api text of each crate
+      # it exports from, read on the same nightly.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.52.0
+      - run: cargo xtask umbrella-api
         env:
           RUSTDOCFLAGS: -D warnings --cfg docsrs
 
