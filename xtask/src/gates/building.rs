@@ -217,6 +217,18 @@ pub(super) const ALLOW: &[Allow] = &[
         "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
     ),
     ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/channels.rs",
+        "ChannelTable::of_planes_mut",
+        CTOR,
+        "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
+    ),
+    ty(
         "crates/tutti-plugin-types/src/audio.rs",
         "PluginAudio::new",
         CTOR,
