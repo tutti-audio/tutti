@@ -142,7 +142,7 @@ pub enum AuError {
     ///
     /// Fatal for the same reason [`AuError::SampleRateRejected`] is, but through
     /// a sharper edge. `MaximumFramesPerSlice` is what the AU sizes its internal
-    /// buffers from at `AudioUnitInitialize`, and `AuProcessor::render_f32` admits
+    /// buffers from at `AudioUnitInitialize`, and `AuProcessor::render_planes` admits
     /// any `num_frames` up to the *recorded* block size. So a config holding a larger
     /// figure than the AU accepted disables that bound check in the unsafe
     /// direction: the render proceeds and the AU writes past buffers it allocated

@@ -4,7 +4,8 @@
 
 use std::os::raw::c_void;
 
-use tutti_plugin_types::ChannelLayout;
+use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
+use tutti_plugin_types::{ChannelLayout, Samples, convert_channel};
 
 use coreaudio_sys::{AudioBuffer, AudioBufferList, AudioTimeStamp, AudioUnitRenderActionFlags};
 
@@ -161,53 +162,38 @@ impl RenderScratch {
         self.list.bind(&mut self.outputs, frames)
     }
 
-    pub fn stage_input(&mut self, input: &[&[f32]], frames: u32) {
-        for (ch, src) in input.iter().enumerate() {
+    /// Converts up to `input.frames()` frames of each input plane into the
+    /// scratch's input channel of the same index: the AU renders in f32, so a
+    /// 64-bit caller is narrowed here, against scratch that already exists
+    /// (AUv2 has no f64 render entry point: `AudioUnitRender` takes an
+    /// `AudioBufferList` of `Float32`). A plane past the scratch's channels is
+    /// not staged, and a scratch channel the caller has no plane for keeps
+    /// what it held.
+    pub fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {
+        for (ch, plane) in input.iter().enumerate() {
             if let Some(dst) = self.inputs.get_mut(ch) {
-                let len = (frames as usize).min(src.len()).min(dst.len());
-                dst[..len].copy_from_slice(&src[..len]);
+                let len = plane.samples().len().min(dst.len());
+                convert_channel(
+                    plane.slice(Samples(0)..Samples(len)),
+                    MonoMut::new(&mut dst[..len]),
+                )
+                .expect("the plane and the scratch row are `len` frames");
             }
         }
     }
 
-    pub fn emit_output(&self, output: &mut [&mut [f32]], frames: u32) {
-        for (ch, dst) in output.iter_mut().enumerate() {
+    /// Converts the rendered block out, up to `output.frames()` frames per
+    /// plane, widening for a 64-bit caller. A plane past the scratch's
+    /// channels keeps what it held.
+    pub fn emit_output<S: Sample>(&self, output: &mut PlanesMut<'_, '_, S>) {
+        for (ch, mut plane) in output.iter_mut().enumerate() {
             if let Some(src) = self.outputs.get(ch) {
-                let len = (frames as usize).min(dst.len()).min(src.len());
-                dst[..len].copy_from_slice(&src[..len]);
-            }
-        }
-    }
-
-    /// [`stage_input`](Self::stage_input) for an f64 caller, narrowing to the
-    /// f32 the AU renders in.
-    ///
-    /// AUv2 has no f64 render entry point — `AudioUnitRender` takes an
-    /// `AudioBufferList` of `Float32` and there is no `…F64` twin the way VST 2.4
-    /// has `processReplacingF64`. The conversion is therefore unavoidable for an
-    /// f64 caller, and the narrowing is the AU's own precision ceiling rather
-    /// than a loss this layer chose. Converting *here*, against the scratch that
-    /// already exists, is what keeps it free of per-block allocation.
-    pub fn stage_input_f64(&mut self, input: &[&[f64]], frames: u32) {
-        for (ch, src) in input.iter().enumerate() {
-            if let Some(dst) = self.inputs.get_mut(ch) {
-                let len = (frames as usize).min(src.len()).min(dst.len());
-                for (d, &s) in dst[..len].iter_mut().zip(&src[..len]) {
-                    *d = s as f32;
-                }
-            }
-        }
-    }
-
-    /// [`emit_output`](Self::emit_output) for an f64 caller, widening back from
-    /// the f32 the AU rendered. Bounded on both sides for the same reason.
-    pub fn emit_output_f64(&self, output: &mut [&mut [f64]], frames: u32) {
-        for (ch, dst) in output.iter_mut().enumerate() {
-            if let Some(src) = self.outputs.get(ch) {
-                let len = (frames as usize).min(dst.len()).min(src.len());
-                for (d, &s) in dst[..len].iter_mut().zip(&src[..len]) {
-                    *d = s as f64;
-                }
+                let len = plane.samples().len().min(src.len());
+                convert_channel(
+                    Mono::new(&src[..len]),
+                    plane.slice_mut(Samples(0)..Samples(len)),
+                )
+                .expect("the plane and the scratch row are `len` frames");
             }
         }
     }
@@ -264,8 +250,8 @@ fn timestamp_at(sample_time: f64) -> AudioTimeStamp {
 ///
 /// The unit's input callback holds a pointer to the scratch, so the scratch is
 /// heap-pinned and owned here, and dropping the renderer withdraws the callback
-/// before the scratch is freed. A block's work is `stage_input*`, `render`,
-/// `emit_output*`; none of them allocates.
+/// before the scratch is freed. A block's work is `stage_input`, `render`,
+/// `emit_output`; none of them allocates.
 pub struct Renderer {
     unit: Unit,
     scratch: std::ptr::NonNull<RenderScratch>,
@@ -334,25 +320,15 @@ impl Renderer {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Copies up to `frames` frames of each input channel into the input
-    /// buffers the callback serves.
-    pub fn stage_input(&mut self, input: &[&[f32]], frames: u32) {
-        self.scratch().stage_input(input, frames);
+    /// Converts the caller's input planes into the input buffers the callback
+    /// serves.
+    pub fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {
+        self.scratch().stage_input(input);
     }
 
-    /// As [`stage_input`](Self::stage_input), narrowing from `f64`.
-    pub fn stage_input_f64(&mut self, input: &[&[f64]], frames: u32) {
-        self.scratch().stage_input_f64(input, frames);
-    }
-
-    /// Copies the rendered block out, up to `frames` frames per channel.
-    pub fn emit_output(&mut self, output: &mut [&mut [f32]], frames: u32) {
-        self.scratch().emit_output(output, frames);
-    }
-
-    /// As [`emit_output`](Self::emit_output), widening to `f64`.
-    pub fn emit_output_f64(&mut self, output: &mut [&mut [f64]], frames: u32) {
-        self.scratch().emit_output_f64(output, frames);
+    /// Converts the rendered block out into the caller's output planes.
+    pub fn emit_output<S: Sample>(&mut self, output: &mut PlanesMut<'_, '_, S>) {
+        self.scratch().emit_output(output);
     }
 
     /// Sends the render cursor back to zero (see `reset` on the unit).
@@ -1130,7 +1106,8 @@ mod tests {
         let mut scratch = stereo_scratch(8);
         let l = [0.25f32, -0.5, 0.75, -1.0];
         let r = [1.0f32, 0.5, -0.25, 0.125];
-        scratch.stage_input(&[&l[..], &r[..]], 4);
+        let ins = [&l[..], &r[..]];
+        scratch.stage_input(Planes::new(&ins).expect("equal planes"));
 
         let mut list = RenderBufferList::new(ChannelLayout::STEREO);
         let mut spare = vec![vec![0.0f32; 4]; 2];
@@ -1169,33 +1146,34 @@ mod tests {
 
         let l: [f64; 4] = [0.25, -0.5, 0.75, -1.0];
         let r: [f64; 4] = [1.0, 0.5, -0.25, 0.125];
-        scratch.stage_input_f64(&[&l[..], &r[..]], 4);
+        let ins = [&l[..], &r[..]];
+        scratch.stage_input(Planes::new(&ins).expect("equal planes"));
 
         // Every value above is exactly representable in f32, so the staging must
-        // be bit-exact — no epsilon needed, and a comparison that needed one
+        // be bit-exact: no epsilon needed, and a comparison that needed one
         // would be reporting a bug rather than float noise.
         assert_eq!(scratch.inputs[0][..4], [0.25f32, -0.5, 0.75, -1.0]);
         assert_eq!(scratch.inputs[1][..4], [1.0f32, 0.5, -0.25, 0.125]);
 
         // Stand in for the AU's render: whatever lands in `outputs` is what
-        // `emit_output_f64` must widen back out.
+        // `emit_output` must widen back out.
         scratch.outputs[0][..4].copy_from_slice(&[0.25, -0.5, 0.75, -1.0]);
         scratch.outputs[1][..4].copy_from_slice(&[1.0, 0.5, -0.25, 0.125]);
 
         let (mut out_l, mut out_r) = ([0.0f64; 4], [0.0f64; 4]);
         let mut outs: Vec<&mut [f64]> = vec![&mut out_l, &mut out_r];
-        scratch.emit_output_f64(&mut outs, 4);
+        scratch.emit_output(&mut PlanesMut::new(&mut outs).expect("equal planes"));
 
         assert_eq!(out_l, [0.25, -0.5, 0.75, -1.0]);
         assert_eq!(out_r, [1.0, 0.5, -0.25, 0.125]);
     }
 
     /// Precision past f32 does not survive, and that is the documented contract
-    /// rather than a defect — AUv2 renders in f32 and has no f64 entry point.
+    /// rather than a defect: AUv2 renders in f32 and has no f64 entry point.
     ///
     /// Pinned so the loss is a stated property with a test behind it. If AUv3 or
     /// a future path ever renders natively at f64, this test failing is the
-    /// correct alarm: the doc on `process_f64` would then be wrong.
+    /// correct alarm: the doc on `AuProcessor::render` would then be wrong.
     #[test]
     fn f64_staging_narrows_to_the_aus_own_precision() {
         // Needs 53 bits of mantissa: exact in f64, rounds in f32.
@@ -1207,7 +1185,8 @@ mod tests {
 
         let mut scratch = stereo_scratch(4);
         let src = [EXACT; 4];
-        scratch.stage_input_f64(&[&src[..]], 4);
+        let ins = [&src[..]];
+        scratch.stage_input(Planes::new(&ins).expect("one plane"));
 
         assert_eq!(
             scratch.inputs[0][0], EXACT as f32,
@@ -1215,50 +1194,44 @@ mod tests {
         );
     }
 
-    /// Both f64 halves are bounded on the caller's side and the scratch's, so a
-    /// caller slice shorter OR longer than the block cannot panic.
-    ///
-    /// The f32 pair already clamps with a three-way `min`; these were written to
-    /// match rather than to fix a live crash, and this pins that they do. A
-    /// staging pair that indexed `[..frames]` on the caller directly would panic
-    /// on the short case, which is the mirror of a fault fixed in VST2's scratch.
+    /// A caller block longer than the scratch holds is staged as far as the scratch goes, and
+    /// one shorter than the scratch leaves the rest of the row alone.
     #[test]
-    fn f64_staging_is_bounded_on_both_sides() {
+    fn staging_and_emitting_are_bounded_by_the_scratch_and_the_caller() {
         let mut scratch = stereo_scratch(8);
 
-        // Caller supplies fewer frames than the block asks for.
         let short = [1.0f64; 3];
-        scratch.stage_input_f64(&[&short[..]], 8);
+        let ins = [&short[..]];
+        scratch.stage_input(Planes::new(&ins).expect("one plane"));
         assert_eq!(&scratch.inputs[0][..3], &[1.0f32; 3]);
 
-        // Caller supplies more than the scratch holds.
         let long = [2.0f64; 32];
-        scratch.stage_input_f64(&[&long[..]], 8);
+        let ins = [&long[..]];
+        scratch.stage_input(Planes::new(&ins).expect("one plane"));
         assert_eq!(&scratch.inputs[0][..8], &[2.0f32; 8]);
 
-        // And the emit half, both directions.
         for ch in scratch.outputs.iter_mut() {
             ch.fill(0.5);
         }
 
         let mut out_short = [0.0f64; 3];
         let mut outs: Vec<&mut [f64]> = vec![&mut out_short];
-        scratch.emit_output_f64(&mut outs, 8);
+        scratch.emit_output(&mut PlanesMut::new(&mut outs).expect("one plane"));
         assert_eq!(out_short, [0.5f64; 3], "filled as far as the caller goes");
 
         let mut out_long = [-1.0f64; 12];
         let mut outs: Vec<&mut [f64]> = vec![&mut out_long];
-        scratch.emit_output_f64(&mut outs, 8);
+        scratch.emit_output(&mut PlanesMut::new(&mut outs).expect("one plane"));
         assert_eq!(&out_long[..8], &[0.5f64; 8]);
         assert!(
             out_long[8..].iter().all(|&v| v == -1.0),
-            "past the block stays untouched"
+            "past the scratch stays untouched"
         );
     }
 
     /// More caller channels than the scratch holds are skipped, not indexed into.
     #[test]
-    fn f64_staging_ignores_channels_the_scratch_lacks() {
+    fn staging_ignores_channels_the_scratch_lacks() {
         let mut scratch = RenderScratch::new(
             BusLayout {
                 inputs: ChannelLayout::MONO,
@@ -1269,13 +1242,14 @@ mod tests {
         );
 
         let (a, b) = ([1.0f64; 4], [2.0f64; 4]);
-        scratch.stage_input_f64(&[&a[..], &b[..]], 4);
+        let ins = [&a[..], &b[..]];
+        scratch.stage_input(Planes::new(&ins).expect("equal planes"));
         assert_eq!(&scratch.inputs[0][..4], &[1.0f32; 4]);
 
         scratch.outputs[0][..4].fill(0.25);
         let (mut out_a, mut out_b) = ([0.0f64; 4], [-1.0f64; 4]);
         let mut outs: Vec<&mut [f64]> = vec![&mut out_a, &mut out_b];
-        scratch.emit_output_f64(&mut outs, 4);
+        scratch.emit_output(&mut PlanesMut::new(&mut outs).expect("equal planes"));
 
         assert_eq!(out_a, [0.25f64; 4]);
         assert_eq!(out_b, [-1.0f64; 4], "channel 1 has no scratch behind it");

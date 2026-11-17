@@ -16,11 +16,12 @@ use tutti_au_ffi::{
     AuParameterListener, Element, EventAddress, EventList, Pushed, RenderNotify, Renderer, Scope,
     TransportState, Unit, Wire,
 };
+use tutti_buffers::{Float, InputOutput};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    ChannelTable, MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch,
-    PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor,
-    TransportInfo, WireMidi,
+    MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch, PluginAudio,
+    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo,
+    WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
@@ -586,56 +587,24 @@ impl AuProcessor {
         self.sysex.dropped()
     }
 
-    /// Renders `num_frames` through the AU: `input` staged into the render
-    /// scratch, `output` filled from it.
+    /// Renders `io.frames()` through the AU: the input planes staged into the
+    /// render scratch, the output planes filled from it.
     ///
-    /// The AU renders in f32 either way. [`render_f64`](Self::render_f64) is the
-    /// same with a narrowing and widening round trip through the one scratch.
+    /// The AU renders in f32 either way: a 64-bit block takes a narrowing and
+    /// widening round trip through the one scratch, which is already owned, so
+    /// the round trip costs no allocation.
     ///
     /// # Errors
-    /// [`AuError::BlockTooLarge`] if `num_frames` exceeds the configured block
+    /// [`AuError::BlockTooLarge`] if the block exceeds the configured block
     /// size, or [`AuError::RenderFailed`] if `AudioUnitRender` fails.
-    pub fn render_f32(
-        &mut self,
-        input: &[&[f32]],
-        output: &mut [&mut [f32]],
-        num_frames: u32,
-    ) -> Result<()> {
-        self.rendering.renderer.stage_input(input, num_frames);
-        if self.render_frames(num_frames)? == Silence::Declared {
-            let n = num_frames as usize;
-            for dst in output.iter_mut() {
-                let len = n.min(dst.len());
-                dst[..len].fill(0.0);
-            }
+    pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, '_, '_, S>) -> Result<()> {
+        let frames = u32::try_from(io.frames().0).unwrap_or(u32::MAX);
+        let (input, mut output) = io.split();
+        self.rendering.renderer.stage_input(input);
+        if self.render_frames(frames)? == Silence::Declared {
+            output.silence();
         } else {
-            self.rendering.renderer.emit_output(output, num_frames);
-        }
-        Ok(())
-    }
-
-    /// [`render_f32`](Self::render_f32) for an f64 caller. AUv2 has no native f64
-    /// render entry point, so an f64 pipeline always costs a narrowing round
-    /// trip through this AU; it is made here because the render scratch is
-    /// already owned here, so the round trip costs no allocation.
-    ///
-    /// # Errors
-    /// As [`render_f32`](Self::render_f32).
-    pub fn render_f64(
-        &mut self,
-        input: &[&[f64]],
-        output: &mut [&mut [f64]],
-        num_frames: u32,
-    ) -> Result<()> {
-        self.rendering.renderer.stage_input_f64(input, num_frames);
-        if self.render_frames(num_frames)? == Silence::Declared {
-            let n = num_frames as usize;
-            for dst in output.iter_mut() {
-                let len = n.min(dst.len());
-                dst[..len].fill(0.0);
-            }
-        } else {
-            self.rendering.renderer.emit_output_f64(output, num_frames);
+            self.rendering.renderer.emit_output(&mut output);
         }
         Ok(())
     }
@@ -768,20 +737,8 @@ impl AuProcessor {
         }
 
         let rendered = match buffer {
-            PluginAudio::F32(io) => {
-                let frames = io.frames().0 as u32;
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input)?;
-                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
-                self.render_f32(&inputs, &mut outputs, frames)
-            }
-            PluginAudio::F64(io) => {
-                let frames = io.frames().0 as u32;
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input)?;
-                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
-                self.render_f64(&inputs, &mut outputs, frames)
-            }
+            PluginAudio::F32(io) => self.render_planes(io),
+            PluginAudio::F64(io) => self.render_planes(io),
         };
         // The scheduled events do not reach the unit's listeners (the plugin's
         // editor among them): only `AUParameterSet` and

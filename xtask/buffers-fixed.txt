@@ -11,8 +11,6 @@
 #         engine-f32   the engine is fixed at f32, pending its own migration row.
 #         pending      not judged yet.
 #         measured: <why>   kept after judging.
-crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f32  pending
-crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f64  pending
 crates/tutti-codec/src/decode/file_in.rs::FileIn::fill_sequential_interleaved  pending
 crates/tutti-codec/src/encoder.rs::Encoder::write  pending
 crates/tutti-codec/src/wave.rs::Wave::channel  pending
@@ -85,11 +83,10 @@ crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir  pending
 crates/tutti-nodes/src/params.rs::ControlSet::assemble  pending
 crates/tutti-nodes/src/params.rs::ControlSet::flatten  pending
 crates/tutti-nodes/src/testing.rs::Const::frame  pending
-crates/tutti-plugin-ipc/src/batcher.rs::Batcher::process  pending
-crates/tutti-plugin-types/src/contract.rs::check  pending
-crates/tutti-plugin-types/src/contract.rs::positions  pending
-crates/tutti-plugin-types/src/contract.rs::round_trip  pending
-crates/tutti-plugin-types/src/contract.rs::steps  pending
+crates/tutti-plugin-types/src/contract.rs::check  measured: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::positions  measured: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::round_trip  measured: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::steps  measured: a normalized parameter position, not audio
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_cents  pending
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  pending
 crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
@@ -105,5 +102,3 @@ crates/tutti-session/src/graph/testing.rs::AudioSide::tick  engine-f32
 crates/tutti-session/src/session.rs::Session::render  engine-f32
 crates/tutti-session/src/session.rs::Session::render_frame  engine-f32
 crates/tutti-session/src/session.rs::Session::render_frame_at  engine-f32
-crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f32  pending
-crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f64  pending

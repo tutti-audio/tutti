@@ -262,7 +262,9 @@ pub use c_string::{
     c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
     write_utf16_str, write_utf16_units,
 };
-pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, silence};
+pub use channels::{
+    ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, convert_channel, sanitize, silence,
+};
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};

@@ -58,9 +58,9 @@
 //! sequence numbers, not by a reply arriving: a mismatch yields silence. See
 //! `tutti-plugin-ipc`'s `transport::shm::header`.
 //!
-//! # `f32` in the graph, the plugin's format on the wire
+//! # `f32` rows, the plugin's format on the wire
 //!
-//! The graph hands every node planar `f32`. The
+//! The FIFO and the ring hold `f32`, whatever width the block is. The
 //! wire carries whatever the plugin negotiated at load, so a plugin that
 //! processes in double is converted here, in the wire scratch, and nowhere
 //! else: the `f64` stays inside the node.
@@ -70,10 +70,10 @@ use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use tutti_plugin_types::SlabAccessError;
+use tutti_buffers::{Float, InputOutput, Mono, MonoMut};
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
-    SampleFormat, TransportChanges, TransportInfo, WireMidi,
+    SampleFormat, SlabAccessError, TransportChanges, TransportInfo, WireMidi, convert_channel,
 };
 use tutti_types::{SampleRate, Samples};
 
@@ -113,14 +113,14 @@ impl WireStorage {
         match self {
             Self::F32 { input, .. } => {
                 let wire = &mut input[..n];
-                wire.copy_from_slice(samples);
+                convert_channel(Mono::new(samples), MonoMut::new(&mut *wire))
+                    .expect("the wire row is the chunk's length");
                 slab.write(seq, ch, wire)
             }
             Self::F64 { input, .. } => {
                 let wire = &mut input[..n];
-                for (d, &s) in wire.iter_mut().zip(samples) {
-                    *d = f64::from(s);
-                }
+                convert_channel(Mono::new(samples), MonoMut::new(&mut *wire))
+                    .expect("the wire row is the chunk's length");
                 slab.write(seq, ch, wire)
             }
         }
@@ -142,17 +142,17 @@ impl WireStorage {
                 let wire = &mut output[..size];
                 let read = slab.read_output_into(seq, ch, wire);
                 let n = read.as_ref().map_or(0, |&n| n);
-                out[..n].copy_from_slice(&wire[..n]);
+                convert_channel(Mono::new(&wire[..n]), MonoMut::new(&mut out[..n]))
+                    .expect("the read and the row are `n` frames");
                 (n, read.is_ok())
             }
             Self::F64 { output, .. } => {
                 let wire = &mut output[..size];
                 let read = slab.read_output_into(seq, ch, wire);
                 let n = read.as_ref().map_or(0, |&n| n);
-                for (o, &v) in out[..n].iter_mut().zip(&wire[..n]) {
-                    // The narrowing is the point: the graph is `f32`.
-                    *o = v as f32;
-                }
+                // The narrowing is the point: the pipeline's rows are `f32`.
+                convert_channel(Mono::new(&wire[..n]), MonoMut::new(&mut out[..n]))
+                    .expect("the read and the row are `n` frames");
                 (n, read.is_ok())
             }
         };
@@ -681,21 +681,23 @@ impl Batcher {
         }
     }
 
-    /// Take `frames` frames of `input` (one slice per input port) and write
-    /// `frames` frames of `output` (one slice per output port): output frame
-    /// `t` is the plugin's output for input frame `t - chunk`, exactly, however
-    /// the calls are cut.
+    /// Take `io.frames()` frames of `io`'s input (one plane per input port) and
+    /// write as many frames of its output (one plane per output port): output
+    /// frame `t` is the plugin's output for input frame `t - chunk`, exactly,
+    /// however the calls are cut.
     ///
-    /// An input port past `input.len()` is taken as silence; an output port
-    /// past `output.len()` is not written.
-    pub fn process(
+    /// The block is converted to the pipeline's `f32` rows by the
+    /// [`Sample`](tutti_buffers::Sample) rule, and back. An input port past the
+    /// input's planes is taken as silence; an output port past the output's planes
+    /// is not written.
+    pub fn process<S: Float>(
         &mut self,
         bridge: &PluginBridge,
-        frames: usize,
-        input: &[&[f32]],
-        output: &mut [&mut [f32]],
+        io: &mut InputOutput<'_, '_, '_, S>,
         host: &mut impl Chunks,
     ) {
+        let frames = io.frames().0;
+        let (input, mut output) = io.split();
         let chunk = self.chunk;
         let mut i = 0;
         while i < frames {
@@ -706,9 +708,13 @@ impl Batcher {
             }
             let n = (chunk - self.pos).min(frames - i);
             let (at, to) = (self.pos, self.pos + n);
+            let call = Samples(i)..Samples(i + n);
             host.take(i, n, at);
-            for (row, out) in self.ring.iter().zip(output.iter_mut()) {
-                out[i..i + n].copy_from_slice(&row[at..to]);
+            for (c, row) in self.ring.iter().enumerate() {
+                if let Some(mut plane) = output.get_plane_mut(c) {
+                    convert_channel(Mono::new(&row[at..to]), plane.slice_mut(call.clone()))
+                        .expect("the ring rows and the call's frames are `n` long");
+                }
             }
             let first = self.reply.partition_point(|e| (e.offset as usize) < at);
             for e in &self.reply[first..] {
@@ -719,8 +725,11 @@ impl Batcher {
                 host.emit(i + o - at, *e);
             }
             for (ch, row) in self.fifo.iter_mut().enumerate() {
-                match input.get(ch) {
-                    Some(inp) => row[at..to].copy_from_slice(&inp[i..i + n]),
+                match input.get_plane(ch) {
+                    Some(plane) => {
+                        convert_channel(plane.slice(call.clone()), MonoMut::new(&mut row[at..to]))
+                            .expect("the call's frames and the fifo rows are `n` long");
+                    }
                     None => row[at..to].fill(0.0),
                 }
             }

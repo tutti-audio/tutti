@@ -1,27 +1,25 @@
 //! Pre-allocated scratch buffers for VST2 process calls.
 //!
 //! The `vst` crate's `AudioBuffer` wants contiguous raw pointer tables, which a
-//! caller's `&[&[f32]]` slice-of-slices cannot supply — the inner slices are not
-//! adjacent in memory. These buffers are allocated once at load time and reused
+//! caller's planes cannot supply: the channel slices are not adjacent in memory. These buffers are allocated once at load time and reused
 //! on every block, which is what keeps the audio thread allocation-free.
 //!
 //! Both widths are resident. VST 2.4 has two render entry points —
 //! `processReplacing` and `processReplacingF64` — and the caller picks per
-//! block, not per instance: the subprocess loader switches on the incoming
-//! `PluginAudio` variant, and does not know at construction which it will
+//! block, not per instance: the caller picks per block
+//! (`PluginAudio` is either width) and the scratch does not know at construction which it will
 //! be asked for; growing a buffer on the first f64 block would allocate on
-//! the audio thread. (The in-process node, `PluginNode`, renders
-//! `f32` only: the graph is `f32`.)
+//! the audio thread.
 
-use tutti_plugin_types::ChannelLayout;
+use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
+use tutti_plugin_types::{ChannelLayout, Samples, convert_channel};
 
 use crate::host::RenderHandle;
 
-/// Pre-allocated audio buffers that `Vst2Processor::process_f32` and
-/// `Vst2Processor::process_f64` render through.
+/// Pre-allocated audio buffers that `Vst2Processor::process` renders through.
 ///
-/// VST2 wants contiguous pointer tables, which a caller's `&[&[f32]]` cannot
-/// supply, so each block is copied into these buffers and back out. One per
+/// VST2 wants contiguous pointer tables, which a caller's planes cannot
+/// supply, so each block is converted into these buffers and back out. One per
 /// activation, sized from the pin counts the plugin has then and the block size
 /// of the [`Prepare`](tutti_plugin_types::Prepare), and reused for every block:
 /// after construction nothing here allocates, so it is safe on the audio thread.
@@ -30,7 +28,7 @@ use crate::host::RenderHandle;
 /// at a 512-sample block and stereo I/O, 24 KiB.
 ///
 /// The pointer tables behind the plugin's buffers are private, and a render is reached only
-/// through the `render_*_piece` calls, which stage the block, check its length and render in
+/// through `render_piece`, which stages the block, check its length and render in
 /// one step. Safe code cannot read the tables or render a block that was not staged:
 ///
 /// ```compile_fail,E0616
@@ -119,115 +117,53 @@ impl RenderScratch {
         }
     }
 
-    /// Copies the caller's f64 inputs into the f64 scratch buffers, zeroing
-    /// missing channels and the outputs.
-    ///
-    /// An input slice shorter than `num_samples` leaves the rest of that
-    /// channel holding the previous block's samples.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `num_samples` exceeds the block size given to
-    /// [`new`](Self::new).
-    #[cfg(test)]
-    fn prepare_f64(&mut self, caller_inputs: &[&[f64]], num_samples: usize) {
-        self.prepare_f64_range(caller_inputs, 0, num_samples);
-    }
-
-    /// Copies the scratch outputs back to the caller's f32 channels.
-    ///
-    /// Writes at most `num_samples` per channel. A caller slice longer than
-    /// that keeps whatever was past the block; a shorter one is filled only up
-    /// to its length.
-    // Both sides are sliced and the `min` is load-bearing: a bare
-    // `copy_from_slice` requires equal lengths and would panic on any caller
-    // slice that is not exactly the block, which `process_f32` allows.
-    #[cfg(test)]
-    fn copy_out_f32(&self, caller_outputs: &mut [&mut [f32]], num_samples: usize) {
-        self.copy_out_f32_range(caller_outputs, 0, num_samples);
-    }
-
-    /// Copies the f64 scratch outputs back to the caller's f64 channels.
-    ///
-    /// Bounded on both sides like `copy_out_f32`.
-    #[cfg(test)]
-    fn copy_out_f64(&self, caller_outputs: &mut [&mut [f64]], num_samples: usize) {
-        self.copy_out_f64_range(caller_outputs, 0, num_samples);
-    }
-
-    /// Widens the *f32* scratch outputs into the caller's f64 channels.
-    ///
-    /// The read half of the fallback pair described on
-    /// `prepare_f64_as_f32`. Bounded like
-    /// `copy_out_f64`.
-    #[cfg(test)]
-    fn copy_out_f64_from_f32(&self, caller_outputs: &mut [&mut [f64]], num_samples: usize) {
-        self.copy_out_f64_from_f32_range(caller_outputs, 0, num_samples);
-    }
-
-    /// Stages the piece `start..start + len` of the caller's `f32` block, renders it through
-    /// `render` and copies the outputs back: the one way in, so the pointer tables handed to
+    /// Stages the piece `start..start + len` of the caller's block, renders it through
+    /// `render` and converts the outputs back: the one way in, so the pointer tables handed to
     /// the plugin are always the ones just staged, and `len` is checked against the block size.
     ///
+    /// `double` picks the entry point: `processReplacingF64` over the `f64` scratch, which only
+    /// a plugin known to install it may take (the vendor's `process_f64` zeroes the outputs when
+    /// it installed none, so reaching it unconditionally would render silence rather than fall
+    /// back), or `processReplacing` over the `f32` scratch. A block of the other width is
+    /// converted at the scratch by the [`Sample`] rule, so a 64-bit block
+    /// for a 32-bit plugin is narrowed and widened back: lossy, deliberately. A caller channel
+    /// the scratch lacks is not rendered, and a scratch input the caller lacks is silence.
+    ///
     /// # Panics
     ///
-    /// If `len` exceeds the block size the scratch was made for.
-    pub fn render_f32_piece(
+    /// If `len` exceeds the block size the scratch was made for, or the piece is not inside
+    /// the caller's block.
+    pub fn render_piece<S: Float>(
         &mut self,
         render: &mut RenderHandle,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        double: bool,
+        inputs: Planes<'_, S>,
+        outputs: &mut PlanesMut<'_, '_, S>,
         start: usize,
         len: usize,
     ) {
         self.check_block(len);
-        self.prepare_f32_range(inputs, start, len);
-        self.render_f32(render, len);
-        self.copy_out_f32_range(outputs, start, len);
-    }
-
-    /// [`render_f32_piece`](Self::render_f32_piece) through `processReplacingF64`, for a plugin
-    /// activated at 64-bit.
-    ///
-    /// Only for a plugin known to install that entry point: the vendor's `process_f64` zeroes
-    /// the outputs when it installed none, so reaching it unconditionally would render silence
-    /// rather than fall back.
-    ///
-    /// # Panics
-    ///
-    /// As [`render_f32_piece`](Self::render_f32_piece).
-    pub fn render_f64_piece(
-        &mut self,
-        render: &mut RenderHandle,
-        inputs: &[&[f64]],
-        outputs: &mut [&mut [f64]],
-        start: usize,
-        len: usize,
-    ) {
-        self.check_block(len);
-        self.prepare_f64_range(inputs, start, len);
-        self.render_f64(render, len);
-        self.copy_out_f64_range(outputs, start, len);
-    }
-
-    /// A 64-bit caller's piece rendered through `processReplacing` (the plugin was activated
-    /// at 32-bit): staged down to `f32`, rendered, widened back. Lossy, deliberately.
-    ///
-    /// # Panics
-    ///
-    /// As [`render_f32_piece`](Self::render_f32_piece).
-    pub fn render_f64_as_f32_piece(
-        &mut self,
-        render: &mut RenderHandle,
-        inputs: &[&[f64]],
-        outputs: &mut [&mut [f64]],
-        start: usize,
-        len: usize,
-    ) {
-        self.check_block(len);
-        self.prepare_f64_as_f32_range(inputs, start, len);
-        self.render_f32(render, len);
-        self.copy_out_f64_from_f32_range(outputs, start, len);
+        let piece = Samples(start)..Samples(start + len);
+        // A block with no input channels has no frames to slice: it stages silence.
+        let inputs = if inputs.channels() == 0 {
+            Planes::default()
+        } else {
+            inputs.slice(piece.clone())
+        };
+        let mut outputs = outputs.slice_mut(piece);
+        if double {
+            stage(&mut self.inputs_f64, &inputs, len);
+            zero(&mut self.outputs_f64, len);
+            self.refresh_ptrs_f64();
+            self.render_f64(render, len);
+            emit(&self.outputs_f64, &mut outputs, len);
+        } else {
+            stage(&mut self.inputs, &inputs, len);
+            zero(&mut self.outputs, len);
+            self.refresh_ptrs();
+            self.render_f32(render, len);
+            emit(&self.outputs, &mut outputs, len);
+        }
     }
 
     /// Refuses a render longer than the Vecs behind the pointer tables.
@@ -286,110 +222,6 @@ impl RenderScratch {
         render.process_f64(&mut buffer);
     }
 
-    /// `prepare_f32` for the piece of the caller's block
-    /// `start..start + len`, staged at the front of the scratch.
-    fn prepare_f32_range(&mut self, caller_inputs: &[&[f32]], start: usize, len: usize) {
-        for (i, src) in caller_inputs.iter().enumerate() {
-            if i < self.inputs.len() {
-                self.inputs[i][..len].copy_from_slice(&src[start..start + len]);
-            }
-        }
-        for i in caller_inputs.len()..self.inputs.len() {
-            self.inputs[i][..len].fill(0.0);
-        }
-        for ch in &mut self.outputs {
-            ch[..len].fill(0.0);
-        }
-        self.refresh_ptrs();
-    }
-
-    /// `prepare_f64` for the piece `start..start + len`.
-    fn prepare_f64_range(&mut self, caller_inputs: &[&[f64]], start: usize, len: usize) {
-        for (i, src) in caller_inputs.iter().enumerate() {
-            if i < self.inputs_f64.len() {
-                let piece = &src[start.min(src.len())..(start + len).min(src.len())];
-                for (d, &s) in self.inputs_f64[i][..len].iter_mut().zip(piece) {
-                    *d = s;
-                }
-            }
-        }
-        for i in caller_inputs.len()..self.inputs_f64.len() {
-            self.inputs_f64[i][..len].fill(0.0);
-        }
-        for ch in &mut self.outputs_f64 {
-            ch[..len].fill(0.0);
-        }
-        self.refresh_ptrs_f64();
-    }
-
-    /// `prepare_f64_as_f32` for the piece
-    /// `start..start + len`.
-    fn prepare_f64_as_f32_range(&mut self, caller_inputs: &[&[f64]], start: usize, len: usize) {
-        for (i, src) in caller_inputs.iter().enumerate() {
-            if i < self.inputs.len() {
-                for (d, &s) in self.inputs[i][..len]
-                    .iter_mut()
-                    .zip(&src[start..start + len])
-                {
-                    *d = s as f32;
-                }
-            }
-        }
-        for i in caller_inputs.len()..self.inputs.len() {
-            self.inputs[i][..len].fill(0.0);
-        }
-        for ch in &mut self.outputs {
-            ch[..len].fill(0.0);
-        }
-        self.refresh_ptrs();
-    }
-
-    /// `copy_out_f32` into the piece of the caller's
-    /// block `start..start + len`.
-    fn copy_out_f32_range(&self, caller_outputs: &mut [&mut [f32]], start: usize, len: usize) {
-        for (i, out_channel) in caller_outputs.iter_mut().enumerate() {
-            if i < self.outputs.len() {
-                let n = len
-                    .min(out_channel.len().saturating_sub(start))
-                    .min(self.outputs[i].len());
-                out_channel[start..start + n].copy_from_slice(&self.outputs[i][..n]);
-            }
-        }
-    }
-
-    /// `copy_out_f64` into the piece `start..start + len`.
-    fn copy_out_f64_range(&self, caller_outputs: &mut [&mut [f64]], start: usize, len: usize) {
-        for (i, out_channel) in caller_outputs.iter_mut().enumerate() {
-            if i < self.outputs_f64.len() {
-                let n = len
-                    .min(out_channel.len().saturating_sub(start))
-                    .min(self.outputs_f64[i].len());
-                out_channel[start..start + n].copy_from_slice(&self.outputs_f64[i][..n]);
-            }
-        }
-    }
-
-    /// `copy_out_f64_from_f32` into the piece
-    /// `start..start + len`.
-    fn copy_out_f64_from_f32_range(
-        &self,
-        caller_outputs: &mut [&mut [f64]],
-        start: usize,
-        len: usize,
-    ) {
-        for (i, out_channel) in caller_outputs.iter_mut().enumerate() {
-            if i < self.outputs.len() {
-                let n = len.min(out_channel.len().saturating_sub(start));
-                for (o, &s) in out_channel[start..start + n]
-                    .iter_mut()
-                    .zip(&self.outputs[i])
-                {
-                    *o = s as f64;
-                }
-            }
-        }
-    }
-
     /// Pointers into the Vecs can become stale after any mutation — refresh
     /// them before each `vst_buffer.from_raw` call.
     ///
@@ -415,6 +247,37 @@ impl RenderScratch {
     }
 }
 
+/// Converts the first `len` frames of each caller channel into the scratch row of the same
+/// index: a row the caller has no channel for is silence, a caller channel past the rows is not
+/// staged.
+fn stage<T: Sample, S: Sample>(rows: &mut [Vec<T>], from: &Planes<'_, S>, len: usize) {
+    for (c, row) in rows.iter_mut().enumerate() {
+        match from.get_plane(c) {
+            Some(plane) => convert_channel(plane, MonoMut::new(&mut row[..len]))
+                .expect("the piece and the row are `len` frames"),
+            None => row[..len].fill(T::SILENCE),
+        }
+    }
+}
+
+/// Silences the first `len` frames of each scratch row.
+fn zero<T: Sample>(rows: &mut [Vec<T>], len: usize) {
+    for row in rows {
+        row[..len].fill(T::SILENCE);
+    }
+}
+
+/// Converts the first `len` frames of each scratch row into the caller channel of the same
+/// index; a caller channel past the rows keeps what it held.
+fn emit<T: Sample, S: Sample>(rows: &[Vec<T>], to: &mut PlanesMut<'_, '_, S>, len: usize) {
+    for (c, row) in rows.iter().enumerate() {
+        if let Some(plane) = to.get_plane_mut(c) {
+            convert_channel(Mono::new(&row[..len]), plane)
+                .expect("the piece and the row are `len` frames");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,139 +298,76 @@ mod tests {
         RenderScratch::new(layout, layout, 64).check_block(64);
     }
 
-    /// Fills the scratch outputs with a recognizable ramp so a copy-out can be
-    /// checked sample by sample.
-    fn scratch_with_ramp(channels: u16, block: usize) -> RenderScratch {
-        let layout = ChannelLayout::from(channels);
-        let mut s = RenderScratch::new(layout, layout, block);
-        for (c, ch) in s.outputs.iter_mut().enumerate() {
-            for (i, v) in ch.iter_mut().enumerate() {
-                *v = (c * 100 + i) as f32;
-            }
-        }
-        for (c, ch) in s.outputs_f64.iter_mut().enumerate() {
-            for (i, v) in ch.iter_mut().enumerate() {
-                *v = (c * 100 + i) as f64;
-            }
-        }
-        s
+    /// Scratch rows holding a recognizable ramp, so an emit can be checked sample by sample.
+    fn ramp_rows(channels: usize, block: usize) -> Vec<Vec<f32>> {
+        (0..channels)
+            .map(|c| (0..block).map(|i| (c * 100 + i) as f32).collect())
+            .collect()
     }
 
-    /// A caller slice LONGER than the rendered block must not panic, and must
-    /// keep whatever lay past the block.
-    ///
-    /// This is the `copy_from_slice` fault: equal-length-or-panic, against a
-    /// public API that takes `num_samples` separately precisely so the caller's
-    /// buffer may be larger.
+    /// Emitting a block converts each row into the caller channel of its index, at the caller's
+    /// width: an f64 caller reads the f32 rows widened exactly.
     #[test]
-    fn copy_out_f32_tolerates_a_caller_slice_longer_than_the_block() {
-        let s = scratch_with_ramp(2, 4);
-        let mut l = vec![-1.0f32; 8];
-        let mut r = vec![-1.0f32; 8];
-        let mut outs: Vec<&mut [f32]> = vec![&mut l, &mut r];
-
-        s.copy_out_f32(&mut outs, 4);
-
-        assert_eq!(&l[..4], &[0.0, 1.0, 2.0, 3.0], "block is copied");
-        assert!(
-            l[4..].iter().all(|&v| v == -1.0),
-            "samples past the block are left alone, got {:?}",
-            &l[4..]
-        );
-        assert_eq!(&r[..4], &[100.0, 101.0, 102.0, 103.0]);
+    fn emit_widens_the_rows_into_a_64_bit_caller() {
+        let rows = ramp_rows(2, 4);
+        let (mut l, mut r) = ([-1.0f64; 4], [-1.0f64; 4]);
+        let mut chans = [&mut l[..], &mut r[..]];
+        let mut outs = PlanesMut::new(&mut chans).expect("equal channels");
+        emit(&rows, &mut outs, 4);
+        assert_eq!(l, [0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(r, [100.0, 101.0, 102.0, 103.0]);
     }
 
-    /// And a caller slice SHORTER than the block must not panic either — it is
-    /// filled as far as it goes.
+    /// Only the first `len` frames of the rows are emitted: a caller block longer than the piece
+    /// keeps what lay past it.
     #[test]
-    fn copy_out_f32_tolerates_a_caller_slice_shorter_than_the_block() {
-        let s = scratch_with_ramp(1, 8);
-        let mut short = vec![-1.0f32; 3];
-        let mut outs: Vec<&mut [f32]> = vec![&mut short];
-
-        s.copy_out_f32(&mut outs, 8);
-
-        assert_eq!(short, vec![0.0, 1.0, 2.0], "filled to the caller's length");
+    fn emit_leaves_the_caller_frames_past_the_piece_alone() {
+        let rows = ramp_rows(1, 8);
+        let mut l = [-1.0f32; 8];
+        let mut chans = [&mut l[..]];
+        let mut outs = PlanesMut::new(&mut chans).expect("one channel");
+        let mut piece = outs.slice_mut(Samples(0)..Samples(4));
+        emit(&rows, &mut piece, 4);
+        assert_eq!(l, [0.0, 1.0, 2.0, 3.0, -1.0, -1.0, -1.0, -1.0]);
     }
 
-    /// The f64 path has the mirror-image hazard — `out[..num_samples]` panics on
-    /// a short caller slice — so it is bounded on both sides too.
-    #[test]
-    fn copy_out_f64_is_bounded_on_both_sides() {
-        let s = scratch_with_ramp(1, 8);
-
-        let mut short = vec![-1.0f64; 3];
-        let mut outs: Vec<&mut [f64]> = vec![&mut short];
-        s.copy_out_f64(&mut outs, 8);
-        assert_eq!(short, vec![0.0, 1.0, 2.0]);
-
-        let mut long = vec![-1.0f64; 12];
-        let mut outs: Vec<&mut [f64]> = vec![&mut long];
-        s.copy_out_f64(&mut outs, 8);
-        assert_eq!(&long[..8], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
-        assert!(
-            long[8..].iter().all(|&v| v == -1.0),
-            "past the block stays untouched"
-        );
-    }
-
-    /// The downcasting fallback is bounded the same way, so choosing it for a
-    /// plugin without `processReplacingF64` cannot panic where the native path
-    /// would not.
-    #[test]
-    fn copy_out_f64_from_f32_is_bounded_on_both_sides() {
-        let s = scratch_with_ramp(1, 8);
-
-        let mut short = vec![-1.0f64; 3];
-        let mut outs: Vec<&mut [f64]> = vec![&mut short];
-        s.copy_out_f64_from_f32(&mut outs, 8);
-        assert_eq!(short, vec![0.0, 1.0, 2.0]);
-
-        let mut long = vec![-1.0f64; 12];
-        let mut outs: Vec<&mut [f64]> = vec![&mut long];
-        s.copy_out_f64_from_f32(&mut outs, 8);
-        assert_eq!(&long[..8], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
-        assert!(long[8..].iter().all(|&v| v == -1.0));
-    }
-
-    /// More caller channels than the scratch holds: the extras are skipped, not
-    /// indexed into.
+    /// More caller channels than the scratch holds: the extras are skipped, not indexed into.
     #[test]
     fn extra_caller_channels_are_ignored() {
-        let s = scratch_with_ramp(1, 4);
-        let (mut a, mut b) = (vec![-1.0f32; 4], vec![-1.0f32; 4]);
-        let mut outs: Vec<&mut [f32]> = vec![&mut a, &mut b];
-
-        s.copy_out_f32(&mut outs, 4);
-
-        assert_eq!(a, vec![0.0, 1.0, 2.0, 3.0]);
-        assert!(
-            b.iter().all(|&v| v == -1.0),
-            "channel 1 has no scratch behind it"
-        );
+        let rows = ramp_rows(1, 4);
+        let (mut a, mut b) = ([-1.0f32; 4], [-1.0f32; 4]);
+        let mut chans = [&mut a[..], &mut b[..]];
+        let mut outs = PlanesMut::new(&mut chans).expect("equal channels");
+        emit(&rows, &mut outs, 4);
+        assert_eq!(a, [0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(b, [-1.0; 4], "channel 1 has no scratch behind it");
     }
 
-    /// `prepare_f64` must carry a value that has no f32 representation through
-    /// unchanged. Staging through an f32 buffer would lose it before the
-    /// plugin was ever entered.
+    /// A scratch input the caller has no channel for is silence, not the previous block's samples.
     #[test]
-    fn prepare_f64_stages_without_narrowing() {
+    fn a_scratch_input_without_a_caller_channel_is_silence() {
+        let mut rows = vec![vec![9.0f32; 4], vec![9.0f32; 4]];
+        let src = [0.5f32; 4];
+        let chans = [&src[..]];
+        stage(&mut rows, &Planes::new(&chans).expect("one channel"), 4);
+        assert_eq!(rows[0], [0.5; 4]);
+        assert_eq!(rows[1], [0.0; 4]);
+    }
+
+    /// Staging into the f64 rows carries a value that has no f32 representation through
+    /// unchanged: staging through an f32 row would lose it before the plugin was entered.
+    #[test]
+    fn staging_f64_into_f64_rows_does_not_narrow() {
         // Needs 53 bits of mantissa: exactly representable in f64, rounds in f32.
         const EXACT: f64 = 1.0 + f64::EPSILON;
-        let layout = ChannelLayout::from(1u16);
-        let mut s = RenderScratch::new(layout, layout, 4);
-
-        let src = [EXACT; 4];
-        s.prepare_f64(&[&src[..]], 4);
-
-        assert_eq!(
-            &s.inputs_f64[0][..4],
-            &[EXACT; 4][..],
-            "the f64 staging buffer must hold the input bit-for-bit"
-        );
         assert_ne!(
             EXACT as f32 as f64, EXACT,
-            "the fixture is vacuous unless this value actually rounds in f32"
+            "the fixture is vacuous unless this value rounds in f32"
         );
+        let mut rows = vec![vec![0.0f64; 4]];
+        let src = [EXACT; 4];
+        let chans = [&src[..]];
+        stage(&mut rows, &Planes::new(&chans).expect("one channel"), 4);
+        assert_eq!(rows[0], [EXACT; 4]);
     }
 }

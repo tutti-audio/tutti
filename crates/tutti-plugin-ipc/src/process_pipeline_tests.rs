@@ -33,12 +33,15 @@ use tutti_fixtures::machine_lock;
 const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
 use crate::unique_socket_path;
-use crate::{AudioSlab, FATES, RING_SLOTS, SlabWriter};
+use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, SlabWriter};
 use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
 use std::sync::Arc;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::midi;
-use tutti_plugin_types::{BlockStatus, ChannelLayout, ChunkCounters, MidiEventVec, SampleFormat};
-use tutti_types::SampleRate;
+use tutti_plugin_types::{
+    BlockStatus, ChannelLayout, ChannelTable, ChunkCounters, MidiEventVec, SampleFormat,
+};
+use tutti_types::{SampleRate, Samples};
 use tutti_ump::MidiChannel;
 
 /// The bridge's editor loader: these peers never open an editor, and one that
@@ -111,6 +114,33 @@ impl Planar {
     fn outs(&mut self) -> [&mut [f32]; CHANNELS] {
         self.0.each_mut().map(Vec::as_mut_slice)
     }
+}
+
+/// One block through `batcher`: the caller's channel slices as the views `Batcher::process`
+/// takes, `frames` long.
+fn drive(
+    batcher: &mut Batcher,
+    bridge: &PluginBridge,
+    frames: usize,
+    input: &[&[f32]],
+    output: &mut [&mut [f32]],
+    host: &mut impl Chunks,
+) {
+    // On the stack: the no-alloc tests run this.
+    let ins: ChannelTable<&[f32]> = input.iter().map(|c| &c[..frames]).collect();
+    let mut outs: ChannelTable<&mut [f32]> = output.iter_mut().map(|c| &mut c[..frames]).collect();
+    let plane_in = if ins.is_empty() {
+        Planes::default()
+    } else {
+        Planes::new(&ins).expect("equal channels")
+    };
+    let plane_out = if outs.is_empty() {
+        PlanesMut::default()
+    } else {
+        PlanesMut::new(&mut outs).expect("equal channels")
+    };
+    let mut io = InputOutput::new(Samples(frames), plane_in, plane_out).expect("equal frames");
+    batcher.process(bridge, &mut io, host);
 }
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
@@ -355,7 +385,8 @@ fn a_sidechain_port_reaches_the_plugin() {
     let mut midi_out = MidiEventVec::new();
     for block in 0..2u64 {
         out.clear();
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &[&main, &main, &side],
@@ -420,7 +451,8 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
         }
         output.clear();
 
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &input.ins(),
@@ -691,7 +723,8 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
             }
         }
         output.clear();
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &input.ins(),
@@ -776,7 +809,8 @@ fn drive_one_block(
     output: &mut Planar,
     midi_out: &mut MidiEventVec,
 ) {
-    batcher.process(
+    drive(
+        batcher,
         bridge,
         BATCH_SIZE,
         &input.ins(),
@@ -1227,7 +1261,8 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
         }
     }
     output.clear();
-    batcher.process(
+    drive(
+        &mut batcher,
         &bridge,
         BATCH_SIZE,
         &input.ins(),
@@ -1303,7 +1338,8 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
             }
         }
         output.clear();
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &input.ins(),
@@ -1566,7 +1602,8 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
     let mut host = StatusProbe::default();
     for block in 1..=4u64 {
         out.clear();
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &[&silence, &silence],
@@ -1659,7 +1696,8 @@ fn an_unstaged_chunk_reports_its_midi_lost() {
         ..LossProbe::default()
     };
     for _ in 0..3 {
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &[&silence, &silence, &silence],
@@ -1707,7 +1745,8 @@ fn a_refused_chunk_reports_its_midi_lost() {
         ..LossProbe::default()
     };
     for _ in 0..2 {
-        batcher.process(
+        drive(
+            &mut batcher,
             &bridge,
             BATCH_SIZE,
             &input.ins(),

@@ -699,9 +699,14 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
         let mut left = [0.0f32; FRAMES];
         let mut right = [0.0f32; FRAMES];
         let input: Vec<&[f32]> = input.iter().map(|c| c.as_slice()).collect();
-        processor
-            .render_f32(&input, &mut [&mut left, &mut right], FRAMES as u32)
-            .expect("renders");
+        let mut output = [&mut left[..], &mut right[..]];
+        let mut block = tutti_buffers::InputOutput::new(
+            tutti_types::Samples(FRAMES),
+            tutti_buffers::Planes::new(&input).expect("equal planes"),
+            tutti_buffers::PlanesMut::new(&mut output).expect("equal planes"),
+        )
+        .expect("equal frames");
+        processor.render_planes(&mut block).expect("renders");
         rendered_tx.send(()).expect("the control side waits");
         release_rx.recv().expect("the control side releases");
         // The last reference to the unit goes here, off its home thread.

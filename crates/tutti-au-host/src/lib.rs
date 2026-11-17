@@ -75,6 +75,7 @@
 //! # {
 //! use tutti_au_host::component::enumerate_components_of_type;
 //! use tutti_au_host::{AuLoaded, AuType};
+//! use tutti_buffers::{InputOutput, Planes, PlanesMut};
 //! use tutti_plugin_types::{Loaded, MainThreadMarker, MainWork, MaxBlock, Prepare, SampleRate, Samples};
 //!
 //! let effects = enumerate_components_of_type(AuType::Effect);
@@ -91,7 +92,13 @@
 //!     let mut output = vec![vec![0.0f32; 512]; 2];
 //!     let in_refs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
 //!     let mut out_refs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-//!     processor.render_f32(&in_refs, &mut out_refs, 512).unwrap();
+//!     let mut block = InputOutput::new(
+//!         Samples(512),
+//!         Planes::new(&in_refs).unwrap(),
+//!         PlanesMut::new(&mut out_refs).unwrap(),
+//!     )
+//!     .unwrap();
+//!     processor.render_planes(&mut block).unwrap();
 //! }
 //! # }
 //! ```
@@ -138,7 +145,7 @@
 //! that uninitializes the unit before the renderer (whose input callback the unit
 //! may still call while initialized) is dropped, the SysEx reassembly buffer, the
 //! transport the unit pulls from, and a lent copy of the parameter ranges.
-//! `render_f32` and `render_f64` are its calls; AUv2 has no native f64 render, so
+//! `render_planes` is its call; AUv2 has no native f64 render, so
 //! an f64 block costs a narrowing round trip through the one scratch it owns.
 //!
 //! **The Controller owns the main thread's side**: it derefs to `AuLoaded`, so
@@ -181,7 +188,7 @@
 //!
 //! ## Threading and real-time safety
 //!
-//! `AuProcessor::render` (and `render_f32`/`render_f64`) belong on the audio thread and does not allocate in the
+//! `AuProcessor::render` (and `render_planes`) belong on the audio thread and does not allocate in the
 //! steady state: render buffers are sized at initialization. Loading,
 //! initialization, state, presets and the editor belong on the main thread; the
 //! editor, state and preset-file methods take a `tutti_plugin_types::MainThreadMarker`,

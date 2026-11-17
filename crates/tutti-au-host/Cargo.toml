@@ -36,6 +36,8 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The engine's unit newtypes: `Bpm`/`Beat` on `TransportState` and `Seconds` on
 # `get_tail_time`. `default-features = false` drops this crate's codec/midi
 # defaults, which the unit vocabulary does not need.
+# The block views a render takes (`InputOutput`, `Float`).
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The queue the MIDI-output callback pushes into during a render. `ArrayQueue`
@@ -53,8 +55,6 @@ tutti-au-ffi = { path = "../tutti-au-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 tutti-graph = { path = "../tutti-graph" }
-# The block views the suites build (`InputOutput`, `Planes`, `PlanesMut`).
-tutti-buffers = { path = "../tutti-buffers" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "au"] }
 assert_no_alloc = { version = "1", default-features = false }
 
