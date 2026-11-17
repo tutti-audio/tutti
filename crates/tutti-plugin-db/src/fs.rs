@@ -144,7 +144,8 @@ impl Walk {
 /// fails. The temp file is a sibling so the rename stays on one filesystem
 /// (a cross-device rename fails with EXDEV), named by the process id: the
 /// pedal's writers are serialized per path by the scan's claim. Keeps the pedal
-/// whole across a crash.
+/// whole across a crash. Safe only under that claim: a second writer in the
+/// process would share the temp name.
 pub(super) fn replace_file(
     path: &Path,
     fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,

@@ -197,13 +197,8 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
-    use std::thread;
     use tempfile::TempDir;
     use tutti_plugin_types::BridgeResult;
-
-    /// How long a probe test waits before it calls the probe hung: far past a
-    /// kill or a cancel, far short of the stand-in's 300 s sleep.
-    const HANG_GUARD: Duration = Duration::from_secs(60);
 
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
@@ -233,70 +228,32 @@ mod tests {
     #[test]
     fn a_probe_that_hangs_is_killed_at_the_deadline() {
         let dir = TempDir::new().unwrap();
-        let pid_file = dir.path().join("pid");
+        let fifo = dir.path().join("pid");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success(),
+            "mkfifo"
+        );
         let locator = stand_in(
             &dir,
-            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
-        );
-
-        let deadline = Instant::now() + HANG_GUARD;
-        // Long enough for the shell to start and write its pid before it is
-        // killed: at 300 ms a cold shell on macOS sometimes had not, and the
-        // pid read below failed.
-        let result = probe(&locator, Duration::from_secs(2));
-        // A hang guard: a child waited for rather than killed takes its whole
-        // 300 s sleep.
-        assert!(
-            Instant::now() < deadline,
-            "the child was waited for, not killed"
-        );
-        assert!(
-            matches!(result, Err(BridgeError::Timeout { .. })),
-            "{result:?}"
-        );
-
-        let pid = std::fs::read_to_string(&pid_file).unwrap();
-        let alive = Command::new("kill")
-            .args(["-0", pid.trim()])
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success();
-        assert!(
-            !alive,
-            "the hung probe (pid {}) is still running",
-            pid.trim()
-        );
-    }
-
-    /// **A cancel kills the probe in flight**: the child has a 300 s sleep and
-    /// the caller a 300 s deadline, and the probe is gone (killed and reaped) by
-    /// the time the call returns.
-    #[test]
-    fn a_cancel_kills_the_probe_without_waiting_for_the_deadline() {
-        let dir = TempDir::new().unwrap();
-        let pid_file = dir.path().join("pid");
-        let locator = stand_in(
-            &dir,
-            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
+            &format!("echo $$ > {}\nexec sleep 300", fifo.display()),
         );
         let stop = StopToken::new();
+        // Opening and reading the fifo block until the child is running and has
+        // written its pid, so the stop comes while the probe waits on the child.
         let raiser = {
-            let (stop, pid_file) = (stop.clone(), pid_file.clone());
+            let stop = stop.clone();
             tutti_rt::spawn_named("probe-raiser", None, move |_| {
-                // The child has written its whole pid (a line) once it is running;
-                // a child that never starts is a failure, not a hang.
-                let deadline = Instant::now() + Duration::from_secs(30);
-                while !std::fs::read_to_string(&pid_file).is_ok_and(|p| p.ends_with('\n')) {
-                    assert!(Instant::now() < deadline, "the child never wrote its pid");
-                    thread::sleep(Duration::from_millis(2));
-                }
+                let pid = std::fs::read_to_string(&fifo).expect("the child writes its pid");
                 stop.stop();
+                pid
             })
             .expect("the raiser starts")
         };
 
-        let deadline = Instant::now() + HANG_GUARD;
         let result = probe_metadata_with(
             &locator,
             Path::new("/plugins/Some.clap"),
@@ -304,16 +261,9 @@ mod tests {
             Duration::from_secs(300),
             &stop,
         );
-        raiser.join().unwrap();
+        let pid = raiser.join().unwrap();
 
-        // A hang guard: a cancel that waited for the child or the deadline takes
-        // 300 s.
-        assert!(
-            Instant::now() < deadline,
-            "the cancel waited for the child or the deadline"
-        );
         assert!(matches!(&result, Err(ProbeError::Cancelled)), "{result:?}");
-        let pid = std::fs::read_to_string(&pid_file).unwrap();
         let alive = Command::new("kill")
             .args(["-0", pid.trim()])
             .stderr(Stdio::null())

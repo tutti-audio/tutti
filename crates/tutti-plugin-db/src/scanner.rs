@@ -15,16 +15,42 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat};
-use tutti_rt::{LockExt, StopToken, ThreadHandle};
+use tutti_rt::{LockExt, StopToken, Tally, TallyWriter, ThreadHandle};
 
 /// How many progress updates wait for the owner before the scan drops the
 /// next one.
 const PROGRESS_CAPACITY: usize = 256;
 
+/// The worker's end of the progress queue: sends the newest update, making room
+/// by dropping the oldest, and counts what it drops.
+struct Progress {
+    tx: Sender<ScanProgress>,
+    oldest: Receiver<ScanProgress>,
+    dropped: TallyWriter<u64>,
+}
+
+impl Progress {
+    fn send(&self, mut update: ScanProgress) {
+        loop {
+            match self.tx.try_send(update) {
+                Ok(()) | Err(TrySendError::Disconnected(_)) => return,
+                Err(TrySendError::Full(back)) => {
+                    update = back;
+                    if self.oldest.try_recv().is_ok() {
+                        self.dropped.add(1);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Where a scan stands, as it advances.
 ///
-/// Advisory: the owner reads it with [`Scan::progress`], and an update the owner
-/// had not read when the queue was full is dropped, the next one superseding it.
+/// Advisory: the owner reads it with [`Scan::progress`]. When the owner has not
+/// kept up and the queue is full, the oldest update is dropped for the newest
+/// ([`Scan::progress_dropped`] counts them). The end of a scan is
+/// [`ScanPoll::Done`], never a progress update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanProgress {
     /// Finding plugin files in a directory. Only a scan of directories reports
@@ -41,11 +67,6 @@ pub enum ScanProgress {
         total: usize,
         /// The file being probed.
         path: PathBuf,
-    },
-    /// Every file has been looked at.
-    Complete {
-        /// How many files the scan looked at.
-        total: usize,
     },
 }
 
@@ -203,10 +224,16 @@ impl Scanner {
 
     fn start(job: Job) -> Result<Scan, ScanError> {
         let (progress_tx, progress_rx) = crossbeam_channel::bounded(PROGRESS_CAPACITY);
+        let dropped = tutti_rt::tally::<u64>();
+        let progress = Progress {
+            tx: progress_tx,
+            oldest: progress_rx.clone(),
+            dropped: dropped.writer(),
+        };
         let (tx, rx) = crossbeam_channel::unbounded();
 
         let worker = tutti_rt::spawn_named("plugin-scanner", None, move |stop| {
-            let result = job.run(stop, &progress_tx, |change| {
+            let result = job.run(stop, &progress, |change| {
                 tx.send(Message::Change(change)).is_ok()
             });
             // Release the pedal before announcing the end, so a caller that
@@ -218,6 +245,7 @@ impl Scanner {
 
         Ok(Scan {
             progress_rx,
+            progress_dropped: dropped,
             rx,
             _worker: worker,
         })
@@ -316,7 +344,9 @@ pub enum FilesError {
 #[must_use]
 pub struct Scan {
     progress_rx: Receiver<ScanProgress>,
+    progress_dropped: Tally<u64>,
     rx: Receiver<Message>,
+    /// Dropping the handle stops the worker and joins it.
     _worker: ThreadHandle<()>,
 }
 
@@ -358,7 +388,8 @@ impl Scan {
     }
 
     /// The progress updates the scan has made since the last call, oldest
-    /// first. Never blocks. An update made while the queue was full was dropped.
+    /// first. Never blocks. Updates the owner had not read when the queue filled
+    /// were dropped oldest first ([`progress_dropped`](Self::progress_dropped)).
     pub fn progress(&self) -> impl Iterator<Item = ScanProgress> + '_ {
         self.progress_rx.try_iter()
     }
@@ -367,6 +398,13 @@ impl Scan {
     /// Returns `None` if the worker died without finishing.
     pub fn wait(self, db: &mut PluginDb) -> Option<ScanResult> {
         self.drain(db)
+    }
+
+    /// How many progress updates were dropped because the owner had not read
+    /// them when the queue was full.
+    #[must_use]
+    pub fn progress_dropped(&self) -> u64 {
+        self.progress_dropped.get()
     }
 
     /// [`wait`](Self::wait) without consuming the scan.
@@ -405,13 +443,10 @@ impl Job {
     fn run(
         &self,
         stop: &StopToken,
-        progress_tx: &Sender<ScanProgress>,
+        progress: &Progress,
         mut sink: impl FnMut(RowChange) -> bool,
     ) -> ScanResult {
-        // Progress is advisory: an update the owner has no room for is dropped.
-        let emit = |p: ScanProgress| match progress_tx.try_send(p) {
-            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
-        };
+        let emit = |p: ScanProgress| progress.send(p);
 
         let (plugin_paths, force) = match &self.targets {
             Targets::Directories(directories) => {
@@ -480,8 +515,6 @@ impl Job {
                 return result;
             }
         }
-
-        emit(ScanProgress::Complete { total });
 
         info!(
             "scan complete: {} scanned, {} new, {} failed, {} blacklisted",
@@ -942,9 +975,9 @@ mod tests {
     }
 
     /// A scan of directories reports each directory it walks, each file it
-    /// probes in order with the count, and its end.
+    /// probes in order with the count.
     #[test]
-    fn a_scan_reports_discovery_each_probe_and_the_end_as_progress() {
+    fn a_scan_reports_discovery_and_each_probe_as_progress() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.vst3");
@@ -958,7 +991,7 @@ mod tests {
         assert_eq!(result.new + result.failed, 2);
 
         let updates: Vec<_> = scan.progress().collect();
-        assert_eq!(updates.len(), 4, "{updates:?}");
+        assert_eq!(updates.len(), 3, "{updates:?}");
         assert_eq!(
             updates[0],
             ScanProgress::Discovering {
@@ -973,13 +1006,12 @@ mod tests {
             })
             .collect();
         assert_eq!(probing, [(1, 2), (2, 2)]);
-        assert_eq!(updates[3], ScanProgress::Complete { total: 2 });
     }
 
-    /// Progress nobody reads is dropped once the queue is full, and the scan
-    /// still finishes with every file recorded.
+    /// Progress nobody reads keeps the newest updates: the oldest are dropped
+    /// and counted, and the scan still ends with `Done` and every file recorded.
     #[test]
-    fn an_unread_progress_queue_drops_updates_and_the_scan_still_finishes() {
+    fn an_unread_progress_queue_keeps_the_newest_updates_and_counts_the_rest() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let files = PROGRESS_CAPACITY + 10;
@@ -991,11 +1023,24 @@ mod tests {
         let scan = scanner_for(dir.path())
             .spawn(&mut db, [&plugins_dir], no_save)
             .unwrap();
-        let result = scan.drain(&mut db).expect("the worker finishes");
+        let result = scan.drain(&mut db).expect("Done arrives with a full queue");
 
         assert_eq!(result.new, files);
         assert_eq!(db.len(), files);
-        assert_eq!(scan.progress().count(), PROGRESS_CAPACITY);
+        // One discovery and one probe per file were sent; the queue holds the last
+        // `PROGRESS_CAPACITY` of them.
+        let sent = files + 1;
+        assert_eq!(scan.progress_dropped(), (sent - PROGRESS_CAPACITY) as u64);
+        let kept: Vec<_> = scan.progress().collect();
+        assert_eq!(kept.len(), PROGRESS_CAPACITY);
+        assert!(matches!(
+            kept.last(),
+            Some(ScanProgress::Probing { current, total, .. }) if *current == files && *total == files
+        ));
+        assert!(matches!(
+            kept.first(),
+            Some(ScanProgress::Probing { current, .. }) if *current == sent - PROGRESS_CAPACITY
+        ));
     }
 
     /// A spawned scan's findings reach the database through `wait`: the worker
