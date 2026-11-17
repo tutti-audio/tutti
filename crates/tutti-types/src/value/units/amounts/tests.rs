@@ -20,6 +20,10 @@ use super::*;
 ///   bound unchecked. `new_clamped` / `stable_pair` are the ways in.
 /// - `Drive * f32` — a shaper's response is nonlinear, so "twice the
 ///   drive" is not twice anything.
+/// - `BitDepth + BitDepth`, `BitDepth * f32` — a word length is chosen, not
+///   accumulated, and twice the bits is not twice anything audible (about 6 dB of
+///   signal-to-noise ratio per bit). A depth from a number is
+///   `BitDepth::new_clamped`.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -248,4 +252,17 @@ fn balance_saturates_and_orders() {
     assert_eq!(Balance::new_clamped(-1.5), Balance::LEFT);
     assert!(Balance::LEFT < Balance::CENTER && Balance::CENTER < Balance::RIGHT);
     assert_eq!(-Balance::LEFT, Balance::RIGHT);
+}
+
+/// A depth is a word length in `1..=32`: `new_clamped` holds both ends, passes a
+/// fractional depth through and leaves NaN to the reader.
+#[test]
+fn a_bit_depth_is_held_within_one_and_thirty_two() {
+    assert_eq!(BitDepth::new_clamped(0.0), BitDepth::MIN);
+    assert_eq!(BitDepth::new_clamped(-3.0), BitDepth::MIN);
+    assert_eq!(BitDepth::new_clamped(33.0), BitDepth::MAX);
+    assert_eq!(BitDepth::new_clamped(3.5), BitDepth::new(3.5));
+    assert_eq!(BitDepth::MIN.get(), 1.0);
+    assert_eq!(BitDepth::MAX.get(), 32.0);
+    assert!(BitDepth::MIN < BitDepth::MAX);
 }
