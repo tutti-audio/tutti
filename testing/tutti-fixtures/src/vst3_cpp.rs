@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 mod ext;
 
 /// The C++ plugin's module, in the bundle its crate's `build.rs` links.
+///
+/// # Panics
+///
+/// Panics when the module is not in the bundle.
 #[must_use]
 pub fn vst3_cpp_module() -> PathBuf {
     // The extension its `build.rs` gives the module.

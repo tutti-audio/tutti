@@ -112,6 +112,7 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
     };
 
     let ours = ump_endpoints()
+        .expect("CoreMIDI raised no exception")
         .expect("the manager class exists")
         .into_iter()
         .find(is_ours)

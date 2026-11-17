@@ -198,7 +198,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-lints",
         "",
-        "every crate takes the workspace lints and missing_debug_implementations denies",
+        "every workspace member takes the workspace lints and missing_debug_implementations denies",
     ),
     (
         "check-value-traits",
