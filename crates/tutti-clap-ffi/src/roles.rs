@@ -46,7 +46,7 @@ fn thread_id_hash(id: ThreadId) -> u64 {
 /// is the OS main thread (the spec lets a host drive `start_processing` from
 /// there). Not re-entrant: claiming twice on one thread deadlocks.
 #[derive(Debug)]
-pub struct AudioClaim<'a> {
+pub(crate) struct AudioClaim<'a> {
     roles: &'a ThreadRoles,
     // Held for the claim's lifetime; declared last so it releases only after
     // `Drop` has cleared the published identity.
@@ -69,7 +69,7 @@ impl Drop for AudioClaim<'_> {
 /// answered as such. The one audio-side entry in the sequence, `stop_processing`,
 /// runs inside [`audio`](Self::audio).
 #[derive(Debug)]
-pub struct LifecycleClaim<'a> {
+pub(crate) struct LifecycleClaim<'a> {
     roles: &'a ThreadRoles,
     _guard: MutexGuard<'a, ()>,
 }
@@ -77,7 +77,7 @@ pub struct LifecycleClaim<'a> {
 impl LifecycleClaim<'_> {
     /// Runs `f` as the audio thread: the claim's thread answers
     /// `is_audio_thread` (and not `is_main_thread`) for its span.
-    pub fn audio<R>(&self, f: impl FnOnce() -> R) -> R {
+    pub(crate) fn audio<R>(&self, f: impl FnOnce() -> R) -> R {
         struct Clear<'r>(&'r ThreadRoles);
         impl Drop for Clear<'_> {
             fn drop(&mut self) {
@@ -96,7 +96,7 @@ impl LifecycleClaim<'_> {
 impl ThreadRoles {
     /// Takes the roles lock without becoming the audio thread: for the
     /// `[main-thread]` entries that must not overlap audio-side ones.
-    pub fn claim_lifecycle(&self) -> LifecycleClaim<'_> {
+    pub(crate) fn claim_lifecycle(&self) -> LifecycleClaim<'_> {
         let guard = self.lock.lock_recover();
         LifecycleClaim {
             roles: self,
@@ -120,14 +120,14 @@ impl ThreadRoles {
 
     /// The thread that built these roles.
     #[must_use]
-    pub fn main_thread_id(&self) -> ThreadId {
+    pub(crate) fn main_thread_id(&self) -> ThreadId {
         self.main
     }
 
     /// Claim the `[audio-thread]` role, waiting until any other claim has
     /// been released. A poisoned lock is taken as is: the guarded value is
     /// `()`, so a panicking claimant broke no invariant.
-    pub fn claim(&self) -> AudioClaim<'_> {
+    pub(crate) fn claim(&self) -> AudioClaim<'_> {
         let guard = self.lock.lock_recover();
         // `Release` pairs with the `Acquire` in `is_audio_thread`.
         self.audio.store(
@@ -145,7 +145,7 @@ impl ThreadRoles {
     /// and parameter calls or by another audio entry. What the audio thread
     /// takes, so a main-thread call never stalls a block. A poisoned lock is
     /// taken as is, as [`claim`](Self::claim) takes it.
-    pub fn try_claim(&self) -> Option<AudioClaim<'_>> {
+    pub(crate) fn try_claim(&self) -> Option<AudioClaim<'_>> {
         let guard = match self.lock.try_lock() {
             Ok(guard) => guard,
             Err(TryLockError::Poisoned(p)) => p.into_inner(),
@@ -175,5 +175,154 @@ impl ThreadRoles {
     #[must_use]
     pub fn is_main_thread(&self) -> bool {
         std::thread::current().id() == self.main && !self.is_audio_thread()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU32};
+
+    fn roles() -> Arc<ThreadRoles> {
+        Arc::new(ThreadRoles::new(tutti_fixtures::main_thread()))
+    }
+
+    /// A thread that holds no claim is neither role but the one that built
+    /// the roles is the main thread.
+    /// Spec: clap.thread-check
+    #[test]
+    fn an_unclaimed_thread_is_not_the_audio_thread() {
+        let roles = roles();
+        assert!(roles.is_main_thread());
+        assert!(!roles.is_audio_thread());
+        let other = Arc::clone(&roles);
+        let (main, audio) =
+            std::thread::spawn(move || (other.is_main_thread(), other.is_audio_thread()))
+                .join()
+                .unwrap();
+        assert!(!main && !audio);
+    }
+
+    /// `is_main_thread` and `is_audio_thread` are mutually exclusive: the main
+    /// thread inside an audio claim is the audio thread alone, so a plugin's
+    /// `!is_main_thread()` assertion there can fail.
+    /// Spec: clap.thread-check
+    #[test]
+    fn a_claim_makes_its_thread_the_audio_thread_and_not_the_main_thread() {
+        let roles = roles();
+        {
+            let _claim = roles.claim();
+            assert!(roles.is_audio_thread());
+            assert!(!roles.is_main_thread());
+        }
+        assert!(roles.is_main_thread());
+        assert!(!roles.is_audio_thread());
+    }
+
+    /// The audio claim is mutual exclusion: no two threads are inside it at
+    /// once, and each sees itself as the audio thread throughout.
+    /// Spec: clap.params (`flush` is never concurrent with `process`)
+    #[test]
+    fn audio_claims_serialize_across_threads() {
+        let roles = roles();
+        let inside = Arc::new(AtomicU32::new(0));
+        let overlapped = Arc::new(AtomicBool::new(false));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let (roles, inside, overlapped) = (
+                    Arc::clone(&roles),
+                    Arc::clone(&inside),
+                    Arc::clone(&overlapped),
+                );
+                std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        let _claim = roles.claim();
+                        if inside.fetch_add(1, Ordering::SeqCst) != 0 {
+                            overlapped.store(true, Ordering::SeqCst);
+                        }
+                        assert!(roles.is_audio_thread());
+                        inside.fetch_sub(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert!(!overlapped.load(Ordering::SeqCst));
+        assert!(!roles.is_audio_thread());
+    }
+
+    /// `try_claim` never waits: it is `None` while another claim is held.
+    #[test]
+    fn a_try_claim_over_a_held_claim_is_refused() {
+        let roles = roles();
+        let held = roles.claim();
+        let other = Arc::clone(&roles);
+        assert!(
+            std::thread::spawn(move || other.try_claim().is_none())
+                .join()
+                .unwrap()
+        );
+        drop(held);
+        assert!(roles.try_claim().is_some());
+    }
+
+    /// Claiming repeatedly from one thread does not allocate.
+    #[test]
+    fn repeated_claims_from_one_thread_do_not_allocate() {
+        let roles = roles();
+        for _ in 0..8 {
+            drop(roles.claim());
+        }
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..1024 {
+                let claim = roles.claim();
+                assert!(roles.is_audio_thread());
+                drop(claim);
+            }
+        });
+    }
+
+    /// An audio thread claiming every block while a second thread claims in
+    /// between does not allocate: a one-slot cache of the claimant would miss
+    /// on every block, a published hash has nothing to evict.
+    #[test]
+    fn claims_interleaved_with_another_thread_do_not_allocate() {
+        use std::sync::Barrier;
+        const WARMUP: usize = 8;
+        const ROUNDS: usize = 256;
+        let roles = roles();
+        // Two barriers make the threads strictly alternate; the counts match by
+        // construction, so neither side ever parks alone.
+        let before = Arc::new(Barrier::new(2));
+        let after = Arc::new(Barrier::new(2));
+        let interloper = {
+            let (roles, before, after) =
+                (Arc::clone(&roles), Arc::clone(&before), Arc::clone(&after));
+            std::thread::spawn(move || {
+                for _ in 0..WARMUP + ROUNDS {
+                    drop(roles.claim());
+                    before.wait();
+                    after.wait();
+                }
+            })
+        };
+        for _ in 0..WARMUP {
+            before.wait();
+            drop(roles.claim());
+            after.wait();
+        }
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..ROUNDS {
+                before.wait();
+                let claim = roles.claim();
+                assert!(roles.is_audio_thread());
+                drop(claim);
+                after.wait();
+            }
+        });
+        interloper.join().unwrap();
     }
 }

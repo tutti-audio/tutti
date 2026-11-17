@@ -124,7 +124,7 @@ impl ClapProcessor {
     /// # Threading
     /// CLAP marks `reset` `[audio-thread & active]`. The `[audio-thread]` half
     /// is taken here rather than asserted: the call runs under an
-    /// [`AudioClaim`](tutti_clap_ffi::AudioClaim), so the calling OS
+    /// audio claim, so the calling OS
     /// thread becomes the audio thread for its duration (which the spec permits
     /// for any thread). It never waits: while the main thread holds the
     /// instance, the plugin's `reset` is owed and the next block runs it first.

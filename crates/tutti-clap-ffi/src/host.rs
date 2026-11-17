@@ -31,8 +31,6 @@ use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, clap_host_note_ports,
 };
 use clap_sys::ext::params::{CLAP_EXT_PARAMS, clap_host_params};
-#[cfg(unix)]
-use clap_sys::ext::posix_fd_support::{CLAP_EXT_POSIX_FD_SUPPORT, clap_host_posix_fd_support};
 use clap_sys::ext::preset_load::{
     CLAP_EXT_PRESET_LOAD, CLAP_EXT_PRESET_LOAD_COMPAT, clap_host_preset_load,
 };
@@ -56,6 +54,14 @@ use tutti_plugin_types::{TrackInfo, TrackKind, TransportRequest};
 use tutti_types::{Beat, BeatDuration};
 
 use crate::guard::{lossy, or_abort};
+use crate::plugin::Plain;
+
+/// The host version this crate reports: its own.
+const HOST_VERSION: &CStr =
+    match CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
+        Ok(version) => version,
+        Err(_) => panic!("the package version has no interior nul"),
+    };
 use crate::types::{AudioPortsRescanFlags, LogSeverity, ParamsRescanFlags};
 use tutti_plugin_types::ffi_guard;
 
@@ -227,10 +233,10 @@ impl Host {
             vtable: clap_host {
                 clap_version: CLAP_VERSION,
                 host_data: std::ptr::null_mut(),
-                name: c"clap-host".as_ptr(),
-                vendor: c"Rust".as_ptr(),
-                url: c"".as_ptr(),
-                version: c"0.1.0".as_ptr(),
+                name: c"tutti".as_ptr(),
+                vendor: c"tutti-audio".as_ptr(),
+                url: c"https://github.com/tutti-audio/tutti".as_ptr(),
+                version: HOST_VERSION.as_ptr(),
                 get_extension: Some(host_get_extension),
                 request_restart: Some(host_request_restart),
                 request_process: Some(host_request_process),
@@ -385,14 +391,7 @@ extern "C" fn host_get_extension(
             CLAP_EXT_SURROUND_COMPAT        => HOST_SURROUND,
             CLAP_EXT_TRACK_INFO_COMPAT      => HOST_TRACK_INFO,
         );
-        // The one platform line: `posix-fd-support.h` is POSIX's, so a host
-        // on Windows does not offer it, and a plugin there falls back to its own
-        // events.
-        #[cfg(unix)]
-        if id == CLAP_EXT_POSIX_FD_SUPPORT {
-            return std::ptr::from_ref(&HOST_POSIX_FD_SUPPORT).cast::<c_void>();
-        }
-        std::ptr::null()
+        posix_fd::extension(id)
     })
 }
 
@@ -617,9 +616,7 @@ fn encode_track_info(track: &TrackInfo) -> clap_track_info {
         TrackKind::Bus => CLAP_TRACK_INFO_IS_FOR_BUS,
         TrackKind::Master => CLAP_TRACK_INFO_IS_FOR_MASTER,
     };
-    // SAFETY: all-zero is a valid `clap_track_info`: integers, an array of
-    // them and a null pointer.
-    let mut out: clap_track_info = unsafe { std::mem::zeroed() };
+    let mut out = clap_track_info::zeroed();
     if let Some(name) = &track.name {
         flags |= CLAP_TRACK_INFO_HAS_TRACK_NAME;
         let room = out.name.len() - 1;
@@ -814,36 +811,60 @@ extern "C" fn host_thread_pool_request_exec(host: *const clap_host, num_tasks: u
     })
 }
 
+/// `clap.posix-fd-support`, POSIX's: a host on Windows does not offer it, and
+/// a plugin there falls back to its own events.
 #[cfg(unix)]
-static HOST_POSIX_FD_SUPPORT: clap_host_posix_fd_support = clap_host_posix_fd_support {
-    register_fd: Some(host_posix_fd_register),
-    modify_fd: Some(host_posix_fd_modify),
-    unregister_fd: Some(host_posix_fd_unregister),
-};
+mod posix_fd {
+    use super::*;
+    use clap_sys::ext::posix_fd_support::{CLAP_EXT_POSIX_FD_SUPPORT, clap_host_posix_fd_support};
 
-#[cfg(unix)]
-trampoline!(
-    host_posix_fd_register(fd: i32, flags: u32) -> bool,
-    main_only,
-    false,
-    |cb| cb.posix_fd_register(fd, flags)
-);
+    static HOST_POSIX_FD_SUPPORT: clap_host_posix_fd_support = clap_host_posix_fd_support {
+        register_fd: Some(host_posix_fd_register),
+        modify_fd: Some(host_posix_fd_modify),
+        unregister_fd: Some(host_posix_fd_unregister),
+    };
 
-#[cfg(unix)]
-trampoline!(
-    host_posix_fd_modify(fd: i32, flags: u32) -> bool,
-    main_only,
-    false,
-    |cb| cb.posix_fd_modify(fd, flags)
-);
+    trampoline!(
+        host_posix_fd_register(fd: i32, flags: u32) -> bool,
+        main_only,
+        false,
+        |cb| cb.posix_fd_register(fd, flags)
+    );
 
-#[cfg(unix)]
-trampoline!(
-    host_posix_fd_unregister(fd: i32) -> bool,
-    main_only,
-    false,
-    |cb| cb.posix_fd_unregister(fd)
-);
+    trampoline!(
+        host_posix_fd_modify(fd: i32, flags: u32) -> bool,
+        main_only,
+        false,
+        |cb| cb.posix_fd_modify(fd, flags)
+    );
+
+    trampoline!(
+        host_posix_fd_unregister(fd: i32) -> bool,
+        main_only,
+        false,
+        |cb| cb.posix_fd_unregister(fd)
+    );
+
+    /// The vtable of extension `id`, null for any other.
+    pub(super) fn extension(id: &CStr) -> *const c_void {
+        if id == CLAP_EXT_POSIX_FD_SUPPORT {
+            std::ptr::from_ref(&HOST_POSIX_FD_SUPPORT).cast::<c_void>()
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+
+/// The platform has no `clap.posix-fd-support`.
+#[cfg(not(unix))]
+mod posix_fd {
+    use super::*;
+
+    /// Null: no extension is offered.
+    pub(super) fn extension(_id: &CStr) -> *const c_void {
+        std::ptr::null()
+    }
+}
 
 #[cfg(test)]
 mod tests {

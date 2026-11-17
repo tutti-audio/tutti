@@ -672,10 +672,10 @@ pub(super) fn handle(
             // synchronised and there is nothing to crash about. Contrast
             // `recv_by`, where an over-cap length genuinely *has*
             // desynchronised the stream.
-            if data.len() > crate::protocol::MAX_STATE_BYTES {
+            if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
                 reply.send(Err(StateError::TooLarge {
                     bytes: data.len(),
-                    limit: crate::protocol::MAX_STATE_BYTES,
+                    limit: tutti_plugin_types::MAX_STATE_BYTES,
                 }));
                 return Ok(());
             }

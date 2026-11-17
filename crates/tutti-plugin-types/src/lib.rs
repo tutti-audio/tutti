@@ -282,7 +282,9 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
-pub use state_frame::{BareFrame, FrameReader, Opened, StateFrame, StateFrameError};
+pub use state_frame::{
+    BareFrame, FrameReader, MAX_STATE_BYTES, Opened, StateFrame, StateFrameError,
+};
 pub use state_use::StateUse;
 pub use track_info::{TrackInfo, TrackKind};
 pub use transport_request::TransportRequest;
