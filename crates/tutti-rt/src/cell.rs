@@ -18,10 +18,10 @@ use crate::claim::ClaimWord;
 /// borrows at once, or one mutable borrow, never both.
 ///
 /// The cell enforces that contract itself, in release builds as in debug
-/// ones, `atomic_refcell`-style: one atomic word holds a writer bit and a
-/// reader count. A mutable borrow sets the writer bit with one
+/// ones: one atomic claim word is either exclusive or counts the live shared
+/// borrows. A mutable borrow takes the word exclusively with one
 /// compare-exchange from zero; a shared borrow adds one to the count with a
-/// compare-exchange that never succeeds while the writer bit is set. A borrow
+/// compare-exchange that never succeeds while the word is exclusive. A borrow
 /// that the contract refuses — a second mutable borrow, or a shared and a
 /// mutable one together, from another thread or nested on the same one —
 /// panics ([`borrow_mut`], [`borrow`]) or returns `None` ([`try_borrow_mut`],

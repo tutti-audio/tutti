@@ -22,18 +22,11 @@
 //! - **release**: a borrower refused while another holds the cell is granted
 //!   once that guard drops, and the cell is free once every guard has.
 //!
-//! # Why compare-exchanges
+//! # The claim word
 //!
-//! Taking the writer bit with `swap(true, Acquire)` fails the model with "free once every guard dropped": a refused swap
-//! still *writes*, and loom 0.7 leaves that write unordered against the
-//! holder's later release, so after both threads finish it lets the next
-//! borrow read the refused write. Under the C++ model that read is impossible
-//! (the refused RMW sits right after the holder's acquire in modification
-//! order, before its release), so it was loom's imprecision, not a bug; but a
-//! compare-exchange writes nothing when refused and is no dearer, so both
-//! acquires use one (the reader's in a loop, rather than `atomic_refcell`'s
-//! unconditional `fetch_add`, for the same reason) and the models check the
-//! code as shipped.
+//! The cell's state is a `ClaimWord` (`src/claim.rs`). Every claim on it is a
+//! compare-exchange, so a refused borrow writes nothing: after every guard has
+//! dropped, the next borrow is granted, which the models check as shipped.
 
 #![cfg(loom)]
 

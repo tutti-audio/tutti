@@ -33,8 +33,8 @@
 //!
 //! One uncontended atomic per borrow and one per release. The claim words are
 //! a separate table ([`ClaimTable`]), preallocated on the control thread and
-//! reset per [`SplitMut::new`] / [`SplitRw::new`] (plain stores through
-//! `&mut`), so building a split per block never allocates.
+//! cleared per [`SplitMut::new`] / [`SplitRw::new`] (`ClaimWord::clear`, a
+//! plain store through `&mut`), so building a split per block never allocates.
 
 use std::cell::Cell;
 use std::marker::PhantomData;

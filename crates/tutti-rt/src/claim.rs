@@ -20,18 +20,11 @@
 //! - **An exclusive release is a store of zero.** While the exclusive bit is
 //!   set no other claim writes the word, so the holder's store cannot lose an
 //!   update.
-//! - **A refusal is never observable.** A shared claim that added one before
-//!   it looked at the exclusive bit (a `fetch_add`, undone on refusal) would,
-//!   for that instant, refuse a concurrent exclusive claim on a word nobody
-//!   holds, and under `loom` 0.7 its undo is a write left unordered against
-//!   the holder's release, which reports a phantom refusal after every claim
-//!   has been released. The compare-exchange loop retries only when another
-//!   *shared* claim changed the count in between, so it is lock-free: some
-//!   claim always makes progress, and an exclusive holder never makes one
-//!   wait.
-//!
-//! The price against a `fetch_add` is a load before the compare-exchange; an
-//! uncontended claim is still one read-modify-write.
+//! - **No claimer is refused because of a refusal.** A refused claim leaves
+//!   the word as it found it, so a concurrent claim on a word nobody holds is
+//!   granted. The shared loop retries only when another shared claimer changed
+//!   the count in between, so it is lock-free: some claim always makes
+//!   progress, and an exclusive holder never makes one wait.
 
 use sync::{AtomicU32, Ordering};
 
