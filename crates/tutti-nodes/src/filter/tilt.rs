@@ -3,6 +3,7 @@
 use tutti_dsp::{Ring, Sos, SosError, Tilt};
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
+use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
 use super::{MAX_EQ_GAIN, MIN_EQ_CENTER, eq_center, eq_gain, filter_bus};
 use crate::kernel::KernelNode;
@@ -88,11 +89,13 @@ control_set! {
     }
 }
 
-impl EqControls for TiltFilterControls {
+impl EqControls for TiltFilterControls {}
+
+impl Sealed for TiltFilterControls {
     type Set = TiltFilterSet;
     const DEFAULT: Self = Self::DEFAULT;
 
-    fn held(self, rate: SampleRate) -> Self {
+    fn held(&self, rate: SampleRate) -> Self {
         Self {
             frequency: eq_center(self.frequency, rate),
             gain: eq_gain(self.gain),
@@ -119,10 +122,9 @@ mod tests {
     use core::f64::consts::PI;
 
     use super::*;
-    use crate::filter::test_utils::{bin, gain, generate_sine, level, render};
+    use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_glides, prepared};
-    use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
@@ -242,30 +244,6 @@ mod tests {
         assert_ne!(at(500.0, 6.0), at(500.0, -6.0));
     }
 
-    /// The first frame from which the tail sum of the design's impulse response (a
-    /// first-order section run in `f64`) is at most the floor.
-    fn ring_at(fc: f32, db: f32) -> usize {
-        let b = Tilt::new(Db(db)).design(Hz(fc), RATE).unwrap().sections()[0];
-        let mut z = 0.0f64;
-        let h: Vec<f64> = (0..1 << 20)
-            .map(|n| {
-                let x = if n == 0 { 1.0 } else { 0.0 };
-                let y = b.b0 * x + z;
-                z = b.b1 * x - b.a1 * y;
-                y
-            })
-            .collect();
-        let eps = f64::from(TAIL_FLOOR.to_amplitude().get());
-        let mut sum = 0.0;
-        for n in (0..h.len()).rev() {
-            sum += h[n].abs();
-            if sum > eps {
-                return n + 1;
-            }
-        }
-        0
-    }
-
     /// Across pivots and gains, from a pole near 1 (a low pivot) to one near -1 (a high
     /// pivot and a boost), the reported tail covers the first frame from which the
     /// impulse response's tail sum is under the floor, and the ceiling covers every one.
@@ -285,7 +263,8 @@ mod tests {
                     gain: Db(db),
                 };
                 let reported = frames(kernel.tail_of(&controls));
-                let ring = ring_at(fc, db);
+                let section = Tilt::new(Db(db)).design(Hz(fc), RATE).unwrap();
+                let ring = ring_at(&section.sections()[0]);
                 let tag = format!("fc {fc} gain {db}: reported {reported}, ring {ring}");
                 assert!(ring <= reported, "{tag}");
                 assert!(reported <= ceiling, "{tag}");

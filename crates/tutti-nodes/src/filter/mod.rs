@@ -8,6 +8,7 @@ mod crossover;
 mod cut;
 mod eq;
 pub mod eq_band;
+mod glided;
 pub mod ladder;
 pub mod svf;
 mod tilt;
@@ -84,6 +85,31 @@ pub(super) mod test_utils {
             .chunks(1024)
             .flat_map(|c| crate::test_support::drive_block(node, &[c]).remove(0))
             .collect()
+    }
+
+    /// The first frame from which the tail sum of the `f64` impulse response of `section`
+    /// (transposed direct form II, never the kernel's realization) is at most the floor.
+    pub fn ring_at(section: &tutti_dsp::Biquad) -> usize {
+        let b = section;
+        let mut z = [0.0f64; 2];
+        let h: Vec<f64> = (0..1 << 21)
+            .map(|n| {
+                let x = if n == 0 { 1.0 } else { 0.0 };
+                let y = b.b0 * x + z[0];
+                z[0] = b.b1 * x - b.a1 * y + z[1];
+                z[1] = b.b2 * x - b.a2 * y;
+                y
+            })
+            .collect();
+        let eps = f64::from(tutti_dsp::TAIL_FLOOR.to_amplitude().get());
+        let mut sum = 0.0;
+        for n in (0..h.len()).rev() {
+            sum += h[n].abs();
+            if sum > eps {
+                return n + 1;
+            }
+        }
+        0
     }
 
     /// The gain of the settled half of a unit sine at `f` through `node`, prepared.

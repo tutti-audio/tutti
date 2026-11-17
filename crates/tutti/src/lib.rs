@@ -218,11 +218,10 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// inserted with `Session::graph().add(node)`.
 pub mod nodes {
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, Biquad, BrickwallControls, ChunkSize, Fdn,
-        FirSummary, Full, Gains, HrtfBinauralError, Inline, Lanes, Line, LineModulation,
-        LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
-        OutputMap as NetworkOutputMap, ResampleError, Ring, Sos, SosError, SpeakerGeometryError,
-        Stage, Tap, Taps, WaveshaperControls,
+        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
+        Full, Gains, HrtfBinauralError, Inline, Lanes, Line, LineModulation, LookaheadError,
+        Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
+        ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{

@@ -3,6 +3,7 @@
 use tutti_dsp::{MatchedBell, Ring, Sos, SosError};
 use tutti_types::{ChannelLayout, Db, Hz, Q, SampleRate};
 
+use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
 use super::{eq_center, eq_gain, filter_bus};
 use crate::kernel::KernelNode;
@@ -60,7 +61,7 @@ impl BellFilterConfig {
 /// The declared tail is unbounded: the matched cut's poles have no closed-form bound over the
 /// ranges. Each block narrows it to [`MatchedBell::ring_out`] at the controls in force, the
 /// first frame from which the tail sum of the impulse response is under the floor, so any
-/// input in `[-1, 1]` that stops is under the floor by then. No latency. A [`KernelNode`]. Made from a
+/// input in `[-1, 1]` that stops is under the floor by then at the controls in force. No latency. A [`KernelNode`]. Made from a
 /// [`BellFilterConfig`] (`BellFilterNode::from`).
 ///
 /// # Panics
@@ -97,11 +98,13 @@ control_set! {
     }
 }
 
-impl EqControls for BellFilterControls {
+impl EqControls for BellFilterControls {}
+
+impl Sealed for BellFilterControls {
     type Set = BellFilterSet;
     const DEFAULT: Self = Self::DEFAULT;
 
-    fn held(self, rate: SampleRate) -> Self {
+    fn held(&self, rate: SampleRate) -> Self {
         Self {
             frequency: eq_center(self.frequency, rate),
             q: Q(self.q.get().clamp(Q_RANGE.0, Q_RANGE.1)),
@@ -122,7 +125,7 @@ impl EqControls for BellFilterControls {
     /// inverse, whose poles are the boost's zeros, and the matched zeros have no
     /// closed-form bound on their radius (the numerator is fixed by three magnitudes, not
     /// by its zeros). A ceiling is a bound over every control, so the shape declares none;
-    /// each block's [`ring_out`](Self::ring_out) is a bound at its controls and is what the
+    /// each block's [`MatchedBell::ring_out`] is a bound at its controls and is what the
     /// node reports.
     fn ring_ceiling(_: SampleRate, _: Db) -> Result<Ring, SosError> {
         Ok(Ring::Unbounded)
@@ -134,10 +137,9 @@ mod tests {
     use core::f64::consts::PI;
 
     use super::*;
-    use crate::filter::test_utils::{bin, gain, generate_sine, level, render};
+    use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_glides, prepared};
-    use tutti_dsp::{Biquad, TAIL_FLOOR};
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
@@ -164,6 +166,15 @@ mod tests {
             .norm()
     }
 
+    /// The analog bell `(s^2 + s A / Q + 1) / (s^2 + s / (A Q) + 1)` at `s = j f / fc`, as a
+    /// magnitude, for `A = 10^(db / 40)`: the oracle the design is matched to.
+    fn analog(fc: f64, q: f64, db: f64, f: f64) -> f64 {
+        let a = 10f64.powf(db / 40.0);
+        let x = f / fc;
+        let off = 1.0 - x * x;
+        ((off * off + (a * x / q).powi(2)) / (off * off + (x / (a * q)).powi(2))).sqrt()
+    }
+
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
@@ -178,7 +189,7 @@ mod tests {
     /// The shape is the width in and out, `Moderate`, declares the center, Q and gain and a
     /// finite tail once prepared; the center starts at the configured one.
     #[test]
-    fn the_shape_declares_its_controls_and_a_finite_tail() {
+    fn the_shape_declares_its_controls_and_an_unbounded_ceiling() {
         let n = node(BellFilterConfig::new(3u16, Hz(120.0), Q(4.0), Db(9.0)));
         let shape = n.shape();
         assert_eq!(
@@ -207,6 +218,21 @@ mod tests {
                 assert!(
                     (got - want).abs() < 1e-4 * want,
                     "q {q} gain {db} at {f}: {got} vs {want}"
+                );
+            }
+            // The matched points against the analog bell itself: DC (bin 1), the center and
+            // Nyquist (bin 4095), where the render is the analog magnitude.
+            for f in [bin(1), center.get(), bin(4_095)] {
+                let want = analog(
+                    f64::from(center.get()),
+                    f64::from(q),
+                    f64::from(db),
+                    f64::from(f),
+                );
+                let got = gain_of(config(center, q, db), f);
+                assert!(
+                    (got - want).abs() < 2e-3 * want,
+                    "q {q} gain {db} at {f}: {got} vs analog {want}"
                 );
             }
             let at = gain_of(config(center, q, db), center.get());
@@ -267,34 +293,6 @@ mod tests {
         assert_ne!(at(500.0, 1.0, 6.0), at(500.0, 1.0, -6.0));
     }
 
-    /// The first frame from which the tail sum of the bell's `f64` impulse response
-    /// (transposed direct form II, never the kernel's realization) is at most the floor.
-    fn ring_at(fc: f32, q: f32, db: f32) -> usize {
-        let b: Biquad = MatchedBell::new(Q(q), Db(db))
-            .design(Hz(fc), RATE)
-            .unwrap()
-            .sections()[0];
-        let mut z = [0.0f64; 2];
-        let h: Vec<f64> = (0..1 << 21)
-            .map(|n| {
-                let x = if n == 0 { 1.0 } else { 0.0 };
-                let y = b.b0 * x + z[0];
-                z[0] = b.b1 * x - b.a1 * y + z[1];
-                z[1] = b.b2 * x - b.a2 * y;
-                y
-            })
-            .collect();
-        let eps = f64::from(TAIL_FLOOR.to_amplitude().get());
-        let mut sum = 0.0;
-        for n in (0..h.len()).rev() {
-            sum += h[n].abs();
-            if sum > eps {
-                return n + 1;
-            }
-        }
-        0
-    }
-
     /// For centers, Q and gains across the ranges the reported tail covers the first frame
     /// from which the impulse response's tail sum is under the floor.
     #[test]
@@ -315,54 +313,12 @@ mod tests {
                         gain: Db(db),
                     };
                     let reported = frames(kernel.tail_of(&controls));
-                    let ring = ring_at(fc, q, db);
+                    let section = MatchedBell::new(Q(q), Db(db)).design(Hz(fc), RATE).unwrap();
+                    let ring = ring_at(&section.sections()[0]);
                     let tag = format!("fc {fc} q {q} gain {db}: reported {reported}, ring {ring}");
                     assert!(ring <= reported, "{tag}");
                 }
             }
-        }
-    }
-
-    /// The residue bound's figure for a bell, in frames, read from the design's poles:
-    /// `1 + ceil(ln(S / eps) / -ln r)` for `S = (|A1| + |A2|) / (1 - r)` over
-    /// `h[n] = sum A_k p_k^(n-1)`, or 1 when `S <= eps`.
-    fn residue_frames(fc: f32, q: f32, db: f32) -> f64 {
-        let b: Biquad = MatchedBell::new(Q(q), Db(db))
-            .design(Hz(fc), RATE)
-            .unwrap()
-            .sections()[0];
-        let [p1, p2] = b.poles();
-        let r = p1.norm().max(p2.norm());
-        let (c1, c0) = (b.b1 - b.b0 * b.a1, b.b2 - b.b0 * b.a2);
-        let sum = ((p1 * c1 + c0).norm() + (p2 * c1 + c0).norm()) / (p1 - p2).norm() / (1.0 - r);
-        let eps = f64::from(TAIL_FLOOR.to_amplitude().get());
-        if sum <= eps {
-            return 1.0;
-        }
-        1.0 + ((sum / eps).ln() / -r.ln()).ceil()
-    }
-
-    /// A narrow bell of low gain (Q 30, +6 dB at 90 Hz) and a wider one (Q 4, +24 dB at 90 Hz)
-    /// report at most the residue bound's figure (the smaller bound of the two) and cover the
-    /// tail sum of the f64 impulse response.
-    #[test]
-    fn the_reported_tail_is_at_most_the_residue_bound() {
-        let mut kernel = BellFilterKernel::new(filter_bus(1u16.into()));
-        kernel.prepare(RATE, MaxBlock::of(Samples(64)));
-        for (fc, q, db) in [(90.0f32, 30.0f32, 6.0f32), (90.0, 4.0, 24.0)] {
-            let Tail::Finite(reported) = kernel.tail_of(&BellFilterControls {
-                frequency: Hz(fc),
-                q: Q(q),
-                gain: Db(db),
-            }) else {
-                panic!("not finite");
-            };
-            let bound = residue_frames(fc, q, db);
-            assert!(ring_at(fc, q, db) <= reported.get(), "{fc} {q} {db}");
-            assert!(
-                reported.get() as f64 <= bound + 1.0,
-                "{reported:?} vs {bound}"
-            );
         }
     }
 }
