@@ -195,7 +195,8 @@ impl SlabHeader {
     ///
     /// # Errors
     ///
-    /// [`SlabError::Header`] when the magic, the header version or the slot
+    /// [`SlabError::BadMagic`], [`SlabError::BadVersion`] or
+    /// [`SlabError::BadSlots`] when the magic, the header version or the slot
     /// count is not this build's.
     pub(crate) fn validate(&self) -> Result<(), SlabError> {
         let magic = self.control.magic.load(Ordering::Acquire);
@@ -313,8 +314,8 @@ mod tests {
             .header_version
             .store(HEADER_VERSION, Ordering::Relaxed);
         h.control.slots.store(RING_SLOTS as u32, Ordering::Relaxed);
-        let err = h.validate().unwrap_err().to_string();
-        assert!(err.contains("not a tutti audio slab"), "{err}");
+        let err = h.validate().unwrap_err();
+        assert!(matches!(err, SlabError::BadMagic { .. }), "{err}");
     }
 
     /// Corrupt magic is rejected. This is the first line of defence against
