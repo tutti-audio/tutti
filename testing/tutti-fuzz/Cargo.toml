@@ -20,7 +20,6 @@ tutti-midi-device = { path = "../../crates/tutti-midi-device" }
 tutti-midi-file = { path = "../../crates/tutti-midi-file" }
 tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
 tutti-ump = { path = "../../crates/tutti-ump" }
-tutti-types = { path = "../../crates/tutti-types" }
 
 [dev-dependencies]
 tutti-fixtures = { path = "../tutti-fixtures" }

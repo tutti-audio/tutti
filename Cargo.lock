@@ -2773,7 +2773,6 @@ dependencies = [
  "tutti-midi-device",
  "tutti-midi-file",
  "tutti-midi-protocol",
- "tutti-types",
  "tutti-ump",
 ]
 
