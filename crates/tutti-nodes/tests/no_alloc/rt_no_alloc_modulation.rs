@@ -20,8 +20,8 @@ use tutti_nodes::{
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
-    BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement, SampleRate, Seconds,
-    UnitParam,
+    Ballistics, BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement,
+    SampleRate, Seconds, UnitParam,
 };
 use tutti_ump::{MidiChannel, U7};
 
@@ -481,12 +481,7 @@ fn lane_block(
     bufs: &mut [Vec<f32>; 4],
 ) {
     let looping = tutti_types::LoopRange::new(tutti_types::Beat(0.1), tutti_types::Beat(0.5));
-    let graph_loop = looping.map(|l| tutti_graph::LoopRange {
-        start: l.start(),
-        end: l.end(),
-    });
-    let t =
-        tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), graph_loop);
+    let t = tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), looping);
     let [a, b, c, d] = bufs;
     exec.process(
         n,
@@ -826,10 +821,10 @@ fn lanes_transport(clock: &tutti_types::FrameClock) -> tutti_graph::TransportPos
         true,
         clock.tempo(),
         clock.origin(),
-        Some(tutti_graph::LoopRange {
-            start: tutti_types::Beat(0.5),
-            end: tutti_types::Beat(1.7),
-        }),
+        Some(
+            tutti_types::LoopRange::new(tutti_types::Beat(0.5), tutti_types::Beat(1.7))
+                .expect("a loop"),
+        ),
     )
 }
 
@@ -1065,8 +1060,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             );
             let follower = EnvelopeFollowerNode::new(
                 id,
-                Seconds::from_f32(0.001 + 0.0005 * k as f32),
-                Seconds(0.03),
+                Ballistics::new(Seconds::from_f32(0.001 + 0.0005 * k as f32), Seconds(0.03))
+                    .unwrap(),
                 ChannelLayout::STEREO,
             );
             ed.insert(node, "follower", ForkByClone(follower));

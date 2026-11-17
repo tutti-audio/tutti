@@ -303,7 +303,7 @@ fn continued_without_origin(
         && let Some(l) = from.looping
     {
         let (start, end) = (from.beat().get(), to.beat().get());
-        if start < l.end.get() && end >= l.end.get() {
+        if start < l.end().get() && end >= l.end().get() {
             return None;
         }
     }
@@ -458,9 +458,7 @@ impl Snapshot {
             tempo: t.tempo,
             tempo_inc: 0.0,
             beat: t.beat(),
-            // The graph's loop is an unchecked pair: one that is empty or
-            // reversed never wraps, so the plugin is told no cycle.
-            looping: t.looping.and_then(|l| LoopRange::new(l.start, l.end)),
+            looping: t.looping,
             loop_seconds: None,
             continuous,
             system_time_ns: block_ns
@@ -656,7 +654,7 @@ impl BlockTransport<'_> {
 mod tests {
     use super::*;
     use std::time::Instant;
-    use tutti_graph::{Env, LoopRange, TransportChanges, TransportHistory, TransportPosition};
+    use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
     use tutti_tempo::TempoMap;
     use tutti_types::Latency;
     use tutti_types::{BarNumber, BeatsPerBar, MeterChange, NoteValue, TimeSignature};
@@ -789,10 +787,7 @@ mod tests {
     /// reports it.
     #[test]
     fn a_seek_a_tempo_change_and_a_loop_wrap_inside_the_block_are_followed() {
-        let looping = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(4.0 + 32.0 / 24_000.0),
-        });
+        let looping = Some(LoopRange::new(Beat(4.0), Beat(4.0 + 32.0 / 24_000.0)).expect("a loop"));
         let t = TransportPosition::counted(
             true,
             Bpm::of(120.0),
@@ -998,7 +993,7 @@ mod tests {
     /// ((120 t + 18.75 t^2) / 60 at t = 0.8).
     fn ramp_map() -> TempoMap {
         TempoMap::new([
-            point(0.0, 120.0, tutti_tempo::Transition::RampTime),
+            point(0.0, 120.0, tutti_tempo::Transition::RampTime { end: None }),
             point(4.0, 180.0, tutti_tempo::Transition::Step),
         ])
         .expect("a map")
@@ -1051,8 +1046,8 @@ mod tests {
     #[test]
     fn a_stretch_with_a_point_inside_is_told_its_segments_slope() {
         let map = TempoMap::new([
-            point(0.0, 120.0, tutti_tempo::Transition::RampTime),
-            point(4.0, 180.0, tutti_tempo::Transition::RampTime),
+            point(0.0, 120.0, tutti_tempo::Transition::RampTime { end: None }),
+            point(4.0, 180.0, tutti_tempo::Transition::RampTime { end: None }),
             point(8.0, 60.0, tutti_tempo::Transition::Step),
         ])
         .expect("a map");
@@ -1097,10 +1092,7 @@ mod tests {
                 true,
                 Bpm::of(120.0),
                 Beat(1.8),
-                Some(LoopRange {
-                    start: Beat(1.0),
-                    end: Beat(end),
-                }),
+                Some(LoopRange::new(Beat(1.0), Beat(end)).expect("a loop")),
             )
         };
         // 64 frames at 150 BPM is 0.0033 beat.
@@ -1121,10 +1113,7 @@ mod tests {
             true,
             Bpm::of(120.0),
             Beat(3.0),
-            Some(LoopRange {
-                start: Beat(2.0),
-                end: Beat(8.0),
-            }),
+            Some(LoopRange::new(Beat(2.0), Beat(8.0)).expect("a loop")),
         );
         let got = told(&step_map(), looped, 64);
         let (start, end) = got
@@ -1208,9 +1197,8 @@ mod tests {
                 Cmd::Seek(beat) => self.clock.seat(Beat(beat)),
                 Cmd::Tempo(bpm) => self.clock.set_tempo(Bpm::of(bpm)),
                 Cmd::Loop(l) => {
-                    self.looping = l.map(|(start, end)| LoopRange {
-                        start: Beat(start),
-                        end: Beat(end),
+                    self.looping = l.map(|(start, end)| {
+                        LoopRange::new(Beat(start), Beat(end)).expect("a loop")
                     });
                 }
                 Cmd::Rate(hz) => self.clock.set_sample_rate(SampleRate::of(hz)),
@@ -1219,10 +1207,7 @@ mod tests {
 
         fn roll(&mut self, frames: usize) {
             if self.playing {
-                let region = self
-                    .looping
-                    .and_then(|l| tutti_types::LoopRange::new(l.start, l.end));
-                self.clock.advance(Samples(frames), region);
+                self.clock.advance(Samples(frames), self.looping);
             }
         }
 
@@ -1672,12 +1657,8 @@ mod tests {
     fn a_transport_built_by_hand_is_read_by_the_playheads_rule() {
         let per = |n: f64, bpm: f64| n * bpm / 60.0 / 48_000.0;
         let b1 = 10.0 + per(64.0, 120.0);
-        let lp = |start: f64, end: f64| {
-            Some(LoopRange {
-                start: Beat(start),
-                end: Beat(end),
-            })
-        };
+        let lp =
+            |start: f64, end: f64| Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
         let crossing = lp(9.0, b1 + per(16.0, 121.0));
         let behind = lp(5.0, 9.0);
         let read_after = |looping, playing, to: TransportPosition, rate| {

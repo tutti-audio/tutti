@@ -1,6 +1,7 @@
 use super::*;
 use crate::filter::crossover::CrossoverState;
 use crate::{Complex32, RealFft};
+use tutti_buffers::Mono;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -120,7 +121,7 @@ fn the_response_is_what_the_crossover_runs() {
     let mut scratch = fft.new_scratch();
     for (band, ir) in bands.iter().enumerate() {
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(ir, &mut bins, &mut scratch);
+        fft.forward(Mono::new(ir), &mut bins, &mut scratch);
         let (mut num, mut den) = (0.0f64, 0.0f64);
         for (i, b) in bins.iter().enumerate().step_by(5) {
             let want = at(&m, band, (i as f64 * RATE.get() / N as f64) as f32);

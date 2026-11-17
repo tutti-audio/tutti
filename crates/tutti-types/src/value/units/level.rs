@@ -50,6 +50,26 @@ impl Db {
         Db(20.0 * libm::log10f(amp.0))
     }
 
+    /// The amplitude ratio of `db` decibels in `f64`, `10^(db / 20)`: the working-precision
+    /// path for analysis and design, which widens a [`Db`] once at entry
+    /// (`f64::from(db.get())`) and narrows once at the end. The `f32` converters
+    /// ([`to_amplitude`](Self::to_amplitude)) stay the API. Through `libm`, so the result is
+    /// the same on every target.
+    #[inline]
+    #[must_use]
+    pub fn to_amplitude_f64(db: f64) -> f64 {
+        libm::pow(10.0, db / 20.0)
+    }
+
+    /// Decibels of an amplitude ratio in `f64`, `20 log10 ratio`: `-inf` for 0, NaN for a
+    /// negative ratio, as [`from_amplitude`](Self::from_amplitude) and under the same
+    /// working-precision rule as [`to_amplitude_f64`](Self::to_amplitude_f64).
+    #[inline]
+    #[must_use]
+    pub fn from_amplitude_f64(ratio: f64) -> f64 {
+        20.0 * libm::log10(ratio)
+    }
+
     /// A power ratio as decibels (`10·log10`). `power` is a dimensionless
     /// ratio of powers, the square of an amplitude ratio, so `0.5` is
     /// about -3.01 dB.

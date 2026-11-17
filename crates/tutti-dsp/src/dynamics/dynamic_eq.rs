@@ -42,7 +42,7 @@ use tutti_types::{
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction, compute_upward_gain_lift};
 use super::key_filter::KeyStage;
-use super::shared::{Ballistics, MAX_KNEE_DB};
+use super::shared::{Follower, MAX_KNEE_DB, floored};
 use crate::delay::finite_or;
 use crate::{
     COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
@@ -130,7 +130,7 @@ struct Design {
     knee: Db,
     ratio: CompressionRatio,
     range: f32,
-    ballistics: Ballistics,
+    ballistics: Follower,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
     key_scale: f32,
     /// The one-pole coefficient of the detector's mean square.
@@ -143,7 +143,7 @@ impl Design {
         knee: Db(0.0),
         ratio: CompressionRatio::UNITY,
         range: 0.0,
-        ballistics: Ballistics::NEUTRAL,
+        ballistics: Follower::NEUTRAL,
         key_scale: 1.0,
         mean: 1.0,
     };
@@ -158,7 +158,7 @@ impl Design {
             knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             range: finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB),
-            ballistics: Ballistics::of(c.attack, c.release, rate),
+            ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: 1.0 / q.get(),
             mean: Seconds(tau).one_pole_coeff(rate),
         }

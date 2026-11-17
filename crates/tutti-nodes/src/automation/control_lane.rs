@@ -451,10 +451,7 @@ fn roll_one(t: TransportPosition, rate: tutti_types::SampleRate) -> TransportPos
         return t;
     }
     let mut clock = t.clock(rate);
-    let region = t
-        .looping
-        .and_then(|l| tutti_types::LoopRange::new(l.start, l.end));
-    clock.advance(Samples(1), region);
+    clock.advance(Samples(1), t.looping);
     TransportPosition::counted(t.playing, t.tempo, clock.origin(), t.looping)
 }
 
@@ -618,7 +615,7 @@ impl Block<'_> {
         };
         // The loop's wrap, a point of its own, in frames from here.
         let wrap = match (fpb, t.looping) {
-            (Some(f), Some(l)) if l.end.get() > beat => Some((l.end.get() - beat) * f),
+            (Some(f), Some(l)) if l.end().get() > beat => Some((l.end().get() - beat) * f),
             _ => None,
         };
         let pf = p as f64;

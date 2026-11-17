@@ -14,7 +14,7 @@ use tutti_graph::{
     Reference, ScheduleError, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, Samples, Tail};
+use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, Samples, Tail};
 use tutti_ump::Ump;
 
 /// `(absolute frame, block start, offset, tag)` per event received.
@@ -685,10 +685,7 @@ fn at_beat(beat: f64, playing: bool, tempo: f64, looping: Option<(f64, f64)>) ->
         playing,
         Bpm::of(tempo),
         Beat(beat),
-        looping.map(|(start, end)| tutti_graph::LoopRange {
-            start: Beat(start),
-            end: Beat(end),
-        }),
+        looping.map(|(start, end)| LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
     )
 }
 
@@ -1201,10 +1198,7 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
             true,
             Bpm::of(120.0),
             Beat(beat),
-            Some(tutti_graph::LoopRange {
-                start: Beat(start),
-                end: Beat(end),
-            }),
+            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
         )
     };
     let step = |b: f64| {

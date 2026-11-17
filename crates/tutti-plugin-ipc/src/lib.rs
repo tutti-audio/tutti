@@ -32,6 +32,7 @@ mod protocol;
 mod server_watch;
 mod subprocess;
 mod transport;
+mod wake;
 
 #[cfg(test)]
 mod process_pipeline_tests;
@@ -42,6 +43,7 @@ pub(crate) use client::audio::BridgeListener;
 pub use client::audio::{BridgeEvent, BridgeThread, HarmonyInputs, Submitted};
 pub(crate) use client::audio::{FATES, Fate};
 pub use client::{EditorLoader, PluginBridge};
+pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.
 #[doc(hidden)]

@@ -2,7 +2,7 @@
 
 use tutti_midi_network::{Digest, Nonce, Username};
 
-/// Spec: m2-124/6.9#9
+/// Spec: m2-124/6.9#8
 #[test]
 fn shared_secret_digest_matches_the_specification_example() {
     let nonce = Nonce::new(*b"nUWrn*@#$hjfwnkL").unwrap();
@@ -37,6 +37,7 @@ fn digests_that_differ_in_one_byte_do_not_match() {
 }
 
 /// The nonce is ASCII ordinals 32-126.
+/// Spec: m2-124/6.7#14
 #[test]
 fn a_nonce_holds_only_the_printable_ascii_range() {
     let good = *b"0123456789abcdef";

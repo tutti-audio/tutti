@@ -27,23 +27,16 @@ crates/tutti-dsp/src/convolver.rs::Convolver::new  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::process_block  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::with_ir  pending
 crates/tutti-dsp/src/dither.rs::DitherNoise::apply  pending
-crates/tutti-dsp/src/fft/real.rs::RealFft::forward  pending
-crates/tutti-dsp/src/fft/real.rs::RealFft::inverse  pending
-crates/tutti-dsp/src/fft/scratch.rs::FftScratch::forward  pending
-crates/tutti-dsp/src/fft/scratch.rs::FftScratch::inverse  pending
-crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::forward_step  pending
-crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  pending
 crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::hold  pending
 crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::process  pending
-crates/tutti-dsp/src/resample/fft.rs::FftResampler::process_into_buffer  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::finish  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::push  pending
 crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::process  pending
 crates/tutti-dsp/src/spatial/vbap.rs::VbapGains::render_channel  pending
 crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  pending
-crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  pending
-crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  pending
-crates/tutti-dsp/src/stft/window.rs::Window::coefficients  pending
+crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-audio: a window's weights
+crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
+crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights
 crates/tutti-engine/src/callback.rs::OutputBlock::render  engine-f32
 crates/tutti-engine/src/callback.rs::process_audio  engine-f32
 crates/tutti-engine/src/engine.rs::Engine::process  engine-f32
@@ -62,16 +55,6 @@ crates/tutti-graph/src/contract.rs::drive  spec-f32: the param lanes are f32 by 
 crates/tutti-graph/src/contract.rs::drive_input  spec-f32: the param lanes are f32 by spec; the audio edge is generic
 crates/tutti-graph/src/param.rs::ParamInput.Frames  spec-f32: control values are f32 by spec
 crates/tutti-graph/src/param.rs::ParamInput::frames  spec-f32: control values are f32 by spec
-crates/tutti-graph/src/reference.rs::Reference::process  pending
-crates/tutti-graph/src/reference.rs::Reference::process_with_changes  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_planes  pending
-crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  pending
-crates/tutti-graph/src/testing.rs::Pair::block  pending
-crates/tutti-graph/src/testing.rs::Pair::block_at  pending
-crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
-crates/tutti-graph/src/testing.rs::bits  pending
-crates/tutti-graph/src/testing.rs::input_signal  pending
 crates/tutti-measure/src/features.rs::spectral_centroid  not-audio: a magnitude spectrum
 crates/tutti-measure/src/features.rs::spectral_flatness  not-audio: a magnitude spectrum
 crates/tutti-measure/src/features.rs::spectral_rolloff  not-audio: a magnitude spectrum

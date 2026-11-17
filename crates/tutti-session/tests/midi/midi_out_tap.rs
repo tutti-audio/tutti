@@ -251,9 +251,9 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     let sent: Vec<UmpAt> = wire.batches().concat();
     let kinds: Vec<(u32, bool)> = sent
         .iter()
-        .filter_map(|(at, ump)| match ump.key_event() {
-            Some(tutti_ump::KeyEvent::On(_)) => Some((at.get(), true)),
-            Some(tutti_ump::KeyEvent::Off(_)) => Some((at.get(), false)),
+        .filter_map(|(at, ump)| match ump.note_key_event() {
+            Some(tutti_ump::NoteKeyEvent::On(_)) => Some((at.get(), true)),
+            Some(tutti_ump::NoteKeyEvent::Off(_)) => Some((at.get(), false)),
             _ => None,
         })
         .collect();
@@ -373,8 +373,8 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         match ump.decode() {
             Ok(Message::Utility(tutti_ump::Utility::JrTimestamp(t))) => stamp = Some(t),
             _ if matches!(
-                ump.key_event(),
-                Some(tutti_ump::KeyEvent::On(_) | tutti_ump::KeyEvent::Off(_))
+                ump.note_key_event(),
+                Some(tutti_ump::NoteKeyEvent::On(_) | tutti_ump::NoteKeyEvent::Off(_))
             ) =>
             {
                 notes.push(stamp.expect("every event follows its stamp"));

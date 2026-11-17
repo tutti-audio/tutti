@@ -58,6 +58,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "analyze")]
+mod analyze;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -136,6 +138,8 @@ mod value;
 #[cfg(feature = "device")]
 mod watch;
 
+#[cfg(feature = "analyze")]
+pub use analyze::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,

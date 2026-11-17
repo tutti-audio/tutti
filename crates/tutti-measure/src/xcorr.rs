@@ -7,7 +7,7 @@
 //! the direct sum. A caller that wants a weighted variant (phase transform)
 //! reshapes the cross-spectrum through [`cross_correlate_shaped`].
 
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_types::Samples;
 
 use crate::convert::to_f32;
@@ -130,7 +130,7 @@ pub(crate) fn cross_correlate_shaped(
         let mut padded = vec![0.0f32; size];
         padded[..signal.len()].copy_from_slice(signal);
         let mut out = vec![Complex32::default(); bins];
-        fft.forward(&padded, &ones, &mut out);
+        fft.forward(Mono::new(&padded), &ones, &mut out);
         out
     };
     let mut cross = spectrum(a, fft);
@@ -141,7 +141,7 @@ pub(crate) fn cross_correlate_shaped(
     shape(&mut cross);
 
     let mut circular = vec![0.0f32; size];
-    fft.inverse(&cross, &mut circular);
+    fft.inverse(&cross, MonoMut::new(&mut circular));
 
     // Negative lags wrapped to the end of the circular result; lay them out in
     // front of the non-negative ones.

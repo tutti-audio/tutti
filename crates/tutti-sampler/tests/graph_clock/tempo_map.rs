@@ -81,7 +81,7 @@ fn step_seconds(b: f64) -> f64 {
 /// 60 to 240 BPM over 8 beats, linear in time, then 240.
 fn ramp() -> Arc<TempoMap> {
     map(&[
-        (0.0, 60.0, Transition::RampTime),
+        (0.0, 60.0, Transition::RampTime { end: None }),
         (8.0, 240.0, Transition::Step),
     ])
 }
