@@ -11,6 +11,7 @@
 #       config-width  a `*Config` constructor whose first parameter is not a width
 #       ctor-result   a receiverless `pub fn` returning its type in a `Result`
 #       range-macro   a `macro_rules!` writing a range type outside tutti-types
+#       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
 # key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
 
 # tutti-au-host
@@ -116,6 +117,11 @@ tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channe
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
+tutti-export  option-arg  crates/tutti-export/src/graph.rs::Setup::pool
+tutti-export  option-arg  crates/tutti-export/src/graph.rs::Setup::root
+tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::dither
+tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::normalize
+tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::resample
 
 # tutti-graph
 tutti-graph  with-prefix  crates/tutti-graph/src/event.rs::ParamRamp::with_shape
@@ -408,6 +414,7 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginContr
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_pipeline
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_tail
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcClient::set_render_mode
+tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
 tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::at
@@ -459,6 +466,9 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::Tra
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/lifecycle.rs::State::set_mode
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOutput::set_params_unsent
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOutput::set_status
+tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/metadata.rs::PluginBus::placed
+tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
+tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
 
 # tutti-polysynth
 tutti-polysynth  setter  crates/tutti-polysynth/src/polysynth.rs::PolySynth::set_volume
@@ -562,6 +572,8 @@ tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::star
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/session.rs::Session::new
+tutti-session  option-arg  crates/tutti-session/src/bounce.rs::Bounce::root_topology
+tutti-session  option-arg  crates/tutti-session/src/builder.rs::SessionBuilder::plugin_recovery
 
 # tutti-sf2
 tutti-sf2  ctor-result  crates/tutti-sf2/src/soundfont.rs::SoundFont::from_reader
@@ -630,3 +642,4 @@ tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/loaded/buses.rs::Vst3Lo
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/loaded/editor.rs::Vst3Loaded::set_editor_focus
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/processor.rs::Vst3Processor::set_prefetch
 tutti-vst3-host  ctor-result  crates/tutti-vst3-host/src/host/controller.rs::Vst3Loaded::deactivate_typed
+tutti-vst3-host  option-arg  crates/tutti-vst3-host/src/types/mod.rs::PluginInfo::sub_categories

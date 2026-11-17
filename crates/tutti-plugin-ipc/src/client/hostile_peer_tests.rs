@@ -51,8 +51,8 @@ const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 /// out the real margin.
 const REPLY_MARGIN: Duration = Duration::from_millis(200);
 
-/// The shortened deadline the stall tests run with (the slow-transfer test has
-/// its own, wider one).
+/// The shortened deadline the stall tests run with (the chunked-reassembly test
+/// has its own, wider one).
 ///
 /// Two orders of magnitude under production, so a stalled transfer is detected
 /// in a fraction of a second, and comfortably over the 20 ms poll interval so a
@@ -1489,39 +1489,24 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
 
 // ── State transfer: progress, not a total ────────────────────────────────────
 
-/// A slow but *steadily progressing* transfer must complete, however long it
-/// takes in total.
+/// A *steadily progressing* transfer must complete, however long it takes in
+/// total.
 ///
 /// A fixed budget for the whole transfer would make
-/// [`MAX_STATE_BYTES`](crate::protocol::MAX_STATE_BYTES) unreachable — a
-/// gigabyte cannot cross the control socket inside 10 s, so a large-but-legal
-/// state would fail on the clock and read as a hung plugin.
-///
-/// **Scaled, not literal.** Proving this with real sizes would mean moving a
-/// gigabyte through a socket. Instead the *ratio* is reproduced: 30 chunks at a
-/// gap that sums to comfortably more than the deadline any single-budget
-/// implementation would impose. With `SLOW_TRANSFER_TIMEOUT` at 2 s and a
-/// 50 ms gap the transfer takes ~3 s — 1.5x a total budget, while no single gap
-/// comes within 40x of it. Under a total budget this is a timeout; under a
-/// progress deadline it simply works.
-///
-/// **Its own deadline, wider than the stall tests'.** This test fails if any
-/// one gap outlasts the deadline, so a scheduler pause on a loaded runner is a
-/// failure here, where in the stall tests it only delays detection. At 400 ms
-/// it failed on a shared macOS runner with `Stalled { bytes: 1 }`: the first
-/// 40 ms gap took over 400 ms of wall clock.
+/// [`MAX_STATE_BYTES`](crate::protocol::MAX_STATE_BYTES) unreachable. That a
+/// transfer advancing inside its window is live however many windows it spans
+/// is the `StallWatch` rule, tested over constructed instants in
+/// `client::audio::progress`; this test carries the reassembly through the
+/// bridge: 60 chunks, a byte each, arriving with a gap, come back in order.
+/// The window and the guard are far past anything a loaded machine spends, and
+/// the test asserts completion, never how long it took.
 #[test]
-fn a_slow_but_progressing_state_transfer_completes() {
-    /// Enough chunks that the total dwarfs the deadline while each gap stays
-    /// well under it.
+fn a_chunked_state_transfer_reassembles_in_order() {
     const CHUNKS: usize = 60;
-    const GAP: Duration = Duration::from_millis(50);
-    const SLOW_TRANSFER_TIMEOUT: Duration = Duration::from_secs(2);
+    const GAP: Duration = Duration::from_millis(2);
 
-    // One byte per chunk: this test is about *timing*, and materialising a
-    // realistically-sized state to prove a deadline would make it slow for a
-    // reason unrelated to what it asserts. The byte pattern still catches a
-    // chunk dropped or reordered by a progress-accounting bug.
+    // One byte per chunk; the byte pattern catches a chunk dropped or
+    // reordered by a progress-accounting bug.
     let expected: Vec<u8> = (0..CHUNKS).map(|i| (i % 251) as u8).collect();
     let msgs: Vec<BridgeMessage> = (0..CHUNKS)
         .map(|i| BridgeMessage::StateChunk {
@@ -1533,7 +1518,7 @@ fn a_slow_but_progressing_state_transfer_completes() {
 
     let mock = MockServer::start_with_state_progress_timeout(
         "slow-state",
-        SLOW_TRANSFER_TIMEOUT,
+        Duration::from_secs(60),
         move |msg| match msg {
             HostMessage::SaveState { .. } => Action::ReplyManySlowly {
                 msgs: msgs.clone(),
@@ -1544,29 +1529,17 @@ fn a_slow_but_progressing_state_transfer_completes() {
     );
 
     let bridge = Arc::clone(&mock.bridge);
-    let (got, elapsed) =
-        call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-            .unwrap_or_else(|w| panic!("a steadily-progressing save_state blocked for {w:?}"));
-    let got = got.unwrap_or_else(|e| {
-        panic!(
-            "a slow but progressing transfer failed with {e} — a plugin that is \
-             advancing is working, and must not be failed for being slow"
-        )
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(bridge.save_state(tutti_plugin_types::StateUse::Project));
     });
+    let got = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("a progressing save_state never returned");
+    let got = got.unwrap_or_else(|e| panic!("a progressing transfer failed with {e}"));
     assert_eq!(
         got, expected,
         "the reassembled state does not match what the peer sent"
-    );
-
-    // The transfer really did outlast a single-budget deadline. Without this the
-    // test would still pass if the gaps were tuned down until the whole transfer
-    // fit inside one deadline — at which point it no longer distinguishes a
-    // progress budget from a total one.
-    assert!(
-        elapsed > SLOW_TRANSFER_TIMEOUT,
-        "the transfer finished in {elapsed:?}, inside the {SLOW_TRANSFER_TIMEOUT:?} \
-         deadline — it would have passed under a fixed total budget too, so it \
-         does not test what it claims"
     );
 }
 

@@ -46,7 +46,7 @@ use tutti_ump::{Message, Voice2};
 
 /// Every phase at `now`: one update, at a time the test picks.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
+fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, PhaseCx::at(now), &mut out);
@@ -1010,7 +1010,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
         family: [tutti_ump::U7::of(1); 2],
         model: [tutti_ump::U7::of(2); 2],
-        revision: [tutti_ump::U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from([tutti_ump::U7::of(3); 4]),
     });
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
@@ -1040,7 +1040,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
             manufacturer: tutti_ump::ManufacturerId::of(0x41),
             family: [tutti_ump::U7::of(1); 2],
             model: [tutti_ump::U7::of(2); 2],
-            revision: [tutti_ump::U7::of(3); 4],
+            revision: tutti_ump::SoftwareRevision::from([tutti_ump::U7::of(3); 4]),
         },
         CiCategories::empty(),
         MaxSysexSize::of(256),
@@ -1129,7 +1129,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         manufacturer,
         family: [U7::of(1); 2],
         model: [U7::of(2); 2],
-        revision: [U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     };
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
@@ -1475,7 +1475,7 @@ impl MpePeer {
                             manufacturer: ManufacturerId::of(0x41),
                             family: [U7::of(1); 2],
                             model: [U7::of(2); 2],
-                            revision: [U7::of(3); 4],
+                            revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
                         },
                         CiCategories::PROFILE_CONFIGURATION | CiCategories::PROCESS_INQUIRY,
                         MaxSysexSize::of(256),
@@ -1631,7 +1631,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
         manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
         family: [tutti_ump::U7::of(1); 2],
         model: [tutti_ump::U7::of(2); 2],
-        revision: [tutti_ump::U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from([tutti_ump::U7::of(3); 4]),
     });
     let (synth, seen) = tap(&mut s);
     s.midi()
@@ -1794,7 +1794,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         manufacturer,
         family: [U7::of(1); 2],
         model: [U7::of(2); 2],
-        revision: [U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     };
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);

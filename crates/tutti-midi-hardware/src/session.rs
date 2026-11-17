@@ -51,7 +51,10 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
-use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
+use tutti_midi_device::{
+    DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, ProductInstanceId, SavedDevice,
+    random_bytes,
+};
 use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::{GroupSpan, MidiGroup};
 
@@ -88,6 +91,10 @@ pub struct MidiSession {
     /// Who the session presents itself as on every input with an output; `None`
     /// presents nothing ([`present`](MidiSession::present)).
     presented: Option<Presented>,
+    /// The Product Instance Id the session declares for a [`presented`](Self::presented)
+    /// identity that carries none, made once and kept so every rebuilt Endpoint
+    /// declares the same one ([`instance_id`](MidiSession::instance_id)).
+    generated_instance: Option<ProductInstanceId>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: Arc<Mutex<ResourceStore>>,
@@ -308,6 +315,7 @@ impl MidiSession {
             devices: Devices::open_over(backend)?,
             options,
             presented: None,
+            generated_instance: None,
             properties: Arc::default(),
         })
     }
@@ -556,7 +564,11 @@ impl MidiSession {
     /// rings and sends.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
         let mut polled = Vec::new();
-        let presented = self.presented;
+        let generated = self.generated_instance;
+        let presented = self.presented.map(|mut who| {
+            who.identity.instance = who.identity.instance.or(generated);
+            who
+        });
         let ci = presented.is_some();
         let ports = &*self.ports;
         for (id, held) in &mut self.inputs {
@@ -638,12 +650,37 @@ impl MidiSession {
     /// A session built by `tutti-session` has this set on every update from its
     /// `MidiPolicy`, which overwrites a call made here.
     ///
+    /// An identity with no Product Instance Id is declared with one the session
+    /// makes the first time it is presented so and keeps
+    /// ([`instance_id`](Self::instance_id)), so the Id (M2-104 §7.1.5) is the
+    /// same through every change of name or Groups; one the identity carries is
+    /// declared as it is.
+    ///
     /// A change of identity ends the devices that ran (each sends Invalidate
     /// MUID for its own MUID, its peers are lost) and the new identity starts
     /// them again under fresh MUIDs, all in the next poll; a change of name or
     /// Product Instance Id alone re-announces the Endpoint.
     pub fn present(&mut self, who: Option<Presented>) {
+        if self.generated_instance.is_none()
+            && who.is_some_and(|who| who.identity.instance.is_none())
+        {
+            self.generated_instance = random_bytes().ok().map(ProductInstanceId::from_random);
+        }
         self.presented = who;
+    }
+
+    /// The Product Instance Id in force: the presented identity's own when it
+    /// has one, else the one the session made for it
+    /// ([`present`](Self::present)), else `None` (before an identity without
+    /// one was presented, or when the operating system had no random bytes).
+    /// An app keeps it (it is serde with the `serde` feature) and puts it in
+    /// the [`MidiIdentity`] it presents next time, so the Id re-identifies the
+    /// device after a power cycle.
+    #[must_use]
+    pub fn instance_id(&self) -> Option<ProductInstanceId> {
+        self.presented
+            .and_then(|who| who.identity.instance)
+            .or(self.generated_instance)
     }
 
     /// Who the session presents itself as ([`present`](Self::present)).

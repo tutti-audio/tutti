@@ -56,12 +56,16 @@ fn the_close_yields_while_a_helper_is_inside() {
 
 /// The close yields after the gate's own budget, not the default: with
 /// a budget of an hour and its clock stepping the default budget per
-/// read, it waits 50 ms on a helper inside without yielding. Linux only,
-/// as the yield is.
+/// read, it reads the clock `READS` times waiting on a helper inside
+/// without yielding. The helper stays inside until it sees the reads
+/// counted; the 10 s bound is only how a close that never waits fails
+/// rather than hangs. Linux only, as the yield is.
 #[test]
 fn the_close_yields_after_the_gates_budget() {
     use std::time::Duration;
     static YIELDED: AtomicU32 = AtomicU32::new(0);
+    static READ: AtomicU32 = AtomicU32::new(0);
+    const READS: u32 = 8;
     let waits = BlockWaits {
         caller_yield_after: Duration::from_secs(3600),
         ..BlockWaits::DEFAULT
@@ -69,6 +73,7 @@ fn the_close_yields_after_the_gates_budget() {
     let gate = JobGate::with_waits(2, waits);
     assert_eq!(gate.waits(), waits);
     let inside = AtomicBool::new(false);
+    let reads = AtomicU32::new(0);
     let stop = AtomicBool::new(false);
     std::thread::scope(|s| {
         s.spawn(|| {
@@ -78,6 +83,7 @@ fn the_close_yields_after_the_gates_budget() {
             }
         });
         crate::spin::tests::yielding::count_yields_into(&YIELDED);
+        crate::spin::tests::count_clock_reads_into(&READ);
         crate::spin::tests::step_clock(BlockWaits::DEFAULT.caller_yield_after);
         let joined = gate.run(
             &|i| {
@@ -90,7 +96,13 @@ fn the_close_yields_after_the_gates_budget() {
                     }
                 } else {
                     inside.store(true, Ordering::Release);
-                    std::thread::sleep(Duration::from_millis(50));
+                    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                    while READ.load(Ordering::Acquire) < READS
+                        && std::time::Instant::now() < deadline
+                    {
+                        std::thread::yield_now();
+                    }
+                    reads.store(READ.load(Ordering::Acquire), Ordering::Relaxed);
                 }
             },
             || {},
@@ -99,5 +111,9 @@ fn the_close_yields_after_the_gates_budget() {
         stop.store(true, Ordering::Release);
     });
     assert!(inside.load(Ordering::Relaxed), "the helper joined");
+    assert!(
+        reads.load(Ordering::Relaxed) >= READS,
+        "the close never made {READS} clock reads while the helper was inside"
+    );
     assert_eq!(YIELDED.load(Ordering::Acquire), 0);
 }

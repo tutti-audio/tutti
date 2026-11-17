@@ -158,6 +158,10 @@ pub fn asset(rel: &str) -> PathBuf {
 /// grandparent when the parent is `deps` or `examples`.
 ///
 /// Pure over the path, so the layouts are testable without cargo.
+///
+/// # Panics
+///
+/// Panics when `exe` has no parent directory.
 pub fn profile_dir_of(exe: &Path) -> PathBuf {
     let dir = exe.parent().expect("an executable path has a parent");
     let in_artifact_dir = dir

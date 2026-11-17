@@ -24,6 +24,7 @@ objc2-foundation = { workspace = true }
 objc2-core-midi = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-foundation = { workspace = true, features = ["NSDictionary"] }
 objc2-core-midi = { workspace = true, features = ["block2", "MIDIUMPMutableEndpoint", "MIDIUMPMutableFunctionBlock"] }
 
 [package.metadata.docs.rs]

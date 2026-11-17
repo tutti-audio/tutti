@@ -29,7 +29,7 @@ mod os;
 
 pub use exit::ExitWait;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
-pub use mapping::{MappingWriter, SharedMapping, remove};
+pub use mapping::{MappingWriter, SharedMapping};
 pub use os::process_exists;
 #[cfg(unix)]
 pub use os::{ERROR, Poller, READ, WRITE, poll_now, wait_readable};

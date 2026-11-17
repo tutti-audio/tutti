@@ -117,7 +117,6 @@ struct Options {
     mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
-    #[cfg(feature = "modulation")]
     unresolved_warning: std::time::Duration,
     #[cfg(feature = "plugin")]
     snapshot_interval: std::time::Duration,
@@ -161,7 +160,6 @@ impl Default for Options {
             mpe_mode: tutti_midi_protocol::MpeMode::Disabled,
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
-            #[cfg(feature = "modulation")]
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             #[cfg(feature = "plugin")]
             snapshot_interval: crate::plugin::SNAPSHOT_INTERVAL,
@@ -774,7 +772,6 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`PhaseCx::now`](crate::PhaseCx::now), before it is logged and
     /// reported ([`SessionEvent::Modulation`](crate::SessionEvent::Modulation)).
     /// Default 4 s.
-    #[cfg(feature = "modulation")]
     #[must_use]
     pub fn unresolved_warning(mut self, after: std::time::Duration) -> Self {
         self.opts.unresolved_warning = after;
@@ -965,7 +962,6 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "midi-hardware")]
             midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
                 .with_mpe(self.opts.mpe_mode),
-            #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]
             midi_io: parts.midi_io,
