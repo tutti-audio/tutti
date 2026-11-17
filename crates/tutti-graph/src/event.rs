@@ -51,7 +51,7 @@ use crate::time::Offset;
 ///   the raw `f32`), because one event port carries ramps for parameters of
 ///   different units and an `Event` has to be one `Copy` type. The raw value
 ///   is private: nothing reads a built-in ramp without naming its key.
-/// - **Foreign params** ([`ParamRamp::foreign`]) carry an opaque `u32` id and
+/// - **Foreign params** ([`ParamRamp::foreign`]) carry a [`ParamId`](tutti_types::ParamId) and
 ///   a raw value in the foreign unit's own normalisation. That is the C ABI
 ///   boundary the units rule stops at: tutti does not know the unit.
 ///
@@ -246,7 +246,7 @@ impl ShapeTag {
 /// interrupted segment had reached.
 ///
 /// Addressed and typed as [`ParamRamp`] is (built-in params by
-/// [`ParamKey<U>`], foreign ones by an opaque `u32`). A param port's range
+/// [`ParamKey<U>`], foreign ones by a `ParamId`). A param port's range
 /// is applied when the port reads the value, never to the endpoints.
 ///
 /// ```
