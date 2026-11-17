@@ -271,7 +271,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-buffers",
         "",
-        "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt",
+        "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt, and a hand interleave loop or frame-times-width length in src only as a row of xtask/buffers-loops.txt",
     ),
     (
         "check-session-api",

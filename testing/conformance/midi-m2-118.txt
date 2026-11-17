@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-118/<section>#<n>          the nth sentence under the numbered section
@@ -21,15 +24,15 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-118/1.2.1#1 | both |  | permitted | M2-118 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-118/1.2.1#2 | both |  | permitted | M2-118 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
-m2-118/3.1#1 | receiver |  | required | M2-118 §3.1 | a GM2 Profile device meets the General MIDI 2 minimum requirements |  |  |
-m2-118/3.2#1 | receiver |  | required | M2-118 §3.2 | a GM2 Profile device answers Profile Configuration messages to turn GM2 on and off |  |  |
-m2-118/3.2.1#1 | receiver |  | permitted | M2-118 §3.2.1 | a device can also keep the old GM1 and GM2 System On mechanisms for older peers |  |  |
-m2-118/3.2.1#2 | receiver |  | permitted | M2-118 §3.2.1 | a device can respond to GM1 System On, GM2 System On and GM System Off |  |  |
-m2-118/3.2.1#3 | receiver |  | required | M2-118 §3.2.1 | a device that turns GM on by GM1 or GM2 System On sends Profile Enabled |  |  |
-m2-118/3.2.1#4 | receiver |  | required | M2-118 §3.2.1 | a device that turns GM off by GM System Off sends Profile Disabled |  |  |
-m2-118/3.3#1 | both |  | required | M2-118 §3.3 | the Device ID of every GM2 Profile message is 0x7F, the Function Block |  |  |
-m2-118/3.3#2 | sender |  | permitted | M2-118 §3.3 | a Sender can learn a Function Block's channel count through UMP mechanisms |  |  |
-m2-118/3.3#3 | receiver |  | required | M2-118 §3.3 | a Function Block of two or more Groups applies GM2 Channel rules to each Group |  |  |
-m2-118/3.5#1 | both |  | permitted | M2-118 §3.5 | the Profile can be carried in the protocols and formats listed after it |  |  |
+m2-118/1.2.1#1 | both |  | permitted | M2-118 §1.2.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-118/1.2.1#2 | both |  | permitted | M2-118 §1.2.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |  | 7feaf7f9d052ffeb
+m2-118/3.1#1 | receiver |  | required | M2-118 §3.1 | a GM2 Profile device meets the General MIDI 2 minimum requirements |  |  |  | f680f5c4e3c83bdf
+m2-118/3.2#1 | receiver |  | required | M2-118 §3.2 | a GM2 Profile device answers Profile Configuration messages to turn GM2 on and off |  |  |  | 230e73f81d8df750
+m2-118/3.2.1#1 | receiver |  | permitted | M2-118 §3.2.1 | a device can also keep the old GM1 and GM2 System On mechanisms for older peers |  |  |  | 9cea75a00cb0e705
+m2-118/3.2.1#2 | receiver |  | permitted | M2-118 §3.2.1 | a device can respond to GM1 System On, GM2 System On and GM System Off |  |  |  | f4e80acfa2da2f49
+m2-118/3.2.1#3 | receiver |  | required | M2-118 §3.2.1 | a device that turns GM on by GM1 or GM2 System On sends Profile Enabled |  |  |  | 2d4767cff9daf200
+m2-118/3.2.1#4 | receiver |  | required | M2-118 §3.2.1 | a device that turns GM off by GM System Off sends Profile Disabled |  |  |  | 6331207cf8a2b315
+m2-118/3.3#1 | both |  | required | M2-118 §3.3 | the Device ID of every GM2 Profile message is 0x7F, the Function Block |  |  |  | 40f291ea08caca19
+m2-118/3.3#2 | sender |  | permitted | M2-118 §3.3 | a Sender can learn a Function Block's channel count through UMP mechanisms |  |  |  | f65e5bbbfb687655
+m2-118/3.3#3 | receiver |  | required | M2-118 §3.3 | a Function Block of two or more Groups applies GM2 Channel rules to each Group |  |  |  | 859d28bdc3d55a87
+m2-118/3.5#1 | both |  | permitted | M2-118 §3.5 | the Profile can be carried in the protocols and formats listed after it |  |  |  | 5ed40e7f3e86ee74
