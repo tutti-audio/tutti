@@ -34,7 +34,7 @@ use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
 use tutti::session::{Peer as _, PoolEvent};
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, Normalized, ParamId, Pcm, PluginEvent, PluginRef,
-    Range, Root, SampleRate, Samples, Session, SessionEvent,
+    Range, Root, SampleRate, Samples, Session, SessionEvent, StateUse,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -172,13 +172,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    crash-recovery copy, up to a snapshot interval old). The state names
     //    the plugin it came from, so a project that keeps it restores it into
     //    that plugin and no other.
-    let state = hosted.state().save()?;
+    let state = hosted.state().save(StateUse::Project)?;
     let state_path = out.with_extension("state");
     std::fs::write(&state_path, state.bytes())?;
     eprintln!(
         "saved {} bytes of {} to {}",
         state.bytes().len(),
-        state.plugin().id().unwrap_or("the plugin"),
+        state.peer(),
         state_path.display()
     );
 

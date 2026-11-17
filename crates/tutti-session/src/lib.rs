@@ -104,6 +104,8 @@ mod node;
 mod os_clock;
 mod params;
 mod peer;
+#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
+mod peer_state;
 #[cfg(feature = "plugin")]
 mod plugin;
 #[cfg(feature = "plugin")]
@@ -204,12 +206,14 @@ pub use modulation::{
 pub use node::{Reclaimer, Reclaims, SessionNode};
 pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
+#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
+pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    PortsRefusal, PresetJobError, PresetJobFailed, RestoreState, SaveState, StateJobError,
-    StateJobFailed, StateRestore, StateView,
+    PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState, SaveState,
+    StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
