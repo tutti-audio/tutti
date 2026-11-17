@@ -513,8 +513,7 @@ fn a_non_ascii_nonce_is_refused() {
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
 }
 
-/// Spec: m2-124/6.7 (the sender's nonce is ASCII 32-126; a received one is
-/// only hashed, so any ASCII is read)
+/// The sender's nonce is ASCII 32-126; a received one is only hashed, so any ASCII is read.
 #[test]
 fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
     let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
@@ -605,7 +604,8 @@ fn texts_refuse_a_nul_and_overlong_input() {
     assert!(Username::new(&"u".repeat(988)).is_ok());
 }
 
-/// Spec: m2-124/6.15#2, m2-124/6.16#5 (advisory text: what is UTF-8 is kept)
+/// Advisory text: what is UTF-8 is kept.
+/// Spec: m2-124/6.15#2, m2-124/6.16#5
 #[test]
 fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
     let bye = one(&[

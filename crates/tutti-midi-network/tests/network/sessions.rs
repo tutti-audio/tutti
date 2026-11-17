@@ -654,8 +654,8 @@ fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
     }
 }
 
-/// Spec: m2-124/5.3#6, m2-124/6.15 (a NAK quotes the refused command's header
-/// as it arrived, reserved bits included)
+/// A NAK quotes the refused command's header as it arrived, reserved bits included.
+/// Spec: m2-124/5.3#6
 #[test]
 fn a_nak_quotes_the_header_as_received() {
     let mut sim = established();
@@ -1403,8 +1403,8 @@ fn raw_bye(text: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// Spec: m2-124/6.16#1, m2-124/6.16#5 (Table 26: a Bye's payload length is
-/// 0..255 words, so its message is up to 1020 bytes)
+/// Table 26: a Bye's payload length is 0..255 words, so its message is up to 1020 bytes.
+/// Spec: m2-124/6.16#1, m2-124/6.16#5
 #[test]
 fn a_bye_with_the_longest_message_the_wire_allows_ends_the_session() {
     let mut sim = established();
@@ -1423,8 +1423,8 @@ fn a_bye_with_the_longest_message_the_wire_allows_ends_the_session() {
     );
 }
 
-/// Spec: m2-124/6.16#1, m2-124/6.16#5 (the message is advisory: a message that
-/// is not UTF-8 does not keep the Session open)
+/// The message is advisory: a message that is not UTF-8 does not keep the Session open.
+/// Spec: m2-124/6.16#1, m2-124/6.16#5
 #[test]
 fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
     let mut sim = established();
