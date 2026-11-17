@@ -818,13 +818,17 @@ fn the_mixer_strip_arity_differs_between_input_and_output_scope() {
 fn is_recording_and_is_cycling_read_their_own_flags() {
     for (recording, cycling) in [(false, false), (true, false), (false, true), (true, true)] {
         let state = TransportState::new();
-        let info = TransportInfo::new()
+        let mut info = TransportInfo::new(tutti_types::SampleRate::SR_48K)
             .with_playing(true)
-            .with_recording(recording)
-            // `with_loop`'s first argument is the cycle-active flag; the beats are
-            // a valid non-empty region so the state is not rejected on some other
-            // ground.
-            .with_loop(cycling, 4.0, 20.0);
+            .with_recording(recording);
+        // A cycle is the loop being present; its bounds are a valid non-empty
+        // region so the state is not rejected on some other ground.
+        if cycling {
+            info = info.with_loop(tutti_plugin_types::LoopRegion::new(
+                tutti_types::LoopRange::new(tutti_types::Beat(4.0), tutti_types::Beat(20.0))
+                    .expect("a loop"),
+            ));
+        }
         state.set_transport(&info, false);
 
         assert_eq!(
