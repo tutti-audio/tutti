@@ -552,8 +552,8 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
-        BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError, PluginEntry,
-        ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
+        Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
