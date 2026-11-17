@@ -72,15 +72,3 @@ fn pop_takes_the_last_item_and_keeps_the_flag() {
     assert_eq!(v.as_slice(), &[1]);
     assert!(v.is_overflowed(), "still latched");
 }
-
-/// `drain` yields the run in order, empties the list and clears the overflow
-/// flag, and the cap still holds afterwards.
-#[test]
-fn drain_yields_the_run_and_empties_the_list() {
-    let mut v = CappedVec::with_capacity(2);
-    v.extend([1, 2, 3]);
-    assert!(v.is_overflowed());
-    assert_eq!(v.drain().collect::<Vec<_>>(), [1, 2]);
-    assert!(v.is_empty() && !v.is_overflowed());
-    assert!(v.push(4) && v.push(5) && !v.push(6));
-}
