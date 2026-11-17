@@ -1,9 +1,9 @@
 //! The nodes at the graph's MIDI border:
 //! [`MidiIngestNode`] sends the events of its device inlets out of their channels' ports,
 //! translated; an event tap hands what a port carries back to a control
-//! thread; [`ClockNode`] ticks
-//! Beat Clock on the frames the transport reaches, a start inside a block
-//! included.
+//! thread; [`SyncOut`] sends
+//! Beat Clock, timecode and Machine Control on the frames the transport reaches, a
+//! start inside a block included.
 
 use tutti_types::MaxBlock;
 
@@ -11,19 +11,19 @@ use crate::common;
 use tutti_graph::{Stamp, UmpAt};
 
 use tutti_fixtures::midi;
+use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, ForkMode,
     ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
-use tutti_graph::{IntoNode as _, NodeKey};
 use tutti_midi_protocol::{
     MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
     widen_velocity,
 };
 use tutti_midi_runtime::{
-    CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MachineControlEvent, MachineControlFollower, MachineControlNode, MidiIngestNode,
-    MidiInputPorts, MidiOutNode, MpeTransformNode,
+    CHANNELLESS_PORT, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
+    MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
+    MpeTransformNode, SyncMessages, SyncOut, SyncOutConfig,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -41,6 +41,11 @@ const G: MidiGroup = MidiGroup::FIRST;
 const RATE: f64 = 48_000.0;
 
 use tutti_fixtures::{EventRig, Seen};
+
+/// A sync node on the first Group, sending `messages`.
+fn sync(messages: SyncMessages) -> SyncOut {
+    SyncOut::new(SyncOutConfig::new(G).messages(messages))
+}
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input
 /// of the same number, blocks of at most `max`.
@@ -1025,19 +1030,15 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
 /// `prepare` gave the master).
 #[test]
 fn a_start_inside_a_block_clocks_from_its_frame() {
-    let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
+    let (_ed, mut exec, _clock, seen) = rig(
+        sync(SyncMessages {
+            clock: true,
+            mtc: false,
+            ..SyncMessages::OFF
+        }),
         1,
         2048,
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
     let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut changes = TransportChanges::NONE;
@@ -1075,7 +1076,11 @@ fn followed(seen: &Seen) -> Vec<(u64, MachineControlEvent)> {
 #[test]
 fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
     let (_ed, mut exec, _controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         2048,
     );
@@ -1142,7 +1147,11 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
 #[test]
 fn a_machine_control_locate_to_no_time_code_is_counted() {
     let (_ed, mut exec, controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         512,
     );
@@ -1159,11 +1168,19 @@ fn a_machine_control_locate_to_no_time_code_is_counted() {
     assert_eq!(controls.losses().refused, 1);
 }
 
-/// **A Machine Control node's fork sends nothing.**
+/// **A sync node's fork runs**: a bounce's events are data. The fork holds
+/// what the live node sent at the fork (clock and Machine Control here) and
+/// sends it for the transport it is given: Start and a tick at beat 0, and PLAY
+/// on the second look.
 #[test]
-fn a_machine_control_fork_sends_nothing() {
+fn a_sync_nodes_fork_runs() {
     let (live, _exec, _controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            clock: true,
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         512,
     );
@@ -1180,41 +1197,17 @@ fn a_machine_control_fork_sends_nothing() {
             &mut [&mut out[..]],
         );
     }
-    assert!(seen.lock().unwrap().is_empty());
-}
-
-/// **A clock's fork sends nothing.**
-#[test]
-fn a_clocks_fork_sends_nothing() {
-    let (live, _exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
-        1,
-        512,
+    let got: Vec<Ump> = seen.lock().unwrap().iter().map(|s| s.2).collect();
+    assert!(got.contains(&Ump::from(Message::System(G, System::Start))));
+    assert!(
+        followed(&seen).contains(&(512, MachineControlEvent::Play)),
+        "{:?}",
+        followed(&seen)
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
-    let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
-        .expect("forks");
-    let mut out = vec![0.0f32; 512];
-    fork_exec.process(
-        512,
-        &TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None),
-        &[],
-        &mut [&mut out[..]],
-    );
-    assert!(seen.lock().unwrap().is_empty());
 }
 
 /// **A block with more clock events than the port holds sends the first
-/// [`CLOCK_EVENT_CAPACITY`](tutti_midi_runtime::CLOCK_EVENT_CAPACITY) and
+/// [`SYNC_OUT_EVENT_CAPACITY`](tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY) and
 /// counts the rest.**
 ///
 /// 300 BPM with MTC on at 48 kHz is 120 ticks and 100 quarter-frames a
@@ -1224,25 +1217,20 @@ fn a_clocks_fork_sends_nothing() {
 /// counted must equal it, exactly.
 #[test]
 fn a_clock_flood_past_the_port_capacity_is_counted() {
-    use tutti_midi_runtime::CLOCK_EVENT_CAPACITY;
+    use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
     const LONG: usize = 65_536;
     const BPM: f64 = 300.0;
 
     let run = |blocks: &[usize]| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                tutti_transport::ProjectMeter::default().reader(),
-            ),
+            sync(SyncMessages {
+                clock: true,
+                mtc: true,
+                ..SyncMessages::OFF
+            }),
             1,
             LONG,
         );
-        clock.set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            mtc: true,
-            ..Default::default()
-        });
         let mut frame = 0usize;
         for &len in blocks {
             let beat = frame as f64 / RATE * BPM / 60.0;
@@ -1258,12 +1246,15 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
     let (whole, none) = run(&[LONG / 4; 4]);
     assert_eq!(none, 0, "a quarter-length block fits every event");
     assert!(
-        whole > CLOCK_EVENT_CAPACITY,
+        whole > SYNC_OUT_EVENT_CAPACITY,
         "the span produces more than one block can carry ({whole})"
     );
 
     let (sent, dropped) = run(&[LONG]);
-    assert_eq!(sent, CLOCK_EVENT_CAPACITY, "one block sends up to the cap");
+    assert_eq!(
+        sent, SYNC_OUT_EVENT_CAPACITY,
+        "one block sends up to the cap"
+    );
     assert_eq!(
         sent as u64 + dropped,
         whole as u64,
@@ -1284,19 +1275,15 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
     use tutti_graph::LoopRange;
     // The loop starts at beat 1, a quarter note: 4 MIDI beats (sixteenths).
     const LOOP_START: u16 = 4;
-    let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
+    let (_ed, mut exec, _clock, seen) = rig(
+        sync(SyncMessages {
+            clock: true,
+            mtc: false,
+            ..SyncMessages::OFF
+        }),
         1,
         4096,
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
     let looping = Some(LoopRange {
         start: Beat(1.0),
         end: Beat(1.1),
@@ -1347,25 +1334,21 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
 #[test]
 fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
     use tutti_graph::LoopRange;
-    use tutti_midi_runtime::CLOCK_EVENT_CAPACITY;
+    use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
     use tutti_types::FrameClock;
     const TOTAL: usize = 16_384;
     let end = 47.3 / 24_000.0;
 
     let run = |len: usize| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                tutti_transport::ProjectMeter::default().reader(),
-            ),
+            sync(SyncMessages {
+                clock: true,
+                mtc: false,
+                ..SyncMessages::OFF
+            }),
             1,
             TOTAL,
         );
-        clock.set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
-        });
         let looping = Some(LoopRange {
             start: Beat(0.0),
             end: Beat(end),
@@ -1384,26 +1367,10 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
 
     let (cut, none) = run(1_024);
     assert_eq!(none, 0, "blocks of 1 024 fit every event");
-    assert!(cut > 2 * CLOCK_EVENT_CAPACITY, "{cut} events in all");
+    assert!(cut > 2 * SYNC_OUT_EVENT_CAPACITY, "{cut} events in all");
     let (sent, dropped) = run(TOTAL);
-    assert_eq!(sent, CLOCK_EVENT_CAPACITY);
+    assert_eq!(sent, SYNC_OUT_EVENT_CAPACITY);
     assert_eq!(sent as u64 + dropped, cut as u64);
-}
-
-/// **A clock node's master is built with a real rate and its Group, never a
-/// placeholder of zero**: the controls read both back before any prepare, and a
-/// fork keeps the Group.
-#[test]
-fn a_clock_node_holds_its_group_and_rate_from_construction() {
-    let group = MidiGroup::masked(2);
-    let node = ClockNode::new(
-        group,
-        SampleRate::SR_44K1,
-        tutti_transport::ProjectMeter::default().reader(),
-    );
-    let master = node.into_parts().controls;
-    assert_eq!(master.group(), group);
-    assert_eq!(master.sample_rate(), SampleRate::SR_44K1);
 }
 
 /// The MPE transform node over a script: one batch of MIDI 1.0 or 2.0 events a

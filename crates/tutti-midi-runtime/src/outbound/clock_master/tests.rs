@@ -2,13 +2,11 @@ use super::*;
 use crate::{ClockTransportState, MidiClockDecoder, MtcDecoder};
 use atomic_float::AtomicF64;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool as StdAtomicBool;
+use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
-use tutti_transport::ProjectMeter;
-use tutti_types::MeterChange;
 use tutti_types::{Bpm, Seconds};
-use tutti_ump::{Flex, Message, MidiGroup, System};
+use tutti_ump::{Message, MidiGroup, System};
 
 /// The System message a packet carries.
 fn system(ump: Ump) -> Option<System> {
@@ -57,19 +55,13 @@ impl TestTransport {
     }
 }
 
-/// A master ticked from a [`TestTransport`], emitting into a mailbox.
+/// A master ticked from a [`TestTransport`], emitting into a mailbox, sending
+/// what `messages` says.
 struct Rig {
     cm: ClockMaster,
-    controls: ClockControls,
+    messages: SyncMessages,
     transport: Arc<TestTransport>,
     out: Collected,
-}
-
-impl std::ops::Deref for Rig {
-    type Target = ClockControls;
-    fn deref(&self) -> &ClockControls {
-        &self.controls
-    }
 }
 
 impl Rig {
@@ -78,25 +70,29 @@ impl Rig {
     }
 
     /// The Beat Clock on or off, the rest of what is sent as it was.
-    fn set_enabled(&self, on: bool) {
-        let sends = self.controls.sends();
-        self.controls.set_sends(ClockSends {
-            timing: on,
-            ..sends
-        });
+    fn set_enabled(&mut self, on: bool) {
+        self.messages.clock = on;
     }
 
     /// MTC on or off, the rest of what is sent as it was.
-    fn set_send_mtc(&self, on: bool) {
-        let sends = self.controls.sends();
-        self.controls.set_sends(ClockSends { mtc: on, ..sends });
+    fn set_send_mtc(&mut self, on: bool) {
+        self.messages.mtc = on;
+    }
+
+    /// The frame rate time codes are stated at.
+    fn set_mtc_fps(&mut self, rate: MtcRate) {
+        self.messages.rate = rate;
     }
 
     fn tick(&mut self, block_size: usize) {
-        self.cm
-            .tick(&self.transport.now(), Samples(block_size), &mut |e| {
+        self.cm.tick(
+            self.messages,
+            &self.transport.now(),
+            Samples(block_size),
+            &mut |e| {
                 self.out.0.lock().unwrap().push(e);
-            });
+            },
+        );
     }
 }
 
@@ -104,18 +100,13 @@ fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTrans
     let transport = Arc::new(TestTransport::new(tempo));
     let receiver = Collected::default();
     let out = receiver.clone();
-    let (cm, controls) = ClockMaster::new(
-        MidiGroup::FIRST,
-        sample_rate.into(),
-        ProjectMeter::default().reader(),
-    );
-    controls.set_sends(ClockSends {
-        timing: true,
-        ..ClockSends::default()
-    });
+    let cm = ClockMaster::new(MidiGroup::FIRST, sample_rate.into());
     let rig = Rig {
         cm,
-        controls,
+        messages: SyncMessages {
+            clock: true,
+            ..SyncMessages::OFF
+        },
         transport: Arc::clone(&transport),
         out,
     };
@@ -426,7 +417,7 @@ fn a_rate_change_moves_the_tick_spacing() {
     );
 
     cm.set_sample_rate(SampleRate::SR_48K);
-    assert_eq!(cm.sample_rate(), SampleRate::SR_48K);
+    assert_eq!(cm.cm.sample_rate, SampleRate::SR_48K);
     let run = (&mut beat, &mut frame);
     let after = of(
         &run_at(&mut cm, &transport, &cons, 48_000.0, (480, 100), run),
@@ -960,18 +951,19 @@ fn a_wrap_on_the_block_edge_and_a_locate_are_one_song_position() {
 #[test]
 fn every_event_goes_out_on_the_masters_group() {
     let group = MidiGroup::masked(5);
-    let (mut cm, controls) =
-        ClockMaster::new(group, SampleRate::SR_48K, ProjectMeter::default().reader());
-    controls.set_sends(ClockSends {
-        timing: true,
+    let mut cm = ClockMaster::new(group, SampleRate::SR_48K);
+    let messages = SyncMessages {
+        clock: true,
         mtc: true,
-        flex: false,
-    });
+        ..SyncMessages::OFF
+    };
     let transport = TestTransport::new(Bpm::of(120.0));
     transport.set_beat(8.0);
     transport.set_playing(true);
     let mut events = Vec::new();
-    cm.tick(&transport.now(), Samples(4096), &mut |e| events.push(e));
+    cm.tick(messages, &transport.now(), Samples(4096), &mut |e| {
+        events.push(e)
+    });
     let statuses: std::collections::BTreeSet<u8> = events
         .iter()
         .map(|(_, ump)| ((ump.0[0] >> 16) & 0xFF) as u8)
@@ -982,27 +974,9 @@ fn every_event_goes_out_on_the_masters_group() {
             "{status:#x} not sent: {statuses:x?}"
         );
     }
-    assert_eq!(controls.group(), group);
+    assert_eq!(cm.group, group);
     for (_, ump) in &events {
         assert_eq!(ump.group(), Some(group), "{ump:?}");
-    }
-}
-
-/// **Every combination of the settings word reads back as written**: each
-/// `ClockSends` and each frame rate, so what the control side sets is one word
-/// the audio side decodes whole.
-#[test]
-fn the_settings_word_round_trips_every_combination() {
-    for bits in 0..8u8 {
-        let sends = ClockSends {
-            timing: bits & 1 != 0,
-            mtc: bits & 2 != 0,
-            flex: bits & 4 != 0,
-        };
-        for fps in MtcRate::ALL {
-            let settings = Settings { sends, fps };
-            assert_eq!(Settings::from_bits(settings.bits()), settings);
-        }
     }
 }
 
@@ -1027,7 +1001,7 @@ fn a_frame_rate_set_between_blocks_keeps_the_pending_quarter_frame() {
     assert_eq!(before.last(), Some(&10_080), "setup: every 480 frames");
 
     cm.set_mtc_fps(MtcRate::Fps30);
-    assert_eq!(cm.mtc_fps(), MtcRate::Fps30);
+    assert_eq!(cm.messages.rate, MtcRate::Fps30);
     let run = (&mut beat, &mut frame);
     let events = run_at(&mut cm, &transport, &cons, 48_000.0, (512, 20), run);
     assert_eq!(of(&events, 0xF2), Vec::<u64>::new(), "not a seek");
@@ -1059,7 +1033,7 @@ fn full_messages(events: &[UmpAt]) -> Vec<(u32, Vec<u8>)> {
 
 /// A rig at 120 BPM and 48 kHz sending MTC at `fps`, stopped at `beat`.
 fn mtc_rig(fps: MtcRate, beat: f64) -> (Rig, Arc<TestTransport>, Collected) {
-    let (rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
     rig.set_send_mtc(true);
     rig.set_mtc_fps(fps);
     transport.set_beat(beat);
@@ -1171,375 +1145,4 @@ fn no_full_message_is_sent_with_mtc_off() {
     transport.set_beat(80.0);
     rig.tick(512);
     assert!(full_messages(&drain_all(&cons)).is_empty());
-}
-
-// --- Flex Set Tempo and Set Time Signature ----------------------------------
-
-/// A master on the first Group at 48 kHz, its clock bytes on or off, Flex on,
-/// reading the meter of the returned project meter (4/4 until set).
-fn flex_master(clock: bool) -> (ClockMaster, ProjectMeter, Collected) {
-    let meter = ProjectMeter::default();
-    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_sends(ClockSends {
-        timing: clock,
-        mtc: false,
-        flex: true,
-    });
-    (cm, meter, Collected::default())
-}
-
-/// One block of `frames` frames at `beat` and `tempo`, playing.
-fn play(cm: &mut ClockMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
-    let transport = TransportPosition::new(true, Bpm::of(tempo), Beat(beat), None);
-    cm.tick(&transport, Samples(frames), &mut |e| {
-        out.0.lock().unwrap().push(e);
-    });
-}
-
-/// The Flex messages of `events` as `(frame, message)`, in order.
-fn flexes(events: &[UmpAt]) -> Vec<(u32, Flex)> {
-    events
-        .iter()
-        .filter_map(|(at, ump)| match ump.decode() {
-            Ok(Message::Flex(group, flex)) => {
-                assert_eq!(group, MidiGroup::FIRST, "addressed to the group");
-                Some((at.get(), flex))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn time_signature(numerator: u8, denominator: u8) -> Flex {
-    Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
-        numerator,
-        denominator,
-        thirty_seconds: 8,
-    })
-}
-
-/// Tempo 120 for 2 500 frames (ticks every 1 000 frames: 24 000 frames a beat
-/// over 24), then 150 from beat 2 500 / 24 000 (800 frames a tick; the next
-/// tick, 3 / 24 beat, is (3 / 24 - 2 500 / 24 000) x 19 200 = 400 frames in).
-/// Set Tempo goes out for 120 on the start beat's tick and for 150 on frame
-/// 400, with the Timing Clock of that tick, and on no frame between ticks.
-/// Spec: m2-104/7.5.3#2
-#[test]
-fn set_tempo_with_clock_goes_out_on_a_tick() {
-    let (mut cm, _meter, out) = flex_master(true);
-    play(&mut cm, &out, 120.0, 0.0, 2_500);
-    let first = drain_all(&out);
-    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
-    play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
-    let second = drain_all(&out);
-    let tempo: Vec<_> = flexes(&second)
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
-        .collect();
-    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
-    let ticks: Vec<u32> = second
-        .iter()
-        .filter(|e| is_status(e, 0xF8))
-        .map(|e| e.0.get())
-        .collect();
-    assert_eq!(ticks, [400, 1_200]);
-}
-
-/// The same with the clock bytes off: no Timing Clock is sent, and Set Tempo
-/// still waits for the 24-PPQN grid (frame 400), not the segment's first frame.
-/// Spec: m2-104/7.5.3#3
-#[test]
-fn set_tempo_without_clock_goes_out_on_the_tick_grid() {
-    let (mut cm, _meter, out) = flex_master(false);
-    play(&mut cm, &out, 120.0, 0.0, 2_500);
-    let first = drain_all(&out);
-    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
-    play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
-    let second = drain_all(&out);
-    assert!(
-        second.iter().all(|e| !is_status(e, 0xF8)),
-        "no clock bytes with the clock off"
-    );
-    let tempo: Vec<_> = flexes(&second)
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
-        .collect();
-    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
-}
-
-/// A tempo that stays is stated once, not on every tick or block.
-/// Spec: m2-104/7.5.3#3
-#[test]
-fn an_unchanged_tempo_is_not_restated() {
-    let (mut cm, _meter, out) = flex_master(false);
-    play(&mut cm, &out, 120.0, 0.0, 2_400);
-    play(&mut cm, &out, 120.0, 0.1, 2_400);
-    let tempo = flexes(&drain_all(&out))
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
-        .count();
-    assert_eq!(tempo, 1);
-}
-
-/// 4/4 from the top is stated on frame 0 (a bar boundary); a 3/4 meter
-/// published at beat 1.5 (36 000 frames at 120 bpm, 48 kHz) is stated on the
-/// next bar boundary of the new meter, beat 3, frame (3 - 1.5) x 24 000 =
-/// 36 000 of the block that starts at 1.5, and on no frame before it.
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn set_time_signature_with_clock_goes_out_on_a_bar_boundary() {
-    let (mut cm, meter, out) = flex_master(true);
-    play(&mut cm, &out, 120.0, 0.0, 36_000);
-    let first = flexes(&drain_all(&out));
-    assert_eq!(
-        first
-            .iter()
-            .filter(|(_, f)| *f == time_signature(4, 2))
-            .count(),
-        1
-    );
-    meter.set_meter(MeterMap::new([MeterChange::new(
-        Beat(0.0),
-        TimeSignature::of(3, 4),
-    )]));
-    play(&mut cm, &out, 120.0, 1.5, 48_000);
-    let second: Vec<_> = flexes(&drain_all(&out))
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
-        .collect();
-    assert_eq!(second, [(36_000, time_signature(3, 2))]);
-}
-
-/// The same with the clock bytes off.
-/// Spec: m2-104/7.5.4#2
-#[test]
-fn set_time_signature_without_clock_goes_out_on_a_bar_boundary() {
-    let (mut cm, meter, out) = flex_master(false);
-    play(&mut cm, &out, 120.0, 0.0, 36_000);
-    let first = flexes(&drain_all(&out));
-    assert!(first.contains(&(0, time_signature(4, 2))));
-    meter.set_meter(MeterMap::new([MeterChange::new(
-        Beat(0.0),
-        TimeSignature::of(7, 8),
-    )]));
-    // 7/8 is 3.5 beats a bar: the boundary after beat 1.5 is beat 3.5, frame
-    // (3.5 - 1.5) x 24 000 = 48 000 of the block; 7/8 wire is 7 over 2^3.
-    play(&mut cm, &out, 120.0, 1.5, 60_000);
-    let second: Vec<_> = flexes(&drain_all(&out))
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
-        .collect();
-    assert_eq!(second, [(48_000, time_signature(7, 3))]);
-}
-
-/// A Continue mid-bar states the tempo on its first tick (beat 1 is tick 24,
-/// frame 0) and the meter on the next bar boundary, beat 4, frame
-/// (4 - 1) x 24 000 = 72 000, never off a bar boundary.
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
-    let (mut cm, _meter, out) = flex_master(true);
-    play(&mut cm, &out, 120.0, 1.0, 80_000);
-    let sent = flexes(&drain_all(&out));
-    assert_eq!(
-        sent,
-        [
-            (0, Flex::SetTempo(50_000_000)),
-            (72_000, time_signature(4, 2)),
-        ]
-    );
-}
-
-/// Flex is off until set: a clock with the tempo changing and a meter set
-/// sends no Flex Data.
-#[test]
-fn no_flex_is_sent_unless_enabled() {
-    let meter = ProjectMeter::default();
-    let (mut cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_sends(ClockSends {
-        timing: true,
-        ..ClockSends::default()
-    });
-    assert!(!controls.sends().flex);
-    let out = Collected::default();
-    play(&mut cm, &out, 120.0, 0.0, 48_000);
-    play(&mut cm, &out, 150.0, 2.0, 48_000);
-    let events = drain_all(&out);
-    assert!(flexes(&events).is_empty());
-    assert!(events.iter().any(|e| is_status(e, 0xF8)), "the clock ran");
-}
-
-fn meters(events: &[UmpAt]) -> Vec<(u32, Flex)> {
-    flexes(events)
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
-        .collect()
-}
-
-fn tempos(events: &[UmpAt]) -> Vec<(u32, Flex)> {
-    flexes(events)
-        .into_iter()
-        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
-        .collect()
-}
-
-fn map(changes: &[(f64, u32, u32)]) -> MeterMap {
-    MeterMap::new(
-        changes
-            .iter()
-            .map(|&(beat, n, d)| MeterChange::new(Beat(beat), TimeSignature::of(n, d))),
-    )
-}
-
-/// A meter change off the dyadic beats puts bar lines where `bar_at` of a line
-/// can name the bar before it (4/4 from 0.1 has bar 3 at 4.1, which `bar_at`
-/// puts in bar 2; 1/64 from 0.1 has bar 5 at 0.2875). The master walks bars by
-/// number, so it ends, and states each new meter on the frame of the first bar
-/// line of it: at 120 bpm and 48 kHz a beat is 24 000 frames, the lines here
-/// are whole frames, and the expected frames are those of `MeterMap::bar_start`.
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn bar_lines_off_the_dyadic_beats_are_walked_by_number_and_end() {
-    for changes in [
-        &[(0.0, 4, 4), (0.1, 4, 4)][..],
-        &[(0.0, 4, 4), (0.1, 3, 4)],
-        &[(0.0, 4, 4), (0.1, 1, 64)],
-    ] {
-        let meter_map = map(changes);
-        let (mut cm, meter, out) = flex_master(true);
-        meter.set_meter(meter_map.clone());
-        let frames = 480_000;
-        play(&mut cm, &out, 120.0, 0.0, frames);
-        let mut expected = Vec::new();
-        let mut stated = None;
-        for n in 1.. {
-            let line = meter_map.bar_start(tutti_types::BarNumber(n));
-            let frame = (line.get() * 24_000.0).round() as usize;
-            if frame >= frames {
-                break;
-            }
-            let signature = meter_map.at(line);
-            if stated != Some(signature) {
-                stated = Some(signature);
-                expected.push((
-                    frame as u32,
-                    Flex::SetTimeSignature(flex_time_signature_wire(signature).unwrap()),
-                ));
-            }
-        }
-        assert_eq!(meters(&drain_all(&out)), expected, "{changes:?}");
-    }
-}
-
-/// A tick and a bar line on the first frame of a block are sent there once,
-/// not also at the end of the block before: 1 000 frames a tick at 120 bpm,
-/// and 4/4 then 3/4 from beat 4 (frame 96 000).
-/// Spec: m2-104/7.5.3#2, m2-104/7.5.4#1
-#[test]
-fn a_tick_and_a_bar_line_on_a_block_edge_are_sent_once() {
-    let (mut cm, meter, out) = flex_master(true);
-    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 3, 4)]));
-    play(&mut cm, &out, 120.0, 0.0, 96_000);
-    let first = drain_all(&out);
-    assert_eq!(meters(&first), [(0, time_signature(4, 2))]);
-    // 96 ticks, the last on frame 95 000: beat 4's tick is the next block's.
-    let clocks = offsets(&first, 0xF8);
-    assert_eq!((clocks.len(), clocks.last()), (96, Some(&95_000)));
-    play(&mut cm, &out, 120.0, 4.0, 48_000);
-    let second = drain_all(&out);
-    assert_eq!(meters(&second), [(0, time_signature(3, 2))]);
-    assert_eq!(offsets(&second, 0xF8)[..2], [0, 1_000]);
-
-    // Tempo 150 from the block that starts on tick 1 (frame 1 000 of 120).
-    let (mut cm, _meter, out) = flex_master(true);
-    play(&mut cm, &out, 120.0, 0.0, 1_000);
-    let block = drain_all(&out);
-    assert_eq!(tempos(&block), [(0, Flex::SetTempo(50_000_000))]);
-    assert_eq!(offsets(&block, 0xF8), [0]);
-    play(&mut cm, &out, 150.0, 1_000.0 / 24_000.0, 1_000);
-    let block = drain_all(&out);
-    assert_eq!(tempos(&block), [(0, Flex::SetTempo(40_000_000))]);
-    // 800 frames a tick at 150 bpm.
-    assert_eq!(offsets(&block, 0xF8), [0, 800]);
-    play(
-        &mut cm,
-        &out,
-        150.0,
-        1_000.0 / 24_000.0 + 1_000.0 / 19_200.0,
-        1_000,
-    );
-    let block = drain_all(&out);
-    assert!(tempos(&block).is_empty());
-    // Tick 3 (beat 0.125) is (0.125 - 0.09375) x 19 200 = 600 frames in.
-    assert_eq!(offsets(&block, 0xF8), [600]);
-}
-
-/// A locate while playing restates nothing that did not change, and the new
-/// meter waits for a bar line: 4/4 from 0 and 3/4 from 4 have bars at 0, 4, 7
-/// and 10, so a locate to 8.5 states 3/4 on frame (10 - 8.5) x 24 000 = 36 000.
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn a_locate_while_playing_states_the_meter_at_the_next_bar_line() {
-    let (mut cm, meter, out) = flex_master(true);
-    play(&mut cm, &out, 120.0, 0.0, 2_400);
-    drain_all(&out);
-    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 3, 4)]));
-    play(&mut cm, &out, 120.0, 8.5, 60_000);
-    let second = drain_all(&out);
-    assert_eq!(meters(&second), [(36_000, time_signature(3, 2))]);
-    assert!(tempos(&second).is_empty());
-}
-
-/// The passes of a looped block (here three of 24 000 frames, wrapping at
-/// 24 000 and 48 000) restate nothing: the tempo and the meter are each
-/// stated once, on the first frame.
-/// Spec: m2-104/7.5.3#2, m2-104/7.5.4#1
-#[test]
-fn the_passes_of_a_looped_block_restate_nothing() {
-    let (mut cm, _meter, out) = flex_master(true);
-    let looping = tutti_graph::LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    };
-    let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), Some(looping));
-    cm.tick(&transport, Samples(72_000), &mut |e| {
-        out.0.lock().unwrap().push(e);
-    });
-    let events = drain_all(&out);
-    assert_eq!(offsets(&events, 0xF2), [24_000, 48_000], "two wraps");
-    assert_eq!(
-        flexes(&events),
-        [(0, Flex::SetTempo(50_000_000)), (0, time_signature(4, 2)),]
-    );
-}
-
-/// A meter whose change falls inside the block is stated on the first bar line
-/// of the new one: 4/4 then 3/4 from beat 8 over 12 beats (288 000 frames) puts
-/// 3/4 on frame 8 x 24 000 = 192 000.
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn a_meter_change_inside_the_block_is_stated_on_its_bar_line() {
-    let (mut cm, meter, out) = flex_master(true);
-    meter.set_meter(map(&[(0.0, 4, 4), (8.0, 3, 4)]));
-    play(&mut cm, &out, 120.0, 0.0, 288_000);
-    assert_eq!(
-        flexes(&drain_all(&out)),
-        [
-            (0, Flex::SetTempo(50_000_000)),
-            (0, time_signature(4, 2)),
-            (192_000, time_signature(3, 2)),
-        ]
-    );
-}
-
-/// A whole-note meter (4/1, 16 beats a bar) has no standard Set Time
-/// Signature: nothing is sent for it, and nothing is resent at each of its bar
-/// lines (beats 4 and 20 of 24).
-/// Spec: m2-104/7.5.4#1
-#[test]
-fn a_whole_note_meter_sends_nothing_and_4_4_is_sent_once() {
-    let (mut cm, meter, out) = flex_master(true);
-    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 4, 1)]));
-    play(&mut cm, &out, 120.0, 0.0, 576_000);
-    assert_eq!(meters(&drain_all(&out)), [(0, time_signature(4, 2))]);
 }

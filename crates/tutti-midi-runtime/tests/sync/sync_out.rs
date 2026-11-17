@@ -1,0 +1,417 @@
+//! [`SyncOut`] on the graph's clock: each message is the one the transport's
+//! change calls for, on the frame the change is on.
+//!
+//! The oracle is the specs: MIDI 1.0 Beat Clock (24 ticks a quarter note, so a
+//! tick every 1 000 frames at 120 BPM and 48 kHz) and MTC (a Quarter Frame
+//! every `rate / (4 fps)` frames, the Full Message `7F 7F 01 01 hr mn sc fr`
+//! with the rate in the hours byte, M1 p.52), and RP-013 for Machine Control
+//! (PLAY `02`, STOP `01`, LOCATE target `44 06 01 hr mn sc fr sf`).
+//! At 120 BPM and 48 kHz a beat is 24 000 frames and a second is two beats.
+
+use tutti_graph::{
+    Editor, Executor, IntoNode as _, NodeKey, Offset, TransportChanges, TransportPosition,
+};
+use tutti_midi_protocol::{MtcRate, Recipient};
+use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig, SyncOutControls};
+use tutti_types::{Beat, Bpm, Samples};
+use tutti_ump::{Message, MidiGroup, SysexStatus, System, U14, Ump};
+
+use tutti_fixtures::{EventRig, Seen, heard};
+
+const G: MidiGroup = MidiGroup::FIRST;
+const RATE: f64 = 48_000.0;
+const BLOCK: usize = 4096;
+const BEAT: f64 = 24_000.0;
+
+/// A beat `frames` frames after beat `from`, at 120 BPM and 48 kHz.
+fn beat(from: f64, frames: usize) -> Beat {
+    Beat(from + frames as f64 / BEAT)
+}
+
+fn stopped(at: Beat) -> TransportPosition {
+    TransportPosition::new(false, Bpm::of(120.0), at, None)
+}
+
+fn rolling(at: Beat) -> TransportPosition {
+    TransportPosition::new(true, Bpm::of(120.0), at, None)
+}
+
+struct Rig {
+    _editor: Editor,
+    exec: Executor,
+    seen: Seen,
+    controls: std::sync::Arc<SyncOutControls>,
+    /// The first frame of the next block.
+    frame: u64,
+}
+
+impl Rig {
+    fn new(group: MidiGroup, messages: SyncMessages) -> Self {
+        let mut rig = EventRig::events_only(RATE, BLOCK, 1);
+        let controls = rig
+            .editor
+            .insert(
+                NodeKey(1),
+                "sync",
+                SyncOut::new(SyncOutConfig::new(group).messages(messages)),
+            )
+            .controls;
+        rig.feed(NodeKey(1), 0, 0);
+        rig.commit();
+        Self {
+            _editor: rig.editor,
+            exec: rig.exec,
+            seen: rig.seen,
+            controls,
+            frame: 0,
+        }
+    }
+
+    /// One block of `len` frames from `start`, the transport becoming each
+    /// `(frame, position)` of `changes` on its frame. What the node sent, on
+    /// the graph's frames.
+    fn block(
+        &mut self,
+        len: usize,
+        start: TransportPosition,
+        changes: &[(usize, TransportPosition)],
+    ) -> Vec<(u64, Ump)> {
+        let mut cuts = TransportChanges::NONE;
+        for &(frame, to) in changes {
+            cuts.push(Offset::of(Samples(frame), Samples(len)), to)
+                .unwrap();
+        }
+        self.seen.lock().unwrap().clear();
+        self.exec
+            .process_with_changes(len, &start, &cuts, &[], &mut []);
+        self.frame += len as u64;
+        heard(&self.seen)
+    }
+}
+
+fn clock() -> SyncMessages {
+    SyncMessages {
+        clock: true,
+        ..SyncMessages::OFF
+    }
+}
+
+fn system(group: MidiGroup, message: System) -> Ump {
+    Ump::from(Message::System(group, message))
+}
+
+/// The SysEx7 messages among `events`: the frame of each one's first packet
+/// and its payload bytes.
+fn sysex(events: &[(u64, Ump)]) -> Vec<(u64, Vec<u8>)> {
+    let mut found = Vec::new();
+    let mut open: Option<(u64, Vec<u8>)> = None;
+    for &(frame, ump) in events {
+        let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
+            continue;
+        };
+        let (at, mut bytes) = open.take().unwrap_or((frame, Vec::new()));
+        bytes.extend_from_slice(packet.data());
+        match packet.status() {
+            SysexStatus::Start | SysexStatus::Continue => open = Some((at, bytes)),
+            _ => found.push((at, bytes)),
+        }
+    }
+    found
+}
+
+/// What `events` carry of System message `pick`, each on its frame.
+fn systems<T>(events: &[(u64, Ump)], pick: impl Fn(System) -> Option<T>) -> Vec<(u64, T)> {
+    events
+        .iter()
+        .filter_map(|&(frame, ump)| match ump.decode() {
+            Ok(Message::System(_, message)) => pick(message).map(|t| (frame, t)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **Start, Continue, Song Position and Stop are each on the frame the
+/// transport changes**, with the 24-ppqn ticks between them on a grid from
+/// the start beat: a tick every 1 000 frames.
+///
+/// Stopped at beat 1 (a quarter note: 4 MIDI beats), rolling from frame 100 of
+/// the second block: Song Position and Continue on 2 148 (beat 1 is no
+/// Start), a tick there and 1 000 on. In the third block, rolling on, it
+/// stops on frame 300.
+#[test]
+fn a_start_a_stop_and_a_continue_are_on_their_frames() {
+    let mut rig = Rig::new(G, clock());
+    assert!(rig.block(2048, stopped(Beat(1.0)), &[]).is_empty());
+    let continued = rig.block(2048, stopped(Beat(1.0)), &[(100, rolling(Beat(1.0)))]);
+    let tick = system(G, System::TimingClock);
+    assert_eq!(
+        continued,
+        [
+            (2148, system(G, System::SongPosition(U14::of(4)))),
+            (2148, system(G, System::Continue)),
+            (2148, tick),
+            (3148, tick),
+        ]
+    );
+    // The tick after 3 148 is on 4 148: frame 52 of the third block, before
+    // the stop on frame 300 of it.
+    let stopping = rig.block(
+        2048,
+        rolling(beat(1.0, 1948)),
+        &[(300, stopped(beat(1.0, 1948 + 300)))],
+    );
+    assert_eq!(
+        stopping,
+        [(4148, tick), (4096 + 300, system(G, System::Stop))]
+    );
+    // Stopped, it sends nothing more.
+    assert!(rig.block(2048, stopped(beat(1.0, 2248)), &[]).is_empty());
+}
+
+/// **A start from beat 0 is Start** (not Continue with a Song Position), on its
+/// frame, with the tick of beat 0 on it.
+#[test]
+fn a_start_from_the_top_is_start() {
+    let mut rig = Rig::new(G, clock());
+    rig.block(1024, stopped(Beat(0.0)), &[]);
+    let got = rig.block(1024, stopped(Beat(0.0)), &[(200, rolling(Beat(0.0)))]);
+    let tick = system(G, System::TimingClock);
+    assert_eq!(got, [(1224, system(G, System::Start)), (1224, tick)]);
+}
+
+/// **The Quarter Frames are one every `rate / (4 fps)` frames carrying the
+/// eight nibbles of the position (M1 p.52).** At 30 fps a frame is 1 600 frames
+/// at 48 kHz, a quarter-frame 400: from beat 0 piece `p` is on `400 p`, the
+/// first cycle `00:00:00:00` (piece 7 carries the rate code `11` in its hours
+/// nibble: `0x76`), the next cycle, two frames on, `00:00:00:02`.
+#[test]
+fn the_quarter_frames_are_the_eight_nibbles_four_to_a_frame() {
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            clock: true,
+            mtc: true,
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        },
+    );
+    let got = rig.block(3700, rolling(Beat(0.0)), &[]);
+    let pieces = systems(&got, |m| match m {
+        System::TimeCode(piece) => Some(piece.get()),
+        _ => None,
+    });
+    let frames: Vec<u64> = pieces.iter().map(|p| p.0).collect();
+    assert_eq!(frames, (0..10).map(|k| 400 * k).collect::<Vec<_>>());
+    let values: Vec<u8> = pieces.iter().map(|p| p.1).collect();
+    assert_eq!(
+        values,
+        [0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x76, 0x02, 0x10]
+    );
+}
+
+fn full_message(rate_bits: u8, seconds: u8, frame: u8) -> Vec<u8> {
+    vec![0x7F, 0x7F, 0x01, 0x01, rate_bits, 0, seconds, frame]
+}
+
+/// **A locate is an MTC Full Message on its frame (M1 p.52)**: a cue while
+/// stopped, a jump while playing and a loop wrap each state their position at
+/// the node's rate (25 fps here: hours byte `0x20`).
+#[test]
+fn a_cue_a_jump_and_a_wrap_are_full_messages_on_their_frames() {
+    use tutti_graph::LoopRange;
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            clock: true,
+            mtc: true,
+            rate: MtcRate::Fps25,
+            ..SyncMessages::OFF
+        },
+    );
+    // Cue: stopped at beat 2 (1 s: 00:00:01:00); standing still says nothing more.
+    let cue = sysex(&rig.block(BLOCK, stopped(Beat(2.0)), &[]));
+    assert_eq!(cue, [(0, full_message(0x20, 1, 0))]);
+    assert!(sysex(&rig.block(BLOCK, stopped(Beat(2.0)), &[])).is_empty());
+    // Rolling on from the cued beat: no second message. A jump to beat 40
+    // (20 s) on frame 300 of the next block is one on that frame.
+    let rolled = rig.block(BLOCK, rolling(Beat(2.0)), &[]);
+    assert!(sysex(&rolled).is_empty());
+    let from = 3 * BLOCK as u64;
+    let jump = sysex(&rig.block(
+        BLOCK,
+        rolling(beat(2.0, BLOCK)),
+        &[(300, rolling(Beat(40.0)))],
+    ));
+    assert_eq!(jump, [(from + 300, full_message(0x20, 20, 0))]);
+    // A loop of beats 2.0 to 2.1 (2 400 frames) wraps on frame 2 400 of a block
+    // that starts at its start, a jump back from beat 40: a message of the
+    // loop's start, 1 s, at the block's start and on the wrap.
+    let looping = Some(LoopRange {
+        start: Beat(2.0),
+        end: Beat(2.1),
+    });
+    let start = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    let wrap = sysex(&rig.block(BLOCK, start, &[]));
+    let from = 4 * BLOCK as u64;
+    assert_eq!(
+        wrap,
+        [
+            (from, full_message(0x20, 1, 0)),
+            (from + 2400, full_message(0x20, 1, 0))
+        ]
+    );
+}
+
+const PLAY: [u8; 4] = [0x7F, 0x7F, 0x06, 0x02];
+const STOP: [u8; 4] = [0x7F, 0x7F, 0x06, 0x01];
+
+fn mmc(rate: MtcRate) -> SyncMessages {
+    SyncMessages {
+        mmc: Some(Recipient::AllCall),
+        rate,
+        ..SyncMessages::OFF
+    }
+}
+
+/// **A start and a stop in one block are both sent**, each on its frame
+/// (RP-013 pp.20 and 28): PLAY on 4 096 + 100, STOP on 4 096 + 300. The first
+/// block only looks.
+#[test]
+fn a_start_and_a_stop_in_one_block_both_go() {
+    let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
+    assert!(rig.block(BLOCK, stopped(Beat(0.0)), &[]).is_empty());
+    let got = sysex(&rig.block(
+        BLOCK,
+        stopped(Beat(0.0)),
+        &[(100, rolling(Beat(0.0))), (300, stopped(beat(0.0, 200)))],
+    ));
+    assert_eq!(
+        got,
+        [
+            (BLOCK as u64 + 100, PLAY.to_vec()),
+            (BLOCK as u64 + 300, STOP.to_vec())
+        ]
+    );
+}
+
+/// **One rate states every time code**: the MTC Full Message and the MMC
+/// LOCATE of the same locate are the same time, in the same rate, and a rate
+/// set between blocks moves both. Beat 4 is 2 s: `00:00:02:00` at 25 fps (hours
+/// byte `0x20`), and beat 6 is 3 s, `00:00:03:00` at 30 fps (`0x60`).
+#[test]
+fn mtc_and_an_mmc_locate_state_one_rate() {
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            clock: true,
+            mtc: true,
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps25,
+        },
+    );
+    rig.block(BLOCK, stopped(Beat(0.0)), &[]);
+    let at25 = sysex(&rig.block(BLOCK, stopped(Beat(4.0)), &[]));
+    let locate = |hours: u8| vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, hours, 0, 2, 0, 0];
+    assert_eq!(
+        at25,
+        [
+            (BLOCK as u64, full_message(0x20, 2, 0)),
+            (BLOCK as u64, locate(0x20))
+        ]
+    );
+    rig.controls.messages().set(SyncMessages {
+        rate: MtcRate::Fps30,
+        ..rig.controls.messages().get()
+    });
+    let at30 = sysex(&rig.block(BLOCK, stopped(Beat(6.0)), &[]));
+    let locate = |hours: u8| vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, hours, 0, 3, 0, 0];
+    assert_eq!(
+        at30,
+        [
+            (2 * BLOCK as u64, full_message(0x60, 3, 0)),
+            (2 * BLOCK as u64, locate(0x60))
+        ]
+    );
+}
+
+/// **Every message is on the node's Group**: the clock's System messages and
+/// the SysEx packets of Machine Control and MTC alike.
+#[test]
+fn every_message_is_on_the_nodes_group() {
+    let group = MidiGroup::of(5);
+    let mut rig = Rig::new(
+        group,
+        SyncMessages {
+            clock: true,
+            mtc: true,
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+        },
+    );
+    rig.block(BLOCK, stopped(Beat(0.0)), &[]);
+    let got = rig.block(BLOCK, stopped(Beat(0.0)), &[(100, rolling(Beat(0.0)))]);
+    assert!(got.len() > 10, "{}", got.len());
+    for (frame, ump) in got {
+        assert_eq!(ump.group(), Some(group), "frame {frame}: {ump:?}");
+    }
+}
+
+/// **Nothing is sent until a host sets it, and a setting lands whole at the next
+/// block.** Off, a rolling transport is silent; set to the clock, the next block
+/// resyncs the receiver with a Song Position of where it stands (no Start is
+/// made up). Turning MMC on while rolling sends nothing, and the
+/// stop after it is STOP.
+#[test]
+fn a_setting_lands_at_the_next_block() {
+    let mut rig = Rig::new(G, SyncMessages::OFF);
+    assert!(rig.block(BLOCK, rolling(Beat(1.0)), &[]).is_empty());
+    rig.controls.messages().set(clock());
+    let got = rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]);
+    // 1 + 4 096 / 24 000 beats is 4.68 sixteenths: the nearest is 5.
+    assert_eq!(
+        got[0],
+        (BLOCK as u64, system(G, System::SongPosition(U14::of(5))))
+    );
+    assert!(!got.iter().any(|e| e.1 == system(G, System::Start)));
+
+    let mut rig = Rig::new(G, SyncMessages::OFF);
+    rig.block(BLOCK, rolling(Beat(1.0)), &[]);
+    rig.controls.messages().set(mmc(MtcRate::Fps30));
+    assert!(rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]).is_empty());
+    let got = sysex(&rig.block(
+        BLOCK,
+        rolling(beat(1.0, 2 * BLOCK)),
+        &[(10, stopped(beat(1.0, 2 * BLOCK + 10)))],
+    ));
+    assert_eq!(got, [(2 * BLOCK as u64 + 10, STOP.to_vec())]);
+}
+
+/// **A forked sync node runs, over what the live one sent at the fork.**
+#[test]
+fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
+    use tutti_graph::{ForkMode, ForkTarget};
+    // A fork keeps what reaches the master's output: the sink has one.
+    let mut rig = EventRig::new(RATE, BLOCK, 1);
+    let controls = rig
+        .editor
+        .insert(
+            NodeKey(1),
+            "sync",
+            SyncOut::new(SyncOutConfig::new(G).messages(SyncMessages::OFF)),
+        )
+        .controls;
+    rig.feed(NodeKey(1), 0, 0);
+    rig.commit();
+    controls.messages().set(clock());
+    let prepare = *rig.editor.prepare();
+    let (_fork, mut exec) = rig
+        .editor
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    let mut out = vec![0.0f32; 512];
+    exec.process(512, &rolling(Beat(0.0)), &[], &mut [&mut out[..]]);
+    let got: Vec<_> = heard(&rig.seen).into_iter().map(|e| e.1).collect();
+    assert_eq!(got[0], system(G, System::Start));
+    assert_eq!(got[1], system(G, System::TimingClock));
+    let _ = SyncOut::new(SyncOutConfig::new(G)).into_node();
+}
