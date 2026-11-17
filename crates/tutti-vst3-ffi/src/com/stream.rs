@@ -370,7 +370,8 @@ mod tests {
 
     /// **A plugin cannot make the host allocate past the cap by seeking far and
     /// writing.** `Cursor<Vec<u8>>` zero-fills up to the position, so a seek to
-    /// 1 TiB and a one-byte write used to ask for a terabyte.
+    /// 1 TiB and a one-byte write would ask for a terabyte; the write is
+    /// refused.
     #[test]
     fn a_far_seek_then_a_write_is_refused() {
         let stream = BStream::new();
