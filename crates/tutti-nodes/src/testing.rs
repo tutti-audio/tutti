@@ -104,8 +104,10 @@ impl Const {
     }
 
     /// Creates a constant with one value per channel, so channels can be told
-    /// apart. `values` is one frame, as [`Interleaved::frame`](tutti_buffers::Interleaved::frame) hands it out, in
-    /// any [`Sample`] format; the width is `values.len()`.
+    /// apart. The width is `values.len()`.
+    ///
+    /// `values` is one frame in any [`Sample`] format, the shape
+    /// [`Interleaved::frame`](tutti_buffers::Interleaved::frame) hands out.
     pub fn frame<S: Sample>(values: &[S]) -> Self {
         Self {
             values: values.iter().map(|v| v.convert_to::<f32>()).collect(),
