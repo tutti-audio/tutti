@@ -20,7 +20,7 @@ use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 use crate::common;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_ump::{Address, BendValue, ControlValue, Flex, NoteKeyEvent, Message, System, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, Flex, Message, NoteKeyEvent, System, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
