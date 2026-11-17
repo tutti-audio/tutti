@@ -66,6 +66,17 @@ impl Au {
         )?))
     }
 
+    /// [`new`](Self::new) with its drops handed to `work`, for a test that
+    /// runs the collector itself.
+    pub fn new_on(
+        component: tutti_au_host::component::AuComponentRef,
+        rate: SampleRate,
+        block: u32,
+        work: &tutti_plugin_types::MainWorkHandle,
+    ) -> tutti_au_host::Result<Self> {
+        Ok(Self::of(AuLoaded::new(component, rate, block, work)?))
+    }
+
     /// See [`AuLoaded::new_with_config`].
     pub fn new_with_config(
         component: tutti_au_host::component::AuComponentRef,

@@ -231,7 +231,8 @@ pub use tutti_au_ffi::{PushScratch, output_byte_sizes};
 /// flags are returned. See `tutti_au_ffi::process_push` for the contract.
 ///
 /// # Errors
-/// [`AuError::InvalidBuffer`] if `frames` exceeds the scratch's block size, or
+/// [`AuError::BlockTooLarge`] if `frames` exceeds the scratch's block size,
+/// [`AuError::MissingBus`] if the scratch lacks a bus the call needs, or
 /// [`AuError::RenderFailed`] with the unit's last render error attached (read
 /// here, on the control side, after the failed call).
 pub fn process_push(

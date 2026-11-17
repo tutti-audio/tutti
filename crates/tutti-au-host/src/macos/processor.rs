@@ -593,7 +593,7 @@ impl AuProcessor {
     /// same with a narrowing and widening round trip through the one scratch.
     ///
     /// # Errors
-    /// [`AuError::InvalidBuffer`] if `num_frames` exceeds the configured block
+    /// [`AuError::BlockTooLarge`] if `num_frames` exceeds the configured block
     /// size, or [`AuError::RenderFailed`] if `AudioUnitRender` fails.
     pub fn render_f32(
         &mut self,
@@ -647,10 +647,10 @@ impl AuProcessor {
     /// notably the `OutputIsSilence` handling. Allocation-free on the success path.
     fn render_frames(&mut self, num_frames: u32) -> Result<Silence> {
         if num_frames > self.block_size {
-            return Err(AuError::InvalidBuffer(format!(
-                "num_frames ({num_frames}) > block_size ({})",
-                self.block_size
-            )));
+            return Err(AuError::BlockTooLarge {
+                frames: num_frames,
+                max: self.block_size,
+            });
         }
         // The render callback is installed ONCE at activation off the renderer's
         // stable heap scratch, deliberately NOT here: re-installing per block is
@@ -823,7 +823,7 @@ impl AuProcessor {
 /// errored block, so it must not allocate (`AuError`'s own text is formatted).
 fn block_reason(error: &AuError) -> &'static str {
     match error {
-        AuError::InvalidBuffer(_) => "the block is longer than the activated block size",
+        AuError::BlockTooLarge { .. } => "the block is longer than the activated block size",
         AuError::RenderFailed { code, .. } if *code == K_AUDIO_UNIT_ERR_UNINITIALIZED => {
             "the unit is no longer initialized"
         }

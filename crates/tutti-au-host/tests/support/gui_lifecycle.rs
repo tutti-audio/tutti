@@ -458,15 +458,27 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
 gui_test! {
 /// An editor dropped off the main thread does not touch AppKit: its close is
 /// handed to the main thread's collector, counted once in
-/// `MainWork::deferred_drops`, and the unit is still usable (a new editor opens
+/// `MainWork::deferred_drops`, runs when the collector does (the view gives up
+/// the reference `open` took), and the unit is still usable (a new editor opens
 /// on it) afterwards.
 fn dropping_off_the_main_thread_defers_and_counts_the_close() {
     let _g = lock();
     let (unit, _, _) = &WITH_COCOA_VIEW[0];
-    let au = ready(unit);
+    let (work, handle) = tutti_plugin_types::MainWork::new();
+    let mut au = Au::new_on(unit.require().component, RATE, BLOCK, &handle)
+        .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", unit.label));
+    au.initialize()
+        .unwrap_or_else(|e| panic!("{}: initialize failed: {e:?}", unit.label));
     // SAFETY: `au` is live and initialized, and this runs on the main thread.
     let editor = unsafe { open_headless(&au) }
         .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
+
+    // Our own reference keeps the view alive to be asked after the close.
+    let view = editor.view_ptr();
+    // SAFETY: `view` is the live view `open_headless` just returned; the retain
+    // is balanced by the `release` below.
+    unsafe { retain(view) };
+    let held = unsafe { retain_count(view) };
 
     let before = tutti_plugin_types::MainWork::deferred_drops();
     std::thread::spawn(move || drop(editor))
@@ -478,6 +490,29 @@ fn dropping_off_the_main_thread_defers_and_counts_the_close() {
         "{}: a drop off the main thread defers its close and counts it once",
         unit.label
     );
+
+    // The collector runs the close on the main thread.
+    assert_eq!(
+        work.run(on_main()),
+        1,
+        "{}: the deferred close is the one unit of work",
+        unit.label
+    );
+    let after = unsafe { retain_count(view) };
+    // Counts near the drift floor jitter with AppKit activity (see
+    // `repeated_open_close_cycles_stay_balanced`).
+    const DRIFT_ATTRIBUTABLE_BELOW: usize = 500;
+    if held < DRIFT_ATTRIBUTABLE_BELOW {
+        assert_eq!(
+            after + 1,
+            held,
+            "{}: the deferred close must give up exactly the one reference open took \
+             (retain count {held} -> {after})",
+            unit.label
+        );
+    }
+    // SAFETY: gives up the retain taken above; `view` is not read after.
+    unsafe { release(view) };
 
     // SAFETY: as above.
     let mut again = unsafe { open_headless(&au) }

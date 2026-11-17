@@ -174,15 +174,22 @@ impl AuEditor {
 impl Drop for AuEditor {
     fn drop(&mut self) {
         // Off the main thread the close goes to the main thread's collector
-        // rather than to AppKit from the wrong thread. It runs before the
-        // disposal of the unit this editor holds, which the unit's own drop
-        // queues after it. A collector that is gone strands the close (the
-        // view leaks), counted in `MainWork::stranded`.
+        // rather than to AppKit from the wrong thread. The queued closure holds
+        // a clone of the unit, so the close runs before the unit can be
+        // disposed: this editor's own `unit` field may be the last handle, and
+        // a last drop on the unit's home thread disposes inline. The clone drops
+        // after the close, on the main thread. A collector that is gone and a
+        // caller off the main thread strand the closure: the view and the unit
+        // both leak, counted in `MainWork::stranded`.
         match MainThreadMarker::new() {
             Some(main) => self.close(main),
             None => {
                 if let Some(view) = self.take_view() {
-                    self.unit.work().defer_drop(move |main| view.close(main));
+                    let unit = self.unit.clone();
+                    self.unit.work().defer_drop(move |main| {
+                        view.close(main);
+                        drop(unit);
+                    });
                 }
             }
         }

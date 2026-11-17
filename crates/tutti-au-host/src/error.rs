@@ -81,6 +81,25 @@ pub enum AuError {
     /// configured stream (wrong frame count, mismatched channels, etc.).
     #[error("invalid buffer: {0}")]
     InvalidBuffer(String),
+    /// A render asked for more frames than the activated block size; nothing
+    /// was rendered. Carries no text, so the audio thread builds it without
+    /// allocating.
+    #[error("{frames} frames exceed the block size {max}")]
+    BlockTooLarge {
+        /// The frames asked for.
+        frames: u32,
+        /// The activated block size.
+        max: u32,
+    },
+    /// A push render needs buses its scratch does not have; nothing was
+    /// rendered.
+    #[error("{function} needs {needs}")]
+    MissingBus {
+        /// The AudioToolbox function that was to render.
+        function: &'static str,
+        /// The buses it needs.
+        needs: &'static str,
+    },
     /// A bus reports more channels than a layout holds. Refused rather than
     /// wrapped into a narrower bus.
     #[error("AU {scope} bus is too wide: {source}")]
@@ -282,6 +301,8 @@ impl AuError {
             }
             AuError::CfStringAlloc => return "CoreFoundation string allocation failed",
             AuError::InvalidBuffer(_) => return "invalid buffer",
+            AuError::BlockTooLarge { .. } => return "block larger than the block size",
+            AuError::MissingBus { .. } => return "scratch lacks a bus the render needs",
             AuError::SampleRateRejected { .. } => return "sample rate rejected",
             AuError::BlockSizeRejected { .. } => return "block size rejected",
             AuError::PresetIo(_) => return "preset file I/O failed",
