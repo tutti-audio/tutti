@@ -36,13 +36,24 @@ fn digests_that_differ_in_one_byte_do_not_match() {
     assert!(!a.matches(&Digest::new(other)));
 }
 
+/// The nonce is ASCII ordinals 32-126.
 #[test]
-fn a_nonce_must_be_ascii_and_entropy_makes_printable_ascii() {
-    let mut bad = *b"0123456789abcdef";
-    bad[3] = 0x80;
-    assert!(Nonce::new(bad).is_none());
-    let nonce = Nonce::from_entropy([0xFF; 16]);
-    assert!(nonce.get().iter().all(|b| (32..=126).contains(b)));
+fn a_nonce_holds_only_the_printable_ascii_range() {
+    let good = *b"0123456789abcdef";
+    assert!(Nonce::new(good).is_some());
+    for bad_byte in [0u8, 31, 127, 0x80, 0xFF] {
+        let mut bad = good;
+        bad[3] = bad_byte;
+        assert!(Nonce::new(bad).is_none(), "byte {bad_byte:#04x}");
+    }
+    let (first, last) = (Nonce::new([32; 16]), Nonce::new([126; 16]));
+    assert!(first.is_some() && last.is_some(), "both ends are in range");
+}
+
+#[test]
+fn random_nonces_are_valid_and_differ() {
+    let nonce = Nonce::random().unwrap();
+    assert!(Nonce::new(nonce.get()).is_some());
     assert_ne!(
         Nonce::random().unwrap(),
         Nonce::random().unwrap(),
