@@ -208,3 +208,35 @@ fn the_switch_starts_off_and_both_ends_see_it() {
     reader.disable();
     assert!(!on());
 }
+
+/// An `f64` block of 600 frames, metered through `for_f32`'s chunks of 256
+/// (256, 256 and a short 88): its peak and root-mean-square are the analytic
+/// figures of the block.
+///
+/// The samples are `(i % 7 - 3) / 4`: every sample and square is a multiple of
+/// 1/16 below 2^20, so each `f32` partial sum is exact and the chunked fold
+/// equals the whole one. The sum of squares is `85 * 28/16 + 15/16` (85 whole
+/// periods and 5 samples), the peak `3/4`. The only rounding left is the
+/// final `f32` rms, so the tolerance is one `f32` epsilon relative.
+#[test]
+fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
+    use crate::arena::Arena;
+    const FRAMES: usize = 600;
+    let mut arena = Arena::<f64>::new(1, FRAMES);
+    for (i, x) in arena.slot_mut(0, FRAMES).iter_mut().enumerate() {
+        *x = ((i % 7) as f64 - 3.0) / 4.0;
+    }
+    let (mut reader, writer) = MeterReader::pair(MeterId::of(1), 1, 1);
+    reader.enable();
+    meter_op::<f64, _, _>(&writer, &arena, &[0u8][..], &[0], FRAMES);
+    let level = reader.read()[0];
+    let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
+    let rms = (sum_sq / FRAMES as f64).sqrt() as f32;
+    assert_eq!(level.frames, Samples(FRAMES));
+    assert_eq!(level.peak, Amplitude(0.75));
+    assert!(
+        (level.rms.0 - rms).abs() <= rms * f32::EPSILON,
+        "{} against {rms}",
+        level.rms.0
+    );
+}

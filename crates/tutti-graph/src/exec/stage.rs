@@ -24,6 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use tutti_buffers::Float;
 
 use tutti_curve::declick_frames;
 
@@ -97,14 +98,14 @@ pub(super) struct Vanished {
 }
 
 /// Everything a commit's apply installs, built on the control side.
-pub(super) struct Staged {
+pub(super) struct Staged<F: Float = f32> {
     /// Whether time-based state carries (no sample-rate change).
     pub(super) carry: bool,
     /// The pool participants the parallel state was built for (0: none).
     pub(super) participants: usize,
     /// The new state, shell: every ring and writer that comes from the
     /// commit is in place, the rest waits for what carries.
-    pub(super) state: Option<State>,
+    pub(super) state: Option<State<F>>,
     pub(super) rings: Vec<RingFrom>,
     pub(super) event_fb: Vec<RingFrom>,
     /// The old index each audio feedback ring, tap, event tap, meter and
@@ -126,7 +127,7 @@ pub(super) struct Staged {
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
     pub(super) drives: Vec<(u32, ParamState)>,
-    pub(super) spare_rings: Vec<Ring>,
+    pub(super) spare_rings: Vec<Ring<F>>,
     /// Tables of owed closes merged away, to be freed on the control side.
     pub(super) spare_tables: Vec<Held>,
     pub(super) spare_drives: Vec<ParamState>,
@@ -135,12 +136,12 @@ pub(super) struct Staged {
     /// The executor's chase buffer from this plan on.
     pub(super) chase: Vec<Event>,
     /// A store with room for the plan's units, when the executor's has none.
-    pub(super) store: Option<Vec<Option<Unit>>>,
+    pub(super) store: Option<Vec<Option<Unit<F>>>>,
     /// The store length the plan needs.
     store_len: usize,
 }
 
-impl Staged {
+impl<F: Float> Staged<F> {
     /// The parallel state for `participants` (the pool the executor has now),
     /// built for the plan this was staged for: the pool was set after the
     /// commit was sent. Control side: allocates.
@@ -313,7 +314,7 @@ impl Stager {
     }
 
     /// Builds what applying `c` needs, and puts it in `c`.
-    pub(crate) fn stage(&mut self, c: &mut Commit, input: StageIn<'_>) {
+    pub(crate) fn stage<F: Float>(&mut self, c: &mut Commit<F>, input: StageIn<'_>) {
         let plan = Arc::clone(
             c.plan
                 .as_ref()
@@ -440,7 +441,7 @@ impl Stager {
     }
 
     /// Crossfades in flight, and how long a chase can be, by key.
-    fn track(&mut self, c: &Commit, cx: &Cx<'_>) {
+    fn track<F: Float>(&mut self, c: &Commit<F>, cx: &Cx<'_>) {
         for (key, f) in &c.delta.fades {
             if !f.is_cut() {
                 *self.fading.entry(*key).or_default() += 1;
@@ -459,12 +460,12 @@ impl Stager {
 
     /// PDC rings and FIFOs, by key: the shell of each, how it takes over the
     /// old one, and the capacity of each event FIFO for the next commit.
-    fn delays(
+    fn delays<F: Float>(
         &self,
         cx: &Cx<'_>,
         to_close: &BTreeSet<DelayKey>,
     ) -> (
-        Vec<Option<Ring>>,
+        Vec<Option<Ring<F>>>,
         FifoPlan,
         BTreeMap<DelayKey, usize>,
         BTreeSet<DelayKey>,
@@ -557,11 +558,11 @@ impl Stager {
 
     /// Feedback delays, by key: exactly the edge's delay long.
     #[allow(clippy::type_complexity)]
-    fn feedback(
+    fn feedback<F: Float>(
         &self,
         cx: &Cx<'_>,
     ) -> (
-        Vec<Option<AudioRing>>,
+        Vec<Option<AudioRing<F>>>,
         Vec<Option<u32>>,
         Vec<Option<EventFifo>>,
         FifoPlan,
@@ -615,7 +616,7 @@ impl Stager {
     /// What disappears flushes to sinks that survive, and held keys of an
     /// edge that ended are closed at the sink that lost it: each sink gets a
     /// buffer for everything that can flow into it.
-    fn flush(&self, c: &Commit, cx: &Cx<'_>, closers: Vec<Closer>) -> Flush {
+    fn flush<F: Float>(&self, c: &Commit<F>, cx: &Cx<'_>, closers: Vec<Closer>) -> Flush {
         let plan = cx.plan;
         let mut rooms: BTreeMap<(u32, u16), Room> = BTreeMap::new();
         // What replaced nodes wrote for their successors.
@@ -742,7 +743,7 @@ impl Stager {
     /// pedal there is, so it cannot overflow, drained block by block as room
     /// frees, as the owed keys of a bypassed unit are. No close is ever
     /// refused for room, and no note is left stuck.
-    fn closers(&self, c: &Commit, cx: &Cx<'_>) -> Vec<Closer> {
+    fn closers<F: Float>(&self, c: &Commit<F>, cx: &Cx<'_>) -> Vec<Closer> {
         let Some(old) = cx.old else {
             return Vec::new();
         };
@@ -829,7 +830,7 @@ impl Stager {
 
     /// What the units that arrive hold: held-key tables, and room for a
     /// crossfade's chase.
-    fn prepare_incoming(&self, c: &mut Commit, cx: &Cx<'_>) {
+    fn prepare_incoming<F: Float>(&self, c: &mut Commit<F>, cx: &Cx<'_>) {
         for inc in &mut c.incoming {
             let Some(shape) = cx.plan.unit(inc.key).map(|u| u.shape) else {
                 continue;
@@ -933,7 +934,7 @@ struct Outlets {
 
 /// Taps, event taps and meters, by id. A writer the plan does not name stays
 /// in the old state (or the commit) and is freed on the control side.
-fn outlets(c: &mut Commit, cx: &Cx<'_>) -> Outlets {
+fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets {
     let plan = cx.plan;
     fn open<I: PartialEq, W>(opened: &mut Vec<(I, W)>, id: &I) -> Option<W> {
         let at = opened.iter().position(|(o, _)| o == id)?;
@@ -991,7 +992,7 @@ fn outlets(c: &mut Commit, cx: &Cx<'_>) -> Outlets {
 /// keeps the edge (not a sample-rate change's reset: a weight is not time),
 /// and a new edge starts at its value. A lane a source drives has its state
 /// built here.
-fn lanes(c: &Commit, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>>) {
+fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>>) {
     let plan = cx.plan;
     let old_lanes: BTreeMap<crate::EdgeId, usize> = cx
         .old
@@ -1038,8 +1039,8 @@ fn lanes(c: &Commit, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>>) {
 
 /// The lanes that drive a unit's mix: for a unit placed now, or one no
 /// earlier plan drove.
-fn drives(
-    c: &Commit,
+fn drives<F: Float>(
+    c: &Commit<F>,
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState>,
 ) -> Vec<(u32, ParamState)> {
@@ -1106,7 +1107,7 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Vec<usize> {
 }
 
 /// Room for what applying hands back.
-fn reserve_returns(c: &mut Commit, cx: &Cx<'_>) {
+fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
     let replaces = c.delta.replace.len();
     let parked = if cx.resumed {
         cx.old.map_or(0, |o| o.units.len())

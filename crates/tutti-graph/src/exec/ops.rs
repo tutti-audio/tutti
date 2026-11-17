@@ -10,10 +10,11 @@ use crate::kernels::{AudioRing, EventFifo};
 use crate::node::MAX_PORTS;
 use crate::plan::GainPortOp;
 use crate::slots::{AudioSlots, EventSlots, SlotFlags, borrow_events, event_pair};
+use tutti_buffers::Float;
 
 /// An audio delay's ring.
 #[inline]
-pub(crate) fn audio_ring(r: &mut Option<Ring>) -> &mut AudioRing {
+pub(crate) fn audio_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut AudioRing<F> {
     match r {
         Some(Ring::Audio(a)) => a,
         _ => unreachable!("an audio delay on an event ring"),
@@ -22,7 +23,7 @@ pub(crate) fn audio_ring(r: &mut Option<Ring>) -> &mut AudioRing {
 
 /// An event delay's FIFO.
 #[inline]
-pub(crate) fn event_ring(r: &mut Option<Ring>) -> &mut EventFifo {
+pub(crate) fn event_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut EventFifo {
     match r {
         Some(Ring::Event(f)) => f,
         _ => unreachable!("an event delay on an audio ring"),
@@ -31,10 +32,10 @@ pub(crate) fn event_ring(r: &mut Option<Ring>) -> &mut EventFifo {
 
 /// [`Op::GlobalIn`](crate::Op::GlobalIn).
 #[inline]
-pub(crate) fn global_in<A: AudioSlots, F: SlotFlags + ?Sized>(
+pub(crate) fn global_in<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     arena: &mut A,
-    flags: &mut F,
-    inputs: &[&[f32]],
+    flags: &mut Fl,
+    inputs: &[&[F]],
     channel: u16,
     dst: u32,
     frames: usize,
@@ -47,10 +48,10 @@ pub(crate) fn global_in<A: AudioSlots, F: SlotFlags + ?Sized>(
 
 /// [`Op::Delay`](crate::Op::Delay); `src == dst` is the in-place form.
 #[inline]
-pub(crate) fn delay_op<A: AudioSlots, F: SlotFlags + ?Sized>(
-    ring: &mut AudioRing,
+pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
+    ring: &mut AudioRing<F>,
     arena: &mut A,
-    flags: &mut F,
+    flags: &mut Fl,
     src: u32,
     dst: u32,
     frames: usize,
@@ -66,7 +67,7 @@ pub(crate) fn delay_op<A: AudioSlots, F: SlotFlags + ?Sized>(
 }
 
 /// [`Op::Sum`](crate::Op::Sum) or [`Op::WeightedSum`](crate::Op::WeightedSum) of the slots `list` into `dst`: the left
-/// fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `f32`, one rounding per
+/// fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in the engine's sample format `F`, one rounding per
 /// multiply and per add, never fused. `lanes` is empty for a plain sum, else one per
 /// addend; an addend's weight is exactly `1.0` unless its lane says otherwise,
 /// and a `1.0` weight is the plain add, no multiply (`crate::gain`).
@@ -88,9 +89,9 @@ pub(crate) fn delay_op<A: AudioSlots, F: SlotFlags + ?Sized>(
 /// dst`, which turns a `-0.0` into `+0.0`, as `+0.0 + w * a_0` does) and the
 /// rest are added into it.
 #[inline]
-pub(crate) fn sum_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
+pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     arena: &mut A,
-    flags: &mut F,
+    flags: &mut Fl,
     events: &E,
     list: &[u32],
     lanes: &mut [SumLane],
@@ -136,15 +137,15 @@ pub(crate) fn sum_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Size
         live += 1;
     }
     if live == 0 {
-        arena.slot_mut(dst, frames).fill(0.0);
+        arena.slot_mut(dst, frames).fill(F::ZERO);
         flags.set(dst, SILENT | CONSTANT);
         return;
     }
     reqs[m] = (dst, Role::Write(0));
     m += 1;
     reqs[..m].sort_unstable();
-    let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
-    let mut outs: [&mut [f32]; 1] = [&mut [][..]];
+    let mut ins: [&[F]; MAX_PORTS] = [&[]; MAX_PORTS];
+    let mut outs: [&mut [F]; 1] = [&mut [][..]];
     arena.borrow(frames, &reqs[..m], &mut ins, &mut outs);
     let [out] = outs;
     // `ins[k]` is live addend `k`, but for the first when it is `dst` itself.
@@ -199,11 +200,11 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
 /// [`Op::Output`](crate::Op::Output): slot `src` into `out`, through the channel's alignment
 /// ring if it has one.
 #[inline]
-pub(crate) fn output_op<A: AudioSlots, F: SlotFlags + ?Sized>(
-    ring: Option<&mut AudioRing>,
-    out: &mut [f32],
+pub(crate) fn output_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
+    ring: Option<&mut AudioRing<F>>,
+    out: &mut [F],
     arena: &A,
-    flags: &F,
+    flags: &Fl,
     src: u32,
 ) {
     let s = arena.slot(src, out.len());
@@ -217,10 +218,10 @@ pub(crate) fn output_op<A: AudioSlots, F: SlotFlags + ?Sized>(
 
 /// [`Op::Capture`](crate::Op::Capture).
 #[inline]
-pub(crate) fn capture_op<A: AudioSlots, F: SlotFlags + ?Sized>(
-    ring: &mut AudioRing,
+pub(crate) fn capture_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
+    ring: &mut AudioRing<F>,
     arena: &A,
-    flags: &F,
+    flags: &Fl,
     src: u32,
     frames: usize,
 ) {

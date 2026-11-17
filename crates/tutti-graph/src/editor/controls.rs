@@ -401,7 +401,7 @@ impl Editor {
     pub fn check_pass(&self, key: NodeKey) -> Result<(), crate::PassError> {
         self.shapes
             .get(&key)
-            .map_or(Ok(()), |shape| Pass::of(shape).map(drop))
+            .map_or(Ok(()), |shape| Pass::<f32>::of(shape).map(drop))
     }
 
     /// Whether `key`'s shape declares its own bypass
