@@ -42,8 +42,6 @@ use tutti_transport::MeterSlotReader;
 ///
 /// Engine types throughout: [`transport_info`] is where they meet the ABI's
 /// `f64`s.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Snapshot {
     pub(crate) playing: bool,
@@ -119,8 +117,6 @@ impl HostClock {
 /// ABIs' steady time (VST2 `samplePos`'s continuous twin, VST3
 /// `continousTimeSamples`) must never jump. A node keeps one and advances it by
 /// every block it renders.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SteadyTime(u64);
 
@@ -194,8 +190,6 @@ impl SteadyTime {
 /// A transport built by hand ([`TransportPosition::new`]: no frame count, which no
 /// engine block carries, and none when walked on to a frame) is read by the
 /// playhead's rule instead (`continued_without_origin`).
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProjectTime {
     last: Option<ProjectRead>,
@@ -504,8 +498,6 @@ pub(crate) fn from_cx(
 
 /// Map `s` onto the snapshot the plugin ABIs read, with `meter`'s signature
 /// and bar at the playhead.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
     // `.get()` from here on: `TransportInfo` is handed to C ABIs, where the
     // unit types stop.
@@ -562,8 +554,6 @@ pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
 ///
 /// [`block`](Self::block) lends what one block reads; [`advance`](Self::advance)
 /// counts the block's frames after it, whatever the plugin was told.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Clone)]
 pub(crate) struct TransportSource {
     /// A reader of the node's meter cell, registered when the source was
@@ -631,8 +621,6 @@ impl TransportSource {
 
 /// One block's lend of a `TransportSource`. Dropped before the block ends:
 /// it holds the meter's loan.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Debug)]
 pub struct BlockTransport<'a> {
     meter: Loan<'a, Option<Arc<MeterMap>>>,

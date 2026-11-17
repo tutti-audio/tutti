@@ -206,18 +206,55 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
     );
 }
 
-/// **A plugin crossfaded in is the one the latency phase reads.** The
-/// incoming client is told another latency, so the figure says which client
-/// the session's record follows: after `crossfade_plugin` the graph plans
-/// against the incoming plugin's figure plus the chunk, and a later change of
-/// the incoming plugin's latency is the one the phase hands the graph (its
+/// **A plugin crossfaded in is the one the latency phase reads.** The outgoing
+/// plugin announces a longer latency than the incoming one's, so the figure says
+/// which plugin the session's record follows: after `crossfade_plugin` the graph
+/// plans against the incoming plugin's figure plus the chunk, and a later change
+/// of the incoming plugin's latency is the one the phase hands the graph (its
 /// record moved to the incoming plugin). The node keeps its key.
 #[test]
 fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
-    const INCOMING: usize = 211;
+    // The probe adds this to its 137 when told to render offline, and announces it
+    // through `clap.latency`.
+    const OFFLINE_EXTRA: usize = 74;
+    const OWN: usize = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    // SAFETY: as `set_server`: before the first server, from the test's thread.
+    unsafe {
+        std::env::set_var(
+            "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
+            OFFLINE_EXTRA.to_string(),
+        );
+    }
+    // Tells `handle`'s plugin a render mode and waits for the latency it announces.
+    fn told(handle: &tutti_plugin_host::PluginHandle, mode: tutti_plugin_types::RenderMode) {
+        let (reported, heard) = std::sync::mpsc::channel();
+        let _hearing = handle.subscribe(move |notice| {
+            if matches!(
+                notice,
+                tutti_plugin_host::Notice::Invalidate(
+                    tutti_plugin_types::PluginInvalidation::Latency { .. }
+                )
+            ) {
+                let _ = reported.send(());
+            }
+        });
+        assert!(
+            handle.announce_render_mode(mode),
+            "the plugin takes the mode"
+        );
+        heard
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the plugin announced its latency");
+    }
     let mut s = offline();
     let node = add_probe_on_outputs(&mut s);
+    let outgoing_handle = s.plugin_view(node).expect("hosted").handle().clone();
+    told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
+    let _ = s.update();
     let outgoing = s.graph_ref().node_latency(node).unwrap();
+    assert_eq!(outgoing, Samples(OWN + OFFLINE_EXTRA + BLOCK));
 
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::at(
@@ -228,8 +265,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         RATE,
     )
     .expect("load a second instance of the reference plugin");
-    incoming.set_latency(Samples(INCOMING));
-    let controls = incoming.controls();
+    let incoming_handle = incoming.handle();
     let landed = s
         .graph()
         .crossfade_plugin(
@@ -244,21 +280,16 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let _ = s.update();
 
     assert!(s.graph_ref().contains(node), "the node keeps its key");
-    assert_ne!(
-        s.graph_ref().node_latency(node).unwrap(),
-        outgoing,
-        "precondition: the figures differ"
-    );
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(INCOMING + BLOCK),
-        "the graph plans against the incoming plugin's declared latency"
+        Samples(OWN + BLOCK),
+        "the graph plans against the incoming plugin's declared latency, not the outgoing one's"
     );
-    controls.set_latency(Samples(INCOMING + 7));
+    told(&incoming_handle, tutti_plugin_types::RenderMode::Offline);
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(INCOMING + 7 + BLOCK),
+        Samples(OWN + OFFLINE_EXTRA + BLOCK),
         "the latency phase must read the incoming plugin"
     );
 }

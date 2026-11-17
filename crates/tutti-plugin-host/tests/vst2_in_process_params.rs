@@ -32,6 +32,9 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_plugin_host::PluginHandle;
+#[path = "support/param_reads.rs"]
+mod param_reads;
+use param_reads::ParamReads as _;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
@@ -100,7 +103,6 @@ fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
 /// The plugin's own value for parameter `i`.
 fn read(handle: &PluginHandle, i: u32) -> Option<f32> {
     handle
-        .any_thread()
         .parameter_value(ParamId::new((i32::try_from(i).expect("small")) as u32))
         .map(|v| v.get() as f32)
 }
@@ -181,9 +183,7 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
     assert_eq!(read(&handle, p), Some(0.25));
     assert_eq!(controls.param_delivery().points_sent, 1, "sent once");
 
-    handle
-        .any_thread()
-        .set_parameter_value(ParamId::new((p as i32) as u32), Normalized::of(0.75));
+    handle.send_parameter(ParamId::new((p as i32) as u32), Normalized::of(0.75));
     assert_eq!(read(&handle, p), Some(0.75), "the edit reached the plugin");
     held(&mut unit, 0.25, 32);
     assert_eq!(
@@ -242,9 +242,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         Some(251.0),
         "live, held"
     );
-    handle
-        .any_thread()
-        .set_parameter_value(ParamId::new(0), Normalized::of(0.5));
+    handle.send_parameter(ParamId::new(0), Normalized::of(0.5));
     assert_eq!(
         channel_0(&live.render(BLOCK * 8)),
         Some(501.0),

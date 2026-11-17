@@ -5,6 +5,12 @@
 //! socket, then drives `PluginHandle` IPC round-trips through it. The
 //! `respond` callback lets each test script the server's replies.
 
+#[path = "../../../tests/support/param_reads.rs"]
+mod param_reads;
+use param_reads::ParamReads as _;
+#[path = "../../../tests/support/param_list.rs"]
+mod param_list;
+use param_list::ParamList as _;
 use std::sync::Arc;
 use tutti_fixtures::main_thread;
 use tutti_plugin_host::PluginHandle;
@@ -365,14 +371,14 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 
     // First request: receives `ParameterList`; the events that follow it are
     // read as they arrive.
-    let params = handle.any_thread().parameter_descriptors().unwrap();
+    let params = handle.parameter_descriptors().unwrap();
     assert_eq!(params.len(), 1);
     assert_eq!(params[0].name(), "Vol");
 
     // Second request: the helper must peel the two trailing events off
     // before returning the real `ParameterValue` reply.
     assert_eq!(
-        handle.any_thread().parameter_value(ParamId::new(0)),
+        handle.parameter_value(ParamId::new(0)),
         Some(Normalized::of(0.5))
     );
 
@@ -430,12 +436,9 @@ fn a_tail_change_reaches_the_listener() {
 
     // First request takes the reply; the trailing event waits in the socket
     // buffer until the next `recv_reply` drains it.
+    assert_eq!(handle.parameter_descriptors().unwrap().len(), 1);
     assert_eq!(
-        handle.any_thread().parameter_descriptors().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        handle.any_thread().parameter_value(ParamId::new(0)),
+        handle.parameter_value(ParamId::new(0)),
         Some(Normalized::of(0.5))
     );
 
@@ -463,7 +466,7 @@ fn handle_save_state_roundtrip() {
         _ => None,
     });
 
-    let state = handle.any_thread().save_state();
+    let state = handle.save_state();
     assert_eq!(state.expect("mock answered"), vec![0xDE, 0xAD, 0xBE, 0xEF]);
 }
 
@@ -480,7 +483,7 @@ fn handle_get_parameter_list() {
         _ => None,
     });
 
-    let params = handle.any_thread().parameter_descriptors().unwrap();
+    let params = handle.parameter_descriptors().unwrap();
     assert_eq!(params.len(), 3);
     assert_eq!(params[0].name(), "Volume");
     assert_eq!(params[1].name(), "Pan");
@@ -490,6 +493,10 @@ fn handle_get_parameter_list() {
 #[test]
 fn handle_get_parameter_value() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
+        // The mirror's read lists the parameters, then asks for each value.
+        HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
+            parameters: vec![ParameterInfo::new(ParamId::new(42), "Gain".to_string())],
+        }),
         HostMessage::GetParameter { param_id } if param_id == ParamId::new(42) => {
             Some(BridgeMessage::ParameterValue {
                 value: Some(Normalized::of(0.75)),
@@ -500,7 +507,7 @@ fn handle_get_parameter_value() {
     });
 
     assert_eq!(
-        handle.any_thread().parameter_value(ParamId::new(42)),
+        handle.parameter_value(ParamId::new(42)),
         Some(Normalized::of(0.75))
     );
 }

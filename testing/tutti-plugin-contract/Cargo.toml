@@ -28,6 +28,7 @@ tutti-shared-plugin = { path = "../tutti-shared-plugin" }
 # binary is not built for a test.
 tutti-plugin = { path = "../../crates/tutti-plugin", features = ["clap", "vst2", "vst3"], optional = true }
 # `tests/probe.rs` applies a probe's `Delta` to a `PluginDb` to read the descriptor.
+tutti-plugin-host = { path = "../../crates/tutti-plugin-host", optional = true }
 tutti-plugin-db = { path = "../../crates/tutti-plugin-db", optional = true }
 # `tests/server.rs` drives a served plugin through `Ipc`, a `Loaded` of its own.
 tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc", optional = true }
@@ -35,7 +36,7 @@ tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc", optional = true }
 [features]
 # `tests/server.rs`: the same configuration and transcript through a real
 # `plugin-server` process.
-server = ["dep:tutti-plugin", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
+server = ["dep:tutti-plugin", "dep:tutti-plugin-host", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
 
 [[test]]
 name = "server"

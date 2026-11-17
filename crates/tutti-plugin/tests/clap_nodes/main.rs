@@ -6,6 +6,9 @@ mod clap_probe;
 #[cfg(feature = "clap")]
 #[path = "../support/param_probe.rs"]
 mod param_probe;
+#[cfg(feature = "clap")]
+#[path = "../support/param_reads.rs"]
+mod param_reads;
 
 // `assert_no_alloc` is inert unless `AllocDisabler` is the global allocator. It
 // does nothing outside an `assert_no_alloc` closure, so the other tests here are

@@ -4,6 +4,7 @@
 //!
 //! The plugin is the reference VST2 probe, in process.
 
+use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use std::time::{Duration, Instant};
 use tutti_session::Root;
@@ -190,7 +191,6 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
         s.plugin_view(node)
             .expect("the handle")
             .handle()
-            .any_thread()
             .parameter_value(ParamId::new(0))
             .expect("a value")
     };
@@ -264,7 +264,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
             "round {round}: the knob"
         );
         assert_eq!(
-            handle.any_thread().parameter_value(ParamId::new(0)),
+            handle.parameter_value(ParamId::new(0)),
             Some(Normalized::of(0.25)),
             "round {round}: the plugin reads the knob plus the offset"
         );

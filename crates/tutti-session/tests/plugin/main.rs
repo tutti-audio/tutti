@@ -4,6 +4,11 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+// A plugin's parameter values, read through the host's mirror.
+#[cfg(feature = "clap")]
+#[path = "../support/param_reads.rs"]
+mod param_reads;
+
 // Loading a plugin file through the pool, as a test does where an app declares the entry.
 #[cfg(feature = "plugin")]
 #[path = "../support/pooled.rs"]

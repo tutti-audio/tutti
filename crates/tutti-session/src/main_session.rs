@@ -135,7 +135,7 @@ impl<C: Clock> MainSession<'_, C> {
         self.session.graph.graveyard.exhume(main);
         self.session.main_work.run(main);
         for (&node, hosted) in &self.session.graph.plugins {
-            if !hosted.editor_open {
+            if !hosted.handle.is_editor_open() {
                 continue;
             }
             hosted.handle.editor_idle(main);
@@ -261,12 +261,10 @@ impl EditorView<'_> {
         let handle = &self.hosted.handle;
         if handle.loaded().features.contains(Features::EDITOR_FLOATING) {
             handle.open_floating_editor(self.main)?;
-            self.hosted.editor_open = true;
             return Ok(Opened::Floating);
         }
         let parent = WindowHandle::from_window(window)?;
         let size = handle.open_editor(self.main, parent, scale)?;
-        self.hosted.editor_open = true;
         Ok(Opened::Embedded(size))
     }
 
@@ -313,6 +311,5 @@ impl EditorView<'_> {
     /// is open.
     pub fn close(&mut self) {
         self.hosted.handle.close_editor(self.main);
-        self.hosted.editor_open = false;
     }
 }

@@ -76,8 +76,6 @@ struct Track {
 
 /// The segments in flight on a plugin node's event input. See the module
 /// docs.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Debug, Default)]
 pub struct SegmentPoints {
     /// The slots, sized by [`prepare`](Self::prepare); live ones first.

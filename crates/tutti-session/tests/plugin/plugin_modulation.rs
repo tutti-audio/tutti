@@ -9,6 +9,7 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
@@ -161,7 +162,6 @@ fn gain_value(s: &DetachedSession, node: impl Into<NodeKey> + Copy) -> Option<No
     s.plugin_view(node)
         .expect("hosted")
         .handle()
-        .any_thread()
         .parameter_value(ParamId::new(GAIN))
 }
 

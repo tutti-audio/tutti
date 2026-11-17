@@ -103,7 +103,6 @@ use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
@@ -332,7 +331,7 @@ impl PluginClient<Unbound> {
                 ))
             })?;
 
-        let controls = PluginControls::with_chunks(
+        let (controls, reports) = PluginControls::with_chunks(
             loaded.latency_samples,
             loaded.tail,
             rate,
@@ -348,28 +347,26 @@ impl PluginClient<Unbound> {
 
         // Route the bridge's events into the shared cells and sinks, through
         // `Ipc::forward_events`. The listener runs on the bridge thread and
-        // must be cheap. A latency change writes the latency cell directly, so
+        // must be cheap. A latency change reaches the controls (`take_report`), so
         // `PluginControls::declared_latency` reads the new figure, then fires
         // the *invalidate* sink (latency is a structural invalidation — it
         // re-plans PDC, which a host does with `Editor::set_latency`). Resync
         // signals split by consequence into the refresh (cosmetic) vs
         // invalidate (structural) sinks via `ResyncKind::classify`.
-        let listener_latency = controls.latency_cell();
-        let listener_tail = controls.tail_cell();
         let listener_param_sink = param_sink.clone();
         let listener_refresh_sink = refresh_sink.clone();
         let listener_invalidate_sink = invalidate_sink.clone();
         let listener_transport_sink = transport_sink.clone();
         ipc.forward_events(Some(Arc::new(move |ev| match ev {
             BridgeEvent::LatencyChanged { samples } => {
-                // The atomic is the terminus: `AtomicUsize` needs a
-                // primitive, so the unit type stops here.
-                listener_latency.store(samples.get(), Ordering::Release);
-                listener_invalidate_sink.fire(PluginInvalidation::Latency { samples });
+                let reported = PluginInvalidation::Latency { samples };
+                reports.take_report(&reported);
+                listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::TailChanged { tail } => {
-                *tutti_plugin_host::lock_tail(&listener_tail) = tail;
-                listener_invalidate_sink.fire(PluginInvalidation::Tail { tail });
+                let reported = PluginInvalidation::Tail { tail };
+                reports.take_report(&reported);
+                listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::ParameterChanged { edit } => {
                 listener_param_sink.fire(edit);
@@ -603,38 +600,12 @@ impl<S> PluginClient<S> {
         self.controls.latency()
     }
 
-    /// Overrides the plugin's reported latency. RT-safe.
-    ///
-    /// Normally driven by the bridge thread when the plugin-server emits
-    /// `BridgeMessage::LatencyChanged` (forwarded by `PluginClient::new`);
-    /// exposed publicly so callers can also force a value. It changes what
-    /// [`PluginControls::declared_latency`] reports, and a graph re-plans PDC
-    /// around it when the host hands that to `Editor::set_latency` — the
-    /// node's `Shape` changes at the next commit. Register a callback via
-    /// `PluginHandle::subscribe` (latency arrives as
-    /// `PluginInvalidation::Latency`) to get notified.
-    pub fn set_latency(&self, samples: impl Into<Samples>) {
-        self.controls.set_latency(samples);
-    }
-
     /// Returns what the plugin currently reports for its tail.
     ///
     /// Starts as the value read at load and tracks runtime changes for formats
     /// that signal them (CLAP).
     pub fn tail(&self) -> PluginTail {
         self.controls.tail()
-    }
-
-    /// Overrides the plugin's reported tail. Control side: takes a short lock
-    /// (nothing on the audio thread reads the tail).
-    ///
-    /// Normally driven by the bridge thread when the plugin-server emits
-    /// `BridgeMessage::TailChanged`; exposed publicly so callers can also force
-    /// a value. Like `set_latency`, this changes what the node reports without
-    /// re-running anything — an offline render reads the tail when it sizes
-    /// itself, so a bounce already in flight keeps the length it started with.
-    pub fn set_tail(&self, tail: PluginTail) {
-        self.controls.set_tail(tail);
     }
 
     /// Returns a handle on this node's host-side controls that stays valid

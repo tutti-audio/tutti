@@ -30,7 +30,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tutti_plugin_types::{ChunkCounters, PluginTail};
+use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
 use tutti_transport::ProjectMeter;
 use tutti_types::Latency;
 use tutti_types::{AtomicSampleRate, SampleRate, Samples};
@@ -191,9 +191,45 @@ impl std::ops::Deref for PluginControls {
     }
 }
 
+/// The write half of a plugin's [`PluginControls`]: what the plugin reported
+/// goes into the latency and tail cells the controls read.
+///
+/// Issued once, with the controls, to the plugin's bridge listener, which is
+/// the only writer of the figures the graph compensates for. The controls hold
+/// reads only.
+#[derive(Debug)]
+pub struct PluginReports {
+    latency: Arc<AtomicUsize>,
+    tail: Arc<Mutex<PluginTail>>,
+}
+
+impl PluginReports {
+    /// Takes what the plugin reported into the controls: a new latency reaches
+    /// [`PluginControls::latency`] and [`PluginControls::declared_latency`], a
+    /// new tail reaches [`PluginControls::tail`]. Any other invalidation changes
+    /// no cell.
+    pub fn take_report(&self, reported: &PluginInvalidation) {
+        match *reported {
+            // The atomic is the terminus: `AtomicUsize` needs a primitive, so the
+            // unit type stops here.
+            PluginInvalidation::Latency { samples } => {
+                self.latency.store(samples.get(), Ordering::Release);
+            }
+            PluginInvalidation::Tail { tail } => *lock_tail(&self.tail) = tail,
+            _ => {}
+        }
+    }
+}
+
 impl PluginControls {
     /// Public for `tutti-plugin`'s node of a served plugin, which builds its controls at load.
-    pub fn new(latency: Samples, tail: PluginTail, sample_rate: SampleRate) -> Self {
+    ///
+    /// Returns the controls with the [`PluginReports`] that write their latency and tail.
+    pub fn new(
+        latency: Samples,
+        tail: PluginTail,
+        sample_rate: SampleRate,
+    ) -> (Self, PluginReports) {
         Self::with_chunks(latency, tail, sample_rate, Arc::default())
     }
 
@@ -205,15 +241,22 @@ impl PluginControls {
         tail: PluginTail,
         sample_rate: SampleRate,
         chunks: Arc<ChunkCounters>,
-    ) -> Self {
-        Self {
-            latency: Arc::new(AtomicUsize::new(latency.get())),
-            tail: Arc::new(Mutex::new(tail)),
+    ) -> (Self, PluginReports) {
+        let latency = Arc::new(AtomicUsize::new(latency.get()));
+        let tail = Arc::new(Mutex::new(tail));
+        let reports = PluginReports {
+            latency: Arc::clone(&latency),
+            tail: Arc::clone(&tail),
+        };
+        let controls = Self {
+            latency,
+            tail,
             pipeline: Arc::new(AtomicUsize::new(MAX_CHUNK)),
             node: NodeControls::new(crate::PluginMeter::default(), Arc::default()),
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             chunks,
-        }
+        };
+        (controls, reports)
     }
 
     /// The cells the node's IPC pipeline reports to, for the node.
@@ -296,16 +339,6 @@ impl PluginControls {
         self.node.delivery.delivered()
     }
 
-    /// The latency cell, for the bridge-thread listener that writes it.
-    pub fn latency_cell(&self) -> Arc<AtomicUsize> {
-        Arc::clone(&self.latency)
-    }
-
-    /// The tail cell, for the bridge-thread listener that writes it.
-    pub fn tail_cell(&self) -> Arc<Mutex<PluginTail>> {
-        Arc::clone(&self.tail)
-    }
-
     /// The plugin's reported latency, in **frames** — its own figure, without
     /// the chunk the IPC pipeline adds (see
     /// [`declared_latency`](Self::declared_latency)).
@@ -337,22 +370,10 @@ impl PluginControls {
         self.pipeline.store(frames.get(), Ordering::Release);
     }
 
-    /// Overwrite the reported latency. See
-    /// `PluginClient::set_latency`.
-    pub fn set_latency(&self, samples: impl Into<Samples>) {
-        self.latency.store(samples.into().get(), Ordering::Release);
-    }
-
     /// What the plugin currently reports for its tail. Control side: takes a
     /// short lock.
     pub fn tail(&self) -> PluginTail {
         *lock_tail(&self.tail)
-    }
-
-    /// Overwrite the reported tail. See
-    /// `PluginClient::set_tail`.
-    pub fn set_tail(&self, tail: PluginTail) {
-        *lock_tail(&self.tail) = tail;
     }
 
     /// The sample rate a source installed now would be stamped with.
@@ -426,7 +447,7 @@ mod tests {
     use tutti_types::MeterMap;
 
     fn controls() -> PluginControls {
-        PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1)
+        PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1).0
     }
 
     /// A handle taken *before* a rate change reads the new rate — the
@@ -451,7 +472,7 @@ mod tests {
         let live = controls();
         let meter = ProjectMeter::new(MeterMap::default());
         live.set_meter(meter.clone());
-        let fork = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_96K);
+        let (fork, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_96K);
         let gathered = live.sources_now();
         live.set_meter(ProjectMeter::new(MeterMap::default()));
         gathered.install(&fork);
@@ -468,8 +489,8 @@ mod tests {
     fn latency_and_tail_are_shared_between_handles() {
         let node = controls();
         let held = node.clone();
-        node.set_latency(Samples(512));
-        node.set_tail(PluginTail::Unbounded);
+        node.latency.store(512, Ordering::Release);
+        *lock_tail(&node.tail) = PluginTail::Unbounded;
         assert_eq!(held.latency(), Samples(512));
         assert_eq!(held.tail(), PluginTail::Unbounded);
     }
@@ -484,7 +505,7 @@ mod tests {
         let held = node.clone();
         assert_eq!(held.declared_latency(), Latency::new(Samples(MAX_CHUNK)));
         node.set_pipeline(Samples(64));
-        node.set_latency(Samples(512));
+        node.latency.store(512, Ordering::Release);
         assert_eq!(held.declared_latency(), Latency::new(Samples(576)));
         node.set_pipeline(Samples(32));
         assert_eq!(held.declared_latency(), Latency::new(Samples(544)));

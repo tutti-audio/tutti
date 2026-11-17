@@ -11,6 +11,8 @@
 
 #![cfg(feature = "vst2")]
 
+use crate::param_list::ParamList as _;
+use crate::param_reads::ParamReads as _;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
@@ -96,7 +98,7 @@ fn load_in_process_returns_audio_unit_and_handle() {
 
 /// A parameter written through the handle reads back through the handle.
 ///
-/// The round trip is the point: `set_parameter_value` is fire-and-forget, so
+/// The round trip is the point: `send_parameter` is fire-and-forget, so
 /// only a read proves the write reached the plugin rather than being dropped at
 /// a contended `try_lock` inside the in-process backend.
 #[test]
@@ -105,14 +107,12 @@ fn handle_parameter_roundtrip() {
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PARAMS", "4")]);
 
     let params = handle
-        .any_thread()
         .parameter_descriptors()
         .expect("the in-process VST2 backend enumerates parameters");
     assert_eq!(params.len(), 4, "the probe declared 4 parameters");
 
-    handle.any_thread().set_parameter_value(PARAM_0, n(0.5));
+    handle.send_parameter(PARAM_0, n(0.5));
     let v = handle
-        .any_thread()
         .parameter_value(PARAM_0)
         .expect("param 0 should exist");
     let v = v.get();
@@ -143,7 +143,6 @@ fn handle_state_roundtrip() {
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PARAMS", "4")]);
 
     let original = handle
-        .any_thread()
         .save_state()
         .expect("the probe declares chunk-based state");
     assert!(!original.is_empty(), "a declared chunk must not be empty");
@@ -158,7 +157,6 @@ fn handle_state_roundtrip() {
         .load_state(main_thread(), &modified)
         .expect("the probe accepts a chunk it just produced");
     let after = handle
-        .any_thread()
         .save_state()
         .expect("state must still be readable after a load");
 
@@ -181,10 +179,7 @@ fn an_accepted_chunk_reports_success() {
     let _lock = lock_probe();
     let handle = load_handle(&[]);
 
-    let blob = handle
-        .any_thread()
-        .save_state()
-        .expect("probe declares state");
+    let blob = handle.save_state().expect("probe declares state");
     handle
         .load_state(main_thread(), &blob)
         .expect("a chunk the plugin just produced must be accepted");
