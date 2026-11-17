@@ -925,7 +925,8 @@ mod tests {
                             side.drain();
                             side.poll_seat();
                         }
-                        std::thread::sleep(std::time::Duration::from_micros(200));
+                        // The commands ring has no doorbell: the stepper polls it.
+                        std::thread::yield_now();
                     }
                 }
             });
@@ -1126,7 +1127,7 @@ mod tests {
                     };
                     blocks.push((started, peak));
                     rendered.fetch_add(1, Ordering::Release);
-                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    std::thread::yield_now();
                 }
                 blocks
             }

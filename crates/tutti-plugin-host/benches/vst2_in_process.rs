@@ -17,7 +17,7 @@
 //! every block's latency into a pre-sized vector, then p50/p90/p99/p99.9/max
 //! plus a deadline-miss count against the 1.333 ms frame budget, scaled over
 //! instance counts until p99 crosses. That is a harness rather than a
-//! benchmark.
+//! benchmark. `tutti-plugin`'s `pressure` bench is that harness.
 //!
 //! Read the numbers as `engine_render`'s header describes: elem/s ÷ 48 000 is
 //! the realtime multiple, and a 64-frame block has 1.333 ms.

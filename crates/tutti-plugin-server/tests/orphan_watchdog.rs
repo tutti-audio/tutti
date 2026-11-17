@@ -32,7 +32,7 @@
 #![cfg(unix)]
 
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The server re-checks host liveness once per `POLL_SLICE_MS` (50 ms in
 /// `transport.rs`). Everything below is denominated in that slice so the
@@ -47,7 +47,7 @@ const EXIT_DEADLINE: Duration = Duration::from_secs(60);
 /// How long a server with a *live* parent is watched for a spurious exit: an
 /// observation window for an event that must not happen, long enough that the
 /// watchdog has run its check many times over. It asserts no speed.
-const STAY_ALIVE_WINDOW: Duration = Duration::from_millis(50 * 20);
+const STAY_ALIVE_WINDOW: Duration = POLL_SLICE.saturating_mul(20);
 
 /// Has the process `pid` exited?
 ///
@@ -206,7 +206,7 @@ fn an_orphaned_server_exits_without_a_host() {
 fn a_server_with_a_live_parent_keeps_waiting() {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
     let socket = dead_socket_path("live-parent");
-    let mut child = Command::new(exe)
+    let child = Command::new(exe)
         .arg(&socket)
         .env("TUTTI_PLUGIN_HOST_PID", std::process::id().to_string())
         .stdout(Stdio::null())
@@ -214,27 +214,30 @@ fn a_server_with_a_live_parent_keeps_waiting() {
         .spawn()
         .expect("spawning the server as our own child");
 
-    let start = Instant::now();
-    let mut died_early = None;
-    while start.elapsed() < STAY_ALIVE_WINDOW {
-        if let Some(status) = child.try_wait().expect("polling the server") {
-            died_early = Some(status);
-            break;
-        }
-        std::thread::sleep(POLL_SLICE / 5);
-    }
+    // A thread blocks on the server's exit; the window is how long this test
+    // waits for that event, and a timeout is the pass.
+    let pid = i32::try_from(child.id()).expect("a pid fits an i32");
+    let (exited, exit) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let mut child = child;
+        let status = child.wait().expect("waiting on the server");
+        let _ = exited.send(status);
+    });
+    let died_early = exit.recv_timeout(STAY_ALIVE_WINDOW).ok();
 
     // Kill it before asserting so a failure does not also leak a process.
-    let _ = child.kill();
-    let _ = child.wait();
+    // SAFETY: a signal to a pid this test spawned; the waiter has not reaped it
+    // while `died_early` is `None`.
+    unsafe {
+        libc::kill(pid, libc::SIGKILL);
+    }
+    waiter.join().expect("the waiter thread");
     let _ = std::fs::remove_file(&socket);
 
     assert!(
         died_early.is_none(),
-        "server exited ({:?}) after {:?} while its parent was still running; \
+        "server exited ({died_early:?}) while its parent was still running; \
          the watchdog fired on a live host",
-        died_early,
-        start.elapsed()
     );
 }
 

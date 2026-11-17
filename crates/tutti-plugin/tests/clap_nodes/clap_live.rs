@@ -1,7 +1,7 @@
 //! **A live plugin keeps in step with the device.** The reference CLAP
 //! plugin in a real `plugin-server`, rendered by tutti-engine's `Engine` exactly
-//! as a device drives it — one call per callback, the callbacks paced to real
-//! time — at 480-, 1024- and 441-frame device quanta.
+//! as a device drives it — one call per callback, each once the chunk before it
+//! is settled — at 480-, 1024- and 441-frame device quanta.
 //!
 //! A live plugin's pipeline chunk is the device's callback
 //! (`Prepare::quantum`), not a fixed 64 frames. With 64, a chunk completed
@@ -32,10 +32,6 @@ use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
 use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
 
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
@@ -96,72 +92,6 @@ struct Run {
     /// Missed chunks no counter explains at the end of the run
     /// (`unanswered_chunks`).
     unanswered: u64,
-}
-
-/// Keeps idle CPUs awake for the length of a paced run (Linux only).
-///
-/// Measured on an idle 4-vCPU VM: a thread woken from an idle CPU is
-/// sometimes 10 to 28 ms late (a bare `sleep(1 ms)` loop with no tutti code
-/// oversleeps by more than 10 ms about once in 4000 calls), at any thread
-/// priority, and the late thread is the host's bridge thread or the server's
-/// about once in 1000 blocks. The plugin gets one period to answer, so such a
-/// wake-up costs the block and its successors up to the next fresh one: the
-/// source of the late answers `judge_silence` excuses. With spinners on the other
-/// CPUs at the lowest priority (they yield to any waking thread) the late
-/// wake-ups fell from 8 in 5249 blocks to 1 in 8399. A device's callback is
-/// woken by an interrupt, not from an idle CPU, so this keeps the run closer
-/// to one.
-///
-/// Safe where the CPU count is a quota: fewer than 4 CPUs spawn none, and
-/// `cpus / 2` bounds the rest. Every caller holds [`exclusive`], so one
-/// process spins at a time. A spinner whose `setpriority` fails exits rather
-/// than spin at normal priority; other platforms spawn none.
-struct KeepAwake {
-    stop: Arc<AtomicBool>,
-    spinners: Vec<JoinHandle<()>>,
-}
-
-/// Spinners for `cpus` CPUs.
-fn spinner_count(cpus: usize) -> usize {
-    if cfg!(target_os = "linux") && cpus >= 4 {
-        cpus / 2
-    } else {
-        0
-    }
-}
-
-impl KeepAwake {
-    fn new() -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let spinners = (0..spinner_count(cpus))
-            .map(|_| {
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    // Nice 19 on the calling thread; a spinner that cannot
-                    // get it would compete with the run.
-                    #[cfg(target_os = "linux")]
-                    // SAFETY: `setpriority` takes no pointers.
-                    if unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, 19) } != 0 {
-                        return;
-                    }
-                    while !stop.load(Ordering::Relaxed) {
-                        std::hint::spin_loop();
-                    }
-                })
-            })
-            .collect();
-        Self { stop, spinners }
-    }
-}
-
-impl Drop for KeepAwake {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        for t in self.spinners.drain(..) {
-            let _ = t.join();
-        }
-    }
 }
 
 /// Callbacks a [`run_live`] burst makes back to back.
@@ -232,13 +162,26 @@ fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), S
     }
 }
 
-/// Render `blocks` callbacks of `quantum` frames at `rate`, paced to real
-/// time, through an engine whose graph is the ramp into the probe. With
+/// Waits until the chunk the node submitted last is settled: answered, or
+/// counted refused or skipped since `refused` and `skipped` were read.
+fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: u64) {
+    tutti_fixtures::wait_until(
+        "the chunk in flight to be answered, refused or skipped",
+        clap_probe::HANG_GUARD,
+        || {
+            controls.chunk_in_flight_answered()
+                || controls.refused_chunks() > refused
+                || controls.skipped_chunks() > skipped
+        },
+    );
+}
+
+/// Render `blocks` callbacks of `quantum` frames at `rate`, each once the
+/// chunk before it is settled, through an engine whose graph is the ramp into the probe. With
 /// `burst_at`, the callbacks from that block (counted after warm-up) on run
 /// [`BURST`] in a row with no pause, as a device does when it catches up.
 fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -> Run {
     let probe = load_probe(rate);
-    let _awake = KeepAwake::new();
     let inputs = probe.client.inputs();
     let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(quantum)))
         .with_quantum(MaxBlock::of(Samples(quantum)));
@@ -273,14 +216,12 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let transport = Transport::new(SampleRate::of(rate));
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("the engine builds");
-    let period = Duration::from_secs_f64(quantum as f64 / rate);
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
     let (mut misses, mut lates) = (Vec::new(), Vec::new());
     let (mut refuses, mut skips) = (Vec::new(), Vec::new());
     let mut skipped = 0;
-    let mut next = Instant::now();
     // More callbacks, unjudged, so a chunk missed at the end is resolved before
     // the counts are read: the batcher gives up on a fate it has not learned
     // `TRAILING` chunks on.
@@ -327,18 +268,12 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         if burst_at.is_some_and(|at| (warm_up + at..warm_up + at + BURST - 1).contains(&b)) {
             continue;
         }
-        // A device's callbacks stay a period apart: one that oversleeps (a
-        // loaded machine) is not followed by a burst of catch-up calls, which
-        // would hand the server no period to answer and so read as silence.
-        let now = Instant::now();
-        next += period;
-        if next <= now {
-            next = now + period;
-        }
-        std::thread::sleep(next - now);
+        // The next callback comes once the chunk this one submitted is settled
+        // (answered, or counted refused or skipped): the server has the whole
+        // period to answer, and a callback is never a catch-up that would hand
+        // it none and read as silence.
+        settled(&controls, refused, now_skipped);
     }
-    // A skip of the last chunks may still be on its way.
-    std::thread::sleep(period * 3);
     skips.extend((skipped..controls.skipped_chunks()).map(|_| blocks + TRAILING - 1));
     let unanswered = controls.unanswered_chunks();
     drop(probe.handle);

@@ -155,6 +155,23 @@ fn run(
     }
 }
 
+/// When a probe's time is up: a rule over clock readings, which its caller takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Deadline(Option<Instant>);
+
+impl Deadline {
+    /// The deadline `timeout` after `now`; one the clock cannot represent never
+    /// passes.
+    fn after(now: Instant, timeout: Duration) -> Self {
+        Self(now.checked_add(timeout))
+    }
+
+    /// Whether the time is up at `now`: at the deadline itself, and after.
+    fn passed(self, now: Instant) -> bool {
+        self.0.is_some_and(|at| now >= at)
+    }
+}
+
 enum Waited {
     Exited,
     TimedOut,
@@ -165,7 +182,7 @@ enum Waited {
 /// Waits for `child` to exit, killing and reaping it at `timeout` or when
 /// `stop` is requested.
 fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
-    let deadline = Instant::now() + timeout;
+    let deadline = Deadline::after(Instant::now(), timeout);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return Waited::Exited,
@@ -174,7 +191,7 @@ fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
                 let _ = child.wait();
                 return Waited::Cancelled;
             }
-            Ok(None) if Instant::now() >= deadline => {
+            Ok(None) if deadline.passed(Instant::now()) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Waited::TimedOut;
@@ -323,19 +340,35 @@ mod tests {
         ));
     }
 
-    /// The deadline is the caller's: the same probe, one that outlasts 300 ms and
-    /// not 5 s, times out under the one and is a plain crash under the other.
+    /// The deadline is the caller's: a probe that does not exit times out under
+    /// a deadline already up, and one that exits is a plain crash under a long one.
     #[test]
     fn the_deadline_is_the_callers() {
         let dir = TempDir::new().unwrap();
-        let locator = stand_in(&dir, "sleep 1");
-        let short = probe(&locator, Duration::from_millis(300));
-        assert!(
-            matches!(short, Err(BridgeError::Timeout { .. })),
-            "{short:?}"
-        );
-        let long = probe(&locator, Duration::from_secs(10));
+        let hangs = stand_in(&dir, "exec sleep 300");
+        let up = probe(&hangs, Duration::ZERO);
+        assert!(matches!(up, Err(BridgeError::Timeout { .. })), "{up:?}");
+
+        let dir = TempDir::new().unwrap();
+        let exits = stand_in(&dir, "exit 1");
+        let long = probe(&exits, Duration::from_secs(10));
         assert!(matches!(long, Err(BridgeError::ProcessCrashed)), "{long:?}");
+    }
+
+    /// A deadline is up at its instant and after, and not before; one the clock
+    /// cannot hold never is.
+    #[test]
+    fn a_deadline_is_up_at_its_instant_and_after() {
+        let start = Instant::now();
+        let deadline = Deadline::after(start, Duration::from_secs(15));
+        assert!(!deadline.passed(start));
+        assert!(!deadline.passed(start + Duration::from_millis(14_999)));
+        assert!(deadline.passed(start + Duration::from_secs(15)));
+        assert!(deadline.passed(start + Duration::from_secs(16)));
+        assert!(Deadline::after(start, Duration::ZERO).passed(start));
+        assert!(
+            !Deadline::after(start, Duration::MAX).passed(start + Duration::from_secs(1 << 30))
+        );
     }
 
     /// The default allows a cold plugin well past the old five seconds.

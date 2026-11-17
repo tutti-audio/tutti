@@ -154,6 +154,18 @@ impl Rig {
         }
     }
 
+    /// Renders like [`run`](Self::run), then waits until the server has
+    /// answered the chunk the block submitted, so the next block plays it.
+    pub fn run_answered(
+        &mut self,
+        frames: usize,
+        input: impl Fn(usize, usize) -> f32,
+    ) -> Vec<Vec<f32>> {
+        let out = self.run(frames, input);
+        await_answer(&self.controls);
+        out
+    }
+
     /// The graph's global audio inputs: the plugin's, unless it is
     /// [`behind`](Self::behind) a latent path.
     pub fn inputs(&self) -> usize {
@@ -206,6 +218,24 @@ pub const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 
 /// so an unpaced loop starves the subprocess and every block reads back
 /// silence.
 pub const PACE: Duration = PERIOD.saturating_mul(20);
+
+/// A hang guard on waiting for the server: the wait ends on its event, and this
+/// only decides how long a server that never answers is given.
+pub const HANG_GUARD: Duration = Duration::from_secs(60);
+
+/// Waits until the server has answered the chunk the node submitted last
+/// (`PluginControls::chunk_in_flight_answered`), for at most [`HANG_GUARD`].
+///
+/// # Panics
+///
+/// If it is not answered within [`HANG_GUARD`].
+pub fn await_answer(controls: &PluginControls) {
+    tutti_fixtures::wait_until(
+        "the server to answer the chunk in flight",
+        HANG_GUARD,
+        || controls.chunk_in_flight_answered(),
+    );
+}
 
 /// Absolute path to the `plugin-server` binary these tests spawn.
 ///

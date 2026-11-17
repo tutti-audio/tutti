@@ -6,21 +6,11 @@
 #![cfg(feature = "clap")]
 
 use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginRef};
-use tutti_plugin_db::{PluginDb, Scan, ScanPoll, ScanResult};
+use tutti_plugin_db::{PluginDb, Scan, ScanResult};
 
 /// Applies `task` as it arrives until it ends, and returns its result.
-fn finish(catalog: &mut Catalog, mut task: Scan) -> ScanResult {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    loop {
-        match catalog.try_apply(&mut task) {
-            ScanPoll::Running => {
-                assert!(std::time::Instant::now() < deadline, "the task never ended");
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-            ScanPoll::Done(result) => break result,
-            ScanPoll::Died => panic!("the task's worker died"),
-        }
-    }
+fn finish(catalog: &mut Catalog, task: Scan) -> ScanResult {
+    catalog.wait(task).expect("the task's worker died")
 }
 
 /// Runs a scan of the catalog's directories to its end.
@@ -182,7 +172,7 @@ mod stand_in_probe {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tutti_plugin::catalog::Locator;
     use tutti_plugin_db::ProbeFailureKind;
 
@@ -195,6 +185,16 @@ mod stand_in_probe {
         probe_timeout: Option<Duration>,
     ) -> (Catalog, PathBuf, PathBuf) {
         let pid_file = dir.path().join("pid");
+        // A fifo: the script's write of its pid blocks until the test reads it,
+        // so a read is the event of the probe running.
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&pid_file)
+                .status()
+                .expect("mkfifo runs")
+                .success(),
+            "mkfifo"
+        );
         let script = dir.path().join("plugin-probe");
         let text = body.replace("$PID_FILE", &pid_file.display().to_string());
         std::fs::write(&script, format!("#!/bin/sh\n{text}\n")).expect("the stand-in");
@@ -218,18 +218,20 @@ mod stand_in_probe {
 
     const HANG: &str = "echo $$ > $PID_FILE\nexec sleep 600";
 
-    /// The pid the stand-in wrote, once it is running.
+    /// The pid the stand-in wrote, once it is running. The read blocks until
+    /// the script opens the fifo; a hang guard fails a probe that never ran.
     fn running_pid(pid_file: &Path) -> String {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if let Ok(pid) = std::fs::read_to_string(pid_file)
-                && pid.ends_with('\n')
-            {
-                return pid.trim().to_owned();
-            }
-            assert!(Instant::now() < deadline, "the probe never started");
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        let (sent, received) = std::sync::mpsc::channel();
+        let pid_file = pid_file.to_owned();
+        std::thread::spawn(move || {
+            let _ = sent.send(std::fs::read_to_string(pid_file));
+        });
+        received
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the probe never started")
+            .expect("the probe wrote its pid")
+            .trim()
+            .to_owned()
     }
 
     /// Drops `task` on a thread: a hang guard, so a drop that waits for the
@@ -312,8 +314,7 @@ mod stand_in_probe {
     #[test]
     fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, file, _) =
-            catalog_probed_by(&dir, HANG, Some(Duration::from_millis(500)));
+        let (mut catalog, file, _) = catalog_probed_by(&dir, HANG, Some(Duration::ZERO));
 
         let task = catalog.register(&file).expect("a plugin file");
         let result = finish(&mut catalog, task);

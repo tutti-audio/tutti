@@ -51,20 +51,17 @@ fn sent(record: &Record) -> Vec<Sent> {
 /// Waits for the server to have been sent `chunks` chunks: the last one the
 /// schedule completed is on its way asynchronously.
 fn wait_for_chunks(record: &Record, chunks: usize) -> Vec<Sent> {
-    let start = std::time::Instant::now();
-    loop {
-        let all = sent(record);
-        let n = all.iter().filter(|s| matches!(s, Sent::Chunk(_))).count();
-        if n >= chunks {
-            return all;
-        }
-        // A hang guard: the chunks arrive, however slowly.
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(60),
-            "the server was sent {n} of {chunks} chunks"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    let mut all = Vec::new();
+    // A hang guard: the chunks arrive, however slowly.
+    tutti_fixtures::wait_until(
+        "the server to be sent its chunks",
+        std::time::Duration::from_secs(60),
+        || {
+            all = sent(record);
+            all.iter().filter(|s| matches!(s, Sent::Chunk(_))).count() >= chunks
+        },
+    );
+    all
 }
 
 /// The block at stream frame `frame`, rolling from beat 4 at the map's tempo.
@@ -124,17 +121,15 @@ fn a_click_comes_out_one_declared_latency_later() {
 }
 
 /// **An offline render's MIDI-out is the plugin's, whenever the server's reply
-/// comes.** The mock server publishes a chunk's audio and sends its reply a
-/// quarter of a second later (a scheduler that has not run it: far past the
-/// few block periods a live block waits). A note at frame 10 of the first
+/// comes.** The mock server publishes a chunk's audio and sends its reply long
+/// after (a scheduler that has not run it: a hundred thousand yields of the
+/// server thread, far past the few block periods a live block waits). A note at frame 10 of the first
 /// chunk is echoed at frame 10 of the second, as it is with a prompt server.
 #[test]
 fn a_late_reply_still_carries_its_midi_out_offline() {
     let _machine = machine_lock();
-    let (mut unit, _record, _threads) = new_node(
-        rig_replying_after("late", std::time::Duration::from_millis(250)),
-        tempo(STEP_BEAT),
-    );
+    let (mut unit, _record, _threads) =
+        new_node(rig_replying_after("late", 100_000), tempo(STEP_BEAT));
     let mut heard = Vec::new();
     for (block, frame) in [(0usize, 0u64), (1, 128), (2, 256)] {
         let events: Vec<Event> = if block == 0 {

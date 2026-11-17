@@ -43,12 +43,13 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
-// Paced to `PACE`: a starved subprocess reads back silence, which here would
-// be indistinguishable from the crash this suite observes.
-use clap_probe::{BLOCK, PACE, ProbeEnv, Rig, SAMPLE_RATE, load_probe, render};
+// Each block waits for the server's answer: a starved subprocess reads back
+// silence, which here would be indistinguishable from the crash this suite
+// observes.
+use clap_probe::{BLOCK, ProbeEnv, Rig, SAMPLE_RATE, load_probe, render};
 use tutti_fixtures::machine_lock;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tutti_plugin_host::PluginStatus;
 use tutti_plugin_types::PluginFailure;
@@ -65,7 +66,7 @@ use tutti_plugin_types::PluginFailure;
 /// That is why this is generous rather than tight. [`GOOD_BLOCKS_REQUIRED`] good
 /// blocks have to be *observed* before the abort, and on a cold pipeline the
 /// early calls routinely yield nothing: the subprocess is still starting, and
-/// under parallel load its first blocks can miss their `PACE` window. Sizing
+/// under parallel load its first blocks can miss their answer. Sizing
 /// this to the minimum needed on an idle machine turns a slow start into a
 /// failure — the budget is spent before the pipeline is warm, and the abort
 /// arrives with nothing yet checked. The pre-crash loop stops as soon as it has
@@ -83,8 +84,7 @@ const GOOD_BLOCKS_REQUIRED: u32 = 2;
 /// A bound, not a budget: the loop exits the moment death is observed, so this
 /// only decides how long a plugin that never dies is given before the assertion
 /// says so. Generous enough that a slow subprocess is never mistaken for a
-/// surviving one — each block costs a [`PACE`] sleep, so the whole ceiling is
-/// still well under [`NOTICE_TIMEOUT`]'s order of magnitude.
+/// surviving one — each block waits for the server's answer.
 const DRIVE_TO_DEATH_MAX: usize = 60;
 
 /// How long to keep polling for the crash to be noticed.
@@ -114,9 +114,16 @@ const TAG_P0C0: f32 = 1.0;
 const EXPECTED_LIVE: f32 = INPUT_DC + TAG_P0C0;
 
 /// Drive one block of DC through `unit` and return output channel 0.
-fn drive_block(unit: &mut Rig) -> Vec<f32> {
+///
+/// Returns once the server has answered the chunk the block submitted, or the
+/// plugin has died and will not.
+fn drive_block(unit: &mut Rig, handle: &tutti_plugin_host::PluginHandle) -> Vec<f32> {
     let out = unit.run(BLOCK, |_, _| INPUT_DC);
-    std::thread::sleep(PACE);
+    tutti_fixtures::wait_until(
+        "the server's answer or the plugin's death",
+        NOTICE_TIMEOUT,
+        || unit.controls.chunk_in_flight_answered() || handle.status().is_dead(),
+    );
     out.into_iter().next().expect("the probe has outputs")
 }
 
@@ -134,7 +141,7 @@ fn drive_block(unit: &mut Rig) -> Vec<f32> {
 /// ends the loop and fails an assertion rather than spinning.
 fn drive_until_dead(unit: &mut Rig, handle: &tutti_plugin_host::PluginHandle) -> usize {
     for driven in 1..=DRIVE_TO_DEATH_MAX {
-        let _ = drive_block(unit);
+        let _ = drive_block(unit, handle);
         if handle.status().is_dead() {
             return driven;
         }
@@ -142,19 +149,14 @@ fn drive_until_dead(unit: &mut Rig, handle: &tutti_plugin_host::PluginHandle) ->
     DRIVE_TO_DEATH_MAX
 }
 
-/// Poll until the host reports the plugin dead, or the deadline passes.
+/// Wait until the host reports the plugin dead, for at most [`NOTICE_TIMEOUT`].
 ///
-/// Returns the status either way, so the caller asserts on it and gets a useful
-/// message rather than a bare timeout.
+/// Returns the status, which the caller asserts on.
 fn wait_for_death(handle: &tutti_plugin_host::PluginHandle) -> PluginStatus {
-    let deadline = Instant::now() + NOTICE_TIMEOUT;
-    loop {
-        let status = handle.status();
-        if status.is_dead() || Instant::now() >= deadline {
-            return status;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until("the host to notice the plugin died", NOTICE_TIMEOUT, || {
+        handle.status().is_dead()
+    });
+    handle.status()
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +201,7 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
     // fixed count and checking the tally afterwards. The difference is the whole
     // point: a fixed count is a deadline in disguise. The pipeline holds one
     // block, so the first call collects nothing by construction, and every later
-    // call is good only if the subprocess published within one `PACE` — which a
+    // call is good only if the subprocess published before the next block — which a
     // cold subprocess under load does not reliably do. Spending a fixed budget
     // and asserting on the tally therefore fails whenever the start-up transient
     // eats it, and cannot recover, because the abort is armed on a block count
@@ -218,7 +220,7 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
     let mut good_blocks = 0;
     let mut driven = 0;
     while good_blocks < GOOD_BLOCKS_REQUIRED && driven < CRASH_AT_BLOCK - 1 {
-        let out = drive_block(&mut unit);
+        let out = drive_block(&mut unit, &handle);
         driven += 1;
         if out.iter().all(|&s| s == EXPECTED_LIVE) {
             good_blocks += 1;
@@ -281,7 +283,7 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
     // memory, which for this rig is the last correct block — audible as a stuck
     // note, and passing any assertion that only checked "not the input".
     for block in 0..4 {
-        let out = drive_block(&mut unit);
+        let out = drive_block(&mut unit, &handle);
         for (i, &s) in out.iter().enumerate() {
             assert_eq!(
                 s, 0.0,

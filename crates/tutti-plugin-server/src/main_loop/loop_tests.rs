@@ -60,9 +60,6 @@ impl Until {
 /// hang, a hundred times what a loaded runner needs.
 const HANG_GUARD: Duration = Duration::from_secs(60);
 
-/// How often a script silent until an event looks for it.
-const UNTIL_POLL: Duration = Duration::from_millis(5);
-
 /// A host that follows a script and records what it is sent.
 struct Script {
     steps: VecDeque<Step>,
@@ -107,7 +104,7 @@ impl Transport for Script {
 }
 
 impl Script {
-    fn wait_inner(&mut self, timeout: Duration) -> BridgeResult<bool> {
+    fn wait_inner(&mut self, _timeout: Duration) -> BridgeResult<bool> {
         match self.steps.front() {
             Some(Step::Call(_)) => {
                 let Some(Step::Call(call)) = self.steps.pop_front() else {
@@ -127,7 +124,9 @@ impl Script {
                 if (until.holds)(&self.heard) {
                     self.steps.pop_front();
                 } else {
-                    std::thread::sleep(timeout.min(UNTIL_POLL));
+                    // The predicates read other threads' state, which has no
+                    // wake to wait on.
+                    std::thread::yield_now();
                 }
                 Ok(false)
             }
@@ -545,8 +544,9 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                         if waits.load(Ordering::SeqCst) == sent_at {
                             within.lock().unwrap().push(sent_at);
                         }
-                        // Paces the host's blocks.
-                        std::thread::sleep(Duration::from_millis(5));
+                        // Each block is a round trip to the render thread: it
+                        // paces itself.
+                        std::thread::yield_now();
                     }
                     done.store(true, Ordering::SeqCst);
                 }));

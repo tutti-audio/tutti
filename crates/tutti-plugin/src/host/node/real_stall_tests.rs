@@ -45,15 +45,6 @@ use tutti_plugin_ipc::BridgeConfig;
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;
 
-/// One block period; the pace the driving loop keeps so the subprocess gets
-/// real wall-clock time between blocks.
-const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
-
-/// How long to actually wait per block. Generous for the same reason the PDC
-/// suite's is: a `sleep` bounds elapsed time, not CPU granted to another
-/// process, and nothing else here is a timing assertion.
-const PACE: Duration = PERIOD.saturating_mul(20);
-
 /// Which `process()` call parks. Late enough that the pipeline is at steady
 /// state, so the stall is a *mid-run* event rather than part of start-up.
 const PARK_FROM: u32 = 4;
@@ -143,18 +134,32 @@ fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHan
 
 /// `client`, bound, as the only node of a graph rendering `BLOCK`-frame
 /// blocks: the global inputs feed its inputs, its outputs the global outputs.
-fn graph_of(client: PluginClient) -> Renderer {
+fn graph_of(client: PluginClient) -> (Renderer, tutti_plugin_host::PluginControls) {
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
     let mut g = GraphBuilder::new(layout(client.inputs()), layout(client.outputs()));
-    let (key, _controls) = g.add_with_controls(client.bind(
+    let (key, controls) = g.add_with_controls(client.bind(
         tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
     ));
     g.pipe_input(key).pipe_output(key);
-    g.renderer(Prepare::new(
-        SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
-    ))
-    .expect("a one-plugin graph compiles")
+    let renderer = g
+        .renderer(Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples(BLOCK)),
+        ))
+        .expect("a one-plugin graph compiles");
+    (renderer, controls)
+}
+
+/// Waits until the server has answered the chunk the last block submitted, so
+/// the next block plays it: the pipeline never waits for a reply, and a block
+/// run before the answer reads back silence. Not for a parked plugin, which
+/// answers nothing.
+fn await_answer(controls: &tutti_plugin_host::PluginControls) {
+    tutti_fixtures::wait_until(
+        "the server to answer the chunk in flight",
+        Duration::from_secs(60),
+        || controls.chunk_in_flight_answered(),
+    );
 }
 
 /// Drive one block of DC and return output channel 0.
@@ -191,7 +196,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // correct block is a known constant and silence is unmistakable.
     let (client, handle) = load_probe(&mut env, 1);
     let bridge = client.bridge();
-    let mut client = graph_of(client);
+    let (mut client, controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
 
     // --- Steady state before the park.
@@ -201,7 +206,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         if out.iter().all(|&s| s == EXPECTED_LIVE) {
             good_before += 1;
         }
-        std::thread::sleep(PACE);
+        await_answer(&controls);
     }
     assert!(
         good_before >= 1,
@@ -214,10 +219,19 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // Audio must keep flowing: `process` returns per block, and the blocks the
     // server never answered read back as silence rather than stalling the
     // caller. That is the property the whole pipelined design exists for.
-    const STALLED_BLOCKS: usize = 6;
-    for _ in 0..STALLED_BLOCKS {
+    //
+    // Blocks run until `STALLED_BLOCKS` of them have been abandoned: the budget
+    // is a wall-clock rule the bridge applies when it next collects, so the
+    // counter is the event.
+    const STALLED_BLOCKS: u64 = 6;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while handle.block_counts().abandoned < STALLED_BLOCKS {
+        assert!(
+            Instant::now() < deadline,
+            "the parked plugin's blocks were never abandoned"
+        );
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
+        std::thread::yield_now();
     }
 
     // --- The session survived. A missed budget is not a death.
@@ -238,7 +252,13 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
+        // The released plugin works through what it was sent; the next block
+        // comes once it has answered one, or the drain has taken a reply back.
+        tutti_fixtures::wait_until(
+            "the released plugin to answer",
+            Duration::from_secs(60),
+            || controls.chunk_in_flight_answered() || bridge.settled_replies() > 0,
+        );
         settled = bridge.settled_replies();
         if settled > 0 {
             break;
@@ -262,7 +282,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         if out.iter().all(|&s| s == EXPECTED_LIVE) {
             good_after += 1;
         }
-        std::thread::sleep(PACE);
+        await_answer(&controls);
     }
     assert!(
         good_after >= 1,
@@ -304,13 +324,13 @@ fn a_plugin_that_never_parks_settles_nothing() {
 
     let (client, handle) = load_probe(&mut env, 1);
     let bridge = client.bridge();
-    let mut client = graph_of(client);
+    let (mut client, controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
 
     const BLOCKS: usize = 12;
     for _ in 0..BLOCKS {
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
+        await_answer(&controls);
     }
 
     assert!(
@@ -334,8 +354,7 @@ fn a_plugin_that_never_parks_settles_nothing() {
     );
 
     // A quarter of the blocks. The budget is 4 periods (5.3 ms at 64/48k), the
-    // probe's work is a passthrough, and each block follows a whole `PACE` (20
-    // periods) of idle time. So an ordinary block is abandoned only if its
+    // probe's work is a passthrough, and each block follows the server's answer to the one before. So an ordinary block is abandoned only if its
     // round trip is kept off a core for over 5 ms; idle that is 0 of 12,
     // and it stayed 0 of 12 in every run under bursty load pinned to one core.
     // A machine that keeps it off a core that long on more than 3 widely
@@ -362,7 +381,7 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     let mut env = ScopedEnv::new();
     env.set("TUTTI_CLAP_PROBE_BLOCK_FROM", PARK_FROM.to_string());
     let (client, handle) = load_probe(&mut env, 1);
-    let mut client = graph_of(client);
+    let (mut client, _controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
 
     assert_eq!(
@@ -383,13 +402,11 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
             counts.abandoned
         );
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
     };
     // Replies came before the park; none since the blocks began to be
     // abandoned (the count read at that moment is the baseline).
     for _ in 0..5 {
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
     }
     assert_eq!(
         handle.block_counts().replies,
@@ -410,7 +427,7 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     while !handle.status().is_dead() {
         assert!(Instant::now() < deadline, "terminate left the plugin alive");
         let _ = drive_block(&mut client, &mut midi_out);
-        std::thread::sleep(PACE);
+        std::thread::yield_now();
     }
     assert!(
         matches!(
@@ -424,19 +441,13 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     #[cfg(target_os = "linux")]
     {
         let pid = handle.server_pid().expect("a subprocess plugin");
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            let ended = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+        tutti_fixtures::wait_until("the server to end", Duration::from_secs(60), || {
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
                 stat.rsplit(')')
                     .next()
                     .is_some_and(|rest| rest.trim_start().starts_with(['Z', 'X']))
-            });
-            if ended {
-                break;
-            }
-            assert!(Instant::now() < deadline, "server {pid} is still running");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+            })
+        });
     }
 }
 
