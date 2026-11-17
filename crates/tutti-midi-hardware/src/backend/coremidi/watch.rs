@@ -166,7 +166,7 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
         spawn_named("tutti-devwatch", None, move |_| {
-            let client =
+            let client = tutti_coremidi_ffi::create_client(|| {
                 Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
                     CALLBACKS.fetch_add(1, Ordering::Relaxed);
                     if matches!(
@@ -178,7 +178,8 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
                     ) {
                         hub.notify();
                     }
-                });
+                })
+            });
             let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
             // The client lives as long as the process.
             let Ok(_client) = client else { return };
