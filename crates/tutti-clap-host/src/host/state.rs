@@ -67,7 +67,7 @@ pub struct GuiState {
     pub window_destroyed: AtomicBool,
     /// What the plugin asked the editor window to be resized to, in pixels:
     /// width and height in one word, so a take never pairs one request's width
-    /// with another's height. [`NO_RESIZE`] when none waits.
+    /// with another's height. `[0, 0]` when none waits.
     pub resize_request: PackedAtomic<[u32; 2]>,
 }
 
@@ -247,7 +247,7 @@ pub struct HostState {
     pub process_wake: OnceLock<ProcessWake>,
     /// The plugin's saveable state changed (`state.mark_dirty`), so a state
     /// blob written earlier no longer matches the instance. Latched until
-    /// [`Control::take_dirty`](tutti_plugin_types::Control::take_dirty).
+    /// [`Editor::take_dirty`](tutti_plugin_types::Editor::take_dirty).
     pub state_dirty: AtomicBool,
     /// The plugin asked for a parameter flush (`params.request_flush`).
     /// Latched until the main thread's pass flushes.

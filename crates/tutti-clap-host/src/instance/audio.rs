@@ -2,6 +2,7 @@
 
 use super::ClapProcessor;
 use super::config::AudioScratch;
+use super::lifecycle::EDIT_CAPACITY;
 use crate::error::{ClapError, Result};
 use crate::events::{ClapEvent, EventList};
 use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
@@ -20,6 +21,7 @@ use tutti_plugin_types::AudioBufferMut;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 use tutti_plugin_types::is_usable;
+use tutti_rt::RtVec;
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -335,17 +337,22 @@ impl ClapProcessor {
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let edits_from = input_events.events.len();
+            // The block's edits, held until the drain ends: a reset in it voids
+            // those before it.
+            let mut edits: RtVec<(u32, f64), EDIT_CAPACITY> = RtVec::new();
             self.drain.drain(|edit| match edit {
                 tutti_plugin_types::Edit::Param { id, value } => {
-                    input_events.add_param_edit(id.get(), value.get(), &table.ranges, table.claims);
+                    edits.push((id.get(), value.get()));
                 }
                 // The Controller reset the stream (a state or preset load): the
                 // edits queued before it, which this block already took, are not
                 // to be sent.
-                tutti_plugin_types::Edit::Reset => input_events.discard_edits(edits_from),
+                tutti_plugin_types::Edit::Reset => edits.clear(),
                 _ => {}
             });
+            for &(id, value) in &edits {
+                input_events.add_param_edit(id, value, &table.ranges, table.claims);
+            }
             if !param_changes.is_empty() {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
             }
