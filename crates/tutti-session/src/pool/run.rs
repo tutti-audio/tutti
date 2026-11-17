@@ -105,8 +105,12 @@ impl<C: crate::Clock> Session<C> {
     /// What `update` does for the pool: runs the stages waiting for this
     /// thread, lands what came back, and reports the entries' outcomes since
     /// the last update.
-    pub(crate) fn pool_events(&mut self, out: &mut Vec<crate::SessionEvent>) {
-        if let Some(main) = MainThreadMarker::new() {
+    pub(crate) fn pool_events(
+        &mut self,
+        main: Option<MainThreadMarker>,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
+        if let Some(main) = main {
             self.pool_main_stages(main);
         }
         self.pool_openings();

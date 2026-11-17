@@ -9,6 +9,7 @@
 
 use super::{Expr, FoldError, Row, Term};
 use crate::Float;
+use alloc::boxed::Box;
 use tutti_types::{AmbisonicFormat, AmbisonicNormalization, AmbisonicOrdering};
 
 /// The ACN index held by FuMa channel `i` (`W X Y Z R S T U V K L M N O P Q`).

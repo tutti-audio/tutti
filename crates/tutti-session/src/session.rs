@@ -108,12 +108,23 @@ pub struct PhaseCx<'a> {
     /// [`Modulation`](Phase::Modulation) and
     /// [`AfterCommit`](Phase::AfterCommit) phases.
     pub mods: Option<ModInput<'a>>,
+    /// The proof the calling thread is the main thread, when it is: the work
+    /// only that thread may do (the retired plugins' drops, the editors'
+    /// service, the work other threads handed over, the pool's main stages)
+    /// runs in a phase that holds one and waits otherwise. [`PhaseCx::at`]
+    /// asks the OS ([`MainThreadMarker::new`](tutti_rt::MainThreadMarker::new)).
+    pub main: Option<tutti_rt::MainThreadMarker>,
 }
 
 impl PhaseCx<'_> {
-    /// A context at `now`, with the session's own declarations.
+    /// A context at `now`, with the session's own declarations, on the thread
+    /// the OS says is the main one, if this is it.
     pub fn at(now: Instant) -> Self {
-        Self { now, mods: None }
+        Self {
+            now,
+            mods: None,
+            main: tutti_rt::MainThreadMarker::new(),
+        }
     }
 }
 
@@ -470,14 +481,14 @@ pub enum RootTopologyStatus {
 /// `Send`, not `Sync`: one control thread owns it, whichever thread that is.
 /// Nothing the session frees needs the main thread: a plugin a removal, a
 /// replacement or a crossfade retires is parked in a graveyard, which the main
-/// thread empties (`MainSession::update`, with `plugin`), and a format closes an
+/// thread empties (`Session::update`, called there), and a format closes an
 /// in-process plugin that is released off the main thread there (it hands the
 /// close to the session's `MainWork`, which the main thread's update runs). A
 /// host with no main-thread update keeps the parked plugins until it has one, and
 /// the session says so once
 /// (`Session::retired_plugins`). What does need the main thread (an editor,
 /// loading an in-process plugin, restoring state) takes the proof
-/// (`MainThreadMarker`), or is the view's (`Session::main`).
+/// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// ```
 /// use tutti_types::MaxBlock;
@@ -1071,14 +1082,30 @@ impl<C: Clock> Session<C> {
     /// Runs every phase in [`PHASES`] order at `Instant::now()` with the
     /// session's own declarations, and returns what it found.
     ///
-    /// With `plugin`, a host that has the main thread calls
-    /// `MainSession::update` instead, which also drops the retired plugins and
-    /// services the editors (see the type docs).
+    /// This is the one update. What only the main thread may do (dropping the
+    /// plugins the session retired, closing the editors of those, servicing
+    /// the open `Editor`s (feature `plugin`), running the work other threads
+    /// handed over, and the pool's main stages) runs when it is called on the
+    /// thread the OS says is the main one; called elsewhere that work waits
+    /// for an update on that thread. A host whose main thread is not the OS's
+    /// calls [`update_on`](Self::update_on).
     #[must_use = "the events carry faults and dropouts (a refused commit, a plugin that died, a lost block): handle them, or bind `let _events` with a reason"]
     pub fn update(&mut self) -> Vec<SessionEvent> {
+        self.update_in(PhaseCx::at(Instant::now()))
+    }
+
+    /// [`update`](Self::update) on a thread that stands in for the main thread:
+    /// a host whose UI thread is not the process's main one, or a test.
+    #[must_use = "the events carry faults and dropouts (a refused commit, a plugin that died, a lost block): handle them, or bind `let _events` with a reason"]
+    pub fn update_on(&mut self, main: tutti_rt::MainThreadMarker) -> Vec<SessionEvent> {
+        let mut cx = PhaseCx::at(Instant::now());
+        cx.main = Some(main);
+        self.update_in(cx)
+    }
+
+    fn update_in(&mut self, cx: PhaseCx<'_>) -> Vec<SessionEvent> {
         // What a `Job::wait` updated through comes first: it happened first.
         let mut out = self.jobs.take_held();
-        let cx = PhaseCx::at(Instant::now());
         for &phase in PHASES {
             self.run_phase(phase, cx, &mut out);
         }
@@ -1094,7 +1121,7 @@ impl<C: Clock> Session<C> {
                 self.land_jobs(out);
                 // What those landings and the holds' ends changed, and the pool's
                 // stages on this thread.
-                self.pool_events(out);
+                self.pool_events(cx.main, out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its
@@ -1122,9 +1149,9 @@ impl<C: Clock> Session<C> {
                 self.sync_root_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
-                // runs on the process's main thread (`MainThreadMarker::new` is `Some` only there).
+                // runs on the main thread (`PhaseCx::main` is `Some` only there).
                 #[cfg(feature = "plugin")]
-                if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
+                if let Some(main) = cx.main {
                     self.main_work.run(main);
                 }
                 self.report_event_losses(out);
@@ -1187,7 +1214,7 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "plugin")]
                 {
                     self.plugins_phase(cx, out);
-                    self.rebind_plugins(out);
+                    self.rebind_plugins(cx.main, out);
                 }
             }
             Phase::RenderMode =>
@@ -1256,6 +1283,12 @@ impl<C: Clock> Session<C> {
                 }
                 self.reclaim();
                 self.graph.drain_rt_log();
+                // What the main thread owns of the retired and the open.
+                #[cfg(feature = "plugin")]
+                if let Some(main) = cx.main {
+                    self.graph.graveyard.exhume(main);
+                    self.graph.graveyard.service(main);
+                }
             }
         }
     }

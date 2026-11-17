@@ -211,7 +211,7 @@ pub trait Sink {
     /// The format this sink takes.
     type Sample: Sample;
 
-    /// What closing the destination can fail with: [`std::io::Error`] for a
+    /// What closing the destination can fail with: `std::io::Error` for a
     /// file, [`core::convert::Infallible`] for a sink in memory.
     type Error: core::error::Error;
 

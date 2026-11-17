@@ -376,7 +376,7 @@ pub struct Graph {
     #[cfg(feature = "plugin")]
     pub(crate) plugins: BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     /// What a removal or a replacement took out of `plugins`, held until the
-    /// main thread drains it (`MainSession::update`).
+    /// main thread drains it (`Session::update` there).
     #[cfg(feature = "plugin")]
     pub(crate) graveyard: crate::plugin::Graveyard,
     /// A reader of the session's tempo map, the template each plugin and
@@ -1003,7 +1003,7 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace(handle, controls, plugin);
-                        outgoing.retire().settle(&mut self.graveyard);
+                        outgoing.retire().settle(node, &mut self.graveyard);
                     }
                     None => {
                         self.plugins.insert(
@@ -1058,7 +1058,7 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
-                        outgoing.retire().settle(&mut self.graveyard);
+                        outgoing.retire().settle(node, &mut self.graveyard);
                     }
                     None => {
                         self.plugins.insert(
@@ -1258,7 +1258,7 @@ impl Graph {
         let controls = self.swap_unit(node, incoming, fade, law)?;
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            record.retire().settle(&mut self.graveyard);
+            record.retire().settle(node, &mut self.graveyard);
         }
         Ok(controls)
     }
@@ -1855,7 +1855,7 @@ impl Graph {
         }
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            record.retire().settle(&mut self.graveyard);
+            record.retire().settle(node, &mut self.graveyard);
         }
         // A crossfade waiting on it would only fail at its retry, dropping
         // the incoming node then: drop it here, on the control thread.

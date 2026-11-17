@@ -194,9 +194,7 @@ impl<J: JobKind> Job<J> {
 
     /// Calls `session.update()` until this job lands, and returns its result.
     /// The events of those updates stay queued for the app's next `update()`,
-    /// in order: a wait delays them, it loses none. An editor is not
-    /// serviced while a wait blocks the main thread
-    /// (`MainSession::update`, feature `plugin`, does that).
+    /// in order: a wait delays them, it loses none.
     ///
     /// Waiting takes `&self`: an error does not cancel the job. Call it on the
     /// session that made the job.

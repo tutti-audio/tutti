@@ -145,7 +145,7 @@ pub fn platform_type_refused(result: i32) -> bool {
 /// Tears a view down: retract the host frame, then tell the view it is removed.
 ///
 /// The order is the point, and it matches `editorhost`'s `closePlugView`. The
-/// `HostPlugFrame` this view was given dies with the `EditorState` that owned
+/// `HostPlugFrame` this view was given dies with the editor that owned
 /// it, so a plugin still holding the pointer during `removed()` — to report a
 /// final `resizeView`, say — would call through memory about to be freed.
 /// Retracting first makes that unrepresentable rather than merely unlikely.

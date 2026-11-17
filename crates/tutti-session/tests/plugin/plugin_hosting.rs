@@ -56,7 +56,7 @@ fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
 fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolEvent {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        for event in s.main(main).update() {
+        for event in s.update_on(main) {
             if let SessionEvent::Pool {
                 event: event @ (PoolEvent::Loaded | PoolEvent::Failed(_)),
                 ..
@@ -105,7 +105,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
 
     // Blacklisted before the load runs, and still: refused.
     let (mut s, held) = holding();
-    let _ = s.main(main).update();
+    let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     run_held(&held);
@@ -122,7 +122,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     assert!(catalog.unblacklist(&path));
     probe(&mut catalog, &path);
     let (mut s, held) = holding();
-    let _ = s.main(main).update();
+    let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
