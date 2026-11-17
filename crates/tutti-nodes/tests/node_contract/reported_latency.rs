@@ -41,7 +41,7 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
             .map(|i| if i == 0 { 1.0 } else { 0.0 })
             .collect();
         let inputs: Vec<&[f32]> = (0..ins).map(|_| &chunk[..]).collect();
-        let block = drive(&mut node, SR, &inputs, &[]);
+        let block = drive(&mut node, SR, Planes::new(&inputs).unwrap(), &[]);
         out.resize(block.len(), Vec::with_capacity(frames));
         for (ch, b) in out.iter_mut().zip(block) {
             ch.extend(b);
@@ -397,10 +397,10 @@ mod convolver {
         let mut node = prepared(ConvolverNode::new(&[1.0], 64), SR, 256);
 
         // Load the convolver with a take, then reset mid-block.
-        drive(&mut node, SR, &[&[1.0; 32]], &[]);
+        drive(&mut node, SR, Planes::new(&[&[1.0; 32]]).unwrap(), &[]);
         Node::reset(&mut node);
 
-        let out = drive(&mut node, SR, &[&[0.0; 256]], &[]);
+        let out = drive(&mut node, SR, Planes::new(&[&[0.0; 256]]).unwrap(), &[]);
         let peak = tutti_fixtures::signal::peak(&out[0]);
         assert!(
             peak < 1e-6,

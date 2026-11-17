@@ -14,6 +14,7 @@
 //! place a wrong value. The expected figures come from the engine's speaker
 //! order (`ChannelTopology::assumed`), not from the placement under test.
 
+use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
@@ -139,7 +140,7 @@ fn settled_block(voice: DiskVoice) -> Vec<Vec<f32>> {
     let mut last = Vec::new();
     for _ in 0..8 {
         let env = clock.env(BLOCK, SampleRate::of(SR));
-        last = contract::drive_input(&mut voice, &env, &[], &[], &[]).audio;
+        last = contract::drive_input(&mut voice, &env, Planes::default(), &[], &[]).audio;
         clock.advance(BLOCK as i64, SampleRate::of(SR));
     }
     last
@@ -268,7 +269,7 @@ fn a_fork_places_the_file_as_the_live_voice_does() {
     );
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let env = clock.env(BLOCK, SampleRate::of(SR));
-    let out = contract::drive_input(&mut *node, &env, &[], &[], &[]).audio;
+    let out = contract::drive_input(&mut *node, &env, Planes::default(), &[], &[]).audio;
     // Engine order: FL FR FC LFE SL SR BL BR from the file's FL FR FC LFE BL BR SL SR.
     let want: Vec<f32> = [0, 1, 2, 3, 6, 7, 4, 5].map(value).to_vec();
     assert_channels(&out, &want, "the fork of a 7.1 in WAV order");
@@ -418,7 +419,7 @@ fn render(node: &mut dyn tutti_graph::Node, clock: &MockTransport, n: usize) -> 
     let mut out: Vec<Vec<f32>> = Vec::new();
     for _ in 0..n {
         let env = clock.env(BLOCK, SampleRate::of(SR));
-        let b = contract::drive_input(node, &env, &[], &[], &[]).audio;
+        let b = contract::drive_input(node, &env, Planes::default(), &[], &[]).audio;
         if out.is_empty() {
             out = vec![Vec::new(); b.len()];
         }
@@ -481,7 +482,9 @@ fn fork(voice: &DiskVoice) -> Box<dyn tutti_graph::Node> {
 /// Channel `c` of `direct`'s last block, all channels, as owned lanes
 /// (allocating: call it outside a guard).
 fn lanes<N: tutti_graph::Node>(direct: &contract::Direct<N>) -> Vec<Vec<f32>> {
-    (0..8).map(|c| direct.output(c).to_vec()).collect()
+    (0..8)
+        .map(|c| direct.output().plane(c).samples().to_vec())
+        .collect()
 }
 
 fn loop_1000_3000() -> Option<Loop> {
@@ -643,7 +646,8 @@ fn a_wide_file_at_its_own_width_is_allocation_free() {
             for (c, &file) in order.iter().enumerate() {
                 assert!(
                     direct
-                        .output(c)
+                        .output()
+                        .plane(c)
                         .iter()
                         .all(|s| s.to_bits() == value(file).to_bits()),
                     "{channels} channels, looped {looped}: channel {c} is not {}",

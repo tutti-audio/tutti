@@ -2,6 +2,7 @@
 
 mod azimuth_arc;
 mod declared_reads;
+mod declared_settings;
 mod edge_fade;
 mod edge_gain;
 mod edge_gain_driven;

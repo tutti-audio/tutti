@@ -34,7 +34,12 @@ fn peak(synth: PolySynth, frames: usize) -> f32 {
     let mut peak = 0.0f32;
     for _ in 0..frames / 64 {
         hand.block();
-        peak = hand.output(0).iter().fold(peak, |a, s| a.max(s.abs()));
+        peak = hand
+            .output()
+            .plane(0)
+            .samples()
+            .iter()
+            .fold(peak, |a, s| a.max(s.abs()));
     }
     peak
 }

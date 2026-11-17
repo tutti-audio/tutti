@@ -350,6 +350,79 @@ pub fn input<'a>(
 /// [`Node::param_base`](crate::Node::param_base)), and the type's
 /// [`HasParam`] impls.
 ///
+/// # Settings
+///
+/// A value that is one word by its encoding (a mode: a fieldless enum written
+/// with [`setting_word!`](tutti_rt::setting_word)) is not a param: it has no
+/// address and no port, and cannot be modulated. It is a
+/// [`Setting<T>`](tutti_rt::Setting) field of the type that owns the cells (the
+/// node, or the `Arc`-shared controls a node reads), declared after the rows:
+///
+/// ```text
+/// declare_params!([] Node, n { rows } settings NodeConfig { mode: Mode = Mode::Off });
+/// declare_params!([] Controls, settings ControlsConfig { mode: Mode = Mode::Off });
+/// ```
+///
+/// With no rows the `n { rows }` part is left out. Each entry writes:
+///
+/// - the config named after `settings`: its `new()` holds each entry's
+///   default and a chained option per entry (`.mode(Mode::On)`) sets the
+///   initial value. Its fields are
+///   private to the module that declares it, where the type's constructor
+///   builds each cell with `Setting::new(config.mode)`;
+/// - the control-side handle `owner.mode()`, a `&Setting<Mode>`: `set` lands
+///   at once, with no pending slot;
+/// - the type check that the field `mode` is a `Setting<Mode>` and that `Mode`
+///   is a [`SettingWord`](tutti_rt::SettingWord).
+///
+/// The node reads `self.mode.get()` once per block.
+///
+/// ```
+/// use tutti_graph::declare_params;
+/// use tutti_rt::{Setting, setting_word};
+///
+/// #[derive(Clone, Copy, Debug, PartialEq)]
+/// #[repr(u8)]
+/// enum Mode { Off, On }
+/// setting_word!(Mode { Off, On });
+///
+/// #[derive(Debug)]
+/// struct Controls {
+///     mode: Setting<Mode>,
+/// }
+///
+/// declare_params!([] Controls, settings ControlsConfig { mode: Mode = Mode::Off });
+///
+/// impl Controls {
+///     fn new(config: ControlsConfig) -> Self {
+///         Self { mode: Setting::new(config.mode) }
+///     }
+/// }
+///
+/// let controls = Controls::new(ControlsConfig::new().mode(Mode::On));
+/// assert_eq!(controls.mode().get(), Mode::On);
+/// controls.mode().set(Mode::Off);
+/// assert_eq!(controls.mode.get(), Mode::Off);
+/// ```
+///
+/// A cell that is not a `Setting` of the declared type does not compile:
+///
+/// ```compile_fail
+/// use tutti_graph::declare_params;
+/// use tutti_rt::{Setting, setting_word};
+///
+/// #[derive(Clone, Copy, Debug)]
+/// #[repr(u8)]
+/// enum Mode { Off }
+/// setting_word!(Mode { Off });
+///
+/// struct Controls {
+///     mode: u8,
+/// }
+///
+/// declare_params!([] Controls, settings ControlsConfig { mode: Mode = Mode::Off });
+/// ```
+///
 /// # Reading a driven param
 ///
 /// `process` reads a param through the declaration, never by a port index:
@@ -393,6 +466,64 @@ pub fn input<'a>(
 /// ```
 #[macro_export]
 macro_rules! declare_params {
+    // A node's rows and its settings: the two forms below.
+    ([$($g:tt)*] $ty:ty, $n:ident { $($rows:tt)* }
+        settings $cfg:ident { $($set:tt)* }) => {
+        $crate::declare_params!([$($g)*] $ty, $n { $($rows)* });
+        $crate::declare_params!([$($g)*] $ty, settings $cfg { $($set)* });
+    };
+
+    // A type with settings and no params.
+    ([$($g:tt)*] $ty:ty, settings $cfg:ident {
+        $($name:ident : $st:ty = $default:expr),+ $(,)?
+    }) => {
+        const _: () = {
+            fn is_a_setting_word<T: $crate::__private::SettingWord>() {}
+            #[allow(dead_code)]
+            fn every_setting_is_a_word() {
+                $(is_a_setting_word::<$st>();)+
+            }
+        };
+
+        #[doc = concat!("The initial settings of a `", stringify!($ty), "`: each entry's value, set by a chained option.")]
+        #[derive(Clone, Copy, Debug)]
+        pub struct $cfg {
+            $($name: $st,)+
+        }
+
+        impl $cfg {
+            /// The configuration with every setting at its declared default.
+            #[must_use]
+            pub fn new() -> Self {
+                Self { $($name: $default,)+ }
+            }
+
+            $(
+                #[doc = concat!("The initial value of `", stringify!($name), "`.")]
+                #[must_use]
+                pub fn $name(mut self, value: $st) -> Self {
+                    self.$name = value;
+                    self
+                }
+            )+
+        }
+
+        impl Default for $cfg {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl<$($g)*> $ty {
+            $(
+                #[doc = concat!("The setting `", stringify!($name), "`: `set` on the control side, `get` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
+                pub fn $name(&self) -> &$crate::__private::Setting<$st> {
+                    &self.$name
+                }
+            )+
+        }
+    };
+
     ([$($g:tt)*] $ty:ty, $n:ident { $($rows:tt)* }) => {
         impl<$($g)*> $ty {
             #[allow(dead_code)]

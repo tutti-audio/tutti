@@ -5,6 +5,7 @@
 //! The rate is a power of two and the times are whole frames over it, so a
 //! delay in frames is exact in `f64`.
 
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxDelay, Routing};
@@ -38,7 +39,10 @@ fn render(node: DelayNode, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
         let n = [64, 17, 1, 33][k % 4].min(len - pos);
         k += 1;
         let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[pos..pos + n]).collect();
-        for (o, b) in out.iter_mut().zip(drive(&mut node, SR, &ins, &[])) {
+        for (o, b) in out
+            .iter_mut()
+            .zip(drive(&mut node, SR, Planes::new(&ins).unwrap(), &[]))
+        {
             o.extend(b);
         }
         pos += n;

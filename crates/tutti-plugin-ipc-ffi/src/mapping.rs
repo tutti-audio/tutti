@@ -1,18 +1,40 @@
 //! The slab's shared memory: the file, the mapping, and the only copies in and
 //! out of it.
 //!
-//! The mapping is held as a raw base pointer and its length, and is reached
-//! only through [`SharedMapping::header`] (a shared reference to the atomics at
-//! offset 0), [`SharedMapping::read`] and [`MappingWriter::write`]. No reference
-//! to the data region is ever formed: another process writes it while we hold
-//! the mapping, so a `&[u8]` or `&mut [u8]` over it would assert an exclusivity
-//! or immutability that no Rust type can see, let alone keep.
+//! The mapping is a [`memmap2::MmapRaw`] and is reached only through
+//! [`SharedMapping::header`] (a shared reference to the atomics at offset 0),
+//! [`SharedMapping::read`] and [`MappingWriter::write`]. No reference to the
+//! data region is ever formed: another process writes it while we hold the
+//! mapping, so a `&[u8]` or `&mut [u8]` over it would assert an exclusivity or
+//! immutability that no Rust type can see, let alone keep.
 //!
 //! A mapping exists only together with its one [`MappingWriter`] (not `Clone`,
 //! `write` takes `&mut self`), so within this process every store into the data
 //! region is ordered by the borrow checker. That, and the file being made here
 //! (exclusively, at 0600 on unix and in the temp directory's ACL on Windows) and
 //! never resized, is what lets every call in this module be safe.
+//!
+//! What makes `&SharedMapping` shareable between threads is the data region's
+//! discipline, since `header` hands out `&SlabHeader` (all atomics) and `read`
+//! copies through raw pointers and never forms a reference to the region, so no
+//! Rust aliasing rule is in play for those bytes. What remains is the data-race
+//! question:
+//!
+//! - *Within this process*, the only stores into the data region are
+//!   `MappingWriter::write`, and a mapping has exactly one writer (made with it
+//!   in `create` or `open`, not `Clone`, `write` takes `&mut self`).
+//! - *Across processes*, the other side writes the other direction's region
+//!   (disjoint offsets, decided by `tutti-plugin-ipc`'s layout), and a reader of
+//!   a region the peer writes copies only between two `Acquire` loads of the
+//!   slot's sequence that both name the block it wants. A copy that overlapped
+//!   the peer's rewrite of the slot is discarded, never used.
+//!
+//! What is NOT claimed: that a misbehaving peer cannot scribble on the region,
+//! or that the copy of a slot the peer is rewriting is well-defined in the
+//! abstract machine (it is the seqlock pattern, which Rust's model does not yet
+//! express). The bytes copied are plain bytes into our own buffer, so a corrupt
+//! or racing peer yields wrong audio, which the recheck then discards, never an
+//! invalid value on this side.
 //!
 //! The backing file's platform is one module, chosen once above: where it lives,
 //! how it is opened, and what keeps it from outliving its last mapping.
@@ -26,9 +48,8 @@ mod platform;
 
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
-use memmap2::MmapMut;
+use memmap2::MmapRaw;
 use std::fs::File;
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 /// A mapped slab: a [`SlabHeader`] at offset 0, then the data region.
@@ -37,46 +58,12 @@ use std::sync::Arc;
 /// the [`MappingWriter`] it was made with.
 #[derive(Debug)]
 pub struct SharedMapping {
-    /// Owns the mapping and unmaps it on drop. Never touched after `new`:
-    /// every access goes through `base`, so no borrow of it exists that the
-    /// raw copies could alias.
-    _map: MmapMut,
+    /// The mapping, page-aligned and at least [`SLAB_HEADER_BYTES`] long;
+    /// unmapped on drop.
+    map: MmapRaw,
     /// What the platform keeps open beside the mapping.
     _backing: platform::Backing,
-    /// The mapping's first byte. Page-aligned.
-    base: NonNull<u8>,
-    /// The mapping's length in bytes, at least [`SLAB_HEADER_BYTES`].
-    len: usize,
 }
-
-// SAFETY: `SharedMapping` is a pointer to memory it owns (through `_map`) for as
-// long as it exists, so sending it to another thread moves nothing a thread
-// could still be using. The pointer is the only reason the auto trait is
-// missing; `MmapMut` itself is `Send`.
-unsafe impl Send for SharedMapping {}
-
-// SAFETY: sharing `&SharedMapping` between threads gives each of them `header`
-// and `read`. `header` hands out `&SlabHeader`, whose fields are all atomics, so
-// concurrent use is what they are for. `read` copies through raw pointers and
-// never forms a reference to the data region, so no Rust aliasing rule is in
-// play for those bytes; what remains is the data-race question:
-//
-// - *Within this process*, the only stores into the data region are
-//   `MappingWriter::write`, and a mapping has exactly one writer (made with it
-//   in `create` or `open`, not `Clone`, `write` takes `&mut self`).
-// - *Across processes*, the other side writes the other direction's region
-//   (disjoint offsets, decided by `tutti-plugin-ipc`'s layout), and a reader of
-//   a region the peer writes copies only between two `Acquire` loads of the
-//   slot's sequence that both name the block it wants. A copy that overlapped
-//   the peer's rewrite of the slot is discarded, never used.
-//
-// What is NOT claimed: that a misbehaving peer cannot scribble on the region,
-// or that the copy of a slot the peer is rewriting is well-defined in the
-// abstract machine (it is the seqlock pattern, which Rust's model does not yet
-// express). The bytes copied are plain bytes into our own buffer, so a corrupt
-// or racing peer yields wrong audio, which the recheck then discards, never an
-// invalid value on this side.
-unsafe impl Sync for SharedMapping {}
 
 /// The one writer of a [`SharedMapping`]'s data region in this process.
 ///
@@ -139,7 +126,8 @@ impl MappingWriter {
     ///
     /// [`SlabError::File`] if it cannot be opened or mapped,
     /// [`SlabError::Short`] if it is shorter than `size`, and
-    /// [`SlabError::Header`] if it is not a tutti slab of this header version
+    /// [`SlabError::BadMagic`], [`SlabError::BadVersion`] or
+    /// [`SlabError::BadSlots`] if it is not a tutti slab of this header version
     /// and ring depth.
     ///
     /// # Panics
@@ -149,7 +137,10 @@ impl MappingWriter {
         let (file, backing) = platform::open_file(name, size, Open::Existing)?;
         let actual = file
             .metadata()
-            .map_err(|e| SlabError::File(format!("failed to read shared memory size: {e}")))?
+            .map_err(|source| SlabError::File {
+                op: "read the size of",
+                source,
+            })?
             .len();
         // Length first: `header()` asserts on a short mapping, and an assert is
         // the wrong failure mode for "the peer created a slab of another shape".
@@ -165,15 +156,13 @@ impl MappingWriter {
     }
 
     fn map(file: File, backing: platform::Backing) -> Result<Self, SlabError> {
-        // SAFETY: `memmap2`'s contract is that the file is not truncated or
-        // resized by anyone while mapped. `open_file` is the only code that makes
-        // or opens a slab file: it creates one exclusively (0600 on unix) and sizes it
-        // before this map, and opens the peer's without `truncate` and never
-        // sizes it. A process with write access to the file could still shrink
-        // it; that is a fault of a trusted peer, as is scribbling on it (the
-        // `Sync` argument above).
-        let map = unsafe { MmapMut::map_mut(&file) }
-            .map_err(|e| SlabError::File(format!("failed to map shared memory: {e}")))?;
+        // `open_file` is the only code that makes or opens a slab file: it
+        // creates one exclusively and sizes it before this map, and opens the
+        // peer's without `truncate` and never sizes it. A process with write
+        // access to the file could still shrink it; that is a fault of a
+        // trusted peer, as is scribbling on it (the module's argument).
+        let map =
+            MmapRaw::map_raw(&file).map_err(|source| SlabError::File { op: "map", source })?;
         Ok(Self {
             mapping: Arc::new(SharedMapping::new(map, backing)),
         })
@@ -196,14 +185,14 @@ impl MappingWriter {
     pub fn write(&mut self, offset: usize, src: &[u8]) {
         let m = &self.mapping;
         let end = m.check_range(offset, src.len());
-        debug_assert!(end <= m.len);
+        debug_assert!(end <= m.map.len());
         // SAFETY: `check_range` proves `offset..end` lies in the mapping and
         // after the header. `src` is our own buffer, never the mapping, so the
         // two ranges cannot overlap. No reference to these bytes exists (the
         // module's rule), and `&mut self` on the mapping's one writer orders
-        // every store this process makes (the `Sync` argument).
+        // every store this process makes (the module's argument).
         unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), m.base.as_ptr().add(offset), src.len());
+            std::ptr::copy_nonoverlapping(src.as_ptr(), m.map.as_mut_ptr().add(offset), src.len());
         }
     }
 }
@@ -214,29 +203,15 @@ impl SharedMapping {
     /// # Panics
     ///
     /// If the mapping is smaller than the header.
-    fn new(mut map: MmapMut, backing: platform::Backing) -> Self {
-        let len = map.len();
+    fn new(map: MmapRaw, backing: platform::Backing) -> Self {
         assert!(
-            len >= SLAB_HEADER_BYTES,
+            map.len() >= SLAB_HEADER_BYTES,
             "slab mapping is smaller than its own header"
         );
-        let base = NonNull::new(map.as_mut_ptr()).expect("a non-empty mapping has a base");
         Self {
-            _map: map,
+            map,
             _backing: backing,
-            base,
-            len,
         }
-    }
-
-    /// The mapping's length in bytes, header included.
-    #[must_use]
-    #[allow(
-        clippy::len_without_is_empty,
-        reason = "a mapping always holds its header"
-    )]
-    pub fn len(&self) -> usize {
-        self.len
     }
 
     /// The header at offset 0 of the mapping.
@@ -251,7 +226,7 @@ impl SharedMapping {
             clippy::cast_ptr_alignment,
             reason = "page-aligned mmap base; the alignment argument is below"
         )]
-        let header = self.base.as_ptr().cast::<SlabHeader>();
+        let header = self.map.as_ptr().cast::<SlabHeader>();
         // SAFETY:
         // - *Alignment*: the header sits at offset 0 of a page-aligned mmap base,
         //   which exceeds `SlabHeader`'s alignment (`CachePadded`, so <= 128).
@@ -278,13 +253,13 @@ impl SharedMapping {
     #[inline]
     pub fn read(&self, offset: usize, dst: &mut [u8]) {
         let end = self.check_range(offset, dst.len());
-        debug_assert!(end <= self.len);
+        debug_assert!(end <= self.map.len());
         // SAFETY: `check_range` proves `offset..end` lies in the mapping and
         // after the header. `dst` is our own buffer, never the mapping, so the
         // ranges cannot overlap. Any byte value is valid for `u8`.
         unsafe {
             std::ptr::copy_nonoverlapping(
-                self.base.as_ptr().add(offset),
+                self.map.as_ptr().add(offset),
                 dst.as_mut_ptr(),
                 dst.len(),
             );
@@ -296,9 +271,9 @@ impl SharedMapping {
     fn check_range(&self, offset: usize, len: usize) -> usize {
         let end = offset.checked_add(len).expect("slab range overflows usize");
         assert!(
-            offset >= SLAB_HEADER_BYTES && end <= self.len,
+            offset >= SLAB_HEADER_BYTES && end <= self.map.len(),
             "slab range {offset}..{end} is outside the data region {SLAB_HEADER_BYTES}..{}",
-            self.len
+            self.map.len()
         );
         end
     }
@@ -382,7 +357,7 @@ mod tests {
         let err = MappingWriter::open(&n, size).expect_err("a foreign file must not open");
         std::fs::remove_file(platform::path(&n)).unwrap();
         assert!(
-            err.to_string().contains("not a tutti audio slab"),
+            matches!(err, SlabError::BadMagic { found, expected: SLAB_MAGIC } if found == 0xABAB_ABAB_ABAB_ABAB),
             "expected a magic failure, got: {err}"
         );
     }
