@@ -282,7 +282,9 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
-pub use state_frame::{BareFrame, FrameReader, Opened, StateFrame, StateFrameError};
+pub use state_frame::{
+    BareFrame, FrameReader, MAX_STATE_BYTES, Opened, StateFrame, StateFrameError,
+};
 pub use state_use::StateUse;
 pub use track_info::{TrackInfo, TrackKind};
 pub use transport_request::TransportRequest;
@@ -296,9 +298,8 @@ pub use harmony::{
     NoteExpressionTextChanges, NoteExpressionTextValue, ScaleChanges, ScaleValue,
 };
 pub use lifecycle::{
-    EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, FdId, HostOp, MAX_STEP_EFFECTS, Notice, Prepare,
-    Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId, standing,
-    step,
+    EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice, Prepare, Reply,
+    Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId, standing, step,
 };
 pub use load_stage::LoadStage;
 pub use main_thread::{MainThreadMarker, MainWork, MainWorkHandle};
@@ -315,7 +316,7 @@ pub use midi::{
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
-pub use wakeups::{Interest, Ready, Wakeups, Watch};
+pub use wakeups::Wakeups;
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
 pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};

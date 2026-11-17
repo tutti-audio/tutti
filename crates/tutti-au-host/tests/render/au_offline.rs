@@ -614,16 +614,17 @@ fn the_push_path_refuses_an_oversized_block() {
     assert_eq!(scratch.block_size(), BLOCK);
 
     match au.process_push(&mut scratch, BLOCK + 1) {
-        Err(AuError::InvalidBuffer(msg)) => {
-            assert!(
-                msg.contains(&(BLOCK + 1).to_string()) && msg.contains(&BLOCK.to_string()),
+        Err(AuError::BlockTooLarge { frames, max }) => {
+            assert_eq!(
+                (frames, max),
+                (BLOCK + 1, BLOCK),
                 "the rejection should name both the requested and the configured \
-                 frame counts; got {msg:?}"
+                 frame counts"
             );
         }
         other => panic!(
             "a {}-frame render on a {BLOCK}-frame scratch must be refused host-side \
-             with InvalidBuffer, not forwarded to the AU (which answers \
+             with BlockTooLarge, not forwarded to the AU (which answers \
              {TOO_MANY_FRAMES} — a refusal that arrives only after it has been \
              handed a buffer list that overstates its own size). Got {other:?}",
             BLOCK + 1
@@ -931,14 +932,14 @@ fn a_scratch_with_no_output_bus_is_refused() {
     assert!(
         matches!(
             au.process_push(&mut no_out, BLOCK),
-            Err(AuError::InvalidBuffer(_))
+            Err(AuError::MissingBus { .. })
         ),
         "AudioUnitProcess with no output bus must be refused"
     );
     assert!(
         matches!(
             au.process_push_multiple(&mut no_out, BLOCK),
-            Err(AuError::InvalidBuffer(_))
+            Err(AuError::MissingBus { .. })
         ),
         "AudioUnitProcessMultiple with no output bus must be refused"
     );

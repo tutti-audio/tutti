@@ -14,6 +14,7 @@
 //! on purpose, which it must fail — a harness that cannot fail is worse than
 //! none.
 
+use tutti_buffers::Planes;
 use tutti_graph::testing as common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -438,7 +439,7 @@ fn the_transport_harnesses_hand_the_node_their_transport() {
         changes,
         play: tutti_graph::PlayClock::ZERO,
     };
-    let out = drive_input(&mut node, &env, &[], &[], &[]).audio;
+    let out = drive_input(&mut node, &env, Planes::default(), &[], &[]).audio;
     let want = [2.0, 2.0 + per_frame, 10.0, 10.0 + per_frame];
     for (got, want) in out[0].iter().zip(want) {
         assert_eq!(*got, want as f32);
@@ -450,22 +451,25 @@ fn the_transport_harnesses_hand_the_node_their_transport() {
         ..env
     };
     direct.block_in(&env);
-    assert_eq!(direct.output(0)[0], 2.0);
+    assert_eq!(direct.output().plane(0).samples()[0], 2.0);
     direct.block();
-    assert_eq!(direct.output(0)[0], 0.0);
+    assert_eq!(direct.output().plane(0).samples()[0], 0.0);
     // `outputs_mut` is the buffer the node writes and `output` reads, so a
     // frame the node leaves unwritten shows what it was filled with.
-    direct.outputs_mut()[0].fill(7.0);
-    assert_eq!(direct.output(0)[3], 7.0);
+    direct.outputs_mut().plane_mut(0).samples_mut().fill(7.0);
+    assert_eq!(direct.output().plane(0).samples()[3], 7.0);
     direct.block_in(&env);
-    assert_eq!(direct.output(0)[3], (2.0 + 3.0 * per_frame) as f32);
+    assert_eq!(
+        direct.output().plane(0).samples()[3],
+        (2.0 + 3.0 * per_frame) as f32
+    );
 
     let (mut rig, ()) = BlockRig::new(Unforkable(BeatEcho), rate, 4);
     rig.block_in(&rolling_at_two());
-    assert_eq!(rig.output(0)[0], 2.0);
-    assert_eq!(rig.output(0)[1], (2.0 + per_frame) as f32);
+    assert_eq!(rig.output().plane(0).samples()[0], 2.0);
+    assert_eq!(rig.output().plane(0).samples()[1], (2.0 + per_frame) as f32);
     rig.block();
-    assert_eq!(rig.output(0)[0], 0.0);
+    assert_eq!(rig.output().plane(0).samples()[0], 0.0);
 }
 
 /// The tail contract: a node that reports its ring (or less than its ceiling

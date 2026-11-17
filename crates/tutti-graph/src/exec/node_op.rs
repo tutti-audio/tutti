@@ -209,6 +209,7 @@ pub(super) fn fading_node_op<
             &mut evout[..eout.len()],
         )
         .with_main(h.rec.main)
+        .with_wired(h.rec.wired)
         .with_params(params);
         let cx = Cx {
             env: h.env,
@@ -708,6 +709,7 @@ impl<'p> Call<'p, '_> {
             &mut [],
         )
         .with_main(self.rec.main)
+        .with_wired(self.rec.wired)
         .with_params(self.params)
         .with_tail(self.reported)
         .with_log(self.log);
@@ -812,6 +814,7 @@ impl<'p> Call<'p, '_> {
             &mut evout[..e_out],
         )
         .with_main(rec.main)
+        .with_wired(rec.wired)
         .with_params(self.params)
         .with_lost(&unplaced)
         .with_tail(self.reported)

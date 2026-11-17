@@ -19,7 +19,7 @@ use clap_sys::ext::note_ports::{
 };
 use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::ChannelTopology;
+use tutti_types::{ChannelTopology, Samples};
 
 impl ClapLoaded {
     /// Number of input or output audio ports exposed by the plugin.
@@ -147,7 +147,7 @@ impl ClapLoaded {
     }
 
     /// Plugin-reported processing latency in samples. 0 when unsupported.
-    pub fn latency_samples(&self, main: MainThreadMarker) -> u32 {
+    pub fn latency_samples(&self, main: MainThreadMarker) -> Samples {
         self.plugin.latency(main)
     }
 

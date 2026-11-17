@@ -341,7 +341,7 @@ fn automation_is_a_host_write_and_its_echo_is_not_reported() {
     let mut edits = Vec::new();
     controller.take_reported_edits(main_thread(), &mut edits);
     assert_eq!(edits, Vec::new());
-    assert_eq!(controller.loaded().dropped_param_changes(), 0);
+    assert_eq!(controller.loaded().dropped_param_changes().get(), 0);
     drop(rejoin(processor, controller));
 }
 

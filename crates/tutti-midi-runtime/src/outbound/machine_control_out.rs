@@ -20,9 +20,7 @@
 //! segment of a block, so a change on frame `N` of a block is a message on frame
 //! `N`.
 
-use tutti_midi_protocol::{
-    MmcCommand, MmcCommands, MmcLocate, MmcPayload, MmcPosition, MtcRate, Recipient,
-};
+use tutti_midi_protocol::{MmcCommands, MmcPayload, MmcPosition, MtcRate, Recipient};
 use tutti_types::{Frame, SampleRate, Seconds};
 
 /// Why a look at the transport could not be sent as Machine Control: the
@@ -32,14 +30,6 @@ use tutti_types::{Frame, SampleRate, Seconds};
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 #[error("{0:?} has no time code")]
 pub struct NoTimeCode(pub Seconds);
-
-/// Adds `command` to `commands`. A look sends at most a Locate (11 bytes) and a
-/// Deferred Play (1), far inside the 48 bytes a message holds.
-fn put(commands: &mut MmcCommands, command: &MmcCommand) {
-    commands
-        .push(command)
-        .expect("at most two commands of a dozen bytes fit 48 bytes");
-}
 
 /// What the transport was at a look.
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +75,12 @@ impl MachineControlSender {
         }
     }
 
+    /// Forgets the last look: the next one compares against nothing and
+    /// sends nothing, as the first of a new sender.
+    pub(crate) fn reset(&mut self) {
+        self.last = None;
+    }
+
     /// Where the commands go.
     #[must_use]
     pub fn to(&self) -> Recipient {
@@ -122,10 +118,8 @@ impl MachineControlSender {
         let Some(before) = self.last.replace(now) else {
             return Ok(None);
         };
-        let mut commands = MmcCommands::new();
         if before.playing && !playing {
-            put(&mut commands, &MmcCommand::Stop);
-            return Ok(Some(commands.payload(self.to)));
+            return Ok(Some(MmcCommands::stop().payload(self.to)));
         }
         let expected = if before.playing {
             before.seconds
@@ -137,16 +131,11 @@ impl MachineControlSender {
         if moved {
             let target =
                 MmcPosition::from_seconds(now.seconds, self.rate).ok_or(NoTimeCode(now.seconds))?;
-            put(
-                &mut commands,
-                &MmcCommand::Locate(MmcLocate::Target(target)),
-            );
-            if playing {
-                put(&mut commands, &MmcCommand::DeferredPlay);
-            }
+            Ok(Some(MmcCommands::locate(target, playing).payload(self.to)))
         } else if playing && !before.playing {
-            put(&mut commands, &MmcCommand::Play);
+            Ok(Some(MmcCommands::play().payload(self.to)))
+        } else {
+            Ok(None)
         }
-        Ok((!commands.is_empty()).then(|| commands.payload(self.to)))
     }
 }

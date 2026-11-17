@@ -22,6 +22,7 @@
 //! the Processor lent runs once [`Event::Returned`] arrives.
 
 use arrayvec::ArrayVec;
+use tutti_plugin_ipc_ffi::FdId;
 
 use crate::{
     Layout, MaxBlock, PluginError, PluginTail, RenderMode, SampleFormat, SampleRate, Samples,
@@ -59,10 +60,6 @@ const _: () = assert!(MAX_STEP_EFFECTS <= EFFECT_CAPACITY);
 /// A plugin timer, as the format names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimerId(pub u32);
-
-/// A plugin file descriptor registration, as the format names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FdId(pub i32);
 
 /// What `activate` needs, and what a change of any field costs: a deactivate
 /// and an activate.

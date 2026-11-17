@@ -109,6 +109,28 @@ impl TryFrom<&PeJson> for PartialValue {
     }
 }
 
+impl TryFrom<&PeJson> for PartialUpdate {
+    type Error = PartialError;
+
+    /// Reads the changes of Property Data.
+    ///
+    /// # Errors
+    ///
+    /// [`PartialError::NotAChange`] unless it is an object whose names are
+    /// pointers and whose values are strings, numbers or booleans.
+    fn try_from(json: &PeJson) -> Result<Self, PartialError> {
+        let PeJson::Object(object) = json else {
+            return Err(PartialError::NotAChange);
+        };
+        let mut update = Self::new();
+        for (name, value) in object.iter() {
+            let pointer = JsonPointer::new(name).ok_or(PartialError::NotAChange)?;
+            update = update.with(pointer, PartialValue::try_from(value)?);
+        }
+        Ok(update)
+    }
+}
+
 impl PartialUpdate {
     /// No change.
     #[must_use]
@@ -146,24 +168,6 @@ impl PartialUpdate {
             object.insert(pointer.as_str(), value.clone().into());
         }
         PeJson::Object(object)
-    }
-
-    /// Reads the changes of Property Data.
-    ///
-    /// # Errors
-    ///
-    /// [`PartialError::NotAChange`] unless it is an object whose names are
-    /// pointers and whose values are strings, numbers or booleans.
-    pub fn from_json(json: &PeJson) -> Result<Self, PartialError> {
-        let PeJson::Object(object) = json else {
-            return Err(PartialError::NotAChange);
-        };
-        let mut update = Self::new();
-        for (name, value) in object.iter() {
-            let pointer = JsonPointer::new(name).ok_or(PartialError::NotAChange)?;
-            update = update.with(pointer, PartialValue::try_from(value)?);
-        }
-        Ok(update)
     }
 
     /// The Property Data with the changes made, or an error and nothing changed.

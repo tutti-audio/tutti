@@ -6,9 +6,7 @@
 ///
 /// Every `u32` is a value, so there is no refusing constructor, as for
 /// [`NoteVelocity`](crate::NoteVelocity). The word is the wire's integer, not
-/// a MIDI 1.0 value: a 7-bit value reaches it through
-/// `tutti_midi_protocol::widen_value`, which scales by M2-115, and `127` as a
-/// raw word is nearly zero.
+/// a MIDI 1.0 value: `127` as a raw word is nearly zero.
 ///
 /// # Examples
 ///
@@ -24,7 +22,24 @@
 /// assert_eq!(ControlValue::MAX.get(), u32::MAX);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct ControlValue(u32);
+
+// Every `u32` is a ControlValue, so the serde form (the bare number) reads back
+// through a conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u32> for ControlValue {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
 
 impl ControlValue {
     /// Value 0.

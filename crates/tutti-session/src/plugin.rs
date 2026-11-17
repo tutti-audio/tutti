@@ -1090,12 +1090,18 @@ impl HostedPlugin {
 
     /// What the node lost: MIDI past a block's capacity, in a block the plugin
     /// did not run, or from a SysEx message that lost a packet (all
-    /// [`lost`](tutti_graph::Losses::lost)), and the parameter points it did not
-    /// deliver as they were.
+    /// [`lost`](tutti_graph::Losses::lost)), the parameter points it did not
+    /// deliver as they were, and, for a served plugin, the commands its
+    /// bridge's queue [refused](tutti_graph::Losses::refused) and the responses
+    /// it [lost](tutti_graph::Losses::lost).
     fn node_losses(&self) -> tutti_graph::Losses {
         use tutti_graph::Losses;
         let points = self.node.param_delivery();
-        Losses::lost(self.node.dropped_midi_in())
+        let bridge = self.controls.as_ref().map_or(Losses::NONE, |c| {
+            Losses::refused(c.refused_commands()) + Losses::lost(c.lost_responses())
+        });
+        bridge
+            + Losses::lost(self.node.dropped_midi_in())
             + Losses::lost(points.grid_points_dropped)
             + Losses::evicted(points.points_merged)
             + Losses::refused(points.points_dropped)

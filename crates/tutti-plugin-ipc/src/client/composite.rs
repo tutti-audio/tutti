@@ -7,6 +7,7 @@ use crate::protocol::{
     MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo,
     Preset, PresetId, TransportChanges, TransportInfo,
 };
+use crossbeam::queue::ArrayQueue;
 use dpi::Size;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +17,9 @@ use tutti_plugin_types::{
     BridgeResult, Delivered, EditorError, PluginError, PluginFailure, Request, StateError,
 };
 use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
-use tutti_plugin_types::{
-    Edit, EditDrain, EditSink, MainThreadMarker, MainWorkHandle, ParamEdit, edits,
-};
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
-use tutti_rt::LockExt;
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, ParamEdit};
+use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
 use tutti_types::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
@@ -143,8 +142,31 @@ impl std::fmt::Debug for EditorLoader {
 }
 
 /// How many parameter writes wait for the next editor idle. A full ring drops
-/// the newest: the mirror is cosmetic, and the audio command is authoritative.
+/// the newest, counted: the mirror is cosmetic, and the audio command is authoritative.
 const MIRROR_CAPACITY: usize = 256;
+
+/// An automation mode as a nonzero code, 0 being "none".
+fn mode_code(mode: crate::protocol::AutomationMode) -> u8 {
+    use crate::protocol::AutomationMode;
+    match mode {
+        AutomationMode::Off => 1,
+        AutomationMode::Reading => 2,
+        AutomationMode::Writing => 3,
+        AutomationMode::ReadWriting => 4,
+    }
+}
+
+/// The mode a [`mode_code`] stands for; `None` for 0.
+fn mode_of_code(code: u8) -> Option<crate::protocol::AutomationMode> {
+    use crate::protocol::AutomationMode;
+    match code {
+        1 => Some(AutomationMode::Off),
+        2 => Some(AutomationMode::Reading),
+        3 => Some(AutomationMode::Writing),
+        4 => Some(AutomationMode::ReadWriting),
+        _ => None,
+    }
+}
 
 /// The cosmetic mirror of the realtime setters onto the in-process editor.
 ///
@@ -154,9 +176,18 @@ const MIRROR_CAPACITY: usize = 256;
 /// they queue here (never blocking, never allocating) and the main-thread
 /// [`editor_idle`](PluginBridge::editor_idle) applies what was queued.
 struct GuiMirror {
-    params: Mutex<EditSink>,
-    drain: Mutex<EditDrain>,
-    automation: Mutex<Option<crate::protocol::AutomationMode>>,
+    /// The writes waiting for the next editor idle: a bounded lock-free
+    /// queue, pushed from any thread and popped on the main thread.
+    params: ArrayQueue<(ParamId, Normalized)>,
+    /// Writes the full queue refused, ever.
+    refused: Tally<u64>,
+    /// The writer of `refused`.
+    refused_writer: TallyWriter<u64>,
+    /// The latest automation mode written, as [`mode_code`]; 0 for none.
+    automation: PackedAtomic<u8>,
+    /// The code of the mode the editor was last shown, 0 for none, so an idle
+    /// applies a mode once. Main thread only.
+    shown: PackedAtomic<u8>,
     /// Whether an editor is open. Nothing is queued while it is not, and what
     /// was queued is discarded when it opens or closes: an edit made with no
     /// editor to show it is not one to replay on the first idle.
@@ -165,41 +196,59 @@ struct GuiMirror {
 
 impl GuiMirror {
     fn new() -> Self {
-        let (sink, drain) = edits(MIRROR_CAPACITY);
+        let refused = tally();
         Self {
-            params: Mutex::new(sink),
-            drain: Mutex::new(drain),
-            automation: Mutex::new(None),
+            params: ArrayQueue::new(MIRROR_CAPACITY),
+            refused_writer: refused.writer(),
+            refused,
+            automation: PackedAtomic::new(0),
+            shown: PackedAtomic::new(0),
             open: AtomicBool::new(false),
         }
     }
 
-    /// Queues a parameter write for the editor, if one is open. Never blocks.
+    /// Queues a parameter write for the editor, if one is open. Wait-free,
+    /// any thread; a full queue counts the write refused.
     fn push_param(&self, id: ParamId, value: Normalized) {
-        if self.open.load(Ordering::Acquire)
-            && let Ok(mut sink) = self.params.try_lock()
-        {
-            let _ = sink.send(Edit::Param { id, value });
+        if self.open.load(Ordering::Acquire) && self.params.push((id, value)).is_err() {
+            self.refused_writer.add(1);
         }
     }
 
-    /// Queues the latest automation mode for the editor, if one is open.
-    fn push_automation(&self, mode: crate::protocol::AutomationMode) {
-        if self.open.load(Ordering::Acquire)
-            && let Ok(mut latest) = self.automation.try_lock()
-        {
-            *latest = Some(mode);
+    /// Hands each queued write, oldest first, to `apply`. Main thread.
+    fn drain(&self, mut apply: impl FnMut(ParamId, Normalized)) {
+        for _ in 0..self.params.len() {
+            let Some((id, value)) = self.params.pop() else {
+                break;
+            };
+            apply(id, value);
         }
+    }
+
+    /// Records the latest automation mode for the editor, if one is open.
+    /// Wait-free, any thread: one store.
+    fn push_automation(&self, mode: crate::protocol::AutomationMode) {
+        if self.open.load(Ordering::Acquire) {
+            self.automation.store(mode_code(mode));
+        }
+    }
+
+    /// The automation mode written since the editor was last shown one, if
+    /// any. Main thread.
+    fn take_automation(&self) -> Option<crate::protocol::AutomationMode> {
+        let latest = self.automation.load();
+        if latest == self.shown.load() {
+            return None;
+        }
+        self.shown.store(latest);
+        mode_of_code(latest)
     }
 
     /// Drops everything queued.
     fn discard(&self) {
-        if let Ok(mut drain) = self.drain.lock() {
-            drain.drain(|_| {});
-        }
-        if let Ok(mut latest) = self.automation.lock() {
-            *latest = None;
-        }
+        self.drain(|_, _| {});
+        self.automation.store(0);
+        self.shown.store(0);
     }
 
     /// An editor opened (after its state sync): what was queued before it is
@@ -317,7 +366,7 @@ impl PluginBridge {
     /// `AudioBridge::set_parameter_rt`, mirrored into an open editor.
     pub fn set_parameter_rt(&self, param_id: ParamId, value: Normalized) -> bool {
         // Cosmetic GUI mirror (keeps the display in sync): queued for the next
-        // `editor_idle`, `try_lock` and a bounded ring so the `_rt` contract
+        // `editor_idle`, a bounded lock-free queue so the `_rt` contract
         // stays non-blocking and allocation-free. The authoritative delivery is
         // the audio command below; a dropped mirror write self-heals on the next
         // edit.
@@ -339,7 +388,7 @@ impl PluginBridge {
         // here.
         //
         // The GUI mirror is cosmetic and a main-thread call, so the latest mode
-        // waits for the next `editor_idle` (`try_lock`, never block); a dropped
+        // waits for the next `editor_idle` (one store, never block); a dropped
         // glow self-heals on the next mode change.
         self.mirror.push_automation(mode);
         self.audio.set_automation_state_rt(mode)
@@ -408,25 +457,34 @@ impl PluginBridge {
         self.audio.news_settled(within)
     }
 
+    /// The count of editor-mirror parameter writes a full queue refused. The
+    /// audio command is unaffected: the mirror only keeps the display current.
+    pub fn mirror_refused_cell(&self) -> tutti_rt::Tally<u64> {
+        self.mirror.refused.clone()
+    }
+
     /// How many plugin parameter-change events the bridge dropped. See
     /// `AudioBridge::dropped_parameter_events`.
     pub fn dropped_parameter_events(&self) -> u64 {
         self.audio.dropped_parameter_events()
     }
 
-    /// How many abandoned replies the bridge thread has taken back off the
-    /// socket. See
-    /// `AudioBridge::settled_replies`.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn settled_replies(&self) -> u64 {
-        self.audio.settled_replies()
+    /// The count of commands the audio side could not hand to the bridge
+    /// thread. See `AudioBridge::commands_refused_cell`.
+    pub fn commands_refused_cell(&self) -> tutti_rt::Tally<u64> {
+        self.audio.commands_refused_cell()
     }
 
-    /// How many blocks' replies the bridge thread abandoned. See
-    /// `AudioBridge::abandoned_replies`.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn abandoned_replies(&self) -> u64 {
-        self.audio.abandoned_replies()
+    /// The count of audio responses lost to a full response queue. See
+    /// `AudioBridge::responses_lost_cell`.
+    pub fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
+        self.audio.responses_lost_cell()
+    }
+
+    /// The count of parameter buffers the audio thread leaked. See
+    /// `AudioBridge::leaked_buffers_cell`.
+    pub fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
+        self.audio.leaked_buffers_cell()
     }
 
     /// See `AudioBridge::block_counts`.
@@ -701,7 +759,7 @@ impl PluginBridge {
     pub fn wake(
         &self,
         main: MainThreadMarker,
-        ready: &[tutti_plugin_types::Ready],
+        ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
         if self.load_editor.is_none() {
@@ -728,16 +786,9 @@ impl PluginBridge {
         {
             gui.editor_idle(main);
             // Apply what the realtime setters queued for the editor's display.
-            if let Ok(mut drain) = self.mirror.drain.lock() {
-                drain.drain(|edit| {
-                    if let Edit::Param { id, value } = edit {
-                        gui.set_parameter(main, id, value);
-                    }
-                });
-            }
-            if let Ok(mut latest) = self.mirror.automation.lock()
-                && let Some(mode) = latest.take()
-            {
+            self.mirror
+                .drain(|id, value| gui.set_parameter(main, id, value));
+            if let Some(mode) = self.mirror.take_automation() {
                 gui.set_automation_state(main, mode);
             }
             // Forward GUI-originated parameter changes to the audio bridge.
@@ -989,11 +1040,7 @@ mod gui_mirror_tests {
 
     fn applied(mirror: &GuiMirror) -> Vec<ParamId> {
         let mut out = Vec::new();
-        mirror.drain.lock().unwrap().drain(|edit| {
-            if let Edit::Param { id, .. } = edit {
-                out.push(id);
-            }
-        });
+        mirror.drain(|id, _| out.push(id));
         out
     }
 
@@ -1035,6 +1082,55 @@ mod gui_mirror_tests {
             applied(&mirror).is_empty(),
             "opening again drops what waited"
         );
+    }
+
+    /// **`take_automation` applies a mode once**: the mode written is
+    /// returned, then nothing until another is written; closing the editor
+    /// drops one not yet applied.
+    #[test]
+    fn an_automation_mode_is_applied_once() {
+        use crate::protocol::AutomationMode;
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        assert_eq!(mirror.take_automation(), None, "nothing written yet");
+        mirror.push_automation(AutomationMode::Reading);
+        assert_eq!(mirror.take_automation(), Some(AutomationMode::Reading));
+        assert_eq!(mirror.take_automation(), None, "applied once");
+        mirror.push_automation(AutomationMode::Off);
+        assert_eq!(mirror.take_automation(), Some(AutomationMode::Off));
+        mirror.push_automation(AutomationMode::Writing);
+        mirror.closed();
+        assert_eq!(mirror.take_automation(), None, "closing drops it");
+    }
+
+    /// **A full mirror queue counts each refused write and keeps what it
+    /// holds**: the first `MIRROR_CAPACITY` writes are applied in order.
+    #[test]
+    fn a_full_mirror_queue_counts_its_refusals() {
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        for i in 0..MIRROR_CAPACITY + 3 {
+            mirror.push_param(ParamId::new(i as u32), Normalized::of(0.5));
+        }
+        assert_eq!(mirror.refused.get(), 3);
+        let kept = applied(&mirror);
+        assert_eq!(kept.len(), MIRROR_CAPACITY);
+        assert_eq!(kept[0], ParamId::new(0));
+    }
+
+    /// **Pushing a write or a mode allocates nothing**, with the editor open
+    /// and with the queue full.
+    #[test]
+    fn pushing_to_the_mirror_allocates_nothing() {
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        assert_no_alloc::assert_no_alloc(|| {
+            for i in 0..MIRROR_CAPACITY + 2 {
+                mirror.push_param(ParamId::new(i as u32), Normalized::of(0.25));
+            }
+            mirror.push_automation(crate::protocol::AutomationMode::ReadWriting);
+        });
+        assert_eq!(mirror.refused.get(), 2);
     }
 }
 

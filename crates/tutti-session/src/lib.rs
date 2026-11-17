@@ -94,6 +94,9 @@ mod midi_follow;
 mod midi_hardware;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
+#[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
+#[path = "midi_port_none.rs"]
+mod midi_port;
 #[cfg(feature = "midi")]
 mod midi_report;
 #[cfg(feature = "midi")]
@@ -178,9 +181,7 @@ pub use key::{
     RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "midi")]
-pub use midi::{
-    Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
-};
+pub use midi::{Midi, MidiLoad, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -192,7 +193,8 @@ pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachin
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
-    MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
+    MidiOutputInfo, MidiPortError, NoHardware, OutputLoaded, OutputOptions, PortCause, midi_input,
+    midi_output,
 };
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
@@ -277,7 +279,8 @@ pub use tutti_graph::{
     BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
 };
 pub use tutti_graph::{
-    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError, Stamp,
+    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError,
+    Stamp, Wired, WiredMask,
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};

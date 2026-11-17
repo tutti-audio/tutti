@@ -3,6 +3,7 @@
 //! panics and never produces a non-finite sample.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::contract::drive;
@@ -38,7 +39,7 @@ fn finite(node: &mut dyn Node) -> bool {
             })
             .collect();
         let refs: Vec<&[f32]> = chans.iter().map(|c| &c[..]).collect();
-        ok &= drive(node, RATE, &refs, &[])
+        ok &= drive(node, RATE, Planes::new(&refs).unwrap(), &[])
             .iter()
             .flatten()
             .all(|s| s.is_finite());

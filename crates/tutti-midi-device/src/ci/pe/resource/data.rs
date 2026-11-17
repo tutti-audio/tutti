@@ -295,7 +295,7 @@ impl PeData {
         }
         match media_type.filter(|m| !is_json(m)) {
             None => {
-                let json = PeJson::parse(bytes).map_err(|e| {
+                let json = PeJson::try_from(bytes).map_err(|e| {
                     PeDataError::new(resource.as_str(), PeDataFault::NotValid(json_fault(&e)))
                 })?;
                 Self::decode(resource, &json)

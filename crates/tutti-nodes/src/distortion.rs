@@ -458,12 +458,12 @@ mod tests {
         let x = vec![0.25f32; 64];
         let ins: Vec<&[f32]> = (0..6).map(|_| &x[..]).collect();
         let step: Vec<f32> = (0..64).map(|i| if i < 32 { 1.0 } else { 3.0 }).collect();
-        let out = drive(&mut n, RATE, &ins, &[Some(&step)]);
+        let out = drive(&mut n, RATE, Planes::new(&ins).unwrap(), &[Some(&step)]);
         for (c, o) in out.iter().enumerate() {
             assert_eq!(o[31], 0.25, "channel {c} before the step");
             assert_eq!(o[32], 0.75, "channel {c} on the step's frame");
         }
-        let out = drive(&mut n, RATE, &ins, &[None]);
+        let out = drive(&mut n, RATE, Planes::new(&ins).unwrap(), &[None]);
         assert!(
             out.iter().all(|o| o.iter().all(|&y| y == 0.25)),
             "the cell again"
@@ -503,7 +503,7 @@ mod tests {
             let out = drive_block(&mut n, &[&x]);
             assert!(out[0].iter().all(|&y| y == 0.5), "written {bad}");
             let fed = vec![bad; 64];
-            let out = drive(&mut n, RATE, &[&x], &[Some(&fed)]);
+            let out = drive(&mut n, RATE, Planes::new(&[&x]).unwrap(), &[Some(&fed)]);
             assert!(out[0].iter().all(|&y| y == 0.5), "fed {bad}");
         }
         let mut built = hard_clip(1, f32::NAN);

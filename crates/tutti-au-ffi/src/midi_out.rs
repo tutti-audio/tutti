@@ -11,13 +11,14 @@
 use std::mem::align_of;
 use std::os::raw::c_void;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use coreaudio_sys::{AudioTimeStamp, MIDIPacket, MIDIPacketList, OSStatus};
 use tutti_midi_protocol::Translator;
 #[cfg(feature = "testing")]
 use tutti_midi_protocol::midi1;
 use tutti_plugin_types::{MidiEventVec, WireMidi, group_of_port};
+use tutti_rt::{Tally, TallyWriter};
 use tutti_ump::{Message, Midi1Parser, MidiGroup, Ump};
 
 use crate::callback::with_state_mut;
@@ -81,7 +82,7 @@ struct MidiOutState {
     /// published fewer streams than it calls with, or more than the sixteen
     /// Groups): dropped and counted here, read through
     /// [`AuMidiOutput::unrouted_packets`].
-    unrouted: Arc<AtomicU64>,
+    unrouted: TallyWriter<u64>,
     /// Set by [`AuMidiOutput::reset`]: the next list finds every reader forgotten
     /// before it is read.
     reset: Arc<AtomicBool>,
@@ -196,7 +197,7 @@ pub struct AuMidiOutput {
     state: Option<std::ptr::NonNull<MidiOutState>>,
     /// [`MidiOutState::unrouted`], shared so the handle reads it without
     /// touching the state the render thread holds.
-    unrouted: Arc<AtomicU64>,
+    unrouted: Tally<u64>,
     /// [`MidiOutState::reset`], shared for the same reason.
     reset: Arc<AtomicBool>,
 }
@@ -208,7 +209,7 @@ impl AuMidiOutput {
     /// so this is the least the events lost came to.
     #[must_use]
     pub fn unrouted_packets(&self) -> u64 {
-        self.unrouted.load(Ordering::Relaxed)
+        self.unrouted.get()
     }
 
     /// Forgets what the output streams have read: a SysEx open across a
@@ -327,12 +328,12 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
         .map_while(|stream| group_of_port(u16::try_from(stream).ok()?))
         .map(Decoder::new)
         .collect();
-    let unrouted = Arc::new(AtomicU64::new(0));
+    let unrouted = tutti_rt::tally::<u64>();
     let reset = Arc::new(AtomicBool::new(false));
     let state = Box::into_raw(Box::new(MidiOutState {
         sink,
         decoders,
-        unrouted: Arc::clone(&unrouted),
+        unrouted: unrouted.writer(),
         reset: Arc::clone(&reset),
     }));
     let user_data: *mut c_void = state.cast();
@@ -596,10 +597,7 @@ unsafe fn dispatch(
     else {
         // SAFETY: `pktlist` is non-null and well formed, per this function's
         // contract.
-        unrouted.fetch_add(
-            u64::from(unsafe { packet_count(pktlist) }),
-            Ordering::Relaxed,
-        );
+        unrouted.add(u64::from(unsafe { packet_count(pktlist) }));
         return NO_ERR;
     };
     // A list cut short by a panic last time leaves events staged; they belong
@@ -833,6 +831,7 @@ pub unsafe fn split_packet_list_for_test(pktlist: *const MIDIPacketList) -> Vec<
 mod tests {
     use super::*;
     use std::mem::size_of;
+    use std::sync::atomic::AtomicU64;
     use tutti_ump::KeyEvent;
 
     /// The hand-declared callback struct must match Apple's: an
@@ -1058,20 +1057,20 @@ mod tests {
         }
         let delivered = Arc::new(AtomicU64::new(0));
         let seen = Arc::clone(&delivered);
-        let unrouted = Arc::new(AtomicU64::new(0));
+        let unrouted = tutti_rt::tally::<u64>();
         let mut state = MidiOutState {
             sink: Box::new(move |_, events| {
                 seen.fetch_add(events.len() as u64, Ordering::Relaxed);
             }),
             decoders: Box::new([Decoder::new(MidiGroup::FIRST)]),
-            unrouted: Arc::clone(&unrouted),
+            unrouted: unrouted.writer(),
             reset: Arc::new(AtomicBool::new(false)),
         };
         // SAFETY: `state` is the only reference, and `packets` is the list built
         // above.
         let status = unsafe { dispatch(&mut state, 5, packets) };
         assert_eq!(status, NO_ERR);
-        assert_eq!(unrouted.load(Ordering::Relaxed), 3);
+        assert_eq!(unrouted.get(), 3);
         assert_eq!(delivered.load(Ordering::Relaxed), 0);
     }
 

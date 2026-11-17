@@ -10,8 +10,8 @@ use tutti_ump::Ump;
 /// when the value is built ([`new`](Self::new)), so a clip never meets a beat
 /// that has no frame.
 ///
-/// [`Beat`] is `tutti-types`' and a plain `f64`, which holds NaN; this type is
-/// where a beat of an event is refused for it.
+/// [`Beat`] is `tutti-types`' unit over an `f64`, which holds NaN and the
+/// infinities; this type is where an event's beat is refused for them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimedMidiEvent {
     event: Ump,
@@ -34,7 +34,7 @@ impl TimedMidiEvent {
     #[inline]
     #[must_use]
     pub fn shifted(self, by: tutti_types::BeatDuration) -> Option<Self> {
-        Self::new(Beat(self.beat.get() + by.get()), self.event)
+        Self::new(self.beat + by, self.event)
     }
 
     /// The event itself. It carries no offset in storage: [`beat`](Self::beat)

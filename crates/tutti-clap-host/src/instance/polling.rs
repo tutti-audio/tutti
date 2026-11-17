@@ -9,7 +9,8 @@ use crate::types::{ContentScale, EditorCapabilities, WindowHandle};
 use dpi::Size;
 use std::sync::Arc;
 use tutti_clap_ffi::GuiError;
-use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
+use tutti_plugin_types::{MainThreadMarker, Wakeups};
 
 fn gui_error(error: GuiError) -> ClapError {
     ClapError::EditorError(error.to_string())
@@ -153,21 +154,7 @@ impl ClapLoaded {
         if !self.flags.gui_created {
             return EditorCapabilities::default();
         }
-        let Some(hints) = self.plugin.gui_hints(main) else {
-            return EditorCapabilities::default();
-        };
-        let mut caps = EditorCapabilities {
-            resize: tutti_plugin_types::ResizeHints {
-                resizable: hints.resizable,
-                can_resize_horizontally: hints.can_resize_horizontally,
-                can_resize_vertically: hints.can_resize_vertically,
-            },
-            aspect: tutti_plugin_types::AspectRatio::default(),
-            appkit_autoresize_friendly: false,
-        };
-        caps.aspect.preserve = hints.preserve_aspect_ratio;
-        caps.aspect.ratio = hints.aspect_ratio;
-        caps
+        self.plugin.gui_hints(main).unwrap_or_default()
     }
 
     /// Tells the open editor its window's scale changed (`gui.set_scale`).
@@ -381,7 +368,7 @@ impl ClapLoaded {
             && let Ok(fds) = self.host_state.posix_fds.entries.lock()
         {
             for entry in fds.iter() {
-                out.watch(FdId(entry.fd), interest_of(entry.flags));
+                out.watch(FdId::new(entry.fd), interest_of(entry.flags));
             }
         }
         let timer = &self.host_state.timer;
@@ -399,18 +386,18 @@ impl ClapLoaded {
     pub(crate) fn latch_wakeups(&mut self, ready: &[Ready], now: std::time::Instant) {
         if let Ok(registered) = self.host_state.posix_fds.entries.lock() {
             for r in ready {
-                let Some(entry) = registered.iter().find(|e| e.fd == r.fd.0) else {
+                let Some(entry) = registered.iter().find(|e| e.fd == r.fd.get()) else {
                     continue;
                 };
                 let flags = flags_of(r.events) & entry.flags;
                 if flags == 0 {
                     continue;
                 }
-                match self.woken.fds.iter_mut().find(|(fd, _)| *fd == r.fd.0) {
+                match self.woken.fds.iter_mut().find(|(fd, _)| *fd == r.fd.get()) {
                     Some((_, held)) => *held |= flags,
                     None => {
-                        self.woken.fds.push((r.fd.0, flags));
-                        self.woken.announce.push(r.fd.0);
+                        self.woken.fds.push((r.fd.get(), flags));
+                        self.woken.announce.push(r.fd.get());
                     }
                 }
             }

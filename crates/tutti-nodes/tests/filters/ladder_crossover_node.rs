@@ -3,6 +3,7 @@
 //! tail declares. Every figure is the node's own definition (reset is silence, a grid of 16
 //! frames counted from the last reset, an unknown tail is never parked), not another render's.
 
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
 use tutti_nodes::{CrossoverNode, LadderFilterNode, LadderType};
@@ -71,7 +72,7 @@ fn render(
     let mut out: Vec<Vec<f32>> = Vec::new();
     for (i, chunk) in x.chunks(block).enumerate() {
         before(i * block);
-        let y = drive(node, SR, &[chunk, chunk], &[]);
+        let y = drive(node, SR, Planes::new(&[chunk, chunk]).unwrap(), &[]);
         out.resize(y.len(), Vec::new());
         for (all, part) in out.iter_mut().zip(y) {
             all.extend(part);
@@ -226,7 +227,7 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
             };
             let mut x = [0.0f32; 64];
             x[0] = if block == 0 { 0.01 } else { 0.0 };
-            let d = drive_input(node, &env, &[&x, &x], &[], &[]);
+            let d = drive_input(node, &env, Planes::new(&[&x, &x]).unwrap(), &[], &[]);
             assert_eq!(d.status, Some(Status::Modified), "block {block}");
             assert_eq!(d.reported_tail, None, "block {block}");
             ring = tutti_fixtures::signal::peak_planes(&d.audio);
@@ -288,7 +289,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
             })
             .collect();
         let refs: Vec<&[f32]> = inputs.iter().map(|x| &x[..]).collect();
-        let out = drive(&mut node, SR, &refs, &[]);
+        let out = drive(&mut node, SR, Planes::new(&refs).unwrap(), &[]);
         assert!(usize::from(channels) * bands > 16);
         assert_eq!(out.len(), usize::from(channels) * bands);
         let mut probes: Vec<f64> = vec![20.0, 20_000.0];

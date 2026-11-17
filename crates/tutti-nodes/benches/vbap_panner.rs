@@ -19,6 +19,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::PlanesMut;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
@@ -30,10 +31,10 @@ use tutti_types::{Azimuth, Bed, Elevation, SampleRate};
 const WARMUP_FRAMES: usize = 96_000;
 
 /// Deterministic broadband input: a cheap LCG, so the bench needs no `rand`.
-fn fill_noise(channels: &mut [Vec<f32>]) {
+fn fill_noise(mut channels: PlanesMut<'_, '_>) {
     let mut state = 0x2545_f491_u32;
-    for c in channels {
-        for x in c.iter_mut() {
+    for mut c in channels.iter_mut() {
+        for x in c.samples_mut() {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             *x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
         }
@@ -72,7 +73,7 @@ fn bench(c: &mut Criterion) {
                         aim(&params, Azimuth(bearing), Elevation::LEVEL);
                     }
                     d.block();
-                    black_box(d.output(0)[block - 1]);
+                    black_box(d.output().plane(0).samples()[block - 1]);
                 })
             });
         }
