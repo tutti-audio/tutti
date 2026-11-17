@@ -71,7 +71,6 @@ pub struct MidiIo {
     /// Events dropped because `out` was full, since load. A tally the host's own drops also
     /// add to.
     out_overflow: TallyWriter<u64>,
-    out_overflow_reader: Tally<u64>,
     /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
     /// parameter-number and bank runs across blocks: VST2 has one output
     /// stream, so one translator.
@@ -104,15 +103,8 @@ impl MidiIo {
             out_rx,
             out,
             out_overflow: out_overflow.writer(),
-            out_overflow_reader: out_overflow.clone(),
             translator: Translator::new(),
         }
-    }
-
-    /// Plugin MIDI-out events dropped because a split block's pieces filled
-    /// the block's list (reserved for one inbox's worth).
-    pub fn out_overflow(&self) -> &Tally<u64> {
-        &self.out_overflow_reader
     }
 }
 
@@ -708,7 +700,8 @@ mod tests {
         let cc =
             |controller: u32, value: u32| Ump([0x20B0_0000 | controller << 8 | value, 0, 0, 0]);
         let inbox = Arc::new(ArrayQueue::new(4));
-        let mut io = MidiIo::new(Arc::clone(&inbox), &tutti_rt::tally());
+        let overflow = tutti_rt::tally();
+        let mut io = MidiIo::new(Arc::clone(&inbox), &overflow);
         // The list is full of notes, then the run (select, MSB, LSB) arrives.
         for i in 0..4 {
             inbox
@@ -722,7 +715,7 @@ mod tests {
         }
         io.drain_from(0);
         assert_eq!(io.out.len(), 4, "no room for the controller");
-        assert_eq!(io.out_overflow().get(), 1, "which is counted");
+        assert_eq!(overflow.get(), 1, "which is counted");
         // The next block: RPN 0/0 is still selected, so a new value is one
         // Registered Controller (7 semitones, zero-extended, M2-115 4.1).
         io.out.clear();
@@ -749,7 +742,8 @@ mod tests {
     #[test]
     fn a_split_block_with_full_inboxes_does_not_grow_the_out_list() {
         let inbox = Arc::new(ArrayQueue::new(256));
-        let mut io = MidiIo::new(Arc::clone(&inbox), &tutti_rt::tally());
+        let overflow = tutti_rt::tally();
+        let mut io = MidiIo::new(Arc::clone(&inbox), &overflow);
         for _ in 0..2 {
             io.out.clear();
             for piece in 0..2usize {
@@ -762,11 +756,7 @@ mod tests {
             }
             assert_eq!(io.out.len(), 256, "capped at the reservation");
         }
-        assert_eq!(
-            io.out_overflow().get(),
-            2 * 256,
-            "the second piece's, counted"
-        );
+        assert_eq!(overflow.get(), 2 * 256, "the second piece's, counted");
     }
 
     use tutti_fixtures::midi;

@@ -222,8 +222,8 @@ pub trait Host {
     /// Get vendor and product information.
     ///
     /// Returns a tuple in the form of `(version, vendor_name, product_name)`.
-    fn get_info(&self) -> (isize, String, String) {
-        (1, "vendor string".to_owned(), "product string".to_owned())
+    fn get_info(&self) -> (isize, &str, &str) {
+        (1, "vendor string", "product string")
     }
 
     /// Handle incoming events from the plugin: what the host callback hands the host for
@@ -4290,12 +4290,15 @@ mod tests {
     }
 
     /// **A plugin with no render entry is refused at load**, not rendered silent per block:
-    /// neither `processReplacing` nor `process` is `NoProcessEntry`.
+    /// neither `processReplacing` nor `process` is `NoProcessEntry`, and the refused plugin
+    /// is closed. One with only the deprecated `process` loads, and so does one that sets
+    /// `effFlagsCanReplacing` over a null `processReplacing` but has `process`.
     #[cfg(unix)]
     #[test]
     fn a_plugin_with_no_render_entry_is_refused_at_load() {
-        use std::sync::atomic::AtomicPtr;
+        use std::sync::atomic::{AtomicPtr, AtomicUsize};
         static EFFECT: AtomicPtr<AEffect> = AtomicPtr::new(ptr::null_mut());
+        static CLOSES: AtomicUsize = AtomicUsize::new(0);
 
         extern "C" fn dispatch(
             _: *mut AEffect,
@@ -4305,6 +4308,9 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
+            if opcode == plugin::OpCode::Shutdown as i32 {
+                CLOSES.fetch_add(1, Ordering::SeqCst);
+            }
             if opcode == plugin::OpCode::GetApiVersion as i32 {
                 return 2400;
             }
@@ -4313,14 +4319,116 @@ mod tests {
         extern "C" fn main_returning_effect(_: crate::api::HostCallbackProc) -> *mut AEffect {
             EFFECT.load(Ordering::SeqCst)
         }
+        extern "C" fn render(_: *mut AEffect, _: *const *const f32, _: *mut *mut f32, _: i32) {}
+        let load = |effect: *mut AEffect| {
+            EFFECT.store(effect, Ordering::SeqCst);
+            loader_over(main_returning_effect, 1)
+                .instance(tutti_fixtures::main_thread(), &detached())
+        };
 
+        // Neither entry: refused, and closed.
         let effect = fake_effect(dispatch);
         // SAFETY: the test's leaked `AEffect`.
         unsafe { (*effect)._process = None };
-        EFFECT.store(effect, Ordering::SeqCst);
-        let result = loader_over(main_returning_effect, 1)
-            .instance(tutti_fixtures::main_thread(), &detached());
+        let result = load(effect);
         assert!(matches!(result, Err(PluginLoadError::NoProcessEntry)));
+        assert_eq!(
+            CLOSES.load(Ordering::SeqCst),
+            1,
+            "the refused plugin is closed"
+        );
+
+        // Only the deprecated `process`: loads.
+        let effect = fake_effect(dispatch);
+        // SAFETY: as above.
+        unsafe { (*effect)._process = Some(render) };
+        drop(load(effect).expect("a plugin with only `process` loads"));
+        assert_eq!(CLOSES.load(Ordering::SeqCst), 2);
+
+        // `effFlagsCanReplacing` over a null `processReplacing`, with `process`: loads.
+        let effect = fake_effect(dispatch);
+        // SAFETY: as above.
+        unsafe {
+            (*effect).flags = PluginFlags::CAN_REPLACING.bits();
+            (*effect).processReplacing = None;
+            (*effect)._process = Some(render);
+        }
+        drop(load(effect).expect("a null processReplacing falls back to `process`"));
+
+        // The flag over a null `processReplacing` and no `process`: refused.
+        let effect = fake_effect(dispatch);
+        // SAFETY: as above.
+        unsafe {
+            (*effect).flags = PluginFlags::CAN_REPLACING.bits();
+            (*effect)._process = None;
+        }
+        assert!(matches!(load(effect), Err(PluginLoadError::NoProcessEntry)));
+    }
+
+    /// **Each refusal of an audio-thread entry is counted in its own tally.** A closed gate,
+    /// a missing entry (`f64` render, `setParameter`) and a cleared dispatcher.
+    #[test]
+    fn each_refused_entry_is_counted_apart() {
+        extern "C" fn dispatch(
+            _: *mut AEffect,
+            _: i32,
+            _: i32,
+            _: isize,
+            _: *mut c_void,
+            _: f32,
+        ) -> isize {
+            0
+        }
+        extern "C" fn render(_: *mut AEffect, _: *const *const f32, _: *mut *mut f32, _: i32) {}
+        let inputs = vec![vec![0.0f32; 8]; 2];
+        let mut outputs = vec![vec![0.0f32; 8]; 2];
+        let inputs64 = vec![vec![0.0f64; 8]; 2];
+        let mut outputs64 = vec![vec![0.0f64; 8]; 2];
+        let mut host32: HostBuffer<f32> = HostBuffer::new(2, 2);
+        let mut host64: HostBuffer<f64> = HostBuffer::new(2, 2);
+        let no_events = api::Events {
+            num_events: 0,
+            _reserved: 0,
+            events: [ptr::null_mut(); 2],
+        };
+
+        // A plugin with `processReplacing` but no `f64` entry and no `setParameter`.
+        let effect = fake_effect(dispatch);
+        // SAFETY: the test's leaked `AEffect`; nothing else touches it yet.
+        unsafe {
+            (*effect).processReplacing = Some(render);
+            (*effect).flags = PluginFlags::CAN_REPLACING.bits();
+        }
+        let (instance, main) = instance_over(effect);
+        let mut handle = instance.render_handle(main);
+        handle.process(&mut host32.bind(&inputs, &mut outputs));
+        assert_eq!(instance.gate_refusals().get(), 0);
+        assert_eq!(instance.entry_refusals().get(), 0);
+        handle.process_f64(&mut host64.bind(&inputs64, &mut outputs64));
+        assert_eq!(instance.entry_refusals().get(), 1, "no f64 entry");
+        assert!(!handle.set_parameter(0, 0.5));
+        assert_eq!(instance.entry_refusals().get(), 2, "a null setParameter");
+
+        // A cleared dispatcher: the event list and the process start do not reach it.
+        // SAFETY: as above; no other thread.
+        unsafe { (*effect).dispatcher = None };
+        handle.process_events(&no_events);
+        assert_eq!(instance.dispatcher_cleared().get(), 1);
+        handle.start_process();
+        assert_eq!(instance.dispatcher_cleared().get(), 2);
+        assert_eq!(instance.gate_refusals().get(), 0, "the gate was open");
+        assert_eq!(instance.pin_refusals().get(), 0);
+        // The dispatcher is restored for the close.
+        // SAFETY: as above.
+        unsafe { (*effect).dispatcher = Some(dispatch) };
+
+        // A closed gate: the instance is gone, the handle's entries are refused.
+        let gate = instance.gate_refusals().clone();
+        drop(instance);
+        handle.process(&mut host32.bind(&inputs, &mut outputs));
+        assert_eq!(gate.get(), 1, "a block after the close");
+        handle.process_events(&no_events);
+        assert_eq!(gate.get(), 2, "an event list after the close");
     }
 
     /// **An `AEffect` that is not one is refused untouched.** A wrong `magic` or a

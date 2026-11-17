@@ -15,8 +15,8 @@ use crate::aeffect::AEffectExt as _;
 
 /// [`interfaces::copy_string`] into the host's buffer for the opcode being dispatched.
 fn copy_string(ptr: *mut c_void, src: &str, max: usize) -> isize {
-    // SAFETY: the VST2 ABI has the host pass, for a string opcode, a buffer of the SDK's
-    // size for it (`max`), writable for the call.
+    // SAFETY: the host's buffer for a string opcode is at least `max` bytes, per this
+    // crate's constants (the SDK's sizes), and writable for the call.
     unsafe { interfaces::copy_string(ptr, src, max) }
 }
 

@@ -487,8 +487,8 @@ impl Host for HostState {
     /// vst-rs's default returns placeholder strings ("vendor string" /
     /// "product string"); this reports Tutti's real identity so a plugin that
     /// keys behaviour off the host name sees the truth.
-    fn get_info(&self) -> (isize, String, String) {
-        (1, "Tutti".to_string(), "Tutti VST2 Host".to_string())
+    fn get_info(&self) -> (isize, &str, &str) {
+        (1, "Tutti", "Tutti VST2 Host")
     }
 
     /// Maximum render block size, in samples. vst-rs's default returns 0,

@@ -952,6 +952,23 @@ unsafe impl Send for HostCallback {}
 unsafe impl Sync for HostCallback {}
 
 impl HostCallback {
+    /// The host's `(version, vendor, product)`, read through `audioMaster` callbacks. Owned
+    /// strings: the plugin's calling thread is not the audio thread.
+    pub fn host_info(&self) -> (isize, String, String) {
+        use api::consts::*;
+        let version = self.callback(
+            self.effect,
+            host::OpCode::CurrentId,
+            0,
+            0,
+            ptr::null_mut(),
+            0.0,
+        ) as isize;
+        let vendor_name = self.read_string(host::OpCode::GetVendorString, MAX_VENDOR_STR_LEN);
+        let product_name = self.read_string(host::OpCode::GetProductString, MAX_PRODUCT_STR_LEN);
+        (version, vendor_name, product_name)
+    }
+
     /// Wrap callback in a function to avoid using fn pointer notation.
     #[doc(hidden)]
     fn callback(
@@ -1097,21 +1114,6 @@ impl Host for HostCallback {
 
     fn idle(&self) {
         self.callback(self.effect, host::OpCode::Idle, 0, 0, ptr::null_mut(), 0.0);
-    }
-
-    fn get_info(&self) -> (isize, String, String) {
-        use api::consts::*;
-        let version = self.callback(
-            self.effect,
-            host::OpCode::CurrentId,
-            0,
-            0,
-            ptr::null_mut(),
-            0.0,
-        ) as isize;
-        let vendor_name = self.read_string(host::OpCode::GetVendorString, MAX_VENDOR_STR_LEN);
-        let product_name = self.read_string(host::OpCode::GetProductString, MAX_PRODUCT_STR_LEN);
-        (version, vendor_name, product_name)
     }
 
     /// Send events to the host.
