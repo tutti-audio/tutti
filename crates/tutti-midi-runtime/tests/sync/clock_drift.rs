@@ -8,7 +8,9 @@
 //! `B(t)` less that integral, and every bound below is a formula of the
 //! constants.
 
-use tutti_midi_runtime::{ClockEvent, ClockFollower, ClockKind, ClockPosition, MidiClockDecoder};
+use tutti_midi_runtime::{
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, MidiClockDecoder,
+};
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{Message, MidiGroup, System, U14, Ump};
 
@@ -40,7 +42,7 @@ impl Model {
 
     fn take(&mut self, event: ClockEvent, now: f64, slips: &mut Vec<f64>, locates: &mut Vec<f64>) {
         match event {
-            ClockEvent::Tempo(tempo) => {
+            ClockEvent::Tempo { tempo, .. } => {
                 self.beat = self.beat_at(now);
                 self.since = now;
                 self.tempo = tempo.get();
@@ -53,7 +55,9 @@ impl Model {
                 self.since = now;
                 locates.push(beat.get());
             }
-            ClockEvent::Slipped { error } => slips.push(error.get()),
+            ClockEvent::Slipped {
+                error: ClockOffset::Beat(error),
+            } => slips.push(error.get()),
             _ => {}
         }
     }
@@ -104,7 +108,7 @@ fn run(source: &Source, seconds: f64, from: f64, behind: f64, steer: bool) -> Ru
             k += 1;
         } else {
             if steer {
-                let here = Some(Beat::new(model.beat_at(block)));
+                let here = Some(ClockPosition::Beat(Beat::new(model.beat_at(block))));
                 follower.steer(here, at(block), &mut |e| events.push(e));
                 for e in events.drain(..) {
                     model.take(e, block, &mut slips, &mut locates);
@@ -244,11 +248,10 @@ fn the_gauge_reads_the_error_and_the_trim_follows() {
     // 0.5 s is inside the hold-off the Start's locate began.
     assert_eq!(held.follower.error(), None);
     let steered = run(&source, 3.0, 0.0, 0.01, true);
-    let error = steered
-        .follower
-        .error()
-        .expect("a steered, locked follower")
-        .get();
+    let Some(ClockOffset::Beat(error)) = steered.follower.error() else {
+        panic!("a steered, locked follower reads a beat error");
+    };
+    let error = error.get();
     // The transport is still 0.01 behind at the first steer, then closes.
     assert!(error < 0.01 && error > 0.0, "{error}");
     // The trim moved the tempo the model integrates above the fit by a step.
@@ -276,8 +279,15 @@ fn the_error_at_the_first_read_is_the_beat_difference() {
     // source is 0.01 beat on.
     let now = 59.0 * p + 0.005;
     assert!(now > ClockFollower::SETTLE.get());
-    follower.steer(Some(Beat::new(2.4)), at(now), &mut |_| {});
-    let error = follower.error().expect("read").get();
+    follower.steer(
+        Some(ClockPosition::Beat(Beat::new(2.4))),
+        at(now),
+        &mut |_| {},
+    );
+    let Some(ClockOffset::Beat(error)) = follower.error() else {
+        panic!("a beat error");
+    };
+    let error = error.get();
     assert!((error - (59.0 / 24.0 + 0.01 - 2.4)).abs() < 1e-9, "{error}");
 }
 
@@ -326,17 +336,29 @@ fn the_error_is_none_after_a_stop_and_while_the_transport_is_stopped() {
         );
     }
     let now = 59.0 * p + 0.005;
-    follower.steer(Some(Beat::new(2.4)), at(now), &mut |_| {});
+    follower.steer(
+        Some(ClockPosition::Beat(Beat::new(2.4))),
+        at(now),
+        &mut |_| {},
+    );
     assert!(follower.error().is_some());
     // The transport stops while the source rolls.
     follower.steer(None, at(now + 0.01), &mut |_| {});
     assert_eq!(follower.error(), None);
-    follower.steer(Some(Beat::new(2.4)), at(now + 0.02), &mut |_| {});
+    follower.steer(
+        Some(ClockPosition::Beat(Beat::new(2.4))),
+        at(now + 0.02),
+        &mut |_| {},
+    );
     assert!(follower.error().is_some());
     // The source stops.
     follower.step(system(System::Stop), at(now + 0.03), &mut |_| {});
     assert_eq!(follower.error(), None);
-    follower.steer(Some(Beat::new(2.4)), at(now + 0.04), &mut |_| {});
+    follower.steer(
+        Some(ClockPosition::Beat(Beat::new(2.4))),
+        at(now + 0.04),
+        &mut |_| {},
+    );
     assert_eq!(follower.error(), None);
 }
 
@@ -359,7 +381,11 @@ fn a_non_finite_transport_beat_reads_no_error_and_leaves_the_tempo_untrimmed() {
         }
         let now = 59.0 * p + 0.005;
         assert!(now > ClockFollower::SETTLE.get());
-        follower.steer(Some(Beat::new(bad)), at(now), &mut |_| {});
+        follower.steer(
+            Some(ClockPosition::Beat(Beat::new(bad))),
+            at(now),
+            &mut |_| {},
+        );
         assert_eq!(follower.error(), None, "{bad}");
         for k in 61..=200u32 {
             follower.step(
@@ -371,7 +397,7 @@ fn a_non_finite_transport_beat_reads_no_error_and_leaves_the_tempo_untrimmed() {
         let announced: Vec<f64> = tempos
             .iter()
             .filter_map(|e| match e {
-                ClockEvent::Tempo(t) => Some(t.get()),
+                ClockEvent::Tempo { tempo, .. } => Some(tempo.get()),
                 _ => None,
             })
             .collect();
