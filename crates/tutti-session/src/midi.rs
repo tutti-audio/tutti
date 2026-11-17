@@ -38,7 +38,7 @@ use crate::midi_follow::{
     MACHINE_TAP_CAPACITY, MachineFollow,
 };
 use crate::{EventOutPort, Key, MidiError, MidiNodes, MidiReport};
-use crate::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
+use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
 type Result<T> = std::result::Result<T, MidiError>;
@@ -547,28 +547,6 @@ fn route_drain(
     }
 }
 
-/// Routes a batch of events, each on its frame on the graph's clock, to `out`
-/// ([`UmpOut::send_frames`]). An event with no output is dropped (the ring must
-/// not back up), counted first. Returns how many events did not go.
-pub(crate) fn route_batch(
-    out: Option<&mut UmpOut>,
-    losses: &mut LossWriters,
-    timing: Option<&OutputTiming>,
-    events: &[(Frame, Ump)],
-) -> u64 {
-    let refused = match out {
-        Some(out) => out.send_frames(events, timing) as u64,
-        None => events.len() as u64,
-    };
-    losses.refused(refused);
-    refused
-}
-
-/// What [`Midi::unroute`] found missing: the rule `id` named.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("no MIDI route {0:?}")]
-pub struct NoSuchMidiRoute(pub MidiRouteId);
-
 /// Where a take's events belong on the timeline: the figure
 /// [`Midi::record`]'s readers are placed by. A note played at graph frame `F`
 /// was answered by output the device played `output` after it was rendered, and
@@ -736,7 +714,6 @@ pub(crate) struct MidiState {
     /// The sinks the pool's `midi_sink` entries opened.
     pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
-    #[cfg(feature = "midi-hardware")]
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`Midi::set_mpe`]).
     mpe: MpeMode,
@@ -747,10 +724,6 @@ pub(crate) struct MidiState {
     /// The Machine Control the session follows, if it does
     /// ([`Midi::follow_machine_control`]).
     machine: Option<MachineFollow>,
-    /// The Machine Control the session sends, if it does
-    /// ([`Midi::send_machine_control`]): the Group it goes out on and what
-    /// turns the transport's changes into commands.
-    machine_out: Option<(MidiGroup, tutti_midi_runtime::MachineControlSender)>,
     /// Events [`Midi::unfollow_tempo`] and [`Midi::unfollow_clock`] queued for the next `Poll` phase, which
     /// reports them.
     follow_events: Vec<MidiReport>,
@@ -890,27 +863,12 @@ impl MidiState {
     /// The ingest nodes of the input ports: none on a session without the OS
     /// MIDI layer.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
-        #[cfg(feature = "midi-hardware")]
-        {
-            self.ports.input_nodes()
-        }
-        #[cfg(not(feature = "midi-hardware"))]
-        {
-            Vec::new()
-        }
+        self.ports.input_nodes()
     }
 
     /// Whether `node` is the ingest node of an input port.
     pub(crate) fn is_input_node(&self, node: NodeKey) -> bool {
-        #[cfg(feature = "midi-hardware")]
-        {
-            self.ports.is_input_node(node)
-        }
-        #[cfg(not(feature = "midi-hardware"))]
-        {
-            let _ = node;
-            false
-        }
+        self.ports.is_input_node(node)
     }
 
     /// The timing of a drain at `now`, from the engine's block clock: `None`
@@ -1003,46 +961,6 @@ impl MidiState {
         edited
     }
 
-    /// Sends the Machine Control the transport's change since the last update
-    /// calls for, to the output, at once and on the playhead's frame.
-    fn send_machine_control(&mut self, playhead: &tutti_engine::Playhead, now: Instant) {
-        let Some((group, sender)) = self.machine_out.as_mut() else {
-            return;
-        };
-        let message = match sender.observe(
-            playhead.playing(),
-            playhead.seconds(),
-            playhead.frame(),
-            playhead.rate(),
-        ) {
-            Ok(Some(message)) => message,
-            Ok(None) => return,
-            // A refused look sends nothing and is counted refused on every output.
-            Err(_) => {
-                self.refuse_to_outputs(1);
-                return;
-            }
-        };
-        let frame = playhead.frame();
-        let Ok(packets) = tutti_ump::Sysex7Packets::from_payload(*group, &message) else {
-            self.refuse_to_outputs(1);
-            return;
-        };
-        let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
-        let timing = self.output_timing(now);
-        // Every output is sent it, and counts what does not go.
-        #[cfg(feature = "midi-hardware")]
-        self.ports.route(&batch, timing.as_ref());
-        self.sinks.route(&batch, timing.as_ref());
-    }
-
-    /// Counts `n` events a look could not become as refused by every output.
-    fn refuse_to_outputs(&mut self, n: u64) {
-        #[cfg(feature = "midi-hardware")]
-        self.ports.refuse(n);
-        self.sinks.refuse(n);
-    }
-
     /// The outputs' taps are on one scale of frames, the rate they were opened
     /// at: when the graph has been re-prepared at another, drains the old
     /// readers and reopens those taps (and no other: a caller's own are the
@@ -1051,29 +969,19 @@ impl MidiState {
     pub(crate) fn follow_rate(&mut self, graph: &mut Graph, now: Instant) -> bool {
         let timing = self.output_timing(now);
         let sinks = self.sinks.reopen(graph, timing.as_ref());
-        #[cfg(feature = "midi-hardware")]
         let ports = self.ports.reopen(graph, timing.as_ref());
-        #[cfg(not(feature = "midi-hardware"))]
-        let ports = false;
         sinks || ports
     }
 
     /// `Phase::MidiOut`: drains every output's tap to its device or sink.
     /// Whether the graph was edited.
-    pub(crate) fn midi_out_phase(
-        &mut self,
-        graph: &mut Graph,
-        playhead: &tutti_engine::Playhead,
-        now: Instant,
-    ) -> bool {
+    pub(crate) fn midi_out_phase(&mut self, graph: &mut Graph, now: Instant) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
-        #[cfg(feature = "midi-hardware")]
         self.ports.drain_outputs(timing.as_ref());
-        self.send_machine_control(playhead, now);
         edited
     }
 }
@@ -1110,7 +1018,9 @@ pub(crate) fn drain_events(
 /// to the sinks `resolve` names, replacing every route before: the ports of
 /// every input node feed each sink their rule gives ports, so devices merge in
 /// the sink's event fan-in. A target `resolve` maps to no node, or to one not in
-/// the graph, takes nothing (and still covers its rule's ports); a sink fed
+/// the graph, takes nothing (and still covers its rule's ports): a host's table
+/// may name a target it has not made yet or has removed, so this is the one
+/// place a missing target is skipped, not refused. A sink fed
 /// before and not now is unwired. `routed` holds the sinks the last compile fed.
 fn compile_feeds<'r, T: Copy + Ord + 'r>(
     graph: &mut Graph,
@@ -1319,7 +1229,7 @@ impl Midi<'_> {
     /// The events are [`TimedMidiEvent`]s, positioned in beats from the
     /// clip's own start, in any order; a clip file's
     /// [`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline) is the
-    /// `(Beat, Ump)` pairs they are built from, and
+    /// `packets` are the `(Beat, Ump)` pairs they are built from, and
     /// [`play_file`](Self::play_file) does that for a file. The clip reads its
     /// block's `Env`, so a note lands on its frame through seeks and loop
     /// wraps, and **a bounce contains it**: an export forks the clip with its
@@ -1403,7 +1313,9 @@ impl Midi<'_> {
     /// file's one timeline
     /// ([`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline)), with
     /// its looping and bounce behaviour. A file arrives from
-    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`].
+    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`]. The
+    /// System Exclusive events the timeline lists as dropped are not played
+    /// and are counted in a `tracing` warning.
     ///
     /// # Errors
     ///
@@ -1416,9 +1328,16 @@ impl Midi<'_> {
         at: Beat,
         file: &tutti_midi_file::MidiFile,
     ) -> Result<()> {
-        let events = file
-            .timeline()
-            .map_err(tutti_midi_file::Error::from)?
+        let timeline = file.timeline().map_err(tutti_midi_file::Error::from)?;
+        if !timeline.dropped.is_empty() {
+            tracing::warn!(
+                dropped = timeline.dropped.len(),
+                "the file's System Exclusive events with no SysEx7 packet are not played"
+            );
+        }
+        let events = timeline
+            .packets
+            .into_iter()
             .map(|(beat, packet)| {
                 TimedMidiEvent::new(beat, packet).ok_or(MidiError::BeatNotFinite(beat))
             })
@@ -1550,9 +1469,13 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while a host's `set_routes` declares
-    /// the routes.
+    /// the routes, and [`MidiError::NoEventInput`] naming a target that is not
+    /// in the graph or takes no MIDI. Nothing changes.
     pub fn route(&mut self, rule: MidiRouteRule) -> Result<MidiRouteId> {
         self.own_may_declare()?;
+        for &target in &rule.targets {
+            self.takes_midi(target)?;
+        }
         let id = MidiRouteId::mint(&self.state.minted);
         self.state.rules.insert(id, rule);
         self.compile_session_routes();
@@ -1563,11 +1486,11 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoSuchRoute`] ([`NoSuchMidiRoute`]) when there is no rule `id` (removed already, or
+    /// [`MidiError::NoSuchRoute`] when there is no rule `id` (removed already, or
     /// never added); nothing changes.
     pub fn unroute(&mut self, id: MidiRouteId) -> Result<()> {
         if self.state.rules.remove(&id).is_none() {
-            return Err(NoSuchMidiRoute(id).into());
+            return Err(MidiError::NoSuchRoute(id));
         }
         self.compile_session_routes();
         Ok(())
@@ -1579,10 +1502,16 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while a host's
-    /// [`set_routes`](Self::set_routes) declares the routes.
+    /// [`set_routes`](Self::set_routes) declares the routes, and
+    /// [`MidiError::NoEventInput`] naming a fallback that is not in the graph
+    /// or takes no MIDI. Nothing changes.
     pub fn set_route_fallback(&mut self, fallback: Option<impl Into<NodeKey>>) -> Result<()> {
         self.own_may_declare()?;
-        self.state.fallback = fallback.map(Into::into);
+        let fallback = fallback.map(Into::into);
+        if let Some(target) = fallback {
+            self.takes_midi(target)?;
+        }
+        self.state.fallback = fallback;
         self.compile_session_routes();
         Ok(())
     }
@@ -1631,8 +1560,12 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::TwoRouteDeclarers`] while the session's own rules or
-    /// fallback are declared ([`unroute`](Self::unroute) them first).
-    /// Nothing is changed.
+    /// fallback are declared ([`unroute`](Self::unroute) them first), and
+    /// [`MidiError::NotAnInput`] when `input` is not in the graph or has no event
+    /// output. Nothing is changed. Those are the only refusals: any node with event
+    /// outputs may be the source (a host's own `MidiIngestNode`, or a stand-in
+    /// that sends on the ingest layout's ports), because a host routes from
+    /// sources the session did not make, so a port's ingest node is not required.
     pub fn set_routes<'r, T: Copy + Ord + 'r>(
         &mut self,
         input: impl Into<NodeKey>,
@@ -1641,6 +1574,13 @@ impl Midi<'_> {
         resolve: impl Fn(T) -> Option<NodeKey>,
     ) -> Result<()> {
         let input = input.into();
+        if !self
+            .graph
+            .shape(input)
+            .is_some_and(|shape| shape.event_out > 0)
+        {
+            return Err(MidiError::NotAnInput(input));
+        }
         if !self.state.rules.is_empty() || self.state.fallback.is_some() {
             return Err(MidiError::TwoRouteDeclarers(RouteDeclarer::Session));
         }
@@ -1747,23 +1687,25 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI.
+    /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI,
+    /// and [`MidiError::Tap`] when the live input's port is gone from the graph.
     pub fn record(
         &mut self,
         target: impl Into<NodeKey>,
         capacity: tutti_graph::EventCapacity,
     ) -> Result<EventTapReader> {
         let target = target.into();
-        let node = match self.instrument_queue(target) {
-            Some(queue) if self.takes_midi(target).is_ok() => queue,
-            _ => self.live_inlet(target)?,
+        let node = if let Some(queue) = self.instrument_queue(target) {
+            self.takes_midi(target)?;
+            queue
+        } else {
+            self.live_inlet(target)?
         };
         let source = EventOutPort::new(node, 0);
         self.graph
             .taps()
             .open_event(source, tutti_graph::TapAlign::Raw, capacity)
-            // The live input was just found or opened in this graph, with its port.
-            .map_err(|_| MidiError::NoEventInput(node))
+            .map_err(MidiError::Tap)
     }
 
     // --- Following an outside tempo ---
@@ -1790,8 +1732,7 @@ impl Midi<'_> {
                 tutti_graph::TapAlign::Raw,
                 capacity,
             )
-            // The Group's port was just found on the input: a refusal is a port it lacks.
-            .map_err(|_| MidiError::GroupNotHeard(group))
+            .map_err(MidiError::Tap)
     }
 
     /// Follows the tempo (and, if `follow.meter`, the time signature) the session's MIDI
@@ -1828,7 +1769,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] while a Beat Clock
     /// [`follow_clock`](Self::follow_clock) publishes the tempo. Nothing changes.
     pub fn follow_tempo(&mut self, follow: FollowTempo) -> Result<()> {
@@ -1904,17 +1846,26 @@ impl Midi<'_> {
     /// kept rolling is not trailed by more than a block's placement. **A Beat
     /// Clock follower owns the tempo map** as `follow_tempo` does: the map found
     /// now is the one [`unfollow_clock`](Self::unfollow_clock) restores, and
-    /// `Session::set_tempo` refuses while it follows. **It does not correct
-    /// drift**: a tempo estimate moves the map by steps of at least
-    /// `ClockFollower::TEMPO_STEP`, and the beat the source counts and the beat
-    /// the transport counts are matched at each locate and not in between.
+    /// `Session::set_tempo` refuses while it follows.
+    ///
+    /// **Drift is corrected.** In each poll while the transport rolls, the
+    /// beat the source counts is compared with the beat the transport reaches
+    /// at the next block ([`clock_error`](Self::clock_error)), and the tempo
+    /// published is the fit trimmed to close the error in `ClockFollower::CATCH_UP`
+    /// (4 seconds), by at most 2% of the fit. A trim goes into the map as any
+    /// tempo does, a step of at least `ClockFollower::TEMPO_STEP` and one point
+    /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
+    /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
+    /// quarter of a beat) locates to the source's beat once and is reported as
+    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim.
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
@@ -1935,6 +1886,16 @@ impl Midi<'_> {
             self.meter.current(),
         ));
         Ok(())
+    }
+
+    /// The beat error of the Beat Clock the session follows: the source's beat
+    /// less the transport's, read at the last [`Poll`](crate::Phase::Poll) phase
+    /// (positive when the transport is behind). `None` when no clock is followed,
+    /// or the follower could not read one: not locked, not rolling, an MTC
+    /// follower, or a locate that has not landed yet.
+    #[must_use]
+    pub fn clock_error(&self) -> Option<tutti_types::Beat> {
+        self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
@@ -1997,7 +1958,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node and
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear.
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node.
     /// Nothing changes.
     pub fn follow_machine_control(&mut self, follow: FollowMachineControl) -> Result<()> {
         let tap = self.follow_tap(follow.input, follow.group, MACHINE_TAP_CAPACITY)?;
@@ -2026,45 +1988,10 @@ impl Midi<'_> {
         Ok(())
     }
 
-    /// Sends the transport's play, stop and locate as MIDI Machine Control
-    /// commands (RP-013) to every open output (a `midi_output` or `midi_sink` entry's),
-    /// for a host that drives a tape machine or another DAW. **Off by default.**
-    ///
-    /// Each update looks at the playhead and sends what changed since the last:
-    /// PLAY when the transport started, STOP when it stopped, and a LOCATE to the
-    /// position's time code (with DEFERRED PLAY after it while rolling) when
-    /// the position is not where rolling would have left it, a loop wrap
-    /// included. The first update after the call sends nothing. A change is
-    /// sent at the update that sees it, not on its frame: MMC carries no time
-    /// of its own. A transport that starts and stops again between two updates
-    /// sends neither; a followed source's commands are sent on like any other
-    /// motion, so do not follow and send to the same machine.
-    ///
-    /// A second call replaces the first.
-    pub fn send_machine_control(&mut self, send: SendMachineControl) {
-        self.state.machine_out = Some((
-            send.group,
-            tutti_midi_runtime::MachineControlSender::new(send.to, send.rate),
-        ));
-    }
-
-    /// Stops sending Machine Control ([`send_machine_control`](Self::send_machine_control)).
-    ///
-    /// # Errors
-    ///
-    /// [`MidiError::NotSendingMachineControl`] when none is sent.
-    pub fn stop_sending_machine_control(&mut self) -> Result<()> {
-        self.state
-            .machine_out
-            .take()
-            .map(|_| ())
-            .ok_or(MidiError::NotSendingMachineControl)
-    }
-
     // --- Outputs ---
 
     /// Adds an output node to the graph and opens its tap: the node is fed by
-    /// the session's clock (every output carries it), and the tap is aligned to
+    /// the session's sync node (every output carries it), and the tap is aligned to
     /// the outputs' time so MIDI leaves with the audio. What a host wires to
     /// the node's event input is read from the tap.
     pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader) {
@@ -2074,7 +2001,7 @@ impl Midi<'_> {
         let node = key.erase();
         if let Some(nodes) = self.nodes {
             self.graph
-                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.clock, 0)]);
+                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.sync, 0)]);
         }
         let tap = self
             .graph
@@ -2233,30 +2160,14 @@ mod tests {
         );
     }
 
-    /// A router with no output counts the events rather than losing them
-    /// silently.
+    /// An open output takes the batch whole: both events reach the sink and
+    /// none is refused.
     #[test]
-    fn routing_with_no_output_counts_the_drops() {
-        let (mut writers, readers) = loss_cells();
-        let refused = route_batch(None, &mut writers, None, &[at(0), at(1), at(2)]);
-        assert_eq!(
-            (refused, readers.get()),
-            (3, tutti_graph::Losses::refused(3))
-        );
-    }
-
-    /// And a router *with* an output does not count drops.
-    #[test]
-    fn routing_to_an_open_output_drops_nothing() {
+    fn sending_to_an_open_output_refuses_nothing() {
         let (mut out, count) = out_with_counter(Stamping::Off);
-        let (mut writers, readers) = loss_cells();
-        route_batch(Some(&mut out), &mut writers, None, &[at(0), at(1)]);
+        let refused = out.send_frames(&[at(0), at(1)], None);
         assert_eq!(count.load(Ordering::SeqCst), 2, "both reached the sink");
-        assert_eq!(
-            readers.get(),
-            tutti_graph::Losses::NONE,
-            "nothing was dropped"
-        );
+        assert_eq!(refused, 0, "nothing was dropped");
     }
 
     /// An event on a frame of the graph's clock.
@@ -2282,13 +2193,7 @@ mod tests {
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
-        let (mut losses, _) = loss_cells();
-        route_batch(
-            Some(&mut out),
-            &mut losses,
-            None,
-            &[at(1_250), at(1_000), at(1_999)],
-        );
+        out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         let sent = log.lock().unwrap().remove(0);
         let span = Samples(1_000);
         let offsets: Vec<_> = sent.iter().map(|e| e.0).collect();
@@ -2299,12 +2204,7 @@ mod tests {
         );
         out.set_stamping(Stamping::Jr);
         let before = out.origin();
-        route_batch(
-            Some(&mut out),
-            &mut losses,
-            None,
-            &[at(1_250), at(1_000), at(1_999)],
-        );
+        out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         assert_eq!(out.origin().since(before), Some(Samples(1_000)), "the span");
     }
 
@@ -2444,25 +2344,16 @@ mod tests {
         );
     }
 
-    /// **An event beyond the cap is not sent and is counted**; one within it
-    /// goes.
+    /// **An event beyond the cap is not sent and is reported refused**; one
+    /// within it goes.
     #[test]
     fn an_event_beyond_the_cap_is_refused_and_counted() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        let (mut writers, readers) = loss_cells();
         let timing = timing_at(t0, OutputTerms::default());
         let beyond = 48_000 * 3;
-        let refused = route_batch(
-            Some(&mut out),
-            &mut writers,
-            Some(&timing),
-            &[at(1_000), at(beyond)],
-        );
-        assert_eq!(
-            (refused, readers.get()),
-            (1, tutti_graph::Losses::refused(1))
-        );
+        let refused = out.send_frames(&[at(1_000), at(beyond)], Some(&timing));
+        assert_eq!(refused, 1);
         assert_eq!(log.lock().unwrap().len(), 1, "only the one within the cap");
     }
 

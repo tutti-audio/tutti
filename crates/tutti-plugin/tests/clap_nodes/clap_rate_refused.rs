@@ -32,9 +32,6 @@ const REFUSED_RATE: f64 = 96_000.0;
 /// Another rate the probe accepts.
 const OTHER_RATE: f64 = 44_100.0;
 const BLOCK: usize = 64;
-/// Long enough for the subprocess to answer each block before the next: the
-/// pipeline never waits for a reply, so a tight loop reads as silence.
-const PACE: Duration = Duration::from_millis(30);
 /// A hang guard on waiting for the plugin's status to change.
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -43,9 +40,16 @@ const INPUT_DC: f32 = 7.0;
 /// `INPUT_DC` plus the probe's `TagPassthrough` tag on port 0, channel 0.
 const LIVE: f32 = INPUT_DC + 1.0;
 
-fn drive_block(unit: &mut Rig) -> Vec<f32> {
+/// One block, then the wait for the server's answer to it: the pipeline never
+/// waits for a reply. A plugin that is not alive (refused, or dead) answers
+/// nothing, and is not waited for.
+fn drive_block(unit: &mut Rig, handle: &PluginHandle) -> Vec<f32> {
     let out = unit.run(BLOCK, |_, _| INPUT_DC);
-    std::thread::sleep(PACE);
+    clap_probe::await_answer_or(
+        &unit.controls,
+        "the server's answer, or the plugin to stop being alive",
+        || !handle.status().is_alive(),
+    );
     out.into_iter().next().expect("the probe has outputs")
 }
 
@@ -68,7 +72,7 @@ fn wait_for(
 ) -> PluginStatus {
     let deadline = Instant::now() + NOTICE_TIMEOUT;
     loop {
-        let _ = drive_block(unit);
+        let _ = drive_block(unit, handle);
         let status = handle.status();
         if want(&status) || Instant::now() >= deadline {
             return status;
@@ -81,10 +85,10 @@ fn refused_at(status: &PluginStatus, rate: f64) -> bool {
 }
 
 /// Drive until `blocks` consecutive blocks are live, within a bounded budget.
-fn renders_live(unit: &mut Rig) -> bool {
+fn renders_live(unit: &mut Rig, handle: &PluginHandle) -> bool {
     let mut live = 0;
     for _ in 0..60 {
-        if drive_block(unit).iter().all(|&s| s == LIVE) {
+        if drive_block(unit, handle).iter().all(|&s| s == LIVE) {
             live += 1;
             if live >= 2 {
                 return true;
@@ -96,9 +100,9 @@ fn renders_live(unit: &mut Rig) -> bool {
     false
 }
 
-fn assert_silent(unit: &mut Rig, what: &str) {
+fn assert_silent(unit: &mut Rig, handle: &PluginHandle, what: &str) {
     for block in 0..4 {
-        let out = drive_block(unit);
+        let out = drive_block(unit, handle);
         assert!(
             out.iter().all(|&s| s == 0.0),
             "{what}: block {block} is silent, not the plugin at the wrong rate: {out:?}"
@@ -134,7 +138,10 @@ fn a_refused_rate_is_silent_visible_and_retried() {
         LOAD_RATE,
         BLOCK,
     );
-    assert!(renders_live(&mut unit), "the plugin renders at {LOAD_RATE}");
+    assert!(
+        renders_live(&mut unit, &handle),
+        "the plugin renders at {LOAD_RATE}"
+    );
     assert!(handle.status().is_alive());
 
     // The graph moves to a rate the plugin refuses.
@@ -143,7 +150,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     assert!(refused_at(&status, REFUSED_RATE), "{status:?}");
     assert!(!status.is_dead() && !handle.is_crashed());
     let missed = unit.controls.missed_chunks();
-    assert_silent(&mut unit, "refused");
+    assert_silent(&mut unit, &handle, "refused");
     assert_eq!(
         unit.controls.missed_chunks(),
         missed,
@@ -170,13 +177,13 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     let _ = wait_for(&mut unit, &handle, |_| refusals() >= 2);
     assert_eq!(refusals(), 2, "the second ask is refused and announced too");
     assert!(refused_at(&handle.status(), REFUSED_RATE));
-    assert_silent(&mut unit, "refused again");
+    assert_silent(&mut unit, &handle, "refused again");
 
     // A rate the plugin takes brings it back.
     reprepare(&mut unit, OTHER_RATE);
     let status = wait_for(&mut unit, &handle, |s| s.is_alive());
     assert!(status.is_alive(), "the error clears: {status:?}");
-    assert!(renders_live(&mut unit), "the plugin renders again");
+    assert!(renders_live(&mut unit, &handle), "the plugin renders again");
     assert!(
         events
             .lock()

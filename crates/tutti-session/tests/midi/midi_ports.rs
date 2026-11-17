@@ -441,7 +441,7 @@ fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
     let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
         panic!("the load failed: {:?}", s.pool_state(&"keys"));
     };
-    assert!(matches!(&*error, MidiPortError::NoHardware), "{error:?}");
+    assert!(matches!(&*error, MidiPortError::NoHardware(_)), "{error:?}");
 }
 
 /// **A released port reads `Closed`**: once the pool no longer names the entry,
@@ -775,10 +775,11 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     let _ = s.update();
     roll(&s, 4_096);
@@ -1001,10 +1002,11 @@ fn an_output_port_counts_what_its_device_refused() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 4_096);
     let _ = s.update();
@@ -1026,10 +1028,11 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 1_100_000);
     let _ = s.update();

@@ -17,7 +17,7 @@ use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_runtime::MidiOut;
 
 use crate::midi::{
-    LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells, route_batch,
+    LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells,
 };
 use crate::pool::{Declared, HandleError, Life, Load, PoolEntry};
 use crate::{Peer, Presence, Resource, ResourceId, Session};
@@ -218,7 +218,7 @@ impl Peer for MidiSink {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The sink of the `midi_sink` entry under `key`.
     ///
     /// # Errors
@@ -226,11 +226,11 @@ impl<C: crate::Clock> Session<C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands.
-    pub fn midi_sink<K>(&self, key: &K) -> Result<MidiSink, HandleError<K>>
+    pub fn midi_sink<P>(&self, key: &P) -> Result<MidiSink, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.handle::<K, MidiSinkEntry>(key)
+        self.pool.handle::<P, MidiSinkEntry>(key)
     }
 }
 
@@ -331,28 +331,6 @@ impl Sinks {
             held
         });
         edited
-    }
-
-    /// Counts `n` events as refused by every sink.
-    pub(crate) fn refuse(&mut self, n: u64) {
-        for port in &mut self.ports {
-            port.losses.refused(n);
-        }
-    }
-
-    /// Sends `batch` to every sink, each event on its frame.
-    pub(crate) fn route(
-        &mut self,
-        batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        timing: Option<&OutputTiming>,
-    ) {
-        for port in self
-            .ports
-            .iter_mut()
-            .filter(|port| port.token.strong_count() > 0)
-        {
-            route_batch(Some(&mut port.out), &mut port.losses, timing, batch);
-        }
     }
 }
 

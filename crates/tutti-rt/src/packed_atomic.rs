@@ -84,6 +84,16 @@ impl<T: NoUninit + AnyBitPattern> PackedAtomic<T> {
         self.word.store(pack(value), Ordering::Release);
     }
 
+    /// Replaces the value and returns the one it replaced, in one atomic
+    /// step: a store from another thread lands before or after it, never
+    /// between the read and the write, so a taker that swaps in an empty
+    /// value loses no request. Wait-free.
+    #[inline]
+    pub fn swap(&self, value: T) -> T {
+        let () = Self::FITS;
+        unpack(self.word.swap(pack(value), Ordering::AcqRel))
+    }
+
     /// The value, as one store left it. Wait-free.
     #[inline]
     pub fn load(&self) -> T {

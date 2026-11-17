@@ -4,7 +4,7 @@
 use super::*;
 
 fn parse(text: &str) -> Result<PeJson, PeJsonError> {
-    PeJson::parse(text.as_bytes())
+    PeJson::try_from(text.as_bytes())
 }
 
 // §8.2 Table 18 and §10.1 Table 28: Property Data is written with line breaks and
@@ -45,7 +45,7 @@ fn a_non_ascii_character_is_written_as_utf16_escapes() {
 // §6.1.1: the text of Property Data is 7-bit, so a byte past 7F is not read.
 #[test]
 fn a_byte_past_7f_is_not_json_of_property_exchange() {
-    assert!(PeJson::parse(b"\"\xc3\xa9\"").is_err());
+    assert!(PeJson::try_from(b"\"\xc3\xa9\"".as_slice()).is_err());
 }
 
 // §6.1.1: the forward slash may be escaped or not.

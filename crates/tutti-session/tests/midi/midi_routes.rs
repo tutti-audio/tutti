@@ -14,7 +14,7 @@ use crate::common::with_input;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
-use tutti_session::{Feeder, MidiRouteRule, Session};
+use tutti_session::{Feeder, MidiError, MidiRouteRule, Session};
 use tutti_ump::MidiChannel;
 
 /// A stand-in synth: one MIDI event input.
@@ -97,4 +97,71 @@ fn a_disabled_rule_routes_nothing_until_it_is_armed() {
 
     s.midi().set_routes(input, [&armed], None, Some).unwrap();
     assert!(!ports(&s, input, lead.erase()).is_empty(), "re-armed");
+}
+
+/// A node with no event input: it takes no MIDI.
+#[derive(Clone)]
+struct Mute;
+
+impl Node for Mute {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// **A rule naming a target that takes no MIDI is refused at the call**, with
+/// the target named, and nothing is declared.
+#[test]
+fn a_rule_to_a_target_without_an_event_input_is_refused() {
+    let (mut s, input) = session();
+    let (mute, _) = s.graph().add(ForkByClone(Mute));
+    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let refused = s.midi().route(
+        MidiRouteRule::any_channel()
+            .to(lead.erase())
+            .to(mute.erase()),
+    );
+    assert!(
+        matches!(refused, Err(MidiError::NoEventInput(n)) if n == mute.erase()),
+        "{refused:?}"
+    );
+    assert!(
+        ports(&s, input, lead.erase()).is_empty(),
+        "the refused rule wired none of its targets"
+    );
+}
+
+/// **A fallback that takes no MIDI is refused at the call**, and the fallback
+/// in force is kept.
+#[test]
+fn a_fallback_without_an_event_input_is_refused() {
+    let (mut s, input) = session();
+    let (mute, _) = s.graph().add(ForkByClone(Mute));
+    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    s.midi().set_route_fallback(Some(lead.erase())).unwrap();
+    let refused = s.midi().set_route_fallback(Some(mute.erase()));
+    assert!(
+        matches!(refused, Err(MidiError::NoEventInput(n)) if n == mute.erase()),
+        "{refused:?}"
+    );
+    assert!(!ports(&s, input, lead.erase()).is_empty(), "kept");
+}
+
+/// **`set_routes` from a node with no event outputs is refused as not an input.**
+#[test]
+fn set_routes_from_a_node_that_is_not_an_input_is_refused() {
+    let (mut s, _input) = session();
+    let (mute, _) = s.graph().add(ForkByClone(Mute));
+    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let rule = MidiRouteRule::any_channel().to(lead.erase());
+    let refused = s.midi().set_routes(mute.erase(), [&rule], None, Some);
+    assert!(
+        matches!(refused, Err(MidiError::NotAnInput(n)) if n == mute.erase()),
+        "{refused:?}"
+    );
 }

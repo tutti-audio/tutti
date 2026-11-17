@@ -448,8 +448,9 @@ fn a_take_suspends_the_automation_then_restores_it() {
     let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
-    let mut lane = Trajectory::new().with_range(0.0, 1_000.0);
-    lane.add_breakpoint(Breakpoint::new(Beat(0.0), 800.0));
+    let cutoff_key = probe.cutoff();
+    let mut lane = Trajectory::new().with_range(Hz(0.0), Hz(1_000.0));
+    lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.automate(cutoff, Arc::new(lane));
@@ -463,14 +464,14 @@ fn a_take_suspends_the_automation_then_restores_it() {
 
     let mut m = s.mods_mut();
     m.record(
-        cutoff,
-        AutomationTake::record(RecordMode::Touch, 0.0, 1_000.0),
+        cutoff_key,
+        AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1_000.0)),
     )
     .unwrap();
-    m.take_mut(cutoff)
+    m.take_mut(cutoff_key)
         .expect("the take is open")
         .recorder_mut()
-        .touch(Beat(0.0), 650.0);
+        .touch(Beat(0.0), Hz(650.0));
     let _ = s.update();
     assert_eq!(
         last(&render(&mut side, 512, 128)),
@@ -479,12 +480,15 @@ fn a_take_suspends_the_automation_then_restores_it() {
     );
 
     s.mods_mut()
-        .take_mut(cutoff)
+        .take_mut(cutoff_key)
         .expect("still open")
         .recorder_mut()
-        .release(Beat(1.0), 650.0);
+        .release(Beat(1.0), Hz(650.0));
     let _ = s.update();
-    assert!(s.mods_mut().take_mut(cutoff).is_none(), "the take closed");
+    assert!(
+        s.mods_mut().take_mut(cutoff_key).is_none(),
+        "the take closed"
+    );
     assert_eq!(
         last(&render(&mut side, 512, 128)),
         650.0,
@@ -686,8 +690,9 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
         "dropping it applies again"
     );
 
-    let curve =
-        || -> Option<Arc<dyn Curve>> { Some(Arc::new(Trajectory::new().with_range(0.0, 1_000.0))) };
+    let curve = || -> Option<Arc<dyn Curve>> {
+        Some(Arc::new(Trajectory::new().with_range(Hz(0.0), Hz(1_000.0))))
+    };
     let two_automations = declare_targets(
         [(cutoff, 0.0, 1_000.0)],
         [(cutoff, curve()), (cutoff, curve())],

@@ -417,7 +417,7 @@ fn novelty(
     let mut curve: Vec<f32> = run(onset, samples, fft)
         .novelty()
         .iter()
-        .map(|&(_, v)| v)
+        .map(|n| n.value)
         .collect();
     if let Some(first) = curve.first_mut() {
         *first = 0.0;

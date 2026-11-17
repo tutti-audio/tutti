@@ -2,9 +2,9 @@
 //!
 //! Copying events into the graph is `tutti-graph`'s event inlet (an
 //! [`EventInletNode`](tutti_graph::EventInletNode) and its
-//! [`EventInletWriter`]); the graph builds no message. What a keyboard, a
-//! preview or an all-notes-off needs on top of it is a Note On and a Note Off
-//! built as MIDI 2.0 packets on the Group the keys were made for, and that is
+//! [`EventInletWriter`]); the graph builds no message. What a keyboard or a
+//! preview needs on top of it is a Note On and a Note Off built as MIDI 2.0
+//! packets on the Group the keys were made for, and that is
 //! all this is: the writer is borrowed through `Deref`, so `push`, `push_all`,
 //! `clock` and the counts are the inlet's own.
 

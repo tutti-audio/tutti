@@ -10,13 +10,12 @@ use std::sync::Mutex;
 use tutti_graph::Losses;
 use tutti_rt::LockExt;
 
-use super::enumerate::unpack_id;
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
-use crate::error::{NotFound, Result};
+use crate::error::{Error, NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Blocking, CAP_READ, Client, QueueClock, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
+    Blocking, Client, Packet, PortCaps, PortId, PortKind, QueueClock, UmpVersion,
 };
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
@@ -34,7 +33,7 @@ pub struct AlsaOutput {
 
 struct Sender {
     seq: Client,
-    port: u8,
+    port: PortId,
     /// The client's own queue, started when the output opened, which holds an
     /// event until its time.
     queue: QueueClock,
@@ -47,8 +46,9 @@ impl Sender {
     /// clock with `Instant` first if none is `paired` yet: a batch pairs once,
     /// at its first scheduled packet ([`Paired`]).
     fn send(&mut self, words: &[u32], at: SendAt, paired: &mut Option<Paired>) -> Result<()> {
+        let packet = Packet::new(words)?;
         let SendAt::At(instant) = at else {
-            self.seq.send_to_subscribers(self.port, words)?;
+            self.seq.send_to_subscribers(self.port, packet)?;
             return Ok(());
         };
         let pairing = match *paired {
@@ -58,9 +58,9 @@ impl Sender {
         match pairing.departure(instant) {
             Some(time) => self
                 .seq
-                .send_to_subscribers_at(self.port, words, &self.queue, time)?,
+                .send_to_subscribers_at(self.port, packet, &self.queue, time)?,
             // Beyond what a queue's clock holds: not schedulable, so now.
-            None => self.seq.send_to_subscribers(self.port, words)?,
+            None => self.seq.send_to_subscribers(self.port, packet)?,
         }
         Ok(())
     }
@@ -128,9 +128,8 @@ impl MidiOut for AlsaOutput {
                     sent: 0,
                 })?;
                 if free < needed {
-                    let error = tutti_alsa_ffi::Error::PoolFull { free, needed };
                     return Err(Refused {
-                        error: error.into(),
+                        error: Error::OutputPoolFull { free, needed },
                         sent: 0,
                     });
                 }
@@ -157,7 +156,7 @@ impl DeviceOut for AlsaOutput {
 ///
 /// # Errors
 ///
-/// [`Error::Os`](crate::Error::Os) if the sequencer cannot be opened, the
+/// [`Error::Os`] if the sequencer cannot be opened, the
 /// port created, or the subscription to `id` made.
 pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
     Ok(Box::new(connect(id)?))
@@ -165,7 +164,7 @@ pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
 
 /// [`open`], as the concrete type.
 pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
-    let (dest_client, dest_port) = unpack_id(id).ok_or(NotFound::Endpoint(id))?;
+    let dest = super::address_of(id).ok_or(NotFound::Endpoint(id))?;
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
@@ -175,11 +174,11 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
         // Not subscribable by others, so never listed as a device (see
         // `input::open`); this client subscribes its own port to the
         // destination.
-        CAP_READ,
-        TYPE_MIDI_GENERIC | TYPE_APPLICATION,
+        PortCaps::READ,
+        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
 
-    seq.connect_to(port, dest_client, dest_port)?;
+    seq.connect_to(port, dest)?;
 
     // The queue that holds scheduled events. A queue the client never created
     // is refused a scheduled send, so it is the client's own and started.

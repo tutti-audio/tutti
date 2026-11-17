@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
-use tutti_rt::RequestWord;
+use tutti_rt::{RequestWord, Tally, TallyWriter, tally};
 use tutti_types::{AtomicSampleRate, SampleRate};
 use tutti_ump::MidiGroup;
 use vst::api::{AutomationState, ProcessLevel, Supported};
@@ -139,7 +139,10 @@ pub(crate) struct HostState {
     /// A counter, not a flag: the question a caller asks is "did I lose
     /// automation, and how much", and a boolean answers only the first. Read
     /// through [`Vst2Loaded::dropped_param_changes`](crate::Vst2Loaded::dropped_param_changes).
-    dropped_param_changes: AtomicU64,
+    dropped_param_changes: Tally<u64>,
+    /// The audio-side end of [`dropped_param_changes`](Self::dropped_param_changes), minted
+    /// with the state.
+    dropped_param_changes_writer: TallyWriter<u64>,
     /// MIDI events refused because [`midi_out_tx`](Self::midi_out_tx) was
     /// full. Monotonic for the instance's life.
     ///
@@ -147,7 +150,14 @@ pub(crate) struct HostState {
     /// consequence differs in kind: a dropped note-off whose note-on landed is
     /// a stuck note, which is audible, whereas a dropped automation point is
     /// merely a stale readout.
-    dropped_midi_out: AtomicU64,
+    dropped_midi_out: Tally<u64>,
+    /// The audio-side end of [`dropped_midi_out`](Self::dropped_midi_out), minted with the
+    /// state. The MIDI inbox's own overflow adds to the same tally.
+    dropped_midi_out_writer: TallyWriter<u64>,
+    /// Callbacks the host did not answer (`Host::refused_callback`): an opcode it does not
+    /// implement, or a malformed pointer.
+    refused_callbacks: Tally<u64>,
+    refused_callbacks_writer: TallyWriter<u64>,
     time_info: TransportReader,
     /// The maximum block size the plugin was last told (`effSetBlockSize`), in
     /// samples. Served back through `audioMasterGetBlockSize`.
@@ -207,7 +217,7 @@ impl HostState {
             return;
         }
         if self.param_tx.push(change).is_err() {
-            self.dropped_param_changes.fetch_add(1, Ordering::Relaxed);
+            self.dropped_param_changes_writer.add(1);
         }
     }
 
@@ -220,11 +230,18 @@ impl HostState {
         default_sample_rate: SampleRate,
         current_id: i32,
     ) -> Self {
+        let dropped_param_changes = tally();
+        let dropped_midi_out = tally();
+        let refused_callbacks = tally();
         Self {
             param_tx,
             midi_out_tx,
-            dropped_param_changes: AtomicU64::new(0),
-            dropped_midi_out: AtomicU64::new(0),
+            dropped_param_changes_writer: dropped_param_changes.writer(),
+            dropped_param_changes,
+            dropped_midi_out_writer: dropped_midi_out.writer(),
+            dropped_midi_out,
+            refused_callbacks_writer: refused_callbacks.writer(),
+            refused_callbacks,
             time_info,
             block_size: AtomicU64::new(block_size as u64),
             sample_rate: AtomicSampleRate::new(default_sample_rate),
@@ -306,8 +323,8 @@ impl HostState {
 
     /// How many `audioMasterAutomate` reports have been dropped because the
     /// queue was full, since load.
-    pub(crate) fn dropped_param_changes(&self) -> u64 {
-        self.dropped_param_changes.load(Ordering::Relaxed)
+    pub(crate) fn dropped_param_changes(&self) -> &Tally<u64> {
+        &self.dropped_param_changes
     }
 
     /// Queues a SysEx message the plugin emitted as UMP SysEx7 packets (any
@@ -328,13 +345,13 @@ impl HostState {
         }
         // A payload byte of 128 or more is a malformed message: dropped, counted.
         let Some(packets) = sysex_packets(MidiGroup::FIRST, bytes) else {
-            self.dropped_midi_out.fetch_add(1, Ordering::Relaxed);
+            self.dropped_midi_out_writer.add(1);
             return;
         };
         // The queue's only other end pops, so room seen now can only grow.
         let room = self.midi_out_tx.capacity() - self.midi_out_tx.len();
         if packets.len() > room {
-            self.dropped_midi_out.fetch_add(1, Ordering::Relaxed);
+            self.dropped_midi_out_writer.add(1);
             return;
         }
         let frame = delta_frames.max(0) as u32;
@@ -345,8 +362,13 @@ impl HostState {
 
     /// How many plugin-emitted MIDI events have been dropped because the queue
     /// was full, since load.
-    pub(crate) fn dropped_midi_out(&self) -> u64 {
-        self.dropped_midi_out.load(Ordering::Relaxed)
+    pub(crate) fn dropped_midi_out(&self) -> &Tally<u64> {
+        &self.dropped_midi_out
+    }
+
+    /// How many plugin callbacks the host did not answer, since load.
+    pub(crate) fn refused_callbacks(&self) -> &Tally<u64> {
+        &self.refused_callbacks
     }
 }
 
@@ -418,7 +440,7 @@ impl Host for HostState {
                     if let Some(converted) = to_midi(&midi_event)
                         && self.midi_out_tx.push(converted).is_err()
                     {
-                        self.dropped_midi_out.fetch_add(1, Ordering::Relaxed);
+                        self.dropped_midi_out_writer.add(1);
                     }
                 }
                 PluginEvent::SysEx(sysex) => {
@@ -426,6 +448,10 @@ impl Host for HostState {
                 }
             }
         }
+    }
+
+    fn refused_callback(&self, _opcode: i32) {
+        self.refused_callbacks_writer.add(1);
     }
 
     /// `audioMasterCurrentId`: the sub-plugin a shell is to create, which it asks during
@@ -461,8 +487,8 @@ impl Host for HostState {
     /// vst-rs's default returns placeholder strings ("vendor string" /
     /// "product string"); this reports Tutti's real identity so a plugin that
     /// keys behaviour off the host name sees the truth.
-    fn get_info(&self) -> (isize, String, String) {
-        (1, "Tutti".to_string(), "Tutti VST2 Host".to_string())
+    fn get_info(&self) -> (isize, &str, &str) {
+        (1, "Tutti", "Tutti VST2 Host")
     }
 
     /// Maximum render block size, in samples. vst-rs's default returns 0,
@@ -916,22 +942,22 @@ mod tests {
             host.automate(i as i32, 0.5);
         }
         assert_eq!(
-            host.dropped_param_changes(),
+            host.dropped_param_changes().get(),
             0,
             "a queue filled exactly to capacity must not have dropped anything"
         );
 
         // One past capacity: refused, and counted.
         host.automate(9_999, 1.0);
-        assert_eq!(host.dropped_param_changes(), 1);
+        assert_eq!(host.dropped_param_changes().get(), 1);
         host.automate(9_999, 1.0);
-        assert_eq!(host.dropped_param_changes(), 2);
+        assert_eq!(host.dropped_param_changes().get(), 2);
 
         // Draining makes room again — the queue is a queue, not a latch.
         assert_eq!(host.param_tx.pop(), Some(ParameterChange::Automate(0, 0.5)));
         host.automate(7, 0.25);
         assert_eq!(
-            host.dropped_param_changes(),
+            host.dropped_param_changes().get(),
             2,
             "a push into freed space must not count as a drop"
         );
@@ -948,7 +974,7 @@ mod tests {
         for _ in 0..MIDI_OUT_QUEUE_CAPACITY {
             assert!(host.midi_out_tx.push(ev).is_ok());
         }
-        assert_eq!(host.dropped_midi_out(), 0);
+        assert_eq!(host.dropped_midi_out().get(), 0);
 
         // `process_events` is the only path that pushes; drive it through a
         // real `api::Events` so the count reflects the callback, not the queue.
@@ -964,12 +990,12 @@ mod tests {
         host.process_plugin_events(PluginEvents::for_test(&events));
 
         assert_eq!(
-            host.dropped_midi_out(),
+            host.dropped_midi_out().get(),
             1,
             "an event refused by a full queue must be counted"
         );
         assert_eq!(
-            host.dropped_param_changes(),
+            host.dropped_param_changes().get(),
             0,
             "a MIDI drop must not move the parameter tally"
         );
@@ -1024,7 +1050,7 @@ mod tests {
                 }
             }
             assert_eq!(done, vec![message], "{len} bytes");
-            assert_eq!(host.dropped_midi_out(), 0);
+            assert_eq!(host.dropped_midi_out().get(), 0);
         }
     }
 
@@ -1115,7 +1141,7 @@ mod tests {
         host.process_plugin_events(PluginEvents::for_test(&events));
 
         assert!(host.midi_out_tx.is_empty());
-        assert_eq!(host.dropped_midi_out(), 0);
+        assert_eq!(host.dropped_midi_out().get(), 0);
     }
 
     /// A SysEx that does not fit the queue is dropped whole and counted once,
@@ -1127,7 +1153,7 @@ mod tests {
         let mut event = sysex_event(0, &mut payload);
         deliver(&host, &mut event);
         assert!(host.midi_out_tx.is_empty());
-        assert_eq!(host.dropped_midi_out(), 1);
+        assert_eq!(host.dropped_midi_out().get(), 1);
     }
 
     /// **The SysEx path is allocation-free**, accepting and refusing: a
@@ -1155,7 +1181,7 @@ mod tests {
             }
             while host.midi_out_tx.pop().is_some() {}
         });
-        assert!(host.dropped_midi_out() > 0, "the refusing branch ran");
+        assert!(host.dropped_midi_out().get() > 0, "the refusing branch ran");
     }
 
     /// **A plugin's malformed MIDI bytes are dropped without allocating.** A
@@ -1195,7 +1221,7 @@ mod tests {
                 host.midi_out_tx.is_empty(),
                 "a malformed message was queued"
             );
-            assert_eq!(host.dropped_midi_out(), 0);
+            assert_eq!(host.dropped_midi_out().get(), 0);
 
             api_ev.midi_data = good;
             host.process_plugin_events(PluginEvents::for_test(&events(&mut api_ev)));
@@ -1241,7 +1267,7 @@ mod tests {
         // Both queues actually overflowed — otherwise the gate above only
         // covered the accepting half and would pass on a refusing path that
         // allocates.
-        assert!(host.dropped_param_changes() > 0);
-        assert!(host.dropped_midi_out() > 0);
+        assert!(host.dropped_param_changes().get() > 0);
+        assert!(host.dropped_midi_out().get() > 0);
     }
 }

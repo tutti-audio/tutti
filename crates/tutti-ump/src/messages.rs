@@ -184,7 +184,7 @@ fn passes(packet: Ump, open: &OpenRuns) -> bool {
     match packet.message_type() {
         0 | 0xF => true,
         // System Real Time: status 0xF8 and above.
-        1 => ((packet.0[0] >> 16) & 0xFF) >= 0xF8 || !open.has_group_of(packet),
+        1 => packet.is_system_real_time() || !open.has_group_of(packet),
         _ => !open.has_group_of(packet),
     }
 }

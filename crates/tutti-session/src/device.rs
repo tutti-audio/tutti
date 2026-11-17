@@ -21,7 +21,7 @@
 //!   ([`root_width`](crate::root_width)), never narrowed;
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,
-//!   through the re-prepare, the MIDI clock node;
+//!   through the re-prepare, the MIDI sync node;
 //! - the compensation figures in samples ([`Session::compensation`],
 //!   [`Session::latency`]), published before the first block.
 //!
@@ -159,9 +159,9 @@ impl DeviceHandle {
 /// fn is_send<T: Send>() {}
 /// is_send::<tutti_session::LiveSession>();
 /// ```
-pub type LiveSession = Session<DeviceClock>;
+pub type LiveSession<K = &'static str> = Session<K, DeviceClock>;
 
-impl Session<DeviceClock> {
+impl<K: crate::AppKey> Session<K, DeviceClock> {
     /// The device that drives the session.
     pub fn device(&self) -> &Device {
         self.running.device()
@@ -812,7 +812,7 @@ impl From<DeviceEvent> for SessionEvent {
     }
 }
 
-impl<C: RealTime> Session<C> {
+impl<K: crate::AppKey, C: RealTime> Session<K, C> {
     /// Starts listing the host's output devices on a thread of its own:
     /// enumeration can block for good, so it never runs here.
     /// The answer is taken without blocking by a later
@@ -846,7 +846,7 @@ impl<C: RealTime> Session<C> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// The listing's share of [`Phase::Poll`](crate::Phase::Poll): the answer of
     /// the output-device listing, if one is running.
     pub(crate) fn listing_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {

@@ -14,7 +14,9 @@
 
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, interleave};
 use tutti_dsp::DitherShape;
-use tutti_measure::{Loudness, LoudnessConfig, LoudnessMeter, TruePeakMeter};
+use tutti_measure::{
+    Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
+};
 use tutti_types::{Amplitude, ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 
 use crate::Result;
@@ -454,7 +456,9 @@ impl Measurer {
             ) => Meter::Peak {
                 meter: PeakMeter::TruePeak(UnplacedMeter {
                     layout,
-                    meter: TruePeakMeter::new(rate, layout).map_err(|_| Unmeasured::Format)?,
+                    meter: TruePeakConfig
+                        .measure((rate, layout))
+                        .map_err(|_| Unmeasured::Format)?,
                 }),
                 target,
             },
@@ -516,7 +520,7 @@ impl Measurer {
                 meter: PeakMeter::Placed(meter),
                 ..
             } => {
-                let pushed = meter.meter.push(frames);
+                let pushed = meter.meter.push(frames, &mut ());
                 debug_assert!(
                     pushed.is_ok(),
                     "the frames are the meter's width: {pushed:?}"
@@ -526,7 +530,7 @@ impl Measurer {
                 meter: PeakMeter::TruePeak(meter),
                 ..
             } => {
-                let pushed = meter.meter.push(frames);
+                let pushed = meter.meter.push(frames, &mut ());
                 debug_assert!(
                     pushed.is_ok(),
                     "the frames are the meter's width: {pushed:?}"

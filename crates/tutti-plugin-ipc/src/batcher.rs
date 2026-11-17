@@ -66,15 +66,16 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabAccessError, SlabWriter};
+use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use tutti_plugin_types::SlabAccessError;
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     SampleFormat, TransportChanges, TransportInfo, WireMidi,
 };
-use tutti_types::Samples;
+use tutti_types::{SampleRate, Samples};
 
 /// Single-chunk wire scratch in the plugin-negotiated format. Allocated at
 /// [`Batcher::new`] for the chunk ceiling, because the wire format is known
@@ -167,7 +168,7 @@ impl WireStorage {
 /// The chunk's parameter changes are not here: they stay in the node's
 /// `ParamDelivery`, whose buffer the bridge swaps rather than moves
 /// ([`Chunks::params`]), so nothing is allocated or freed per chunk.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockPayload {
     /// The chunk's MIDI events.
     pub midi: MidiEventVec,
@@ -180,6 +181,21 @@ pub struct BlockPayload {
     /// The transport changes after it, each at its chunk frame (doc 020
     /// stage 5b; `transport_walk`). Inline: nothing allocates.
     pub changes: TransportChanges,
+}
+
+impl BlockPayload {
+    /// A chunk with nothing in it: no MIDI, no harmony, a stopped transport at
+    /// `sample_rate` and no changes after it.
+    #[must_use]
+    pub fn new(sample_rate: SampleRate) -> Self {
+        Self {
+            midi: MidiEventVec::new(),
+            note_expression: NoteExpressionChanges::default(),
+            harmony: HarmonyInputs::default(),
+            transport: TransportInfo::new(sample_rate),
+            changes: TransportChanges::new(),
+        }
+    }
 }
 
 /// What the plugin node gives the batcher per chunk: the chunk's payload, and

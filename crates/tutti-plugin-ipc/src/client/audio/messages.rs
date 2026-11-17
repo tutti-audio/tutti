@@ -36,7 +36,7 @@ pub(super) struct ProcessPayload {
 }
 
 impl ProcessPayload {
-    pub(super) fn empty() -> Self {
+    pub(super) fn empty(sample_rate: SampleRate) -> Self {
         Self {
             seq: 0,
             num_samples: 0,
@@ -47,7 +47,7 @@ impl ProcessPayload {
             scales: ScaleChanges::new(),
             expr_texts: NoteExpressionTextChanges::new(),
             expr_ints: NoteExpressionIntChanges::new(),
-            transport: TransportInfo::default(),
+            transport: TransportInfo::new(sample_rate),
             transport_changes: TransportChanges::new(),
         }
     }

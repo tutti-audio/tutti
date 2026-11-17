@@ -116,8 +116,8 @@ fn note_rate_change(events: &mut Vec<SessionEvent>, from: SampleRate, to: Sample
 /// The input latency cell the card's session reads, with the output's cell
 /// handed to the inputs (feature `audio-io`).
 #[cfg(feature = "audio-io")]
-fn bind_inputs(
-    live: &mut LiveSession,
+fn bind_inputs<K: crate::AppKey>(
+    live: &mut LiveSession<K>,
     driver: &TuttiDriver,
 ) -> std::sync::Arc<tutti_engine::StreamLatency> {
     live.inputs.set_output_latency(driver.stream().latency());
@@ -125,14 +125,14 @@ fn bind_inputs(
 }
 
 #[cfg(not(feature = "audio-io"))]
-fn bind_inputs(
-    _: &mut LiveSession,
+fn bind_inputs<K: crate::AppKey>(
+    _: &mut LiveSession<K>,
     _: &TuttiDriver,
 ) -> std::sync::Arc<tutti_engine::StreamLatency> {
     std::sync::Arc::default()
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The first of what a switch makes before anything stops:
     ///
     /// 1. refuse while a run waits for an entry that has not loaded
@@ -174,7 +174,7 @@ impl<C: crate::Clock> Session<C> {
     }
 }
 
-impl Session<SystemClock> {
+impl<K: crate::AppKey> Session<K, SystemClock> {
     /// Moves the session onto the sound card `device` selects: the device is
     /// opened first, and a device that will not open returns the session
     /// running, on the timer, with the error. The graph is re-prepared at the
@@ -200,7 +200,7 @@ impl Session<SystemClock> {
     pub fn into_device(
         self,
         device: DeviceSelector,
-    ) -> std::result::Result<LiveSession, ClockError<Self>> {
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>> {
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
             let engine = AudioEngine::open(host, device.clone())?;
             let resolved = engine.resolve_device()?;
@@ -232,7 +232,7 @@ impl Session<SystemClock> {
         self,
         spec: OutputSpec,
         driver: D,
-    ) -> std::result::Result<LiveSession, ClockError<Self>>
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>>
     where
         D::Error: Into<tutti_cpal::Error>,
     {
@@ -257,7 +257,7 @@ impl Session<SystemClock> {
             &mut Self,
         )
             -> std::result::Result<TuttiDriver, Box<(tutti_engine::StreamHost, Error)>>,
-    ) -> std::result::Result<LiveSession, ClockError<Self>> {
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>> {
         if let Err(e) = self
             .settle_runs()
             .and_then(|()| self.check_switch(channels))
@@ -308,7 +308,7 @@ impl Session<SystemClock> {
         chosen: DeviceSelector,
         previous: SampleRate,
         mut events: Vec<SessionEvent>,
-    ) -> LiveSession {
+    ) -> LiveSession<K> {
         let audio_host = self.running.audio_host;
         let (mut live, _timer) = self.with_clock::<DeviceClock>(DeviceHandle::vacant(audio_host));
         let input_latency = bind_inputs(&mut live, &driver);
@@ -330,7 +330,7 @@ impl SystemEngine {
     }
 }
 
-impl Session<DeviceClock> {
+impl<K: crate::AppKey> Session<K, DeviceClock> {
     /// Moves the session onto an OS timer thread: the stream stops, the graph
     /// keeps the rate it ran at and takes the graph's block as the timer's,
     /// and the session has no audio in or out. The captures the session held
@@ -353,7 +353,7 @@ impl Session<DeviceClock> {
     /// [`Error::RunsPending`] before the stream stops, the re-prepare's or the
     /// timer's own failure ([`Error::Clock`]) after it, and
     /// [`Error::SwitchNotUndone`] when the card could not be started again.
-    pub fn into_system_clock(self) -> std::result::Result<SystemSession, ClockError<Self>> {
+    pub fn into_system_clock(self) -> std::result::Result<SystemSession<K>, ClockError<Self>> {
         self.into_timer(TimerDriver::new(), |session, device, _| {
             let chosen = device.chosen.clone();
             device.driver.restart_with(chosen, |spec, stopped| {
@@ -375,7 +375,7 @@ impl Session<DeviceClock> {
         self,
         timer: impl StreamDriver<Error = tutti_engine::TimerError>,
         back: B,
-    ) -> std::result::Result<SystemSession, ClockError<Self>>
+    ) -> std::result::Result<SystemSession<K>, ClockError<Self>>
     where
         B::Error: Into<tutti_cpal::Error>,
     {
@@ -392,7 +392,7 @@ impl Session<DeviceClock> {
         mut self,
         timer: D,
         undo: impl FnOnce(&mut Self, &mut Device, OutputSpec) -> Result<()>,
-    ) -> std::result::Result<SystemSession, ClockError<Self>>
+    ) -> std::result::Result<SystemSession<K>, ClockError<Self>>
     where
         D: StreamDriver<Error = tutti_engine::TimerError>,
     {

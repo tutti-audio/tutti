@@ -1,9 +1,9 @@
 //! The nodes at the graph's MIDI border:
 //! [`MidiIngestNode`] sends the events of its device inlets out of their channels' ports,
 //! translated; an event tap hands what a port carries back to a control
-//! thread; [`ClockNode`] ticks
-//! Beat Clock on the frames the transport reaches, a start inside a block
-//! included.
+//! thread; [`SyncOut`] sends
+//! Beat Clock, timecode and Machine Control on the frames the transport reaches, a
+//! start inside a block included.
 
 use tutti_types::MaxBlock;
 
@@ -11,19 +11,19 @@ use crate::common;
 use tutti_graph::{Stamp, UmpAt};
 
 use tutti_fixtures::midi;
+use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, ForkMode,
     ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
-use tutti_graph::{IntoNode as _, NodeKey};
 use tutti_midi_protocol::{
     MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
     widen_velocity,
 };
 use tutti_midi_runtime::{
-    CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MachineControlEvent, MachineControlFollower, MachineControlNode, MidiIngestNode,
-    MidiInputPorts, MidiOutNode, MpeTransformNode,
+    CHANNELLESS_PORT, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
+    MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
+    MpeTransformNode, SyncMessages, SyncOut,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -41,6 +41,11 @@ const G: MidiGroup = MidiGroup::FIRST;
 const RATE: f64 = 48_000.0;
 
 use tutti_fixtures::{EventRig, Seen};
+
+/// A sync node on the first Group, sending `messages`.
+fn sync(messages: SyncMessages) -> SyncOut {
+    SyncOut::new(G).messages(messages)
+}
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input
 /// of the same number, blocks of at most `max`.
@@ -310,14 +315,14 @@ fn a_devices_select_and_entry_make_a_run() {
 /// Note Off.
 #[test]
 fn a_departed_devices_epoch_settles_only_after_a_block_has_run() {
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
     let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     assert!(epochs.is_settled(), "the block handled the arrival");
     assert_eq!(heard(&seen).len(), 1, "the key is down");
-    epochs.depart();
+    writer.depart();
     assert!(!epochs.is_settled(), "the departure is owed a block");
     block(&mut exec, 512);
     assert!(epochs.is_settled(), "the block released and said so");
@@ -336,8 +341,8 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
             .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))
             .collect()
     };
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
     let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
     let offs = |from: u64, to: u64| {
@@ -350,7 +355,7 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
     block(&mut exec, 512);
     assert_eq!(heard(&seen).len(), 800, "every key is down");
 
-    epochs.depart();
+    writer.depart();
     block(&mut exec, 512);
     assert_eq!(offs(1024, 1536), 584, "what the port has room for");
     assert!(!epochs.is_settled(), "216 are still owed");
@@ -430,14 +435,14 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         ])
     };
     for reopened in [false, true] {
-        let epochs = DeviceEpochs::new();
+        let (mut writer, epochs) = DeviceEpochs::new();
         let Ingest { node, inlet } = Ingest::new(script());
         let node = node.following(&epochs);
         let (_ed, mut exec, _controls, seen) =
             ingest(Ingest { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         if reopened {
-            epochs.arrive();
+            writer.arrive();
         }
         block(&mut exec, 512);
         let made = seen
@@ -497,8 +502,8 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
 #[test]
 fn a_device_that_lets_go_has_what_it_held_released() {
     for replaced in [false, true] {
-        let epochs = DeviceEpochs::new();
-        epochs.arrive();
+        let (mut writer, epochs) = DeviceEpochs::new();
+        writer.arrive();
         let bend = at(
             30,
             midi::pitch_bend(Address::new(G, MidiChannel::of(0)), 0xC000_0000),
@@ -512,9 +517,9 @@ fn a_device_that_lets_go_has_what_it_held_released() {
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
-        epochs.depart();
+        writer.depart();
         if replaced {
-            epochs.arrive();
+            writer.arrive();
         }
         block(&mut exec, 512);
         let mut expected = vec![
@@ -737,8 +742,8 @@ fn a_requested_mpe_mode_is_adopted_once() {
 #[test]
 fn a_devices_profile_zones_switch_its_rules() {
     let reset = |frame: usize| cc_at(frame, 2, CCNumber::RESET_ALL, 0);
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let node = following(
         Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]),
         &epochs,
@@ -786,13 +791,52 @@ fn a_devices_profile_zones_switch_its_rules() {
     assert_eq!(heard(1024), 2);
 }
 
+/// **A Profile zone is started once, by the publish that enabled it**: the
+/// blocks after it, with no further request, send no more of its resets.
+#[test]
+fn a_profile_zone_starts_once_per_request() {
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
+    let (_ed, mut exec, controls, seen) = ingest(
+        following(Script::new(vec![vec![], vec![], vec![], vec![]]), &epochs),
+        MIDI_INPUT_PORTS as u16,
+        512,
+    );
+    let zone = MpeZones::single(MpeZoneConfig::profile(
+        MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
+        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
+    ));
+    // The first block takes the device's slot over; the zones come after it.
+    block(&mut exec, 512);
+    controls.set_mpe_profile(MidiGroup::FIRST, Some(zone));
+    for _ in 0..3 {
+        block(&mut exec, 512);
+    }
+    let resets = |range: std::ops::Range<u64>| {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|s| {
+                range.contains(&s.1)
+                    && matches!(
+                        s.2.decode(),
+                        Ok(Message::Midi2(_, Voice2::ControlChange { controller, .. }))
+                            if controller == CCNumber::RESET_ALL
+                    )
+            })
+            .count()
+    };
+    assert_eq!(resets(512..1024), 4, "read on the block after the publish");
+    assert_eq!(resets(1024..2048), 0, "not again without a publish");
+}
+
 /// Clearing the device's zones sets each of its Groups to none: the device's
 /// Reset All Controllers on a Member Channel, ignored under the Profile, is
 /// heard again.
 #[test]
 fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let reset = cc_at(1, 2, CCNumber::RESET_ALL, 0);
     let (_ed, mut exec, controls, seen) = ingest(
         following(Script::new(vec![vec![], vec![reset], vec![reset]]), &epochs),
@@ -1025,19 +1069,15 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
 /// `prepare` gave the master).
 #[test]
 fn a_start_inside_a_block_clocks_from_its_frame() {
-    let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
+    let (_ed, mut exec, _clock, seen) = rig(
+        sync(SyncMessages {
+            clock: true,
+            mtc: false,
+            ..SyncMessages::OFF
+        }),
         1,
         2048,
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
     let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut changes = TransportChanges::NONE;
@@ -1075,7 +1115,11 @@ fn followed(seen: &Seen) -> Vec<(u64, MachineControlEvent)> {
 #[test]
 fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
     let (_ed, mut exec, _controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         2048,
     );
@@ -1142,7 +1186,11 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
 #[test]
 fn a_machine_control_locate_to_no_time_code_is_counted() {
     let (_ed, mut exec, controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         512,
     );
@@ -1159,11 +1207,19 @@ fn a_machine_control_locate_to_no_time_code_is_counted() {
     assert_eq!(controls.losses().refused, 1);
 }
 
-/// **A Machine Control node's fork sends nothing.**
+/// **A sync node's fork runs**: a bounce's events are data. The fork holds
+/// what the live node sent at the fork (clock and Machine Control here) and
+/// sends it for the transport it is given: Start and a tick at beat 0, and PLAY
+/// on the second look.
 #[test]
-fn a_machine_control_fork_sends_nothing() {
+fn a_sync_nodes_fork_runs() {
     let (live, _exec, _controls, seen) = rig(
-        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        sync(SyncMessages {
+            clock: true,
+            mmc: Some(Recipient::AllCall),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        }),
         1,
         512,
     );
@@ -1180,41 +1236,17 @@ fn a_machine_control_fork_sends_nothing() {
             &mut [&mut out[..]],
         );
     }
-    assert!(seen.lock().unwrap().is_empty());
-}
-
-/// **A clock's fork sends nothing.**
-#[test]
-fn a_clocks_fork_sends_nothing() {
-    let (live, _exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
-        1,
-        512,
+    let got: Vec<Ump> = seen.lock().unwrap().iter().map(|s| s.2).collect();
+    assert!(got.contains(&Ump::from(Message::System(G, System::Start))));
+    assert!(
+        followed(&seen).contains(&(512, MachineControlEvent::Play)),
+        "{:?}",
+        followed(&seen)
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
-    let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
-        .expect("forks");
-    let mut out = vec![0.0f32; 512];
-    fork_exec.process(
-        512,
-        &TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None),
-        &[],
-        &mut [&mut out[..]],
-    );
-    assert!(seen.lock().unwrap().is_empty());
 }
 
 /// **A block with more clock events than the port holds sends the first
-/// [`CLOCK_EVENT_CAPACITY`](tutti_midi_runtime::CLOCK_EVENT_CAPACITY) and
+/// [`SYNC_OUT_EVENT_CAPACITY`](tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY) and
 /// counts the rest.**
 ///
 /// 300 BPM with MTC on at 48 kHz is 120 ticks and 100 quarter-frames a
@@ -1224,25 +1256,20 @@ fn a_clocks_fork_sends_nothing() {
 /// counted must equal it, exactly.
 #[test]
 fn a_clock_flood_past_the_port_capacity_is_counted() {
-    use tutti_midi_runtime::CLOCK_EVENT_CAPACITY;
+    use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
     const LONG: usize = 65_536;
     const BPM: f64 = 300.0;
 
     let run = |blocks: &[usize]| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                tutti_transport::ProjectMeter::default().reader(),
-            ),
+            sync(SyncMessages {
+                clock: true,
+                mtc: true,
+                ..SyncMessages::OFF
+            }),
             1,
             LONG,
         );
-        clock.set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            mtc: true,
-            ..Default::default()
-        });
         let mut frame = 0usize;
         for &len in blocks {
             let beat = frame as f64 / RATE * BPM / 60.0;
@@ -1258,12 +1285,15 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
     let (whole, none) = run(&[LONG / 4; 4]);
     assert_eq!(none, 0, "a quarter-length block fits every event");
     assert!(
-        whole > CLOCK_EVENT_CAPACITY,
+        whole > SYNC_OUT_EVENT_CAPACITY,
         "the span produces more than one block can carry ({whole})"
     );
 
     let (sent, dropped) = run(&[LONG]);
-    assert_eq!(sent, CLOCK_EVENT_CAPACITY, "one block sends up to the cap");
+    assert_eq!(
+        sent, SYNC_OUT_EVENT_CAPACITY,
+        "one block sends up to the cap"
+    );
     assert_eq!(
         sent as u64 + dropped,
         whole as u64,
@@ -1284,19 +1314,15 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
     use tutti_graph::LoopRange;
     // The loop starts at beat 1, a quarter note: 4 MIDI beats (sixteenths).
     const LOOP_START: u16 = 4;
-    let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader(),
-        ),
+    let (_ed, mut exec, _clock, seen) = rig(
+        sync(SyncMessages {
+            clock: true,
+            mtc: false,
+            ..SyncMessages::OFF
+        }),
         1,
         4096,
     );
-    clock.set_sends(tutti_midi_runtime::ClockSends {
-        timing: true,
-        ..Default::default()
-    });
     let looping = Some(LoopRange {
         start: Beat(1.0),
         end: Beat(1.1),
@@ -1347,25 +1373,21 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
 #[test]
 fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
     use tutti_graph::LoopRange;
-    use tutti_midi_runtime::CLOCK_EVENT_CAPACITY;
+    use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
     use tutti_types::FrameClock;
     const TOTAL: usize = 16_384;
     let end = 47.3 / 24_000.0;
 
     let run = |len: usize| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(
-                tutti_ump::MidiGroup::FIRST,
-                tutti_types::SampleRate::SR_48K,
-                tutti_transport::ProjectMeter::default().reader(),
-            ),
+            sync(SyncMessages {
+                clock: true,
+                mtc: false,
+                ..SyncMessages::OFF
+            }),
             1,
             TOTAL,
         );
-        clock.set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
-        });
         let looping = Some(LoopRange {
             start: Beat(0.0),
             end: Beat(end),
@@ -1384,26 +1406,10 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
 
     let (cut, none) = run(1_024);
     assert_eq!(none, 0, "blocks of 1 024 fit every event");
-    assert!(cut > 2 * CLOCK_EVENT_CAPACITY, "{cut} events in all");
+    assert!(cut > 2 * SYNC_OUT_EVENT_CAPACITY, "{cut} events in all");
     let (sent, dropped) = run(TOTAL);
-    assert_eq!(sent, CLOCK_EVENT_CAPACITY);
+    assert_eq!(sent, SYNC_OUT_EVENT_CAPACITY);
     assert_eq!(sent as u64 + dropped, cut as u64);
-}
-
-/// **A clock node's master is built with a real rate and its Group, never a
-/// placeholder of zero**: the controls read both back before any prepare, and a
-/// fork keeps the Group.
-#[test]
-fn a_clock_node_holds_its_group_and_rate_from_construction() {
-    let group = MidiGroup::masked(2);
-    let node = ClockNode::new(
-        group,
-        SampleRate::SR_44K1,
-        tutti_transport::ProjectMeter::default().reader(),
-    );
-    let master = node.into_parts().controls;
-    assert_eq!(master.group(), group);
-    assert_eq!(master.sample_rate(), SampleRate::SR_44K1);
 }
 
 /// The MPE transform node over a script: one batch of MIDI 1.0 or 2.0 events a

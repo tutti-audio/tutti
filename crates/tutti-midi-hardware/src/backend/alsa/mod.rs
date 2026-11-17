@@ -45,9 +45,19 @@ use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
 use enumerate::Direction;
 use std::sync::Mutex;
-use tutti_alsa_ffi::{Blocking, Client, UmpVersion};
+use tutti_alsa_ffi::{Address, Blocking, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_rt::LockExt;
+
+/// The handle a port is listed under.
+pub(super) fn handle_of(at: Address) -> EndpointId {
+    EndpointId::from_raw(at.into())
+}
+
+/// The port a handle names; `None` for a handle no port here made.
+pub(super) fn address_of(handle: EndpointId) -> Option<Address> {
+    Address::try_from(handle.raw()).ok()
+}
 
 /// The Linux [`MidiEndpoints`] implementation.
 ///
@@ -81,7 +91,7 @@ impl AlsaEndpoints {
         let mut held = self.enumerator.lock_recover();
         if held.is_none() {
             *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
-                .inspect_err(|e| tracing::debug!("ALSA enumeration: {e}"))
+                .inspect_err(|e| tracing::debug!("ALSA enumeration: {}", crate::error::chain(e)))
                 .ok();
         }
         held.as_ref()

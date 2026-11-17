@@ -472,7 +472,7 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
     }));
 
     let mut per_block = Vec::with_capacity(blocks.len());
-    let default_transport = TransportInfo::default();
+    let default_transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     for block in blocks {
         *seen.lock().unwrap() = false;

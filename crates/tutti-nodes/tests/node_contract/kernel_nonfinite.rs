@@ -8,14 +8,16 @@ use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls,
-    CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, FdnNode, FreeverbNode,
-    GateControls, GateNode, LadderFilterNode, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
-    MultibandCompressorNode, PeakDetection, PhaserControls, PhaserNode, RingModConfig, RingModNode,
-    SvfFilterNode, TremoloConfig, TremoloNode,
+    CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, DynamicEqConfig,
+    DynamicEqNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
+    LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection,
+    PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode, TremoloConfig,
+    TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    TiltFilterConfig, TiltFilterNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -114,6 +116,29 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 CutResponse::LowPass,
                 CutAlignment::LinkwitzRiley(ButterworthOrder::of(4)),
             ))),
+        ),
+        (
+            "bell filter",
+            Box::new(BellFilterNode::from(BellFilterConfig::new(
+                ChannelLayout::STEREO,
+                Hz(2_000.0),
+                Q(2.0),
+                Db(6.0),
+            ))),
+        ),
+        (
+            "tilt filter",
+            Box::new(TiltFilterNode::from(TiltFilterConfig::new(
+                ChannelLayout::STEREO,
+                Hz(1_000.0),
+                Db(6.0),
+            ))),
+        ),
+        (
+            "dynamic eq",
+            Box::new(DynamicEqNode::from(
+                DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
+            )),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (

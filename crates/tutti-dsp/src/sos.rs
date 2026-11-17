@@ -1,5 +1,6 @@
 //! [`Sos`]: a cascade of second-order sections, the design and analysis form of an IIR
-//! filter of any order, and the [`Butterworth`] and [`LinkwitzRiley`] designs that make one.
+//! filter of any order, and the [`Butterworth`], [`LinkwitzRiley`], [`MatchedBell`] and
+//! [`Tilt`] designs that make one.
 //!
 //! A [`Sos`] is plain data: a list of [`Biquad`]s whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
 //! [`SosBank`] runs one as a cascade of trapezoidal state-variable sections (each section's
@@ -7,7 +8,9 @@
 //! coefficients move and at a low cutoff in `f32`.
 
 mod bank;
+mod bell;
 mod butterworth;
+mod tilt;
 
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
@@ -15,9 +18,12 @@ use crate::filter::{integrator_gains, section_l1};
 use crate::{Biquad, Complex64, Lti, Ring, SvfCoeffs, System, svf_step};
 
 pub use bank::{MAX_SECTIONS, SosBank, SosCoefficients};
+pub use bell::MatchedBell;
 pub use butterworth::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley, SosError,
+    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
+    MAX_GAIN_MAGNITUDE, SosError,
 };
+pub use tilt::Tilt;
 
 /// The longest impulse response [`Sos::tail`](System::tail) follows, in frames: a longer
 /// ring-out reads as [`Ring::Unbounded`].
@@ -207,3 +213,6 @@ impl Lti for Sos {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod eq_tests;

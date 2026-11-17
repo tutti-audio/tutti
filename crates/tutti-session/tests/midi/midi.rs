@@ -39,7 +39,7 @@ use tutti_session::{
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiReport, PHASES, PhaseCx};
 #[cfg(feature = "midi-hardware")]
-use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
+use tutti_session::{MidiRouteRule, RouteDeclarer};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
@@ -192,7 +192,7 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(480),
-        240,
+        Tick(720),
         MidiChannel::FIRST,
         NoteNumber::of(62),
         U7::of(100),
@@ -384,7 +384,7 @@ fn route_rules_wire_the_hardware_input() {
     assert!(
         matches!(
             s.midi().unroute(all),
-            Err(MidiError::NoSuchRoute(NoSuchMidiRoute(id))) if id == all
+            Err(MidiError::NoSuchRoute(id)) if id == all
         ),
         "a removed rule is not there"
     );
@@ -517,10 +517,11 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
     let _ = s.update(); // the sink's node, loaded and committed
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 24_000);
     s
@@ -1120,8 +1121,8 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     use tutti_midi_device::{
         BlockName, CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded,
-        DiscoveryData, MaxSysexSize, Muid, ProfileChannels, ProfileId, ProfileLists, ProfileState,
-        StandardProfile,
+        DiscoveryData, MaxSysexSize, Muid, ProfileChannels, ProfileId, ProfileList, ProfileLists,
+        ProfileState, StandardProfile,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
@@ -1228,7 +1229,10 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                     for (address, lists) in [
                         (
                             CiDeviceId::Channel(MidiChannel::of(0)),
-                            ProfileLists::new(vec![], vec![profile]).unwrap(),
+                            ProfileLists::new(
+                                ProfileList::default(),
+                                ProfileList::try_from(vec![profile]).unwrap(),
+                            ),
                         ),
                         (CiDeviceId::FunctionBlock, ProfileLists::none()),
                     ] {
@@ -1443,7 +1447,7 @@ impl MpePeer {
     ) {
         use tutti_midi_device::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
-            MaxSysexSize, Nak, ProfileId, ProfileLists, ProfileTarget,
+            MaxSysexSize, Nak, ProfileId, ProfileList, ProfileLists, ProfileTarget,
             SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
@@ -1498,7 +1502,10 @@ impl MpePeer {
                     for (address, lists) in [
                         (
                             CiDeviceId::Channel(MidiChannel::of(0)),
-                            ProfileLists::new(vec![], vec![ProfileId::MPE]).unwrap(),
+                            ProfileLists::new(
+                                ProfileList::default(),
+                                ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
+                            ),
                         ),
                         (CiDeviceId::FunctionBlock, ProfileLists::none()),
                     ] {
@@ -2051,10 +2058,11 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     let out = s.midi_output(&"dev out").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
 
     let start = settle(&mut s, &fake, raw);
@@ -2106,10 +2114,11 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     declare_dev(&mut s);
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     let start = settle(&mut s, &fake, raw);
     let on = Ump::from(Message::Stream(Stream::StreamConfigurationNotification(

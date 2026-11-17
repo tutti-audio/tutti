@@ -25,6 +25,9 @@ pub const MAX_CHUNK: usize = 4096;
 pub struct BlockCounts {
     /// Blocks it gave up waiting for.
     pub abandoned: u64,
+    /// Of the abandoned blocks, those whose reply it collected afterwards:
+    /// the plugin answered, late.
+    pub late: u64,
     /// Replies it took, on time or owed.
     pub replies: u64,
 }
@@ -64,6 +67,21 @@ pub struct ChunkCounters {
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
     skipped: OnceLock<Tally<u64>>,
+    /// Commands the audio side could not hand to the bridge thread (a full
+    /// command queue, an empty payload pool, a parameter buffer with no room
+    /// to return to), counted by the bridge (set by
+    /// [`attach_commands_refused`](Self::attach_commands_refused)).
+    commands_refused: OnceLock<Tally<u64>>,
+    /// Audio responses the bridge could not queue for the audio thread,
+    /// counted by the bridge (set by
+    /// [`attach_responses_lost`](Self::attach_responses_lost)).
+    responses_lost: OnceLock<Tally<u64>>,
+    /// Parameter buffers the audio thread leaked rather than free, counted by
+    /// the payload pool (set by [`attach_leaked_buffers`](Self::attach_leaked_buffers)).
+    leaked_buffers: OnceLock<Tally<u64>>,
+    /// Parameter writes the editor mirror refused, counted by the bridge (set
+    /// by [`attach_mirror_refused`](Self::attach_mirror_refused)).
+    mirror_refused: OnceLock<Tally<u64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -79,6 +97,10 @@ impl std::fmt::Debug for ChunkCounters {
             .field("refused", &self.refused)
             .field("unanswered", &self.unanswered)
             .field("skipped", &self.skipped())
+            .field("commands_refused", &self.commands_refused())
+            .field("responses_lost", &self.responses_lost())
+            .field("leaked_buffers", &self.leaked_buffers())
+            .field("mirror_refused", &self.mirror_refused())
             .finish_non_exhaustive()
     }
 }
@@ -97,6 +119,46 @@ impl ChunkCounters {
     /// Reads the bridge thread's count of skipped chunks (the node's bind).
     pub fn attach_skipped(&self, skipped: Tally<u64>) {
         let _ = self.skipped.set(skipped);
+    }
+
+    /// Reads the bridge's count of refused commands (the node's bind).
+    pub fn attach_commands_refused(&self, refused: Tally<u64>) {
+        let _ = self.commands_refused.set(refused);
+    }
+
+    /// See `PluginControls::refused_commands`.
+    pub fn commands_refused(&self) -> u64 {
+        self.commands_refused.get().map_or(0, Tally::get)
+    }
+
+    /// Reads the bridge's count of lost audio responses (the node's bind).
+    pub fn attach_responses_lost(&self, lost: Tally<u64>) {
+        let _ = self.responses_lost.set(lost);
+    }
+
+    /// See `PluginControls::lost_responses`.
+    pub fn responses_lost(&self) -> u64 {
+        self.responses_lost.get().map_or(0, Tally::get)
+    }
+
+    /// Reads the payload pool's count of leaked buffers (the node's bind).
+    pub fn attach_leaked_buffers(&self, leaked: Tally<u64>) {
+        let _ = self.leaked_buffers.set(leaked);
+    }
+
+    /// See `PluginControls::leaked_buffers`.
+    pub fn leaked_buffers(&self) -> u64 {
+        self.leaked_buffers.get().map_or(0, Tally::get)
+    }
+
+    /// Reads the editor mirror's count of refused writes (the node's bind).
+    pub fn attach_mirror_refused(&self, refused: Tally<u64>) {
+        let _ = self.mirror_refused.set(refused);
+    }
+
+    /// See `PluginControls::mirror_writes_refused`.
+    pub fn mirror_refused(&self) -> u64 {
+        self.mirror_refused.get().map_or(0, Tally::get)
     }
 
     /// See `PluginControls::skipped_chunks`.

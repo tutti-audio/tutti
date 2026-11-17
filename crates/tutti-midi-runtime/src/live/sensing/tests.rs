@@ -84,9 +84,9 @@ fn each_group_is_judged_alone() {
 /// The limit is 330 ms of the rate it is built at.
 #[test]
 fn the_limit_is_330_ms_at_the_rate() {
-    assert_eq!(watch().limit(), Samples(15_840));
+    assert_eq!(watch().limit, Samples(15_840));
     assert_eq!(
-        ActiveSensing::at_rate(SampleRate::SR_44K1).limit(),
+        ActiveSensing::at_rate(SampleRate::SR_44K1).limit,
         Samples(14_553)
     );
 }

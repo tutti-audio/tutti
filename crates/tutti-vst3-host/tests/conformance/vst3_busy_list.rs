@@ -20,7 +20,7 @@ fn a_block_is_skipped_while_the_plugin_holds_the_input_list() {
     let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
     let input = [[1.0f32; 16]; 2];
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let render = |plugin: &mut Active| {
         let mut out = [[9.0f32; 16]; 2];
         let [l, r] = &mut out;
@@ -66,7 +66,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
     let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
     let input = [[1.0f32; 16]; 2];
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
     automation.add_change(0u32.into(), 0, 0.5);
     let render = |plugin: &mut Active| {
@@ -130,7 +130,7 @@ fn a_refused_set_processing_fails_the_block() {
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     assert!(result.is_err(), "the refusal fails the block");
     assert!(

@@ -83,7 +83,7 @@ fn two_hundred_parameters_changing_in_one_block_all_arrive() {
     let arrived = until(
         SETTLE,
         || {
-            rig.run(BLOCK, |_, _| 0.0);
+            rig.run_answered(BLOCK, |_, _| 0.0);
         },
         || (0..PARAMS).all(|i| read(&handle, i) == Some(value(i))),
     );
@@ -116,7 +116,7 @@ fn an_unchanged_value_is_not_sent_again() {
         SETTLE,
         || {
             resend(&knobs);
-            rig.run(BLOCK, |_, _| 0.0);
+            rig.run_answered(BLOCK, |_, _| 0.0);
         },
         || (0..PARAMS).all(|i| read(&handle, i) == Some(value(i))),
     ));
@@ -124,7 +124,7 @@ fn an_unchanged_value_is_not_sent_again() {
     assert_eq!(settled, PARAMS as u64, "one point per parameter");
     for _ in 0..50 {
         resend(&knobs);
-        rig.run(BLOCK, |_, _| 0.0);
+        rig.run_answered(BLOCK, |_, _| 0.0);
     }
     assert_eq!(
         rig.controls.param_delivery().points_sent,
@@ -136,7 +136,7 @@ fn an_unchanged_value_is_not_sent_again() {
     assert!(until(
         SETTLE,
         || {
-            rig.run(BLOCK, |_, _| 0.0);
+            rig.run_answered(BLOCK, |_, _| 0.0);
         },
         || read(&handle, 3) == Some(0.875),
     ));
@@ -162,7 +162,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
     assert!(until(
         SETTLE,
         || {
-            rig.run(BLOCK, |_, _| 0.0);
+            rig.run_answered(BLOCK, |_, _| 0.0);
         },
         || read(&handle, p) == Some(0.25),
     ));
@@ -173,7 +173,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         until(
             SETTLE,
             || {
-                rig.run(BLOCK, |_, _| 0.0);
+                rig.run_answered(BLOCK, |_, _| 0.0);
             },
             || read(&handle, p) == Some(0.75)
         ),
@@ -181,12 +181,10 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
     );
     for _ in 0..100 {
         knobs[p].resync();
-        rig.run(BLOCK, |_, _| 0.0);
+        rig.run_answered(BLOCK, |_, _| 0.0);
     }
-    // Long enough for any resend to have crossed the server: a block takes
-    // a few milliseconds there.
-    std::thread::sleep(Duration::from_millis(200));
-    rig.run(BLOCK, |_, _| 0.0);
+    // Every block was answered by the server, so any resend has crossed it.
+    rig.run_answered(BLOCK, |_, _| 0.0);
     assert_eq!(
         read(&handle, p),
         Some(0.75),
@@ -198,7 +196,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         until(
             SETTLE,
             || {
-                rig.run(BLOCK, |_, _| 0.0);
+                rig.run_answered(BLOCK, |_, _| 0.0);
             },
             || read(&handle, p) == Some(0.5),
         ),
@@ -267,7 +265,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     assert!(
         until(
             SETTLE,
-            || *last.borrow_mut() = live.run(FORK_BLOCK, |_, _| 0.0),
+            || *last.borrow_mut() = live.run_answered(FORK_BLOCK, |_, _| 0.0),
             || near(&last.borrow(), -6.0)
         ),
         "the held host value reached the plugin"
@@ -281,7 +279,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     assert!(
         until(
             SETTLE,
-            || *last.borrow_mut() = live.run(FORK_BLOCK, |_, _| 0.0),
+            || *last.borrow_mut() = live.run_answered(FORK_BLOCK, |_, _| 0.0),
             || near(&last.borrow(), -15.0)
         ),
         "the edit reached the plugin"
@@ -291,7 +289,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     // not a value).
     let mut heard = None;
     for _ in 0..20 {
-        let out = live.run(FORK_BLOCK, |_, _| 0.0);
+        let out = live.run_answered(FORK_BLOCK, |_, _| 0.0);
         assert!(
             !near(&out, -6.0),
             "live re-sent the held value over the edit"
@@ -299,7 +297,6 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         if let Some(&s) = out.first().and_then(|c| c.last()).filter(|&&s| s != 0.0) {
             heard = Some(s);
         }
-        std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
         heard.is_some_and(|s| (s - amplitude(-15.0)).abs() < 1e-4),
