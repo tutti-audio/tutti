@@ -487,12 +487,12 @@ fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
 fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
     for hz in [1.0f64, 50.0, 97.0] {
         let (mut bank, mut glides) = settled(SampleRate::of(hz), &FreeverbControls::GENERAL_MIDI);
-        assert!(bank.combs.iter().flatten().all(|c| !c.buffer.is_empty()));
+        assert!(bank.combs.iter().flatten().all(|c| c.buffer.len() >= 1));
         assert!(
             bank.all_passes
                 .iter()
                 .flatten()
-                .all(|a| !a.buffer.is_empty())
+                .all(|a| a.buffer.len() >= 1)
         );
         let (l, r) = run(&mut bank, &mut glides, &impulse(2_000), 64);
         assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");

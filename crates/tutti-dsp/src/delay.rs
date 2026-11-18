@@ -4,6 +4,7 @@
 mod bank;
 mod layout;
 mod max_delay;
+mod ring;
 mod routing;
 mod taps;
 mod times;
@@ -11,6 +12,7 @@ mod times;
 pub use bank::{DelayBank, DelayGlides, DelayLanes};
 pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
+pub(crate) use ring::DelayRing;
 pub use routing::{Routing, RoutingError};
 pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
@@ -53,15 +55,13 @@ pub enum InterpolationMode {
 /// [`read_whole`]: Self::read_whole
 #[derive(Clone)]
 pub struct DelayLine {
-    buffer: Vec<f32>,
-    write_pos: usize,
+    ring: DelayRing,
     max_delay_samples: usize,
 }
 
 impl std::fmt::Debug for DelayLine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DelayLine")
-            .field("write_pos", &self.write_pos)
             .field("max_delay_samples", &self.max_delay_samples)
             .finish_non_exhaustive()
     }
@@ -77,8 +77,7 @@ impl DelayLine {
     pub fn new(capacity: Samples) -> Self {
         let max_delay_samples = capacity.get();
         Self {
-            buffer: vec![0.0; max_delay_samples + 1],
-            write_pos: 0,
+            ring: DelayRing::new(max_delay_samples + 1),
             max_delay_samples,
         }
     }
@@ -90,11 +89,7 @@ impl DelayLine {
     /// skipped or doubled push shifts every subsequent read by that much.
     #[inline]
     pub fn push_sample(&mut self, sample: f32) {
-        self.buffer[self.write_pos] = sample;
-        self.write_pos += 1;
-        if self.write_pos >= self.buffer.len() {
-            self.write_pos = 0;
-        }
+        self.ring.push(sample);
     }
 
     /// Reads the line `delay_samples` frames back from the newest write,
@@ -143,8 +138,7 @@ impl DelayLine {
     ///
     /// Does not reallocate, so it is safe on the audio thread.
     pub fn reset(&mut self) {
-        self.buffer.fill(0.0);
-        self.write_pos = 0;
+        self.ring.clear();
     }
 
     /// Reads the line `frames` frames back from the newest write, a whole number and no
@@ -153,11 +147,9 @@ impl DelayLine {
     #[inline]
     #[must_use]
     pub fn read_whole(&self, frames: usize) -> f32 {
-        let len = self.buffer.len();
-        // `write_pos < len` and the clamped delay is below `len`, so the sum
-        // is below `2 * len`: one conditional subtract wraps it.
-        let idx = self.write_pos + len - 1 - frames.min(self.max_delay_samples);
-        self.buffer[if idx >= len { idx - len } else { idx }]
+        // The newest write is one slot behind the cursor, and the clamped read is at
+        // most `max_delay_samples`, so the ring (one frame longer) holds it.
+        self.ring.back(frames.min(self.max_delay_samples) + 1)
     }
 }
 
