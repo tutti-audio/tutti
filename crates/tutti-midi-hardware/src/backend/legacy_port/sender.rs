@@ -1,7 +1,6 @@
 //! An output's sender: a thread's loop over an [`Outbox`], with the sending and
 //! the waiting left to the platform.
 
-use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tutti_rt::LockExt;
@@ -68,8 +67,6 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     losses: CounterWriter<Losses>,
     setup: impl FnOnce() -> (Send, Wait),
 ) where
-    S: Display,
-    W: Display,
     Send: FnMut(T) -> Result<(), S>,
     Wait: FnMut(Option<Duration>) -> Result<(), W>,
 {
@@ -82,15 +79,17 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
         match step {
             Next::Stop => return,
             Next::Send(event) => {
-                if let Err(e) = send(event) {
-                    tracing::debug!("MIDI send: {e}");
+                // A refused send is counted: the sender's thread is a driver's,
+                // and logs nothing.
+                if send(event).is_err() {
                     ends.1.add(Losses::lost(1));
                 }
                 mailbox.state().done();
             }
             Next::Wait(time) => {
-                if let Err(e) = wait(time) {
-                    tracing::warn!("MIDI output stopped: {e}");
+                // A wait that fails ends the sender; the mailbox reads dead and
+                // what it held is counted refused.
+                if wait(time).is_err() {
                     return;
                 }
             }

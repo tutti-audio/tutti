@@ -51,9 +51,14 @@ impl core::fmt::Debug for UmpVirtualDestination {
     }
 }
 
-/// Every message delivered is on CoreMIDI's thread, and the endpoint is
-/// disposed by the drop: nothing to report beyond that it delivers.
-impl InputConnection for UmpVirtualDestination {}
+/// The endpoint catches a panic in its receive callback and counts it
+/// ([`UmpDestination::faults`]); after one the callback delivers nothing, so
+/// the destination reads as gone.
+impl InputConnection for UmpVirtualDestination {
+    fn is_alive(&self) -> bool {
+        self._destination.faults() == 0
+    }
+}
 
 impl UmpVirtualDestination {
     /// Publishes the destination `spec` describes, pushing every received
@@ -77,9 +82,9 @@ impl UmpVirtualDestination {
             spec.name().as_str(),
             spec.protocol(),
             move |event, arrived| {
-                if producer.push(event, arrived) == Err(tutti_rt::PushError::Full) {
-                    debug!("UMP input ring full, dropping event");
-                }
+                // A full inlet counts the drop itself; a log line would run on
+                // CoreMIDI's thread.
+                let _ = producer.push(event, arrived);
             },
         )
     }

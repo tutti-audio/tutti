@@ -86,46 +86,42 @@ fn a_virtual_destination_comes_and_goes_and_the_watch_unregisters() {
     assert_eq!(registered(), 0);
 }
 
-/// The notification path itself: with the engine's shared client created first,
-/// as `Devices::open` does, CoreMIDI still delivers the hub's notifications, and
-/// they arrive on the hub's client (`CALLBACKS`), not through the idle look.
+/// With the engine's shared client created first, as `Devices::open` does, a
+/// virtual destination that appears is still reported `Added`: the change
+/// reaches the watch's receiver, which is waited on (`PATIENCE` only guards a
+/// hang).
 #[test]
-fn notifications_reach_the_hub_when_the_shared_client_is_created() {
+fn a_change_is_reported_when_the_shared_client_is_created_first() {
     let _ = crate::backend::coremidi::shared_client().expect("shared client");
-    hub().expect("hub");
-    let before = CALLBACKS.load(std::sync::atomic::Ordering::Relaxed);
+    let devices = Watched::open();
     let name = format!("tutti-callbacks-{}", std::process::id());
     let destination =
         UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
-    let deadline = Instant::now() + PATIENCE;
-    while CALLBACKS.load(std::sync::atomic::Ordering::Relaxed) == before {
-        assert!(
-            Instant::now() < deadline,
-            "no notification reached the hub's client"
-        );
-        // Observing another process (CoreMIDI): a short wait, bounded above.
-        std::thread::park_timeout(Duration::from_millis(50));
-    }
+    until(
+        &devices,
+        |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
+    );
     drop(destination);
 }
 
-/// As above, with a virtual source first: its raw client is the other creation
-/// site.
+/// As above, with a virtual source created before the watch: its raw client is
+/// the other creation site, and a destination that appears after the watch
+/// opened is still reported.
 #[test]
-fn notifications_reach_the_hub_when_a_virtual_source_comes_first() {
+fn a_change_is_reported_when_a_virtual_source_comes_first() {
     use crate::backend::coremidi::UmpVirtualSource;
-    let name = format!("tutti-source-{}", std::process::id());
-    let before = CALLBACKS.load(std::sync::atomic::Ordering::Relaxed);
-    let source = UmpVirtualSource::new(&name, VirtualProtocol::Midi2).expect("creates");
-    let deadline = Instant::now() + PATIENCE;
-    while CALLBACKS.load(std::sync::atomic::Ordering::Relaxed) == before {
-        assert!(
-            Instant::now() < deadline,
-            "no notification reached the hub's client"
-        );
-        std::thread::park_timeout(Duration::from_millis(50));
-    }
-    drop(source);
+    let pid = std::process::id();
+    let source = UmpVirtualSource::new(&format!("tutti-source-{pid}"), VirtualProtocol::Midi2)
+        .expect("creates");
+    let devices = Watched::open();
+    let name = format!("tutti-after-source-{pid}");
+    let destination =
+        UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    until(
+        &devices,
+        |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
+    );
+    drop((destination, source));
 }
 
 /// **A hub whose loop has no source looks once per `IDLE_LOOK`**: a run shorter
