@@ -15,6 +15,7 @@ use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
 
 use crate::ledger::NoteLedger;
 use crate::{MidiClipControls, MidiClipNode, TimedMidiEvent};
+use tutti_buffers::Float;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
@@ -115,7 +116,7 @@ impl Sink {
     }
 }
 
-impl Node for Sink {
+impl<F: Float> Node<F> for Sink {
     fn shape(&self) -> Shape {
         let layout = |on| {
             if on {
@@ -131,7 +132,7 @@ impl Node for Sink {
         .with_events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let mut t = self.tally.lock().unwrap();
         for e in io.events(0) {
             let EventKind::Midi(Ump(w)) = e.kind else {
@@ -153,7 +154,7 @@ impl Node for Sink {
             }
         }
         if self.audio_out {
-            io.output(0).fill(0.0);
+            io.output(0).fill(F::ZERO);
             return Status::Modified;
         }
         Status::Silent
@@ -196,13 +197,13 @@ impl IntoNode for ForkableSink {
 /// other path into a node it shares with a sink.
 struct Latent(usize);
 
-impl Node for Latent {
+impl<F: Float> Node<F> for Latent {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.output(0).fill(0.0);
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        io.output(0).fill(F::ZERO);
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -267,14 +268,14 @@ struct Script {
     k: usize,
 }
 
-impl Node for Script {
+impl<F: Float> Node<F> for Script {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
             .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         if let Some(block) = self.blocks.get(self.k) {
             let out = io.event_out(0);
             for u in block {
@@ -293,14 +294,14 @@ struct Relay {
     capacity: u32,
 }
 
-impl Node for Relay {
+impl<F: Float> Node<F> for Relay {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
             .with_event_capacity(std::num::NonZeroU32::new(self.capacity).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let events = io.events(0);
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
@@ -795,14 +796,14 @@ struct Probe {
     k: usize,
 }
 
-impl Node for Probe {
+impl<F: Float> Node<F> for Probe {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
             .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
         };
@@ -1103,14 +1104,14 @@ struct SendThenRelease {
     block: u32,
 }
 
-impl Node for SendThenRelease {
+impl<F: Float> Node<F> for SendThenRelease {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
             .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let first = cx.env.offset(0).unwrap();
         let mut sending = self.ledger.block(io.event_out(0), first);
         if self.block == 0 {

@@ -5,7 +5,9 @@
 //! **Library code** is every `crates/*/src/**/*.rs` file that is not under a `tests`,
 //! `benches` or `examples` directory, not a file named `tests.rs` or ending `_tests.rs` and not a `contract`,
 //! `testing` or `test_support` module (`contract.rs`, `testing.rs`, `test_support.rs` or a
-//! directory of that name). Its text
+//! directory of that name), and not a file its parent declares as a module behind a
+//! `#[cfg(test)]` (`#[cfg(test)] mod doubles;` makes `doubles.rs`, `doubles/mod.rs`, a
+//! `#[path]` target and everything under `doubles/` test code). Its text
 //! is read with comments and literals blanked (so `//`, `///` and `//!` lines and doc
 //! examples are not code) with every test-only item blanked: the item behind a
 //! `#[cfg(test)]` (or `#[cfg(all(.., test, ..))]`), up to its `;` for an out-of-line `mod
@@ -20,7 +22,9 @@
 //! - `as_f32`: `as f32`. Text cannot tell a float cast from an integer one, so the cast is
 //!   refused outright; an integer-to-float conversion goes through a named helper;
 //! - `lit`: a `::lit(` or `.lit(` call whose argument is not a numeric literal.
-//!   `F::lit(0.5)` is allowed; `f64::from` is lossless and is never refused;
+//!   `F::lit(0.5)` is allowed; `f64::from` is lossless and is never refused.
+//!   `F::from_unit(q)` and `F::from_design(x)` are the named crossings and are never
+//!   refused; review holds `from_design` to a kernel's design function;
 //! - `plain_node`: an `impl Node for X` or `impl Node<f32> for X` with no `F`, an f32-only
 //!   node (event-only nodes included);
 //! - `fn_twin`: a `pub fn` named `*_f32` or `*_f64`;
@@ -38,12 +42,14 @@
 //! An [`EDGES`] path (a file, or a directory ending in `/`) that matches no library file
 //! fails like a stale baseline row, so the list names only files that exist.
 //!
-//! **Baseline.** [`BASELINE`] holds `<path>  <max>  migrating: <PR or step>` rows, one per
-//! file, `#` lines and blank lines aside. A file fails when it holds more sites than its
+//! **Baseline.** [`BASELINE`] holds `<path>  <max>  <reason>` rows, one per file, `#`
+//! lines and blank lines aside. The reason is `migrating: <PR or step>`, debt a lane
+//! removes, or `spec: <the external fact>`, a site an outside specification fixes (a
+//! plugin format's audio width): kept, still counted and still ratcheted. A file fails when it holds more sites than its
 //! max (a file with no row has max 0), naming each site. A row whose file holds no site
 //! fails (delete it), and so does a row for an unknown reason, a malformed row and a file
 //! listed twice. A file below its max passes and the report says how far it can drop.
-//! The baseline ends empty.
+//! The baseline ends with `spec:` rows only.
 //!
 //! **Blind spots.** The scan is lexical: it cannot see a cast hidden in a macro body that
 //! the macro's caller writes, a type alias that hides `f32`, a `lit` argument that is a
@@ -55,7 +61,8 @@ use super::lex::{blank, find_word_from, line_of, matching, test_ranges};
 use super::{Report, Tree};
 use std::collections::BTreeMap;
 
-/// The baseline: `<path>  <max>  migrating: <PR or step>` per file.
+/// The baseline: `<path>  <max>  migrating: <PR or step>` or `<path>  <max>  spec: <fact>`
+/// per file.
 pub(crate) const BASELINE: &str = "xtask/width-baseline.txt";
 
 const GATE: &str = "check-width";
@@ -68,7 +75,7 @@ pub(super) const MIN_FILES: usize = 500;
 pub(super) const EDGES: &[(&str, &str)] = &[
     (
         "crates/tutti-units/src/real.rs",
-        "`Real::from_unit` and `Real::lit`: the quantity-to-data crossing",
+        "`Real::from_unit`, `Real::from_design` and `Real::lit`: the quantity and design-figure crossings into data",
     ),
     (
         "crates/tutti-buffers/src/sample.rs",
@@ -260,7 +267,8 @@ fn skipped(dir: &str) -> bool {
 
 /// The library files of `crates/*/src`.
 fn library_files(tree: &dyn Tree) -> Vec<String> {
-    tree.files("crates", &skipped)
+    let files: Vec<String> = tree
+        .files("crates", &skipped)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();
@@ -281,7 +289,75 @@ fn library_files(tree: &dyn Tree) -> Vec<String> {
                     )
                 })
         })
+        .collect();
+    let test_only = test_modules(tree, &files);
+    files
+        .into_iter()
+        .filter(|f| {
+            !test_only
+                .iter()
+                .any(|t| f == t || t.strip_suffix(".rs").is_some_and(|d| under(f, d)))
+        })
         .collect()
+}
+
+/// Whether `file` sits in directory `dir`, at any depth.
+fn under(file: &str, dir: &str) -> bool {
+    file.strip_prefix(dir)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// The files of `files` that a parent declares as an out-of-line module behind a
+/// `#[cfg(test)]` (`#[cfg(test)] mod doubles;`): `doubles.rs`, `doubles/mod.rs`, or
+/// the `#[path]` the declaration names. Such a file is all test code; a file under a
+/// test module's directory is too (the caller skips `doubles/` for `doubles.rs`).
+fn test_modules(tree: &dyn Tree, files: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for parent in files {
+        let Some(src) = tree.read(parent) else {
+            continue;
+        };
+        let blanked = blank(&src);
+        let (dir, file) = parent.rsplit_once('/').unwrap_or(("", parent));
+        let module_dir = match file {
+            "lib.rs" | "main.rs" | "mod.rs" => dir.to_owned(),
+            f => format!("{dir}/{}", f.trim_end_matches(".rs")),
+        };
+        for (from, to) in test_ranges(&blanked) {
+            let item = &blanked[from..to.min(blanked.len())];
+            let Some(name) = out_of_line_mod(item) else {
+                continue;
+            };
+            let raw = &src[from..to.min(src.len())];
+            let candidates = match path_attr(raw) {
+                Some(path) => vec![format!("{dir}/{path}")],
+                None => vec![
+                    format!("{module_dir}/{name}.rs"),
+                    format!("{module_dir}/{name}/mod.rs"),
+                ],
+            };
+            out.extend(candidates.into_iter().filter(|c| files.contains(c)));
+        }
+    }
+    out
+}
+
+/// The name of an out-of-line module declaration (`mod x;`, `pub(crate) mod x;`) that
+/// `item` ends with, or `None` for any other item.
+fn out_of_line_mod(item: &str) -> Option<&str> {
+    let body = item.trim_end().strip_suffix(';')?;
+    let at = find_word_from(body, "mod", 0)?;
+    let name = body[at + 3..].trim();
+    (!name.is_empty() && name.bytes().all(word)).then_some(name)
+}
+
+/// The path a `#[path = "x"]` attribute in `raw` names, read from the unblanked text.
+fn path_attr(raw: &str) -> Option<&str> {
+    let at = raw.find("#[path")?;
+    let rest = &raw[at..];
+    let open = rest.find('"')? + 1;
+    let close = rest[open..].find('"')? + open;
+    Some(&rest[open..close])
 }
 
 /// The offsets of `needle` (a path or method spelling) followed by optional whitespace and `(`.
@@ -488,6 +564,9 @@ struct Row {
 }
 
 /// The baseline's rows, or what is malformed in them.
+/// The reason kinds a row may give, each followed by its text.
+const REASONS: [&str; 2] = ["migrating:", "spec:"];
+
 fn parse(text: &str) -> Result<BTreeMap<String, Row>, Vec<String>> {
     let mut rows = BTreeMap::new();
     let mut errors = Vec::new();
@@ -504,7 +583,10 @@ fn parse(text: &str) -> Result<BTreeMap<String, Row>, Vec<String>> {
             .unwrap_or((rest, ""));
         let (max, why) = (
             max.parse::<usize>().ok(),
-            reason.trim().strip_prefix("migrating:").map(str::trim),
+            REASONS
+                .iter()
+                .find_map(|k| reason.trim().strip_prefix(k))
+                .map(str::trim),
         );
         match (max, why) {
             (Some(max), Some(w)) if !w.is_empty() && max > 0 => {
@@ -513,7 +595,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, Row>, Vec<String>> {
                 }
             }
             _ => errors.push(format!(
-                "  {BASELINE}:{at}: `{line}` is not `<path>  <max>  migrating: <PR or step>` with a max above 0"
+                "  {BASELINE}:{at}: `{line}` is not `<path>  <max>  migrating: <PR or step>` or `<path>  <max>  spec: <fact>` with a max above 0"
             )),
         }
     }
@@ -676,6 +758,14 @@ mod tests {
     }
 
     #[test]
+    fn the_named_crossings_are_no_site() {
+        assert!(
+            forms("fn d() { let g = F::from_design(k.tan()); let c = F::from_unit(hz); }")
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn each_cast_spelling_is_a_site_on_any_path() {
         assert_eq!(forms("fn f() { let a = F::from_f32(x); }"), ["from_f32"]);
         assert_eq!(
@@ -765,6 +855,40 @@ mod tests {
         let src = "#[cfg(test)]\nmod t { fn a() { y as f32; } }\nfn b() { z.to_f32(); }\n\
                    #[cfg(test)]\nuse x::y;\nfn c() { w as f32; }\n";
         assert_eq!(forms(src), ["to_f32", "as_f32"]);
+    }
+
+    #[test]
+    fn a_file_its_parent_declares_under_cfg_test_is_not_library_code() {
+        let bad = "fn f() { x as f32; }\n";
+        let r = run(
+            "",
+            &[
+                (
+                    "crates/a/src/lib.rs",
+                    "#[cfg(test)]\nmod doubles;\nmod live;\n",
+                ),
+                ("crates/a/src/doubles.rs", bad),
+                ("crates/a/src/doubles/inner.rs", bad),
+                ("crates/a/src/live.rs", bad),
+                (
+                    "crates/a/src/ledger.rs",
+                    "#[cfg(test)]\npub(crate) mod graphs;\n",
+                ),
+                ("crates/a/src/ledger/graphs/mod.rs", bad),
+                (
+                    "crates/a/src/lib2.rs",
+                    "#[cfg(test)]\n#[path = \"lib2/fake.rs\"]\nmod fake;\n",
+                ),
+                ("crates/a/src/lib2/fake.rs", bad),
+            ],
+        );
+        assert_eq!(
+            r.findings[1..],
+            [
+                "  crates/a/src/live.rs: 1 sites, max 0",
+                "    as_f32: line 1"
+            ]
+        );
     }
 
     #[test]
@@ -972,6 +1096,8 @@ mod tests {
             "crates/a/src/lib.rs  0  migrating: B2/B3",
             "crates/a/src/lib.rs  1  later",
             "crates/a/src/lib.rs  1  migrating:",
+            "crates/a/src/lib.rs  1  spec:",
+            "crates/a/src/lib.rs  1  spec-f32: CLAP",
             "crates/a/src/lib.rs  1  ffi",
         ] {
             let r = run(&format!("{row}\n"), &[(F, "fn f() { a as f32; }\n")]);
@@ -982,6 +1108,17 @@ mod tests {
             "crates/a/src/lib.rs  1  migrating: B2/B3\ncrates/a/src/lib.rs  2  migrating: B2/B3\n";
         let r = run(twice, &[(F, "fn f() { a as f32; }\n")]);
         assert!(r.findings[1].ends_with("is listed twice"));
+    }
+
+    #[test]
+    fn a_spec_row_is_kept_counted_and_ratcheted() {
+        let row =
+            "crates/a/src/lib.rs  1  spec: f32 is the audio width every plugin format processes\n";
+        assert!(run(row, &[(F, "fn f() { a as f32; }\n")]).passed());
+        let over = run(row, &[(F, "fn f() { a as f32; b as f32; }\n")]);
+        assert!(!over.passed(), "a spec row holds its max like any row");
+        let stale = run(row, &[(F, "fn f() {}\n")]);
+        assert!(!stale.passed(), "a spec row whose site is gone is deleted");
     }
 
     #[test]
