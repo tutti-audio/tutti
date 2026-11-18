@@ -4,6 +4,7 @@
 mod auth;
 mod discovery;
 mod props;
+mod roles;
 mod sessions;
 mod sim;
 mod udp;

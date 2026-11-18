@@ -21,7 +21,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderControls,
     LadderDesign, LadderModel, LadderType, Lanes, PhaserChain, Stages, StreamingResampler, SvfBank,
-    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_coeff,
+    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_types::ChannelLayout;
@@ -209,7 +209,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
         for fc in [300.0f64, 2_000.0, 10_000.0] {
-            let c = allpass_coeff(Hz(fc), SampleRate::of(RATE));
+            let c = allpass_complement(Hz(fc), SampleRate::of(RATE));
             let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];

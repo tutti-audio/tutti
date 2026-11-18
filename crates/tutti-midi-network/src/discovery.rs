@@ -52,6 +52,9 @@ pub enum DiscoveryError {
     /// The Product Instance Id in the TXT record is not a valid Id.
     #[error("the ProductInstanceId is invalid")]
     InstanceId(#[source] NameError),
+    /// A TXT value is empty, which M2-124 section 4.4 does not allow.
+    #[error("the TXT value of {0} is empty")]
+    Empty(&'static str),
     /// The service resolved with no address.
     #[error("the service has no address")]
     NoAddress,
@@ -61,10 +64,10 @@ pub enum DiscoveryError {
 #[must_use]
 pub fn txt_properties(identity: &EndpointIdentity) -> [(&'static str, String); 2] {
     [
-        (KEY_ENDPOINT_NAME, identity.name.as_str().to_owned()),
+        (KEY_ENDPOINT_NAME, identity.name().as_str().to_owned()),
         (
             KEY_PRODUCT_INSTANCE_ID,
-            identity.instance_id.as_str().to_owned(),
+            identity.instance_id().as_str().to_owned(),
         ),
     ]
 }
@@ -73,7 +76,7 @@ pub fn txt_properties(identity: &EndpointIdentity) -> [(&'static str, String); 2
 /// and its name, cut to a DNS label.
 #[must_use]
 pub fn instance_name(identity: &EndpointIdentity) -> String {
-    let full = format!("{}-{}", identity.instance_id, identity.name);
+    let full = format!("{}-{}", identity.instance_id(), identity.name());
     let mut end = full.len().min(LABEL_MAX);
     while !full.is_char_boundary(end) {
         end -= 1;
@@ -186,13 +189,30 @@ impl FoundHost {
         addresses.sort();
         Ok(Self {
             fullname: service.get_fullname().to_owned(),
-            identity: EndpointIdentity {
-                name: name.parse().map_err(DiscoveryError::EndpointName)?,
-                instance_id: id.parse().map_err(DiscoveryError::InstanceId)?,
-            },
+            identity: identity_from_txt(name, id)?,
             addresses,
         })
     }
+}
+
+/// The identity a TXT record's Endpoint Name and Product Instance Id values
+/// name: both are valid and neither is empty (M2-124 section 4.4).
+///
+/// # Errors
+///
+/// [`DiscoveryError::EndpointName`] or [`DiscoveryError::InstanceId`] for a
+/// value that is not valid text, and [`DiscoveryError::Empty`] for an empty
+/// one.
+pub fn identity_from_txt(name: &str, id: &str) -> Result<EndpointIdentity, DiscoveryError> {
+    let name = name.parse().map_err(DiscoveryError::EndpointName)?;
+    let id = id.parse().map_err(DiscoveryError::InstanceId)?;
+    EndpointIdentity::new(name, id).ok_or_else(|| {
+        DiscoveryError::Empty(if name.is_empty() {
+            KEY_ENDPOINT_NAME
+        } else {
+            KEY_PRODUCT_INSTANCE_ID
+        })
+    })
 }
 
 fn txt_text<'a>(
