@@ -158,7 +158,7 @@ impl OutputPolicyHandle<'_> {
         // A level that is not a gain is refused even where no monitor uses it.
         policy.levels.check().map_err(RoutingError::Fold)?;
         let root = self.graph.root_in_force();
-        policy.routing().fold(&root, &placed)?;
+        policy.routing().fold::<f32>(&root, &placed)?;
         *self.policy = policy;
         *self.staged = true;
         Ok(())

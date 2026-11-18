@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use tutti_buffers::SampleFormat;
+use tutti_buffers::{Float, SampleFormat};
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
@@ -144,28 +144,60 @@ impl RunningStream for CpalStream {
     }
 }
 
-impl StreamDriver for CpalDriver {
-    type Running = CpalStream;
-    type Error = Error;
+/// The graph's float formats the device edge converts from: cpal's sample types
+/// convert from `f32` and `f64` (`cpal::FromSample`).
+macro_rules! stream_driver_for {
+    ($($float:ty),+) => {$(
+        impl StreamDriver<$float> for CpalDriver {
+            type Running = CpalStream;
+            type Error = Error;
 
-    fn open(
+            fn open(
+                self,
+                spec: &OutputSpec,
+                block: OutputBlock<$float>,
+                faults: Arc<StreamFaults>,
+            ) -> Result<CpalStream> {
+                self.open_stream(spec, block, faults)
+            }
+        }
+    )+};
+}
+
+stream_driver_for!(f32, f64);
+
+impl CpalDriver {
+    /// Opens `block` on the device in the device's own sample type, converting
+    /// from the graph's `F` per sample at the edge.
+    fn open_stream<F>(
         self,
         spec: &OutputSpec,
-        block: OutputBlock,
+        block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<CpalStream> {
+    ) -> Result<CpalStream>
+    where
+        F: Float,
+        i8: cpal::FromSample<F>,
+        i16: cpal::FromSample<F>,
+        i32: cpal::FromSample<F>,
+        u8: cpal::FromSample<F>,
+        u16: cpal::FromSample<F>,
+        u32: cpal::FromSample<F>,
+        f32: cpal::FromSample<F>,
+        f64: cpal::FromSample<F>,
+    {
         let config = stream_config(spec);
         let format = self.format;
         Owned::spawn("tutti-output-stream", move || {
             let stream = match format {
-                cpal::SampleFormat::I8 => self.build::<i8>(&config, block, faults)?,
-                cpal::SampleFormat::I16 => self.build::<i16>(&config, block, faults)?,
-                cpal::SampleFormat::I32 => self.build::<i32>(&config, block, faults)?,
-                cpal::SampleFormat::U8 => self.build::<u8>(&config, block, faults)?,
-                cpal::SampleFormat::U16 => self.build::<u16>(&config, block, faults)?,
-                cpal::SampleFormat::U32 => self.build::<u32>(&config, block, faults)?,
-                cpal::SampleFormat::F32 => self.build::<f32>(&config, block, faults)?,
-                cpal::SampleFormat::F64 => self.build::<f64>(&config, block, faults)?,
+                cpal::SampleFormat::I8 => self.build::<i8, F>(&config, block, faults)?,
+                cpal::SampleFormat::I16 => self.build::<i16, F>(&config, block, faults)?,
+                cpal::SampleFormat::I32 => self.build::<i32, F>(&config, block, faults)?,
+                cpal::SampleFormat::U8 => self.build::<u8, F>(&config, block, faults)?,
+                cpal::SampleFormat::U16 => self.build::<u16, F>(&config, block, faults)?,
+                cpal::SampleFormat::U32 => self.build::<u32, F>(&config, block, faults)?,
+                cpal::SampleFormat::F32 => self.build::<f32, F>(&config, block, faults)?,
+                cpal::SampleFormat::F64 => self.build::<f64, F>(&config, block, faults)?,
                 // Checked by `CpalDriver::new`.
                 _ => unreachable!("sample format checked at construction"),
             };
@@ -174,17 +206,15 @@ impl StreamDriver for CpalDriver {
         })
         .map(CpalStream)
     }
-}
 
-impl CpalDriver {
-    fn build<T>(
+    fn build<T, F: Float>(
         &self,
         config: &cpal::StreamConfig,
-        mut block: OutputBlock,
+        mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<cpal::Stream>
     where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
+        T: cpal::SizedSample + cpal::FromSample<F>,
     {
         let channels = block.channels();
         let delivering = Arc::clone(&faults);

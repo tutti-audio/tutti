@@ -7,7 +7,7 @@ use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
 use tutti_session::{OutPort, Root, Session};
 use tutti_types::ChannelLayout;
-use tutti_units::SampleRate;
+use tutti_units::{SampleRate, Samples};
 
 #[path = "../support/rt_log.rs"]
 mod support;
@@ -37,7 +37,9 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
         let _ = session.update();
         // The first update stored the subscriber's filter: the block after it
         // logs.
-        stream.render_block(64).expect("the stream is open");
+        stream
+            .render_block(Samples(64))
+            .expect("the stream is open");
         let _ = session.update();
     });
 
@@ -86,7 +88,9 @@ fn nothing_is_logged_when_no_subscriber_takes_the_target() {
         .set_sources_hard(Root::output(0), [OutPort::new(noisy, 0)])
         .unwrap();
     let _ = session.update();
-    stream.render_block(64).expect("the stream is open");
+    stream
+        .render_block(Samples(64))
+        .expect("the stream is open");
     let events = rt_events(|| {
         let _ = session.update();
     });

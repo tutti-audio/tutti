@@ -10,6 +10,7 @@ mod pacer;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tutti_buffers::Float;
 use tutti_rt::{
     PriorityRequest, StopToken, ThreadHandle, monotonic_ns, sleep_until_ns, spawn_named,
 };
@@ -94,20 +95,20 @@ impl RunningStream for TimerRunning {
     }
 }
 
-impl StreamDriver for TimerDriver {
+impl<F: Float> StreamDriver<F> for TimerDriver {
     type Running = TimerRunning;
     type Error = TimerError;
 
     fn open(
         self,
         spec: &OutputSpec,
-        mut block: OutputBlock,
+        mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<TimerRunning, TimerError> {
         let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get().min(MAX_FRAMES);
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
-        let mut scratch = vec![0.0f32; block.layout().interleaved_len(Samples(frames))];
+        let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples(frames))];
         // A refusal of the priority leaves the thread at the default.
         let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
             let time = OsTime;

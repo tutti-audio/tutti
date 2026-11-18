@@ -7,12 +7,13 @@
 //! assertable.
 
 use std::sync::Arc;
+use tutti_buffers::Float;
 use tutti_engine::{AudioCallbackState, Engine};
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, OutPort, Prepare, Source};
+use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, OutPort, Prepare, Shape, Source, Status};
 use tutti_nodes::testing::Const;
 use tutti_transport::Transport;
-use tutti_types::MaxBlock;
+use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;
@@ -37,6 +38,44 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
         .expect("within the limits");
     // The editor outlives nothing here: a test process is the whole lifetime,
     // and nothing commits again.
+    Box::leak(Box::new(ed));
+    Arc::new(AudioCallbackState::new(engine))
+}
+
+/// A constant source in any sample format.
+#[derive(Clone)]
+struct Dc(f64);
+
+impl<F: Float> Node<F> for Dc {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        io.output(0).fill(F::from_f64(self.0));
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// [`dc_state`] in an `f64` graph.
+pub fn dc_state_f64(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
+    let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
+    let (mut ed, exec) = Editor::<f64>::with_format(Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
+    ed.spec_mut().topology.set_outputs(vec![
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0
+        });
+        outputs
+    ]);
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     Box::leak(Box::new(ed));
     Arc::new(AudioCallbackState::new(engine))
 }

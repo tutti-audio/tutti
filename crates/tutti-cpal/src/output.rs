@@ -6,6 +6,7 @@
 
 use cpal::traits::DeviceTrait;
 use std::sync::Arc;
+use tutti_buffers::Float;
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
 };
@@ -188,7 +189,10 @@ impl AudioEngine {
     /// [`Error::DeviceNotAvailable`] if the config cannot be read,
     /// [`Error::InvalidConfig`] for a sample format the engine does not build,
     /// or [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
-    pub fn start(&mut self, state: Arc<AudioCallbackState>) -> Result<()> {
+    pub fn start<F: Float>(&mut self, state: Arc<AudioCallbackState<F>>) -> Result<()>
+    where
+        CpalDriver: StreamDriver<F, Error = crate::Error>,
+    {
         if self.is_running() {
             return Err(Error::AlreadyRunning);
         }
@@ -257,12 +261,15 @@ impl AudioEngine {
     /// The hook's error, or what the driver's `open` reports, as `E`, **with
     /// the host back** and its stream stopped at its old spec: nothing plays,
     /// and the driver the host ran is to be started again by the caller.
-    pub fn start_resolved<E: From<Error>>(
+    pub fn start_resolved<F: Float, E: From<Error>>(
         self,
-        host: tutti_engine::StreamHost,
+        host: tutti_engine::StreamHost<F>,
         resolved: Resolved,
-        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)> {
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver<F>, (tutti_engine::StreamHost<F>, E)>
+    where
+        CpalDriver: StreamDriver<F, Error = crate::Error>,
+    {
         let (spec, driver, opened) = resolved.into_parts();
         crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, opened)
     }
@@ -275,13 +282,14 @@ impl AudioEngine {
     /// # Errors
     /// As [`start_resolved`](Self::start_resolved).
     #[cfg(feature = "testing")]
-    pub fn start_on<D: StreamDriver, E: From<Error>>(
+    pub fn start_on<F: Float, D: StreamDriver<F>, E: From<Error>>(
         self,
-        host: tutti_engine::StreamHost,
+        host: tutti_engine::StreamHost<F>,
         driver: D,
-        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)>
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver<F>, (tutti_engine::StreamHost<F>, E)>
     where
+        CpalDriver: StreamDriver<F, Error = crate::Error>,
         D::Error: Into<Error>,
     {
         let spec = self.spec().clone();
@@ -300,9 +308,9 @@ impl AudioEngine {
     /// [`Error::AlreadyRunning`] if a stream is running (it is left running);
     /// otherwise whatever the driver's [`open`](StreamDriver::open) reports; for
     /// [`CpalDriver`], [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
-    pub fn start_with<D: StreamDriver>(
+    pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
-        state: Arc<AudioCallbackState>,
+        state: Arc<AudioCallbackState<F>>,
         driver: D,
     ) -> Result<()>
     where

@@ -36,7 +36,7 @@
 //! `impl Foo<f32>` and an `impl Foo<f64>` each with `new`) share one row.
 //!
 //! **List.** [`LIST`] holds `<key>  <reason>` lines, `#` lines and blank lines
-//! aside. The reason is `pending`, `engine-f32` (until the engine edge goes
+//! aside. The reason is `pending`, `session-f32` (until the session goes
 //! generic), `ffi`, `not-audio: <why>` or `spec-f32: <why>`: a fixed `f32` on
 //! audio stays only where the item is not audio, the spec fixes `f32`, or the
 //! type is C ABI, IPC or wire. A free-text `measured:` row is refused.
@@ -488,7 +488,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 }
 
 /// Why `reason` is refused, or `None` when it is one of `allowed`: a bare kind
-/// (`pending`, `engine-f32`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
+/// (`pending`, `session-f32`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
 /// The reason kinds that carry a judgement, written `<kind>: <why>` with a
 /// non-empty why.
 const JUDGED: [&str; 3] = ["not-audio", "spec-f32", "not-interleave"];
@@ -527,7 +527,7 @@ pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
 }
 
 /// The reasons `LIST` accepts.
-const KINDS: [&str; 5] = ["pending", "engine-f32", "ffi", "not-audio", "spec-f32"];
+const KINDS: [&str; 5] = ["pending", "session-f32", "ffi", "not-audio", "spec-f32"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -690,7 +690,7 @@ mod tests {
         }
         for reason in [
             "pending",
-            "engine-f32",
+            "session-f32",
             "ffi",
             "not-audio: a magnitude spectrum",
             "spec-f32: control values",

@@ -333,7 +333,9 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
-    let _ = stream.render_block(512).expect("the stream is open");
+    let _ = stream
+        .render_block(Samples(512))
+        .expect("the stream is open");
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
@@ -405,7 +407,9 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
             driver,
         )
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
-    let _ = stream.render_block(256).expect("the stream is open");
+    let _ = stream
+        .render_block(Samples(256))
+        .expect("the stream is open");
     let _ = live.update();
     assert_eq!(
         live.graph_ref().node_latency(node).unwrap(),

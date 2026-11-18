@@ -90,8 +90,8 @@ fn a_system_session_switches_to_a_device_and_its_graph_plays_there() {
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert!(live.device().is_running(), "the card's stream runs");
     let _ = live.update();
-    stream.render_block(64).expect("open");
-    let block = stream.render_block(64).expect("open");
+    stream.render_block(Samples(64)).expect("open");
+    let block = stream.render_block(Samples(64)).expect("open");
     assert!(
         block.iter().all(|&x| x == 0.25),
         "the wired constant plays on the card: {:?}",
@@ -110,12 +110,12 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     wire_constant(&mut live, 0.25);
-    stream.render_block(64).expect("open");
+    stream.render_block(Samples(64)).expect("open");
     let mut s = live
         .into_system_clock()
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert!(
-        stream.render_block(64).is_none(),
+        stream.render_block(Samples(64)).is_none(),
         "the card's stream stopped"
     );
     play(&s);
@@ -302,7 +302,7 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_timer() {
     let _ = live.update();
     play(&live);
     for _ in 0..5 {
-        stream.render_block(BLOCK).expect("open");
+        stream.render_block(Samples(BLOCK)).expect("open");
     }
     let timer_block = tutti_session::LIVE_MAX_BLOCK.samples().0 as u64;
     // The playhead reads the frame the last block started at.
@@ -328,7 +328,7 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_device() {
     let live = s
         .into_device_on(stereo(SampleRate::SR_48K), driver)
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
-    stream.render_block(64).expect("open");
+    stream.render_block(Samples(64)).expect("open");
     let started = frame(&live);
     assert_eq!(
         started % BLOCK as u64,
@@ -527,10 +527,13 @@ fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
         "the spec it had, block included"
     );
     assert!(
-        again.render_block(64).is_some(),
+        again.render_block(Samples(64)).is_some(),
         "the card renders blocks again"
     );
-    assert!(stream.render_block(64).is_none(), "the old stream is gone");
+    assert!(
+        stream.render_block(Samples(64)).is_none(),
+        "the old stream is gone"
+    );
     let _ = live.update();
 }
 

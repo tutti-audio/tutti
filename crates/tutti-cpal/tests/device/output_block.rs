@@ -10,7 +10,7 @@
 //! calling `T::from_sample`: asking the function under test what it should
 //! have produced is not a second opinion.
 
-use crate::support::dc_state;
+use crate::support::{dc_state, dc_state_f64};
 use tutti_engine::OutputBlock;
 use tutti_types::ChannelLayout;
 
@@ -65,4 +65,33 @@ fn silence_is_the_formats_own_zero_not_a_literal_zero() {
     dc_and_check::<i16>(0.0, 0, "i16");
     dc_and_check::<u8>(0.0, 128, "u8");
     dc_and_check::<u16>(0.0, 32768, "u16");
+}
+
+/// **The device edge converts an `f64` graph the same way.** `T::from_sample`
+/// takes the graph's `f64` straight to each device format: a constant 0.5 is
+/// `0.5 * 2^(bits-1)` in a signed integer, and mid-scale plus that in an
+/// offset-binary one.
+#[test]
+fn an_f64_graph_reaches_every_device_format_by_the_same_rule() {
+    fn check<T: cpal::SizedSample + cpal::FromSample<f64> + PartialEq + std::fmt::Debug>(
+        expected: T,
+        label: &str,
+    ) {
+        let mut block = OutputBlock::new(dc_state_f64(0.5, 2), ChannelLayout::STEREO);
+        let mut out = [T::from_sample(0.0f64); 64];
+        block.render_with(&mut out, T::from_sample);
+        assert!(
+            out.iter().all(|s| *s == expected),
+            "{label}: a constant 0.5 should be {expected:?}, got {:?}",
+            &out[..4]
+        );
+    }
+    check::<f64>(0.5, "f64");
+    check::<f32>(0.5, "f32");
+    check::<i16>(1 << 14, "i16");
+    check::<i8>(1 << 6, "i8");
+    check::<i32>(1 << 30, "i32");
+    check::<u8>(128 + (1 << 6), "u8");
+    check::<u16>(32768 + (1 << 14), "u16");
+    check::<u32>(2_147_483_648 + (1 << 30), "u32");
 }

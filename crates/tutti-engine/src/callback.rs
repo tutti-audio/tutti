@@ -25,7 +25,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_buffers::InterleavedMut;
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Sample, convert};
 use tutti_rt::with_no_denormals;
 use tutti_types::ChannelLayout;
 use tutti_units::Samples;
@@ -48,13 +48,13 @@ pub const MAX_FRAMES: usize = 8192;
 /// [`OutputStream`](crate::OutputStream) on its own) and the stream's callback,
 /// which passes it to [`process_audio`].
 #[derive(Debug)]
-pub struct AudioCallbackState {
-    pub(crate) engine: Engine,
+pub struct AudioCallbackState<F: Float = f32> {
+    pub(crate) engine: Engine<F>,
 }
 
-impl AudioCallbackState {
+impl<F: Float> AudioCallbackState<F> {
     /// Creates the state a stream's callback reads, on the control thread.
-    pub fn new(engine: Engine) -> Self {
+    pub fn new(engine: Engine<F>) -> Self {
         Self { engine }
     }
 }
@@ -82,14 +82,18 @@ impl AudioCallbackState {
 /// stops rendering (see there); a caller on a thread of its own that a C frame
 /// called must do the same.
 #[inline]
-pub fn process_audio(state: &AudioCallbackState, output: &mut InterleavedMut<'_>) {
+pub fn process_audio<F: Float>(state: &AudioCallbackState<F>, output: &mut InterleavedMut<'_, F>) {
     with_no_denormals(|| state.engine.process(output));
 }
 
 /// [`process_audio`] for a block dated by the caller: the block clock records
 /// `os_ns` as the OS time the block began ([`Engine::process_at`]).
 #[inline]
-fn process_audio_at(state: &AudioCallbackState, output: &mut InterleavedMut<'_>, os_ns: i64) {
+fn process_audio_at<F: Float>(
+    state: &AudioCallbackState<F>,
+    output: &mut InterleavedMut<'_, F>,
+    os_ns: i64,
+) {
     with_no_denormals(|| state.engine.process_at(output, os_ns));
 }
 
@@ -99,8 +103,8 @@ fn process_audio_at(state: &AudioCallbackState, output: &mut InterleavedMut<'_>,
 /// thread, and never resized: a callback larger than [`MAX_FRAMES`] is
 /// clamped in [`render_with`](OutputBlock::render_with) and its tail silenced
 /// rather than reallocating on the audio thread.
-pub struct OutputBlock {
-    state: Arc<AudioCallbackState>,
+pub struct OutputBlock<F: Float = f32> {
+    state: Arc<AudioCallbackState<F>>,
     /// The device's true channel layout. The engine folds the graph root to
     /// this width (declared with [`Engine::support_output`](crate::Engine::support_output)
     /// when the block is built). A device wider than
@@ -110,7 +114,7 @@ pub struct OutputBlock {
     /// The interleave stride for both the mix buffer and the device buffer,
     /// derived ONCE here — never inside the per-frame loops.
     channels: usize,
-    buffer: Vec<f32>,
+    buffer: Vec<F>,
     last_rendered_frames: usize,
     /// Where each callback's reported delay goes ([`render_delayed_with`](Self::render_delayed_with)).
     latency: Arc<StreamLatency>,
@@ -121,7 +125,7 @@ pub struct OutputBlock {
     failed: bool,
 }
 
-impl std::fmt::Debug for OutputBlock {
+impl<F: Float> std::fmt::Debug for OutputBlock<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputBlock")
             .field("state", &self.state)
@@ -132,7 +136,7 @@ impl std::fmt::Debug for OutputBlock {
     }
 }
 
-impl OutputBlock {
+impl<F: Float> OutputBlock<F> {
     /// Allocate the callback's working set for a device of `layout` width.
     ///
     /// Control-thread only. This is the only allocation on the output path,
@@ -144,7 +148,7 @@ impl OutputBlock {
     /// # Panics
     ///
     /// If `layout` has no channels: a device has at least one.
-    pub fn new(state: Arc<AudioCallbackState>, layout: ChannelLayout) -> Self {
+    pub fn new(state: Arc<AudioCallbackState<F>>, layout: ChannelLayout) -> Self {
         state
             .engine
             .support_output(layout)
@@ -154,7 +158,7 @@ impl OutputBlock {
             state,
             layout,
             channels,
-            buffer: vec![0.0f32; layout.interleaved_len(Samples(MAX_FRAMES))],
+            buffer: vec![F::ZERO; layout.interleaved_len(Samples(MAX_FRAMES))],
             last_rendered_frames: 0,
             latency: Arc::new(StreamLatency::new()),
             faults: Arc::new(StreamFaults::new()),
@@ -207,25 +211,29 @@ impl OutputBlock {
         &mut self,
         data: &mut [T],
         delay: Option<Duration>,
-        convert: impl Fn(f32) -> T,
+        convert: impl Fn(F) -> T,
     ) {
         self.latency.record(delay);
         self.render_with(data, convert);
     }
 
-    /// [`render_with`](Self::render_with) into an `f32` device buffer.
+    /// [`render_with`](Self::render_with) into a device buffer of a
+    /// [`Sample`] format: each rendered sample is converted by the rule in
+    /// [`Sample`] ([`tutti_buffers::convert`]), a float to an integer rounding
+    /// and holding at the format's range, and a block shorter than `data`
+    /// leaves the rest silent.
     #[inline]
-    pub fn render(&mut self, data: &mut [f32]) {
-        self.render_with(data, |x| x);
+    pub fn render<S: Sample>(&mut self, data: &mut [S]) {
+        self.render_stamped(data, None, S::SILENCE, write_converted);
     }
 
     /// Render one block and write it to `data`, each sample made from the
-    /// rendered `f32` by `convert` (the driver's sample format).
+    /// rendered sample by `convert` (the driver's sample format).
     ///
     /// This is the entire output callback. A device driver calls it with
     /// whatever buffer the backend handed over; a manual driver calls it with a
     /// buffer of the caller's choosing. `convert` is the driver's one
-    /// conversion from the engine's nominal `f32` to its device's type; it runs
+    /// conversion from the graph's format to its device's type; it runs
     /// on the audio thread, so it does not allocate, lock or wait, and it maps
     /// `0.0` to the format's silence.
     ///
@@ -247,36 +255,47 @@ impl OutputBlock {
     /// Runs on the audio thread. Must not allocate, lock, or block, which
     /// `tests/no_alloc/block_no_alloc.rs` gates.
     #[inline]
-    pub fn render_with<T: Copy>(&mut self, data: &mut [T], convert: impl Fn(f32) -> T) {
-        self.render_stamped(data, None, convert);
+    pub fn render_with<T: Copy>(&mut self, data: &mut [T], convert: impl Fn(F) -> T) {
+        let silence = convert(F::ZERO);
+        self.render_stamped(data, None, silence, |mix, data| {
+            write_mapped(mix, data, &convert, silence);
+        });
     }
 
-    /// [`render_delayed_with`](Self::render_delayed_with) into an `f32` buffer
-    /// for a block due at `os_ns`, a [`monotonic_ns`](tutti_rt::monotonic_ns)
-    /// reading: the block clock dates the block by it, not by the time the
-    /// render began ([`Engine::process_at`]). A driver that renders to a
-    /// schedule calls this with the block's deadline. Wait-free like
-    /// `render_with`, with the same panic latch.
+    /// [`render_delayed_with`](Self::render_delayed_with) into a [`Sample`]
+    /// buffer ([`render`](Self::render)) for a block due at `os_ns`, a
+    /// [`monotonic_ns`](tutti_rt::monotonic_ns) reading: the block clock dates
+    /// the block by it, not by the time the render began
+    /// ([`Engine::process_at`]). A driver that renders to a schedule calls this
+    /// with the block's deadline. Wait-free like `render_with`, with the same
+    /// panic latch.
     #[inline]
-    pub(crate) fn render_at(&mut self, data: &mut [f32], os_ns: i64, delay: Option<Duration>) {
+    pub(crate) fn render_at<S: Sample>(
+        &mut self,
+        data: &mut [S],
+        os_ns: i64,
+        delay: Option<Duration>,
+    ) {
         self.latency.record(delay);
-        self.render_stamped(data, Some(os_ns), |x| x);
+        self.render_stamped(data, Some(os_ns), S::SILENCE, write_converted);
     }
 
+    /// Renders one block, guarded, and hands the rendered mix and the device
+    /// buffer to `write`, which fills all of `data`.
     #[inline]
     fn render_stamped<T: Copy>(
         &mut self,
         data: &mut [T],
         stamp: Option<i64>,
-        convert: impl Fn(f32) -> T,
+        silence: T,
+        write: impl FnOnce(Interleaved<'_, F>, &mut [T]),
     ) {
-        let silence = convert(0.0);
         if self.failed {
             data.fill(silence);
             return;
         }
         let rendered = catch_unwind(AssertUnwindSafe(|| {
-            self.render_unguarded(data, stamp, &convert, silence)
+            self.render_unguarded(data, stamp, write);
         }));
         if let Err(payload) = rendered {
             self.failed = true;
@@ -292,10 +311,8 @@ impl OutputBlock {
         &mut self,
         data: &mut [T],
         stamp: Option<i64>,
-        convert: &impl Fn(f32) -> T,
-        silence: T,
+        write: impl FnOnce(Interleaved<'_, F>, &mut [T]),
     ) {
-        let channels = self.channels;
         // Clamp so we never allocate. If a backend hands us a larger buffer we
         // process the head and write silence to the tail. The assertion that
         // this should not happen lives at the driver boundary, not here.
@@ -308,7 +325,7 @@ impl OutputBlock {
         let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];
         // Zero before rendering: the previous callback's contents are not
         // meaningful input for the graph.
-        mix.fill(0.0);
+        mix.fill(F::ZERO);
         // `frames` frames of the device's layout: whole frames
         // of a width the device opened with, so the view is always built.
         let Ok(mut mix) = InterleavedMut::new(mix, self.layout) else {
@@ -318,44 +335,46 @@ impl OutputBlock {
             Some(os_ns) => process_audio_at(&self.state, &mut mix, os_ns),
             None => process_audio(&self.state, &mut mix),
         }
-        // Back to a flat slice for the device write.
-        let mix = mix.as_interleaved().samples();
-
-        write_output(data, channels, mix, frames.get(), convert, silence);
+        write(mix.as_interleaved(), data);
     }
 }
 
-/// Convert the rendered f32 mix into the driver's sample type.
+/// Writes the rendered `mix` to the head of `data`, converted by the rule in
+/// [`Sample`] ([`convert`]), and silences the tail past the rendered frames (an
+/// over-sized callback).
+#[inline]
+fn write_converted<F: Float, S: Sample>(mix: Interleaved<'_, F>, data: &mut [S]) {
+    let (head, tail) = data.split_at_mut(mix.samples().len());
+    let converted = InterleavedMut::new(head, mix.layout()).and_then(|dst| convert(mix, dst));
+    debug_assert!(
+        converted.is_ok(),
+        "the head is whole frames of the mix's layout: {converted:?}"
+    );
+    tail.fill(S::SILENCE);
+}
+
+/// Writes the rendered `mix` to the head of `data`, each sample made by
+/// `convert`, and the tail past the rendered frames `silence`.
 ///
-/// `data` stays a bare `&mut [T]` and `channels` a bare `usize`: `T` is
-/// whatever the backend's buffer holds, including offset-binary unsigned
-/// formats that no `tutti_buffers::Sample` is, so `InterleavedMut` cannot
-/// describe every destination. The only arithmetic in this function is
-/// `i / channels`, and the width it needs is the *source's*, which the caller
-/// already reads off the `InterleavedMut` it built. The vocabulary stops at the
-/// backend's buffer, as it does at the C ABI and wire boundaries.
+/// `data` stays a bare `&mut [T]`: `T` is whatever the backend's buffer holds,
+/// including offset-binary unsigned formats that no `tutti_buffers::Sample`
+/// is, so `InterleavedMut` cannot describe every destination, and the
+/// driver's own conversion is the one rule applied. The vocabulary stops at
+/// the backend's buffer, as it does at the C ABI and wire boundaries.
 ///
 /// Private on purpose: it is reached through [`OutputBlock::render_with`], which
 /// is how a driver reaches it. A parallel public conversion helper would be a
 /// second implementation of the matrix under test.
 #[inline]
-fn write_output<T: Copy>(
+fn write_mapped<F: Float, T: Copy>(
+    mix: Interleaved<'_, F>,
     data: &mut [T],
-    channels: usize,
-    output: &[f32],
-    rendered_frames: usize,
-    convert: &impl Fn(f32) -> T,
+    convert: &impl Fn(F) -> T,
     silence: T,
 ) {
-    // `output` is already `channels`-wide interleaved (the engine folded the
-    // graph root to the device width). Copy every channel through; frames past
-    // what we rendered (an over-sized callback) get silence.
-    for (i, sample) in data.iter_mut().enumerate() {
-        let frame = i / channels;
-        *sample = if frame < rendered_frames {
-            convert(output[i])
-        } else {
-            silence
-        };
+    let (head, tail) = data.split_at_mut(mix.samples().len());
+    for (sample, rendered) in head.iter_mut().zip(mix.samples()) {
+        *sample = convert(*rendered);
     }
+    tail.fill(silence);
 }
