@@ -95,7 +95,7 @@ fn tone(frames: usize) -> Arc<Wave> {
 ///
 /// Prepared at `RenderGraph::prepare`'s `GRAPH_MAX_BLOCK`, what an export
 /// renders at: see the module docs.
-fn voice_graph(stretch: f32, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) {
+fn voice_graph(stretch: f64, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) {
     let transport = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         start_beat: Beat(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(TEMPO)).expect("a tempo")),
@@ -237,7 +237,7 @@ fn window(x: &[f32]) -> &[f32] {
 
 /// Render one case to a WAV and return the measured (frequency, RMS) of the left
 /// channel's settled window.
-fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f32, cents: f64) -> (f64, f64) {
+fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f64, cents: f64) -> (f64, f64) {
     let (graph, clock) = voice_graph(stretch, cents);
     let path = dir.join(format!("{name}.wav"));
     render_to_file(
@@ -321,7 +321,7 @@ fn a_stretched_voice_exports_without_transposing() {
     let d = tempfile::tempdir().unwrap();
 
     for (name, factor) in [
-        ("stretch_half", 0.5f32),
+        ("stretch_half", 0.5f64),
         ("stretch_1p5", 1.5),
         ("stretch_double", 2.0),
     ] {
@@ -348,7 +348,7 @@ fn stretch_and_pitch_compose_independently_through_the_export() {
     let d = tempfile::tempdir().unwrap();
 
     for (name, stretch, cents, ratio) in [
-        ("stretch_double_up_octave", 2.0f32, 1200.0f64, 2.0f64),
+        ("stretch_double_up_octave", 2.0f64, 1200.0f64, 2.0f64),
         ("stretch_1p5_up_fifth", 1.5, 700.0, SEMITONE.powi(7)),
     ] {
         let (hz, level) = render_and_measure(d.path(), name, stretch, cents);

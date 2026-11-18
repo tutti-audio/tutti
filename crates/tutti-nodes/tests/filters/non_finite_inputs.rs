@@ -2,6 +2,8 @@
 //! refuses or saturates (never panics), and a gain cell holding NaN or an
 //! infinity never reaches the output.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use std::sync::atomic::Ordering;
 use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
@@ -182,7 +184,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("eq band", || {
-        let n = EqBandNode::<f64>::new(SvfType::Bell, Hz(1000.0), Q(1.0), Db(3.0));
+        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz(1000.0), Q(1.0), Db(3.0));
         let cells = vec![
             (
                 "frequency",

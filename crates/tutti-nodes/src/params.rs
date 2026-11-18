@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+use tutti_buffers::Float;
 use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_types::AtomicF64;
@@ -433,7 +434,7 @@ impl<S: ControlSet> Params<S> {
 
     /// Each control's lowest and highest value in the block (the cell's where no
     /// lane drives it), or `None` when no lane does.
-    fn extremes(&self, io: &Io<'_>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
+    fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
         let mut out = [[0.0; MAX_CONTROLS]; 2];
         let mut driven = false;
         for (k, cell) in self.cells.iter().enumerate() {
@@ -443,7 +444,7 @@ impl<S: ControlSet> Params<S> {
             let fold = |pick: fn(f64, f64) -> f64| {
                 lane.into_iter()
                     .flatten()
-                    .map(|&v| f64::from(v))
+                    .map(|v| v.to_f64())
                     .filter(|v| v.is_finite())
                     .fold(base, pick)
             };
@@ -492,7 +493,7 @@ impl<S: ControlSet> Params<S> {
     /// [`ControlRead::Glide`] cell is its glide at that frame ([`begin`](Self::begin)),
     /// a [`ControlRead::Fast`] control is its cell whatever its port carries, and a
     /// [`ControlRead::Whole`] one is its cell.
-    pub(crate) fn read(&mut self, io: &Io<'_>, at: At) -> S::Controls {
+    pub(crate) fn read<G: Float>(&mut self, io: &Io<'_, G>, at: At) -> S::Controls {
         let n = self.cells.len();
         let mut value = [0.0f64; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
@@ -503,7 +504,7 @@ impl<S: ControlSet> Params<S> {
             };
             *v = match (lane, control.read) {
                 (Some(lane), _) => {
-                    let x = f64::from(lane[at.frame]);
+                    let x = lane[at.frame].to_f64();
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Glide) => {
@@ -521,7 +522,7 @@ impl<S: ControlSet> Params<S> {
 
     /// Whether a port drives a control, so the controls can differ between the frames
     /// of the block.
-    pub(crate) fn driven(&self, io: &Io<'_>) -> bool {
+    pub(crate) fn driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
         (0..self.cells.len())
             .any(|k| self.controls[k].read != ControlRead::Fast && io.param(k).frames().is_some())
     }
@@ -530,7 +531,7 @@ impl<S: ControlSet> Params<S> {
     /// slow control ([`ParamInput::corners`](tutti_graph::ParamInput::corners): where
     /// the trajectory a port delivers changes piece), if any. A fast control is read
     /// every frame and needs none.
-    pub(crate) fn corner_from(&self, io: &Io<'_>, from: usize) -> Option<usize> {
+    pub(crate) fn corner_from<G: Float>(&self, io: &Io<'_, G>, from: usize) -> Option<usize> {
         (0..self.cells.len())
             .filter(|&k| self.controls[k].read != ControlRead::Fast)
             .filter_map(|k| {
@@ -545,7 +546,7 @@ impl<S: ControlSet> Params<S> {
     /// [`ControlLanes`](crate::ControlLanes): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
-    pub(crate) fn lanes<'a>(&self, io: &Io<'a>) -> [Option<&'a [f32]>; MAX_LANES] {
+    pub(crate) fn lanes<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_LANES] {
         let mut lanes = [None; MAX_LANES];
         for (lane, &k) in lanes.iter_mut().zip(&self.fast[..self.fast_len]) {
             *lane = io.param(k).frames();
@@ -555,7 +556,7 @@ impl<S: ControlSet> Params<S> {
 
     /// The controls that ring longest among the values a modulated port takes anywhere
     /// in the block, or `None` when nothing is modulated.
-    pub(crate) fn longest(&self, io: &Io<'_>) -> Option<S::Controls> {
+    pub(crate) fn longest<G: Float>(&self, io: &Io<'_, G>) -> Option<S::Controls> {
         let [lowest, highest] = self.extremes(io)?;
         let n = self.cells.len();
         Some(self.set.longest(

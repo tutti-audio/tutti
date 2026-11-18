@@ -67,10 +67,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block.
 ///
-/// `F` is the state precision of the detector, the gain and the key filter, `f64` by default:
-/// an `f64` graph runs them in `f64`, and a view of the other sample format is converted at
-/// the edges.
-pub type GateNode<F = f64> = KernelNode<GateKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
+pub type GateNode<F> = KernelNode<GateKernel<F>>;
 
 impl<F: Float + Lanes + Lerp> GateNode<F> {
     /// A gate on the bus `input`, its detector on `key`, running at `controls`.
@@ -223,6 +221,7 @@ impl<F: Float + Lanes + Lerp> GateKernel<F> {
 }
 
 impl<F: Float + Lanes + Lerp> Kernel for GateKernel<F> {
+    type Float = F;
     type Set = GateSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -262,21 +261,21 @@ impl<F: Float + Lanes + Lerp> Kernel for GateKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.render_keyed(input, input, lanes, output);
     }
 
-    fn render_keyed<S: Float>(
+    fn render_keyed(
         &mut self,
-        input: Planes<'_, S>,
-        key: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        key: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lanes = GateLanes {
             threshold: lanes.get(GateSet::THRESHOLD_LANE),

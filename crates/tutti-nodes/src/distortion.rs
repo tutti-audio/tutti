@@ -60,9 +60,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// value last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares it at
 /// the device rate before its first block.
 ///
-/// `F` is the precision of the drive's glide, the curve, the antialiasing history and the
-/// oversampling, `f64` by default.
-pub type DistortionNode<F = f64> = KernelNode<DistortionKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the drive's glide, the curve, the
+/// antialiasing history and the oversampling.
+pub type DistortionNode<F> = KernelNode<DistortionKernel<F>>;
 
 impl<F: Float + Lerp> DistortionNode<F> {
     /// A stereo waveshaper of `kind` at `drive`.
@@ -268,6 +268,7 @@ impl<F: Float + Lerp> Oversampled<F> {
 }
 
 impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
+    type Float = F;
     type Set = DistortionSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -327,11 +328,11 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lane = lanes.get(DistortionSet::DRIVE_LANE);
         match &mut self.oversampled {

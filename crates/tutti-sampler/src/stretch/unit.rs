@@ -11,7 +11,7 @@ use tutti_dsp::StftGeometry;
 use super::vocoder::Vocoder;
 use super::{FftSize, MAX_BUFFER_SIZE};
 use std::sync::atomic::Ordering;
-use tutti_types::{AtomicF32, AtomicF64, ChannelLayout};
+use tutti_types::{AtomicF64, ChannelLayout, Param64};
 use tutti_units::{Cents, ReadRate, SampleRate, StretchFactor};
 
 /// Real-time time-stretching and pitch-shifting unit.
@@ -67,7 +67,7 @@ pub struct Unit {
     /// Written only through [`set_stretch_factor`](Self::set_stretch_factor),
     /// so it always holds a finite factor in
     /// [`StretchFactor::MIN`]..=[`StretchFactor::MAX`]: the hops divide by it.
-    pub(super) stretch_factor: AtomicF32,
+    pub(super) stretch_factor: Param64<StretchFactor>,
     /// Written only through [`set_pitch_cents`](Self::set_pitch_cents), so it
     /// always holds a finite transposition within ±2400 cents.
     pub(super) pitch_cents: AtomicF64,
@@ -186,7 +186,7 @@ impl Unit {
                 scratch_out: scratch(),
             }),
             width,
-            stretch_factor: AtomicF32::new(clamp_stretch(stretch_factor).get()),
+            stretch_factor: Param64::new(clamp_stretch(stretch_factor)),
             pitch_cents: AtomicF64::new(clamp_pitch(pitch_cents).get()),
             enabled,
             intake_debt: 0.0,
@@ -225,13 +225,12 @@ impl Unit {
     /// untouched either way. `&self` and a single atomic store, so a control
     /// thread may call it while the audio thread ticks.
     pub fn set_stretch_factor(&self, factor: StretchFactor) {
-        self.stretch_factor
-            .store(clamp_stretch(factor).get(), Ordering::Release);
+        self.stretch_factor.store(clamp_stretch(factor));
     }
 
     /// The duration scaling currently in force, as last clamped and stored.
     pub fn stretch_factor(&self) -> StretchFactor {
-        StretchFactor::new(self.stretch_factor.load(Ordering::Acquire))
+        self.stretch_factor.load()
     }
 
     /// Sets the transposition in [`Cents`], clamped to ±2400 (two octaves each
@@ -342,7 +341,7 @@ impl Unit {
     /// factors from 0.0625 to 16.0, i.e. across the whole clamp-free range.
     #[inline]
     pub(super) fn effective_stretch(&self) -> f64 {
-        f64::from(self.stretch_factor().get()) * self.pitch_cents().to_pitch_ratio()
+        self.stretch_factor().get() * self.pitch_cents().to_pitch_ratio()
     }
 
     /// Fed samples this unit consumes per output sample:
@@ -445,13 +444,13 @@ impl Unit {
         if !self.is_processing() {
             return ReadRate::UNITY;
         }
-        ReadRate(1.0 / self.stretch_factor().get() as f64)
+        ReadRate(1.0 / self.stretch_factor().get())
     }
 }
 
 /// Below this, a stretch factor is indistinguishable from unity and the unit
 /// bypasses rather than paying for an FFT.
-const STRETCH_EPSILON: f32 = 0.001;
+const STRETCH_EPSILON: f64 = 0.001;
 /// Half a cent — beneath the threshold of hearing.
 const PITCH_EPSILON_CENTS: f64 = 0.5;
 /// Two octaves down.

@@ -37,8 +37,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// port clamps at the cell's ceiling, and a NaN given to [`new`](Self::new) starts the
 /// node at 0 dB. `+-inf` dB are ceilings: `+inf` passes everything, `-inf` mutes.
 ///
-/// `F` is the precision the ceiling is held and the clamp runs in, `f64` by default.
-pub type BrickwallLimiterNode<F = f64> = KernelNode<BrickwallKernel<F>>;
+/// `F` is the float of the graph it runs in, and the precision the ceiling is held and the clamp
+/// runs in.
+pub type BrickwallLimiterNode<F> = KernelNode<BrickwallKernel<F>>;
 
 impl<F: Float> BrickwallLimiterNode<F> {
     /// Builds a stereo brickwall limiter clamping at `ceiling_db`.
@@ -111,6 +112,7 @@ impl<F: Float> BrickwallKernel<F> {
 }
 
 impl<F: Float> Kernel for BrickwallKernel<F> {
+    type Float = F;
     type Set = BrickwallSet;
 
     /// A cell that moves reaches the clamp within 16 frames, wherever the blocks fall.
@@ -133,11 +135,11 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
         self.bank.aim(controls);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lanes = BrickwallLanes {
             ceiling: lanes.get(BrickwallSet::CEILING_LANE),

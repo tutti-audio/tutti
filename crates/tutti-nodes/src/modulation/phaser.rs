@@ -72,8 +72,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// sweep**. Its tail is [`Tail::Unknown`] (the feedback
 /// recirculates), so it is never skipped.
 ///
-/// `F` is the state precision of the chain and the glides, `f64` by default.
-pub type PhaserNode<F = f64> = KernelNode<PhaserKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the chain and the glides.
+pub type PhaserNode<F> = KernelNode<PhaserKernel<F>>;
 
 impl<F: Float + Lerp> PhaserNode<F> {
     /// A phaser on the bus `input`, as wide as it, with `stages` all-passes per channel
@@ -239,6 +239,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
+    type Float = F;
     type Set = PhaserSet;
 
     /// The corners solve on the stream's grid of 16 frames, like the filters and the chorus:
@@ -305,11 +306,11 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         self.chain

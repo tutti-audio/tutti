@@ -25,15 +25,11 @@ fn detached() -> DetachedSession {
 
 fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph()
-        .add(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz(cutoff),
-            Q(0.7),
-        ))
+        .add(SvfFilterNode::new(SvfType::LowPass, Hz(cutoff), Q(0.7)))
         .0
 }
 
-fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode> {
+fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
     s.graph()
         .add(CompressorNode::new(
             BusTopology::MONO,
@@ -46,7 +42,7 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode> {
 /// A node whose `Seconds` params are `f64` cells.
 fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph()
-        .add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap())
+        .add(MultibandCompressorNode::new(ChannelLayout::STEREO, 2).unwrap())
         .0
 }
 
@@ -273,11 +269,9 @@ fn a_seconds_param_keeps_its_full_width() {
 #[test]
 fn a_write_and_a_read_go_through_the_nodes_cell() {
     let mut s = detached();
-    let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
-    ));
+    let (lp, controls) = s
+        .graph()
+        .add(SvfFilterNode::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)));
     s.set(lp.cutoff().to(Hz(2_500.0))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
     controls.set(UnitParam::Q, 4.0);
@@ -417,11 +411,7 @@ fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
     swap(
         &mut s,
         bare,
-        Unforkable(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz(1_000.0),
-            Q(0.7),
-        )),
+        Unforkable(SvfFilterNode::new(SvfType::LowPass, Hz(1_000.0), Q(0.7))),
     );
     for key in [stale, bare] {
         let e = s.set(key.cutoff().to(Hz(5.0))).unwrap_err();

@@ -74,10 +74,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block, which sizes the delay.
 ///
-/// `F` is the state precision of the delay, the envelope and the peak detector, `f64` by
-/// default: an `f64` graph runs them in `f64`, and a view of the other sample format is
-/// converted at the edges.
-pub type LimiterNode<F = f64> = KernelNode<LimiterKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the delay, the envelope and the peak
+/// detector.
+pub type LimiterNode<F> = KernelNode<LimiterKernel<F>>;
 
 impl<F: Float> LimiterNode<F> {
     /// A limiter on the bus `input`, as wide as it, delaying by `lookahead` (at least one
@@ -173,6 +172,7 @@ impl<F: Float> LimiterKernel<F> {
 }
 
 impl<F: Float> Kernel for LimiterKernel<F> {
+    type Float = F;
     type Set = LimiterSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -216,11 +216,11 @@ impl<F: Float> Kernel for LimiterKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lanes = LimiterLanes {
             threshold: lanes.get(LimiterSet::THRESHOLD_LANE),

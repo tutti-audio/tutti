@@ -15,7 +15,7 @@ use tutti_graph::{
     ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
 use tutti_types::MaxBlock;
-use tutti_units::{Latency, SampleRate, Samples, Tail};
+use tutti_units::{Latency, Real, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -27,19 +27,19 @@ pub const MAX_LANES: usize = 4;
 
 /// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
 /// controls, in the order of their rows: the frames a port carries, in the port's own unit
-/// and the sample format `S` of the audio, each `None` where nothing drives it.
+/// and the graph's float `F`, each `None` where nothing drives it.
 ///
 /// Every lane is as long as the frames the call renders.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ControlLanes<'a, S: Float = f32>([Option<Mono<'a, S>>; MAX_LANES]);
+pub struct ControlLanes<'a, F: Float>([Option<Mono<'a, F>>; MAX_LANES]);
 
-impl<'a, S: Float> ControlLanes<'a, S> {
+impl<'a, F: Float> ControlLanes<'a, F> {
     /// No lane is driven.
     pub const NONE: Self = Self([None; MAX_LANES]);
 
     /// Lane `k`, or `None` when nothing drives it, and for a `k` past [`MAX_LANES`].
     #[must_use]
-    pub fn get(&self, k: usize) -> Option<Mono<'a, S>> {
+    pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
     }
 }
@@ -49,6 +49,10 @@ impl<'a, S: Float> ControlLanes<'a, S> {
 /// Built on the control side, where it allocates everything it will hold; nothing it does
 /// after that allocates.
 pub trait Kernel: Clone + Send + 'static {
+    /// The float of the kernel's state and of the audio it runs: the graph's, so a kernel of
+    /// one float is a node of a graph of that float and no sample converts between them.
+    type Float: Float;
+
     /// Its params: their addresses, units and the plain controls they assemble into.
     type Set: ControlSet;
 
@@ -79,14 +83,13 @@ pub trait Kernel: Clone + Send + 'static {
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
-    /// Runs `input` into `output`, the same number of frames, in any sample format (the
-    /// graph's is `f32`), with the controls a port drives per frame in `lanes`. Audio
-    /// thread: no allocation.
-    fn render<S: Float>(
+    /// Runs `input` into `output`, the same number of frames, with the controls a port
+    /// drives per frame in `lanes`. Audio thread: no allocation.
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, Self::Float>,
+        lanes: ControlLanes<'_, Self::Float>,
+        output: PlanesMut<'_, '_, Self::Float>,
     );
 
     /// Runs `input` into `output` as [`render`](Self::render) does, with the signal a
@@ -95,12 +98,12 @@ pub trait Kernel: Clone + Send + 'static {
     /// calls this instead of `render` when the shape declares one, so a kernel with one
     /// overrides it; a block whose key bus (or main input bus) has no channels renders as silence.
     /// Audio thread: no allocation.
-    fn render_keyed<S: Float>(
+    fn render_keyed(
         &mut self,
-        input: Planes<'_, S>,
-        key: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, Self::Float>,
+        key: Planes<'_, Self::Float>,
+        lanes: ControlLanes<'_, Self::Float>,
+        output: PlanesMut<'_, '_, Self::Float>,
     ) {
         let _ = key;
         self.render(input, lanes, output);
@@ -125,7 +128,7 @@ pub trait Kernel: Clone + Send + 'static {
     }
 }
 
-/// An effect of any [`Kernel`] as a graph node.
+/// An effect of any [`Kernel`] as a graph node of the kernel's float ([`Kernel::Float`]).
 ///
 /// # Controls
 ///
@@ -273,7 +276,7 @@ impl<K: Kernel> KernelNode<K> {
     /// frame, `moved` whether they differ from the last design.
     fn cut(
         &mut self,
-        io: &mut Io<'_>,
+        io: &mut Io<'_, K::Float>,
         target: &<K::Set as ControlSet>::Controls,
         moved: bool,
     ) -> usize {
@@ -295,7 +298,11 @@ impl<K: Kernel> KernelNode<K> {
             current = current.max(tail_frames(self.kernel.tail_of(&longest)));
         }
         let last_input = (0..inputs)
-            .filter_map(|c| io.input(c)[..size].iter().rposition(|&s| s != 0.0))
+            .filter_map(|c| {
+                io.input(c)[..size]
+                    .iter()
+                    .rposition(|&s| s != K::Float::ZERO)
+            })
             .max();
         let owed = clock.advance(current, Heard { size, last_input });
         io.report_tail(owed.tail(t.rate));
@@ -303,7 +310,7 @@ impl<K: Kernel> KernelNode<K> {
     }
 
     /// Renders `frames` of the block through the kernel.
-    fn render(&mut self, io: &mut Io<'_>, frames: Range<usize>) {
+    fn render(&mut self, io: &mut Io<'_, K::Float>, frames: Range<usize>) {
         if frames.is_empty() {
             return;
         }
@@ -326,15 +333,15 @@ impl<K: Kernel> KernelNode<K> {
         let Ok(output) = PlanesMut::new(&mut output[..width]) else {
             return;
         };
-        let silence = |mut output: PlanesMut<'_, '_, f32>| {
+        let silence = |mut output: PlanesMut<'_, '_, K::Float>| {
             for c in 0..output.channels() {
-                output.plane_mut(c).samples_mut().fill(0.0);
+                output.plane_mut(c).samples_mut().fill(K::Float::ZERO);
             }
         };
         let Ok(input) = Planes::new(&input[..self.inputs]) else {
             return silence(output);
         };
-        let mut lanes = ControlLanes::<f32>::NONE;
+        let mut lanes = ControlLanes::<K::Float>::NONE;
         for (slot, lane) in lanes.0.iter_mut().zip(driven) {
             *slot = lane.map(|l| Mono::new(&l[frames.clone()]));
         }
@@ -352,7 +359,7 @@ impl<K: Kernel> KernelNode<K> {
     /// frame, and one that moved past the dead-band of the last design designs and
     /// retargets before the frames after it render. Cuts that did not move render
     /// together, in one call.
-    fn render_steps(&mut self, io: &mut Io<'_>, position: u64, rate: SampleRate) {
+    fn render_steps(&mut self, io: &mut Io<'_, K::Float>, position: u64, rate: SampleRate) {
         let size = io.frames();
         walk_grid(
             &mut (self, io),
@@ -392,7 +399,7 @@ impl<K: Kernel> KernelNode<K> {
     }
 
     /// The first NaN or infinity in the block's output, as `(frame, channel)`.
-    fn first_non_finite_output(&self, io: &mut Io<'_>) -> Option<(usize, usize)> {
+    fn first_non_finite_output(&self, io: &mut Io<'_, K::Float>) -> Option<(usize, usize)> {
         let (_, mut outs) = io.split();
         first_non_finite(outs.bus(self.out).into_channels())
     }
@@ -407,7 +414,7 @@ impl<K: Kernel> KernelNode<K> {
 
 /// The earliest NaN or infinity across `channels` as `(frame, channel)`, the lowest channel
 /// on a tie, in one pass: a channel is scanned only up to the best frame found so far.
-pub(crate) fn first_non_finite<T: AsRef<[f32]>>(
+pub(crate) fn first_non_finite<G: Float, T: AsRef<[G]>>(
     channels: impl Iterator<Item = T>,
 ) -> Option<(usize, usize)> {
     let mut first: Option<(usize, usize)> = None;
@@ -422,7 +429,7 @@ pub(crate) fn first_non_finite<T: AsRef<[f32]>>(
 }
 
 /// Logs the reset that follows a non-finite output at `frame` of `channel`.
-pub(crate) fn log_non_finite(io: &Io<'_>, frame: usize, channel: usize) {
+pub(crate) fn log_non_finite<G: Float>(io: &Io<'_, G>, frame: usize, channel: usize) {
     // `frame` is inside the block (both callers scan channels `io.frames()` long), so the
     // offset exists; a frame outside it would log nothing rather than a wrong offset.
     if let Some(at) = io.offset(frame) {
@@ -436,11 +443,11 @@ pub(crate) fn log_non_finite(io: &Io<'_>, frame: usize, channel: usize) {
 }
 
 /// The first [`MAX_PORTS`] of `channels`, each cut to `frames`, and how many there are.
-pub(crate) fn slice_in<'a>(
-    channels: impl Iterator<Item = &'a [f32]>,
+pub(crate) fn slice_in<'a, G: Float>(
+    channels: impl Iterator<Item = &'a [G]>,
     frames: &Range<usize>,
-) -> ([&'a [f32]; MAX_PORTS], usize) {
-    let mut planes: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
+) -> ([&'a [G]; MAX_PORTS], usize) {
+    let mut planes: [&[G]; MAX_PORTS] = [&[]; MAX_PORTS];
     let mut n = 0;
     for (slot, ch) in planes.iter_mut().zip(channels) {
         *slot = &ch[frames.clone()];
@@ -450,11 +457,11 @@ pub(crate) fn slice_in<'a>(
 }
 
 /// [`slice_in`] for channels written to.
-pub(crate) fn slice_out<'a>(
-    channels: impl Iterator<Item = &'a mut [f32]>,
+pub(crate) fn slice_out<'a, G: Float>(
+    channels: impl Iterator<Item = &'a mut [G]>,
     frames: &Range<usize>,
-) -> ([&'a mut [f32]; MAX_PORTS], usize) {
-    let mut planes: [&mut [f32]; MAX_PORTS] = core::array::from_fn(|_| Default::default());
+) -> ([&'a mut [G]; MAX_PORTS], usize) {
+    let mut planes: [&mut [G]; MAX_PORTS] = core::array::from_fn(|_| Default::default());
     let mut n = 0;
     for (slot, ch) in planes.iter_mut().zip(channels) {
         *slot = &mut ch[frames.clone()];
@@ -466,11 +473,11 @@ pub(crate) fn slice_out<'a>(
 /// Runs `f` over the main input and output buses of a stateless through node, each cut to
 /// the whole block: the views of `inputs` channels in and `outputs` out. A bus with no
 /// channels has nothing to render.
-pub(crate) fn through_planes(
-    io: &mut Io<'_>,
+pub(crate) fn through_planes<G: Float>(
+    io: &mut Io<'_, G>,
     inputs: usize,
     outputs: usize,
-    f: impl FnOnce(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
+    f: impl FnOnce(Planes<'_, G>, PlanesMut<'_, '_, G>),
 ) {
     debug_assert_eq!(
         inputs, outputs,
@@ -490,7 +497,7 @@ pub(crate) fn through_planes(
     // No view to render (a bus of no channels): every channel is silence, none is left as the
     // arena had it.
     for ch in &mut output[..n_out] {
-        ch.fill(0.0);
+        ch.fill(G::ZERO);
     }
 }
 
@@ -553,7 +560,7 @@ pub(crate) fn walk_grid<S, T>(
     render(state, held..size);
 }
 
-impl<K: Kernel> Node for KernelNode<K> {
+impl<K: Kernel> Node<K::Float> for KernelNode<K> {
     /// The ports and cells always; latency and tail from the prepared rate. Unprepared, a
     /// node declares no latency and an unknown tail.
     fn shape(&self) -> Shape {
@@ -581,7 +588,7 @@ impl<K: Kernel> Node for KernelNode<K> {
         self.clear();
     }
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, K::Float>) -> Status {
         let Some(t) = &mut self.tuned else {
             return Status::Silent;
         };
@@ -624,7 +631,7 @@ impl<K: Kernel> Node for KernelNode<K> {
         if live < size {
             let (_, mut outs) = io.split();
             for ch in outs.bus(self.out).into_channels() {
-                ch[live..size].fill(0.0);
+                ch[live..size].fill(K::Float::ZERO);
             }
             self.park();
         } else if let Some((frame, channel)) = self.first_non_finite_output(&mut io) {
@@ -669,7 +676,7 @@ impl<K: Kernel> Clone for KernelNode<K> {
     }
 }
 
-impl<K: Kernel> ParamNode for KernelNode<K> {
+impl<K: Kernel> ParamNode<K::Float> for KernelNode<K> {
     fn param_set(&self) -> ParamSet {
         self.params.bind(ParamSet::builder()).build()
     }
@@ -695,10 +702,10 @@ impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasCo
 
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts from the values
 /// last set through it ([`tutti_graph::param_parts`]).
-impl<K: Kernel> IntoNode for KernelNode<K> {
+impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, K::Float> {
         tutti_graph::param_parts(self)
     }
 }
@@ -805,6 +812,7 @@ mod tests {
             key: Option<BusTopology>,
         }
         impl Kernel for Keyed {
+            type Float = f32;
             type Set = GainSet;
             const GRID: usize = 16;
             fn shape(&self) -> Shape {
@@ -820,11 +828,11 @@ mod tests {
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
             fn reset(&mut self) {}
             fn retarget(&mut self, _: &Gain) {}
-            fn render<S: Float>(
+            fn render(
                 &mut self,
-                _: Planes<'_, S>,
-                _: ControlLanes<'_, S>,
-                _: PlanesMut<'_, '_, S>,
+                _: Planes<'_, f32>,
+                _: ControlLanes<'_, f32>,
+                _: PlanesMut<'_, '_, f32>,
             ) {
                 unreachable!("an empty bus is refused before the kernel renders");
             }

@@ -107,7 +107,7 @@ fn beats(frames: f64) -> f64 {
 #[derive(Clone, Copy)]
 struct Setup {
     loop_: Option<Loop>,
-    speed: f32,
+    speed: f64,
     /// Where the clock starts (the voice is placed at beat 0); the stream is
     /// started there, so the ring holds it before the first block.
     beat: f64,
@@ -116,7 +116,7 @@ struct Setup {
 }
 
 impl Setup {
-    fn looped(loop_: Option<Loop>, speed: f32) -> Self {
+    fn looped(loop_: Option<Loop>, speed: f64) -> Self {
         Self {
             loop_,
             speed,
@@ -138,7 +138,7 @@ struct Live {
 }
 
 impl Live {
-    fn new(path: &Path, loop_: Option<Loop>, speed: f32) -> Self {
+    fn new(path: &Path, loop_: Option<Loop>, speed: f64) -> Self {
         Self::with(path, Setup::looped(loop_, speed))
     }
 
@@ -256,7 +256,7 @@ struct Memory {
 }
 
 impl Memory {
-    fn new(wave: Arc<tutti_buffers::Wave>, loop_: Option<Loop>, speed: f32, from: f64) -> Self {
+    fn new(wave: Arc<tutti_buffers::Wave>, loop_: Option<Loop>, speed: f64, from: f64) -> Self {
         let clock = MockTransport::rolling(Beat::new(from), Bpm::of(120.0));
         let mut source =
             MemorySource::placed(wave, VoiceWindow::from(Beat(0.0))).expect("a placeable wave");
@@ -311,7 +311,7 @@ fn a_live_looped_voice_plays_the_memory_tiers_loop_bit_for_bit() {
     struct Case {
         what: &'static str,
         file_rate: u32,
-        speed: f32,
+        speed: f64,
         loop_: Option<Loop>,
     }
     let cases = [
@@ -375,7 +375,7 @@ fn a_live_looped_voice_plays_the_memory_tiers_loop_bit_for_bit() {
         assert_eq!(live.underruns(), 0, "{}: frames went unread", case.what);
         let want =
             Memory::new(ramp_wave(case.file_rate, LEN), case.loop_, case.speed, 0.0).render(BLOCKS);
-        let rate = case.speed as f64 * case.file_rate as f64 / SR;
+        let rate = case.speed * case.file_rate as f64 / SR;
         let Some(looped) = case.loop_ else {
             unreachable!()
         };
@@ -557,7 +557,7 @@ fn edits_and_jumps_leave_the_live_voice_on_the_clock() {
     enum Event {
         Loop(Option<Loop>),
         Jump(f64),
-        Speed(f32),
+        Speed(f64),
     }
     let events = [
         (30, Event::Loop(loop_on(8_000.0, 12_001.0, 400))),

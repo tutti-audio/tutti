@@ -17,7 +17,7 @@ const BLOCK: usize = 64;
 #[test]
 fn a_design_nodes_ports_start_at_its_first_cell() {
     let filter = prepared(
-        SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.707)),
+        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(1_000.0), Q(0.707)),
         SR,
         BLOCK,
     );

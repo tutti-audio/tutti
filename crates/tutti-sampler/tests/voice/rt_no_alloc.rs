@@ -382,7 +382,7 @@ fn ragged_at_512<N: Node>(node: N) {
 
 /// A memory source reading `wave` placed at beat 0, and how it plays:
 /// `stretch`.
-fn placed_parts(wave: &Arc<Wave>, stretch: f32) -> (MemorySource, Playback) {
+fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource, Playback) {
     let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let play = Playback {
@@ -397,7 +397,7 @@ fn placed_parts(wave: &Arc<Wave>, stretch: f32) -> (MemorySource, Playback) {
 }
 
 /// [`placed_parts`] as a voice.
-fn placed_voice(wave: &Arc<Wave>, stretch: f32) -> Voice {
+fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice {
     let (sampler, play) = placed_parts(wave, stretch);
     Voice {
         source: VoiceSource::Memory(sampler),
@@ -430,7 +430,7 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
     // Looped, at unit rate and varispeed (the block read's looped lanes,
     // straight from the wave and gathered), and one placed past the
     // transport (a silent voice the pool skips).
-    let looped = |speed: f32| {
+    let looped = |speed: f64| {
         let (source, mut play) = placed_parts(&wave, 1.0);
         play.loop_ = Some(loop_frames(1_000, 30_000, 256));
         play.speed = PlaybackRate::new(speed);

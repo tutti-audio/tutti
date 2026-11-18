@@ -3,7 +3,7 @@
 //! graph's mix aligned to the kernel's latency, the cut at `tail + latency` inside a block
 //! and a block-aligned park. Every figure is the definition of a delay.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_graph::contract::{Driven, assert_honest_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{Env, PlayClock, Prepare, Solo, Status, TransportChanges, TransportPosition};
@@ -58,6 +58,7 @@ impl ControlSet for NoParams {
 }
 
 impl Kernel for Echo {
+    type Float = f32;
     type Set = NoParams;
 
     const GRID: usize = 16;
@@ -80,21 +81,21 @@ impl Kernel for Echo {
 
     fn retarget(&mut self, _: &()) {}
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, f32>,
+        _: ControlLanes<'_, f32>,
+        mut output: PlanesMut<'_, '_, f32>,
     ) {
         let n = self.line.len();
         let (first, second) = (self.claimed + self.latency, self.actual + self.latency);
         let x = input.plane(0);
         let mut y = output.plane_mut(0);
         for (x, y) in x.samples().iter().zip(y.samples_mut()) {
-            self.line[self.at] = x.to_f64();
+            self.line[self.at] = f64::from(*x);
             let back = |d: usize| self.line[(self.at + n - d) % n];
             let wet = back(first) + if second != first { back(second) } else { 0.0 };
-            *y = S::from_f64(wet);
+            *y = wet as f32;
             self.at = (self.at + 1) % n;
         }
     }

@@ -71,7 +71,7 @@ fn a_placed_clip_adds_no_tail_to_the_range() {
 #[test]
 fn a_free_running_voice_rings_out_its_wave() {
     let frames = 12_000;
-    let at = |speed: f32, looped: Option<Loop>| {
+    let at = |speed: f64, looped: Option<Loop>| {
         let mut session = session();
         let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
         source.set_speed(PlaybackRate::new_clamped(speed));

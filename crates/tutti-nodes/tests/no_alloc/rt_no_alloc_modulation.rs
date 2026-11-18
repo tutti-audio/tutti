@@ -1354,7 +1354,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         .insert(
             filter,
             "svf",
-            SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
+            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
         )
         .controls;
     let topology = &mut ed.spec_mut().topology;

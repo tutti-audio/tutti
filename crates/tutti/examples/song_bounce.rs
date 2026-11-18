@@ -82,13 +82,13 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
 
     // A stereo low-pass, then a reverb whose input is mono: that width change
     // is a bus edge, never a truncation (`connect` would refuse it).
-    let (filter, _) = s.graph().add(SvfFilterNode::<f64>::with_channels(
+    let (filter, _) = s.graph().add(SvfFilterNode::with_channels(
         ChannelLayout::STEREO,
         SvfType::LowPass,
         Hz(1_000.0),
         Q(0.7),
     ));
-    let (reverb, _) = s.graph().add(FreeverbNode::<f32>::default());
+    let (reverb, _) = s.graph().add(FreeverbNode::default());
     s.graph().connect(first, filter)?;
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph().connect(filter.bus_out(0), reverb.bus_in(0))?;

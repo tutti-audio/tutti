@@ -629,7 +629,7 @@ impl<F: Float> MemorySource<F> {
             return Tail::Unbounded;
         }
         let wave = SamplePosition::new(0.0).advanced_by(self.wave.len());
-        let played = wave.get() / self.read_rate().get() * f64::from(stretch.get());
+        let played = wave.get() / self.read_rate().get() * stretch.get();
         // A figure out of range saturates; the graph counts a finite tail past
         // `MAX_NODE_TAIL` as unbounded.
         Tail::Finite(SamplePosition::new(played).to_samples_ceil())

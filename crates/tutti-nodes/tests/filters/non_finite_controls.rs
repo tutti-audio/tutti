@@ -12,6 +12,8 @@
 //! accident). After it, and after a finite value is written back, the output
 //! must be finite.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use std::sync::atomic::Ordering;
 use tutti_buffers::{Mono, Planes};
 use tutti_types::MaxBlock;
@@ -115,7 +117,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "svf",
         || {
-            SvfFilterNode::<f64>::with_channels(
+            SvfFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 SvfType::Bell,
                 Hz::new(900.0),
@@ -137,7 +139,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "ladder",
         || {
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 LadderType::LP24,
                 Hz::new(900.0),

@@ -7,14 +7,14 @@ use super::*;
 /// - `Confidence + Confidence` — two 0.6-confident estimates do not make a
 ///   1.2-confident one. `combine` is the replacement, and its name states
 ///   the independence precondition that multiplying them requires.
-/// - `Correlation * f32` — the value is a normalized inner product, so
+/// - `Correlation * f64` — the value is a normalized inner product, so
 ///   rescaling denormalizes it and it stops meaning "coherence".
 /// - `Correlation + Correlation` — coherence does not accumulate;
 ///   time-averaging it is meter ballistics, which smooths.
-/// - `StereoBalance * f32`, `StereoBalance + StereoBalance` — a ratio of
+/// - `StereoBalance * f64`, `StereoBalance + StereoBalance` — a ratio of
 ///   measured energy: rescaled it is no longer that ratio, and two of them do
 ///   not sum. Smoothing it over time is meter ballistics.
-/// - `Velocity * f32` — `scaled`, which clamps. The bare operator reads as
+/// - `Velocity * f64` — `scaled`, which clamps. The bare operator reads as
 ///   "half as loud", and velocity→loudness is the instrument's mapping, not
 ///   arithmetic's: a patch may be louder at low velocity.
 /// - `Velocity + Velocity` — two strikes do not sum into a harder one.
@@ -40,7 +40,7 @@ fn omitted_operators_are_documented() {}
 /// Velocity scales by a *named* method, and the scale clamps.
 ///
 /// `scaled` exists because a "soften the take" edit is real, and without a
-/// replacement for the omitted `Mul<f32>` every call site would escape to
+/// replacement for the omitted `Mul<f64>` every call site would escape to
 /// `Velocity(v.get() * 0.8)` — which does not clamp, and which is how a
 /// velocity leaves `0..1` and reaches the 16-bit widening out of range.
 #[test]

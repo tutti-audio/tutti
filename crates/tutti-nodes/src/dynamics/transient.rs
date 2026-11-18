@@ -77,13 +77,12 @@ impl TransientShaperConfig {
 /// No latency and no tail: the gain only scales, so a silent input is a silent output. A
 /// [`KernelNode`]; made from a [`TransientShaperConfig`] (`TransientShaperNode::from`).
 ///
-/// `F` is the state precision of the envelopes and the gain, `f64` by default: an `f64` graph
-/// runs them in `f64`, and a view of the other sample format is converted at the edges.
+/// `F` is the float of the graph it runs in, and of the envelopes and the gain.
 ///
 /// # Panics
 ///
 /// `TransientShaperNode::from` panics past 16 channels: a shaper is one bus.
-pub type TransientShaperNode<F = f64> = KernelNode<TransientShaperKernel<F>>;
+pub type TransientShaperNode<F> = KernelNode<TransientShaperKernel<F>>;
 
 impl<F: Float + Lerp> From<TransientShaperConfig> for TransientShaperNode<F> {
     fn from(config: TransientShaperConfig) -> Self {
@@ -136,6 +135,7 @@ impl<F: Float + Lerp> TransientShaperKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
+    type Float = F;
     type Set = TransientShaperSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -169,11 +169,11 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
             bank.process(input, output);
@@ -209,7 +209,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::<f64>::NONE,
+            ControlLanes::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         let pole = |tau: f64| (-1.0 / (tau * rate.get())).exp();

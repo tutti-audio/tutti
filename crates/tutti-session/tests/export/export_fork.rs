@@ -130,11 +130,7 @@ fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>)
 fn chain(session: &mut DetachedSession) -> NodeKey {
     let graph = session.graph();
     let (osc, _) = graph.add(ForkByClone(Osc::saw(Hz(110.0))));
-    let (filter, _params) = graph.add(SvfFilterNode::<f64>::new(
-        SvfType::LowPass,
-        Hz(800.0),
-        Q(1.0),
-    ));
+    let (filter, _params) = graph.add(SvfFilterNode::new(SvfType::LowPass, Hz(800.0), Q(1.0)));
     graph
         .set_sources_hard(InPort::new(filter, 0), [OutPort::new(osc, 0)])
         .unwrap();
@@ -161,11 +157,8 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let render = |master: bool| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let osc = g.add(Osc::saw(Hz(110.0)));
-        let (filter, _params) = g.add_with_controls(SvfFilterNode::<f64>::new(
-            SvfType::LowPass,
-            Hz(800.0),
-            Q(1.0),
-        ));
+        let (filter, _params) =
+            g.add_with_controls(SvfFilterNode::new(SvfType::LowPass, Hz(800.0), Q(1.0)));
         g.connect(osc, 0, filter, 0).connect_output(filter, 0, 0);
         g.connect_output(if master { osc } else { filter }, 0, 1);
         let (editor, executor) = g
