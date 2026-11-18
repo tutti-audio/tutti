@@ -8,8 +8,8 @@ use crate::smoother::Smoother;
 /// back: the attack's while the quantity rises and the release's while it falls.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Follower {
-    pub(crate) attack: f32,
-    pub(crate) release: f32,
+    attack: f32,
+    release: f32,
 }
 
 impl Follower {
@@ -20,6 +20,12 @@ impl Follower {
         attack: 0.0,
         release: 0.0,
     };
+
+    /// The attack and release coefficients.
+    #[cfg(test)]
+    pub(crate) fn coeffs(&self) -> (f32, f32) {
+        (self.attack, self.release)
+    }
 
     /// The follower of `ballistics` at `rate`.
     pub(crate) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {

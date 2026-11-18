@@ -8,7 +8,7 @@ pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
     libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
 }
 
-/// The frames, fractional, for the decay `pole^n` to reach `floor`: `ln(floor) / ln(pole)`.
+/// The frames, fractional (a count `Samples` does not cover), for the decay `pole^n` to reach `floor`: `ln(floor) / ln(pole)`.
 /// A pole of 0 or less decays at once (0 frames), and one of 1 or more never does
 /// (infinite); a floor at or above 0 dB is already reached (0 frames).
 pub(crate) fn ring_frames(pole: f64, floor: Db) -> f64 {

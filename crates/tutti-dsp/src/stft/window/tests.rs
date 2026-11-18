@@ -205,19 +205,16 @@ fn bessel_i0_matches_known_values() {
 #[test]
 fn kaiser_at_beta_zero_is_rectangular() {
     let k = KaiserWindow::new(0.0);
-    assert_eq!(
-        k.coefficients(16),
-        CosineWindow::RECTANGULAR.coefficients(16)
-    );
-    assert_eq!(k.centred(0.5), 1.0);
+    for x in [-0.5, -0.25, 0.0, 0.1, 0.5] {
+        assert_eq!(k.centred(x), 1.0);
+    }
 }
 
-/// `w(1/2) = 1` and `w(0) = w(1) = 1 / I0(beta)`, with `I0(5)` from A&S table 9.8.
+/// `w(0) = 1` at the centre and `w(±1/2) = 1 / I0(beta)`, with `I0(5)` from A&S table 9.8.
 #[test]
 fn kaiser_peaks_at_one_in_the_middle_and_ends_at_one_over_i0_of_beta() {
     let k = KaiserWindow::new(5.0);
     assert_eq!(k.centred(0.0), 1.0);
     assert!((k.centred(0.5) - 1.0 / 27.239_871_823_604_442).abs() < 1e-14);
-    assert!((k.at(0.5) - 1.0).abs() < 1e-6);
-    assert!((f64::from(k.at(0.0)) - 1.0 / 27.239_871_823_604_442).abs() < 1e-6);
+    assert!((k.centred(-0.5) - 1.0 / 27.239_871_823_604_442).abs() < 1e-14);
 }

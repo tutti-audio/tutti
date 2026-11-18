@@ -120,7 +120,7 @@ impl DcBlocker {
     #[must_use]
     pub fn tail(controls: &DcBlockerControls, rate: SampleRate) -> Samples {
         let r = dc_pole(controls.corner, rate);
-        Samples(ring_frames(r, crate::TAIL_FLOOR).ceil() as usize + 1)
+        Samples((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
     }
 
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels

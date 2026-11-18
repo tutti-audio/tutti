@@ -323,8 +323,7 @@ pub(crate) fn bessel_i0(x: f64) -> f64 {
 /// The Kaiser window of shape `beta`: `w(t) = I0(β √(1 − (2t − 1)²)) / I0(β)`, peak 1 at the
 /// middle and `1 / I0(β)` at the ends; `beta = 0` is [`CosineWindow::RECTANGULAR`].
 ///
-/// [`at`](Window::at) is the periodic form over `[0, 1)`, like every window here;
-/// [`centred`](Self::centred) is the symmetric one in `f64`, which a filter design takes.
+/// [`centred`](Self::centred) is the symmetric form in `f64`, which a filter design takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct KaiserWindow {
     beta: f64,
@@ -342,19 +341,12 @@ impl KaiserWindow {
     }
 
     /// The window centred on 0, in `f64`: `x` in `[−0.5, 0.5]`, peak 1 at `x = 0` and
-    /// `1 / I0(β)` at `x = ±0.5`; `x` outside the range is 0.
+    /// `1 / I0(β)` at `x = ±0.5`; `x` outside the range reads as the end value.
     #[inline]
     #[must_use]
     pub(crate) fn centred(&self, x: f64) -> f64 {
         let r = 2.0 * x;
         bessel_i0(self.beta * libm::sqrt((1.0 - r * r).max(0.0))) / self.norm
-    }
-}
-
-impl Window for KaiserWindow {
-    #[inline]
-    fn at(&self, t: f32) -> f32 {
-        self.centred(f64::from(t) - 0.5) as f32
     }
 }
 

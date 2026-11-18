@@ -2,7 +2,6 @@
 //! windowed-sinc reconstruction of the output (a signal's property, not another render).
 
 use super::*;
-use crate::stft::window::bessel_i0;
 use crate::{Oversampling, OversamplingFactor};
 
 /// The ceiling the cases limit to: 0.5, -6.02 dB.
@@ -36,6 +35,15 @@ fn shortest() -> Lookahead {
         Err(TruePeakError::Lookahead { shortest, .. }) => shortest,
         other => panic!("{other:?}"),
     }
+}
+
+fn bessel_i0(x: f64) -> f64 {
+    let (mut sum, mut term) = (1.0, 1.0);
+    for k in 1..60 {
+        term *= (x / (2.0 * f64::from(k))).powi(2);
+        sum += term;
+    }
+    sum
 }
 
 /// The largest magnitude of `x` between its samples, read by a Kaiser-windowed sinc (beta 10,
