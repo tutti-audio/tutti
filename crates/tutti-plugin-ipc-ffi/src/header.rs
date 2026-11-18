@@ -12,7 +12,7 @@
 //! # The ordering
 //!
 //! A slot is a seqlock. The writer [`begin`](SlabHeader::begin)s it (stores
-//! [`BUSY`], then a [`Release`](Ordering::Release) fence), `memcpy`s every
+//! `BUSY`, then a [`Release`](Ordering::Release) fence), `memcpy`s every
 //! channel, then [`publish`](SlabHeader::publish)es `seq` with
 //! [`Release`](Ordering::Release). The reader loads `seq` with
 //! [`Acquire`](Ordering::Acquire), `memcpy`s out only if it matches, then
@@ -244,7 +244,7 @@ impl SlabHeader {
     ///
     /// Call before the first sample write of a block. The `Release` fence
     /// keeps the sample writes after the mark, so a reader that copies any of
-    /// them sees [`BUSY`] (or a later block) at its [`recheck`](Self::recheck).
+    /// them sees `BUSY` (or a later block) at its [`recheck`](Self::recheck).
     #[inline]
     pub fn begin(&self, direction: Direction, slot: usize) {
         self.array(direction)[slot].store(BUSY, Ordering::Relaxed);
@@ -268,7 +268,7 @@ impl SlabHeader {
     }
 
     /// The block currently published in `slot`, or 0 if nothing is: nothing
-    /// ever was, or the writer is rewriting it ([`BUSY`] reads as 0, so a
+    /// ever was, or the writer is rewriting it (`BUSY` reads as 0, so a
     /// peer-supplied sequence of `u64::MAX` cannot match a slot mid-write).
     ///
     /// `Acquire` pairs with [`publish`](Self::publish)'s `Release`: once this
