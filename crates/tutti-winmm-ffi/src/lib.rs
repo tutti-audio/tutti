@@ -4,7 +4,8 @@
 //! backend above it is `#![forbid(unsafe_code)]` and holds the logic
 //! (enumeration identity, byte to UMP packing, timestamp placement).
 //!
-//! The crate is empty off Windows.
+//! The crate is empty off Windows, except `lifetime`, the open-callback-close
+//! protocol with no OS call, which is tested and modelled on every target.
 //!
 //! ## What is here
 //!
@@ -23,20 +24,21 @@
 //! - `synth-tests`: the suite that opens the GS Wavetable Synth. It needs an
 //!   audio endpoint, which a machine with no sound hardware gets from a virtual
 //!   audio driver. Off by default.
-#![cfg(windows)]
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
 
-mod caps;
-mod error;
-mod input;
-mod output;
-mod sleeper;
+// The OS-free protocol: tested everywhere, and used by `os`'s input.
+#[cfg(any(windows, test))]
+mod lifetime;
 
-pub use caps::{Caps, Input, InputPort, Output, OutputPort, Port, PortKind, ports};
-pub use error::{Direction, Error, MmOperation, MmResult, OsOperation};
-pub use input::{Event, MidiIn};
-pub use output::MidiOut;
-pub use sleeper::{TimerWaiter, TimerWaker, Woken, waitable_timer};
+// The one platform seam: the Windows half, or nothing.
+#[cfg(windows)]
+mod os;
+#[cfg(not(windows))]
+mod os {}
+
+// Empty off Windows, where `os` has nothing to export.
+#[allow(unused_imports)]
+pub use os::*;

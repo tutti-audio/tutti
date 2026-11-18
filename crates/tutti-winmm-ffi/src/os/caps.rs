@@ -21,7 +21,7 @@ use windows_sys::Win32::Media::Multimedia::{
     DRV_QUERYDEVICEINTERFACE, DRV_QUERYDEVICEINTERFACESIZE,
 };
 
-use crate::error::{Direction, Error, MmOperation, check};
+use super::error::{Direction, Error, MmOperation, check};
 
 /// What a driver reports of one port.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,8 +95,8 @@ fn name_of(field: &[u16]) -> String {
 const MAX_INTERFACE_BYTES: u32 = 4096;
 
 mod sealed {
-    use crate::Caps;
-    use crate::error::Error;
+    use super::Caps;
+    use crate::Error;
 
     /// The winmm calls of one direction. Nameable only in this crate, so no
     /// other crate can call them by a position.

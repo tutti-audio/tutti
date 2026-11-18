@@ -3594,6 +3594,7 @@ dependencies = [
 name = "tutti-winmm-ffi"
 version = "0.0.1"
 dependencies = [
+ "loom",
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",
