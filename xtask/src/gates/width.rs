@@ -90,6 +90,10 @@ pub(super) const EDGES: &[(&str, &str)] = &[
         "the meter folds: a per-block statistic crossing into a reading",
     ),
     (
+        "crates/tutti-dsp/src/spatial/hrtf/sphere/words.rs",
+        "the HRIR byte format's f32 words",
+    ),
+    (
         "crates/tutti-codec/src/",
         "an external edge: file sample words",
     ),

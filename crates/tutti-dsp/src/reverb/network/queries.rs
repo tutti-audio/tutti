@@ -140,26 +140,26 @@ impl Fdn {
     /// must cover the ring. `m` is the effective length.
     #[must_use]
     pub fn rt60(&self, band: Band, rate: SampleRate) -> Seconds {
-        let rate = rate.get();
         let lines = self.lines.iter().map(|l| {
             (
                 l.effective_frames(),
                 Db::from_amplitude(l.absorption.gain(band)),
             )
         });
-        let seconds = if self.mixing() {
+        if self.mixing() {
             let (m, l) = lines.fold((0.0, Db::UNITY), |(m, l), (dm, dl)| (m + dm, l + dl));
             if self.lines.is_empty() {
-                0.0
+                Seconds::ZERO
             } else {
                 decay_seconds(m, l, rate)
             }
         } else {
             lines
                 .map(|(m, l)| decay_seconds(m, l, rate))
-                .fold(0.0, f64::max)
-        };
-        Seconds(seconds)
+                .fold(Seconds::ZERO, |slowest, s| {
+                    Seconds(slowest.get().max(s.get()))
+                })
+        }
     }
 
     /// The slowest line's per-frame figures in `band`: `(20 log10 ρ, 20 log10 σ,
@@ -382,14 +382,14 @@ impl Network {
     #[must_use]
     pub fn echo_density(&self, at: Seconds) -> Hz {
         let rate = self.rate.get();
-        let t = at.get().max(0.0);
+        let t = Seconds(at.get().max(0.0));
         let mut total = 0.0f64;
         for stage in self.stages.iter() {
             match stage {
                 Stage::Fdn(f) if !f.lines.is_empty() => {
-                    total += fdn_density(f, rate, t);
+                    total += fdn_density(f, self.rate, t);
                 }
-                Stage::Fir(s) if t * rate < s.length.get() as f64 => total += rate,
+                Stage::Fir(s) if t.get() * rate < s.length.get() as f64 => total += rate,
                 _ => {}
             }
         }
@@ -499,7 +499,8 @@ impl System for Network {
     }
 }
 
-fn fdn_density(f: &Fdn, rate: f64, t: f64) -> f64 {
+fn fdn_density(f: &Fdn, rate: SampleRate, t: Seconds) -> f64 {
+    let (rate, t) = (rate.get(), t.get());
     let n = f.lines.len() as f64;
     let taus = f.lines.iter().map(|l| l.effective_frames() / rate);
     if f.mixing() {

@@ -1107,3 +1107,67 @@ fn an_f64_convolver_sums_the_scaled_delayed_copies_of_the_ir() {
         .fold(0.0f64, |a, (w, g)| a.max((w - g).abs()));
     assert!(worst < 1e-12, "the f64 render is off by {worst}");
 }
+
+/// The FFT error of the `f32` convolver is `sqrt(P) u` of the output's rms, `u = 2^-24` the `f32`
+/// rounding and `P` the partitions of the IR at the head partition `B`, `ceil(L / B)`: a
+/// non-uniform layout has fewer, longer partitions, so `P` at `B` is the conservative count. At
+/// the extreme, a 10 s IR at 48 kHz with `B = 512`, `P = 938` and the bound is `sqrt(938) * 6e-8
+/// = 1.8e-6`, -115 dB, pinned against the difference equation `y[n] = sum_k h[k] x[n - B - k]`
+/// summed in `f64` (the inputs are `f32` values, so the products are exact in `f64`).
+///
+/// The reference costs `L` terms a frame, so it is evaluated at `N = 256` output frames spread
+/// past the fill-up. `x` and `h` are uniform noise, so the output's rms is `sqrt(L) sigma_x
+/// sigma_h`, measured on the sampled frames. The peak over the `N` frames is bounded by
+/// `1.5 sqrt(2 ln N)` of that bound, the extreme of `N` Gaussians (the factor is 5.0).
+#[test]
+fn the_f32_fft_error_of_a_ten_second_ir_is_under_sqrt_partitions_times_u_of_the_output_rms() {
+    const B: usize = 512;
+    const L: usize = 480_000;
+    const N: usize = 256;
+    let p = L.div_ceil(B);
+    assert_eq!(p, 938);
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let ir = tutti_fixtures::noise(41, L);
+    let frames = L + 2 * B + 4096;
+    let x = tutti_fixtures::noise(42, frames);
+    let mut c = Convolver::<f32>::new(Mono::new(&ir), Samples(B));
+    let lat = c.latency().get();
+    assert_eq!(lat, B);
+    let got: Vec<f32> = x.iter().map(|&s| c.process_sample(s)).collect();
+
+    // Past the fill-up, where the output holds a whole IR's worth of terms.
+    let from = lat + L;
+    let at: Vec<usize> = (0..N).map(|i| from + i * (frames - from) / N).collect();
+    let want: Vec<f64> = at
+        .iter()
+        .map(|&n| {
+            let m = n - lat;
+            ir.iter()
+                .enumerate()
+                .map(|(k, &h)| f64::from(h) * f64::from(x[m - k]))
+                .sum()
+        })
+        .collect();
+    let rms = |v: &[f64]| (v.iter().map(|e| e * e).sum::<f64>() / v.len() as f64).sqrt();
+    let errors: Vec<f64> = at
+        .iter()
+        .zip(&want)
+        .map(|(&n, &w)| f64::from(got[n]) - w)
+        .collect();
+    let signal = rms(&want);
+    let sigma = (p as f64).sqrt() * u * signal;
+    let (error, worst) = (
+        rms(&errors),
+        errors.iter().fold(0.0f64, |m, e| m.max(e.abs())),
+    );
+    let factor = 1.5 * (2.0 * (N as f64).ln()).sqrt();
+    assert!(
+        error <= sigma,
+        "rms error {error:e} against sqrt(P) u rms = {sigma:e} (signal rms {signal})"
+    );
+    assert!(
+        worst <= factor * sigma,
+        "peak error {worst:e} against {factor} sigma = {:e}",
+        factor * sigma
+    );
+}
