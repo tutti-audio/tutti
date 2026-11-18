@@ -399,3 +399,112 @@ fn an_f64_plate_is_linear() {
         }
     }
 }
+
+/// The longest decay at the highest rate, in `f32`, against the closed form. At diffusion
+/// 0, no damping and no modulation the impulse response repeats every `T` frames (the loop of
+/// the tank's eight delays) at the loop gain `g = c^4`, `c` the decay gain, so the energies of
+/// the successive loop-long windows past the first fall by `g^2`, and the measured RT60
+/// `-3 T / (fs log10 g)` is the control's 8 s.
+///
+/// The bound is the rounding of `f32` over the `K` trips the windows span, in `ln g` a trip: the
+/// decay gain `c` rounds once (at most `u`, `u = 2^-24`) and each of the four products a trip
+/// rounds (at most `u`), `8 u` in all, coherent; plus the noise of the two windows' energies
+/// compared, each a sum over a window of samples that carry at most `4 K + 14` roundings (the
+/// products along their echo and the tap sum), so a sample's relative error is `sigma_s =
+/// sqrt(4 K + 14) u / sqrt(3)` and a window's energy's `2 sigma_s`; the pair differ by `1.5 sqrt(2
+/// ln N)` of `sqrt(2)` of that (`N = K + 1` windows), in `ln g` a trip over the `2 K` trips of
+/// the amplitude between them. An RT60 is `-3 T / (fs log10 g)`, so its relative error is the
+/// bound over `|ln g|`.
+#[test]
+fn the_longest_decay_at_192_khz_holds_its_closed_form_rt60_in_f32() {
+    use crate::reverb::plate::design::loop_frames;
+    let rate = SampleRate::SR_192K;
+    let decay = crate::MAX_PLATE_DECAY.get();
+    let c = pure(decay);
+    let t = loop_frames(rate) as usize;
+    let k = (decay * rate.get() / t as f64) as usize - 1;
+    let [left, _] = response(rate, &c, (k + 2) * t);
+
+    let window = |j: usize| -> f64 {
+        left[t * (1 + j)..t * (2 + j)]
+            .iter()
+            .map(|&s| f64::from(s) * f64::from(s))
+            .sum()
+    };
+    let (first, last) = (window(0), window(k));
+    let g_measured = libm::pow(last / first, 1.0 / (2.0 * k as f64));
+    let measured = -3.0 * t as f64 / (rate.get() * g_measured.log10());
+
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let n = (k + 1) as f64;
+    let sigma = (4.0 * k as f64 + 14.0).sqrt() * u / 3.0f64.sqrt();
+    let noise = 1.5 * (2.0 * n.ln()).sqrt() * 2.0f64.sqrt() * 2.0 * sigma / (2.0 * k as f64);
+    let per_trip = 8.0 * u + noise;
+    let ln_g = -libm::log(10.0) * 3.0 * t as f64 / (decay * rate.get());
+    let bound = per_trip / ln_g.abs();
+    let error = (measured / decay - 1.0).abs();
+    assert!(
+        error <= bound,
+        "RT60 {measured} s against {decay} s: error {error:e}, bound {bound:e} ({k} trips of {t} frames)"
+    );
+}
+
+/// The bandwidth one-pole stores its complement `c = 1 - exp(-2 pi fc / fs)`, designed in `f64`,
+/// so it holds `f32`'s relative precision (at most `u = 2^-24`) at the lowest bandwidth (10 Hz at
+/// 192 kHz: `c = 3.3e-4`). The pole narrowed first and `1 - p` formed in `f32` is off by up to
+/// `u / (2 c)` of `c` (4.6e-5 at 10 Hz), over a sweep of corners clearly worse.
+#[test]
+fn the_bandwidth_complement_keeps_its_relative_precision_where_one_minus_the_pole_does_not() {
+    let rate = SampleRate::SR_192K;
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let (mut stored, mut formed) = (0.0f64, 0.0f64);
+    for hz in (10..=100).map(f64::from) {
+        let controls = PlateControls {
+            bandwidth: Hz(hz),
+            ..PlateControls::DEFAULT
+        };
+        let (_, glides) = landed(rate, &controls);
+        let exact = -libm::expm1(-std::f64::consts::TAU * hz / rate.get());
+        let held = f64::from(glides.bandwidth.now());
+        stored = stored.max((held / exact - 1.0).abs());
+        let pole = libm::exp(-std::f64::consts::TAU * hz / rate.get()) as f32;
+        let old = f64::from(1.0f32 - pole);
+        formed = formed.max((old / exact - 1.0).abs());
+    }
+    assert!(
+        stored <= u,
+        "the complement's error {stored:e} against u = {u:e}"
+    );
+    assert!(
+        formed > 100.0 * u,
+        "`1 - p` in f32 is off by {formed:e}, not clearly worse than {u:e}"
+    );
+}
+
+/// The damping one-pole stores its complement `1 - damp`, designed in `f64`: at the largest
+/// damping (0.999: `c = 1e-3`) the pole rounded to `f32` first is off by up to `u / c`, 6e-5 of
+/// `c`, where the complement is within `u`.
+#[test]
+fn the_damping_complement_keeps_its_relative_precision_near_the_largest_pole() {
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let (mut stored, mut formed) = (0.0f64, 0.0f64);
+    for step in 0..=90 {
+        let damp = 0.99 + 0.0001 * f64::from(step);
+        let controls = PlateControls {
+            damping: Mix(damp),
+            ..PlateControls::DEFAULT
+        };
+        let (_, glides) = landed(SampleRate::SR_48K, &controls);
+        let exact = 1.0 - damp;
+        stored = stored.max((f64::from(glides.damping.now()) / exact - 1.0).abs());
+        formed = formed.max((f64::from(1.0f32 - damp as f32) / exact - 1.0).abs());
+    }
+    assert!(
+        stored <= u,
+        "the complement's error {stored:e} against u = {u:e}"
+    );
+    assert!(
+        formed > 100.0 * u,
+        "`1 - p` in f32 is off by {formed:e}, not clearly worse than {u:e}"
+    );
+}
