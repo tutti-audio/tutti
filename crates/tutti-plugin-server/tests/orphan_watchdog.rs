@@ -228,6 +228,44 @@ fn a_server_with_a_live_parent_serves_its_host() {
     let _ = std::fs::remove_file(&socket);
 }
 
+/// **A server behind a wrapper does not take the wrapper for an ended host.** A
+/// shell that runs the server without `exec` (a wrapper script, `strace`, a
+/// sandbox) is the server's parent, and the host that stated its pid is alive.
+/// The server is asked to shut down by the host, and its log must not say that its
+/// host was gone: the watch logs that the moment it fires, so it cannot have
+/// fired while the server answered.
+#[test]
+fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
+    let exe = env!("CARGO_BIN_EXE_plugin-server");
+    let socket = dead_socket_path("wrapper");
+    let dir = std::env::temp_dir().join(format!("tw-wrapper-log-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let log = dir.join("server.log");
+    // `true` after it keeps the shell from replacing itself with the server.
+    let mut wrapper = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!("{exe:?} {socket:?} >{log:?} 2>&1; true"))
+        .env("RUST_LOG", "info")
+        .env(
+            tutti_plugin_ipc_ffi::HOST_PID_ENV,
+            std::process::id().to_string(),
+        )
+        .spawn()
+        .expect("spawning the wrapper");
+
+    let mut stream = connect(&socket, || wrapper.try_wait().expect("polling").is_some());
+    tutti_plugin_ipc::write_frame(&mut stream, &tutti_plugin_ipc::HostMessage::Shutdown)
+        .expect("ask the server to shut down");
+    assert!(wrapper.wait().expect("the wrapper ends").success());
+
+    let printed = std::fs::read_to_string(&log).expect("the server's log");
+    assert!(
+        !printed.contains("the host process is gone"),
+        "the server took its running host for gone: {printed}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// (e) **A host that ends after it connected ends the server, though the
 /// connection stays open.** A watch that covered only the wait for the first
 /// connection leaves a server that is past it, parked reading the handshake, an

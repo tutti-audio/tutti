@@ -259,7 +259,9 @@ impl PluginServer {
         render: &RenderThread,
     ) -> BridgeResult<()> {
         let main = self.main;
-        crate::main_loop::serve(&mut self.session, transport, main, render)
+        crate::main_loop::serve(&mut self.session, transport, main, render)?;
+        tracing::info!("plugin-server: the control phase ended cleanly");
+        Ok(())
     }
 }
 

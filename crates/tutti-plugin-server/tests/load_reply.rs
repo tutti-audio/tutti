@@ -246,85 +246,82 @@ fn a_handshake_frame_that_does_not_decode_ends_the_server() {
 
 /// **A host that ends once the session is running shuts the server down as an
 /// end of the control connection does, and the plugin is released.** This test
-/// process keeps all three connections open, so no end of stream says the host
-/// is gone: only the watch on the host process does. The server must leave by
-/// its own exit (status 0, not a signal), which only a teardown that ran
-/// reaches, and without the log of a plugin it had to leak.
-///
-/// The host is a shell that spawns the server, so the server's parent is the
-/// process it names as its host, as a real host's is. This process adopts the
-/// server when the shell ends (a subreaper), so it can read the server's status.
-#[cfg(target_os = "linux")]
-mod host_ends_in_the_control_phase {
-    use super::*;
+/// process keeps the connections open, so no end of stream says the host is gone:
+/// only the watch on the host process does. The host is a shell that states its
+/// pid and spawns the server. When it ends, the server's own teardown closes its
+/// sockets (the stream ends) and logs that the control phase ended cleanly, which
+/// an end by `SIGKILL` cannot do; the log carries no plugin it had to leak.
+#[test]
+fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     use std::io::BufRead as _;
 
-    #[test]
-    fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
-        // SAFETY: `prctl` with `PR_SET_CHILD_SUBREAPER` takes scalars and only
-        // changes where this process's orphaned descendants are reparented.
-        let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) };
-        assert_eq!(rc, 0, "PR_SET_CHILD_SUBREAPER failed: this test needs it");
-        let (_not_a_plugin, good) = fixtures();
-        let socket = tutti_plugin_ipc::BridgeConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        )
-        .socket_path;
-        let dir = tempfile::tempdir().expect("a scratch directory");
-        let log = dir.path().join("server.log");
-        // The shell is the host until its input closes: it states its own pid,
-        // prints the server's, and waits.
-        let script = format!(
-            "{env}=$$ {exe:?} {socket:?} >{log:?} 2>&1 & echo $!; read _",
-            env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
-            exe = env!("CARGO_BIN_EXE_plugin-server"),
-        );
-        let mut host = Server(
-            Command::new("/bin/sh")
-                .arg("-c")
-                .arg(&script)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .expect("spawn the host shell"),
-        );
-        let mut line = String::new();
-        std::io::BufReader::new(host.0.stdout.take().expect("piped"))
-            .read_line(&mut line)
-            .expect("the shell prints the server's pid");
-        let server: i32 = line.trim().parse().expect("the server's pid");
+    let (_not_a_plugin, good) = fixtures();
+    let socket = tutti_plugin_ipc::BridgeConfig::at(
+        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+    )
+    .socket_path;
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let log = dir.path().join("server.log");
+    // The shell is the host until its input closes: it states its own pid, prints
+    // the server's, and waits.
+    let script = format!(
+        "RUST_LOG=info {env}=$$ {exe:?} {socket:?} >{log:?} 2>&1 & echo $!; read _",
+        env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
+        exe = env!("CARGO_BIN_EXE_plugin-server"),
+    );
+    let mut host = Server(
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn the host shell"),
+    );
+    let mut line = String::new();
+    std::io::BufReader::new(host.0.stdout.take().expect("piped"))
+        .read_line(&mut line)
+        .expect("the shell prints the server's pid");
+    let server: u32 = line.trim().parse().expect("the server's pid");
 
-        let mut handshake = connect(&socket, &mut host);
+    let mut handshake = connect(&socket, &mut host);
+    assert!(matches!(
+        read_frame::<_, BridgeMessage>(&mut handshake),
+        Ok(BridgeMessage::Ready { .. })
+    ));
+    assert!(matches!(
+        load(&mut handshake, &good, PluginFormat::Clap),
+        BridgeMessage::PluginLoaded { .. }
+    ));
+    drop(handshake);
+    let mut audio = connect(&socket, &mut host);
+    let mut control = connect(&socket, &mut host);
+    for stream in [&mut audio, &mut control] {
         assert!(matches!(
-            read_frame::<_, BridgeMessage>(&mut handshake),
+            read_frame::<_, BridgeMessage>(stream),
             Ok(BridgeMessage::Ready { .. })
         ));
-        assert!(matches!(
-            load(&mut handshake, &good, PluginFormat::Clap),
-            BridgeMessage::PluginLoaded { .. }
-        ));
-        drop(handshake);
-        let mut audio = connect(&socket, &mut host);
-        let mut control = connect(&socket, &mut host);
-        for stream in [&mut audio, &mut control] {
-            assert!(matches!(
-                read_frame::<_, BridgeMessage>(stream),
-                Ok(BridgeMessage::Ready { .. })
-            ));
-        }
-
-        drop(host.0.stdin.take());
-        host.0.wait().expect("the host ends");
-        let mut status = 0;
-        // SAFETY: `waitpid` on a pid this process adopted, writing one `c_int`.
-        let reaped = unsafe { libc::waitpid(server, &mut status, 0) };
-        assert_eq!(reaped, server, "the adopted server is reaped");
-        assert!(libc::WIFEXITED(status), "ended by a signal: {status}");
-        assert_eq!(libc::WEXITSTATUS(status), 0, "left by its own exit");
-        let printed = std::fs::read_to_string(&log).unwrap_or_default();
-        assert!(
-            !printed.contains("leaking the plugin"),
-            "the plugin was leaked: {printed}"
-        );
     }
+    let (ended, server_ended) = std::sync::mpsc::channel();
+    tutti_plugin_ipc_ffi::watch_host(server, move || ended.send(()).expect("listening"))
+        .expect("the watch starts");
+
+    drop(host.0.stdin.take());
+    host.0.wait().expect("the host ends");
+    // The server's teardown closes its end of the control connection.
+    assert!(
+        read_frame::<_, BridgeMessage>(&mut control).is_err(),
+        "the server answered after its host ended"
+    );
+    server_ended.recv().expect("the server ends");
+
+    let printed = std::fs::read_to_string(&log).expect("the server's log");
+    assert!(
+        printed.contains("the control phase ended cleanly"),
+        "no clean teardown in the log: {printed}"
+    );
+    assert!(
+        !printed.contains("leaking the plugin"),
+        "the plugin was leaked: {printed}"
+    );
 }

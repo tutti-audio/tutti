@@ -732,25 +732,53 @@ mod host_watch {
         ended.recv().expect("the probe ends with its host");
     }
 
-    /// **A stated host that is not the probe's parent is not trusted**: the pid a
-    /// live process holds may have been another's, so the probe takes its host as
-    /// gone and ends at once, though the process stated is running.
+    /// **A probe behind a wrapper finishes and writes its result**: a shell that
+    /// runs it without `exec` (as a wrapper script, `strace` or a sandbox does)
+    /// is its parent, not the host that stated its pid, and the host is alive. The
+    /// probe must not take that for a host that ended: ending it would be read as a
+    /// crash of every plugin scanned.
     #[test]
-    fn a_stated_pid_that_is_not_the_parent_is_not_trusted() {
+    fn a_probe_behind_a_wrapper_finishes_while_its_host_runs() {
         let dir = tempfile::tempdir().unwrap();
-        let mut stranger = std::process::Command::new("sleep")
-            .arg("600")
-            .spawn()
-            .expect("sleep");
-        let status = hanging_probe(&dir)
+        let result = dir.path().join("result");
+        // `true` after it keeps the shell from replacing itself with the probe.
+        let script = format!(
+            "{probe:?} {plugin:?} {result:?} --as clap; true",
+            probe = tutti_fixtures::plugin_probe(),
+            plugin = clap_path(),
+        );
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
             .env(
                 tutti_plugin_ipc_ffi::HOST_PID_ENV,
-                stranger.id().to_string(),
+                std::process::id().to_string(),
             )
             .status()
+            .expect("the wrapper ends");
+
+        assert!(status.success(), "{status:?}");
+        assert!(
+            matches!(
+                tutti_plugin_types::read_result(&result),
+                Ok(Some(ProbeOutcome::Described(_)))
+            ),
+            "the probe wrote its result"
+        );
+    }
+
+    /// **A stated pid that no process holds is a host that ended**, so the probe
+    /// ends at once: the pid is that of a child this test has already reaped.
+    #[test]
+    fn a_stated_pid_that_no_process_holds_ends_the_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut gone = std::process::Command::new("true").spawn().expect("true");
+        let pid = gone.id();
+        gone.wait().expect("reaped");
+        let status = hanging_probe(&dir)
+            .env(tutti_plugin_ipc_ffi::HOST_PID_ENV, pid.to_string())
+            .status()
             .expect("the probe ends");
-        stranger.kill().expect("kill the stranger");
-        stranger.wait().expect("reap it");
 
         assert_eq!(status.signal(), Some(SIGKILL), "ended by the watch's kill");
         assert_eq!(ProbeDeath::of(status), ProbeDeath::Signal(SIGKILL));
