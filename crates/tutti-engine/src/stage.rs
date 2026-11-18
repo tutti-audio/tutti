@@ -3,7 +3,7 @@
 
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
-use tutti_graph::{control_in, ramp_in};
+use tutti_graph::ramp_in;
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{Amplitude, Samples};
 
@@ -70,7 +70,7 @@ impl OutputStage {
             }
             if ramp.done >= ramp.frames {
                 if ramp.now != Amplitude::UNITY {
-                    let gain = control_in::<F>(ramp.now.get());
+                    let gain = F::from_unit(ramp.now);
                     block
                         .iter_mut()
                         .skip(c)
@@ -81,13 +81,10 @@ impl OutputStage {
             }
             // The ramp renders in `F`, as an edge weight's does; the gain it
             // ends the block on is where the next target starts from.
-            let (from, to) = (
-                control_in::<F>(ramp.from.get()),
-                control_in::<F>(ramp.to.get()),
-            );
+            let (from, to) = (F::from_unit(ramp.from), F::from_unit(ramp.to));
             for s in block.iter_mut().skip(c).step_by(out_ch) {
                 let gain = ramp_in(None, from, to, Samples(ramp.done), Samples(ramp.frames));
-                ramp.now = Amplitude(gain.to_f64());
+                ramp.now = Amplitude(gain.into());
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
