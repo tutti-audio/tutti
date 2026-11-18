@@ -16,16 +16,9 @@ use tutti_plugin_types::{
 use tutti_types::ParamId;
 
 use super::ClapLoaded;
-use crate::ParamBounds;
-use crate::types::ClapParamFlags;
 
 fn editor_error(reason: String) -> PluginError {
     PluginError::Editor(EditorError::PluginError(reason))
-}
-
-/// Look up declared bounds for `id` in a table sorted by id.
-fn lookup_range(table: &[ParamBounds], id: u32) -> Option<&ParamBounds> {
-    ParamBounds::find(table, id)
 }
 
 /// A CLAP plugin loaded for its editor alone: never activated, it shows the
@@ -43,14 +36,6 @@ fn lookup_range(table: &[ParamBounds], id: u32) -> Option<&ParamBounds> {
 #[derive(Debug)]
 pub struct ClapEditor {
     inner: ClapLoaded,
-    /// Declared plain-unit bounds per parameter id, sorted, captured at load.
-    ///
-    /// CLAP parameter values are in the plugin's own units where this host
-    /// speaks normalized, so a mirrored write has to be denormalized. Cached
-    /// because `ClapLoaded::parameter_range` is a linear scan that makes one
-    /// FFI call per parameter to find one id — acceptable once at load, not on
-    /// every knob movement.
-    param_ranges: Vec<ParamBounds>,
     /// What the plugin asked of the host that the instance does not serve
     /// itself, since the last [`take_requests`](Editor::take_requests).
     asked: Vec<Request>,
@@ -66,14 +51,8 @@ impl ClapEditor {
         load: &Load,
     ) -> PluginResult<Self> {
         let inner = ClapLoaded::load_in_process(main, work, path, load)?;
-        // One pass over the catalog instead of a scan per write. Params are
-        // readable on an unactivated instance, which is what this GUI-only
-        // load is.
-        let param_ranges = read_param_ranges(main, &inner);
-
         Ok(Self {
             inner,
-            param_ranges,
             asked: Vec::new(),
         })
     }
@@ -90,23 +69,6 @@ impl ClapEditor {
     }
 }
 
-/// The plugin's declared plain-unit bounds per parameter id, sorted by id.
-fn read_param_ranges(main: MainThreadMarker, inner: &ClapLoaded) -> Vec<ParamBounds> {
-    let mut ranges: Vec<ParamBounds> = inner
-        .native_parameters(main)
-        .into_iter()
-        .map(|p| ParamBounds {
-            id: p.id,
-            min: p.min_value,
-            max: p.max_value,
-            stepped: p.flags.contains(ClapParamFlags::STEPPED),
-            read_only: p.flags.contains(ClapParamFlags::READONLY),
-        })
-        .collect();
-    ranges.sort_unstable_by_key(|b| b.id);
-    ranges
-}
-
 impl Editor for ClapEditor {
     fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         // CLAP values are in the plugin's native plain range, so the host's
@@ -117,7 +79,7 @@ impl Editor for ClapEditor {
         //
         // The mirror follows the host's write policy: the write the host
         // refused (an undeclared or a read-only parameter) is not mirrored.
-        let Some(bounds) = lookup_range(&self.param_ranges, id.get()) else {
+        let Some(bounds) = self.inner.parameter_bounds(id) else {
             return;
         };
         if bounds.read_only {
@@ -146,13 +108,20 @@ impl Editor for ClapEditor {
         // `ClapLoaded::activate` consumes `self` into a processor and a controller,
         // so a `ClapLoaded` held by value cannot reach the active state. `flush_params` takes the main-thread branch, which is also
         // what the existing `editor_idle` flush above already relies on.
-        let events = self.inner.flush_params(main, vec![]);
+        let flushed = self.inner.flush_params(main, vec![]);
+        if flushed.lost() > 0 {
+            tracing::warn!(
+                lost = flushed.lost(),
+                "a CLAP editor flush output more than its room holds"
+            );
+        }
 
         // Each event as the edit it reports: a value normalized against the
         // declared bounds (`ClapEvent::heard`), and a gesture's ends.
-        events
+        flushed
+            .events()
             .iter()
-            .filter_map(|e| e.heard(&self.param_ranges))
+            .filter_map(|e| e.heard(&self.inner.params.ranges().ranges))
             .collect()
     }
 
@@ -227,14 +196,15 @@ impl EditorWindow for ClapEditor {
         // loop found ready (`wake`) is latched, and is taken here.
         let mut requests = Vec::new();
         Control::take_requests(&mut self.inner, main, &mut requests);
-        let mut reread = false;
         for request in requests {
             match request {
                 Request::Callback => self.inner.run_main_thread(main),
                 Request::Timer(id) => self.inner.run_timer(main, id),
                 Request::Fd(id) => self.inner.service_fd(main, id),
                 // A rescan that re-described the parameters re-reads their bounds.
-                Request::RescanParams(RescanScope::Info | RescanScope::All) => reread = true,
+                Request::RescanParams(scope @ (RescanScope::Info | RescanScope::All)) => {
+                    Control::rescan_parameters(&mut self.inner, main, scope);
+                }
                 // The plugin's own buttons ask the host of the instance that
                 // shows them; the host of the session answers.
                 Request::Transport(asked) => self.asked.push(Request::Transport(asked)),
@@ -253,9 +223,6 @@ impl EditorWindow for ClapEditor {
                 | Request::NoteExpressionChanged
                 | Request::RescanParams(RescanScope::Values | RescanScope::Text) => {}
             }
-        }
-        if reread {
-            self.param_ranges = read_param_ranges(main, &self.inner);
         }
     }
 
@@ -309,7 +276,7 @@ mod tests {
         clap_event_header, clap_event_param_gesture,
     };
 
-    use crate::ClapEvent;
+    use crate::{ClapEvent, ParamBounds};
 
     use super::*;
 
@@ -317,10 +284,10 @@ mod tests {
     /// distinguishable from a pass-through. Both halves matter — against
     /// `0..=1` bounds the plain and normalized domains coincide and every
     /// assertion below would hold with the conversion deleted.
-    const CUTOFF: ParamBounds = ParamBounds::continuous(7, 20.0, 20_000.0);
+    const CUTOFF: ParamBounds = ParamBounds::continuous(ParamId::new(7), 20.0, 20_000.0);
 
-    fn change(id: u32, value: f64) -> Option<ParamEdit> {
-        Some(ParamEdit::change(ParamId::new(id), Normalized::of(value)))
+    fn change(id: ParamId, value: f64) -> Option<ParamEdit> {
+        Some(ParamEdit::change(id, Normalized::of(value)))
     }
 
     /// The editor's plain value is normalized before it leaves for the audio
@@ -335,20 +302,22 @@ mod tests {
     fn a_plain_editor_value_is_normalized_against_the_declared_range() {
         let ranges = [CUTOFF];
         let ParamBounds { id, min, max, .. } = CUTOFF;
+        // `ClapEvent` carries the plugin's raw `clap_id`.
+        let raw = id.get();
 
         assert_eq!(
-            ClapEvent::param_value(0, id, min).heard(&ranges),
+            ClapEvent::param_value(0, raw, min).heard(&ranges),
             change(id, 0.0)
         );
         assert_eq!(
-            ClapEvent::param_value(0, id, max).heard(&ranges),
+            ClapEvent::param_value(0, raw, max).heard(&ranges),
             change(id, 1.0)
         );
         // Midpoint of the declared span, which is *not* the midpoint of the
         // value: 10010 Hz is halfway between 20 and 20000 linearly, and a
         // pass-through would report 10010.0 rather than 0.5.
         assert_eq!(
-            ClapEvent::param_value(0, id, 10_010.0).heard(&ranges),
+            ClapEvent::param_value(0, raw, 10_010.0).heard(&ranges),
             change(id, 0.5)
         );
     }
@@ -366,7 +335,7 @@ mod tests {
             // What `set_parameter` would hand the plugin...
             let plain = CUTOFF.plain(Normalized::of(host_value));
             // ...and what the editor reporting that same position comes back as.
-            let heard = ClapEvent::param_value(0, id, plain)
+            let heard = ClapEvent::param_value(0, id.get(), plain)
                 .heard(&ranges)
                 .expect("a PARAM_VALUE event yields an edit");
             let got = heard.value().expect("a change has a value").get();
@@ -391,7 +360,7 @@ mod tests {
         let ranges = [CUTOFF];
         assert_eq!(
             ClapEvent::param_value(0, 99, 0.5).heard(&ranges),
-            change(99, 0.5)
+            change(ParamId::new(99), 0.5)
         );
     }
 

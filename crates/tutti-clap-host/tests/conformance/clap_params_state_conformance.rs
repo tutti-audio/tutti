@@ -442,7 +442,7 @@ fn parameter_range_is_keyed_by_id_and_refuses_unknown_ids() {
 
     for want in probe_params() {
         assert_eq!(
-            loaded.parameter_range(main_thread(), want.id),
+            loaded.parameter_range(main_thread(), ParamId::new(want.id)),
             Some((want.min, want.max)),
             "range for param id {} must be the plugin's declared bounds",
             want.id
@@ -453,7 +453,7 @@ fn parameter_range_is_keyed_by_id_and_refuses_unknown_ids() {
     // id, so answering for one would mean a host had confused the two.
     for index in 0..probe_params().len() as u32 {
         assert_eq!(
-            loaded.parameter_range(main_thread(), index),
+            loaded.parameter_range(main_thread(), ParamId::new(index)),
             None,
             "index {index} is not a param id in this plugin"
         );
@@ -688,8 +688,11 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     let probe = Probe::acquire();
     // After the load: with no handle open, the switch's own would be the last
     // and closing it would unload the image and reset the switch.
-    let loaded = probe.load();
+    let mut loaded = probe.load();
     set_readonly_param(param(0).id);
+    // A plugin that changes a parameter's flags asks for an info rescan, which
+    // the lifecycle serves.
+    Control::rescan_parameters(&mut loaded, main_thread(), RescanScope::Info);
     let mut inst = loaded
         .activate_at::<f32>(48_000.0, 512)
         .map_err(|(_, e)| e)
@@ -719,6 +722,7 @@ fn set_parameter_does_not_write_a_read_only_parameter() {
     let probe = Probe::acquire();
     let mut loaded = probe.load();
     set_readonly_param(param(0).id);
+    Control::rescan_parameters(&mut loaded, main_thread(), RescanScope::Info);
     let n = Normalized::new(0.5).expect("on 0..=1");
 
     let read_only = ParamId::new(param(0).id);
@@ -754,7 +758,9 @@ fn host_decodes_plugin_emitted_param_values() {
 
     // The probe drains its output queue in `params.flush`, which is where
     // `flush_params` will pick it up.
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     assert_eq!(out.len(), 1, "the plugin's one output event must survive");
     let hdr = out[0].header();
@@ -764,8 +770,8 @@ fn host_decodes_plugin_emitted_param_values() {
 /// Gesture begin/end and modulation events the plugin emits are *not*
 /// representable as parameter values, and must not be silently dropped.
 ///
-/// `fill_param_changes` matches only `ParamValue`; the rest go through
-/// `fill_gestures`. A host that collapses all four kinds into `PARAM_VALUE`, or
+/// `fill_param_changes` matches only `ParamValue`; the rest stay in the
+/// output event list. A host that collapses all four kinds into `PARAM_VALUE`, or
 /// drops the two gesture types, fails here.
 /// Spec: clap.event.param_gesture_begin, clap.event.param_gesture_end, clap.event.param_value, clap.event.param_mod, clap.events.output.try_push
 #[test]
@@ -780,7 +786,9 @@ fn host_preserves_gesture_and_modulation_events_from_the_plugin() {
     probe.queue_output(OUT_GESTURE_END, p.id, 0.0);
     probe.queue_output(OUT_PARAM_MOD, p.id, 0.125);
 
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     let types: Vec<u16> = out.iter().map(|e| e.header().type_).collect();
     assert_eq!(

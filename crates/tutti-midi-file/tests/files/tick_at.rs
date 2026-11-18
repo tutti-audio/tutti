@@ -13,7 +13,7 @@ fn tpq(ticks: u16) -> TicksPerQuarterNote {
 fn file(ticks_per_quarter: u16) -> MidiFile {
     MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(ticks_per_quarter),
+        SmfDivision::per_quarter(ticks_per_quarter),
         vec![track(vec![])],
     )
     .unwrap()
@@ -25,7 +25,7 @@ fn tick_at_inverts_beat_at_for_every_tick_at_each_division() {
         let file = file(tpq);
         for t in (0..=40_000).chain([1 << 40, (1 << 52) + 1]) {
             assert_eq!(
-                file.tick_at(file.beat_at(Tick(t))),
+                file.tick_at(file.beat_at(Tick(t)).unwrap()),
                 Some(Tick(t)),
                 "tick {t} at {tpq}"
             );

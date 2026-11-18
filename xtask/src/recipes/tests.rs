@@ -101,7 +101,6 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
     ] {
         assert_eq!(dry(recipe, &[]), [gate]);
     }
-    assert!(dry("check-doc-features", &[])[0].starts_with("doc-features: "));
     let ci = dry("ci", &[]);
     for want in [
         "gate check-range-types",
@@ -131,7 +130,6 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
     ] {
         assert!(ci.iter().any(|l| l == want), "{want}");
     }
-    assert!(ci.iter().any(|l| l.starts_with("doc-features: ")));
 }
 
 #[test]
@@ -157,7 +155,9 @@ fn ci_runs_each_dependency_once() {
     assert_eq!(count("cargo fmt --all --check"), 1);
     // lint first, doc last, as the justfile's dependency list ran.
     assert_eq!(steps[0], "cargo fmt --all --check");
-    assert!(steps[steps.len() - 2].contains("--cfg docsrs"));
+    assert!(
+        steps[steps.len() - 2].contains("cargo doc --locked --workspace --no-deps --all-features")
+    );
     assert!(steps.last().unwrap().starts_with("umbrella-api: "));
     let deny = steps
         .iter()
@@ -268,25 +268,14 @@ fn deny_probes_cargo_deny_first() {
 }
 
 #[test]
-fn doc_sets_rustdocflags_and_the_dated_nightly() {
+fn doc_documents_every_feature_with_private_items_then_the_umbrella() {
     let s = dry("doc", &[]);
-    assert_eq!(s.len(), 7);
-    assert!(s[0].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc"));
-    assert!(
-        s[1].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc")
-            && s[1].contains("-p tutti-session -p tutti")
-            && s[1].contains("--all-features"),
-        "{}",
-        s[1]
+    assert_eq!(s.len(), 2);
+    assert_eq!(
+        s[0],
+        "RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc --locked --workspace --no-deps --all-features"
     );
-    assert!(
-        s[3].contains("-p tutti-plugin-types") && s[3].contains("--features contract"),
-        "{}",
-        s[3]
-    );
-    assert!(s[4].starts_with("doc-features: cargo doc"), "{}", s[4]);
-    assert!(s[5].contains("cargo +nightly-2026-10-14 doc"));
-    assert!(s[6].starts_with("umbrella-api: "), "{}", s[6]);
+    assert!(s[1].starts_with("umbrella-api: "), "{}", s[1]);
 }
 
 #[test]

@@ -19,7 +19,6 @@ mod comments;
 mod conformance;
 mod conformance_site;
 mod decode_boundary;
-mod doc_features;
 mod doc_idents;
 mod doc_refs;
 mod errors;
@@ -54,7 +53,6 @@ mod value_traits;
 mod values;
 mod vst3_sdk;
 
-pub(crate) use doc_features::doc_runs;
 pub(crate) use umbrella_api::collect;
 
 use std::fs;

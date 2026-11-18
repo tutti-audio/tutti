@@ -1323,8 +1323,8 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoCommonTimeline`] for a format 2 file, which has no one
-    /// timeline; otherwise as
+    /// [`MidiError::NoTimeline`] for a format 2 file, which has no one
+    /// timeline, and for a file in SMPTE time, which has no beats; otherwise as
     /// [`play_clip`](Self::play_clip).
     pub fn play_file(
         &mut self,

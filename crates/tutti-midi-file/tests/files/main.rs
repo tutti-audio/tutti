@@ -4,6 +4,7 @@
 mod authoring;
 mod clip_model;
 mod common;
+mod division;
 mod smf_model;
 mod smf_wire;
 mod support;

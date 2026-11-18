@@ -24,12 +24,6 @@ pub enum ReadError {
     #[error("not a Standard MIDI File or a MIDI 2.0 Clip File")]
     UnknownFormat,
 
-    /// SMPTE/timecode division. The codec reads metrical timing only: beats
-    /// come from the file's division, and a timecode file has no beat grid to
-    /// read them from or put a tempo map on.
-    #[error("an SMPTE division is not supported: the codec reads metrical timing only")]
-    SmpteDivision,
-
     /// The bytes are not a well-formed SMF, or are cut off.
     #[error("SMF{} at byte {offset}: {cause}", track.map_or_else(String::new, |t| format!(" track {t}")))]
     Smf {

@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_buffers::Planes;
+use tutti_buffers::{Mono, Planes};
 use tutti_fixtures::Noise;
 use tutti_types::MaxBlock;
 
@@ -933,7 +933,7 @@ fn mix_cases() -> Vec<MixCase> {
                 parts_of(
                     tutti_nodes::ConvolverNode::shared_ir(
                         ChannelLayout::try_from(w).expect("a test width is small"),
-                        &[0.0, 0.0, 1.0, -0.5],
+                        Mono::new(&[0.0, 0.0, 1.0, -0.5]),
                         64,
                     )
                     .unwrap(),

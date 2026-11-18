@@ -13,6 +13,7 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
+use tutti_buffers::Mono;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
@@ -26,6 +27,7 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    TransientShaperConfig, TransientShaperNode,
 };
 use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -33,7 +35,7 @@ use tutti_nodes::{
 };
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, StereoWidth, UnitParam,
+    Resonance, Seconds, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -295,6 +297,24 @@ fn cut_filter() {
 }
 
 #[test]
+fn transient_shaper() {
+    IsolateRow::new("TransientShaperNode (stereo)", || {
+        TransientShaperNode::from(
+            TransientShaperConfig::new(ChannelLayout::STEREO)
+                .attack(Db(6.0))
+                .sustain(Db(-3.0)),
+        )
+    })
+    .control("attack", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 0), 12.0))
+    })
+    .control("sustain", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 1), 9.0))
+    })
+    .check();
+}
+
+#[test]
 fn auto_pan() {
     IsolateRow::new("AutoPanNode", || {
         AutoPanNode::from(AutoPanConfig::new().depth(Depth::of(0.2)))
@@ -459,7 +479,9 @@ fn convolver() {
             white * (-(n as f32) / 128.0).exp()
         })
         .collect();
-    IsolateRow::new("ConvolverNode (mono)", move || ConvolverNode::new(&ir, 64))
-        .control("gain", |c| c.set_gain(Amplitude(0.3)))
-        .check();
+    IsolateRow::new("ConvolverNode (mono)", move || {
+        ConvolverNode::new(Mono::new(&ir), 64)
+    })
+    .control("gain", |c| c.set_gain(Amplitude(0.3)))
+    .check();
 }

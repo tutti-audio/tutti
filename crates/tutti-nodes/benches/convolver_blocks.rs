@@ -23,6 +23,7 @@ use tutti_types::Seconds;
 fn main() {
     use std::hint::black_box;
     use std::time::Instant;
+    use tutti_buffers::{Mono, MonoMut};
     use tutti_dsp::Convolver;
     use tutti_fixtures::signal::decay_ir;
     use tutti_types::SampleRate;
@@ -32,7 +33,7 @@ fn main() {
         "partition", "ir (s)", "host", "mean (us)", "p99 (us)", "p99.9", "max (us)", "max/mean"
     );
     let run = |ir: &[f32], partition: usize, lens: &[usize]| {
-        let mut c = Convolver::new(ir, partition);
+        let mut c = Convolver::new(Mono::new(ir), partition);
         let longest = *lens.iter().max().unwrap_or(&1);
         let input: Vec<f32> = (0..longest)
             .map(|i| ((i * 7919) % 1000) as f32 * 2e-3 - 1.0)
@@ -43,7 +44,7 @@ fn main() {
         let warm = (2 * ir.len() / mean_len) + 4 * partition;
         for k in 0..warm {
             let n = lens[k % lens.len()];
-            c.process_block(&input[..n], &mut out[..n]);
+            c.process_block(Mono::new(&input[..n]), MonoMut::new(&mut out[..n]));
         }
         let calls = (16 * partition.max(4096) / mean_len).max(2048);
         let mut all = Vec::with_capacity(calls * 21);
@@ -53,7 +54,10 @@ fn main() {
             for k in 0..calls {
                 let n = lens[k % lens.len()];
                 let t = Instant::now();
-                c.process_block(black_box(&input[..n]), &mut out[..n]);
+                c.process_block(
+                    Mono::new(black_box(&input[..n])),
+                    MonoMut::new(&mut out[..n]),
+                );
                 let ns = t.elapsed().as_nanos() as u64;
                 black_box(&out);
                 pass_max = pass_max.max(ns);
