@@ -59,18 +59,15 @@ use tutti_types::{PitchClass, Samples};
 
 use tutti_types::ranged;
 
-use crate::chroma::{CLASSES, Chroma};
-use crate::framing::Framing;
+use crate::chroma::{CLASSES, Chroma, MAX_FRAMES};
+use crate::framing::{Framing, check_frame_count};
+use crate::sequence::median;
 use crate::{Error, Result};
-use tutti_dsp::{FrameCount, FrameIndex, Grid};
+use tutti_dsp::{FrameIndex, Grid};
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
 const STATES: usize = 2 * CLASSES + 1;
 const NO_CHORD: usize = 2 * CLASSES;
-
-/// The most frames one call smooths, bounding the backpointers (25 bytes a
-/// frame).
-const MAX_FRAMES: usize = 1 << 19;
 
 /// What the Viterbi scores are held in; wide, because they are summed over
 /// every frame.
@@ -194,13 +191,8 @@ pub(crate) fn detect(
             columns: chroma.bins().get(),
         });
     }
+    check_frame_count(chroma.frames(), MAX_FRAMES)?;
     let frames = chroma.frames().get();
-    if frames > MAX_FRAMES {
-        return Err(Error::TooManyFrames {
-            frames: chroma.frames(),
-            max: FrameCount(MAX_FRAMES),
-        });
-    }
     if chroma.as_slice().iter().any(|v| !v.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
@@ -221,9 +213,7 @@ pub(crate) fn detect(
 fn similarities(frame: &[f32]) -> [f64; STATES] {
     let mut sims = [0.0f64; STATES];
     let mut x: [f64; CLASSES] = core::array::from_fn(|i| f64::from(frame[i]));
-    let mut sorted = x;
-    sorted.sort_by(f64::total_cmp);
-    let median = (sorted[CLASSES / 2 - 1] + sorted[CLASSES / 2]) / 2.0;
+    let median = median(&x).unwrap_or_default();
     x.iter_mut().for_each(|v| *v = (*v - median).max(0.0));
     let norm = x.iter().map(|v| v * v).sum::<f64>().sqrt();
     if norm.is_nan() || norm <= 0.0 {
@@ -667,16 +657,16 @@ mod tests {
         x[4] = -0.5;
         assert_eq!(invalid(&grid(&[x])), Error::NegativeInput);
         let huge = Grid::new(
-            vec![0.0; (MAX_FRAMES + 1) * CLASSES],
-            FrameCount(MAX_FRAMES + 1),
+            vec![0.0; (MAX_FRAMES.get() + 1) * CLASSES],
+            FrameCount(MAX_FRAMES.get() + 1),
             BinCount(CLASSES),
         )
         .unwrap();
         assert_eq!(
             invalid(&huge),
             Error::TooManyFrames {
-                frames: FrameCount(MAX_FRAMES + 1),
-                max: FrameCount(MAX_FRAMES)
+                frames: FrameCount(MAX_FRAMES.get() + 1),
+                max: MAX_FRAMES
             }
         );
         let empty = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
@@ -705,8 +695,8 @@ mod tests {
         }
         // The most frames still smooth, in one pass.
         let max = Grid::new(
-            vec![0.0; MAX_FRAMES * CLASSES],
-            FrameCount(MAX_FRAMES),
+            vec![0.0; MAX_FRAMES.get() * CLASSES],
+            MAX_FRAMES,
             BinCount(CLASSES),
         )
         .unwrap();

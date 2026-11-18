@@ -11,6 +11,8 @@
 //! Pure functions over a novelty slice; the public entry points are in
 //! [`crate::tempo`].
 
+use crate::sequence::{local_maxima, median};
+
 /// The standard deviation of the smoothing kernel as a fraction of the period.
 const SMOOTH_PERIOD_FRACTION: f64 = 1.0 / 32.0;
 
@@ -136,15 +138,9 @@ fn local_score(novelty: &[f32], period: f64) -> Vec<f32> {
 /// a trailing stretch of silence does not drag the chain out to the end.
 fn last_beat(cumulative: &[f32]) -> usize {
     let n = cumulative.len();
-    let maxima: Vec<usize> = (0..n)
-        .filter(|&i| {
-            (i == 0 || cumulative[i] > cumulative[i - 1])
-                && (i + 1 == n || cumulative[i] >= cumulative[i + 1])
-        })
-        .collect();
-    let mut scores: Vec<f32> = maxima.iter().map(|&i| cumulative[i]).collect();
-    scores.sort_by(f32::total_cmp);
-    let median = scores.get(scores.len() / 2).copied().unwrap_or(0.0);
+    let maxima: Vec<usize> = local_maxima(cumulative, 0..n).collect();
+    let scores: Vec<f32> = maxima.iter().map(|&i| cumulative[i]).collect();
+    let median = median(&scores).unwrap_or(0.0) as f32;
     let threshold = TAIL_FRACTION * median;
     maxima
         .iter()
@@ -192,6 +188,23 @@ fn trim(beats: &mut Vec<usize>, local: &[f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With an odd count of maxima the threshold is half the middle score:
+    /// scores 12, 10, 2 have median 10, so the last beat is the one scoring 10.
+    #[test]
+    fn the_tail_threshold_is_half_the_median_of_an_odd_count_of_maxima() {
+        let cumulative = [0.0, 12.0, 0.0, 10.0, 0.0, 2.0, 0.0];
+        assert_eq!(last_beat(&cumulative), 3);
+    }
+
+    /// With an even count the median is the mean of the middle two: scores 2,
+    /// 10, 12, 4 have median (4 + 10) / 2 = 7, a threshold of 3.5, which the
+    /// last maximum (4) reaches. The upper middle score (10) would put it at 5.
+    #[test]
+    fn the_tail_threshold_is_half_the_mean_median_of_an_even_count_of_maxima() {
+        let cumulative = [0.0, 2.0, 0.0, 10.0, 0.0, 12.0, 0.0, 4.0, 0.0];
+        assert_eq!(last_beat(&cumulative), 7);
+    }
 
     /// A period far past the curve sizes no table past the curve.
     #[test]

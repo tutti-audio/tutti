@@ -61,13 +61,14 @@
 //! [`reset`](SpectrumMeter::reset) (`tests/alloc/spectrum.rs`).
 
 use core::marker::PhantomData;
+use core::ops::RangeInclusive;
 
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
-use crate::framing::{Framing, check_nyquist};
+use crate::framing::{Framing, check_hop_within, check_nyquist, check_overlap, check_window};
 use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::BinIndex;
 use tutti_dsp::Complex32;
@@ -78,12 +79,7 @@ use tutti_dsp::StftGeometry;
 use tutti_types::ranged;
 
 /// The smallest and largest window accepted.
-const MIN_WINDOW: usize = 64;
-const MAX_WINDOW: usize = 1 << 16;
-
-/// The most hops in one window; each frame is a whole transform, so this
-/// bounds the cost of a tiny hop.
-const MAX_OVERLAP: usize = 64;
+const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 16);
 
 /// The most outputs a banding may have.
 const MAX_BANDS: usize = 4096;
@@ -293,28 +289,9 @@ impl SpectrumConfig {
 
     fn plan(&self, rate: SampleRate) -> Result<SpectrumPlan> {
         let geometry = self.framing.geometry(rate)?;
-        let window = geometry.window().get();
-        if !(MIN_WINDOW..=MAX_WINDOW).contains(&window) {
-            return Err(Error::WindowOutOfRange {
-                window: Samples(window),
-                min: Samples(MIN_WINDOW),
-                max: Samples(MAX_WINDOW),
-            });
-        }
-        let hop = geometry.hop().get();
-        if hop > window {
-            return Err(Error::HopWiderThanWindow {
-                hop: geometry.hop(),
-                window: Samples(window),
-            });
-        }
-        if window.div_ceil(hop) > MAX_OVERLAP {
-            return Err(Error::TooManyOverlaps {
-                window: Samples(window),
-                hop: geometry.hop(),
-                max: MAX_OVERLAP,
-            });
-        }
+        check_window(geometry.window(), &WINDOWS)?;
+        check_hop_within(geometry.window(), geometry.hop())?;
+        check_overlap(geometry.window(), geometry.hop())?;
         if !(MIN_RATE..=MAX_RATE).contains(&rate) {
             return Err(Error::SampleRateOutOfRange {
                 rate,
