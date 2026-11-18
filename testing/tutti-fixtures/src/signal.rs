@@ -187,6 +187,40 @@ pub fn room_ir(
     out
 }
 
+/// `frames` of an `f64` signal that needs more than 24 significant bits: frame `k` is
+/// `(0x2000_0001 + 3k) / 2^31`, an odd 29-bit integer over a power of two, so an `f32`
+/// cannot hold it and a processor that narrows to `f32` anywhere returns a different
+/// value.
+pub fn wide_signal(frames: usize) -> Vec<f64> {
+    const BASE: i64 = 0x2000_0001;
+    const SCALE: f64 = 2_147_483_648.0;
+    (0..frames as i64)
+        .map(|k| (BASE + 3 * k) as f64 / SCALE)
+        .collect()
+}
+
+/// Asserts `got` and `want` have one length and agree to `tolerance` at every frame; the
+/// failure names the first frame that does not (a NaN never agrees), with both values.
+///
+/// # Panics
+///
+/// If the lengths differ or a frame is farther than `tolerance`.
+#[track_caller]
+pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
+    assert_eq!(got.len(), want.len(), "block lengths differ");
+    if let Some(i) = (0..got.len()).find(|&i| {
+        let diff = (got[i] - want[i]).abs();
+        diff.is_nan() || diff > tolerance
+    }) {
+        panic!(
+            "frame {i}: got {} want {} (|diff| {:e} over tolerance {tolerance:e})",
+            got[i],
+            want[i],
+            (got[i] - want[i]).abs()
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,35 +302,5 @@ mod tests {
         let path = dir.path().join("a.wav");
         write_wav_f32(&path, SampleRate::SR_48K, 2, &[0.1, 0.2, 0.3, 0.4]);
         assert_eq!(read_wav_f32(&path), [vec![0.1, 0.3], vec![0.2, 0.4]]);
-    }
-}
-
-/// `frames` of an `f64` signal that needs more than 24 significant bits: frame `k` is
-/// `(0x2000_0001 + 3k) / 2^31`, an odd 29-bit integer over a power of two, so an `f32`
-/// cannot hold it and a processor that narrows to `f32` anywhere returns a different
-/// value.
-pub fn wide_signal(frames: usize) -> Vec<f64> {
-    const BASE: i64 = 0x2000_0001;
-    const SCALE: f64 = 2_147_483_648.0;
-    (0..frames as i64)
-        .map(|k| (BASE + 3 * k) as f64 / SCALE)
-        .collect()
-}
-
-/// Asserts `got` and `want` have one length and agree to `tolerance` at every frame; the
-/// failure names the first frame that does not (a NaN never agrees), with both values.
-#[track_caller]
-pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
-    assert_eq!(got.len(), want.len(), "block lengths differ");
-    if let Some(i) = (0..got.len()).find(|&i| {
-        let diff = (got[i] - want[i]).abs();
-        diff.is_nan() || diff > tolerance
-    }) {
-        panic!(
-            "frame {i}: got {} want {} (|diff| {:e} over tolerance {tolerance:e})",
-            got[i],
-            want[i],
-            (got[i] - want[i]).abs()
-        );
     }
 }
