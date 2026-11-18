@@ -14,7 +14,7 @@ use tutti_session::{
     Assign, DetachedSession, Knobs, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind,
 };
 use tutti_types::{BusTopology, ChannelLayout, Param};
-use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {
     Session::builder()
@@ -25,7 +25,7 @@ fn detached() -> DetachedSession {
 
 fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph()
-        .add(SvfFilterNode::new(SvfType::LowPass, Hz(cutoff), Q(0.7)))
+        .add(SvfFilterNode::new(SvfType::LowPass, Hz(cutoff), Q(0.75)))
         .0
 }
 
@@ -142,7 +142,7 @@ fn a_non_finite_value_is_refused_and_lands_nothing() {
         assert_eq!(e.kind, ValueErrorKind::Refused(SetRefusal::NotFinite));
         assert_eq!(
             s.get(lp.q()).unwrap(),
-            Q(0.7),
+            Q(0.75),
             "the first item did not land"
         );
     }
@@ -199,7 +199,10 @@ fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
         ));
     }));
     assert!(unwound.is_err());
-    assert_eq!(s.get((lp.cutoff(), lp.q())).unwrap(), (Hz(1_000.0), Q(0.7)));
+    assert_eq!(
+        s.get((lp.cutoff(), lp.q())).unwrap(),
+        (Hz(1_000.0), Q(0.75))
+    );
     s.set(lp.cutoff().to(Hz(2.0))).unwrap();
     knobs.set(lp.q().to(Q(1.0))).unwrap();
     assert_eq!(knobs.get((lp.cutoff(), lp.q())).unwrap(), (Hz(2.0), Q(1.0)));
@@ -453,16 +456,33 @@ fn a_modify_may_call_another_session() {
     assert_eq!(seen.take().unwrap().unwrap(), Hz(200.0));
 }
 
-/// **An `f32` param reads back the bits it was given**, subnormals and the last mantissa
-/// bit included.
+/// **An `f32` control reads back the bits it was given**, subnormals and the last mantissa
+/// bit included: a kernel node's controls are `f32` cells, and a quantity that is an `f32`
+/// figure passes through one whole.
 #[test]
-fn an_f32_param_round_trips_bit_for_bit() {
+fn an_f32_control_round_trips_an_f32_figure_bit_for_bit() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
     for bits in [0x3f80_0001u32, 0x0000_0001, 0x7f7f_ffff, 0x1234_5678] {
-        let v = f32::from_bits(bits);
+        let v = f64::from(f32::from_bits(bits));
         s.set(lp.q().to(Q(v))).unwrap();
-        assert_eq!(s.get(lp.q()).unwrap().0.to_bits(), bits);
+        assert_eq!(s.get(lp.q()).unwrap().0.to_bits(), v.to_bits());
+    }
+}
+
+/// **An `f64` param reads back the bits it was given**, the last mantissa bit included.
+#[test]
+fn an_f64_param_round_trips_bit_for_bit() {
+    let mut s = detached();
+    let mb = multiband(&mut s);
+    for bits in [
+        0x3ff0_0000_0000_0001u64,
+        0x4000_0000_0000_0001,
+        0x4059_1234_5678_9abc,
+    ] {
+        let v = f64::from_bits(bits);
+        s.set(mb.ratio_at(0).to(CompressionRatio(v))).unwrap();
+        assert_eq!(s.get(mb.ratio_at(0)).unwrap().0.to_bits(), bits);
     }
 }
 
@@ -513,7 +533,7 @@ fn an_erased_non_finite_assignment_is_refused() {
         (e.at, e.kind),
         (1, ValueErrorKind::Refused(SetRefusal::NotFinite))
     );
-    assert_eq!(s.get(lp.q()).unwrap(), Q(0.7));
+    assert_eq!(s.get(lp.q()).unwrap(), Q(0.75));
 }
 
 /// **A read that fails inside a `Vec` is at its flattened position.**

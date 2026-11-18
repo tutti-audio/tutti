@@ -158,10 +158,7 @@ impl Band {
             good: [
                 LastGood::new(DEFAULT_THRESHOLD.get(), 0.0),
                 LastGood::fixed(0.0),
-                LastGood::new(
-                    f64::from(DEFAULT_RATIO.get()),
-                    f64::from(CompressionRatio::UNITY.get()),
-                ),
+                LastGood::new(DEFAULT_RATIO.get(), CompressionRatio::UNITY.get()),
                 LastGood::new(DEFAULT_ATTACK.get(), 0.0),
                 LastGood::new(DEFAULT_RELEASE.get(), 0.0),
                 LastGood::fixed(0.0),
@@ -194,8 +191,7 @@ impl Band {
         let driven = |k: usize| lanes[k].map(|lane| f64::from(lane[at]));
         let mut take = |k: usize, cell: f64| self.good[k].read(driven(k).unwrap_or(cell));
         let knee = take(KNEE, self.knee.load().get());
-        // `CompressionRatio` is an `f32` unit.
-        let ratio = take(RATIO, f64::from(self.ratio.load().get()));
+        let ratio = take(RATIO, self.ratio.load().get());
         let attack = take(ATTACK, self.attack.load().get());
         let release = take(RELEASE, self.release.load().get());
         let makeup = take(MAKEUP, self.makeup.load().get());
@@ -205,7 +201,7 @@ impl Band {
             compressor: CompressorControls {
                 threshold: Db(threshold),
                 knee: Db(knee),
-                ratio: CompressionRatio(ratio as f32),
+                ratio: CompressionRatio(ratio),
                 attack: Seconds(attack),
                 release: Seconds(release),
                 makeup: Db(makeup),

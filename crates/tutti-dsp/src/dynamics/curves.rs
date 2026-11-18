@@ -55,8 +55,7 @@ pub fn compute_compressor_gain_reduction(
     Db(gain_reduction(
         input_db.into().get(),
         threshold.into().get(),
-        // The ratio is an `f32` unit; the curve is `f64`.
-        f64::from(ratio.into().get()),
+        ratio.into().get(),
         knee.into().get(),
     ))
 }

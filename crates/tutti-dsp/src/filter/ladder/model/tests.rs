@@ -6,7 +6,7 @@ use tutti_units::Real;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn model(ty: LadderType, fc: f64, res: f32) -> LadderModel {
+fn model(ty: LadderType, fc: f64, res: f64) -> LadderModel {
     LadderModel::new(
         LadderControls {
             ty,
@@ -35,8 +35,8 @@ fn at(m: &LadderModel, f: f64) -> Complex64 {
 /// Nyquist is 0 for a low-pass and 1 for a high-pass.
 #[test]
 fn the_response_has_the_closed_forms() {
-    for res in [0.0f32, 0.5, 0.9] {
-        let k = 4.0 * f64::from(res);
+    for res in [0.0f64, 0.5, 0.9] {
+        let k = 4.0 * res;
         let lp = model(LadderType::LP24, 1_000.0, res);
         assert!(
             (at(&lp, 0.0).norm() - 1.0 / (1.0 + k)).abs() < 1e-12,
@@ -60,7 +60,7 @@ fn the_response_has_the_closed_forms() {
 
 /// The ladder's response, **at small signal**, is the model's: an impulse of
 /// 1e-7 through `ladder_step` (where `tanh x = x` to 1e-14) has the model's
-/// spectrum to 1e-6 of its norm, for each type and three resonances.
+/// spectrum to 1e-4 of its norm (an `f32` FFT), for each type and three resonances.
 #[test]
 fn the_small_signal_response_is_the_models() {
     const N: usize = 1 << 15;
@@ -71,7 +71,7 @@ fn the_small_signal_response_is_the_models() {
         LadderType::HP12,
         LadderType::HP24,
     ] {
-        for res in [0.0f32, 0.4, 0.8] {
+        for res in [0.0f64, 0.4, 0.8] {
             let m = model(ty, 1_200.0, res);
             let c = coefficients(Hz(1_200.0), Resonance(res));
             let mut s = [0.0f64; 4];
@@ -93,6 +93,7 @@ fn the_small_signal_response_is_the_models() {
                 den += want.norm_sqr();
             }
             let err = (num / den).sqrt();
+            // The spectrum is an `f32` FFT of an `f32` impulse response: the sample width sets 1e-4.
             assert!(err < 1e-4, "{ty:?} res {res}: {err:.2e}");
         }
     }
@@ -223,14 +224,14 @@ fn a_full_resonance_is_unstable_at_small_signal() {
 #[test]
 fn the_lp24_model_is_the_prewarped_bilinear_image_of_the_continuous_ladder() {
     for (fc, res) in [
-        (1_000.0f64, 0.0f32),
+        (1_000.0f64, 0.0f64),
         (1_000.0, 0.5),
         (1_000.0, 0.9),
         (4_000.0, 0.9),
     ] {
         let m = model(LadderType::LP24, fc, res);
         let g = (PI * fc / RATE.get()).tan();
-        let k = 4.0 * f64::from(res);
+        let k = 4.0 * res;
         for f in [
             50.0f64, 500.0, 900.0, 975.0, 1_000.0, 2_000.0, 3_900.0, 9_000.0,
         ] {
@@ -253,7 +254,7 @@ fn the_lp24_model_is_the_prewarped_bilinear_image_of_the_continuous_ladder() {
 fn the_poles_cross_the_unit_circle_at_k_four() {
     // The measured poles agree with the closed form: inside the circle below
     // `k = 4`, on it at `k = 4` (the root iteration's rounding is the tolerance).
-    for res in [0.9f32, 0.99, 0.999] {
+    for res in [0.9f64, 0.99, 0.999] {
         let m = model(LadderType::LP24, 1_000.0, res);
         assert!(m.is_stable(), "{res}");
         assert!(m.spectral_radius() < 1.0, "{res}: {}", m.spectral_radius());

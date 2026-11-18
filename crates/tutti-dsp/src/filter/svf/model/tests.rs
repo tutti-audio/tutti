@@ -1,6 +1,6 @@
 use super::*;
 
-fn model(ty: SvfType, freq: f64, q: f32, gain: f64, rate: f64) -> SvfModel {
+fn model(ty: SvfType, freq: f64, q: f64, gain: f64, rate: f64) -> SvfModel {
     SvfModel::new(
         SvfControls {
             ty,
@@ -93,14 +93,12 @@ fn the_response_is_the_rbj_closed_form() {
     let rate = 48_000.0;
     for ty in TYPES {
         for (fc, q, gain) in [
-            (1_000.0f64, 0.707f32, 9.0f64),
+            (1_000.0f64, 0.707f64, 9.0f64),
             (250.0, 4.0, -12.0),
             (7_000.0, 1.3, 6.0),
         ] {
-            // `q` is an `f32` control word: the closed form is read at the same figure.
-            let q = f64::from(q);
             let want = rbj(ty, fc, q, gain, rate);
-            let m = model(ty, fc, q as f32, gain, rate);
+            let m = model(ty, fc, q, gain, rate);
             let mut freqs = vec![Hz::ZERO, Hz(fc), Hz(24_000.0)];
             freqs.extend(
                 (0..40).map(|i| Hz(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0))),
@@ -163,13 +161,12 @@ fn the_svf_model_is_the_prewarped_bilinear_image_of_the_analog_prototype() {
     let rate = 48_000.0;
     for ty in TYPES {
         for (fc, q, gain) in [
-            (80.0f64, 0.3f32, 6.0f64),
+            (80.0f64, 0.3f64, 6.0f64),
             (1_000.0, 0.707, -9.0),
             (4_000.0, 12.0, 12.0),
             (20_000.0, 1.3, -6.0),
         ] {
             let m = model(ty, fc, q, gain, rate);
-            let q = f64::from(q);
             let g = (PI * fc / rate).tan();
             let freqs: Vec<f64> = [
                 20.0, 80.0, 300.0, 1_000.0, 4_000.0, 12_000.0, 20_000.0, 23_000.0, 23_900.0,
@@ -259,8 +256,8 @@ fn a_hostile_control_still_gives_a_stable_model() {
     let rate = SampleRate::SR_48K;
     for (f, q, g) in [
         (f64::NAN, 1.0, 0.0),
-        (1_000.0, f32::NAN, 0.0),
-        (1_000.0, f32::INFINITY, 6.0),
+        (1_000.0, f64::NAN, 0.0),
+        (1_000.0, f64::INFINITY, 6.0),
         (1.0, 1e30, 1e30),
         (-5.0, -1.0, f64::NEG_INFINITY),
     ] {

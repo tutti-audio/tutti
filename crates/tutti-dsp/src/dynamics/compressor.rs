@@ -153,11 +153,11 @@ impl<F: Float> Detector<F> {
     /// `-reduction + makeup`.
     #[inline]
     fn frame(&self, reduction: &mut F, level: F, threshold: F, makeup: F) -> F {
-        // The knee narrows to `F` and the ratio (an `f32` unit) widens, here.
+        // The knee and the ratio cross into `F` here.
         let target = gain_reduction(
             level_db(level),
             threshold,
-            F::from_f32(self.ratio.get()),
+            F::from_unit(self.ratio),
             F::from_f64(self.knee.get()),
         );
         *reduction = self.ballistics.follow_raw(*reduction, target);

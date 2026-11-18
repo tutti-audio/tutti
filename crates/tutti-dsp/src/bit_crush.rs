@@ -34,7 +34,7 @@ pub fn hold_frames(hold: HoldFactor) -> usize {
     } else {
         // A float to integer cast saturates, so a huge factor and `+inf` hold for the
         // longest span, and a factor under 1 reads as 1.
-        (f64::from(hold).round_ties_even() as usize).max(1)
+        (hold.round_ties_even() as usize).max(1)
     }
 }
 

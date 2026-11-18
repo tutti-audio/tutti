@@ -19,7 +19,7 @@ const CHUNK: usize = 256;
 fn controls(
     threshold: f64,
     knee: f64,
-    ratio: f32,
+    ratio: f64,
     attack: f64,
     release: f64,
     makeup: f64,
@@ -84,7 +84,7 @@ fn hostile() -> Vec<CompressorControls> {
         all.push(CompressorControls {
             threshold: Db(bad),
             knee: Db(bad),
-            ratio: CompressionRatio(bad as f32),
+            ratio: CompressionRatio(bad),
             makeup: Db(bad),
             ..base
         });
@@ -183,7 +183,7 @@ fn reduction_db(m: &CompressorMember, level: Db) -> Db {
 fn the_member_reduction_is_the_static_curve() {
     for c in reachable() {
         let m = CompressorMember::designed(&c, RATE);
-        let (t, w, r) = (m.threshold.get(), m.knee.get(), f64::from(m.ratio.get()));
+        let (t, w, r) = (m.threshold.get(), m.knee.get(), m.ratio.get());
         for step in -80..=40 {
             let level = f64::from(step) * 1.5 - 20.0;
             let want = curve(level, t, w, r);
@@ -249,7 +249,7 @@ fn the_member_floors_what_cannot_be_run() {
         &CompressorControls {
             threshold: Db(f64::NAN),
             knee: Db(f64::INFINITY),
-            ratio: CompressionRatio(f32::NAN),
+            ratio: CompressionRatio(f64::NAN),
             makeup: Db(f64::NEG_INFINITY),
             ..base
         },
@@ -279,12 +279,8 @@ fn a_steady_key_settles_on_the_static_curve() {
             let ones = vec![1.0f32; n];
             let key = vec![amplitude(level); n];
             let out = run(&mut k, &[&ones, &ones], &[&key, &key], None);
-            let want_db = -curve(
-                level,
-                c.threshold.get(),
-                c.knee.get(),
-                f64::from(c.ratio.get()),
-            ) + c.makeup.get();
+            let want_db =
+                -curve(level, c.threshold.get(), c.knee.get(), c.ratio.get()) + c.makeup.get();
             let got_db = 20.0 * f64::from(out[0][n - 1]).log10();
             assert!(
                 (got_db - want_db).abs() < 2e-3,
@@ -605,7 +601,7 @@ fn hostile_controls_and_keys_render_finite() {
 fn an_infinite_key_does_not_latch_the_follower() {
     let n = 40_000;
     let level = -10.0;
-    for ratio in [1.0f32, 4.0] {
+    for ratio in [1.0f64, 4.0] {
         let c = controls(-20.0, 0.0, ratio, 0.0, 0.01, 0.0);
         let mut k = runner(&c);
         let mut key = vec![amplitude(level); n];
@@ -616,7 +612,7 @@ fn an_infinite_key_does_not_latch_the_follower() {
         let out = run(&mut k, &[&ones, &ones], &[&key, &key], None);
         assert!(out[0].iter().all(|x| x.is_finite()), "ratio {ratio}");
         // After the release has run out the gain is the curve's again.
-        let want = -curve(level, -20.0, 0.0, f64::from(ratio));
+        let want = -curve(level, -20.0, 0.0, ratio);
         let got = 20.0 * f64::from(out[0][n - 1]).log10();
         assert!(
             (got - want).abs() < 2e-3,
@@ -796,7 +792,7 @@ fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
     let (threshold, ratio, tau) = (-30.0, 4.0, 0.002);
     let key = wide_constant(2_000);
     let k = key[0];
-    let c = controls(threshold, 0.0, ratio as f32, tau, 0.05, 0.0);
+    let c = controls(threshold, 0.0, ratio, tau, 0.05, 0.0);
     let target = (20.0 * k.log10() - threshold) * (1.0 - 1.0 / ratio);
     let coeff = 1.0 - (-1.0 / (tau * RATE.get())).exp();
     let mut reduction = 0.0f64;
@@ -817,7 +813,7 @@ fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
 fn an_f64_compressor_above_its_threshold_lands_on_the_static_curve_in_f64() {
     let (threshold, ratio) = (-30.0, 5.0);
     let key = wide_constant(64);
-    let c = controls(threshold, 0.0, ratio as f32, 0.0, 0.0, 0.0);
+    let c = controls(threshold, 0.0, ratio, 0.0, 0.0, 0.0);
     let level = 20.0 * key[0].log10();
     let out = run_f64(&c, &key, &key);
     let got = 20.0 * out[63].log10();

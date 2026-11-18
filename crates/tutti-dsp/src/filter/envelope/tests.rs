@@ -46,7 +46,7 @@ fn run(bank: &mut EnvelopeFilterBank<f32>, x: &[f32], block: usize) -> Vec<f32> 
 fn magnitude(ty: SvfType, cutoff: f64, q: Q, hz: f64) -> f64 {
     let pi = core::f64::consts::PI;
     let w = (pi * hz / RATE.get()).tan() / (pi * cutoff / RATE.get()).tan();
-    let denominator = (1.0 - w * w).hypot(w / f64::from(q.get()));
+    let denominator = (1.0 - w * w).hypot(w / q.get());
     match ty {
         SvfType::LowPass => 1.0 / denominator,
         SvfType::BandPass => w / denominator,
@@ -61,7 +61,7 @@ fn measured_gain(x: &[f32], y: &[f32]) -> f64 {
     amplitude_at(&y[from..], TONE, RATE.get()) / amplitude_at(&x[from..], TONE, RATE.get())
 }
 
-fn controls(base: f64, depth: f64, q: f32) -> EnvelopeFilterControls {
+fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
     EnvelopeFilterControls {
         base: Hz(base),
         depth: Semitones(depth),
@@ -151,7 +151,7 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
 fn the_controls_are_held_in_range() {
     let mut b = bank(
         SvfType::LowPass,
-        &controls(f64::NAN, f64::INFINITY, f32::NAN),
+        &controls(f64::NAN, f64::INFINITY, f64::NAN),
     );
     let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
     assert!(y.iter().all(|s| s.is_finite()));
@@ -298,7 +298,7 @@ fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
             Planes::new(&[&x[..]]).unwrap(),
             PlanesMut::new(&mut [&mut out[..]]).unwrap(),
         );
-        let want = direct_form(&rbj(ty, 1_000.0, f64::from(0.707f32), 0.0, RATE.get()), &x);
+        let want = direct_form(&rbj(ty, 1_000.0, 0.707, 0.0, RATE.get()), &x);
         assert_close_f64(&out, &want, 1e-12);
     }
 }
