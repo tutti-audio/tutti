@@ -122,7 +122,7 @@ fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     }
 }
 
-/// **A disk stream opened on an `f64` session lands as `OpenedF64`, and its
+/// **A disk stream opened on an `f64` session lands as `Opened`, is taken in `f64`, and its
 /// clip renders `FINE + value(k)` at the file's frame `k` in `f64`.**
 #[test]
 fn an_f64_session_streams_a_file_into_f64_frames() {
