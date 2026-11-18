@@ -81,7 +81,7 @@ impl Fake {
     /// One 32-bit block.
     fn render(
         &mut self,
-        buf: &mut InputOutput<'_, '_, '_, f32>,
+        buf: &mut InputOutput<'_, f32>,
         ctx: &ProcessContext<'_>,
     ) -> PluginResult<()> {
         let frames = buf.frames().0;

@@ -371,7 +371,7 @@ impl RecProcessor {
     /// One 32-bit block: the graph's.
     fn render(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, f32>,
+        buffer: &mut InputOutput<'_, f32>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {

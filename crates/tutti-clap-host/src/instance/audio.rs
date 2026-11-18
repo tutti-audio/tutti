@@ -73,7 +73,7 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_buffers::InputOutput;
 /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
 /// # use tutti_units::{Bpm, SampleRate};
-/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut InputOutput<'_, '_, '_, f32>)
+/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut InputOutput<'_, f32>)
 /// # -> tutti_clap_host::Result<()> {
 /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
 /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -149,7 +149,7 @@ impl ClapProcessor {
     /// # use tutti_buffers::InputOutput;
     /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
     /// # use tutti_units::{Bpm, SampleRate};
-    /// # fn ex(active: &mut ClapProcessor, buffer: &mut InputOutput<'_, '_, '_, f32>)
+    /// # fn ex(active: &mut ClapProcessor, buffer: &mut InputOutput<'_, f32>)
     /// # -> tutti_clap_host::Result<()> {
     /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
     /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -162,7 +162,7 @@ impl ClapProcessor {
     /// ```
     pub fn process<S: Float>(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, S>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &ClapProcessContext<'_>,
     ) -> Result<ProcessOutputRef<'_>> {
         let empty_params = ParameterChanges::new();

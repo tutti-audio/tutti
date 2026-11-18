@@ -145,7 +145,7 @@ pub trait ActiveExt<T: Vst3Sample>: Sized {
     /// One block through the Processor.
     fn process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -153,7 +153,7 @@ pub trait ActiveExt<T: Vst3Sample>: Sized {
     /// One block, with the failure the plugin reported.
     fn try_process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -231,7 +231,7 @@ impl<T: Vst3Sample> ActiveExt<T> for Active<T> {
 
     fn process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -242,7 +242,7 @@ impl<T: Vst3Sample> ActiveExt<T> for Active<T> {
 
     fn try_process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,

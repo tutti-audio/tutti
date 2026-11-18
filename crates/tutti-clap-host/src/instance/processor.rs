@@ -204,7 +204,7 @@ impl ClapProcessor {
     /// failed the block.
     pub fn render<S: Float>(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, S>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
@@ -216,7 +216,7 @@ impl ClapProcessor {
     /// copies what the plugin emitted into `out`.
     fn process_shared<S: Float>(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, S>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {

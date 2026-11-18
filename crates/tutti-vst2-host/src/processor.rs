@@ -277,7 +277,7 @@ impl Vst2Processor {
     /// Real-time safe: no allocation or locking on this path.
     pub fn process_planes<S: Float>(
         &mut self,
-        io: &mut InputOutput<'_, '_, '_, S>,
+        io: &mut InputOutput<'_, S>,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
         self.midi.out.clear();
@@ -435,7 +435,7 @@ impl Vst2Processor {
     /// activated at, in either direction. It does not allocate and does not enter the plugin.
     pub fn render<S: Float>(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, S>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {

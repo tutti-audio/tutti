@@ -912,7 +912,7 @@ pub fn process_block<P: Processor, S: Float>(
 #[derive(Debug)]
 pub struct PluginIo<'a, S: Float> {
     /// The channel tables.
-    pub buffer: InputOutput<'a, 'a, 'a, S>,
+    pub buffer: InputOutput<'a, S>,
     /// The block's MIDI, transport and automation.
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.
