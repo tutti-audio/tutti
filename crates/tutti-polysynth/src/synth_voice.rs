@@ -243,7 +243,7 @@ impl SynthVoice {
             mpe: MpeVoiceState::new(),
             base_note_freq: A4_FREQ,
             tuned: None,
-            tune: Semitones(0.0),
+            tune: Semitones::UNISON,
             glide: Portamento::new(
                 config.portamento.clone().unwrap_or_default(),
                 sample_rate,
@@ -307,7 +307,7 @@ impl SynthVoice {
         self.mpe.reset();
         self.base_note_freq = A4_FREQ;
         self.tuned = None;
-        self.tune = Semitones(0.0);
+        self.tune = Semitones::UNISON;
         self.pitch = A4_FREQ;
         self.glide.reset(A4_FREQ);
     }

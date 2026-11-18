@@ -212,7 +212,7 @@ touched.
 
 - `Source`/`Sink` are edges over a `Sample` format: a checked `Interleaved`/`InterleavedMut`
   view, a runtime `ChannelLayout`, every count in frames (`Samples`). Cross to a slice
-  length only with `Samples::interleaved_len` / `from_interleaved_len`.
+  length only with `ChannelLayout::interleaved_len` / `from_interleaved_len`.
 - Audio in a public API is a `tutti_buffers` view (`Mono`, `Interleaved`, `Planes`),
   generic over `Sample`/`Float` with the f32 default; a fixed format is a row in
   `xtask/buffers-fixed.txt` with its reason (`cargo xtask check-buffers`).

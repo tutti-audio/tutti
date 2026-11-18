@@ -22,8 +22,9 @@ impl TextRef {
     }
 }
 
-/// Largest UTF-16 text taken into an arena: a cap on a garbage `textLen`.
-pub(crate) const MAX_EVENT_TEXT_LEN: usize = 256;
+/// Largest UTF-16 text taken into an arena: a cap on a garbage `textLen`, and the
+/// room a host's text for one event holds.
+pub const MAX_EVENT_TEXT_LEN: usize = 256;
 
 /// The UTF-16 owner behind events' borrowed `text` pointers, with its room
 /// reserved once.

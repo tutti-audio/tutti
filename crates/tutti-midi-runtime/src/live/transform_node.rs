@@ -25,6 +25,7 @@
 //! Its fork is a transform in the mode the controls hold when it is made, with
 //! no state of the notes: an offline render starts its clip from the top.
 
+use std::num::NonZeroU32;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
     Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
@@ -33,7 +34,7 @@ use tutti_midi_protocol::{MpeMode, Translator};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
 
-use super::ingest_node::{MIDI_INPUT_EVENT_CAPACITY, Staging};
+use super::ingest_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
 use super::mpe_ingest::MpeIngest;
 use super::order::BLANK;
 use crate::schedule::CLIP_EVENT_DENSITY;
@@ -65,7 +66,7 @@ pub struct MpeTransformNode {
     /// What the block sends, which may outnumber what it read.
     out: Box<[UmpAt]>,
     /// The events a block translates and the port holds.
-    capacity: usize,
+    capacity: NonZeroU32,
     /// The Groups that have carried an event, one bit each.
     active: u16,
     /// The Groups that were sent the mode in force, one bit each.
@@ -112,7 +113,7 @@ impl MpeTransformNode {
             request: cell.reader(),
             request_cell: cell,
             out: vec![BLANK; note_off_room(MIDI_INPUT_EVENT_CAPACITY)].into_boxed_slice(),
-            capacity: MIDI_INPUT_EVENT_CAPACITY,
+            capacity: MIDI_INPUT_PORT_CAPACITY,
             active: 0,
             told: 0,
             dropped,
@@ -171,22 +172,22 @@ impl Node for MpeTransformNode {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
-            .with_event_capacity(self.capacity as u32)
+            .with_event_capacity(self.capacity)
             // Event-only: a translation per event, nothing per frame.
             .with_cost(Cost::Light)
     }
 
     fn prepare(&mut self, p: &Prepare) {
-        let capacity = CLIP_EVENT_DENSITY.capacity(p) as usize;
+        let capacity = CLIP_EVENT_DENSITY.capacity(p);
         if capacity != self.capacity {
             self.capacity = capacity;
-            self.out = vec![BLANK; note_off_room(capacity)].into_boxed_slice();
+            self.out = vec![BLANK; note_off_room(capacity.get() as usize)].into_boxed_slice();
         }
     }
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let requested = *self.request.lend();
-        let mut staging = Staging::new(&mut self.out, self.capacity);
+        let mut staging = Staging::new(&mut self.out, self.capacity.get() as usize);
         // A new mode's stops and ranges, at frame 0, ahead of the block's
         // events, for the Groups that have carried some.
         if requested != self.mode {

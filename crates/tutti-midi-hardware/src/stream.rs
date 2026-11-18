@@ -433,6 +433,7 @@ impl Negotiation {
         out: Option<OpenOutput>,
         timing: InputTiming,
         ci_refused: CounterWriter<Losses>,
+        store: Arc<Mutex<ResourceStore>>,
     ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
@@ -456,7 +457,7 @@ impl Negotiation {
             out,
             run,
             inquire,
-            ci: Ci::new(device, ci_refused),
+            ci: Ci::new(device, ci_refused, store),
             answering: None,
             timing,
             stop: StopJr::Settled,
@@ -591,11 +592,10 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         presented: Option<Presented>,
-        store: &Arc<Mutex<ResourceStore>>,
     ) -> Stepped {
         let ci = presented.map(|p| p.identity.device);
         let changes = match &mut self.out {
-            Some(out) => self.ci.poll(now, heard, ci, store, out),
+            Some(out) => self.ci.poll(now, heard, ci, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);

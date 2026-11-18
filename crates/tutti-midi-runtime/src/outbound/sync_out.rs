@@ -69,6 +69,9 @@ use crate::live::order::{in_offset_order, offset_of};
 /// and counted ([`SyncOutControls::losses`]).
 pub const SYNC_OUT_EVENT_CAPACITY: usize = 256;
 
+const SYNC_OUT_PORT_CAPACITY: std::num::NonZeroU32 =
+    std::num::NonZeroU32::new(SYNC_OUT_EVENT_CAPACITY as u32).unwrap();
+
 /// The Group's clock before the graph's rate arrives with `prepare`.
 const UNPREPARED_RATE: SampleRate = SampleRate::SR_48K;
 
@@ -232,7 +235,7 @@ impl Node for SyncOut {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(SYNC_OUT_EVENT_CAPACITY as u32)
+            .with_event_capacity(SYNC_OUT_PORT_CAPACITY)
             // Event-only: a few pulses a block, nothing per frame (measured
             // about 0.3 µs a block at any length; a gain's 256 frames, 0.2).
             .with_cost(tutti_graph::Cost::Light)

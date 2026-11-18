@@ -126,7 +126,7 @@ impl<E: std::error::Error + Send + Sync + 'static> From<FinalizeError<E>> for Re
 /// Pulls as many frames as `buf` holds from `src` and writes exactly what it
 /// produced to `dst`. The loop and the stop condition are the caller's policy
 /// ([`PumpLoop`], [`Recorder`]). `buf` is interleaved and therefore
-/// *sized* in samples ([`Samples::interleaved_len`]); everything returned is in
+/// *sized* in samples ([`ChannelLayout::interleaved_len`]); everything returned is in
 /// frames.
 ///
 /// Behaviour, not vocabulary: its one caller is [`PumpLoop::pump_once`].
@@ -305,7 +305,7 @@ where
     /// `capacity` is in **frames**, a [`Samples`], so a caller cannot hand over
     /// a sample count by mistake and get a buffer `width` times too large. The
     /// scratch is allocated once, sized
-    /// [`capacity.interleaved_len(layout)`](Samples::interleaved_len) from the
+    /// [`layout.interleaved_len(capacity)`](ChannelLayout::interleaved_len) from the
     /// width both endpoints agreed on. A zero capacity is taken as one frame:
     /// an empty scratch would make every poll return zero, ending a finite
     /// take before its first frame and parking a live one forever.
@@ -333,7 +333,7 @@ where
         Ok(Self {
             src,
             sink,
-            scratch: vec![I::Sample::SILENCE; frames.interleaved_len(layout)],
+            scratch: vec![I::Sample::SILENCE; layout.interleaved_len(frames)],
             source_failed: false,
             failed: Arc::new(FaultLatch::new()),
             lost: Arc::new(AtomicU64::new(0)),

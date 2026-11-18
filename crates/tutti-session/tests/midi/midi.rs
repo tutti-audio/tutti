@@ -205,7 +205,9 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     .unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
-    s.midi().play_file(synth, Beat(1.0), &file).unwrap();
+    s.midi()
+        .play_file(synth, Beat(1.0), file.timebase().metrical().unwrap())
+        .unwrap();
     let _ = s.update();
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
@@ -217,20 +219,18 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     )
     .unwrap();
     assert!(matches!(
-        s.midi().play_file(synth, Beat(0.0), &sequential),
+        s.midi()
+            .play_file(synth, Beat(0.0), sequential.timebase().metrical().unwrap()),
         Err(MidiError::NoTimeline(
             tutti_midi_file::TimelineError::NoCommonTimeline
         ))
     ));
 
     // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
-    // and no beats to play on.
+    // and no beats to play on: it has no metrical view to pass.
     let smpte = MidiFile::from_bytes(b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0")
         .unwrap();
-    assert!(matches!(
-        s.midi().play_file(synth, Beat(0.0), &smpte),
-        Err(MidiError::NoTimeline(tutti_midi_file::TimelineError::Smpte))
-    ));
+    assert!(smpte.timebase().metrical().is_none());
 }
 
 /// **A target that takes no MIDI is refused**: a node with no event input,

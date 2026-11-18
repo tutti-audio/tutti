@@ -27,6 +27,7 @@
 //! nor of a 64-frame piece of one, which voices rendered before their
 //! scratch was sized from `Prepare::max_block`.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_sampler::VoiceWindow;
 
@@ -34,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Env, Io, Node, Prepare, Shape, Status, TransportChanges, contract};
@@ -65,7 +66,8 @@ const HAND: usize = 77;
 fn pool(start: Beat) -> VoicePool {
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for _ in 0..SR as usize {
-        wave.push_frame(&[0.5]);
+        wave.append(Interleaved::new(&[0.5], wave.layout()).unwrap())
+            .unwrap();
     }
     let source =
         MemorySource::placed(Arc::new(wave), VoiceWindow::from(start)).expect("a placeable wave");

@@ -322,6 +322,9 @@ impl From<CentsSpan> for f32 {
 pub struct CentsSpanOutOfRange(pub f32);
 
 impl Semitones {
+    /// The unison: no transposition, a pitch ratio of 1.
+    pub const UNISON: Semitones = Semitones(0.0);
+
     /// One octave.
     pub const OCTAVE: Semitones = Semitones(12.0);
 
@@ -346,7 +349,7 @@ impl Semitones {
     ///
     /// Named rather than a `From` for that method's reason: it is not total,
     /// because a non-positive ratio has no logarithm. Those give
-    /// [`Semitones(0.0)`](Semitones) — a unison — rather than a NaN that
+    /// [`Semitones::UNISON`] — a unison — rather than a NaN that
     /// reaches a note table before anyone notices.
     ///
     #[inline]
@@ -355,7 +358,7 @@ impl Semitones {
         if ratio > 0.0 {
             Semitones(12.0 * libm::log2f(ratio))
         } else {
-            Semitones(0.0)
+            Semitones::UNISON
         }
     }
 }

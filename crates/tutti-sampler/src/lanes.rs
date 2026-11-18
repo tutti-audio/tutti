@@ -266,6 +266,7 @@ pub(crate) fn scale(lane: &mut [f32], gain: f32) {
 mod tests {
     use super::*;
     use crate::VoiceWindow;
+    use tutti_buffers::Interleaved;
     use tutti_types::MaxBlock;
 
     /// [`BlockScratch`]'s bytes a frame that do not depend on the width: a
@@ -358,8 +359,9 @@ mod tests {
         use tutti_graph::{Node, Prepare};
         use tutti_types::{Beat, SampleRate, Samples};
 
-        let mut wave = tutti_codec::Wave::new(2, SampleRate::SR_48K);
-        wave.push_frame(&[0.0, 0.0]);
+        let mut wave = tutti_buffers::Wave::new(2, SampleRate::SR_48K);
+        wave.append(Interleaved::new(&[0.0, 0.0], wave.layout()).unwrap())
+            .unwrap();
         let wave = std::sync::Arc::new(wave);
         let source = MemorySource::placed(
             std::sync::Arc::clone(&wave),

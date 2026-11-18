@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_types::ChannelLayout;
 
 use super::open::Opened;

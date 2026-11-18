@@ -22,6 +22,8 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 # The voice's low-pass is `tutti-dsp`'s `SvfModel` biquad.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp" }
+# The views the voice's low-pass takes its block through, and the contract rigs take and return.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2" }
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 
@@ -33,8 +35,6 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 
 [dev-dependencies]
 tutti-midi-runtime = { path = "../tutti-midi-runtime", default-features = false }
-# The buffer views the contract rigs take and return.
-tutti-buffers = { path = "../tutti-buffers" }
 # The font-to-synth swap of the chase test (`tests/chase.rs`).
 tutti-polysynth = { path = "../tutti-polysynth" }
 # Finds the repo's `assets/` for the tests.

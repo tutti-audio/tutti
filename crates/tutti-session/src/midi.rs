@@ -1231,9 +1231,9 @@ impl Midi<'_> {
     /// [`stop_clip`](Self::stop_clip).
     ///
     /// The events are [`TimedMidiEvent`]s, positioned in beats from the
-    /// clip's own start, in any order; a clip file's
-    /// [`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline) is the
-    /// `packets` are the `(Beat, Ump)` pairs they are built from, and
+    /// clip's own start, in any order; the `packets` of a file's
+    /// [`MetricalView::timeline`](tutti_midi_file::MetricalView::timeline) are
+    /// the `(Beat, Ump)` pairs they are built from, and
     /// [`play_file`](Self::play_file) does that for a file. The clip reads its
     /// block's `Env`, so a note lands on its frame through seeks and loop
     /// wraps, and **a bounce contains it**: an export forks the clip with its
@@ -1315,7 +1315,7 @@ impl Midi<'_> {
     /// Plays the MIDI file `file` on `target` through its clip, `at` the beat
     /// the file's beat 0 lands on: [`play_clip`](Self::play_clip) over the
     /// file's one timeline
-    /// ([`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline)), with
+    /// ([`MetricalView::timeline`](tutti_midi_file::MetricalView::timeline)), with
     /// its looping and bounce behaviour. A file arrives from
     /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`]. The
     /// System Exclusive events the timeline lists as dropped are not played
@@ -1324,13 +1324,14 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NoTimeline`] for a format 2 file, which has no one
-    /// timeline, and for a file in SMPTE time, which has no beats; otherwise as
-    /// [`play_clip`](Self::play_clip).
+    /// timeline; otherwise as [`play_clip`](Self::play_clip). A file in SMPTE
+    /// time has no beats and no [`MetricalView`](tutti_midi_file::MetricalView)
+    /// to pass.
     pub fn play_file(
         &mut self,
         target: impl Into<NodeKey>,
         at: Beat,
-        file: &tutti_midi_file::MidiFile,
+        file: tutti_midi_file::MetricalView<'_>,
     ) -> Result<()> {
         let timeline = file.timeline()?;
         if !timeline.dropped.is_empty() {

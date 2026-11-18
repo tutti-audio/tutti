@@ -466,7 +466,7 @@ pub struct MidiClipNode {
     last_seq: u64,
     play: Play,
     /// The declared event capacity, from the block the node was prepared for.
-    capacity: u32,
+    capacity: NonZeroU32,
 }
 
 impl std::fmt::Debug for MidiClipNode {

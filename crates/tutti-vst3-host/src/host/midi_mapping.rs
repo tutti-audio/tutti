@@ -20,17 +20,14 @@
 //! `Steinberg::Vst::ControllerNumbers`.
 
 use vst3::Steinberg::Vst::{
-    ControllerNumbers_::{
-        kAfterTouch, kCountCtrlNumber, kCtrlPolyPressure, kCtrlProgramChange, kPitchBend,
-    },
+    ControllerNumbers_::{kAfterTouch, kCountCtrlNumber, kPitchBend},
     ParamID,
 };
 
 use tutti_midi_protocol::channel_voice;
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 
-use crate::events::{InputEvents, Stager};
-use crate::helpers::sdk_enum_i32;
+use crate::events::{InputEvents, Stager, sample_offset};
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
@@ -50,7 +47,8 @@ pub(crate) const NUM_CHANNELS: usize = 16;
 
 /// Number of distinct controller slots per channel: CC 0-127 plus the two
 /// synthetic controllers (`kAfterTouch` = 128, `kPitchBend` = 129).
-/// Equal to `Steinberg::Vst::kCountCtrlNumber`.
+/// Equal to `Steinberg::Vst::kCountCtrlNumber`. [`scan`] asks for exactly these
+/// slots, so the table holds every slot a scan returns.
 pub(crate) const NUM_CONTROLLERS: usize = kCountCtrlNumber as usize;
 
 /// Sentinel `ParamID` meaning "no parameter mapped". Mirrors
@@ -72,10 +70,11 @@ pub(crate) struct Slot {
 }
 
 /// Asks the plugin's `IMidiMapping` (event bus 0, the JUCE host contract) for
-/// every channel and every controller number the SDK gives a [`MidiSource`]:
-/// the Control Changes, channel pressure, pitch bend, program change and
-/// polyphonic pressure. The numbers past those are system messages, not
-/// controllers a parameter follows. The one scan both [`MidiCcMapping::from_slots`]
+/// every channel and every controller number `IMidiMapping` addresses
+/// (the controller numbers below `kCountCtrlNumber`): the Control Changes, channel
+/// pressure and pitch bend. Program change and polyphonic pressure are not
+/// among them (the SDK defines those numbers for `kLegacyMIDICCOutEvent` only)
+/// and stay MIDI events. The one scan both [`MidiCcMapping::from_slots`]
 /// and [`declared_assignments`] read; empty without an `IMidiMapping`. Main thread.
 pub(crate) fn scan(main: MainThreadMarker, plugin: &Plugin) -> Vec<Slot> {
     let mut slots = Vec::new();
@@ -85,7 +84,7 @@ pub(crate) fn scan(main: MainThreadMarker, plugin: &Plugin) -> Vec<Slot> {
     plugin.midi_controller_assignments(
         main,
         0..NUM_CHANNELS as i16,
-        0..sdk_enum_i32(kCtrlPolyPressure) as i16 + 1,
+        0..NUM_CONTROLLERS as i16,
         |channel, controller, id| {
             if id != NO_PARAM_ID {
                 slots.push(Slot {
@@ -108,8 +107,6 @@ pub(crate) fn declared_assignments(slots: &[Slot]) -> Vec<MidiAssignment> {
             let source = match slot.controller {
                 c if c == CTRL_AFTERTOUCH as i16 => MidiSource::ChannelPressure,
                 c if c == CTRL_PITCH_BEND as i16 => MidiSource::PitchBend,
-                c if c == sdk_enum_i32(kCtrlProgramChange) as i16 => MidiSource::ProgramChange,
-                c if c == sdk_enum_i32(kCtrlPolyPressure) as i16 => MidiSource::PolyPressure,
                 cc => MidiSource::ControlChange(u8::try_from(cc).ok().and_then(U7::new)?),
             };
             Some(MidiAssignment {
@@ -299,7 +296,7 @@ pub(crate) fn route_cc_events(
                     // set's `points_overflowed`.
                     let _ = out_params.add_change(
                         ParamId::new(param_id),
-                        event.0.get() as i32,
+                        sample_offset(event.0.get()),
                         value.get(),
                     );
                 }

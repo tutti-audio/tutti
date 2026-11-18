@@ -7,6 +7,7 @@
 //! voice left ~85 ms of silence. `verify-audio`'s `seek_while_stretched` case heard
 //! it; this pins it in the suite.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
@@ -14,7 +15,7 @@ use std::f32::consts::TAU;
 use std::sync::Arc;
 use tutti_fixtures::signal::rms;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::contract;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
@@ -31,7 +32,10 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames * 4 {
-        wave.push_frame(&[(TAU * 440.0 * i as f32 / SR as f32).sin()]);
+        wave.append(
+            Interleaved::new(&[(TAU * 440.0 * i as f32 / SR as f32).sin()], wave.layout()).unwrap(),
+        )
+        .unwrap();
     }
     handle
         .add(

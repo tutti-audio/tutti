@@ -161,7 +161,7 @@ impl Drop for Gate {
 fn a_decode_fault_is_faulted_and_the_voice_reads_silence() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = cut_flac(dir.path());
-    let meta = tutti_codec::Wave::read_metadata(&path).expect("the cut file has a header");
+    let meta = tutti_codec::read_wave_metadata(&path).expect("the cut file has a header");
     let rate = f64::from(meta.sample_rate);
     let total = meta.total_frames.expect("flac reports a length") as usize;
 
@@ -451,7 +451,7 @@ pub(super) fn mp3(dir: &Path) -> PathBuf {
 fn a_file_that_cannot_seek_opens_through_the_decode_lane() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = mp3(dir.path());
-    let wave = tutti_codec::Wave::read(&path).expect("the fixture decodes");
+    let wave = tutti_codec::read_wave::<f32>(&path).expect("the fixture decodes");
     for threaded in [false, true] {
         let mut driver = Driver::start(wave.sample_rate().get(), threaded, Seams::default());
         let (stream, mut reader) = driver.open(&path);
@@ -584,7 +584,7 @@ fn a_panicking_decode_fails_that_open_only() {
 fn a_fork_plays_the_loop_as_applied_not_as_asked() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = cut_flac(dir.path());
-    let meta = tutti_codec::Wave::read_metadata(&path).expect("the cut file has a header");
+    let meta = tutti_codec::read_wave_metadata(&path).expect("the cut file has a header");
     let total = meta.total_frames.expect("flac reports a length");
     let mut sampler = DiskStreamer::manual(
         SampleRate::of(f64::from(meta.sample_rate)),
@@ -645,7 +645,7 @@ fn a_stream_names_its_file() {
 
     {
         let mp3 = mp3(dir.path());
-        let wave = tutti_codec::Wave::read(&mp3).expect("the fixture decodes");
+        let wave = tutti_codec::read_wave::<f32>(&mp3).expect("the fixture decodes");
         let mut sampler =
             DiskStreamer::manual(wave.sample_rate(), Default::default()).expect("builds");
         let opening = sampler.open(&mp3, Placement::HEAD);
@@ -668,7 +668,7 @@ fn a_stream_names_its_file() {
 fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = cut_flac(dir.path());
-    let meta = tutti_codec::Wave::read_metadata(&path).expect("the cut file has a header");
+    let meta = tutti_codec::read_wave_metadata(&path).expect("the cut file has a header");
     let mut sampler = DiskStreamer::manual(
         SampleRate::of(f64::from(meta.sample_rate)),
         Default::default(),

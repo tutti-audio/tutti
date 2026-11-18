@@ -13,7 +13,7 @@ use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY, RtMidiEvents, Wi
 use tutti_types::Samples;
 use tutti_ump::{Bank, MidiChannel, MidiGroup, Sysex7Packets, SysexStep, U7, Ump};
 use tutti_vst3_ffi::{EventKind, EventList, K_DATA_TYPE_MIDI_SYSEX, SYSEX_OUT_ROOM, TextArena};
-use tutti_vst3_host::{InputEvents, Stager, Utf16Chord, drain_midi};
+use tutti_vst3_host::{EventText, InputEvents, Stager, Utf16Chord, drain_midi};
 use vst3::Steinberg::Vst::{Event, IEventList, IEventListTrait};
 use vst3::Steinberg::{kResultFalse, kResultOk};
 
@@ -246,7 +246,11 @@ fn a_full_text_arena_refuses_rather_than_moving_its_pointers() {
             root: 0,
             bass_note: 0,
             mask: 0,
-            text: text.clone(),
+            text: {
+                let mut units = EventText::new();
+                units.extend(text.iter().copied());
+                units
+            },
         })
         .collect();
     let sources = InputEvents {

@@ -61,10 +61,6 @@ use tutti_alsa_ffi::{
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_rt::{ThreadHandle, spawn_named};
 
-/// Announcements the watch thread has acted on, for the idle test.
-#[cfg(test)]
-pub(super) static WAKES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
 /// Looks a settle takes before it reports the last one.
 const MAX_SETTLE: usize = 8;
 /// Linux truncates a thread name to 15 bytes.
@@ -600,8 +596,6 @@ pub(super) fn start(
             loop {
                 match announce.wait(tracker.retry_after()) {
                     Ok(woken @ (Woken::Announced(_) | Woken::TimedOut)) => {
-                        #[cfg(test)]
-                        WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let first = match woken {
                             Woken::Announced(first) => first,
                             _ => Drained::default(),

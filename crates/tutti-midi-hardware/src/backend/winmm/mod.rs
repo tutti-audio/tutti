@@ -15,9 +15,11 @@
 //!   the list position (it shifts when an earlier device is unplugged):
 //!   opening finds the device wherever the list has put it, and fails when it
 //!   is gone instead of opening the device that took its place. The name shown is
-//!   winmm's product name (31 characters at most): the longer one lives in the
-//!   device's property store, which reading takes a second API and a query per
-//!   port for.
+//!   the device's friendly name (from its property store) where it has one and
+//!   winmm's product name (31 characters at most) otherwise; identity is the
+//!   interface path or the product name and ids, never the friendly name. A
+//!   listed port owns its list position, and the open checks it again once the
+//!   port is open, failing when the device there is not the one listed.
 //! - **Input** is a winmm callback on the driver's thread. A short message is
 //!   one MIDI 1.0 UMP (type 2 or type 1) and System Exclusive arrives as
 //!   SysEx7 packets; the ingest node widens the first as it does for any
@@ -44,6 +46,7 @@ use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
 
 use super::legacy_port::poll;
 use super::legacy_port::ports::{PortInfo, Side, endpoints, locate, slot_of};
+use tutti_winmm_ffi::{Input, InputPort, Output, OutputPort, Port, PortKind, ports};
 
 /// The Windows [`MidiEndpoints`] implementation. Holds nothing: winmm is
 /// asked afresh at each call.
@@ -57,49 +60,45 @@ impl WinMmEndpoints {
     }
 }
 
-/// What the driver reports at position `index` of `side`'s list; `None` for a
-/// position the driver will not describe (a device removed since the count).
-/// The device is named by its interface path where the driver gives one.
-fn port_info(side: Side, index: u32) -> Option<PortInfo> {
-    let (caps, interface) = match side {
-        Side::Input => (
-            tutti_winmm_ffi::input_caps(index),
-            tutti_winmm_ffi::input_interface(index),
-        ),
-        Side::Output => (
-            tutti_winmm_ffi::output_caps(index),
-            tutti_winmm_ffi::output_interface(index),
-        ),
-    };
-    let caps = caps
-        .inspect_err(|e| tracing::debug!("winmm enumeration: {e}"))
-        .ok()?;
-    let device = match interface {
-        Some(path) => WinMmDevice::Interface(path),
-        None => WinMmDevice::Named {
-            name: caps.name.clone(),
-            manufacturer: caps.manufacturer,
-            product: caps.product,
-        },
-    };
-    Some(PortInfo {
-        name: caps.name,
-        device,
-    })
+/// What names a port's device: the interface path where the driver gives one,
+/// else its product name and ids. Never the friendly name.
+fn device_of<D: PortKind>(port: &Port<D>) -> WinMmDevice {
+    match port.interface() {
+        Some(path) => WinMmDevice::Interface(path.to_owned()),
+        None => {
+            let caps = port.caps();
+            WinMmDevice::Named {
+                name: caps.name.clone(),
+                manufacturer: caps.manufacturer,
+                product: caps.product,
+            }
+        }
+    }
 }
 
-/// Every port of `side`, with its position.
-fn ports(side: Side) -> impl Iterator<Item = (u32, PortInfo)> {
-    let count = match side {
-        Side::Input => tutti_winmm_ffi::input_count(),
-        Side::Output => tutti_winmm_ffi::output_count(),
-    };
-    (0..count).filter_map(move |index| Some((index, port_info(side, index)?)))
+/// Every port of direction `D` now, with what names its device: what a
+/// resolve needs, and no display name.
+fn identified<D: PortKind>() -> Vec<(Port<D>, WinMmDevice)> {
+    ports::<D>()
+        .into_iter()
+        .map(|port| {
+            let device = device_of(&port);
+            (port, device)
+        })
+        .collect()
 }
 
-/// The endpoints of `side` now.
-fn list(side: Side) -> Vec<OsEndpoint> {
-    endpoints(side, ports(side).map(|(_, info)| info))
+/// Every port of direction `D` now, as a listing shows it: the display name
+/// (the friendly name where the device has one, read here and nowhere else) and
+/// what names the device.
+fn shown<D: PortKind>() -> Vec<PortInfo> {
+    ports::<D>()
+        .iter()
+        .map(|port| PortInfo {
+            name: port.name().to_owned(),
+            device: device_of(port),
+        })
+        .collect()
 }
 
 /// Every device now.
@@ -107,15 +106,31 @@ fn devices() -> Vec<OsDevice> {
     os_devices(&list(Side::Input), &list(Side::Output))
 }
 
-/// The position of the port `id` names on `side` now, wherever the list has
-/// moved it; [`NotFound::Endpoint`] when the id is not a `side` port's, or the
-/// device is gone.
-fn resolve(id: EndpointId, side: Side) -> Result<u32> {
+/// The endpoints of `side` now.
+fn list(side: Side) -> Vec<OsEndpoint> {
+    match side {
+        Side::Input => endpoints(side, shown::<Input>()),
+        Side::Output => endpoints(side, shown::<Output>()),
+    }
+}
+
+/// The input port `id` names now, wherever the list has moved it;
+/// [`NotFound::Endpoint`] when the id is not an input's, or the device is gone.
+fn resolve_input(id: EndpointId) -> Result<InputPort> {
     let slot = slot_of(id);
-    if slot.side != side {
+    if slot.side != Side::Input {
         return Err(NotFound::Endpoint(id).into());
     }
-    Ok(locate(slot, ports(side)).ok_or(NotFound::Endpoint(id))?)
+    Ok(locate(slot, identified::<Input>()).ok_or(NotFound::Endpoint(id))?)
+}
+
+/// The output port `id` names now; see [`resolve_input`].
+fn resolve_output(id: EndpointId) -> Result<OutputPort> {
+    let slot = slot_of(id);
+    if slot.side != Side::Output {
+        return Err(NotFound::Endpoint(id).into());
+    }
+    Ok(locate(slot, identified::<Output>()).ok_or(NotFound::Endpoint(id))?)
 }
 
 impl MidiEndpoints for WinMmEndpoints {
@@ -136,12 +151,12 @@ impl MidiEndpoints for WinMmEndpoints {
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        let index = resolve(id, Side::Input)?;
-        Ok(Box::new(input::open(index, producer)?))
+        let port = resolve_input(id)?;
+        Ok(Box::new(input::open(&port, producer)?))
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        let index = resolve(id, Side::Output)?;
-        Ok(Box::new(output::open(index)?))
+        let port = resolve_output(id)?;
+        Ok(Box::new(output::open(&port)?))
     }
 }

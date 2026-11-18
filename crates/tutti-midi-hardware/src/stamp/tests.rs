@@ -46,25 +46,25 @@ fn a_departure_is_the_clock_reading_at_the_instant() {
 #[test]
 fn a_pairing_is_the_midpoint_of_the_readings_around_the_clock() {
     let before = Instant::now();
-    let paired = Paired::read(|| {
-        std::thread::sleep(Duration::from_millis(20));
-        Ok::<_, std::convert::Infallible>(Duration::from_secs(7))
-    })
-    .unwrap();
-    let after = Instant::now();
+    let after = before + Duration::from_millis(20);
+    let paired = Paired::midpoint(before, after, Duration::from_secs(7));
     let at = before + Duration::from_secs(1);
-    let departs = paired.departure(at).unwrap();
-    // The midpoint is at least 10 ms after `before` and before `after`, so the
-    // second between `before` and `at` is a second less that, past the reading.
-    assert!(departs <= Duration::from_secs(8) - Duration::from_millis(10));
-    assert!(departs >= Duration::from_secs(8) - (after - before));
+    // The midpoint is 10 ms after `before`, so `at` is 990 ms after it.
+    assert_eq!(
+        paired.departure(at),
+        Some(Duration::from_secs(7) + Duration::from_millis(990))
+    );
+    assert_eq!(
+        paired.arrival(Duration::from_secs(7)),
+        before + Duration::from_millis(10)
+    );
 }
 
-// A clock that cannot be read pairs nothing.
+// Readings out of order pair at the earlier one rather than before it.
 #[test]
-fn an_unreadable_clock_pairs_nothing() {
-    assert_eq!(
-        Paired::read(|| Err::<Duration, _>("no clock")).unwrap_err(),
-        "no clock"
-    );
+fn readings_out_of_order_pair_at_the_first() {
+    let before = Instant::now() + Duration::from_millis(5);
+    let after = before - Duration::from_millis(5);
+    let paired = Paired::midpoint(before, after, Duration::from_secs(1));
+    assert_eq!(paired.arrival(Duration::from_secs(1)), before);
 }

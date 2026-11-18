@@ -6,6 +6,7 @@
 mod bell;
 mod crossover;
 mod cut;
+mod envelope;
 mod eq;
 pub mod eq_band;
 mod glided;
@@ -21,6 +22,9 @@ pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
 pub use cut::{
     CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
     MIN_CUT_CUTOFF,
+};
+pub use envelope::{
+    EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq::{EqControls, EqKernel};
 pub use eq_band::EqBandNode;

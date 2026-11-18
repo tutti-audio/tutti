@@ -104,6 +104,37 @@ pub struct Shape {
     /// told `Full` at the push, can still choose what matters (a note-off
     /// before a controller move) for the room it has left.
     pub event_capacity: Option<NonZeroU32>,
+    /// The most events per block this node accepts on its event inputs,
+    /// **all of them together**: the size a host may allocate for what it is
+    /// sent. `None` is unbounded: each input is sized from the edges into it.
+    /// Set it with [`with_event_input_capacity`](Self::with_event_input_capacity).
+    ///
+    /// # Overflow: drop the latest, and count it
+    ///
+    /// What the node is sent in a block on all its event inputs together is
+    /// the merge of the edges into each input, the events flushed into it
+    /// when a delay vanished, and the commands scheduled onto it
+    /// ([`Editor::schedule`](crate::Editor::schedule)), ordered by frame, then
+    /// by input, then by source. When that holds more than the bound, the node
+    /// is sent the earliest by frame (a note-off is kept ahead of any other
+    /// event while the bound has room, so an end is never what is cut), and
+    /// the executor counts each event cut as it counts a full output port
+    /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)),
+    /// and per node ([`Editor::take_event_losses`](crate::Editor::take_event_losses)).
+    /// What the node is sent stays in frame order: note-offs first decides
+    /// which events survive the cut, not their order. The cut falls on the same
+    /// events on the serial and the parallel executor. Each input's merge slot is sized `min(bound, what its edges
+    /// can send)` on the control side, and the cut over everything is made in
+    /// buffers sized at a commit, so nothing allocates on the audio thread
+    /// however the edges change.
+    ///
+    /// A bypassed node is sent only the closes of what it holds, at most the
+    /// bound of them a block across its inputs; the rest stays held and is
+    /// closed in the following blocks, never cut and never counted. Every cut
+    /// event is charged to the node (`EventLoss` with no port). A node that
+    /// computes its bound from the block reads it in [`Node::prepare`] ([`EventDensity`](crate::EventDensity)),
+    /// as an output's capacity is.
+    pub event_input_capacity: Option<NonZeroU32>,
     /// **Processing latency only** — frames the node buffers as a side effect
     /// (lookahead, FFT block, plugin pipeline). Never a musical delay: a
     /// 500 ms echo has latency zero, or PDC drags every parallel path 500 ms
@@ -300,6 +331,7 @@ impl Shape {
             event_in: 0,
             event_out: 0,
             event_capacity: None,
+            event_input_capacity: None,
             latency: Latency::ZERO,
             tail: Tail::None,
             in_place: false,
@@ -519,22 +551,33 @@ impl Shape {
     /// ```
     /// use tutti_graph::Shape;
     /// use tutti_types::ChannelLayout;
+    /// use std::num::NonZeroU32;
     /// let arp = Shape::EMPTY
     ///     .with_events(1, 1)
-    ///     .with_event_capacity(16);
+    ///     .with_event_capacity(NonZeroU32::new(16).unwrap());
     /// assert_eq!(arp.event_capacity.map(|n| n.get()), Some(16));
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// If `per_block` is zero: a port that can hold no event is not an
-    /// event port. (In a `const` context, at compile time.)
     #[must_use]
-    pub const fn with_event_capacity(mut self, per_block: u32) -> Self {
-        match NonZeroU32::new(per_block) {
-            Some(n) => self.event_capacity = Some(n),
-            None => panic!("an event capacity of zero: the port could hold no event"),
-        }
+    pub const fn with_event_capacity(mut self, per_block: NonZeroU32) -> Self {
+        self.event_capacity = Some(per_block);
+        self
+    }
+
+    /// This shape, accepting at most `per_block` events per block on its event
+    /// inputs together (see [`event_input_capacity`](Self::event_input_capacity)
+    /// for what that bounds, and what happens past it).
+    ///
+    /// ```
+    /// use tutti_graph::Shape;
+    /// use std::num::NonZeroU32;
+    /// let sink = Shape::EMPTY
+    ///     .with_events(2, 0)
+    ///     .with_event_input_capacity(NonZeroU32::new(64).unwrap());
+    /// assert_eq!(sink.event_input_capacity.map(|n| n.get()), Some(64));
+    /// ```
+    #[must_use]
+    pub const fn with_event_input_capacity(mut self, per_block: NonZeroU32) -> Self {
+        self.event_input_capacity = Some(per_block);
         self
     }
 

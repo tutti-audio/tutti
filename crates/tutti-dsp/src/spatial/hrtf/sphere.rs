@@ -9,10 +9,12 @@
 //! +y up, +z behind), whose length does not matter; the faces are triangles
 //! wound counter-clockwise seen from outside.
 
-use tutti_buffers::{Mono, Sample};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Mono, Sample};
 use tutti_types::{Direction, SampleRate};
 
-use crate::{Complex32, CosineWindow, RealFft, WindowedSinc};
+use crate::convert::convert_equal;
+use crate::{Complex, CosineWindow, RealFft, WindowedSinc};
 
 use super::hull::convex_hull;
 use super::{HrtfBinauralError, MAX_SPHERE_RATE, MIN_SPHERE_RATE, unit_vector};
@@ -168,10 +170,12 @@ impl HrirSphere {
             .iter()
             .map(|m| unit_vector(m.direction))
             .collect();
-        let mut responses = Vec::with_capacity(measurements.len() * 2 * len);
-        for m in measurements {
-            let ears = m.left.samples().iter().chain(m.right.samples());
-            responses.extend(ears.map(|&s| s.convert_to::<f32>()));
+        // Every response is `len` long (checked above): the left ear's, then the right's.
+        let mut responses = vec![0.0f32; measurements.len() * 2 * len];
+        for (m, ears) in measurements.iter().zip(responses.chunks_exact_mut(2 * len)) {
+            let (left, right) = ears.split_at_mut(len);
+            convert_equal(m.left.samples(), left);
+            convert_equal(m.right.samples(), right);
         }
         // The check on the raw values comes first: a NaN direction would
         // poison the duplicate test and the hull.
@@ -562,7 +566,7 @@ pub(crate) struct Weights {
 /// two responses as spectra, the face table, and the FFT plans.
 /// Built on the control thread; shared, read-only, by every renderer at that
 /// rate.
-pub(crate) struct HrtfSet {
+pub(crate) struct HrtfSet<F: Float + FftNum = f32> {
     /// The rate the responses were resampled to.
     pub(crate) rate: u32,
     /// Response length in frames at `rate`.
@@ -571,16 +575,16 @@ pub(crate) struct HrtfSet {
     pub(crate) fft_len: usize,
     /// The real-input transform pair at `fft_len`; the renderer's scratch is
     /// [`RealFft::scratch_len`].
-    pub(crate) fft: RealFft,
+    pub(crate) fft: RealFft<F>,
     /// Per vertex, the left ear's `fft_len / 2 + 1` bins then the right's,
     /// each `FFT(response) / fft_len` (the inverse is unnormalized).
-    spectra: Vec<Complex32>,
+    spectra: Vec<Complex<F>>,
     /// Vertex directions, normalized, for the nearest-vertex fallback.
     directions: Vec<[f32; 3]>,
     faces: Vec<Face>,
 }
 
-impl std::fmt::Debug for HrtfSet {
+impl<F: Float + FftNum> std::fmt::Debug for HrtfSet<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HrtfSet")
             .field("rate", &self.rate)
@@ -592,7 +596,7 @@ impl std::fmt::Debug for HrtfSet {
     }
 }
 
-impl HrtfSet {
+impl<F: Float + FftNum> HrtfSet<F> {
     /// Prepares `sphere` at `rate` for steps of `step` frames. Allocates,
     /// resamples and plans: control thread only.
     ///
@@ -618,16 +622,19 @@ impl HrtfSet {
         // its spectrum lands at `r * bins`. Each is zero-padded into one
         // reused frame and transformed: no copy of the responses at `rate`
         // outlives the call.
-        let mut spectra = vec![Complex32::new(0.0, 0.0); vertices * 2 * bins];
-        let mut frame = vec![0.0f32; fft_len];
-        let mut scratch = vec![Complex32::new(0.0, 0.0); scratch_len];
-        let norm = 1.0 / fft_len as f32;
+        let zero = Complex::new(F::ZERO, F::ZERO);
+        let mut spectra = vec![zero; vertices * 2 * bins];
+        let mut frame = vec![F::ZERO; fft_len];
+        let mut scratch = vec![zero; scratch_len];
+        let norm = <F as Float>::from_f32(1.0 / fft_len as f32);
         let mut transform = |r: usize, response: &[f32]| {
-            frame[..response.len()].copy_from_slice(response);
-            frame[response.len()..].fill(0.0);
+            // The measured responses are `f32`; they enter the render's format here.
+            let (head, tail) = frame.split_at_mut(response.len());
+            convert_equal(response, head);
+            tail.fill(F::ZERO);
             let out = &mut spectra[r * bins..(r + 1) * bins];
             fft.forward(Mono::new(&frame), out, &mut scratch);
-            out.iter_mut().for_each(|s| *s *= norm);
+            out.iter_mut().for_each(|s| *s = *s * norm);
         };
         if rate == sphere.rate {
             for (r, response) in sphere.responses.chunks_exact(ir_len).enumerate() {
@@ -674,7 +681,7 @@ impl HrtfSet {
     /// `v` must be a vertex of the sphere; [`weights`](Self::weights) names
     /// only those.
     #[inline]
-    pub(crate) fn spectrum(&self, v: u32) -> (&[Complex32], &[Complex32]) {
+    pub(crate) fn spectrum(&self, v: u32) -> (&[Complex<F>], &[Complex<F>]) {
         debug_assert!((v as usize) < self.directions.len());
         let bins = self.fft.bins();
         let at = 2 * v as usize * bins;

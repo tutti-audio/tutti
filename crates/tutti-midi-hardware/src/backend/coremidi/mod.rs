@@ -39,7 +39,7 @@ use coremidi::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_rt::LockExt;
+use tutti_rt::{FaultLatch, LockExt};
 
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
@@ -363,7 +363,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         let protocol = input_protocol(&source, ump_of(&endpoints, unique, true));
         // CoreMIDI calls this closure from its own thread through a block, so
         // a panic must not leave it: the guard catches it and ends the input.
-        let died = Arc::new(AtomicBool::new(false));
+        let died = Arc::new(FaultLatch::new());
         let guard = Guard::new(Arc::clone(&died));
         let mut port = client
             .input_port_with_protocol("tutti-in", protocol, move |event_list, _ctx| {
@@ -376,9 +376,9 @@ impl MidiEndpoints for CoreMidiEndpoints {
                         // One CoreMIDI packet is a packed word stream of several
                         // concatenated UMP messages.
                         for event in split_stream(packet.data()) {
-                            if producer.push(event, arrived) == Err(tutti_rt::PushError::Full) {
-                                tracing::debug!("MIDI input ring full, dropping event");
-                            }
+                            // A full inlet counts the drop itself; a log line
+                            // would run on CoreMIDI's thread.
+                            let _ = producer.push(event, arrived);
                         }
                     }
                 });
@@ -415,13 +415,13 @@ impl MidiEndpoints for CoreMidiEndpoints {
 struct CoreMidiInput {
     /// Held for its `Drop`: releasing the port is what disconnects.
     _port: InputPortWithContext<()>,
-    /// Set by the callback's [`Guard`] when it panicked.
-    died: Arc<AtomicBool>,
+    /// Raised by the callback's [`Guard`] when it panicked.
+    died: Arc<FaultLatch>,
 }
 
 impl InputConnection for CoreMidiInput {
     fn is_alive(&self) -> bool {
-        !self.died.load(Ordering::Acquire)
+        !self.died.is_raised()
     }
 }
 

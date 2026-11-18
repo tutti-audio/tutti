@@ -25,6 +25,7 @@
 //! at all, so a regression to silence fails loudly rather than passing every
 //! comparison.
 
+use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
@@ -32,7 +33,7 @@ use tutti_types::MaxBlock;
 
 use std::sync::atomic::Ordering;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Solo, TransportPosition,
@@ -54,7 +55,10 @@ const BLOCK: usize = 256;
 /// against an expected gain directly, and a ramp would make that comparison
 /// depend on which frame the read landed on.
 fn flat_wave(len: usize) -> Arc<Wave> {
-    Arc::new(Wave::from_samples(SampleRate::SR_48K, &vec![1.0f32; len]))
+    Arc::new(Wave::from_mono(
+        SampleRate::SR_48K,
+        Mono::new(&vec![1.0f32; len]),
+    ))
 }
 
 /// Rolling at 120 BPM from beat 0, as a host counting frames reports it.

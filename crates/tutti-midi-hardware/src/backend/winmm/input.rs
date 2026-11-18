@@ -1,7 +1,6 @@
 //! Reading MIDI 1.0 from a winmm input.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use super::super::legacy_port::anchor::Anchor;
@@ -10,30 +9,31 @@ use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
-use tutti_winmm_ffi::{Event, MidiIn};
+use tutti_rt::FaultLatch;
+use tutti_winmm_ffi::{Event, InputPort, MidiIn};
 
 /// An open winmm input. Dropping it stops the port and returns its buffers.
 pub struct WinMmInput {
-    /// Set when the driver closes the port or the callback panics.
-    died: Arc<AtomicBool>,
+    /// Raised when the driver closes the port or the callback panics.
+    died: Arc<FaultLatch>,
     port: MidiIn,
 }
 
 impl InputConnection for WinMmInput {
     fn is_alive(&self) -> bool {
-        !self.died.load(Ordering::Acquire) && self.port.is_alive()
+        !self.died.is_raised() && self.port.is_alive()
     }
 }
 
-/// Opens the input at `index` and delivers what it receives into `producer`.
+/// Opens `port` and delivers what it receives into `producer`.
 ///
 /// # Errors
 ///
 /// [`Error::Os`](crate::Error::Os) from the port's opening, such as
 /// [`MmResult::Allocated`](tutti_winmm_ffi::MmResult::Allocated) when another
 /// application holds it.
-pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinMmInput> {
-    let died = Arc::new(AtomicBool::new(false));
+pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {
+    let died = Arc::new(FaultLatch::new());
     let guard = Guard::new(Arc::clone(&died));
     let closed = Arc::clone(&died);
     let mut bytes = ByteIn::new();
@@ -46,7 +46,7 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
     };
     // winmm calls this on its own thread, and a panic must not leave it: the
     // guard catches it and ends the input.
-    let port = MidiIn::open(index, move |event| {
+    let port = MidiIn::open(port, move |event| {
         guard.run(|| {
             let seen = Instant::now();
             match event {
@@ -61,7 +61,7 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
                         push(ump, at);
                     }
                 }
-                Event::Closed => closed.store(true, Ordering::Release),
+                Event::Closed => closed.raise(),
             }
         });
     })?;

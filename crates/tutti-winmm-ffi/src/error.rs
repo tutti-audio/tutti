@@ -51,6 +51,24 @@ impl std::fmt::Display for MmOperation {
     }
 }
 
+/// Which way a port goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Direction {
+    /// A port that sends MIDI to this process.
+    Input,
+    /// A port this process sends MIDI to.
+    Output,
+}
+
+impl std::fmt::Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Input => "input",
+            Self::Output => "output",
+        })
+    }
+}
+
 /// The Win32 or standard-library call that failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OsOperation {
@@ -175,6 +193,14 @@ pub enum Error {
         operation: OsOperation,
         /// What the operating system said.
         source: std::io::Error,
+    },
+    /// The device at a listed port's position is no longer the one listed (or
+    /// the driver reports none there): the list shifted between the listing
+    /// and the open.
+    #[error("winmm error: the {direction} port changed since it was listed")]
+    PortMoved {
+        /// Which list shifted.
+        direction: Direction,
     },
     /// A call did not return within its bound, so winmm still holds what it was
     /// given: a buffer after a timeout.
