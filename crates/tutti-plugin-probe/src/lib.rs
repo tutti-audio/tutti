@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
+use std::time::Instant;
 use tutti_plugin_types::{
     Deadline, MainThreadMarker, MeasureFailure, PluginDescriptor, PluginFormat, ProbeRefusal,
     Unmeasured,
@@ -158,7 +159,8 @@ impl StateFor<'_> {
 /// own `save_state` wrote): the plugin it names, or the file's only plugin when it
 /// names none. The others are measured as they load, and without `state` every
 /// plugin is. `run` is the deadline of the whole run: each plugin's renders are
-/// bounded by what it leaves.
+/// bounded by what it leaves, and once it has passed the plugins that remain are
+/// reported [`MeasureFailure::BudgetSpent`] without being loaded.
 ///
 /// A plugin that crashes or hangs while measuring takes this process with it, so
 /// the host that spawned it sees the crash or the timeout of a probe that failed
@@ -192,6 +194,15 @@ pub fn describe_measured(
     let read_as = routing(path, format);
     let mut unmeasured = Vec::new();
     for plugin in &mut plugins {
+        // A spent budget loads nothing more: the plugin is not loaded, activated
+        // or rendered, and a state meant for it is not applied.
+        if run.passed(Instant::now()) {
+            unmeasured.push(Unmeasured {
+                plugin: plugin.id.clone(),
+                failure: MeasureFailure::BudgetSpent,
+            });
+            continue;
+        }
         let state = state.filter(|s| s.is_for(&plugin.id)).map(|s| s.bytes);
         match measure_as(read_as, main, path, plugin, state, run) {
             Ok(measured) => plugin.measured = Some(measured),

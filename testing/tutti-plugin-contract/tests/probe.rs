@@ -746,12 +746,14 @@ fn a_state_with_no_plugin_named_goes_to_the_files_only_plugin() {
     );
 }
 
-/// **A run budget that is spent costs each plugin its own rows, and the probe
-/// still finishes**: with no time left (`--budget 0`) every plugin of the factory
-/// is described and reported unmeasured with a typed timeout, the probe writes
-/// its result and exits cleanly, and the host is not left to kill it as a hang.
+/// **A spent run budget loads no plugin and costs each its own row**: with no
+/// time left (`--budget 0`) every plugin of the factory is described and reported
+/// `BudgetSpent`, and the probe writes its result and exits cleanly. That none was
+/// loaded is observed through the state: it is one the second plugin refuses, and a
+/// plugin that was loaded would have refused it (`StateRefused`, which fails the
+/// whole file).
 #[test]
-fn a_spent_budget_times_out_each_plugins_rows_and_the_probe_finishes() {
+fn a_spent_budget_loads_no_plugin_and_the_probe_finishes() {
     use tutti_plugin_types::MeasureFailure;
     let dir = tempfile::tempdir().unwrap();
     let factory = dir.path().join("two.clap");
@@ -761,9 +763,18 @@ fn a_spent_budget_times_out_each_plugins_rows_and_the_probe_finishes() {
     )
     .expect("copy the plugin");
 
+    let state = refused_state(&dir);
     let (status, outcome) = run_probe(
         &factory,
-        &["--measure".as_ref(), "--budget".as_ref(), "0".as_ref()],
+        &[
+            "--measure".as_ref(),
+            "--state".as_ref(),
+            state.as_os_str(),
+            "--plugin".as_ref(),
+            FACTORY_SECOND.as_ref(),
+            "--budget".as_ref(),
+            "0".as_ref(),
+        ],
     );
 
     assert_eq!(status.code(), Some(i32::from(ProbeExit::Written.code())));
@@ -782,7 +793,7 @@ fn a_spent_budget_times_out_each_plugins_rows_and_the_probe_finishes() {
     assert!(
         unmeasured
             .iter()
-            .all(|u| matches!(u.failure, MeasureFailure::TimedOut { .. })),
+            .all(|u| u.failure == MeasureFailure::BudgetSpent),
         "{unmeasured:?}"
     );
 }
@@ -899,7 +910,7 @@ mod host_watch {
         assert!(
             matches!(
                 tutti_plugin_types::read_result(&result),
-                Ok(Some(ProbeOutcome::Described(_)))
+                Ok(Some(ProbeOutcome::Described { .. }))
             ),
             "the probe wrote its result"
         );

@@ -386,6 +386,7 @@ mod tests {
             MeasureFailure::StateRefused { reason: reason() },
             MeasureFailure::SaveState { reason: reason() },
             MeasureFailure::NoAudioOutput,
+            MeasureFailure::BudgetSpent,
             MeasureFailure::Activate {
                 rate,
                 block,

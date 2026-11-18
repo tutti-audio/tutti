@@ -128,6 +128,10 @@ pub enum MeasureFailure {
         /// The plugin's reason.
         reason: String,
     },
+    /// The probe's run budget was spent before this plugin's turn: it was not
+    /// loaded, activated or rendered.
+    #[error("the probe's run budget was spent before this plugin's turn")]
+    BudgetSpent,
     /// The render ran past its deadline: a plugin slower than the budget allows.
     #[error("rendering at {rate} Hz with blocks of {block:?} passed its deadline")]
     TimedOut {
