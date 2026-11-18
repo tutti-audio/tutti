@@ -68,8 +68,8 @@ use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};
 use crate::param::ParamIn;
 use crate::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
-    ZERO_SLOT,
+    GainPortOp, InputBound, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx,
+    Value, ZERO_SLOT,
 };
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
 
@@ -300,6 +300,7 @@ enum Pre {
     EventMerge {
         srcs: Vec<ERef>,
         dst: u32,
+        bound: Option<InputBound>,
     },
     Node {
         unit: u32,
@@ -888,7 +889,30 @@ pub fn compile(
                     }
                 });
             }
-            let merged = merge_tree(&mut em, refs);
+            // A lone undelayed writer whose port cannot hold more than the
+            // bound needs no merge to keep it.
+            let within = |e: &EventEdge| match *e {
+                EventEdge::Direct(from) => {
+                    refs[..] == [ERef::Val(event_out_val[&from])]
+                        && node_shapes[dense[&from.node]]
+                            .event_capacity
+                            .is_some_and(|c| {
+                                shape.event_input_capacity.is_some_and(|b| {
+                                    crate::event::note_off_room(c.get() as usize)
+                                        <= b.get() as usize
+                                })
+                            })
+                }
+                EventEdge::Feedback { .. } => false,
+            };
+            let bound = shape
+                .event_input_capacity
+                .filter(|_| !(sources.len() == 1 && within(&sources[0])))
+                .map(|capacity| InputBound {
+                    capacity,
+                    unit: n as u32,
+                });
+            let merged = merge_tree(&mut em, refs, bound);
             event_in_val.insert(at, merged);
             ein.push(merged);
         }
@@ -1442,14 +1466,17 @@ pub fn compile(
                     block,
                 );
             }
-            Pre::EventMerge { srcs, dst } => {
-                value_cap[*dst as usize] = srcs.iter().fold(EventSlotCapacity::NONE, |acc, r| {
-                    acc.plus(match *r {
-                        ERef::Val(v) => value_cap[v as usize],
-                        ERef::Fb(f) => fb_cap(&event_fb[f as usize]),
-                        ERef::Empty => EventSlotCapacity::NONE,
+            Pre::EventMerge { srcs, dst, bound } => {
+                value_cap[*dst as usize] = srcs
+                    .iter()
+                    .fold(EventSlotCapacity::NONE, |acc, r| {
+                        acc.plus(match *r {
+                            ERef::Val(v) => value_cap[v as usize],
+                            ERef::Fb(f) => fb_cap(&event_fb[f as usize]),
+                            ERef::Empty => EventSlotCapacity::NONE,
+                        })
                     })
-                });
+                    .bounded(bound.map(|b| b.capacity));
             }
             _ => {}
         }
@@ -1536,9 +1563,10 @@ pub fn compile(
                 src: eslot(*src),
                 dst: eslot(*dst),
             },
-            Pre::EventMerge { srcs, dst } => Op::EventMerge {
+            Pre::EventMerge { srcs, dst, bound } => Op::EventMerge {
                 srcs: span_of(&mut event_list, &mut srcs.iter().map(|&r| eref_slot(r))),
                 dst: eslot(*dst),
+                bound: *bound,
             },
             Pre::Node {
                 unit,
@@ -1989,14 +2017,20 @@ fn sum_chain(em: &mut Emitted, refs: Vec<Addend>) -> ARef {
 /// lower input and the runs are contiguous and in order, a tie between
 /// sources in different runs still goes to the earlier source — the tree
 /// delivers exactly what one flat merge would.
-fn merge_tree(em: &mut Emitted, refs: Vec<ERef>) -> ERef {
+///
+/// With a `bound` (the node's `Shape::event_input_capacity`) the last merge
+/// keeps at most that many events, and a single source goes through it too:
+/// the bound holds whatever the edges are. The runs below it hold all their
+/// sources.
+fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
     match refs.len() {
         0 => ERef::Empty,
-        1 => refs[0],
+        1 if bound.is_none() || refs[0] == ERef::Empty => refs[0],
         n if n <= MAX_PORTS => {
             let op = em.push(Pre::EventMerge {
                 srcs: refs.clone(),
                 dst: 0,
+                bound,
             });
             for &r in &refs {
                 em.read_eref(r, op);
@@ -2010,9 +2044,9 @@ fn merge_tree(em: &mut Emitted, refs: Vec<ERef>) -> ERef {
         _ => {
             let runs: Vec<ERef> = refs
                 .chunks(MAX_PORTS)
-                .map(|run| merge_tree(em, run.to_vec()))
+                .map(|run| merge_tree(em, run.to_vec(), None))
                 .collect();
-            merge_tree(em, runs)
+            merge_tree(em, runs, bound)
         }
     }
 }

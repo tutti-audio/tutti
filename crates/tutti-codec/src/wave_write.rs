@@ -48,10 +48,10 @@ pub fn write_wave<S: Sample>(wave: &Wave<S>, path: impl AsRef<Path>, format: For
     let mut encoder = Encoder::create_file_planned(&spec, path, wave.len())?;
     let layout = wave.layout();
     let mut rest = wave.planes();
-    let mut chunk = vec![0.0f32; Samples(WRITE_CHUNK).interleaved_len(layout)];
+    let mut chunk = vec![0.0f32; layout.interleaved_len(Samples(WRITE_CHUNK))];
     while !rest.is_empty() {
         let (head, tail) = rest.split_at(rest.frames().min(Samples(WRITE_CHUNK)));
-        let len = head.frames().interleaved_len(layout);
+        let len = layout.interleaved_len(head.frames());
         let mut out = InterleavedMut::new(&mut chunk[..len], layout)?;
         interleave(head, out.reborrow())?;
         encoder.write(out.as_interleaved())?;

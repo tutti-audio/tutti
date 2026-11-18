@@ -124,7 +124,7 @@ pub(crate) fn render_outputs(
                         continue;
                     }
                     let frames = window.len();
-                    let samples = Samples(frames).interleaved_len(lane.layout);
+                    let samples = lane.layout.interleaved_len(Samples(frames));
                     let mut block = InterleavedMut::new(&mut lane.scratch[..samples], lane.layout)?;
                     let span = Samples(window.start)..Samples(window.end);
                     lane.fold.fold_planar_to_interleaved(
@@ -544,7 +544,7 @@ fn measure(
         match resampler.as_mut() {
             Some((rs, planes, out)) => {
                 crate::planar::split(frames, planes)?;
-                rs.push(planes, out)?;
+                rs.push(Planes::from_vecs(planes)?, out)?;
                 feed_planes(&mut measurer, out, &mut staging, layout)?;
             }
             None => measurer.feed_interleaved(frames),

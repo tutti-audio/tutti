@@ -788,25 +788,24 @@ fn note_expression_int_round_trips_with_its_sign() {
 /// back from the event and the arena.
 #[test]
 fn harmony_values_round_trip_through_a_list() {
-    let utf16 = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
     let chord = Utf16Chord {
         sample_offset: 12,
         root: 60,
         bass_note: 48,
         mask: 0b100_1001_0001,
-        text: utf16("Cmaj7"),
+        text: event_text("Cmaj7"),
     };
     let scale = Utf16Scale {
         sample_offset: 0,
         root: 62,
         mask: 0x5ab5,
-        text: utf16("D Dorian"),
+        text: event_text("D Dorian"),
     };
     let text = Utf16Text {
         sample_offset: 4,
         note_id: spec_note_id(2, 64),
         type_id: 7,
-        text: utf16("staccato"),
+        text: event_text("staccato"),
     };
 
     let list = EventList::input();

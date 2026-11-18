@@ -267,7 +267,9 @@ struct Script {
 
 impl Node for Script {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(2048)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -293,7 +295,7 @@ impl Node for Relay {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
-            .with_event_capacity(self.capacity)
+            .with_event_capacity(std::num::NonZeroU32::new(self.capacity).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -793,7 +795,9 @@ struct Probe {
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(8)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1099,7 +1103,9 @@ struct SendThenRelease {
 
 impl Node for SendThenRelease {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(64)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

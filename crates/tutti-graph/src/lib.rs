@@ -301,12 +301,15 @@
 //! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 //! use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 //!
+//! // A declared capacity is never zero: the type says so.
+//! const CAPACITY: std::num::NonZeroU32 = std::num::NonZeroU32::new(4).unwrap();
+//!
 //! #[derive(Clone)]
 //! struct Pulse;
 //!
 //! impl Node for Pulse {
 //!     fn shape(&self) -> Shape {
-//!         Shape::EMPTY.with_events(0, 1).with_event_capacity(4)
+//!         Shape::EMPTY.with_events(0, 1).with_event_capacity(CAPACITY)
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -477,9 +480,18 @@
 //!   except a note-off, which has room past the capacity
 //!   ([`note_off_room`]); the executor counts each refusal
 //!   ([`Executor::dropped_event_count`]), and per port
-//!   ([`Editor::take_event_losses`]). Nothing downstream of a writer ever
-//!   drops one. A source whose rate is per second sizes its declaration from
-//!   the block it is prepared for ([`EventDensity`]).
+//!   ([`Editor::take_event_losses`]). Nothing downstream of a writer drops
+//!   one, unless the receiving node bounds its inputs. A source whose rate is
+//!   per second sizes its declaration from the block it is prepared for
+//!   ([`EventDensity`]).
+//! - A node that sizes a buffer for what it is sent declares the most events
+//!   per block its event inputs accept together
+//!   ([`Shape::event_input_capacity`]; `None` is unbounded, each input sized
+//!   from its edges). Past it the node is sent the earliest events by frame
+//!   (note-offs first) of what its edges, flushed events and scheduled
+//!   commands bring, and the executor counts the rest as it counts a refused
+//!   write ([`Executor::dropped_event_count`]). The bound holds however the
+//!   edges change at a commit.
 //! - [`Editor::schedule`] delivers an event on an exact frame or beat
 //!   ([`At`](tutti_types::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.
@@ -667,7 +679,8 @@ pub use param::{
 pub use pass::{Pass, PassError};
 pub use plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value, ZERO_SLOT,
+    GainPortOp, InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+    ZERO_SLOT,
 };
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};

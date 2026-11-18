@@ -1,7 +1,7 @@
 //! [`DitherSink`]: the dither noise as a [`Sink`] adapter, the one path an
 //! export and a live recording share.
 
-use tutti_buffers::{Interleaved, Sink, SinkFailed};
+use tutti_buffers::{Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_types::{Amplitude, ChannelLayout, Samples};
 
 use crate::dither::{DitherNoise, DitherShape};
@@ -80,7 +80,7 @@ impl<S: Sink<Sample = f32>> DitherSink<S> {
     /// Wraps `inner`, dithering with `spec`, or passing through with `None`.
     pub fn new(inner: S, spec: Option<DitherSpec>) -> Self {
         let scratch = match spec {
-            Some(_) => Vec::with_capacity(CHUNK.interleaved_len(inner.layout())),
+            Some(_) => Vec::with_capacity(inner.layout().interleaved_len(CHUNK)),
             None => Vec::new(),
         };
         Self {
@@ -130,10 +130,11 @@ impl<S: Sink<Sample = f32>> Sink for DitherSink<S> {
             self.scratch.clear();
             self.scratch
                 .extend_from_slice(frames.slice(at..end).samples());
-            self.noise.apply(spec.shape, spec.lsb, &mut self.scratch);
-            // The scratch holds whole frames at `layout`, so the view builds.
-            let dithered = Interleaved::new(&self.scratch, layout).map_err(|_| SinkFailed)?;
-            self.inner.write(dithered)?;
+            // The scratch holds whole frames at `layout`, so the views build.
+            let mut audio =
+                InterleavedMut::new(&mut self.scratch, layout).map_err(|_| SinkFailed)?;
+            self.noise.apply(spec.shape, spec.lsb, audio.reborrow());
+            self.inner.write(audio.as_interleaved())?;
             at = end;
         }
         Ok(())

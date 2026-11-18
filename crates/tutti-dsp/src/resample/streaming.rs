@@ -16,8 +16,9 @@
 //! silence at the end to push the real tail out.
 
 use super::{FftResampler, ResampleError};
-use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{SampleRate, Samples};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 /// Input frames per FFT chunk, and how finely each chunk is subdivided.
 ///
@@ -126,9 +127,38 @@ fn whole_hz(hz: f64) -> Result<usize, ResampleError> {
 }
 
 /// The frames `input` becomes at `ratio`, the one rounding the budget and
-/// [`StreamingResampler::output_frames`] share.
+/// [`resampled_frames`] share.
 fn scaled(input: usize, ratio: f64) -> usize {
     (input as f64 * ratio).round() as usize
+}
+
+/// Whether a stream from `source_rate` to `target_rate` needs a converter
+/// at all: `false` when both are the same whole rate in Hz, which is the
+/// rate the converter and a codec's header speak, so two rates that write
+/// the same header are one rate. A float comparison would turn on an ULP.
+/// A rate [`StreamingResampler::new`] refuses is not an identity either.
+#[must_use]
+pub fn needs_resampling(source_rate: SampleRate, target_rate: SampleRate) -> bool {
+    match (whole_hz(source_rate.get()), whole_hz(target_rate.get())) {
+        (Ok(source), Ok(target)) => source != target,
+        _ => true,
+    }
+}
+
+/// The frames a stream of `input` frames comes out as, flush included:
+/// `input` itself when [`needs_resampling`] is `false`, else
+/// `round(input * target / source)`, which is what a stream fed `input`
+/// frames emits in all however it is blocked.
+#[must_use]
+pub fn resampled_frames(
+    source_rate: SampleRate,
+    target_rate: SampleRate,
+    input: Samples,
+) -> Samples {
+    if !needs_resampling(source_rate, target_rate) {
+        return input;
+    }
+    Samples(scaled(input.get(), target_rate.get() / source_rate.get()))
 }
 
 /// The most input frames one block of the converter can span, which bounds how
@@ -141,12 +171,11 @@ const MAX_FLUSH_BLOCK: usize = 1 << 20;
 /// Owns its own input carry, so callers hand it whatever block size they
 /// have and it emits output whenever the converter has a chunk ready.
 #[derive(Debug)]
-pub struct StreamingResampler {
-    inner: FftResampler,
-    channels: usize,
+pub struct StreamingResampler<F: Float + FftNum = f32> {
+    inner: FftResampler<F>,
     ratio: f64,
     /// Input frames per channel, consumed up to `head`.
-    carry: Vec<Vec<f32>>,
+    carry: Vec<Vec<F>>,
     /// Frames at the front of every `carry` plane already handed to the
     /// converter. A chunk advances it instead of shifting the plane down,
     /// so a push of the whole signal (the two-pass path) costs O(N) rather
@@ -161,13 +190,13 @@ pub struct StreamingResampler {
     /// Output frames emitted so far, so the budget is a running total.
     emitted: usize,
     /// Reusable scratch so the per-block path does not allocate.
-    in_scratch: Vec<Vec<f32>>,
+    in_scratch: Vec<Vec<F>>,
     /// The converter's output, `output_frames_max()` per channel, written
     /// by `process_into_buffer`.
-    out_scratch: Vec<Vec<f32>>,
+    out_scratch: Vec<Vec<F>>,
 }
 
-impl StreamingResampler {
+impl<F: Float + FftNum> StreamingResampler<F> {
     /// Both rates are [`SampleRate`], which every caller already holds;
     /// the narrowing to the converter's integer rates happens once, here,
     /// at its boundary.
@@ -187,6 +216,8 @@ impl StreamingResampler {
         target_rate: SampleRate,
         chunk: ChunkSize,
     ) -> Result<Self, ResampleError> {
+        // Every scratch view is then buildable, so `drain_chunks` cannot fail on one.
+        ChannelLayout::try_from(channels)?;
         let (source_hz, target_hz) = (source_rate.get(), target_rate.get());
         let (source_int, target_int) = (whole_hz(source_hz)?, whole_hz(target_hz)?);
         let inner = FftResampler::new(
@@ -197,10 +228,9 @@ impl StreamingResampler {
             channels,
         )?;
         let skip = inner.output_delay();
-        let out_scratch = vec![vec![0.0; inner.output_frames_max()]; channels];
+        let out_scratch = vec![vec![F::ZERO; inner.output_frames_max()]; channels];
         Ok(Self {
             inner,
-            channels,
             ratio: target_hz / source_hz,
             carry: vec![Vec::new(); channels],
             head: 0,
@@ -212,44 +242,22 @@ impl StreamingResampler {
         })
     }
 
-    /// Whether a stream from `source_rate` to `target_rate` needs a converter
-    /// at all: `false` when both are the same whole rate in Hz, which is the
-    /// rate the converter and a codec's header speak, so two rates that write
-    /// the same header are one rate. A float comparison would turn on an ULP.
-    /// A rate [`new`](Self::new) refuses is not an identity either.
-    #[must_use]
-    pub fn converts(source_rate: SampleRate, target_rate: SampleRate) -> bool {
-        match (whole_hz(source_rate.get()), whole_hz(target_rate.get())) {
-            (Ok(source), Ok(target)) => source != target,
-            _ => true,
-        }
-    }
-
-    /// The frames a stream of `input` frames comes out as, flush included:
-    /// `input` itself when [`converts`](Self::converts) is `false`, else
-    /// `round(input * target / source)`, which is what a stream fed `input`
-    /// frames emits in all however it is blocked.
-    #[must_use]
-    pub fn output_frames(
-        source_rate: SampleRate,
-        target_rate: SampleRate,
-        input: Samples,
-    ) -> Samples {
-        if !Self::converts(source_rate, target_rate) {
-            return input;
-        }
-        Samples(scaled(input.get(), target_rate.get() / source_rate.get()))
-    }
-
     /// Feed one block of planar input; append whatever output it completes.
     ///
     /// # Errors
-    /// [`ResampleError`] if the converter refuses a chunk or the carry stops
-    /// shrinking.
-    pub fn push(&mut self, planes: &[Vec<f32>], out: &mut [Vec<f32>]) -> Result<(), ResampleError> {
-        let n = planes.first().map_or(0, |p| p.len());
-        for (c, p) in planes.iter().enumerate().take(self.channels) {
-            self.carry[c].extend_from_slice(p);
+    /// [`ResampleError::WidthMismatch`] if the view is not as wide as the resampler (nothing is
+    /// consumed then), else [`ResampleError`] if the converter refuses a chunk or the carry
+    /// stops shrinking.
+    pub fn push(&mut self, planes: Planes<'_, F>, out: &mut [Vec<F>]) -> Result<(), ResampleError> {
+        let n = planes.frames().get();
+        if planes.channels() != self.carry.len() {
+            return Err(ResampleError::WidthMismatch {
+                expected: self.carry.len(),
+                got: planes.channels(),
+            });
+        }
+        for (carry, p) in self.carry.iter_mut().zip(planes) {
+            carry.extend_from_slice(p.samples());
         }
         self.fed += n;
         self.drain(out, false)
@@ -277,7 +285,7 @@ impl StreamingResampler {
     /// # Errors
     /// [`ResampleError::Stalled`] if the silence cannot push the tail out, or
     /// the converter's own error.
-    pub fn finish(&mut self, out: &mut [Vec<f32>]) -> Result<(), ResampleError> {
+    pub fn finish(&mut self, out: &mut [Vec<F>]) -> Result<(), ResampleError> {
         // The real input's last partial chunk, padded by `drain`.
         self.drain(out, true)?;
         let need = self.inner.input_frames_next();
@@ -290,7 +298,7 @@ impl StreamingResampler {
                 return Err(ResampleError::Stalled { chunks: bound });
             }
             for c in self.carry.iter_mut() {
-                c.resize(c.len() + need, 0.0);
+                c.resize(c.len() + need, F::ZERO);
             }
             self.drain(out, true)?;
         }
@@ -315,7 +323,7 @@ impl StreamingResampler {
         (len - self.head, self.head, self.inner.input_frames_next())
     }
 
-    fn drain(&mut self, out: &mut [Vec<f32>], flushing: bool) -> Result<(), ResampleError> {
+    fn drain(&mut self, out: &mut [Vec<F>], flushing: bool) -> Result<(), ResampleError> {
         let result = self.drain_chunks(out, flushing);
         // Drop the consumed prefix once per call, not once per chunk.
         for c in self.carry.iter_mut() {
@@ -325,7 +333,7 @@ impl StreamingResampler {
         result
     }
 
-    fn drain_chunks(&mut self, out: &mut [Vec<f32>], flushing: bool) -> Result<(), ResampleError> {
+    fn drain_chunks(&mut self, out: &mut [Vec<F>], flushing: bool) -> Result<(), ResampleError> {
         // Every pass consumes one chunk, so the carry this call starts
         // with runs out within `ceil(have / need)` passes (the last one
         // padded when flushing). The `+ 1` is slack; past it the carry is
@@ -348,7 +356,7 @@ impl StreamingResampler {
                     return Ok(());
                 }
                 for c in self.carry.iter_mut() {
-                    c.resize(self.head + need, 0.0);
+                    c.resize(self.head + need, F::ZERO);
                 }
             }
 
@@ -363,11 +371,12 @@ impl StreamingResampler {
                 scratch.clear();
                 scratch.extend_from_slice(&self.carry[c][chunk.clone()]);
             }
-            // Each scratch plane is `need` frames in, `output_frames_max()` out; a
-            // channel count a `ChannelLayout` cannot hold is the only refusal.
+            // Each scratch plane is `need` frames in and `output_frames_max()` out, and `new`
+            // checked the width against `ChannelLayout`, so both views build.
             let produced_len = self.inner.process_into_buffer(
-                Planes::from_vecs(&self.in_scratch)?,
-                PlanesMut::from_vecs(&mut self.out_scratch)?,
+                Planes::from_vecs(&self.in_scratch).expect("BUG: equal planes of a checked width"),
+                PlanesMut::from_vecs(&mut self.out_scratch)
+                    .expect("BUG: equal planes of a checked width"),
             )?;
             let produced = &self.out_scratch;
             self.head += need;

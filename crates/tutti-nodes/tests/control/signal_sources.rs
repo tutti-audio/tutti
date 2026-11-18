@@ -174,7 +174,9 @@ struct Midi {
 
 impl Node for Midi {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(1024)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1252,7 +1254,7 @@ fn past_its_capacity_a_follower_thins_its_grid() {
     let all = render_stopped(&mut ed, &mut exec, &[LEN], LEN);
     let m = marks(&all);
     assert!(
-        m.len() <= tutti_nodes::SOURCE_EVENT_CAPACITY as usize,
+        m.len() <= tutti_nodes::SOURCE_EVENT_CAPACITY.get() as usize,
         "{} pieces",
         m.len()
     );

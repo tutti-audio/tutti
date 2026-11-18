@@ -34,7 +34,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Track};
+use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
 use tutti::session::{Master, PoolEvent};
 use tutti::{
     Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PeerState, PluginRef, Range, Root,
@@ -125,15 +125,16 @@ fn play<M: Master>(
     let file = MidiFile::read(midi)?; // an SMF or a Clip File
     // A file timed in SMPTE frames has no beats, so no tempo map to adopt and
     // no beat to end on: this example plays metrical files only.
-    let (Some(tempo_map), Some(end)) = (file.tempo_map(), file.beat_at(file.end())) else {
+    let Timebase::Metrical(metrical) = file.timebase() else {
         return Err("a file timed in SMPTE frames has no beats to play on".into());
     };
+    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(file.end()));
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
     s.set_tempo_map(tempo_map.clone())?;
     // Its messages on the file's timeline (a format 2 file has none), as the
     // packets they are: the clip translates them when it is loaded.
-    s.midi().play_file(synth, Beat(0.0), &file)?;
+    s.midi().play_file(synth, Beat(0.0), metrical)?;
     report(s.update());
 
     // Everything else is derived: the clock is the project's tempo map from

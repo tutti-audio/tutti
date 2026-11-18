@@ -13,10 +13,9 @@
 #
 # A free-text `measured:` is refused.
 crates/tutti-cpal/src/mic.rs::Capture::block  pending
-crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::chunk  pending
-crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  pending
-crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  pending
-crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  pending
+crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  not-interleave: complex re/im packing for the half-size FFT
+crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  not-interleave: complex re/im packing for the half-size FFT
+crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  not-interleave: complex re/im packing for the half-size FFT
 crates/tutti-engine/src/callback.rs::OutputBlock::render_unguarded  pending
 crates/tutti-engine/src/manual.rs::ManualStream::render_block_inner  pending
 crates/tutti-engine/src/timer.rs::TimerDriver::open  pending
