@@ -13,9 +13,8 @@ use tutti_nodes::{
 use tutti_session::{
     Assign, DetachedSession, Knobs, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind,
 };
-use tutti_types::{
-    BusTopology, ChannelLayout, Db, Hz, Param, Q, SampleRate, Seconds, UnitAddr, UnitParam,
-};
+use tutti_types::{BusTopology, ChannelLayout, Param};
+use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {
     Session::builder()

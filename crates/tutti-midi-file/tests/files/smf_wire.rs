@@ -8,8 +8,8 @@ use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
     SmfParseError, TextKind, Tick,
 };
-use tutti_types::Seconds;
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
+use tutti_units::Seconds;
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);

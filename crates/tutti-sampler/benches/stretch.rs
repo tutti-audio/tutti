@@ -10,7 +10,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_sampler::stretch::{FftSize, Unit};
-use tutti_types::{Cents, SampleRate, StretchFactor};
+use tutti_units::{Cents, SampleRate, StretchFactor};
 
 const BLOCK: usize = 512;
 

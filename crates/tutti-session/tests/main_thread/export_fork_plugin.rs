@@ -31,8 +31,8 @@ use tutti_session::{
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
-use tutti_types::{Beat, Bpm, SampleRate, Seconds};
 use tutti_ump::MidiChannel;
+use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 

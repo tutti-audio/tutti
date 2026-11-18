@@ -83,7 +83,8 @@ use std::sync::atomic::Ordering;
 
 use sync::{Arc, AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence};
 use tutti_buffers::{BufferError, Float, I24, Interleaved, Sample};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// The atomics: `std`'s in a real build, `loom`'s under `--cfg loom`, so the
 /// model in `tests/pos_ring_loom.rs` checks this code rather than a replica.
@@ -248,7 +249,8 @@ impl RingWindow {
 /// ```
 /// use tutti_buffers::Interleaved;
 /// use tutti_rt::PosRing;
-/// use tutti_types::{ChannelLayout, Samples};
+/// use tutti_units::Samples;
+/// use tutti_types::ChannelLayout;
 ///
 /// // 8 stereo frames, nothing kept behind the play position.
 /// let (mut writer, mut reader) = PosRing::<f32>::new(8, ChannelLayout::STEREO, 0)?;

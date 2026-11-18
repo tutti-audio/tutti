@@ -29,8 +29,9 @@ use tutti_graph::{
     ModeError, Node, NodeKey, NodeMode, Offset, OutPort, PassError, Prepare, Shape, Source, Status,
     Topology, TransportPosition, Unforkable, ValidGraph,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Latency, Samples, Speaker, Tail};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_ump::Ump;
+use tutti_units::{Latency, Samples, Tail};
 
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.
@@ -426,7 +427,7 @@ fn a_bypass_is_the_fold_between_the_main_buses() {
                 if parked { &modes } else { &[] },
             );
             if !parked {
-                rig.pair.set_mix(key(1), tutti_types::Mix::DRY);
+                rig.pair.set_mix(key(1), tutti_units::Mix::DRY);
             }
             let got = rig.frames(256, &wave);
             let input = |c: u32, f: u64| {

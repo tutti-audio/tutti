@@ -17,8 +17,8 @@ use tutti_plugin_types::{
     MaxBlock, Normalized, Notice, ParameterChanges, PluginAudio, PluginError, PluginIo, Prepare,
     ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
 };
-use tutti_types::ParamId;
 use tutti_ump::{Address, MidiChannel, MidiGroup};
+use tutti_units::ParamId;
 use tutti_vst2_host::{Vst2Controller, Vst2Loaded, Vst2Processor};
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
 

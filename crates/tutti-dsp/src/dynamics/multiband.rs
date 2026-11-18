@@ -25,7 +25,8 @@
 use core::ops::Range;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Db, Hz, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
 use super::shared::{CHUNK, GAIN_GLIDE};

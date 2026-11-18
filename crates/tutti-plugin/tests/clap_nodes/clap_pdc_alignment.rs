@@ -50,7 +50,8 @@ use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Through;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::PluginControls;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 
@@ -266,7 +267,7 @@ fn the_probe_declares_the_latency_this_suite_expects() {
     );
 
     let rig = plugin_alone(probe.client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
     assert_eq!(
         rig.graph.editor().spec().topology.nodes[&rig.plugin].latency,
@@ -301,7 +302,7 @@ fn the_plugin_path_alone_arrives_a_full_latency_late() {
     let handle = probe.handle;
 
     let mut rig = plugin_alone(probe.client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
     let out = render_impulse(&mut rig);
     assert!(
@@ -347,7 +348,7 @@ fn with_compensation_both_paths_land_on_the_same_sample() {
     let handle = probe.handle;
 
     let mut rig = two_paths(probe.client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
     assert_eq!(
         rig.total_latency(),
@@ -407,7 +408,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     let handle = probe.handle;
 
     let mut rig = two_paths(probe.client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
     assert_eq!(rig.total_latency(), Samples(EXPECTED_TOTAL_LATENCY));
 

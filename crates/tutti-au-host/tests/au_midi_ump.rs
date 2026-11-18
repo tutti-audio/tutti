@@ -30,7 +30,7 @@ use tutti_ump::U7;
 
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 const GAIN: u32 = 900;
 const CC: u8 = 20;

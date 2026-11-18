@@ -31,8 +31,8 @@ use tutti_graph::{
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
 use tutti_midi_runtime::{InputInlets, InputWriters, MidiIngestNode};
-use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
+use tutti_units::{Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const INGEST: NodeKey = NodeKey(1);

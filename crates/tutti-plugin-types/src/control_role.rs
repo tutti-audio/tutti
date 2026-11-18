@@ -3,7 +3,7 @@
 
 use tutti_ump::{MidiChannel, U7};
 
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

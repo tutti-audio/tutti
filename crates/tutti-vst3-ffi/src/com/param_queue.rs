@@ -31,7 +31,7 @@ use vst3::{Class, ComWrapper};
 use tutti_plugin_types::{Normalized, PointBuf, PointPool};
 use tutti_plugin_types::{ParameterPoint, ParameterQueue};
 use tutti_rt::{AudioThreadCell, BorrowGuard};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// The least point room a queue is built with. Typical automation carries a
 /// handful of points per buffer; past a queue's room it keeps its latest

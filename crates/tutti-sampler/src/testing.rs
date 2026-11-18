@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_buffers::{Float, Planes};
 
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition, contract};
-use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 use crate::Loop;
 

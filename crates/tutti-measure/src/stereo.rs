@@ -11,7 +11,7 @@
 
 use tutti_buffers::{Sample, StereoPlanes};
 use tutti_dsp::Smoother;
-use tutti_types::{Amplitude, Ballistics, Correlation, Db, Seconds, StereoBalance, StereoWidth};
+use tutti_units::{Amplitude, Ballistics, Correlation, Db, Seconds, StereoBalance, StereoWidth};
 
 /// Mid/side and per-channel levels.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

@@ -14,7 +14,8 @@ use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, Editor, Executor, InPort, Io, Node, NodeKey,
     NodeMode, OutPort, Prepare, Shape, Source, Status, TransportPosition, Unforkable,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Latency, Mix, Samples};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_units::{Latency, Mix, Samples};
 
 const BLOCK: usize = 64;
 

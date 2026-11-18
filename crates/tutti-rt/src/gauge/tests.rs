@@ -1,4 +1,4 @@
-use tutti_types::{Db, SamplePosition, Samples};
+use tutti_units::{Db, SamplePosition, Samples};
 
 use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge, tally};
 

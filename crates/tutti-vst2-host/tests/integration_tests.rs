@@ -19,8 +19,8 @@ use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
 use tutti_plugin_types::{ContentScale, Control, EditorWindow, Normalized};
-use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
+use tutti_units::ParamId;
 use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2ProcessContext};
 
 #[path = "support/active.rs"]
@@ -1289,12 +1289,12 @@ fn process_with_transport() {
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_types::Beat(2.0))
+        .with_beat(tutti_units::Beat(2.0))
         .with_position_samples(44_100)
-        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
         .with_loop(tutti_plugin_types::LoopRegion::new(
-            tutti_types::LoopRange::new(tutti_types::Beat(0.0), tutti_types::Beat(4.0))
+            tutti_types::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0))
                 .expect("a loop"),
         ));
 

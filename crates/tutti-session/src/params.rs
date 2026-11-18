@@ -20,7 +20,7 @@ use std::any::TypeId;
 
 use thiserror::Error;
 use tutti_graph::{HasParam, HasParams};
-use tutti_types::{UnitAddr, UnitParam};
+use tutti_units::{UnitAddr, UnitParam};
 
 use crate::{Key, ParamTarget};
 

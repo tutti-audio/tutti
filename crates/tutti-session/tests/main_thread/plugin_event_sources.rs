@@ -19,7 +19,8 @@ use tutti_fixtures::StandInWindow;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::ContentScale;
 use tutti_session::{Editor, Session};
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::Samples;
 
 use crate::support::clap_probe;
 

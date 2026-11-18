@@ -42,9 +42,9 @@ use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::Normalized;
 use tutti_plugin_types::PluginForkError;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_types::ParamId;
-use tutti_types::{SampleRate, Samples};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 /// The probe's applied gain (`GAIN_PARAM_ID` in the plugin), and its range in
 /// dB. Mirrored rather than imported: this crate links no probe rlib.
@@ -130,7 +130,7 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
         .client
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
     assert_eq!(fork.descriptor().id, probe.client.descriptor().id);
@@ -145,7 +145,7 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
 
     let mut live = Rig::new(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         SAMPLE_RATE,
         BLOCK,
@@ -187,7 +187,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         .client
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
     let state_at_fork = handle
@@ -218,7 +218,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
 
     let mut live = Rig::new(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         SAMPLE_RATE,
         BLOCK,
@@ -279,7 +279,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         .client
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the fresh instance refuses the state");
     assert!(
@@ -294,7 +294,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     editor
@@ -339,7 +339,7 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
         .client
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the fork saved for a duplicate and restored as one");
 }
@@ -355,7 +355,7 @@ fn a_plugin_that_cannot_save_its_state_is_a_named_fork_error() {
         .client
         .fork_instance(
             ForkMode::Live,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the live instance refuses to save");
     assert!(
@@ -382,7 +382,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     editor
@@ -417,7 +417,7 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
         key,
         "plugin",
         client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     editor
@@ -502,7 +502,7 @@ fn a_fork_of_a_dropped_plugin_is_live_gone() {
     let probe = load_probe(SAMPLE_RATE);
     let parts = probe
         .client
-        .bind(tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"))
+        .bind(tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"))
         .into_parts();
     let source = parts.fork.expect("a plugin node is forkable");
     drop(parts.node);
@@ -555,7 +555,7 @@ fn a_dropped_forks_server_is_reaped() {
         .client
         .fork_instance(
             ForkMode::Live,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
     let handle = fork.handle();
@@ -592,7 +592,7 @@ fn a_failed_forks_server_is_reaped() {
         .client
         .fork_instance(
             ForkMode::Live,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .err();
     assert!(
@@ -613,7 +613,7 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
         key,
         "plugin",
         client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     live.spec_mut()
@@ -666,7 +666,7 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
     let config = (
         tutti_export::Job::new(
             rate,
-            tutti_types::Seconds(0.5).to_samples(rate),
+            tutti_units::Seconds(0.5).to_samples(rate),
             Samples(0),
             Samples(0),
         )
@@ -752,7 +752,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
     let config = (
         tutti_export::Job::new(
             SampleRate::of(SAMPLE_RATE),
-            tutti_types::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
+            tutti_units::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
             Samples(0),
             Samples(0),
         )
@@ -776,8 +776,8 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
 fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) {
     use tutti_graph::{EventEdge, EventIn, EventOut};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-    use tutti_types::Beat;
     use tutti_ump::{MidiChannel, MidiGroup};
+    use tutti_units::Beat;
 
     let events = (0..n).flat_map(|k| {
         // Notes 0..100 on channel 0, 100..200 on channel 1.
@@ -846,7 +846,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
         let config = (
             tutti_export::Job::new(
                 SampleRate::of(SAMPLE_RATE),
-                tutti_types::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
+                tutti_units::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
                 Samples(0),
                 Samples(0),
             )
@@ -883,8 +883,8 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
 fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
     use tutti_graph::{EventEdge, EventIn, EventOut};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-    use tutti_types::Beat;
     use tutti_ump::MidiChannel;
+    use tutti_units::Beat;
 
     let clip = NodeKey(1);
     live.insert(
@@ -939,7 +939,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             key,
             "plugin",
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
         );
@@ -991,8 +991,8 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
 fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     use tutti_graph::{EventEdge, EventIn, EventOut};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-    use tutti_types::Beat;
     use tutti_ump::MidiChannel;
+    use tutti_units::Beat;
 
     let _lock = machine_lock();
     let _env = ProbeEnv::new().render_mode(render::NOTES);
@@ -1020,7 +1020,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     live.spec_mut().connect_events(
@@ -1099,8 +1099,8 @@ impl tutti_graph::Node for MidiSink {
 fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
     use tutti_graph::{EventEdge, EventIn, EventOut};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-    use tutti_types::Beat;
     use tutti_ump::MidiChannel;
+    use tutti_units::Beat;
 
     let _lock = machine_lock();
     let _env = ProbeEnv::new().render_mode(render::NOTES);
@@ -1124,7 +1124,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             key,
             "plugin",
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
         );
@@ -1203,7 +1203,7 @@ fn ramp(t: u64) -> f32 {
 impl tutti_graph::Node for RampSource {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(tutti_types::ChannelLayout::MONO)
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(
@@ -1245,7 +1245,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     for port in 0..inputs {
@@ -1274,7 +1274,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     let config = (
         tutti_export::Job::new(
             rate,
-            tutti_types::Seconds(0.1).to_samples(rate),
+            tutti_units::Seconds(0.1).to_samples(rate),
             latency,
             Samples(0),
         )
@@ -1322,14 +1322,14 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
         NodeKey(9),
         "a",
         a.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     let _ = live.insert(
         NodeKey(10),
         "b",
         b.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     live.spec_mut().topology.set_outputs(vec![
@@ -1360,7 +1360,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
         let config = (
             tutti_export::Job::new(
                 rate,
-                tutti_types::Seconds(0.5).to_samples(rate),
+                tutti_units::Seconds(0.5).to_samples(rate),
                 Samples(0),
                 Samples(0),
             )
@@ -1407,7 +1407,7 @@ fn midi_past_the_chunks_capacity_is_counted() {
     let controls = probe.client.controls();
     let mut node = Direct::boxed(
         tutti_graph::IntoNode::into_node(probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ))
         .0,
         SampleRate::of(SAMPLE_RATE),
@@ -1457,7 +1457,7 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     editor

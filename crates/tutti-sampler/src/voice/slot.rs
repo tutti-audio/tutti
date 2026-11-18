@@ -16,9 +16,8 @@ use crate::stretch;
 use super::clock::BlockClock;
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use tutti_rt::RingFloat;
-use tutti_types::{
-    Cents, ChannelLayout, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor,
-};
+use tutti_types::ChannelLayout;
+use tutti_units::{Cents, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor};
 
 /// The first frame of a wave: before it a stretch filter's priming reads
 /// nothing.

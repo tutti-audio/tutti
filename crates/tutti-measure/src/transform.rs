@@ -16,7 +16,7 @@
 //! comb of islands separated by silence.
 
 use tutti_buffers::{Mono, MonoMut, Sample};
-use tutti_types::{Amplitude, SampleRate, Samples};
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 use crate::convert::to_f32;
 

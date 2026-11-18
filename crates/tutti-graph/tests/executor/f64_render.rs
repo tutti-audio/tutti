@@ -8,7 +8,8 @@ use tutti_graph::{
     Cx, ForkByClone, ForkMode, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params,
     Prepare, Renderer, Shape, Status,
 };
-use tutti_types::{Amplitude, ChannelLayout, MaxBlock, Param, SampleRate, Samples, UnitParam};
+use tutti_types::{ChannelLayout, MaxBlock, Param};
+use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
 const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;

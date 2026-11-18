@@ -4,7 +4,7 @@
 //! different units are distinct types at compile time, at zero runtime cost
 //! over a bare `Arc<AtomicF32>`. The atomic follows the unit's raw
 //! representation ([`ParamRaw`]): [`AtomicF32`] for an `f32` unit,
-//! [`AtomicF64`] for an `f64` one ([`Seconds`](super::Seconds)). `SampleRate`
+//! [`AtomicF64`] for an `f64` one ([`Seconds`](tutti_units::Seconds)). `SampleRate`
 //! is `f64`-backed and is not modulated at audio rate: construct it directly,
 //! don't wrap it in `Param`.
 //!
@@ -21,9 +21,9 @@
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use super::units::Unit;
 use alloc::sync::Arc;
 use atomic_float::{AtomicF32, AtomicF64};
+use tutti_units::Unit;
 
 mod sealed {
     pub trait Sealed {}
@@ -121,7 +121,7 @@ impl ParamRaw for f64 {
 /// What a host that addresses params by kind rather than by unit holds: the
 /// modulation path (control lanes, `ParamSet`) works in `f32` values, whatever
 /// the unit's own raw. An `f64` cell is **widened** on a write (exact) and
-/// **narrowed** on a read (`as f32`): the one place a [`Seconds`](super::Seconds)
+/// **narrowed** on a read (`as f32`): the one place a [`Seconds`](tutti_units::Seconds)
 /// param loses precision, and a control time an `f32` carries to well under a
 /// microsecond for any value a modulation lane produces. The node that owns
 /// the [`Param`] reads its own cell at full width.
@@ -203,14 +203,15 @@ impl From<Arc<AtomicF64>> for ParamCell {
 /// [`detach`](Self::detach) are for the control thread.
 ///
 /// The cell holds the unit's raw at its own width ([`ParamRaw`]): `f32` for
-/// most units, `f64` for [`Seconds`](super::Seconds).
-/// [`SampleRate`](super::SampleRate) is `f64`-backed too but is not modulated
+/// most units, `f64` for [`Seconds`](tutti_units::Seconds).
+/// [`SampleRate`](tutti_units::SampleRate) is `f64`-backed too but is not modulated
 /// at audio rate, so it is used directly rather than through a `Param`.
 ///
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Hz, Param};
+/// use tutti_units::Hz;
+/// use tutti_types::Param;
 ///
 /// let cutoff = Param::new(Hz(1_000.0)); // control thread: allocates
 /// let on_audio_thread = cutoff.handle(); // shares the cell
@@ -347,8 +348,8 @@ where
 /// (`Unit<Raw = f64>`), held inline: [`Param`]'s neighbour for a hot loop's own
 /// state, not a mode of it.
 ///
-/// The width is the reason it exists. [`ReadRate`](super::ReadRate) and
-/// [`SamplePosition`](super::SamplePosition) are `f64` because a disk voice adds
+/// The width is the reason it exists. [`ReadRate`](tutti_units::ReadRate) and
+/// [`SamplePosition`](tutti_units::SamplePosition) are `f64` because a disk voice adds
 /// the rate into its read position once per sample for the length of the file.
 /// A cell that stored the rate as `f32` and widened it on load would put that
 /// rounding back into the sum on every load, and the error does not average
@@ -360,7 +361,7 @@ where
 /// another thread reaches it through `&self` on whatever already shares its
 /// owner (a voice's `RtState`, a memory source). It is not what a node's
 /// control is: those are `Param`s, which a host addresses by `UnitAddr`. There
-/// is no `Default`: a default [`ReadRate`](super::ReadRate) is `0.0`, a stopped
+/// is no `Default`: a default [`ReadRate`](tutti_units::ReadRate) is `0.0`, a stopped
 /// voice, so the initial value is always named.
 ///
 /// [`load`](Self::load) and [`store`](Self::store) are audio-thread safe, with
@@ -370,7 +371,8 @@ where
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Param64, ReadRate};
+/// use tutti_units::ReadRate;
+/// use tutti_types::Param64;
 ///
 /// let stretch_rate = Param64::new(ReadRate::UNITY); // no allocation
 /// stretch_rate.store(ReadRate::new(0.75));
@@ -380,7 +382,8 @@ where
 /// An `f32` unit is not a `Param64`:
 ///
 /// ```compile_fail
-/// use tutti_types::{Hz, Param64};
+/// use tutti_units::Hz;
+/// use tutti_types::Param64;
 /// struct Filter {
 ///     cutoff: Param64<Hz>, // `Param<Hz>`
 /// }
@@ -429,8 +432,8 @@ impl<U: Unit<Raw = f64>> core::fmt::Debug for Param64<U> {
 #[cfg(test)]
 mod tests {
     use super::{Param, Param64};
-    use crate::value::units::{Hz, ReadRate, SamplePosition};
     use core::sync::atomic::Ordering;
+    use tutti_units::{Gain, Hz, ReadRate, SamplePosition, SampleSpan};
 
     /// Both `f64` units round-trip through the cell bit for bit: a value `f32`
     /// cannot hold, an hour's position at 48 kHz plus a fraction, and a `NaN`
@@ -463,7 +466,7 @@ mod tests {
     /// handles, and a `ParamCell` reads it as `f32` and writes it widened.
     #[test]
     fn an_f64_param_keeps_its_width_and_its_cell_is_shared() {
-        use crate::value::units::Seconds;
+        use tutti_units::Seconds;
         let long = Seconds(3600.0 + 1.0e-9); // not an f32
         let a = Param::new(Seconds(0.0));
         let b = a.handle();
@@ -493,5 +496,38 @@ mod tests {
             Hz(880.0),
             "its write must not reach the live cell"
         );
+    }
+
+    /// A tap, a routing weight: a driven, signed cell that reads back as written.
+    #[test]
+    fn a_gain_is_a_param() {
+        let tap = Param::new(Gain(-0.5));
+        let on_audio_thread = tap.handle();
+        assert_eq!(on_audio_thread.load(), Gain(-0.5));
+        tap.store(Gain::INVERTING);
+        assert_eq!(on_audio_thread.load(), Gain::INVERTING);
+
+        // The width-erased cell a modulation lane writes keeps the sign.
+        tap.cell()
+            .store(0.75, core::sync::atomic::Ordering::Relaxed);
+        assert_eq!(tap.load(), Gain(0.75));
+    }
+
+    /// A driven delay time: the cell holds a span at full `f64` width, a write
+    /// reads back exact, and a cell written out of range reads back saturated.
+    #[test]
+    fn a_span_is_a_param() {
+        let time = Param::new(SampleSpan::of(504.25));
+        let on_audio_thread = time.handle();
+        assert_eq!(on_audio_thread.load(), SampleSpan::of(504.25));
+        time.store(SampleSpan::of(48_000.5));
+        assert_eq!(on_audio_thread.load().get(), 48_000.5);
+
+        // The width-erased cell a modulation lane writes carries an `f32`.
+        let cell = time.cell();
+        cell.store(-3.0, core::sync::atomic::Ordering::Relaxed);
+        assert_eq!(time.load(), SampleSpan::ZERO);
+        cell.store(100.0, core::sync::atomic::Ordering::Relaxed);
+        assert_eq!(time.load(), SampleSpan::of(100.0));
     }
 }

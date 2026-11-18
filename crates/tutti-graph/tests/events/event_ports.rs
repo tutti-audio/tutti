@@ -32,8 +32,8 @@ use tutti_graph::{
     compile,
 };
 use tutti_graph::{NodeKey, Topology};
-use tutti_types::{At, Frame, Latency, SampleRate, Samples};
 use tutti_ump::Ump;
+use tutti_units::{At, Frame, Latency, SampleRate, Samples};
 
 /// What a sink saw: `(block start frame, offset, port, tag)`.
 type Seen = Arc<Mutex<Vec<(u64, u32, u16, u32)>>>;

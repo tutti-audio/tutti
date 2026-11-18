@@ -53,7 +53,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tutti_types::At;
+use tutti_units::At;
 
 use crate::EdgeId;
 use crate::Fade;
@@ -93,7 +93,8 @@ use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
 use placements::Placements;
-use tutti_types::{Amplitude, MAX_CHANNELS};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::Amplitude;
 pub use unwired::{Placed, Unwired};
 
 /// The host's side of a root generation: whether it has published the folds
@@ -179,7 +180,8 @@ impl Limits {
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
 /// use tutti_graph::{Edge, InPort, OutPort, Source};
-/// use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+/// use tutti_units::{Beat, Bpm, SampleRate, Samples};
+/// use tutti_types::ChannelLayout;
 /// use tutti_graph::NodeKey;
 ///
 /// #[derive(Clone)]

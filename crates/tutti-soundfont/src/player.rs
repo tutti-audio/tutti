@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use tutti_midi_protocol::{Universal, UniversalReader, narrow_value};
 use tutti_sf2::SoundFont;
-use tutti_types::{SampleRate, Seconds, Semitones};
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
+use tutti_units::{SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, Rules, Voicing};
 
 use crate::array_math::ArrayMath;

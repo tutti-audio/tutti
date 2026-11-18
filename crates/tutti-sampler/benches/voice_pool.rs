@@ -38,7 +38,7 @@ use tutti_sampler::{
     Playback, SlotId, StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoicePoolHandle,
     VoiceSource,
 };
-use tutti_types::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
+use tutti_units::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;

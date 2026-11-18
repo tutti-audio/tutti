@@ -25,7 +25,7 @@ use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::MAX_POS_RING_POSITION;
 use tutti_rt::RingFloat;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// Samples a parallel worker's scratch starts with; it grows to a chunk.
 const PARALLEL_SCRATCH_SAMPLES: usize = 16384;

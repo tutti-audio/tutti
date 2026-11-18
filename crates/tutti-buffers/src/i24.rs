@@ -8,7 +8,7 @@
 ///
 /// It has the range-checked shape (`new` never clamps, a const `of` panics for
 /// a literal, `get`, `TryFrom<i32>` agreeing with `new`, `From<I24> for i32`)
-/// written by hand, because [`ranged!`](tutti_types::ranged) stores the raw
+/// written by hand, because [`ranged!`](tutti_units::ranged) stores the raw
 /// value and this type stores three bytes. The two narrower signed integers
 /// convert without loss (`From<i8>`, `From<i16>`), and with the `serde`
 /// feature a value is its `i32`, refused outside the range on the way in.

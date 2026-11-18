@@ -12,7 +12,7 @@ mod figures;
 
 use common::pt;
 use tutti_tempo::{TempoMap, Transition};
-use tutti_types::{Beat, Seconds};
+use tutti_units::{Beat, Seconds};
 
 /// One ramp and its rows: (beat in, seconds out, seconds in, beat out).
 struct Case {

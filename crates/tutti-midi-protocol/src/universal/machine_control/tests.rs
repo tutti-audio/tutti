@@ -1,6 +1,6 @@
 use super::*;
 use crate::MtcRate;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 /// **The transport commands are their RP-013 codes**: STOP `01`, PLAY `02`.
 #[test]

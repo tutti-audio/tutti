@@ -5,7 +5,7 @@
 //! back for the engine's `MotionAudio` to publish.
 
 use super::motion::{FadeOut, MotionEvent, Then};
-use tutti_types::Beat;
+use tutti_units::Beat;
 
 /// What the transport is doing.
 ///

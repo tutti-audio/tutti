@@ -8,7 +8,8 @@
 
 use tutti_buffers::{Fold, FoldError, FoldLevels};
 use tutti_graph::fold_to_topology_with;
-use tutti_types::{Amplitude, ChannelLayout, ChannelTopology, MAX_CHANNELS};
+use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
+use tutti_units::Amplitude;
 
 /// The device channel each channel of what is heard goes to.
 ///

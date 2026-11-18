@@ -45,8 +45,8 @@ use tutti_au_host::AuError;
 use tutti_au_host::component::AuType;
 use tutti_au_host::types::K_AUDIO_UNIT_ERR_UNINITIALIZED;
 use tutti_fixtures::midi;
-use tutti_types::Samples;
 use tutti_ump::{CCNumber, MidiChannel};
+use tutti_units::Samples;
 
 /// AudioToolbox tolerates concurrent use of *distinct* units, but component
 /// discovery walks a process-global registry and several tests here open the
@@ -62,7 +62,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock_recover()
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 // ---------------------------------------------------------------- lifecycle
@@ -554,9 +554,9 @@ fn input_reaches_the_plugin() {
 fn reported_latency_is_the_plugins_own_in_samples() {
     let _g = lock();
     for rate in [
-        tutti_types::SampleRate::SR_44K1,
-        tutti_types::SampleRate::SR_48K,
-        tutti_types::SampleRate::SR_96K,
+        tutti_units::SampleRate::SR_44K1,
+        tutti_units::SampleRate::SR_48K,
+        tutti_units::SampleRate::SR_96K,
     ] {
         let au = DYNAMICS.open(rate, BLOCK);
         let latency = au.get_latency().expect("latency");
@@ -585,9 +585,9 @@ fn sample_rate_change_reconfigures_and_still_renders() {
     assert_eq!(au.sample_rate(), RATE);
 
     for rate in [
-        tutti_types::SampleRate::SR_44K1,
-        tutti_types::SampleRate::SR_96K,
-        tutti_types::SampleRate::SR_48K,
+        tutti_units::SampleRate::SR_44K1,
+        tutti_units::SampleRate::SR_96K,
+        tutti_units::SampleRate::SR_48K,
     ] {
         au.set_sample_rate(rate)
             .unwrap_or_else(|e| panic!("set_sample_rate({rate}) failed: {e:?}"));

@@ -1,10 +1,10 @@
 //! Pan laws: the left and right amplitudes that place a mono source at a [`Pan`].
 //!
-//! A [`Balance`](tutti_types::Balance) attenuates the side it moves away from
-//! ([`Balance::gains`](tutti_types::Balance::gains)); a pan places a source, and
+//! A [`Balance`](tutti_units::Balance) attenuates the side it moves away from
+//! ([`Balance::gains`](tutti_units::Balance::gains)); a pan places a source, and
 //! the law says how the two gains trade off along the way.
 
-use tutti_types::{Amplitude, Pan};
+use tutti_units::{Amplitude, Pan};
 
 /// How a [`Pan`] position splits one source over left and right.
 ///
@@ -30,7 +30,7 @@ pub enum PanLaw {
 ///
 /// ```
 /// use tutti_dsp::{PanLaw, pan_gains};
-/// use tutti_types::Pan;
+/// use tutti_units::Pan;
 ///
 /// let (left, right) = pan_gains(Pan::LEFT, PanLaw::Rp036);
 /// assert_eq!((left.get(), right.get()), (1.0, 0.0));

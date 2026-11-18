@@ -17,7 +17,8 @@ use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, MemorySource, MemorySourceConfig, Placement,
     Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
 };
-use tutti_types::{Beat, Bpm, ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;

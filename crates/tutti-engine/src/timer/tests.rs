@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 
 use tutti_rt::StopToken;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use super::pacer::{Due, MAX_LAG_BLOCKS, Pacer, Timebase};
 use super::run;

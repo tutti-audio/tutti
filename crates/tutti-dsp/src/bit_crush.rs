@@ -15,7 +15,8 @@
 //! sample is held changes what is heard of it at once.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{BitDepth, ChannelLayout, HoldFactor};
+use tutti_types::ChannelLayout;
+use tutti_units::{BitDepth, HoldFactor};
 
 /// The word length a quantizer keeps by default, and the one a depth that is not finite
 /// reads as: 8 bits.

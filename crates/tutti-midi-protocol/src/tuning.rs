@@ -16,13 +16,13 @@
 //! reserved to mean no change rather than a frequency: it is
 //! [`TuningFrequency::NO_CHANGE`], a value of the same type, and has no pitch.
 
-use tutti_types::{Cents, Semitones};
 use tutti_ump::{MidiChannel, NoteNumber, U7, U14};
+use tutti_units::{Cents, Semitones};
 
 /// Steps of a [`TuningFrequency`] in a semitone: the 14-bit fraction.
 const FRACTION_STEPS: u32 = 1 << 14;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// One frequency data word of MTS: 21 bits, the semitone (7 bits) over the
     /// fraction of a semitone (14 bits). See the frequency data format in the module docs.
     ///

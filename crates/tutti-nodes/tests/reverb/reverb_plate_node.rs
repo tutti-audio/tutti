@@ -10,7 +10,7 @@ use tutti_graph::{
     Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition,
 };
 use tutti_nodes::{PlateReverbConfig, PlateReverbNode};
-use tutti_types::{Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitParam};
+use tutti_units::{Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

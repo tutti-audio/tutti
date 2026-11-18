@@ -5,7 +5,7 @@
 //! clamped and one that is not finite takes the General MIDI value, so every control gives a
 //! stable loop.
 
-use tutti_types::{Feedback, Mix};
+use tutti_units::{Feedback, Mix};
 
 /// Freeverb's two controls, as positions on `0..1`.
 #[derive(Clone, Copy, Debug, PartialEq)]

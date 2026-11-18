@@ -17,4 +17,4 @@ hdf5-pure.workspace = true
 thiserror.workspace = true
 tutti-buffers = { path = "../../crates/tutti-buffers" }
 tutti-dsp = { path = "../../crates/tutti-dsp" }
-tutti-types = { path = "../../crates/tutti-types" }
+tutti-units = { path = "../../crates/tutti-units" }

@@ -18,7 +18,7 @@ use tutti_plugin_types::{
     Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
     Prepare,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// The maximum block size the plugin is told (`Prepare::max_block`). A graph
 /// block longer than this (the engine renders up to 8192, more with
@@ -53,7 +53,7 @@ pub fn load_client<F>(
     work: &MainWorkHandle,
     path: &Path,
     load: &Load,
-    sample_rate: impl Into<tutti_types::SampleRate>,
+    sample_rate: impl Into<tutti_units::SampleRate>,
 ) -> BridgeResult<(InProcClient<F>, PluginHandle)>
 where
     F: InProcess + 'static,
@@ -74,7 +74,7 @@ pub fn load_client_restoring<F>(
     work: &MainWorkHandle,
     path: &Path,
     load: &Load,
-    sample_rate: impl Into<tutti_types::SampleRate>,
+    sample_rate: impl Into<tutti_units::SampleRate>,
     restore: Option<&mut dyn FnMut(&mut F) -> std::result::Result<(), String>>,
 ) -> BridgeResult<(
     InProcClient<F>,
@@ -165,7 +165,7 @@ fn wire<H>(
     mut inner: Instance<H>,
     rt: tutti_rt::Rt<H::Processor>,
     origin: Option<Reload>,
-    sample_rate: tutti_types::SampleRate,
+    sample_rate: tutti_units::SampleRate,
     spares: usize,
 ) -> Result<Wired<H>, (LoadStage, String)>
 where

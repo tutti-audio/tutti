@@ -8,7 +8,8 @@ use tutti_graph::{
     RtValue, Shape, Source, Status, Unforkable,
 };
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, Frame, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Frame, SampleRate, Samples, Tail};
 
 static SITE: &str = "site";
 

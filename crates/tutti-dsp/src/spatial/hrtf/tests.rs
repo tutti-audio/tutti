@@ -1,6 +1,6 @@
 use super::*;
 use tutti_buffers::{MonoMut, StereoPlanes};
-use tutti_types::{Azimuth, Elevation};
+use tutti_units::{Azimuth, Elevation};
 
 /// A tetrahedron with delta responses: the smallest sphere that parses.
 fn tetrahedron(rate: u32) -> Vec<u8> {

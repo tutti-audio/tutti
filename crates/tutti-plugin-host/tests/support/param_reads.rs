@@ -3,7 +3,7 @@
 
 use tutti_plugin_host::{PluginHandle, PluginParamValues};
 use tutti_plugin_types::Normalized;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// What a test reads of a plugin through its handle.
 pub(crate) trait ParamReads {

@@ -30,7 +30,8 @@ use tutti_graph::{
     Cx, Editor, Io, Node, Prepare, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const MAX_BLOCK: usize = 64;
 const PROBES: u64 = 24;

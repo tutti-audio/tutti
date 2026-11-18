@@ -11,8 +11,9 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_session::{FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, MeterChange, MeterMap, SampleRate, TimeSignature};
+use tutti_types::{MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
+use tutti_units::{Beat, Bpm, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;
@@ -138,7 +139,7 @@ fn next_block_beat(found: &Found) -> Beat {
     let p = &found.playhead;
     assert!(p.playing());
     let seconds = found.before.seconds_at(p.beat()).get() + BLOCK as f64 / RATE;
-    found.before.beat_at_seconds(tutti_types::Seconds(seconds))
+    found.before.beat_at_seconds(tutti_units::Seconds(seconds))
 }
 
 fn approx(a: Beat, b: Beat) -> bool {

@@ -22,7 +22,8 @@ use crate::{ChannelFeed, LatencyGraph, PortFeed};
 use crate::{Edge, EdgeId, InPort, Sink, Source};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
-use tutti_types::{BusTopology, Mix, Samples};
+use tutti_types::BusTopology;
+use tutti_units::{Mix, Samples};
 
 use crate::node::Resolution;
 use crate::param::{ParamIn, ParamMod, ParamRange};

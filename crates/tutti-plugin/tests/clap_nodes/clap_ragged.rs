@@ -24,7 +24,7 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
 
 use tutti_graph::{ForkMode, TransportPosition};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 /// What the probe declares and delays by (`REPORTED_LATENCY_SAMPLES`).
@@ -43,7 +43,7 @@ fn fork_rig(max_block: usize) -> (Rig, tutti_plugin_host::PluginHandle) {
         .client
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
     (Rig::new(fork, SAMPLE_RATE, max_block), probe.handle)

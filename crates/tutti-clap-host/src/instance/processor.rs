@@ -9,7 +9,7 @@ use tutti_plugin_types::{
     PluginIo, PluginResult, Processor, SampleFormat,
 };
 use tutti_rt::Reader;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use tutti_clap_ffi::AudioSide;
 

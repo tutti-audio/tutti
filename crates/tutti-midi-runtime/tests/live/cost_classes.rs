@@ -14,8 +14,9 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_midi_runtime::{HarmonyNode, MidiClipNode, MidiIngestNode, SyncOut, TimedMidiEvent};
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const BPM: f64 = 120.0;

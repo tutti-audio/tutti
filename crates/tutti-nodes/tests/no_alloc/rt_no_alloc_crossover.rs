@@ -10,8 +10,9 @@
 use tutti_graph::contract::BlockRig;
 use tutti_graph::{IntoNode, ParamNode};
 use tutti_nodes::{BAND_PARAMS, CrossoverNode, MultibandCompressorNode};
-use tutti_types::{ChannelLayout, Hz, SampleRate};
-use tutti_types::{UnitAddr, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, SampleRate};
+use tutti_units::{UnitAddr, UnitParam};
 
 /// `node` through `BlockRig`: a 32-frame square (broadband, so every band is
 /// driven), 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`,

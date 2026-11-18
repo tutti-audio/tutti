@@ -22,7 +22,7 @@ use crate::{
     MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, PluginError, PluginResult, Request,
     Wakeups, WindowHandle,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// What to load from a plugin file: which plugin, when the file exports
 /// several.

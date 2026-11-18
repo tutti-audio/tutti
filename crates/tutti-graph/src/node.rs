@@ -19,10 +19,8 @@
 
 use std::num::NonZeroU32;
 
-use tutti_types::{
-    Beat, Bpm, BusTopology, ChannelLayout, Frame, FrameClock, Latency, LoopRange, MaxBlock,
-    SampleRate, Samples, SegmentOrigin, Tail, UnitAddr, UnitParam,
-};
+use tutti_types::{BusTopology, ChannelLayout, FrameClock, LoopRange, MaxBlock, SegmentOrigin};
+use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, PortSpan};
 use crate::cost::Cost;
@@ -35,7 +33,7 @@ use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_buffers::Float;
-use tutti_types::PlayReading;
+use tutti_units::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
 ///
@@ -612,7 +610,8 @@ impl Shape {
     ///
     /// ```compile_fail
     /// use tutti_graph::Shape;
-    /// use tutti_types::{ChannelLayout, Samples};
+    /// use tutti_units::Samples;
+    /// use tutti_types::ChannelLayout;
     /// let echo_time = Samples(24_000);
     /// let _ = Shape::through_unassigned(ChannelLayout::MONO).with_latency(echo_time);
     /// ```
@@ -620,7 +619,7 @@ impl Shape {
     /// — and there is no conversion that would make it one silently:
     ///
     /// ```compile_fail
-    /// use tutti_types::{Latency, Samples};
+    /// use tutti_units::{Latency, Samples};
     /// let _: Latency = Samples(24_000).into();
     /// ```
     ///
@@ -628,7 +627,8 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// use tutti_types::{ChannelLayout, Latency, Samples};
+    /// use tutti_units::{Latency, Samples};
+    /// use tutti_types::ChannelLayout;
     /// let lookahead = Latency::new(Samples(512));
     /// let s = Shape::through_unassigned(ChannelLayout::MONO).with_latency(lookahead);
     /// assert_eq!(s.latency.samples(), Samples(512));
@@ -697,7 +697,7 @@ impl Shape {
     /// plugin's own bypass when the mode changes (`tutti-plugin-host`'s
     /// `PluginHandle::set_bypassed`). A node with no pass can be set
     /// `Bypassed`.
-    /// [`Muted`](crate::NodeMode::Muted) and a [`Mix`](tutti_types::Mix) stay
+    /// [`Muted`](crate::NodeMode::Muted) and a [`Mix`](tutti_units::Mix) stay
     /// the executor's.
     ///
     /// ```
@@ -1613,7 +1613,8 @@ pub trait Node<F: Float = f32>: Send + 'static {
 ///
 /// ```compile_fail,E0277
 /// # use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status};
-/// # use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// # use tutti_units::{SampleRate, Samples};
+/// # use tutti_types::ChannelLayout;
 /// # use tutti_graph::NodeKey;
 /// struct Silence;
 /// impl Node for Silence {

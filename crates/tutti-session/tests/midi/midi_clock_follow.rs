@@ -16,8 +16,8 @@ use tutti_session::{
     FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError,
 };
 use tutti_transport::MotionEvent;
-use tutti_types::{At, Bpm, SampleRate};
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
+use tutti_units::{At, Bpm, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: f64 = 512.0;

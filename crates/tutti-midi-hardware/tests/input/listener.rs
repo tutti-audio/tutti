@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};
 use tutti_midi_runtime::{InputInlets, MidiIngestNode};
-use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{Frame, SampleRate};
 
 /// How long [`Listener::hear`] plays on after the events it waited for.
 const SETTLE: Duration = Duration::from_millis(100);

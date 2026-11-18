@@ -15,12 +15,13 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
+use tutti_types::Bed;
 use tutti_types::ChannelLayout;
-use tutti_types::Seconds;
-use tutti_types::{Azimuth, Bed};
+use tutti_units::Azimuth;
+use tutti_units::Seconds;
 
 /// The rate [`export`] renders at, and so the rate every graph is built for.
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 
 /// Render `g` to `path` as float WAV at `layout`, for `secs`.
 ///

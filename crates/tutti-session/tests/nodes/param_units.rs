@@ -9,7 +9,7 @@
 use std::any::TypeId;
 
 use tutti_session::HasParam;
-use tutti_types::{
+use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, CompressionRatio, Db, Depth, Drive, Elevation, Feedback,
     HoldFactor, Hz, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth, UnitParam,
 };
@@ -100,7 +100,7 @@ units! {
         tutti_nodes::HrtfBinauralNode { Azimuth => Azimuth, Elevation => Elevation, Wet => Mix }
     }
     the_synths_params_are_in_their_declared_unit #[cfg(feature = "synth")] {
-        tutti_polysynth::PolySynth { Volume => Amplitude, Detune => tutti_types::CentsSpan, StereoSpread => Spread }
+        tutti_polysynth::PolySynth { Volume => Amplitude, Detune => tutti_units::CentsSpan, StereoSpread => Spread }
     }
     the_samplers_params_are_in_their_declared_unit #[cfg(feature = "sampler")] {
         tutti_sampler::VoiceNode { Volume => Amplitude }

@@ -1,6 +1,6 @@
 //! [`MaxBlock`] — the longest block a node or plugin is prepared for.
 
-use super::samples::Samples;
+use tutti_units::Samples;
 
 /// The longest block a node or plugin will ever be handed: from one frame up to
 /// [`u32::MAX`].
@@ -19,7 +19,8 @@ use super::samples::Samples;
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{MaxBlock, Samples};
+/// use tutti_units::Samples;
+/// use tutti_types::MaxBlock;
 ///
 /// assert_eq!(MaxBlock::new(Samples(512)).map(MaxBlock::get), Some(512));
 /// assert_eq!(MaxBlock::new(Samples(0)), None);

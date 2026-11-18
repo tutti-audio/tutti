@@ -1548,7 +1548,7 @@ fn test_clap_param_set_reaches_the_next_block() {
     // plain range, at the head of the block.
     let (min, max) = instance
         .clap_loaded()
-        .parameter_range(main_thread(), tutti_types::ParamId::new(clap_id))
+        .parameter_range(main_thread(), tutti_units::ParamId::new(clap_id))
         .expect("the parameter declares a range");
     let capture = read_process_capture();
     let event = capture.events[..capture.event_count as usize]
@@ -1765,7 +1765,7 @@ fn test_clap_process_with_transport() {
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(tutti_plugin_types::TimeSignature::default());
 
     let num_samples = 512;
@@ -2206,7 +2206,7 @@ fn a_clap_tail_change_reaches_the_event_list() {
 fn a_transport_request_is_sent_to_the_host_in_the_order_made() {
     use tutti_clap_test_plugin::{HOSTEXT_CMD_JUMP, HOSTEXT_CMD_START, HOSTEXT_CMD_STOP};
     use tutti_plugin_types::TransportRequest;
-    use tutti_types::Beat;
+    use tutti_units::Beat;
 
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());

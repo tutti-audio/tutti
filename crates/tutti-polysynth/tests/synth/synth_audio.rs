@@ -27,8 +27,8 @@ use tutti_fixtures::signal::rms;
 use tutti_polysynth::{
     Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
 };
-use tutti_types::{Amplitude, Seconds};
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
+use tutti_units::{Amplitude, Seconds};
 
 const SR: f64 = 48_000.0;
 
@@ -402,7 +402,7 @@ fn master_volume_scales_the_output() {
     let loud = render(&mut full, 100);
 
     let mut half = Hand::new(PolySynth::new(config(OscillatorType::Sine)));
-    half.set_volume(tutti_types::Amplitude(0.5));
+    half.set_volume(tutti_units::Amplitude(0.5));
     half.queue_midi(&[note_on(69, 100)]);
     let quiet = render(&mut half, 100);
 
@@ -415,7 +415,7 @@ fn master_volume_scales_the_output() {
 
     // Zero must be silence, not merely quiet.
     let mut muted = Hand::new(PolySynth::new(config(OscillatorType::Sine)));
-    muted.set_volume(tutti_types::Amplitude(0.0));
+    muted.set_volume(tutti_units::Amplitude(0.0));
     muted.queue_midi(&[note_on(69, 100)]);
     let silent = render(&mut muted, 100);
     assert!(
@@ -432,13 +432,13 @@ fn master_volume_scales_the_output() {
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let mut synth = Hand::new(PolySynth::new(config(OscillatorType::Sine)));
-        synth.set_volume(tutti_types::Amplitude(0.5));
+        synth.set_volume(tutti_units::Amplitude(0.5));
         synth.queue_midi(&[note_on(69, 100)]);
         let before = render(&mut synth, 40);
         // A host writes the cell through the synth's `ParamSet`, which stores
         // what it is given.
         assert!(
-            tutti_graph::ParamNode::param_set(&*synth).set(tutti_types::UnitParam::Volume, bad)
+            tutti_graph::ParamNode::param_set(&*synth).set(tutti_units::UnitParam::Volume, bad)
         );
         let held = render(&mut synth, 40);
         assert!(
@@ -450,7 +450,7 @@ fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
             (ratio - 1.0).abs() < 0.05,
             "volume = {bad} moved the level by {ratio}"
         );
-        synth.set_volume(tutti_types::Amplitude(0.25));
+        synth.set_volume(tutti_units::Amplitude(0.25));
         let after = render(&mut synth, 40);
         assert!(
             rms(&after[2048..]) < 0.7 * rms(&held[2048..]),

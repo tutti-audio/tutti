@@ -4,7 +4,7 @@
 use tutti_ump::{U4, U7, first_non_seven_bit};
 
 use super::MmcBytes;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use crate::smpte::{MtcRate, SmpteTimecode};
 use crate::universal::MtcTimeCode;
@@ -67,7 +67,7 @@ wire_enum! {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A fraction of a frame in hundredths, `0` to `99` (RP-013 p.8).
     #[derive(Eq, Hash)]
     MmcSubframes(u8), NotMmcSubframes, "a subframe count (0 to 99)", |raw| raw < 100
@@ -690,7 +690,7 @@ impl MmcName {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A procedure or event name: `00` to `7E` (`7F` is reserved,
     /// RP-013 pp.34 to 38).
     #[derive(Eq, Hash)]

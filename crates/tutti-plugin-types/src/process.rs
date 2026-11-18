@@ -13,7 +13,7 @@ use crate::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionTextChanges, ParameterChanges,
     ScaleChanges, TransportChange, TransportInfo, WireMidi,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// Sequencer-context inputs for one block: chords, scales, per-note text and
 /// integer per-note expression.

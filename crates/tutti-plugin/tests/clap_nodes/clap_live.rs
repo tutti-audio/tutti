@@ -39,7 +39,7 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_plugin_ipc::RING_SLOTS;
 use tutti_transport::Transport;
 use tutti_types::ChannelLayout;
-use tutti_types::{SampleRate, Samples, Tail};
+use tutti_units::{SampleRate, Samples, Tail};
 
 /// What the probe declares and delays by (`REPORTED_LATENCY_SAMPLES`).
 const PROBE_LATENCY: usize = 137;
@@ -182,7 +182,7 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
             key,
             "plugin",
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
         )

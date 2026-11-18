@@ -18,7 +18,8 @@
 //! # use tutti_buffers::Planes;
 //! use tutti_types::MaxBlock;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
-//! use tutti_types::{ChannelLayout, SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::ChannelLayout;
 //!
 //! /// A one-pole lowpass.
 //! #[derive(Clone)]
@@ -113,7 +114,8 @@
 //! ```
 //! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
-//! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::{ChannelLayout, MaxBlock};
 //!
 //! #[derive(Clone)]
 //! struct Gain(f32);
@@ -163,7 +165,8 @@
 //!
 //! ```
 //! use tutti_graph::{Bus, BusRole, Buses, Cost, Cx, InBus, Io, Node, Prepare, Shape, Status};
-//! use tutti_types::{BusTopology, ChannelLayout, Latency, Samples, Tail};
+//! use tutti_units::{Latency, Samples, Tail};
+//! use tutti_types::{BusTopology, ChannelLayout};
 //!
 //! struct Ducker {
 //!     key: InBus,
@@ -232,7 +235,8 @@
 //!     Cx, GraphBuilder, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 //!     declare_params,
 //! };
-//! use tutti_types::{Amplitude, ChannelLayout, MaxBlock, Param, SampleRate, Samples, UnitParam};
+//! use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
+//! use tutti_types::{ChannelLayout, MaxBlock, Param};
 //!
 //! #[derive(Clone)]
 //! struct Volume {
@@ -298,7 +302,8 @@
 //! use tutti_graph::{
 //!     Cx, Event, EventKind, ForkByClone, GraphBuilder, Io, Node, Offset, Prepare, Shape, Status,
 //! };
-//! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::{ChannelLayout, MaxBlock};
 //! use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 //!
 //! // A declared capacity is never zero: the type says so.
@@ -377,7 +382,8 @@
 //! ```
 //! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
-//! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
+//! use tutti_units::{SampleRate, Samples, Tail};
+//! use tutti_types::{ChannelLayout, MaxBlock};
 //!
 //! /// A feedback echo whose ring-out is `taps` repeats of `period` frames.
 //! #[derive(Clone)]
@@ -433,7 +439,7 @@
 //! Several mistakes are ruled out by types:
 //!
 //! - **Latency is declared, never a delay time.** [`Shape::latency`] is a
-//!   [`Latency`](tutti_types::Latency), which a musical delay in `Samples` or
+//!   [`Latency`](tutti_units::Latency), which a musical delay in `Samples` or
 //!   `Seconds` cannot be passed as, so the graph's delay compensation (PDC)
 //!   never drags parallel paths behind an echo.
 //! - **Blocks never exceed the [`MaxBlock`](tutti_types::MaxBlock) a node was
@@ -441,7 +447,7 @@
 //!   so a node that sizes its scratch from it never clamps.
 //! - **Block offsets are not frames.** An event carries an [`Offset`] inside
 //!   its block, a different type from an absolute
-//!   [`Frame`](tutti_types::Frame); the two convert only through the block's
+//!   [`Frame`](tutti_units::Frame); the two convert only through the block's
 //!   [`Env`] ([`Env::offset_of`], [`Env::frame_at`]).
 //! - **Events arrive sorted and in range** ([`SortedEvents`]), and
 //!   [`Io::sub_blocks`] splits the block at their offsets, so a node written
@@ -493,7 +499,7 @@
 //!   write ([`Executor::dropped_event_count`]). The bound holds however the
 //!   edges change at a commit.
 //! - [`Editor::schedule`] delivers an event on an exact frame or beat
-//!   ([`At`](tutti_types::At)). A late command lands at the start of the next
+//!   ([`At`](tutti_units::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.
 //! - Each node declares how finely it honours event offsets
 //!   ([`Shape::event_resolution`], a [`Resolution`]); an event edge marked
@@ -530,8 +536,8 @@
 //! reads its [`ParamNode`] cells is `f32`). `f64` also belongs inside `f32`
 //! nodes (filter state, oscillator phase — a node converts at its edge), in
 //! time ([`Env::frame`] is a `u64`
-//! [`Frame`](tutti_types::Frame) and the transport position a `f64`
-//! [`Beat`](tutti_types::Beat)), and at the plugin boundary (a plugin that
+//! [`Frame`](tutti_units::Frame) and the transport position a `f64`
+//! [`Beat`](tutti_units::Beat)), and at the plugin boundary (a plugin that
 //! processes in double converts inside its node). [`Io`] exposes buffers
 //! through methods rather than fields.
 //!
@@ -665,6 +671,7 @@ pub use latency::{
     OutputDelay, PortFeed, delays, plan as latency_plan,
 };
 pub use loss::EventLoss;
+pub use meter::{Level, MeterReader, MeterWriter};
 pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
     Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS, MAX_TRANSPORT_CHANGES, Node,
@@ -685,6 +692,8 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+#[cfg(feature = "testing")]
+pub use reference::Reference;
 pub use render_mode::RenderMode;
 pub use root::{
     RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
@@ -692,18 +701,15 @@ pub use root::{
 pub use rtlog::{
     LogFilter, MAX_FIELDS, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue, TEXT_CAPACITY,
 };
-pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
-pub use wake::Wake;
-// The reading is a value type, `tutti-types`' (the modulation compiler
-// carries one without naming the graph); the clock that keeps it is here.
-pub use meter::{Level, MeterReader, MeterWriter};
-#[cfg(feature = "testing")]
-pub use reference::Reference;
 pub use spec::{EventEdge, EventIn, EventOut, GraphInvalid, GraphSpec, ValidGraph};
+pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use tap::{TapReader, TapWriter};
 pub use time::{Continuity, Due, Offset, Playhead};
 pub use tutti_rt::BlockWaits;
-pub use tutti_types::PlayReading;
+// The reading is a value type, `tutti-units`' (the modulation compiler
+// carries one without naming the graph); the clock that keeps it is here.
+pub use tutti_units::PlayReading;
+pub use wake::Wake;
 
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
@@ -711,7 +717,7 @@ pub mod __private {
     pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
     pub use tutti_buffers::Float;
     pub use tutti_rt::{Setting, SettingWord};
-    pub use tutti_types::{UnitAddr, UnitParam};
+    pub use tutti_units::{UnitAddr, UnitParam};
 }
 
 #[cfg(test)]

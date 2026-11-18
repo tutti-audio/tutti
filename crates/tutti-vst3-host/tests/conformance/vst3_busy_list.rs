@@ -9,7 +9,7 @@
 
 use crate::active;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use active::{Active, ActiveExt};
 use tutti_vst3_host::{InputEvents, TransportInfo};

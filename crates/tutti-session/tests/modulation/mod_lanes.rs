@@ -33,9 +33,9 @@ use tutti_session::{
     ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root,
     RouteSpec, Session, SessionEvent, TargetName, declare_targets,
 };
-use tutti_types::{
-    Amplitude, Beat, Bpm, ChannelLayout, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds,
-    UnitParam,
+use tutti_types::ChannelLayout;
+use tutti_units::{
+    Amplitude, Beat, Bpm, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
 };
 
 use common::probe::{ProbeUnit, Pulse};
@@ -155,7 +155,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -213,8 +213,8 @@ fn an_export_is_the_live_render_on_a_native_param() {
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Frames(
-            tutti_types::Frame::new(0),
-            tutti_types::Frame::new(total as u64),
+            tutti_units::Frame::new(0),
+            tutti_units::Frame::new(total as u64),
         ))
         .sample_rate(SampleRate::of(RATE))
         .clock(ExportClock::timeline(timeline))

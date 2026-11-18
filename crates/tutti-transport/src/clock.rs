@@ -12,7 +12,7 @@ use super::walk::{TempoAhead, TempoWalk};
 use std::sync::atomic::Ordering;
 use tutti_tempo::TempoMap;
 use tutti_types::FrameClock;
-use tutti_types::{Beat, Bpm, Samples};
+use tutti_units::{Beat, Bpm, Samples};
 
 /// How far the tempo must move before the clock takes it (and starts a new
 /// segment). Comparing for equality would restart on every buffer from ULP
@@ -134,7 +134,7 @@ impl TransportClock {
     /// one that does not takes each block's tempo from [`Control`]).
     pub fn new(
         links: ClockLinks,
-        sample_rate: impl Into<tutti_types::SampleRate>,
+        sample_rate: impl Into<tutti_units::SampleRate>,
         tempo: Bpm,
     ) -> Self {
         let sample_rate = sample_rate.into();
@@ -269,7 +269,7 @@ impl TransportClock {
     }
 
     /// The rate this clock counts frames at.
-    pub fn sample_rate(&self) -> tutti_types::SampleRate {
+    pub fn sample_rate(&self) -> tutti_units::SampleRate {
         self.clock.sample_rate()
     }
 
@@ -437,7 +437,7 @@ impl TransportClock {
     /// current beat on the map's timeline at the new rate, and the tempo in force there is taken.
     pub fn set_sample_rate(
         &mut self,
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
         map: Option<&TempoMap>,
     ) {
         self.clock.set_sample_rate(sample_rate);
@@ -482,7 +482,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use tutti_types::LoopRange;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     fn create_test_atomics() -> (Bpm, Arc<AtomicBool>) {
         (
@@ -769,7 +769,7 @@ mod tests {
         let mut clock = TransportClock::new(links, SampleRate::SR_44K1, tempo);
         // Inside the hysteresis: asked, but not taken.
         clock.asked = Bpm::of(120.0005);
-        clock.set_sample_rate(tutti_types::SampleRate::SR_48K, None);
+        clock.set_sample_rate(tutti_units::SampleRate::SR_48K, None);
         tick(&mut clock);
         assert_eq!(in_force.load(Ordering::Acquire), Bpm::of(120.0));
         assert_eq!(

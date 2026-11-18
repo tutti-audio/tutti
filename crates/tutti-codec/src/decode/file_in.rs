@@ -37,7 +37,8 @@ use symphonia::core::units::Timestamp;
 use tutti_buffers::{
     FiniteSource, Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement};
+use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
 use super::placement::topology_of;
@@ -74,7 +75,7 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// ```no_run
 /// use tutti_codec::FileIn;
 /// use tutti_buffers::{InterleavedMut, Pull, Source};
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let mut file = FileIn::<f32>::open("take.flac")?;
 /// let width = usize::from(file.layout().count());

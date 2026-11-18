@@ -13,11 +13,12 @@
 //! `LfoShape` and `Waveform` are re-exported so `use tutti_nodes::LfoShape`
 //! resolves here.
 
-use tutti_types::UnitParam;
+use tutti_units::UnitParam;
 
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::{BeatsPerCycle, ChannelLayout, Depth, Hz, Param, PhaseIncrement, SampleRate};
-use tutti_types::{Latency, Tail};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, SampleRate};
+use tutti_units::{Latency, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
 // tutti_nodes::LfoShape` resolves.
@@ -344,8 +345,8 @@ mod tests {
     use tutti_graph::contract::{Direct, assert_param_fork};
     use tutti_graph::{Solo, TransportPosition};
     use tutti_types::MaxBlock;
-    use tutti_types::UnitParam;
-    use tutti_types::{Beat, Bpm, Samples};
+    use tutti_units::UnitParam;
+    use tutti_units::{Beat, Bpm, Samples};
 
     /// A free-running LFO declares its depth and rate, each port's base its
     /// cell; a beat-synced one declares only its depth, its span being its

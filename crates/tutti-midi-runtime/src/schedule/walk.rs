@@ -12,7 +12,8 @@
 //! next block of the same run.
 
 use tutti_graph::{Due, Env, Offset};
-use tutti_types::{At, FRAME_TOLERANCE, Samples, first_frame_at_or_after, frames_per_beat};
+use tutti_types::{FRAME_TOLERANCE, first_frame_at_or_after, frames_per_beat};
+use tutti_units::{At, Samples};
 
 /// An event scheduled at a beat.
 pub(crate) trait Beated {
@@ -196,7 +197,7 @@ fn emit<T: Beated>(
         if e.beat() >= hi || e.beat().is_nan() {
             break;
         }
-        let Due::In(k) = seg.due(At::Beat(tutti_types::Beat(e.beat()))) else {
+        let Due::In(k) = seg.due(At::Beat(tutti_units::Beat(e.beat()))) else {
             continue;
         };
         if !keep(k.index()) {

@@ -6,7 +6,7 @@
 //! sum, 1 the pair as it is, 2 doubles the side.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{SampleRate, StereoWidth};
+use tutti_units::{SampleRate, StereoWidth};
 
 use crate::{GAIN_GLIDE, Glide, Steps};
 

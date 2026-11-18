@@ -20,6 +20,7 @@ tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 
 # The value vocabulary: `Depth`, `Beat`, `PhaseIncrement`, `ParamAddr` (a
 # target's param), `PlayReading`.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # The MIDI a note envelope hears (`Ump`, its held `Key`). Layer 0.

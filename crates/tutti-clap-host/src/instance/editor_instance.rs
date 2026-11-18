@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamMapping,
     PluginError, PluginResult, Request, RescanScope, WindowHandle,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::ClapLoaded;
 

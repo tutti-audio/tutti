@@ -31,8 +31,9 @@ use tutti_nodes::{
     DistortionNode, LimiterControls, LimiterNode, ShapeKind, SvfFilterNode, SvfType,
 };
 use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
+use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 

@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock, SampleRate, StereoWidth, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{SampleRate, StereoWidth, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -140,7 +141,7 @@ mod tests {
     use crate::test_support::{assert_cell_glides, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     fn node(width: f32) -> StereoWidthNode {
         prepared(StereoWidthNode::from(

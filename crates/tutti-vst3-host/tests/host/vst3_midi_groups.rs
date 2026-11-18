@@ -9,12 +9,12 @@
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, UmpAt};
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
-use tutti_types::Samples;
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
     PerNoteManagement, Rpn, Ump, Voice2,
 };
 use tutti_ump::{Bank, ControlValue, RegisteredPerNoteController, System, U7};
+use tutti_units::Samples;
 use tutti_vst3_ffi::{EventKind, EventList};
 use tutti_vst3_host::{InputEvents, Stager};
 use vst3::Steinberg::Vst::{Event, IEventListTrait};

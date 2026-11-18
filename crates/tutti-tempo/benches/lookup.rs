@@ -7,7 +7,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tutti_tempo::{CellGrid, TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, Frame, SampleRate, Seconds};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

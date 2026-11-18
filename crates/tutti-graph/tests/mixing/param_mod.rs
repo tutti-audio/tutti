@@ -53,9 +53,8 @@ use tutti_graph::{
     Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{
-    ChannelLayout, Hz, Latency, ParamKey, Q, SamplePosition, SampleRate, Samples, UnitParam,
-};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, Latency, ParamKey, Q, SamplePosition, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

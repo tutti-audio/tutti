@@ -11,8 +11,8 @@ use super::{BLOCK, Hand};
 use tutti_fixtures::midi;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::SampleRate;
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1, Voice2};
+use tutti_units::SampleRate;
 
 pub const RATE: SampleRate = SampleRate::SR_44K1;
 

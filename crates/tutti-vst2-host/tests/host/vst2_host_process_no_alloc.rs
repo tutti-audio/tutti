@@ -142,7 +142,7 @@ fn read_capture(path: &PathBuf) -> ProcessCapture {
 fn playing_transport() -> TransportInfo {
     TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
 }
 

@@ -34,7 +34,8 @@ pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 
-use tutti_types::{BusTopology, ChannelLayout, Db, Hz, SampleRate};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{Db, Hz, SampleRate};
 
 /// The lowest center a bell or tilt takes: 20 Hz.
 const MIN_EQ_CENTER: Hz = Hz(20.0);
@@ -68,7 +69,7 @@ fn filter_bus(width: ChannelLayout) -> BusTopology {
 pub(super) mod test_utils {
     use tutti_fixtures::signal;
     use tutti_graph::Node;
-    use tutti_types::{Amplitude, Hz, SampleRate, Samples};
+    use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
     pub use signal::rms;
 

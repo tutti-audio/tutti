@@ -149,7 +149,7 @@ pub(crate) fn schedule_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     fn queue(id: u32, points: &[(i32, f64)]) -> ParameterQueue {
         let mut queue = ParameterQueue::with_capacity(ParamId::new(id), points.len());

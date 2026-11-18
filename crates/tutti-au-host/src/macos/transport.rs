@@ -8,7 +8,7 @@
 use tutti_au_ffi::Unit;
 use tutti_au_ffi::property::{PresentationLatency, TailTime};
 use tutti_au_ffi::{Element, Scope};
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 /// Seconds of audio an AU keeps producing after its input goes silent.
 ///
@@ -70,7 +70,7 @@ pub(crate) fn tail_time(unit: &Unit) -> crate::error::Result<Seconds> {
 /// several active buses calls it once per bus. `Input` means "how long ago this
 /// audio was captured", `Output` means "how long until it is heard".
 ///
-/// # Why [`Seconds`] and not [`Samples`](tutti_types::Samples)
+/// # Why [`Seconds`] and not [`Samples`](tutti_units::Samples)
 ///
 /// Apple's width is `Float64` seconds and this value is never a buffer length —
 /// the host does not allocate against it and the AU does not index with it, it

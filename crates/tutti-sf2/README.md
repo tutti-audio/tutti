@@ -2,7 +2,7 @@
 
 This crate reads SoundFont 2 (.sf2) files and gives you their contents as data: presets, instruments, sample headers and the sample audio.
 
-It does not play anything; `tutti-soundfont` does that. It needs only `tutti-types` and `tutti-ump`, so you can use it on its own to inspect or convert SoundFont files.
+It does not play anything; `tutti-soundfont` does that. It needs only `tutti-units` and `tutti-ump`, so you can use it on its own to inspect or convert SoundFont files.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

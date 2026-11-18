@@ -30,7 +30,7 @@
 
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Bpm, Confidence, SampleRate, Samples, Seconds};
+use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::beat;
 use crate::convert::to_f32;
@@ -42,7 +42,7 @@ use crate::{Error, Result};
 use tutti_dsp::StftGeometry;
 use tutti_dsp::parabolic_peak;
 use tutti_dsp::{FftScratch, FrameCount};
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The default analysis window, in samples.
 const WINDOW: usize = 1024;

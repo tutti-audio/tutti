@@ -24,10 +24,10 @@ fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
 
 fn tone(len: usize, freq: f32, sample_rate: f32) -> Vec<f32> {
     tutti_fixtures::signal::sine(
-        tutti_types::Hz(freq),
-        tutti_types::Amplitude(0.5),
-        tutti_types::SampleRate::of(f64::from(sample_rate)),
-        tutti_types::Samples(len),
+        tutti_units::Hz(freq),
+        tutti_units::Amplitude(0.5),
+        tutti_units::SampleRate::of(f64::from(sample_rate)),
+        tutti_units::Samples(len),
     )
 }
 

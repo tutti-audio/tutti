@@ -34,7 +34,7 @@ use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
 use tutti_transport::FrozenClock;
 use tutti_types::ChannelLayout;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 const SR: f64 = 44_100.0;
 const DUR: f64 = 0.1;
@@ -43,7 +43,7 @@ const DUR: f64 = 0.1;
 /// renders at (a graph prepared at another is refused, not re-rated).
 fn built(g: GraphBuilder) -> RenderGraph {
     let (editor, executor) = g
-        .build(RenderGraph::prepare(tutti_types::SampleRate::of(SR)))
+        .build(RenderGraph::prepare(tutti_units::SampleRate::of(SR)))
         .expect("builds");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
@@ -71,7 +71,7 @@ fn flac(pcm: Pcm) -> Format {
 fn config(format: Format) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
-            sample_rate: tutti_types::SampleRate::of(SR),
+            sample_rate: tutti_units::SampleRate::of(SR),
             duration_seconds: Seconds(DUR),
             ..Default::default()
         },
@@ -332,7 +332,7 @@ fn a_resampled_export_preserves_the_signal_not_just_the_frame_count() {
     for target in [48_000.0f64, 22_050.0] {
         let path = d.path().join(format!("rs_{target}.wav"));
         let mut cfg = config(Format::Wav(Pcm::Int24));
-        cfg.resample = Some(tutti_export::Resample::to(tutti_types::SampleRate::of(
+        cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
             target,
         )));
         cfg.render.duration_seconds = Seconds(0.25);
@@ -377,7 +377,7 @@ fn written_frames_is_what_the_file_holds() {
         let mut cfg = config(Format::Wav(Pcm::Int16));
         cfg.render.duration_seconds = Seconds(0.25);
         if let Some(rate) = target {
-            cfg.resample = Some(tutti_export::Resample::to(tutti_types::SampleRate::of(
+            cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
                 rate,
             )));
         }

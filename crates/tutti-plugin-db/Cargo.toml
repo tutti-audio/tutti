@@ -32,7 +32,7 @@ tracing.workspace = true
 crossbeam-channel = "0.5"
 
 [dev-dependencies]
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tempfile = "3"
 # The format the serde round trip runs through.
 serde_json = "1"

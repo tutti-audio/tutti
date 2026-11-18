@@ -36,7 +36,7 @@ mod sync {
 /// Bits in a [`RequestWord`].
 pub(crate) const REQUEST_BITS: u8 = 32;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// One kind of request: a position in a [`RequestWord`], `0..32`.
     #[derive(Eq, Hash)]
     RequestBit(u8), RequestBitOutOfRange, "a request bit below 32", |raw| raw < REQUEST_BITS

@@ -74,7 +74,7 @@
 //! [`signed_f32_to_bend`], a native value as the `[0, 1]` or `[-1, 1]`
 //! float a DSP node wants. Lossy by design; not the MIDI 1.0 to 2.0 path. A
 //! velocity as a level goes through [`unit_f32_to_velocity`] rather than a
-//! `tutti_types` unit: a normalised value is a velocity, a pressure or a
+//! `tutti_units` unit: a normalised value is a velocity, a pressure or a
 //! controller position depending on who reads it.
 //!
 //! What the widening does and does not do:
@@ -130,7 +130,7 @@
 //! `tutti-ump`, and with them the M2-115 scaling and the Note On at velocity 0
 //! rule, which `tutti-ump` leaves to translation.
 //!
-//! The crate depends on `tutti-ump` and `tutti-types` (for `Semitones`, which
+//! The crate depends on `tutti-ump`, `tutti-units` (for `Semitones`, which
 //! [`PitchBendSensitivity::semitones`] returns) and allocates nothing. Its `serde`
 //! feature (off by default) derives serde on [`PitchBendSensitivity`], which
 //! carries the 32 RPN bits.

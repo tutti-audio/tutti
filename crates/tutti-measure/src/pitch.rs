@@ -42,7 +42,7 @@ impl PitchResult {
     }
 }
 
-use tutti_types::{Confidence, Hz};
+use tutti_units::{Confidence, Hz};
 
 use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::Correlator;

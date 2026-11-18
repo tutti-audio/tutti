@@ -3,7 +3,7 @@ use crate::chroma::FrequencyBand;
 use crate::framing::Framing;
 use crate::yin::Pitch;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
-use tutti_types::{Confidence, Hz};
+use tutti_units::{Confidence, Hz};
 
 const RATE: f64 = 44100.0;
 const TAU: f64 = std::f64::consts::TAU;

@@ -32,7 +32,7 @@ au = ["dep:tutti-au-host"]
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }
@@ -53,5 +53,5 @@ tutti-vst2-test-plugin = { path = "../../testing/tutti-vst2-test-plugin" }
 tutti-vst2-shell-plugin = { path = "../../testing/tutti-vst2-shell-plugin" }
 libloading.workspace = true
 tutti-vst2-host = { path = "../tutti-vst2-host" }
-tutti-types = { path = "../tutti-types" }
+tutti-units = { path = "../tutti-units" }
 tempfile = "3"

@@ -11,7 +11,8 @@ use tutti_dsp::SvfType;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{EnvelopeFilterConfig, EnvelopeFilterNode};
-use tutti_types::{ChannelLayout, Hz, Q, SampleRate, Seconds, Semitones, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;

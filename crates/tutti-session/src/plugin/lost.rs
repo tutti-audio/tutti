@@ -16,7 +16,7 @@ impl Lost {
     pub(crate) const fn of(shape: Shape) -> Self {
         Self {
             shape: shape
-                .with_tail(tutti_types::Tail::None)
+                .with_tail(tutti_units::Tail::None)
                 .with_cost(tutti_graph::Cost::Light),
         }
     }
@@ -42,7 +42,8 @@ mod tests {
     use super::*;
     use tutti_buffers::Planes;
     use tutti_graph::{ForkByClone, GraphBuilder};
-    use tutti_types::{ChannelLayout, Latency, MaxBlock, SampleRate, Samples, Tail};
+    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_units::{Latency, SampleRate, Samples, Tail};
 
     /// **The stand-in keeps the ports and the latency, has no tail, and renders
     /// silence**: what a dead plugin's node must keep (its wiring, the delay

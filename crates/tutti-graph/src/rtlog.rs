@@ -42,7 +42,7 @@ use tutti_rt::{
     ClaimTable, Counter, CounterWriter, LockExt, Overflow, PackedAtomic, RingReader, RingWriter,
     counter, ring,
 };
-use tutti_types::{Frame, Samples};
+use tutti_units::{Frame, Samples};
 
 use crate::NodeKey;
 

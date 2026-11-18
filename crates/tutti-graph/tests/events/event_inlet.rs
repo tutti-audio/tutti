@@ -23,8 +23,8 @@ use tutti_graph::{
 };
 use tutti_rt::PushError;
 use tutti_types::MaxBlock;
-use tutti_types::{Frame, Moment, SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
+use tutti_units::{Frame, Moment, SampleRate, Samples};
 
 const R48: SampleRate = SampleRate::SR_48K;
 const R441: SampleRate = SampleRate::SR_44K1;

@@ -10,7 +10,7 @@ use tutti_ump::{U14, first_non_seven_bit};
 /// 14-bit value (M2-101 Tables 33 to 35).
 pub const PE_MAX_CHUNK_DATA_LEN: usize = 0x3FFF;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A Request ID: 0 to 127 (M2-103 §5.3). It ties the chunks of a message
     /// together and a reply to its inquiry, and is unique among the
     /// transactions between one Initiator and one Responder.
@@ -20,7 +20,7 @@ tutti_types::ranged! {
     PeRequestId(u8), NotARequestId, "a request id (0 to 127)", |raw| raw <= 127
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The number of a chunk, or a count of chunks: 1 to 16383, since the
     /// count starts from 1 and is a 14-bit value (M2-101 §8.3, Table 33).
     #[derive(Eq, Hash, PartialOrd, Ord)]

@@ -10,7 +10,7 @@
 //! output `c` is input `c`. **Nothing else is guessed**: main buses of
 //! different widths that name no placement, or placements that do not fold,
 //! have no pass ([`PassError`]), and the graph refuses whatever would hear one
-//! (a bypass, a mix short of [`Mix::WET`](tutti_types::Mix::WET), a lane on
+//! (a bypass, a mix short of [`Mix::WET`](tutti_units::Mix::WET), a lane on
 //! the mix: [`Editor::set_mode`](crate::Editor::set_mode),
 //! [`Editor::set_mix`](crate::Editor::set_mix), a commit). By index, a mono
 //! input under a stereo output was heard on the left alone. A node whose

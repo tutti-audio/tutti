@@ -17,7 +17,8 @@ use tutti_plugin_types::PluginFormat;
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
-use tutti_types::{MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{SampleRate, Samples};
 
 use crate::support::clap_probe;
 
@@ -394,7 +395,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
 /// its mirror hold after `restore_state` lands in an update on the main thread;
 /// the outcome lands in an update, never at the call.
 fn restore_round_trip(hosting: Hosting) {
-    const CUTOFF: tutti_types::ParamId = tutti_types::ParamId::new(101);
+    const CUTOFF: tutti_units::ParamId = tutti_units::ParamId::new(101);
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(s.plugin_entry("verb", &id(), &catalog).hosting(hosting))

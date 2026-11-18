@@ -28,7 +28,8 @@
 //! semantics of folding first.
 
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, Samples};
+use tutti_types::{ChannelIndex, ChannelLayout};
+use tutti_units::{Amplitude, Samples};
 
 use core::marker::PhantomData;
 

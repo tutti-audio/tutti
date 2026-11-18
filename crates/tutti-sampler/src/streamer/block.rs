@@ -11,7 +11,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use tutti_rt::{Loan, PosClaim, PosFrame, PosReader, Reader};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::bell::Bell;
 use super::io::refill::{Refill, needs_refill};
@@ -111,7 +111,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn two(reader: &mut StreamReader) {
 /// let first = reader.block(Samples::new(0), [none(), none()]);
@@ -124,7 +124,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn two(reader: &mut StreamReader) {
 /// {
@@ -140,7 +140,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn away(reader: &mut StreamReader) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
@@ -154,7 +154,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn here(reader: &mut StreamReader) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
@@ -169,7 +169,7 @@ impl<F: RingFloat> RingReader<F> {
 /// ```compile_fail
 /// # #![deny(unused_must_use)]
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn dropped(reader: &mut StreamReader) {
 /// reader.block(Samples::new(0), [none(), none()]);
@@ -181,7 +181,7 @@ impl<F: RingFloat> RingReader<F> {
 /// ```
 /// # #![deny(unused_must_use)]
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn kept(reader: &mut StreamReader) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
@@ -193,7 +193,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn parked(reader: &mut StreamReader) {
 /// let loop_ = {
@@ -208,7 +208,7 @@ impl<F: RingFloat> RingReader<F> {
 ///
 /// ```
 /// # use tutti_sampler::StreamReader;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn copied(reader: &mut StreamReader) {
 /// let loop_ = {

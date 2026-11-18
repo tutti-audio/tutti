@@ -30,7 +30,8 @@ use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_fixtures::wait_until;
 use tutti_session::{Recorder, RecorderError};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 fn wav(path: &std::path::Path) -> FileOut {
     FileOut::create(

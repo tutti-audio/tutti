@@ -13,7 +13,8 @@ use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{PhaserControls, PhaserNode, Stages, Stagger, SweepRange};
-use tutti_types::{Amplitude, BusTopology, Depth, Feedback, Hz, SampleRate, Samples};
+use tutti_types::BusTopology;
+use tutti_units::{Amplitude, Depth, Feedback, Hz, SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const F0: f32 = 1_000.0;

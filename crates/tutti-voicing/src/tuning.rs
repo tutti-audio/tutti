@@ -34,8 +34,8 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use tutti_midi_protocol::{KeyTable, OctaveOffsets, TuningFrequency};
-use tutti_types::Semitones;
 use tutti_ump::{NoteNumber, U7};
+use tutti_units::Semitones;
 
 /// How many tuning banks and programs a bank a core holds: each from 1 to 128
 /// (a bank and a program are 7-bit).

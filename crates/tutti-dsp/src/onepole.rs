@@ -1,7 +1,7 @@
 //! The one-pole's pole and how long it rings: `exp(-2 pi fc / fs)` and the frames its
 //! decay takes to fall to a floor.
 
-use tutti_types::{Db, Hz, SampleRate};
+use tutti_units::{Db, Hz, SampleRate};
 
 /// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
 pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {

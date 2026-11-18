@@ -22,12 +22,12 @@ use std::sync::Arc;
 use tutti_midi_device::ProfileOnRequest;
 use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, ManufacturerId, Message, MidiChannel,
     MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, Sysex7Packets, SysexPart, System,
     TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
 };
+use tutti_units::{Beat, Bpm, Seconds};
 
 use crate::MidiFileKind;
 use crate::smf::{SmfDivision, SmfTicksPerFrame};
@@ -114,7 +114,7 @@ impl Tick {
     ///
     /// ```
     /// use tutti_midi_file::Tick;
-    /// use tutti_types::Beat;
+    /// use tutti_units::Beat;
     /// use tutti_ump::TicksPerQuarterNote;
     ///
     /// assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat(1.5));
@@ -135,7 +135,7 @@ impl Tick {
     ///
     /// ```
     /// use tutti_midi_file::Tick;
-    /// use tutti_types::Beat;
+    /// use tutti_units::Beat;
     /// use tutti_ump::TicksPerQuarterNote;
     ///
     /// assert_eq!(Tick::from_beat(Beat(1.5), TicksPerQuarterNote::of(480)), Some(Tick(720)));
@@ -174,7 +174,7 @@ pub enum SmfFormat {
     Other(OtherSmfFormat),
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The format word of an SMF whose format the specification does not
     /// define: `3..=65535`. The words 0, 1 and 2 are [`SmfFormat`]'s named
     /// formats, so one format is never spelled two ways.
@@ -853,7 +853,7 @@ impl Track {
     ///
     /// ```
     /// use tutti_midi_file::{Meta, Tick, Track};
-    /// use tutti_types::Bpm;
+    /// use tutti_units::Bpm;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
     /// let track = Track::new()
@@ -980,7 +980,7 @@ impl Track {
     ///
     /// ```
     /// use tutti_midi_file::{Meta, Tick, Track};
-    /// use tutti_types::Bpm;
+    /// use tutti_units::Bpm;
     ///
     /// let track = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
     /// assert_eq!(track.events().len(), 1);
@@ -1322,7 +1322,7 @@ impl Container {
 ///
 /// ```
 /// use tutti_midi_file::{LeadTrack, Layout, Meta, MidiFile, SmfDivision, Tick, Track};
-/// use tutti_types::{Bpm, Seconds};
+/// use tutti_units::{Bpm, Seconds};
 /// use tutti_ump::{MidiChannel, NoteNumber, U7};
 ///
 /// let track = Track::new()
@@ -2011,7 +2011,7 @@ impl<'a> MetricalView<'a> {
     ///
     /// ```
     /// use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Tick, Track};
-    /// use tutti_types::Beat;
+    /// use tutti_units::Beat;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
     /// let track = Track::new().note(Tick(480), Tick(960), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));

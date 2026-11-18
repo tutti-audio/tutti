@@ -17,8 +17,9 @@ use tutti_session::{
     DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
     SessionEvent,
 };
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, Depth, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{Depth, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -121,8 +122,8 @@ fn a_plugin_gui_edit_becomes_the_knob() {
     s.render_frame_at(
         &tutti_graph::TransportPosition::new(
             false,
-            tutti_types::Bpm::of(120.0),
-            tutti_types::Beat(0.0),
+            tutti_units::Bpm::of(120.0),
+            tutti_units::Beat(0.0),
             None,
         ),
         &mut out,

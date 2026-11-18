@@ -39,9 +39,8 @@ use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
     Transport, TransportCommand, render_graph,
 };
-use tutti_types::{
-    Amplitude, At, Beat, Bpm, ChannelLayout, Frame, LoopRange, SampleRate, Samples, Tail,
-};
+use tutti_types::{ChannelLayout, LoopRange};
+use tutti_units::{Amplitude, At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
 

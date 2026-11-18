@@ -69,7 +69,8 @@
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{FrameCount, rms};
-use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
+use tutti_types::Note;
+use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
@@ -79,7 +80,7 @@ use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Meter, Result};
 use tutti_dsp::FftScratch;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The longest YIN frame accepted. YIN allocates several buffers of about this
 /// size, so an absurd `min_freq` would otherwise ask for gigabytes.

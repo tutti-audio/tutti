@@ -13,7 +13,7 @@
 //! - a fork starts from each index's own value;
 //! - the sample-accuracy contract's param row drives index 1.
 //!
-//! The kind-and-index encoding itself is pinned in `tutti-types`
+//! The kind-and-index encoding itself is pinned in `tutti-units`
 //! (`unit_param.rs`); the session side in its own suites.
 
 use tutti_graph::testing as common;
@@ -26,7 +26,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ChannelLayout, Db, Param, Samples, UnitAddr, UnitParam};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{Db, Samples, UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1: the same kind, two indices.
 const BAND0: UnitAddr = UnitAddr::new(UnitParam::Threshold, 0);

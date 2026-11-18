@@ -31,8 +31,8 @@ use tutti_graph::{ForkMode, ForkTarget, Prepare, TransportPosition};
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin_host::PluginHandle;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_types::ParamId;
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -57,7 +57,7 @@ fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
     let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
     let mut rig = Rig::prepared_with(
         client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         prepare,
         lanes,
@@ -215,7 +215,7 @@ fn gain_at(db: f64) -> f32 {
 
 /// The probe's tag (1.0 on channel 0) at `db`.
 fn amplitude(db: f64) -> f32 {
-    tutti_types::Db::new(db as f32).to_amplitude().get()
+    tutti_units::Db::new(db as f32).to_amplitude().get()
 }
 
 /// **An export renders an edit made in the plugin's own editor, as live
@@ -243,7 +243,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     );
     let mut live = Rig::prepared_with(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         prepare,
         vec![held],

@@ -26,7 +26,8 @@ use tutti_clap_ffi::{
 };
 use tutti_clap_test_plugin::{PLUGIN_ID, REPORTED_LATENCY_SAMPLES, probe_tag};
 use tutti_plugin_types::SampleFormat;
-use tutti_types::{MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{SampleRate, Samples};
 
 fn probe_path() -> &'static str {
     use std::sync::OnceLock;

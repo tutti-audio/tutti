@@ -38,8 +38,8 @@
 //! next block's first frame (offset 0 there, `len` here), never to both or
 //! neither.
 
-use super::frame::Frame;
-use super::units::{Beat, BeatDuration, Bpm, SampleRate};
+use tutti_units::Frame;
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate};
 
 /// How far past a frame a beat may fall, in frames, and still land on it.
 ///
@@ -160,7 +160,8 @@ pub fn snap_to_whole_frame(position: f64) -> f64 {
 /// timeline) uses the block's first frame as [`Frame::ZERO`].
 ///
 /// ```
-/// use tutti_types::{Beat, Bpm, Frame, SampleRate, TimelineSegment};
+/// use tutti_units::{Beat, Bpm, Frame, SampleRate};
+/// use tutti_types::TimelineSegment;
 /// let seg = TimelineSegment::new(Frame::ZERO, Beat(0.0), Bpm::of(90.0), SampleRate::of(48_000.0));
 /// // Exact, not 2.999999999999891: no accumulation.
 /// assert_eq!(seg.beat_at(Frame::new(96_000)), Beat(3.0));

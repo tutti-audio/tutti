@@ -16,7 +16,8 @@ use tutti_graph::{
     Renderer, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::{Beat, ChannelLayout, Frame, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Frame, Samples};
 
 fn signal(n: usize) -> Vec<f32> {
     (0..n)
@@ -573,7 +574,7 @@ fn renderer_drives_blocks_and_interleaves() {
         log.lock().unwrap().push(frame);
         TransportPosition::new(
             true,
-            tutti_types::Bpm::of(120.0),
+            tutti_units::Bpm::of(120.0),
             Beat(frame.get() as f64),
             None,
         )

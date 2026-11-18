@@ -12,7 +12,7 @@ use tutti_buffers::Planes;
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, settle};
 use tutti_sampler::{DiskStreamer, DiskVoice, Placement, VoiceWindow};
-use tutti_types::{Beat, Bpm, SampleRate};
+use tutti_units::{Beat, Bpm, SampleRate};
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 64;

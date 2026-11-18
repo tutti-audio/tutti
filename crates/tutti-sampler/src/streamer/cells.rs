@@ -23,7 +23,8 @@
 //! streamer follows it, so there is nothing to request and nothing to flush.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_types::{Amplitude, AtomicF32, Param64, PlaybackRate, ReadRate, SrcRatio};
+use tutti_types::{AtomicF32, Param64};
+use tutti_units::{Amplitude, PlaybackRate, ReadRate, SrcRatio};
 
 /// A stream's scalar controls and counts: see the module docs for who writes
 /// each.
@@ -252,7 +253,7 @@ mod tests {
 
         // An hour at 48 kHz: the stored rate still advances the read position
         // exactly, where the narrowed one is over a frame out.
-        let frames = tutti_types::Samples(48_000 * 3600);
+        let frames = tutti_units::Samples(48_000 * 3600);
         let exact = rate.advance(frames);
         assert_eq!(state.stretch_rate().advance(frames), exact);
         let narrowed = ReadRate::new(f64::from(rate.get() as f32)).advance(frames);

@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::{Beat, Bpm, Samples, Seconds};
+use tutti_units::{Beat, Bpm, Samples, Seconds};
 
 /// **A reading is what was written**: the OS time, the frame and the rate of
 /// one call, nothing before the first write, and the latest replaces the one

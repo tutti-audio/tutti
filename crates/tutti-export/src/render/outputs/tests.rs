@@ -5,7 +5,7 @@ use crate::{BufferTarget, Normalize, NormalizeSpec, Progress};
 use tutti_codec::Pcm;
 use tutti_graph::GraphBuilder;
 use tutti_transport::FrozenClock;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 24_000;

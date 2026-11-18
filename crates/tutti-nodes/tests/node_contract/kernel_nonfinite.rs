@@ -20,9 +20,10 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
     TransientShaperConfig, TransientShaperNode,
 };
-use tutti_types::{
-    BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
-    Mix, Q, Resonance, SampleRate, Samples, Seconds, Semitones,
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{
+    BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
+    Seconds, Semitones,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -299,7 +300,8 @@ mod logged {
     use tutti_nodes::{
         CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode, MultibandCompressorNode,
     };
-    use tutti_types::{ChannelLayout, Frame, MaxBlock, Samples, Tail};
+    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_units::{Frame, Samples, Tail};
 
     const MESSAGE: &str = "non-finite output; the node's state resets";
     /// The frame of the poisoned block that carries the non-finite sample.

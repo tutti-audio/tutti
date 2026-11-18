@@ -41,8 +41,9 @@ use tutti_graph::{OutPort, Source};
 use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport, TransportCommand,
 };
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, SampleRate, Samples, Tail};
+use tutti_types::{ChannelLayout, LoopRange};
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
 /// Frames per beat at 120 BPM and `SR`.

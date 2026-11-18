@@ -2,11 +2,11 @@
 //! past, so a node behind a latent path reads the transport its input audio
 //! was rendered at ([`Cx::transport_at`](crate::Cx::transport_at)).
 
-use tutti_types::{Frame, Latency, SampleRate, Samples};
+use tutti_units::{Frame, Latency, SampleRate, Samples};
 
 use crate::node::{Env, MAX_TRANSPORT_CHANGES, TransportPosition};
 use crate::time::Offset;
-use tutti_types::PlayReading;
+use tutti_units::PlayReading;
 
 /// From `frame` on, the transport was `transport`, counted at `rate`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -26,8 +26,8 @@ const EMPTY: Piece = Piece {
     rate: SampleRate::DEFAULT,
     transport: TransportPosition::new(
         false,
-        tutti_types::Bpm::of(120.0),
-        tutti_types::Beat(0.0),
+        tutti_units::Bpm::of(120.0),
+        tutti_units::Beat(0.0),
         None,
     ),
     play: PlayReading {
@@ -362,7 +362,8 @@ impl Env {
 mod tests {
     use super::*;
     use crate::node::TransportChanges;
-    use tutti_types::{Beat, Bpm, LoopRange, SegmentOrigin};
+    use tutti_types::{LoopRange, SegmentOrigin};
+    use tutti_units::{Beat, Bpm};
 
     const SR: SampleRate = SampleRate::SR_48K;
     /// Frames per beat at 120 BPM and 48 kHz.

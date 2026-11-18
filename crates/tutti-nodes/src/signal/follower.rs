@@ -3,7 +3,8 @@
 
 use tutti_graph::{Cost, Io};
 use tutti_modulation::{LevelFollower, SignalKind, SignalSource, SourceId};
-use tutti_types::{Ballistics, ChannelLayout};
+use tutti_types::ChannelLayout;
+use tutti_units::Ballistics;
 
 use super::{SourceNode, SourcePorts};
 

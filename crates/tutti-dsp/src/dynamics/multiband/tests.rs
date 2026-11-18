@@ -1,7 +1,8 @@
 use core::f64::consts::PI;
 
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, CompressionRatio, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{CompressionRatio, Seconds};
 
 use super::*;
 use crate::testing::{amplitude_at, lock_in};

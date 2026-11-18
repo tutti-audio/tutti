@@ -40,7 +40,8 @@ use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosi
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::testing::{MockTransport, block};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
-use tutti_types::{Beat, BeatDuration, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

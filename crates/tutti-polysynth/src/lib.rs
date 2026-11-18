@@ -32,7 +32,7 @@
 //!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
 //! };
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
+//! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
 //!

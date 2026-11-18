@@ -30,7 +30,7 @@ pub enum Gm2Role {
     Rhythm,
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// How many Channels a Function Block gives the Profile: a multiple of 16
     /// from 16 to 256, one set of 16 per Group (M2-118 §3.3).
     #[derive(Eq, Hash)]

@@ -5,7 +5,7 @@ use tutti_buffers::Float;
 
 use tutti_rt::RingWriter;
 use tutti_rt::{RtScope, with_no_denormals};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::commit::{Crossfade, retire_fade};
 use super::node_op::{Head, OpState, flag, node_dispatch};

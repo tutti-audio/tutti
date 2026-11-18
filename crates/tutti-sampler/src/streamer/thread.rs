@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tutti_rt::{PriorityRequest, Sleeper, StopToken, ThreadHandle};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use super::bell::{Bell, StreamerSender};
 use super::cache::LruCache;
@@ -56,7 +56,7 @@ impl<F: RingFloat> Built<F> {
     /// `channel_capacity` bounds the command queue in messages (at least
     /// one); a send to a full queue waits. `sample_rate` is the
     /// *session* rate, against which each file's own rate becomes the stream's
-    /// [`SrcRatio`](tutti_types::SrcRatio).
+    /// [`SrcRatio`](tutti_units::SrcRatio).
     pub(super) fn new(
         channel_capacity: usize,
         sample_rate: SampleRate,

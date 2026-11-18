@@ -58,11 +58,11 @@ use tutti_midi_protocol::{
     GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, bend_to_signed_f32,
     narrow_value, value_to_unit_f32,
 };
-use tutti_types::{Amplitude, Seconds, Semitones};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
 };
+use tutti_units::{Amplitude, Seconds, Semitones};
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};
@@ -3398,7 +3398,7 @@ mod tests {
             probe.cc(0, 10, 20);
             probe.core.channel(MidiChannel::of(0)).pan()
         });
-        assert_eq!(ch.modulation_range(), tutti_types::Cents(100.0));
+        assert_eq!(ch.modulation_range(), tutti_units::Cents(100.0));
         assert_eq!(s.core.channel_pitch(MidiChannel::of(0)).0, 2.0);
         // Channel 1 heard none of it.
         let other = s.core.channel(MidiChannel::of(1));

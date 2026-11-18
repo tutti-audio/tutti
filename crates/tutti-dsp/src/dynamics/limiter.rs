@@ -47,7 +47,8 @@ const UNSET: f32 = f32::INFINITY;
 const LANE_DB_LIMIT: f32 = 300.0;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::{Amplitude, ChannelLayout, Db, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 use super::curves::{LimiterCurve, amplitude_to_db, compute_limiter_gain};
 use super::lookahead::{LookaheadRing, fold_peak};
@@ -160,7 +161,7 @@ impl Default for LimiterControls {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// How far ahead a limiter looks: the delay it runs its gain decision ahead of the
     /// audio by, and so the processing latency it declares to PDC.
     ///

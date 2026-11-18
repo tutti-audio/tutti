@@ -8,7 +8,8 @@
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{EventLossPolicy, FileTarget, Rendered, write_buffers};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The extensible `WAVE_FORMAT` header written for a float or wide file.

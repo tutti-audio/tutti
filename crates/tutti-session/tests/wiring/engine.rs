@@ -18,7 +18,8 @@ use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
-use tutti_types::{Amplitude, Beat, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 
@@ -47,9 +48,9 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
             located = true;
             transport
                 .schedule(
-                    tutti_types::At::NextBlock,
+                    tutti_units::At::NextBlock,
                     MotionEvent::Locate {
-                        beat: tutti_types::Beat(0.75),
+                        beat: tutti_units::Beat(0.75),
                         fade: tutti_transport::FadeOut::Immediate,
                         then: tutti_transport::Then::Keep,
                     },
@@ -156,14 +157,14 @@ fn voice(cents: f32) -> tutti_sampler::VoicePool {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(tutti_types::Beat(0.0)))
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(tutti_units::Beat(0.0)))
         .expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(
         SlotId(1),
         source,
         Playback {
-            pitch: tutti_types::Cents::new(cents),
+            pitch: tutti_units::Cents::new(cents),
             ..Default::default()
         },
     );
@@ -709,7 +710,7 @@ impl tutti_graph::Node for Gated {
 /// pre-fade (a tap fed after the fader would ramp too).
 #[test]
 fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
-    use tutti_types::{At, Frame};
+    use tutti_units::{At, Frame};
     let mut s = offline();
     let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
@@ -774,7 +775,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
 /// is the source's whole level (0.5). A take recorded through it has no click.
 #[test]
 fn the_heard_tap_carries_the_fade_at_a_stop() {
-    use tutti_types::{At, Frame};
+    use tutti_units::{At, Frame};
     let mut s = offline();
     let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()

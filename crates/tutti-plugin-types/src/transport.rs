@@ -17,8 +17,9 @@
 
 use arrayvec::ArrayVec;
 use tutti_graph::MAX_TRANSPORT_CHANGES;
-use tutti_types::{BarNumber, Beat, Bpm, LoopRange, SampleRate, Seconds, TimeSignature};
+use tutti_types::{LoopRange, TimeSignature};
 use tutti_ump::System;
+use tutti_units::{BarNumber, Beat, Bpm, SampleRate, Seconds};
 
 /// A transport that takes effect part-way into a chunk: from frame
 /// [`offset`](Self::offset) of the chunk on, the transport is
@@ -54,7 +55,7 @@ pub type TransportChanges = ArrayVec<TransportChange, MAX_TRANSPORT_CHANGES>;
 ///
 /// ```
 /// use tutti_plugin_types::{BarNumber, TransportInfo};
-/// use tutti_types::{Beat, Bpm, SampleRate};
+/// use tutti_units::{Beat, Bpm, SampleRate};
 ///
 /// let info = TransportInfo::new(SampleRate::of(48_000.0))
 ///     .with_tempo(Bpm::of(128.0))
@@ -355,7 +356,7 @@ impl TransportInfo {
     ///
     /// ```
     /// use tutti_plugin_types::TransportInfo;
-    /// use tutti_types::{Beat, Bpm, SampleRate};
+    /// use tutti_units::{Beat, Bpm, SampleRate};
     ///
     /// // 120 BPM at 48 kHz: a quarter note is 24 000 frames, a clock 1 000.
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))
@@ -390,7 +391,7 @@ impl TransportInfo {
     ///
     /// ```
     /// use tutti_plugin_types::TransportInfo;
-    /// use tutti_types::{Beat, Bpm, SampleRate};
+    /// use tutti_units::{Beat, Bpm, SampleRate};
     ///
     /// // 120 BPM at 48 kHz: a beat is 24 000 frames; a quarter beat is left.
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))

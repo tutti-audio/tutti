@@ -54,9 +54,9 @@ use tutti_au_ffi::{Element, Scope};
 
 use tutti_au_host::BusDirection;
 use tutti_au_host::parameters::{self, DependentParam, MetaScope, ParamAddress};
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// `kAudioUnitErr_InvalidProperty`, the refusal every corpus unit gives to both

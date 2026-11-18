@@ -39,7 +39,7 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, Elevation, Radians, SampleRate, Samples};
+use tutti_units::{Azimuth, Elevation, Radians, SampleRate, Samples};
 
 const SAMPLE_RATE: u32 = 44_100;
 const IR_LEN: usize = 64;

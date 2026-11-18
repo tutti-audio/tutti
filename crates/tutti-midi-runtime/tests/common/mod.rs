@@ -10,8 +10,8 @@ use tutti_graph::{
     TransportPosition,
 };
 use tutti_midi_runtime::TimedMidiEvent;
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{MidiChannel, Ump};
+use tutti_units::{Beat, Bpm};
 
 /// Frames in a beat at 120 BPM and 48 kHz, so a frame is exact in beats.
 const FRAMES_PER_BEAT: f64 = 24_000.0;
@@ -94,7 +94,7 @@ impl Sink {
     pub fn poll_into(&mut self, out: &mut [(u32, Ump)]) -> usize {
         let mut n = 0;
         let mut chunk = [TapEvent {
-            frame: tutti_types::Frame::ZERO,
+            frame: tutti_units::Frame::ZERO,
             ump: Ump([0; 4]),
         }; 64];
         for tap in &mut self.taps {

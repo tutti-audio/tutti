@@ -28,7 +28,8 @@ use tutti_sampler::{
     ByHand, DiskStreamer, DiskVoice, Loop, Placement, Playback, Stream, StreamReader, Voice,
     VoiceNode, VoiceSource,
 };
-use tutti_types::{Beat, Bpm, Frame, FrameClock, LoopRange, SampleRate, Samples};
+use tutti_types::{FrameClock, LoopRange};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -444,7 +445,7 @@ fn a_varispeed_change_lands_on_a_forks_next_block() {
     let clock = clock_at(SR);
     let mut first = fork(&voice, SR);
     let left = render(&mut *first.node, &clock, 32);
-    voice.set_speed(tutti_types::PlaybackRate::new(2.0));
+    voice.set_speed(tutti_units::PlaybackRate::new(2.0));
     // A fork's controls are a snapshot: the 2x reaches a fork taken after it.
     let mut second = fork(&voice, SR);
     let right = render(&mut *second.node, &clock, 32);
@@ -560,7 +561,7 @@ fn a_stretched_fork_reads_at_the_stretchers_rate() {
     write_ramp(&path, SR as u32, 20_000);
     let (_streamer, reader) = streamer_on(&path);
     let voice = live_voice(reader, 0.0);
-    voice.set_stretch_rate(tutti_types::ReadRate(0.5));
+    voice.set_stretch_rate(tutti_units::ReadRate(0.5));
     let clock = clock_at(SR);
     let mut copy = fork(&voice, SR);
     let [l, _] = render(&mut *copy.node, &clock, 8_192);
@@ -744,7 +745,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             _second = Some((second, second_reader));
         }
         let mut voice = live_voice(reader, 1.0);
-        voice.set_speed(tutti_types::PlaybackRate::new(case.speed));
+        voice.set_speed(tutti_units::PlaybackRate::new(case.speed));
         if case.reverse {
             reverse(&mut rig);
         }
@@ -757,7 +758,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         let mut source =
             tutti_sampler::MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(1.0)))
                 .expect("a placeable wave");
-        source.set_speed(tutti_types::PlaybackRate::new(case.speed));
+        source.set_speed(tutti_units::PlaybackRate::new(case.speed));
         source.set_loop(case.loop_);
         let mut memory: Box<dyn Node> = if case.reverse {
             Box::new(VoiceNode::with_channels(

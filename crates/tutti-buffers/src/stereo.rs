@@ -3,7 +3,8 @@
 use crate::{BufferError, Mono, Sample, bounds};
 use core::fmt;
 use core::ops::Range;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Two equal-length channel planes: the deinterleaved stereo pair that
 /// correlation and amplitude metering consume.
@@ -16,7 +17,7 @@ use tutti_types::{ChannelLayout, Samples};
 ///
 /// ```
 /// use tutti_buffers::StereoPlanes;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let (l, r) = ([1.0f32, 2.0], [3.0, 4.0]);
 /// let pair = StereoPlanes::new(&l, &r)?;

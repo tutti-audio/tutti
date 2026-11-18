@@ -41,7 +41,7 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_types::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
+use tutti_units::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -209,8 +209,8 @@ impl std::fmt::Display for ModTarget {
 
 /// A modulation target whose value is in a unit tutti knows: what
 /// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
-/// declares), an [`Edge`] ([`Amplitude`](tutti_types::Amplitude)) and a
-/// [`MixRef`] ([`Mix`](tutti_types::Mix)). Sealed.
+/// declares), an [`Edge`] ([`Amplitude`](tutti_units::Amplitude)) and a
+/// [`MixRef`] ([`Mix`](tutti_units::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
     /// The unit of the target's value.
     type Unit: crate::Scalar;
@@ -226,11 +226,11 @@ impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
 }
 impl ranged::Sealed for Edge {}
 impl Ranged for Edge {
-    type Unit = tutti_types::Amplitude;
+    type Unit = tutti_units::Amplitude;
 }
 impl ranged::Sealed for MixRef {}
 impl Ranged for MixRef {
-    type Unit = tutti_types::Mix;
+    type Unit = tutti_units::Mix;
 }
 
 tutti_types::id! {
@@ -1550,9 +1550,9 @@ impl Mods<'_> {
     /// into the lane, never a plan.
     ///
     /// `target` is a [`Key`](crate::Key)'s param method (`lp.cutoff()`, in
-    /// [`Hz`](tutti_types::Hz)), an [`Edge`] (its gain, in
-    /// [`Amplitude`](tutti_types::Amplitude)) or a [`MixRef`] (in
-    /// [`Mix`](tutti_types::Mix)), and the range is a range of that unit:
+    /// [`Hz`](tutti_units::Hz)), an [`Edge`] (its gain, in
+    /// [`Amplitude`](tutti_units::Amplitude)) or a [`MixRef`] (in
+    /// [`Mix`](tutti_units::Mix)), and the range is a range of that unit:
     /// `m.range(lp.cutoff(), Hz(100.0)..Hz(4000.0))?`. A plugin's param, which
     /// has no unit tutti knows, takes [`range_raw`](Self::range_raw).
     ///

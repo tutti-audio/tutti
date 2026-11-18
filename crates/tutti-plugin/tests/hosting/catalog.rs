@@ -584,7 +584,7 @@ mod links {
             None,
             &tutti_fixtures::detached_work(),
             &loadable,
-            tutti_types::SampleRate::SR_48K,
+            tutti_units::SampleRate::SR_48K,
         )
         .expect("the target loads as CLAP, though its extension names VST2");
 

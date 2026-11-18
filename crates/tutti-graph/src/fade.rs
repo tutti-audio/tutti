@@ -42,7 +42,7 @@
 //!   to fade).
 
 use tutti_curve::FadeLaw;
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// How [`Editor::replace`](crate::Editor::replace) swaps a unit: over
 /// `duration` frames, along `law`. See [`Editor::replace`](crate::Editor::replace)

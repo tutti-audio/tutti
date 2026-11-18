@@ -1648,7 +1648,8 @@ fn a_2d_normalization_converts_only_to_itself() {
 /// fold.
 #[test]
 fn the_default_levels_are_bs775_minus_3_db() {
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
     let m = f32::MINUS_3_DB;
     let levels = FoldLevels::default();
     assert_eq!(
@@ -1664,7 +1665,8 @@ fn the_default_levels_are_bs775_minus_3_db() {
 /// when the fold is built, so it never reaches a signal.
 #[test]
 fn a_level_that_is_not_a_gain_is_refused() {
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
     let (five_one, stereo) = (Bed::Surround51.topology(), Bed::Stereo.topology());
     for bad in [f32::NAN, f32::INFINITY, -0.5] {
         let spec = |levels| Fold::<f32>::spec(&five_one, &stereo).levels(levels).build();
@@ -1704,7 +1706,8 @@ fn a_level_that_is_not_a_gain_is_refused() {
 /// centre, the surrounds and the heights each at their own gain.
 #[test]
 fn levels_state_the_centre_the_surround_and_the_height_gains() {
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
     let levels = FoldLevels {
         centre: Amplitude(0.5),
         surround: Amplitude(0.25),
@@ -1741,7 +1744,8 @@ fn levels_state_the_centre_the_surround_and_the_height_gains() {
 /// the speaker at unity whatever the level says.
 #[test]
 fn a_level_applies_only_where_the_speaker_folds() {
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
     let levels = FoldLevels {
         surround: Amplitude(0.25),
         ..FoldLevels::default()
@@ -1770,7 +1774,8 @@ fn a_level_applies_only_where_the_speaker_folds() {
 /// channel of a mono destination at `g`; `None` omits it.
 #[test]
 fn the_lfe_level_feeds_the_front_pair_or_the_mono_channel() {
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
     let five_one = Bed::Surround51.topology();
     let with = FoldLevels {
         lfe: Some(Amplitude(0.5)),

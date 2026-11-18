@@ -11,8 +11,9 @@ use tutti_graph::{
     Cx, Editor, Fade, FadeLaw, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, Latency, SampleRate, Samples, UnitParam};
+use tutti_units::{Latency, SampleRate, Samples, UnitParam};
 
 struct Out;
 

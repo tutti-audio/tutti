@@ -8,7 +8,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{Beat, Latency, Tail};
+use tutti_units::{Beat, Latency, Tail};
 
 use super::Curve;
 
@@ -59,7 +59,7 @@ use super::Curve;
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{Amplitude, Beat, Bpm, SampleRate, Samples};
+/// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo, TransportPosition};
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
 ///
@@ -199,8 +199,9 @@ mod tests {
     use std::sync::atomic::Ordering;
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
+    use tutti_types::AtomicF32;
     use tutti_types::MaxBlock;
-    use tutti_types::{AtomicF32, Bpm, Hz, SampleRate, Samples};
+    use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {
         let mut env: Trajectory<Hz> = Trajectory::new();

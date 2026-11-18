@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::Semitones;
+use tutti_units::Semitones;
 
 const BASE: Hz = Hz(1000.0);
 

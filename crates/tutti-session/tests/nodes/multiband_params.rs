@@ -19,9 +19,10 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandCompressorNode, MultibandControls};
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
-use tutti_types::{Amplitude, ChannelLayout, SampleRate};
-use tutti_types::{BeatsPerCycle, Depth};
-use tutti_types::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{BeatsPerCycle, Depth};
+use tutti_units::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};
 
 const RATE: f64 = 48_000.0;
 /// The tones' amplitude.

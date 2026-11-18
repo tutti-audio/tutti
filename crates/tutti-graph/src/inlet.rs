@@ -54,7 +54,8 @@
 //!
 //! There is no gain: a level belongs in a node downstream of this one.
 
-use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples, Tail};
 
 use crate::cost::Cost;
 use crate::io::Io;
@@ -72,7 +73,8 @@ use crate::tap::{TapReader, TapWriter};
 /// ```
 /// use tutti_buffers::Interleaved;
 /// use tutti_graph::InletRing;
-/// use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
+/// use tutti_types::ChannelLayout;
 ///
 /// let (ring, mut producer) =
 ///     InletRing::pair(ChannelLayout::STEREO, Samples(64), SampleRate::SR_48K);
@@ -140,7 +142,8 @@ impl InletRing {
 /// ```
 /// use tutti_buffers::Interleaved;
 /// use tutti_graph::InletNode;
-/// use tutti_types::{ChannelLayout, Samples};
+/// use tutti_units::Samples;
+/// use tutti_types::ChannelLayout;
 ///
 /// let (node, mut producer) = InletNode::pair(ChannelLayout::STEREO, Samples(64));
 /// let frame = Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?;

@@ -8,7 +8,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use tutti_session::Stamp;
 
-use tutti_types::{Amplitude, At, Frame, Tail};
+use tutti_units::{Amplitude, At, Frame, Tail};
 
 use super::midi::*;
 use super::rig::{BLOCK, Rig};
@@ -416,7 +416,7 @@ pub fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
         rig.render_to(2 * BLOCK);
         rig.session
             .graph()
-            .set_sample_rate(tutti_types::SampleRate::SR_44K1);
+            .set_sample_rate(tutti_units::SampleRate::SR_44K1);
         rig.settle();
         let before = S::chunks(&rig);
         rig.render_to(rig.frame() + 4 * BLOCK);
@@ -477,7 +477,7 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     let send = |rig: &mut Rig| {
         rig.handle
             .keys_mut()
-            .push(read.after(tutti_types::Samples(AHEAD)), note_on(0, 60, 100))
+            .push(read.after(tutti_units::Samples(AHEAD)), note_on(0, 60, 100))
             .expect("the queue has room");
     };
     if !send_after_the_change {
@@ -488,7 +488,7 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     }
     rig.session
         .graph()
-        .set_sample_rate(tutti_types::SampleRate::SR_44K1);
+        .set_sample_rate(tutti_units::SampleRate::SR_44K1);
     rig.settle();
     let before = S::chunks(&rig);
     if send_after_the_change {
@@ -496,9 +496,9 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     }
     // The instant, at the new rate: the executor's own arithmetic.
     let target = Frame::new(read.frame().get() + AHEAD as u64)
-        .rescaled(super::rig::RATE, tutti_types::SampleRate::SR_44K1);
+        .rescaled(super::rig::RATE, tutti_units::SampleRate::SR_44K1);
     let now = rig.handle.keys().clock().expect("the queue is prepared");
-    assert_eq!(now.rate(), tutti_types::SampleRate::SR_44K1);
+    assert_eq!(now.rate(), tutti_units::SampleRate::SR_44K1);
     let ahead = target
         .since(now.frame())
         .expect("the instant is still ahead")
@@ -580,9 +580,9 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         .midi()
         .play_clip(
             rig.node,
-            tutti_types::Beat(0.0),
+            tutti_units::Beat(0.0),
             [TimedMidiEvent::new(
-                tutti_types::Beat(0.01),
+                tutti_units::Beat(0.01),
                 Message::midi2(
                     MidiChannel::FIRST,
                     Voice2::note_on(NoteNumber::of(64), NoteVelocity::CENTER),
@@ -610,8 +610,8 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         let beat = f64::from(i) * BLOCK as f64 / 24_000.0;
         fork.set_transport(tutti_graph::TransportPosition::new(
             true,
-            tutti_types::Bpm::of(120.0),
-            tutti_types::Beat(beat),
+            tutti_units::Bpm::of(120.0),
+            tutti_units::Beat(beat),
             None,
         ));
         fork.render(BLOCK, BLOCK, &mut out);

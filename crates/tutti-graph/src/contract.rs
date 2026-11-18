@@ -22,7 +22,7 @@
 //! use tutti_graph::EventKind;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
-//! use tutti_types::{Latency, Samples};
+//! use tutti_units::{Latency, Samples};
 //!
 //! let row = Row::new(
 //!     "pulse, 37 frames late",
@@ -82,11 +82,10 @@
 use crate::NodeKey;
 use crate::OutPort;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{
-    At, Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples, Tail, UnitAddr,
-};
 use tutti_ump::{Message, NoteKeyEvent, NoteNumber, Ump, Voice2};
+use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr};
 
 use crate::builder::GraphBuilder;
 use crate::controls::{ParamFork, ParamNode};
@@ -1349,7 +1348,7 @@ impl Node for Pulse {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(1, 0)
             .with_latency(self.latency)
-            .with_tail(tutti_types::Tail::Unknown)
+            .with_tail(tutti_units::Tail::Unknown)
             .with_event_resolution(self.resolution)
     }
 
@@ -1426,7 +1425,7 @@ impl Node for Lookahead {
         Shape::through_unassigned(ChannelLayout::MONO)
             .with_latency(self.latency)
             // Pure delay: nothing rings once the latency is compensated.
-            .with_tail(tutti_types::Tail::None)
+            .with_tail(tutti_units::Tail::None)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1662,7 +1661,7 @@ impl Node for Sum {
 /// use tutti_graph::EventKind;
 /// use tutti_fixtures::midi;
 /// use tutti_ump::{MidiChannel, NoteVelocity};
-/// use tutti_types::{Latency, Samples};
+/// use tutti_units::{Latency, Samples};
 ///
 /// fn pulse_row() -> Row {
 ///     Row::new(

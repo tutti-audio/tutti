@@ -14,7 +14,7 @@
 //! correlation on every call, through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Confidence, SampleRate, Samples, Seconds};
+use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;

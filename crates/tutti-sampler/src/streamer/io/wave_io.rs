@@ -12,7 +12,8 @@
 
 use crate::nonempty;
 use tutti_buffers::{Float, InterleavedMut, Wave, interleave};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Read file frames `at..` of a resident `wave` into `out` (`channels` wide,
 /// floored at one), zero past its end: the whole-file source a region without
@@ -51,7 +52,7 @@ pub(crate) fn read_wave<F: Float>(
 mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
-    use tutti_types::{SampleRate, Seconds};
+    use tutti_units::{SampleRate, Seconds};
 
     fn test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, SampleRate::SR_48K);

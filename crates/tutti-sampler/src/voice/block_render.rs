@@ -32,9 +32,9 @@ use tutti_buffers::Wave;
 use tutti_graph::{
     Env, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
 };
-use tutti_types::{
-    Amplitude, Beat, Bpm, Cents, ChannelLayout, Frame, FrameClock, PlaybackRate, SampleRate,
-    Samples, StretchFactor,
+use tutti_types::{ChannelLayout, FrameClock};
+use tutti_units::{
+    Amplitude, Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor,
 };
 
 use super::memory_source::MemorySource;

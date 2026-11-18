@@ -1,7 +1,7 @@
 //! `TempoMap::stepped_to` against hand-computed beats and seconds.
 
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 fn bpm(x: f64) -> Bpm {
     Bpm::of(x)

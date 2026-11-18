@@ -8,7 +8,8 @@
 //! [`VbapGains::render_channel`].
 
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
-use tutti_types::{ArcDegrees, Azimuth, Elevation, MAX_CHANNELS, Spread, StereoWidth};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{ArcDegrees, Azimuth, Elevation, Spread, StereoWidth};
 
 use crate::{Glide, Lerp};
 

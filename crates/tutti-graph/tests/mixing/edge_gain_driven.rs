@@ -19,7 +19,7 @@ use tutti_graph::{
     GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, ParamRange, Sink,
     Source, Topology, Unforkable, ValidGraph, compile,
 };
-use tutti_types::{Amplitude, Samples, Tail};
+use tutti_units::{Amplitude, Samples, Tail};
 
 const BLOCK: usize = 32;
 const PERIOD: u64 = 16;

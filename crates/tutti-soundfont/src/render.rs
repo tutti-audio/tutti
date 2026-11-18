@@ -9,7 +9,7 @@
 //! rate) and the gains ramp across it. A chunk is the finest a note's start or
 //! release can be placed, and the unit declares it as its event resolution.
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// The rate a voice renders at and the chunk it renders in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

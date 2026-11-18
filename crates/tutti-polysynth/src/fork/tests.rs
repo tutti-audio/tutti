@@ -1,7 +1,7 @@
 use tutti_graph::contract::{Direct, assert_param_fork};
 use tutti_graph::{Event, Offset, ParamFork};
-use tutti_types::{SampleRate, Seconds, UnitParam};
 use tutti_ump::{MidiChannel, Ump};
+use tutti_units::{SampleRate, Seconds, UnitParam};
 
 use crate::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig};
 use tutti_fixtures::midi;
@@ -29,7 +29,7 @@ fn note_on() -> Ump {
 /// frame 0, in 64-frame blocks.
 fn peak(synth: PolySynth, frames: usize) -> f32 {
     let mut hand = Direct::new(synth, RATE, 64);
-    let on = Offset::of(tutti_types::Samples(0), tutti_types::Samples(64));
+    let on = Offset::of(tutti_units::Samples(0), tutti_units::Samples(64));
     hand.events(0, &[Event::midi(on, note_on())]);
     let mut peak = 0.0f32;
     for _ in 0..frames / 64 {
@@ -73,7 +73,7 @@ fn a_fork_takes_the_authored_volume_at_the_fork() {
         let set = source.params().clone();
         set.set(UnitParam::Volume, before);
         // A modulation driver's composite in the live cell: not authored.
-        live.set_volume(tutti_types::Amplitude(before * 3.0));
+        live.set_volume(tutti_units::Amplitude(before * 3.0));
         let fork = source.fork_node();
         set.set(UnitParam::Volume, after);
         peak(fork, 4_096)

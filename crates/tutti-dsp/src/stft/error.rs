@@ -3,7 +3,7 @@
 //! `Result`, not `Option`, and not `assert!`: a caller who passes a hop wider
 //! than its window deserves to know which invariant broke.
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::stft::window::{CosineWindow, Window};
 

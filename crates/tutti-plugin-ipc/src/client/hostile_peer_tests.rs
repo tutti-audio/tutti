@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};
 

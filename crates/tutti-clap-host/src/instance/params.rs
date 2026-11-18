@@ -44,7 +44,7 @@ impl Flushed {
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 fn color_to_clap(color: Color) -> clap_sys::color::clap_color {
     clap_sys::color::clap_color {
@@ -311,7 +311,7 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
     // passes through verbatim: splitting it here would impose a hierarchy the
     // shared vocabulary does not model, and three of the four hosted formats
     // could not fill.
-    tutti_plugin_types::ParameterInfo::new(tutti_types::ParamId::new(info.id), info.name)
+    tutti_plugin_types::ParameterInfo::new(tutti_units::ParamId::new(info.id), info.name)
         .with_range(ParamRange::Plain {
             min: info.min_value,
             max: info.max_value,

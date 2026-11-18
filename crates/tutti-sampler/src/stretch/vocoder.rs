@@ -14,7 +14,7 @@ use super::fft::{Complex32, Fft};
 )]
 use super::{FftSize, Unit};
 use tutti_dsp::StftGeometry;
-use tutti_types::Radians;
+use tutti_units::Radians;
 
 /// One channel of phase-vocoder state.
 ///

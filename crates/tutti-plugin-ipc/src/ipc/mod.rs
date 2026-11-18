@@ -58,7 +58,7 @@ use tutti_plugin_types::{
     StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
 use crate::{

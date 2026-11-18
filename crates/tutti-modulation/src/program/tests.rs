@@ -4,7 +4,7 @@
 use super::*;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
-use tutti_types::{Azimuth, Hz, UnitParam};
+use tutti_units::{Azimuth, Hz, UnitParam};
 
 const SR: f64 = 48_000.0;
 

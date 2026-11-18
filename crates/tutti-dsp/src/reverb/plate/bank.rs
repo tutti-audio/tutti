@@ -24,7 +24,8 @@
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Gain, Hz, MAX_CHANNELS, SampleRate, SampleSpan, Samples, Seconds, Tail};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::delay::DelayRing;
@@ -226,7 +227,7 @@ impl PlateBank {
         let mut network = Box::new(Network::new(rate));
         let worst = PlateControls {
             pre_delay: crate::reverb::fdn::design::MAX_PRE_DELAY,
-            modulation: tutti_types::Depth::of(1.0),
+            modulation: tutti_units::Depth::of(1.0),
             ..PlateControls::DEFAULT
         };
         worst.design_into(rate, &mut network);

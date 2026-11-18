@@ -25,7 +25,8 @@ use tutti_session::{
     Phase, PhaseCx, Range, Root, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 1_024;
@@ -122,7 +123,7 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
     let node = add_probe_on_outputs(&mut s);
     assert_eq!(
         s.graph_ref().node_tail(node).unwrap(),
-        tutti_types::Tail::Finite(Samples(
+        tutti_units::Tail::Finite(Samples(
             tutti_clap_test_plugin::REPORTED_TAIL_SAMPLES as usize
         )),
     );
@@ -146,8 +147,8 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
-            tutti_types::Seconds(0.0),
-            tutti_types::Seconds(0.05),
+            tutti_units::Seconds(0.0),
+            tutti_units::Seconds(0.05),
         ))
         .sample_rate(RATE)
         .clock(ExportClock::frozen())
@@ -271,7 +272,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         .crossfade_plugin(
             node,
             Box::new(incoming),
-            tutti_types::Seconds(0.005),
+            tutti_units::Seconds(0.005),
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");

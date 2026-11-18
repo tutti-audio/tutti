@@ -17,7 +17,7 @@
 //! ```
 
 use tutti_buffers::{I24, Sample};
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 /// An integer sample width: the depths FLAC holds, and the integer half of
 /// [`Pcm`].

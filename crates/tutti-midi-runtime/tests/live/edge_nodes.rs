@@ -25,11 +25,11 @@ use tutti_midi_runtime::{
     MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
     MpeTransformNode, SyncMessages, SyncOut,
 };
-use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteNumber, System, U7, U14, Ump, Voice2,
 };
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 /// The note a channel voice message addresses, either protocol.
 fn note_of(ump: Ump) -> Option<u8> {
@@ -1177,7 +1177,7 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
     }
     assert_eq!(
         got[0].1,
-        MachineControlEvent::Locate(tutti_types::Seconds::new(1.0))
+        MachineControlEvent::Locate(tutti_units::Seconds::new(1.0))
     );
     assert_eq!(got[1].1, MachineControlEvent::Play);
 }

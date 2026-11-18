@@ -14,9 +14,9 @@ use tutti_graph::{
     Env, Event, Harmony, Node, Offset, ParamRamp, PlayClock, TransportChanges, TransportPosition,
 };
 use tutti_plugin_ipc::{HostMessage, ProcessAudioData};
-use tutti_types::ParamId;
-use tutti_types::{Beat, Bpm, Frame, Samples};
 use tutti_ump::MidiChannel;
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, Frame, Samples};
 
 use super::mock_server::{
     BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, at, beat_at,

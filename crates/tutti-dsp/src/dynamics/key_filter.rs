@@ -3,7 +3,8 @@
 use core::ops::Range;
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Hz, MAX_CHANNELS, Q, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MAX_CHANNELS};
+use tutti_units::{Hz, Q, SampleRate, Samples};
 
 use super::shared::{CHUNK, level};
 use crate::{COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};

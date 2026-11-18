@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::ops::Range;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Checks the planes' width and that every plane is as long as the first,
 /// returning the width and the common length.
@@ -45,7 +46,7 @@ fn check<S: Sample, P: AsRef<[S]>>(planes: &[P]) -> Result<(ChannelLayout, Sampl
 ///
 /// ```
 /// use tutti_buffers::Planes;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let (l, r) = ([1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]);
 /// let slices = [&l[..], &r[..]];
@@ -416,7 +417,7 @@ impl<'a, S> MutTable<'_, 'a, S> {
 ///
 /// ```
 /// use tutti_buffers::PlanesMut;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let (mut l, mut r) = ([0.0f32; 4], [0.0f32; 4]);
 /// let mut planes = [&mut l[..], &mut r[..]];

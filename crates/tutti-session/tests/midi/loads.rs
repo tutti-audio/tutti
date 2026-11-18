@@ -9,8 +9,8 @@ use tutti_midi_file::{Layout, LeadTrack, MidiFile, SmfDivision, Tick, Track};
 use tutti_session::{
     DetachedSession, MidiError, MidiLoad, MidiReport, Session, SessionEvent, WorkerError,
 };
-use tutti_types::SampleRate;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
+use tutti_units::SampleRate;
 
 fn session() -> DetachedSession {
     Session::builder()

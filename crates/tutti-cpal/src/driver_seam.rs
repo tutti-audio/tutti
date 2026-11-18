@@ -13,7 +13,8 @@ use tutti_buffers::SampleFormat;
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
-use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 use crate::edge;
 use crate::error::{Error, Result};

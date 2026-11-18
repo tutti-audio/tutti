@@ -16,7 +16,8 @@ use tutti_nodes::testing::Const;
 use tutti_session::{
     BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, ChannelTopology, Seconds, Speaker};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
+use tutti_units::{Amplitude, Seconds};
 
 const BLOCK: usize = 64;
 /// The sources' levels, and the gain of the wire that survives.

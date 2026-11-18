@@ -16,7 +16,7 @@ use tutti_plugin_types::{
     WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::{Ipc, IpcController};
 

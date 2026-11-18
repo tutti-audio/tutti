@@ -2,7 +2,7 @@ use super::*;
 use crate::test_sink::Full;
 use crate::{FormatWriter, SpecError};
 use std::io::Cursor;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 fn spec(channels: u16, pcm: Pcm) -> Spec {
     Spec::of_width(

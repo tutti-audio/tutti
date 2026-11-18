@@ -4,7 +4,8 @@
 use tutti_buffers::{
     Float, Interleaved, InterleavedMut, Sample, Sink, SinkFailed, convert_counting_clips,
 };
-use tutti_types::{Amplitude, ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Samples};
 
 use crate::dither::{DitherNoise, DitherShape};
 

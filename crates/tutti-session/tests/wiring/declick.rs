@@ -13,7 +13,7 @@ use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
 use tutti_session::{DetachedSession, OutPort, Root, Session};
 use tutti_types::ChannelLayout;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// `DECLICK` at the session's 48 kHz.
 const SPAN: usize = 240;

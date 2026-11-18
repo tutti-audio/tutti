@@ -45,7 +45,8 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{ForkByClone, Unforkable};
 use tutti_nodes::BusStripNode;
-use tutti_types::{Amplitude, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, SampleRate, Samples};
 use wide::f32x8;
 
 const SR: f64 = 48_000.0;

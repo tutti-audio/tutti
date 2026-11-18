@@ -10,8 +10,8 @@
 use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, MtcDecoder, MtcDirection,
 };
-use tutti_types::Seconds;
 use tutti_ump::{Message, MidiGroup, System, U7, Ump};
+use tutti_units::Seconds;
 
 const FPS: f64 = 25.0;
 

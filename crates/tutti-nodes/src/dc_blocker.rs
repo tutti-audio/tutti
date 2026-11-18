@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{ChannelLayout, Hz, MaxBlock, SampleRate, Tail};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -167,7 +168,7 @@ mod tests {
     use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     fn node(width: u16, corner: f32) -> DcBlockerNode {
         prepared(DcBlockerNode::from(

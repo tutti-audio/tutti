@@ -8,7 +8,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallLanes, COEFF_INTERVAL};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Db, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -158,7 +159,8 @@ mod tests {
     use crate::test_support::{RATE_44K, prepared, prepared_at, tick, tick_fed};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::{ChannelLayout, Tail, UnitParam};
+    use tutti_types::ChannelLayout;
+    use tutti_units::{Tail, UnitParam};
 
     /// The shape declares the ceiling, a zero latency and no tail, and the width it was
     /// built for.
@@ -171,7 +173,7 @@ mod tests {
             (shape.audio_in().count(), shape.audio_out().count()),
             (2, 2)
         );
-        assert_eq!(shape.latency, tutti_types::Latency::ZERO);
+        assert_eq!(shape.latency, tutti_units::Latency::ZERO);
         assert_eq!(shape.tail, Tail::None);
         assert_eq!(b.param_base(0), Some(-1.0));
     }

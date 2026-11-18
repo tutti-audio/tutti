@@ -2,7 +2,8 @@ use super::*;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_types::{ChannelLayout, Frame};
+use tutti_types::ChannelLayout;
+use tutti_units::Frame;
 
 fn render(s: &Session, blocks: usize) {
     let mut buf = vec![0.0f32; 512 * 2];

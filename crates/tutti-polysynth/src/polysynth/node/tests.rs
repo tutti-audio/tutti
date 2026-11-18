@@ -7,10 +7,10 @@ use crate::{PolySynth, SynthConfig};
 #[test]
 fn the_shape_declares_volume_and_the_unison_params() {
     use tutti_graph::Node;
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let mut plain = PolySynth::new(SynthConfig::default());
-    plain.set_volume(tutti_types::Amplitude(0.5));
+    plain.set_volume(tutti_units::Amplitude(0.5));
     assert_eq!(plain.shape().params.as_slice(), &[UnitParam::Volume][..]);
     assert_eq!(plain.param_base(0), Some(0.5));
     assert_eq!(plain.param_base(1), None);
@@ -18,8 +18,8 @@ fn the_shape_declares_volume_and_the_unison_params() {
     let unison = PolySynth::new(SynthConfig {
         unison: Some(crate::UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(12.0),
-            stereo_spread: tutti_types::Spread::new_clamped(0.25),
+            detune_cents: tutti_units::CentsSpan::of(12.0),
+            stereo_spread: tutti_units::Spread::new_clamped(0.25),
             phase_randomize: false,
         }),
         ..SynthConfig::default()
@@ -42,11 +42,12 @@ fn the_shape_declares_volume_and_the_unison_params() {
 #[test]
 fn the_release_tail_is_in_frames_at_the_prepared_rate() {
     use tutti_graph::{Node, Prepare};
-    use tutti_types::{MaxBlock, SampleRate, Samples, Tail};
+    use tutti_types::MaxBlock;
+    use tutti_units::{SampleRate, Samples, Tail};
 
     let mut synth = PolySynth::new(SynthConfig {
         envelope: tutti_types::Adsr {
-            release: tutti_types::Seconds(0.5),
+            release: tutti_units::Seconds(0.5),
             ..Default::default()
         },
         ..Default::default()

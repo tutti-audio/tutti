@@ -25,8 +25,8 @@ use tutti_graph::{
 };
 use tutti_midi_runtime::{DeviceEpochs, DeviceInput, InputInlets, MidiIngestNode};
 use tutti_types::MaxBlock;
-use tutti_types::{SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 512;
 const EVENTS: usize = 40;

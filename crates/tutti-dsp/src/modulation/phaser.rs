@@ -16,14 +16,15 @@
 //! render.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{ChannelLayout, Depth, Feedback, Hz, MAX_CHANNELS};
+use tutti_types::{ChannelLayout, MAX_CHANNELS};
+use tutti_units::{Depth, Feedback, Hz};
 
 use crate::Glide;
 
 /// The most channels a phaser has: a bus's.
 pub const MAX_PHASER_CHANNELS: usize = MAX_CHANNELS;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// How many first-order all-pass sections a phaser's chain has, per channel: 2 to 12.
     ///
     /// Stages come in pairs, each pair making one notch: 4 gives the classic two-notch phaser

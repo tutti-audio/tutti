@@ -8,11 +8,11 @@
 use tutti_graph::IntoNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{EqBandNode, LadderFilterNode, LadderType, SvfFilterNode, SvfType};
-use tutti_types::Db;
-use tutti_types::Hz;
-use tutti_types::Q;
-use tutti_types::Resonance;
-use tutti_types::SampleRate;
+use tutti_units::Db;
+use tutti_units::Hz;
+use tutti_units::Q;
+use tutti_units::Resonance;
+use tutti_units::SampleRate;
 
 /// A node through `BlockRig`: 16 warm-up blocks, then 2 000 blocks
 /// under `assert_no_alloc`, `between` run before each (a control move).
@@ -118,7 +118,7 @@ fn svf_filter_with_parameter_changes_is_allocation_free() {
         SvfFilterNode::<f64>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0)),
         move |params, _| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 1.0 };
-            params.set(tutti_types::UnitParam::Cutoff, hz);
+            params.set(tutti_units::UnitParam::Cutoff, hz);
         },
     );
 }
@@ -139,8 +139,8 @@ fn ladder_with_moving_cutoff_and_drive_is_allocation_free() {
         ),
         move |params, i| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 7.0 };
-            params.set(tutti_types::UnitParam::Cutoff, hz);
-            params.set(tutti_types::UnitParam::Drive, 1.0 + (i % 7) as f32);
+            params.set(tutti_units::UnitParam::Cutoff, hz);
+            params.set(tutti_units::UnitParam::Drive, 1.0 + (i % 7) as f32);
         },
     );
 }

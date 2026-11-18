@@ -29,9 +29,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{Direction, MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
-use tutti_types::{
-    Amplitude, Beat, Bpm, ChannelLayout, Frame, SamplePosition, SampleRate, Samples,
-};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;

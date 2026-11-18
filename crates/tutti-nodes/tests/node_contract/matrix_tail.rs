@@ -26,9 +26,9 @@ use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::ConvolverNode;
 use tutti_types::{
-    AmbisonicFormat, AmbisonicOrder, Amplitude, Bed, ChannelLayout, ChannelTopology, MaxBlock,
-    Param, SampleRate, Samples,
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, MaxBlock, Param,
 };
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

@@ -25,9 +25,10 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use tutti_curve::Law;
-use tutti_types::{
-    Adsr, Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading,
-    SamplePosition, SampleRate, Samples, Seconds,
+use tutti_types::Adsr;
+use tutti_units::{
+    Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading, SamplePosition,
+    SampleRate, Samples, Seconds,
 };
 
 use crate::curve::Curve;
@@ -387,7 +388,7 @@ pub enum CompileError {
     /// A target range with a NaN bound.
     #[error("target {0:?}: a NaN range bound")]
     NanRange(TargetKey),
-    /// A circular target ([`tutti_types::UnitParam::is_circular`], `Azimuth`) whose
+    /// A circular target ([`tutti_units::UnitParam::is_circular`], `Azimuth`) whose
     /// `min` is above its `max`: an arc is the bounds in order, across ±180°
     /// as `170..190` (`tutti_graph::ParamRange::arc` writes one), since
     /// ordering `170..-170` would read the opposite arc.

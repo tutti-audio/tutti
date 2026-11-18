@@ -3,7 +3,7 @@
 
 use tutti_buffers::{Float, Planes, Wave};
 use tutti_types::{ChannelLayout, LayoutError};
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// Rendered audio held in memory, one `Vec` per channel.
 ///
@@ -19,7 +19,7 @@ use tutti_types::{SampleRate, Samples};
 ///
 /// ```
 /// # use tutti_export::Rendered;
-/// # use tutti_types::SampleRate;
+/// # use tutti_units::SampleRate;
 /// let rendered = Rendered::new(vec![vec![0.0f32; 4], vec![0.0; 4]], SampleRate::SR_48K, 0)?;
 /// assert_eq!(rendered.channels(), 2);
 /// assert_eq!(rendered.planes()[1].len(), 4);
@@ -33,7 +33,7 @@ use tutti_types::{SampleRate, Samples};
 ///
 /// ```compile_fail,E0451
 /// # use tutti_export::Rendered;
-/// # use tutti_types::SampleRate;
+/// # use tutti_units::SampleRate;
 /// let _ = Rendered {
 ///     planes: vec![vec![0.0f32; 4]],
 ///     sample_rate: SampleRate::SR_48K,
@@ -43,7 +43,7 @@ use tutti_types::{SampleRate, Samples};
 ///
 /// ```compile_fail,E0616
 /// # use tutti_export::Rendered;
-/// # use tutti_types::SampleRate;
+/// # use tutti_units::SampleRate;
 /// let mut rendered = Rendered::new(vec![vec![0.0f32; 4]], SampleRate::SR_48K, 0).unwrap();
 /// rendered.planes = vec![vec![0.0f32; 4], vec![0.0; 9]];
 /// ```
@@ -193,7 +193,7 @@ impl<F: Float> Rendered<F> {
 
     /// Multiplies every sample by `gain` — the apply half of a
     /// measure-then-apply normalization.
-    pub fn apply_gain(&mut self, gain: tutti_types::Db) {
+    pub fn apply_gain(&mut self, gain: tutti_units::Db) {
         let scale = F::from_f32(gain.to_amplitude().get());
         for plane in self.planes.iter_mut() {
             for s in plane.iter_mut() {

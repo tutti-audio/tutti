@@ -1,6 +1,6 @@
 //! The four stages of an ADSR envelope.
 
-use super::{Amplitude, Seconds};
+use tutti_units::{Amplitude, Seconds};
 
 /// An ADSR's stages: a synth's amplitude envelope, and a note envelope as a
 /// modulation source.

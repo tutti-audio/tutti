@@ -19,6 +19,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 # `Samples`, the frame count every view speaks, and `ChannelLayout`, its width.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # Pure-Rust `rint`, `sqrt`, `exp` and kin, so a conversion or a `Float`'s math does
 # not depend on the platform's C math library.

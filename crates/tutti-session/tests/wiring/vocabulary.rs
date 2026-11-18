@@ -8,7 +8,8 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{ConnectError, Edge, EdgeGainError, OutPort, Root, Session};
-use tutti_types::{Amplitude, ChannelLayout, ChannelTopology};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::Amplitude;
 
 fn offline() -> Session {
     Session::builder().build().expect("builds")

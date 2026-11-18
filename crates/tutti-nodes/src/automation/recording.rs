@@ -24,7 +24,7 @@
 
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_modulation::Curve;
-use tutti_types::{Beat, BeatDuration, Unit};
+use tutti_units::{Beat, BeatDuration, Unit};
 
 // ───────────────────────────── mode ──────────────────────────────
 
@@ -301,7 +301,7 @@ impl<U: Unit<Raw = f32> + Send + Sync> Curve for Recorder<U> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Hz;
+    use tutti_units::Hz;
 
     fn recorder(mode: RecordMode) -> Recorder<Hz> {
         let mut r = Recorder::new(mode, Hz(0.0), Hz(1.0));

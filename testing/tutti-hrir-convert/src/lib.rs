@@ -22,7 +22,7 @@ use std::path::Path;
 use hdf5_pure::{AttrValue, File};
 use tutti_buffers::Mono;
 use tutti_dsp::{HrirMeasurement, HrirSphere, HrtfBinauralError};
-use tutti_types::{Azimuth, Direction, Elevation, SampleRate};
+use tutti_units::{Azimuth, Direction, Elevation, SampleRate};
 
 /// Why a SOFA file could not become an HRIR sphere.
 #[derive(Debug, thiserror::Error)]

@@ -21,10 +21,10 @@ fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>
 fn sine(sample_rate: f64, freq: f32, seconds: f32) -> Vec<f32> {
     let n = (sample_rate as f32 * seconds) as usize;
     tutti_fixtures::signal::sine(
-        tutti_types::Hz(freq),
-        tutti_types::Amplitude(0.5),
-        tutti_types::SampleRate::of(sample_rate),
-        tutti_types::Samples(n),
+        tutti_units::Hz(freq),
+        tutti_units::Amplitude(0.5),
+        tutti_units::SampleRate::of(sample_rate),
+        tutti_units::Samples(n),
     )
 }
 

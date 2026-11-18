@@ -18,7 +18,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{SeqReader, SeqWriter};
-use tutti_types::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples, Seconds};
+use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples, Seconds};
 
 /// How many times a read retries a copy a write overlapped before it answers
 /// "nothing": a write is a few stores, so a reader that loses this many was
@@ -195,7 +195,7 @@ pub(crate) struct Pose {
 ///
 /// ```
 /// use tutti_engine::Playhead;
-/// use tutti_types::Beat;
+/// use tutti_units::Beat;
 /// let resting = Playhead::default();
 /// assert!(!resting.playing());
 /// assert_eq!(resting.at(), None, "no call has rendered");

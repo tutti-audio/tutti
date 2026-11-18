@@ -6,8 +6,8 @@
 //! refused.
 
 use tutti_transport::{LoopEdit, LoopRegion};
-use tutti_types::Beat;
 use tutti_types::LoopRange;
+use tutti_units::Beat;
 
 #[test]
 fn the_loop_region_round_trips() {

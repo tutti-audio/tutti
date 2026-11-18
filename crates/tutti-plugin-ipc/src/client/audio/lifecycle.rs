@@ -7,7 +7,7 @@ use dpi::Size;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_plugin_types::{PluginFailure, Timeouts};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 #[derive(Clone)]
 pub(super) struct Lifecycle {

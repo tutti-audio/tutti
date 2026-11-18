@@ -17,12 +17,12 @@ use tutti_midi_file::{
     ToClipError, Track,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
-use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
     ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats, Stream, SysexStatus,
     TextError, Utility, split_stream,
 };
+use tutti_units::{Beat, Seconds};
 
 const TPQ: u16 = 480;
 const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);

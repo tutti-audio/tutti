@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use crate::callback::AudioCallbackState;
 use crate::stream::{OutputSpec, OutputStream, StartError, StreamDriver};

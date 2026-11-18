@@ -34,7 +34,7 @@ use tutti_tempo::TempoMap;
 /// ```
 /// use tutti_tempo::TempoMap;
 /// use tutti_transport::{TempoReader, TransportSettings};
-/// use tutti_types::Bpm;
+/// use tutti_units::Bpm;
 ///
 /// let settings = TransportSettings::new();
 /// let mut reader = settings.tempo_reader();
@@ -88,7 +88,7 @@ impl TempoReader {
     ///
     /// [`TempoError`](tutti_tempo::TempoError) when `tempo` is so small that
     /// a beat's rate underflows ([`TempoMap::constant`]).
-    pub fn constant(tempo: tutti_types::Bpm) -> Result<Self, tutti_tempo::TempoError> {
+    pub fn constant(tempo: tutti_units::Bpm) -> Result<Self, tutti_tempo::TempoError> {
         Ok(Self::fixed(Arc::new(TempoMap::constant(tempo)?)))
     }
 
@@ -104,7 +104,7 @@ impl TempoReader {
 mod tests {
     use super::*;
     use crate::TransportSettings;
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     fn constant(bpm: f64) -> Arc<TempoMap> {
         Arc::new(TempoMap::constant(Bpm::of(bpm)).expect("a tempo"))

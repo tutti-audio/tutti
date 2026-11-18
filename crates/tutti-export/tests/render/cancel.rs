@@ -19,8 +19,8 @@ use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
 use tutti_transport::FrozenClock;
 use tutti_types::ChannelLayout;
-use tutti_types::Seconds;
-use tutti_types::{Db, SampleRate, Samples};
+use tutti_units::Seconds;
+use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// Blocks in a short render: three reports of 4096 frames.

@@ -1,4 +1,5 @@
-use tutti_types::{Amplitude, ChannelLayout};
+use tutti_types::ChannelLayout;
+use tutti_units::Amplitude;
 
 use super::{PeakBlock, PeakBlocks};
 

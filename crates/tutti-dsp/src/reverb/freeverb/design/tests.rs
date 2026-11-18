@@ -1,4 +1,4 @@
-use tutti_types::{Feedback, Mix};
+use tutti_units::{Feedback, Mix};
 
 use super::*;
 

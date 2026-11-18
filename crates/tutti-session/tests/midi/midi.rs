@@ -22,15 +22,15 @@ use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
 use tutti_rt::PushError;
 #[cfg(feature = "midi-hardware")]
-use tutti_types::SampleRate;
-use tutti_types::{Beat, BeatDuration, Frame};
-#[cfg(feature = "midi-hardware")]
 use tutti_ump::MidiGroup;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
+#[cfg(feature = "midi-hardware")]
+use tutti_units::SampleRate;
+use tutti_units::{Beat, BeatDuration, Frame};
 
 use tutti_fixtures::midi;
 use tutti_session::{

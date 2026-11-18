@@ -13,7 +13,8 @@ use tutti_graph::{BusRef, BusSource, Cx, ForkByClone, Io, Node, Prepare, Shape, 
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Reopened, Root, RootReader, Session, SessionEvent};
 use tutti_types::Speaker;
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
 const FADE: usize = 240;

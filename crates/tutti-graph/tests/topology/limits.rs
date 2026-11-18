@@ -7,8 +7,9 @@
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Cx, Editor, Io, Limits, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{OutPort, Source};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 struct Wide(u16);
 

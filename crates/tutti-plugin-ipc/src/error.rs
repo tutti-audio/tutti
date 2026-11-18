@@ -6,7 +6,7 @@
 
 use thiserror::Error;
 use tutti_plugin_types::{BridgeError, PluginFailure};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// How a forked plugin instance failed while rendering.
 ///
@@ -55,9 +55,9 @@ pub enum PluginRenderFault {
     )]
     LatencyChanged {
         /// What the fork's graph compensates for.
-        planned: tutti_types::Latency,
+        planned: tutti_units::Latency,
         /// What the instance declares now.
-        now: tutti_types::Latency,
+        now: tutti_units::Latency,
     },
 }
 

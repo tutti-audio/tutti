@@ -5,7 +5,8 @@ use tutti_graph::{
     Cost, Cx, Event, EventKind, Io, Node, Offset, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
-use tutti_types::{ChannelLayout, Frame, ParamId, SamplePosition, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Frame, ParamId, SamplePosition, Samples};
 
 use super::PlayWalk;
 

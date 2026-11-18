@@ -6,7 +6,8 @@ use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 
 use tutti_graph::{NodeKey, ParamUnit};
-use tutti_types::{ParamAddr, ParamCell, UnitAddr};
+use tutti_types::ParamCell;
+use tutti_units::{ParamAddr, UnitAddr};
 
 use super::batch::Describe;
 use super::error::{SetRefusal, ValueErrorKind};
@@ -21,7 +22,7 @@ use super::target::{Info, Moved, ScalarTarget, Target, TargetId, sealed, target_
 ///
 /// It is written and read with the session's verbs:
 /// `session.set(lp.cutoff().to(Hz::new(800.0)))`. The write goes to the
-/// param's cell at the cell's own width, so a [`Seconds`](tutti_types::Seconds)
+/// param's cell at the cell's own width, so a [`Seconds`](tutti_units::Seconds)
 /// stays an `f64`.
 ///
 /// `Copy`, and equal when node and address are.

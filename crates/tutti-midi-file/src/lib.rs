@@ -9,7 +9,7 @@
 //! track is `(Tick, FileEvent)` in order and where it ends. Ticks are integers,
 //! so a write is exact; [`MidiFile::timebase`] says what a tick counts, and the
 //! metrical view's [`MetricalView::events`] gives the merged timeline as
-//! [`Beat`](tutti_types::Beat)s, [`MetricalView::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
+//! [`Beat`](tutti_units::Beat)s, [`MetricalView::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
 //! Offs.
 //!
 //! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
@@ -93,7 +93,7 @@
 //!
 //! ```rust
 //! use tutti_midi_file::{LeadTrack, Layout, Meta, MidiFile, SmfDivision, Tick, Track};
-//! use tutti_types::{Bpm, Seconds};
+//! use tutti_units::{Bpm, Seconds};
 //! use tutti_ump::{MidiChannel, NoteNumber, U7};
 //!
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.

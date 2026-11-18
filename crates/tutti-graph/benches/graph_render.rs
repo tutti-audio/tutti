@@ -34,7 +34,8 @@ use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
 const MAX_BLOCK: usize = 1024;

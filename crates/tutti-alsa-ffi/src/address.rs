@@ -11,8 +11,8 @@ const CLIENTS: u8 = 192;
 /// 254 and 255 name "the subscribers" and "everyone".
 const PORTS: u8 = 254;
 
-// `ClientId`, `PortId` and `Address` are written by hand, not with `tutti_types::ranged!`:
-// this crate is layer 0 and cannot name `tutti-types`, and `Address` is a pair.
+// `ClientId`, `PortId` and `Address` are written by hand, not with `tutti_units::ranged!`:
+// this crate is layer 0 and cannot name `tutti-units`, and `Address` is a pair.
 
 /// A client's number in the sequencer: `0..=191`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

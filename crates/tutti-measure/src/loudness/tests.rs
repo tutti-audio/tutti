@@ -1,7 +1,8 @@
 use super::*;
 use crate::fold_uneven;
 use std::f32::consts::TAU;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, Amplitude, Azimuth, Bed, Elevation, Speaker};
+use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
+use tutti_units::{Amplitude, Azimuth, Elevation};
 
 /// Pushes one chunk to a windowed meter and returns the reading it yields.
 fn read(state: &mut WindowedMeter, chunk: Interleaved<'_>) -> Result<WindowedReading> {
@@ -61,10 +62,10 @@ fn silent_render_yields_a_finite_normalization_gain() {
 fn sine(rate: f64, secs: f64, freq: f32, amp: f32) -> Vec<f32> {
     let n = (rate * secs) as usize;
     tutti_fixtures::signal::sine(
-        tutti_types::Hz(freq),
-        tutti_types::Amplitude(amp),
+        tutti_units::Hz(freq),
+        tutti_units::Amplitude(amp),
         SampleRate::of(rate),
-        tutti_types::Samples(n),
+        tutti_units::Samples(n),
     )
     .into_iter()
     .flat_map(|s| [s, s])
@@ -542,10 +543,10 @@ fn tone_on(bed: Bed, index: usize) -> Loudness {
     let width = usize::from(bed.width().count());
     let rate = SampleRate::SR_48K;
     let tone = tutti_fixtures::signal::sine(
-        tutti_types::Hz(TONE_HZ),
+        tutti_units::Hz(TONE_HZ),
         Amplitude(TONE_AMP),
         rate,
-        tutti_types::Samples(2 * 48_000),
+        tutti_units::Samples(2 * 48_000),
     );
     let mut buf = vec![0.0f32; tone.len() * width];
     for (frame, v) in tone.iter().enumerate() {
@@ -663,10 +664,10 @@ fn the_weight_follows_the_speaker_in_a_reordered_topology() {
     .unwrap();
     let c = Rated(LoudnessConfig::new(reordered), SampleRate::SR_48K);
     let tone = tutti_fixtures::signal::sine(
-        tutti_types::Hz(TONE_HZ),
+        tutti_units::Hz(TONE_HZ),
         Amplitude(TONE_AMP),
         SampleRate::SR_48K,
-        tutti_types::Samples(2 * 48_000),
+        tutti_units::Samples(2 * 48_000),
     );
     let read = |channel: usize| {
         let mut buf = vec![0.0f32; tone.len() * 6];
@@ -723,10 +724,10 @@ fn the_windowed_meter_weighs_by_placement() {
         SampleRate::SR_48K,
     );
     let tone = tutti_fixtures::signal::sine(
-        tutti_types::Hz(TONE_HZ),
+        tutti_units::Hz(TONE_HZ),
         Amplitude(TONE_AMP),
         SampleRate::SR_48K,
-        tutti_types::Samples(48_000),
+        tutti_units::Samples(48_000),
     );
     let momentary = |channel: usize| {
         let mut buf = vec![0.0f32; tone.len() * 6];

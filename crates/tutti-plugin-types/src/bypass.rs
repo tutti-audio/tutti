@@ -2,7 +2,7 @@
 //! came to ([`BypassWrite`]).
 
 use crate::{Normalized, ParamFlags, ParamWriteError, ParameterInfo};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

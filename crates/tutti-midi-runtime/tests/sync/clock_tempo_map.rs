@@ -32,8 +32,9 @@ use tutti_graph::{Editor, Executor, NodeKey, Prepare};
 use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{FadeOut, MotionEvent, Then, Transport};
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, System, U14};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const TICKS_PER_BEAT: f64 = 24.0;

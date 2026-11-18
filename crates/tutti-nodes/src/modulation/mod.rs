@@ -13,8 +13,8 @@
 //! [`ModDelayNode`] and [`PhaserNode`] are each a [`KernelNode`](crate::KernelNode).
 //!
 //! Consequence worth knowing: chorus and flanger take their depth in
-//! [`Seconds`](tutti_types::Seconds) of delay sweep, while the phaser's is a
-//! unitless [`Depth`](tutti_types::Depth) fraction of its frequency range.
+//! [`Seconds`](tutti_units::Seconds) of delay sweep, while the phaser's is a
+//! unitless [`Depth`](tutti_units::Depth) fraction of its frequency range.
 
 mod mod_delay;
 mod phaser;

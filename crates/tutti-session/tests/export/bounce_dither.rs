@@ -9,7 +9,8 @@ use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{Bounce, DitherShape, Range, Root, Session};
-use tutti_types::{ChannelLayout, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Seconds};
 
 /// 9830.1 steps of 16 bit: a tenth of a step off a code.
 const LEVEL: f32 = 9_830.1 / 32_768.0;

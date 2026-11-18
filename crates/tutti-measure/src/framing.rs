@@ -5,7 +5,7 @@
 use core::ops::RangeInclusive;
 
 use tutti_dsp::{FrameCount, StftGeometry};
-use tutti_types::{Hz, SampleRate, Samples};
+use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::convert::BLOCK;
 use crate::{Error, Result};

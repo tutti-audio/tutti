@@ -16,10 +16,11 @@ use tutti_graph::{
     Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
-use tutti_types::{Beat, BeatDuration, Bpm, LoopRange, SampleRate, Samples};
+use tutti_types::LoopRange;
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
 use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, Voice2};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 
@@ -556,7 +557,7 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
     let region = Region::new(start, end).unwrap();
     let mut clock = FrameClock::new(
         Beat(2.999),
-        tutti_types::Bpm::of(TEMPO),
+        tutti_units::Bpm::of(TEMPO),
         SampleRate::of(RATE),
     );
     for _ in 0..4 {
@@ -574,7 +575,7 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
     let mut want = Vec::new();
     let mut walk = FrameClock::new(
         Beat(2.999),
-        tutti_types::Bpm::of(TEMPO),
+        tutti_units::Bpm::of(TEMPO),
         SampleRate::of(RATE),
     );
     let mut prev: Option<f64> = None;
@@ -622,7 +623,7 @@ fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
         let clip = MidiClipNode::new([TimedMidiEvent::new(start, on(60)).unwrap()]);
         let (_ed, mut exec, _c, seen) = rig(clip, 64);
         let mut clock =
-            tutti_types::FrameClock::new(start, tutti_types::Bpm::of(120.0), SampleRate::of(RATE));
+            tutti_types::FrameClock::new(start, tutti_units::Bpm::of(120.0), SampleRate::of(RATE));
         let region = tutti_types::LoopRange::new(start, end).unwrap();
         for _ in 0..4 {
             exec.process(

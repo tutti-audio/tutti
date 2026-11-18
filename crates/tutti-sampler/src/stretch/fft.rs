@@ -1,7 +1,7 @@
 //! The vocoder's real-input FFT pair, planned once per window length.
 //!
 //! A thin owner of [`RealFft`] (the engine's CPU-independent real FFT, in
-//! `tutti-types`) and the scratch one vocoder transforms with. The plans are
+//! `tutti-dsp`) and the scratch one vocoder transforms with. The plans are
 //! immutable and shared between clones; the scratch is per vocoder. A
 //! transform allocates nothing.
 

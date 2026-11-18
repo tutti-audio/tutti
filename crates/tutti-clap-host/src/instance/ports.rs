@@ -18,7 +18,8 @@ use clap_sys::ext::note_ports::{
 };
 use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology, Samples};
+use tutti_types::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology};
+use tutti_units::Samples;
 
 /// CLAP's constant for `ordering`.
 const fn clap_ordering(ordering: AmbisonicOrdering) -> u32 {

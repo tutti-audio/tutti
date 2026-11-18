@@ -9,7 +9,8 @@ use tutti_graph::NodeKey;
 use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -367,7 +368,7 @@ fn muting_the_setup_silences_the_wet_path_too() {
     );
 
     // The instrument's gain is the dry level: zero leaves the reverb heard.
-    gm.instrument().set_gain(tutti_types::Amplitude(0.0));
+    gm.instrument().set_gain(tutti_units::Amplitude(0.0));
     for _ in 0..2 {
         peak_of_block(&mut session);
     }

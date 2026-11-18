@@ -9,8 +9,9 @@ use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamUnit};
 use tutti_session::{DetachedSession, PluginParamError, Root, Session};
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{Db, Hz, SampleRate};
 
 /// The probe's parameter that is labelled `Hz` and has an integer range.
 const HERTZ: ParamId = ParamId::new(1);

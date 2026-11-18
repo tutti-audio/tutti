@@ -9,7 +9,8 @@ use std::sync::Arc;
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
 };
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 use crate::driver_seam::{CpalDriver, spec_from_supported};
 use crate::error::{Error, Result};

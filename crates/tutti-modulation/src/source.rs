@@ -18,8 +18,8 @@ pub use note_adsr::NoteAdsr;
 use core::num::NonZeroU32;
 
 use tutti_curve::{Law, Piece};
-use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::Ump;
+use tutti_units::{Frame, SampleRate, Samples};
 
 /// A stride of the play clock's grid, in play frames: a source on it sends a
 /// piece on every frame whose play count is a multiple of the stride.

@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
+use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use super::*;
 use crate::MaxDecay;

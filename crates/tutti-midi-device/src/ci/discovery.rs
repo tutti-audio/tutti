@@ -46,7 +46,7 @@ bitflags! {
 /// byte stream). [`DiscoveryData::function_block`] is `None` for it.
 const NO_FUNCTION_BLOCK_WIRE: u8 = 0x7F;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The Receivable Maximum SysEx Message Size (M2-101 §5.5.3): 28 bits, and at
     /// least 128.
     ///

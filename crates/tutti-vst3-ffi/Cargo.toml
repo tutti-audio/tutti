@@ -30,6 +30,7 @@ crossbeam-queue = "0.3"
 arrayvec = "0.7"
 bitflags = "2"
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }

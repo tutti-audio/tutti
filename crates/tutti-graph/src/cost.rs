@@ -63,7 +63,7 @@
 
 use crate::node::Shape;
 use crate::plan::Op;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// What a node declares about its processing cost, per sample and channel:
 /// an order of magnitude the compiler's cost model works from (see

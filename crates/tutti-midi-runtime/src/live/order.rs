@@ -2,8 +2,8 @@
 
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_types::Samples;
 use tutti_ump::Ump;
+use tutti_units::Samples;
 
 /// An empty slot for a buffer of events: a Utility NOOP at the block's first
 /// frame.

@@ -20,7 +20,8 @@
 //!
 //! ```
 //! use tutti_types::MaxBlock;
-//! use tutti_types::{ChannelLayout, Hz, SampleRate, Samples};
+//! use tutti_units::{Hz, SampleRate, Samples};
+//! use tutti_types::ChannelLayout;
 //! use tutti_graph::{GraphBuilder, Prepare};
 //! use tutti_nodes::testing::Osc;
 //!
@@ -52,7 +53,8 @@ use tutti_dsp::OscillatorWave;
 use tutti_graph::{
     Cx, ForkByClone, IntoNode, Io, Node, NodeParts, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::{Amplitude, Azimuth, ChannelLayout, Elevation, Hz, Phase, SampleRate, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Azimuth, Elevation, Hz, Phase, SampleRate, UnitParam};
 
 /// Aims a panner at `azimuth` and `elevation` through its [`ParamSet`]: the
 /// two writes a test makes together. The panner wraps the bearing and clamps
@@ -402,7 +404,7 @@ mod tests {
     use tutti_buffers::Planes;
     use tutti_graph::Solo;
     use tutti_types::MaxBlock;
-    use tutti_types::Samples;
+    use tutti_units::Samples;
 
     /// `node` alone in a graph at `rate`, in blocks of `block` frames.
     fn solo<N: IntoNode<Controls = ()>>(node: N, rate: SampleRate, block: usize) -> Solo<()> {
@@ -523,7 +525,7 @@ mod tests {
     /// saw starts at the top of its ramp, +1.0, rather than at −1.0.
     ///
     /// The edge row does not tell a start of `1.0 - ε` from `1.0`, which the saw also emits
-    /// as +1.0; that `Phase::wrapped` stays under 1.0 is pinned in `tutti-types`.
+    /// as +1.0; that `Phase::wrapped` stays under 1.0 is pinned in `tutti-units`.
     #[test]
     fn with_phase_wraps_into_one_cycle_and_reset_restores_it() {
         let quarter = 2.0 * 0.25 - 1.0; // the saw's value at 0.25 turns

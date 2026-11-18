@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 use super::bell::Bell;
 use super::config::BufferConfig;

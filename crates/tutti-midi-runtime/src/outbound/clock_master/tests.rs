@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
 use tutti_transport::ProjectMeter;
+use tutti_types::LoopRange;
 use tutti_types::MeterChange;
-use tutti_types::{Bpm, LoopRange, Seconds};
 use tutti_ump::{Flex, Message, MidiGroup, System};
+use tutti_units::{Bpm, Seconds};
 
 /// The System message a packet carries.
 fn system(ump: Ump) -> Option<System> {
@@ -813,8 +814,8 @@ fn play_layout(from: f64, region: (f64, f64), mtc: bool, lens: &[usize]) -> Vec<
     transport.set_playing(true);
     cm.set_send_mtc(mtc);
     let looping = tutti_types::LoopRange::new(
-        tutti_types::Beat::new(region.0),
-        tutti_types::Beat::new(region.1),
+        tutti_units::Beat::new(region.0),
+        tutti_units::Beat::new(region.1),
     );
     let mut host = tutti_types::FrameClock::new(Beat(from), Bpm::of(120.0), SampleRate::SR_48K);
     let mut frame = 0u64;
@@ -1413,7 +1414,7 @@ fn bar_lines_off_the_dyadic_beats_are_walked_by_number_and_end() {
         let mut expected = Vec::new();
         let mut stated = None;
         for n in 1.. {
-            let line = meter_map.bar_start(tutti_types::BarNumber(n));
+            let line = meter_map.bar_start(tutti_units::BarNumber(n));
             let frame = (line.get() * 24_000.0).round() as usize;
             if frame >= frames {
                 break;

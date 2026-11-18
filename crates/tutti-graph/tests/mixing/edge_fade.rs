@@ -15,7 +15,7 @@ use tutti_graph::{
     Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutPort, Sink, Source,
     TransportPosition, Unforkable,
 };
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 const BLOCK: usize = 64;
 /// `DECLICK` at the rig's 48 kHz.

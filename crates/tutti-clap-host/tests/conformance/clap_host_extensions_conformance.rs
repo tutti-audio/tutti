@@ -25,7 +25,7 @@ use tutti_clap_test_plugin::{
 use tutti_plugin_types::{
     ChannelLayout, Control, Delivered, Request, TrackInfo, TrackKind, TransportRequest,
 };
-use tutti_types::{Beat, BeatDuration};
+use tutti_units::{Beat, BeatDuration};
 
 /// `clap_beattime` is 2^31 units to the beat (`fixedpoint.h`); pinned here so a
 /// failure names the wire value the plugin sent.

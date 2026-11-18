@@ -10,7 +10,8 @@ use tutti_measure::{
     ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
     VectorscopeConfig,
 };
-use tutti_types::{Amplitude, ChannelLayout, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
 use super::{Analyze, AnalyzeError};
 

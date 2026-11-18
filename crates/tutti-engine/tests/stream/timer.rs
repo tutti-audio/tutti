@@ -17,7 +17,8 @@ use tutti_engine::{
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 fn timer_state() -> (Arc<AudioCallbackState>, BlockClockReader) {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {

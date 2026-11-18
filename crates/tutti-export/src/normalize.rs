@@ -17,7 +17,8 @@ use tutti_dsp::DitherShape;
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
 };
-use tutti_types::{Amplitude, ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use crate::Result;
 use crate::Unmeasured;

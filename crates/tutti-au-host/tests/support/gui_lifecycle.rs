@@ -38,7 +38,7 @@ fn on_main() -> tutti_plugin_types::MainThreadMarker {
     tutti_plugin_types::MainThreadMarker::new().expect("the harness-less runner is the main thread")
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// Open `au`'s editor with no parent view.

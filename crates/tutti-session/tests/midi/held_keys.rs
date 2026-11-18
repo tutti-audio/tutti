@@ -9,8 +9,8 @@ use crate::common::{Seen, blocks, offline, tap};
 use tutti_graph::{Cx, Event, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status};
 use tutti_midi_runtime::{MIDI_INPUT_PORTS, MidiInputPorts, TimedMidiEvent};
 use tutti_session::{MidiRouteRule, Session, SessionNode};
-use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::{Beat, BeatDuration};
 
 const MF: u16 = 0x8000;
 /// Stands in for the hardware input: sends what it is mailed on port 0.

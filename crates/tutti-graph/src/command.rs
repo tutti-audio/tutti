@@ -15,8 +15,8 @@
 //!   (`Env::due`), and deliver what falls in this block at its offset
 //! ```
 //!
-//! **Every command says when** — an [`At`]: a [`Frame`](tutti_types::Frame)
-//! on the executor's clock, a [`Beat`](tutti_types::Beat) resolved against
+//! **Every command says when** — an [`At`]: a [`Frame`](tutti_units::Frame)
+//! on the executor's clock, a [`Beat`](tutti_units::Beat) resolved against
 //! the transport snapshot of the block it falls in, or
 //! [`At::NextBlock`], which is a visible choice, not a default.
 //!
@@ -88,7 +88,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
-use tutti_types::{At, Latency};
+use tutti_units::{At, Latency};
 
 use crate::event::{Event, EventKind, merge_into, merge_walk};
 use crate::node::MAX_PORTS;
@@ -452,7 +452,7 @@ impl CommandRx {
                 && let At::Frame(_) = cmd.at
             {
                 cmd.pos *= ratio;
-                cmd.at = At::Frame(tutti_types::Frame::nearest(cmd.pos));
+                cmd.at = At::Frame(tutti_units::Frame::nearest(cmd.pos));
             }
         }
     }
@@ -665,8 +665,8 @@ pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize
 mod tests {
     use super::*;
     use crate::NodeKey;
-    use tutti_types::Frame;
     use tutti_ump::Ump;
+    use tutti_units::Frame;
 
     #[test]
     fn only_a_missing_plan_or_a_full_queue_is_transient() {

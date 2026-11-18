@@ -6,8 +6,8 @@
 
 use tutti_midi_protocol::narrow_note_on_velocity;
 use tutti_sf2::{SamplePool, SoundFont};
-use tutti_types::{Amplitude, Semitones};
 use tutti_ump::{MidiChannel, NoteVelocity};
+use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{ChannelState, Command, VoiceId};
 
 use crate::channel::Channel;

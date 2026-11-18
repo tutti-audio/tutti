@@ -1,7 +1,7 @@
 //! [`System`]: what every processor answers, [`Ring`], how long it rings, and the
 //! [`TAIL_FLOOR`] it is measured to.
 
-use tutti_types::{Db, Samples, Seconds};
+use tutti_units::{Db, Samples, Seconds};
 
 /// The level a tail is measured to when nothing says otherwise:
 /// -60 dB, the reverberation time's definition.

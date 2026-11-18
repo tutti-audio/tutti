@@ -162,7 +162,7 @@ impl Bufs64 {
 #[test]
 fn effect_render_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DELAY.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     for _ in 0..WARMUP {
@@ -188,7 +188,7 @@ fn effect_render_does_not_allocate() {
 #[test]
 fn f64_effect_render_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DELAY.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs64::new();
 
     for _ in 0..WARMUP {
@@ -210,7 +210,7 @@ fn f64_effect_render_does_not_allocate() {
 #[test]
 fn instrument_render_with_midi_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DLS_SYNTH.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DLS_SYNTH.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     au.send_midi(&[(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xC000))]);
@@ -240,7 +240,7 @@ fn instrument_render_with_midi_does_not_allocate() {
 #[test]
 fn send_midi_decode_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DLS_SYNTH.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DLS_SYNTH.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     au.send_midi(&[(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xC000))]);
@@ -291,7 +291,7 @@ fn a_long_sysex_does_not_allocate_and_an_oversized_one_is_dropped_counted() {
     use tutti_ump::SYSEX7_MAX_PAYLOAD;
 
     let _lock = lock();
-    let au = corpus::SAMPLER.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let au = corpus::SAMPLER.open(tutti_units::SampleRate::SR_48K, BLOCK);
 
     // Built before the guarded region: the harness allocates, the host must not.
     let body: Vec<u8> = (0..3000).map(|i| (i % 0x7F) as u8).collect();
@@ -334,7 +334,7 @@ fn a_long_sysex_does_not_allocate_and_an_oversized_one_is_dropped_counted() {
 #[test]
 fn render_after_preset_load_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DISTORTION.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DISTORTION.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     // Enumerated before the guarded region: the walk copies CFStrings into
@@ -369,7 +369,7 @@ fn render_after_preset_load_does_not_allocate() {
 #[test]
 fn bypass_toggle_during_render_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DISTORTION.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DISTORTION.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     au.set_bypass(false).expect("AUDistortion supports bypass");
@@ -398,7 +398,7 @@ fn bypass_toggle_during_render_does_not_allocate() {
 #[test]
 fn per_element_parameter_writes_do_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::MULTI_CHANNEL_MIXER.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::MULTI_CHANNEL_MIXER.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     let unit = au.unit().clone();
@@ -447,13 +447,13 @@ fn per_element_parameter_writes_do_not_allocate() {
 #[test]
 fn render_after_sample_rate_change_does_not_allocate() {
     let _lock = lock();
-    let mut au = corpus::DELAY.open(tutti_types::SampleRate::SR_48K, BLOCK);
+    let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
     for _ in 0..WARMUP {
         b.render(&mut au);
     }
-    au.set_sample_rate(tutti_types::SampleRate::SR_44K1)
+    au.set_sample_rate(tutti_units::SampleRate::SR_44K1)
         .expect("AUDelay accepts 44.1kHz");
     // Re-warm at the new rate: the rebuild's own allocation is expected, and is
     // deliberately left outside the guard.

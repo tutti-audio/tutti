@@ -14,7 +14,8 @@ use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
 use tutti_graph::{Node, Prepare};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Error, Polyphony, Settings, SoundFontUnit};
-use tutti_types::{MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{SampleRate, Samples};
 
 /// A unit at the default settings, whose dry pair is true silence once a voice
 /// stops.

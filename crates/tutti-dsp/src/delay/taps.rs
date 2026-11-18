@@ -1,6 +1,6 @@
 //! What the delay and the reverbs share: the length of a ring-out.
 
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds};
 
 use crate::onepole::ring_frames;
 

@@ -59,8 +59,8 @@ use tutti_midi_protocol::{
     MmcLocate, MmcMove, MmcPosition, MmcSegment, MmcSegmentError, MmcSegmentPlace, MmcSign,
     MmcSpeed, Read, Recipient, SysexDeviceId, Universal, read,
 };
-use tutti_types::Seconds;
 use tutti_ump::{SysexAssembler, SysexStep, Ump};
+use tutti_units::Seconds;
 
 /// What a Machine Control source asks of the transport.
 #[derive(Clone, Copy, Debug, PartialEq)]

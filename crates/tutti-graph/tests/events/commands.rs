@@ -14,8 +14,9 @@ use tutti_graph::{
     Reference, ScheduleError, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, Samples, Tail};
+use tutti_types::{ChannelLayout, LoopRange};
 use tutti_ump::Ump;
+use tutti_units::{At, Beat, Bpm, Frame, Samples, Tail};
 
 /// `(absolute frame, block start, offset, tag)` per event received.
 type Log = Arc<Mutex<Vec<(u64, u64, u32, u32)>>>;
@@ -45,7 +46,7 @@ impl Node for Probe {
                     EventKind::Midi(Ump(w)) => w[0],
                     EventKind::Ramp(r) => {
                         self.level = r
-                            .foreign_target(tutti_types::ParamId::new(0))
+                            .foreign_target(tutti_units::ParamId::new(0))
                             .expect("ramps address id 0");
                         u32::MAX
                     }
@@ -195,7 +196,7 @@ fn a_scheduled_ramp_steps_the_output_on_its_frame() {
     rig.schedule(
         At::Frame(Frame::new(90)),
         EventKind::Ramp(ParamRamp::foreign(
-            tutti_types::ParamId::new(0),
+            tutti_units::ParamId::new(0),
             0.5,
             Samples(0),
         )),
@@ -671,7 +672,7 @@ fn a_ramp_into_a_coarse_node_is_refused() {
     ed.commit().expect("commits");
     exec.apply_pending();
     let ramp = EventKind::Ramp(ParamRamp::foreign(
-        tutti_types::ParamId::new(0),
+        tutti_units::ParamId::new(0),
         1.0,
         Samples(0),
     ));
@@ -1236,8 +1237,8 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
         rig.block(1, &at(now));
         now = step(now);
     }
-    let ahead_again = tutti_types::At::Beat(Beat(3.99995));
-    let crossed = tutti_types::At::Beat(Beat(seek + 2.5 * frame_beat));
+    let ahead_again = tutti_units::At::Beat(Beat(3.99995));
+    let crossed = tutti_units::At::Beat(Beat(seek + 2.5 * frame_beat));
     for (when, t) in [(ahead_again, 1), (crossed, 2)] {
         rig.schedule(when, tag(t));
     }

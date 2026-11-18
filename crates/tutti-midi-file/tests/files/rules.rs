@@ -13,8 +13,8 @@ use tutti_midi_file::{
     SmfDivision, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{ManufacturerId, MidiChannel, NoteNumber, U7};
+use tutti_units::{Beat, Bpm};
 
 const TPQ: u16 = 480;
 const BEAT: u32 = TPQ as u32;

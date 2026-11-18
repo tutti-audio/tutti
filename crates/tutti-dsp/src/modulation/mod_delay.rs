@@ -34,9 +34,9 @@
 //! is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{
-    BusTopology, Feedback, Gain, Hz, MAX_CHANNELS, PhaseIncrement, SamplePosition, SampleRate,
-    SampleSpan, Samples, Seconds,
+use tutti_types::{BusTopology, MAX_CHANNELS};
+use tutti_units::{
+    Feedback, Gain, Hz, PhaseIncrement, SamplePosition, SampleRate, SampleSpan, Samples, Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};

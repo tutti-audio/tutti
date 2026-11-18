@@ -10,7 +10,8 @@ use tutti_dsp::{
     TruePeakError,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Samples, Seconds, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -251,7 +252,8 @@ mod tests {
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode, Prepare};
-    use tutti_types::{Amplitude, ChannelLayout, Latency, MaxBlock, Samples, Tail, UnitParam};
+    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_units::{Amplitude, Latency, Samples, Tail, UnitParam};
 
     /// The usual mastering limiter at the default lookahead, as the node's own tests make
     /// it: stereo, at `threshold` and `ceiling`, with the default release.

@@ -5,7 +5,8 @@ use crate::{BufferError, Sample, bounds};
 use core::fmt;
 use core::iter::FusedIterator;
 use core::ops::Range;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Checks that `len` samples are whole frames of `layout`.
 fn check(len: usize, layout: ChannelLayout) -> Result<(), BufferError> {
@@ -33,7 +34,8 @@ fn check(len: usize, layout: ChannelLayout) -> Result<(), BufferError> {
 ///
 /// ```
 /// use tutti_buffers::Interleaved;
-/// use tutti_types::{ChannelLayout, Samples};
+/// use tutti_units::Samples;
+/// use tutti_types::ChannelLayout;
 ///
 /// let data = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]; // three stereo frames
 /// let buf = Interleaved::new(&data, ChannelLayout::STEREO)?;

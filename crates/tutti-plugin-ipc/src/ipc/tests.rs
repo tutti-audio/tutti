@@ -12,7 +12,7 @@ use tutti_plugin_types::{
     PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat, SampleRate,
     Samples,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::DeclaredCache;
 

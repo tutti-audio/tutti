@@ -11,12 +11,12 @@ use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
-use tutti_types::Samples;
 use tutti_ump::{
     Address, Attribute, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
     PerNoteManagement, Rpn, Ump, Voice2,
 };
 use tutti_ump::{Bank, ControlValue, Message, RegisteredPerNoteController, System, U7};
+use tutti_units::Samples;
 
 const BLOCK: usize = 1_000;
 

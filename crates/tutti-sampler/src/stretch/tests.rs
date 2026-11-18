@@ -8,9 +8,8 @@ use super::unit::*;
 use super::vocoder::*;
 use super::*;
 use tutti_fixtures::signal::rms;
-use tutti_types::{
-    Amplitude, Cents, ChannelLayout, Hz, Radians, ReadRate, SampleRate, Samples, StretchFactor,
-};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Cents, Hz, Radians, ReadRate, SampleRate, Samples, StretchFactor};
 
 use std::f32::consts::PI;
 use std::sync::Arc;

@@ -113,8 +113,9 @@ use tutti_plugin_types::{
     Normalized, ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare,
     ResyncClass, SampleFormat,
 };
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 use self::fork::{ForkWatch, ServedFork};
 

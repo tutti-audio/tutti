@@ -13,8 +13,8 @@ use tutti_graph::{
 };
 use tutti_session::{CloseError, DetachedSession, EventInPort, EventOutPort, Session};
 use tutti_types::ChannelLayout;
-use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{Frame, SampleRate};
 
 /// A note-on on every frame that is a multiple of 4, its own frame in word 0.
 struct Every4;

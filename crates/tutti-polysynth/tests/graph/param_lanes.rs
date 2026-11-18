@@ -15,11 +15,11 @@ use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
-use tutti_types::{
+use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::{
     Beat, BeatsPerCycle, Bpm, CentsSpan, Depth, PhaseIncrement, SampleRate, Samples, Seconds,
     Spread, UnitParam,
 };
-use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -157,11 +157,11 @@ fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], O
 #[test]
 fn a_lane_drives_the_master_volume_around_its_cell() {
     let mut plain = synth(false, 0.0);
-    plain.set_volume(tutti_types::Amplitude(0.5));
+    plain.set_volume(tutti_units::Amplitude(0.5));
     let [undriven, _] = render(plain, None);
 
     let mut driven_synth = synth(false, 0.0);
-    driven_synth.set_volume(tutti_types::Amplitude(0.5));
+    driven_synth.set_volume(tutti_units::Amplitude(0.5));
     let ([driven, _], knob) = render_with_knob(
         driven_synth,
         Some(Drive {

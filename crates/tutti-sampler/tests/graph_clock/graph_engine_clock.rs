@@ -29,7 +29,8 @@ use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport};
-use tutti_types::{At, Beat, Cents, ChannelLayout, Frame, LoopRange, SampleRate, Samples};
+use tutti_types::{ChannelLayout, LoopRange};
+use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 /// Frames per beat at 120 BPM and `SR`.

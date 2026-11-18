@@ -11,7 +11,8 @@
 //! corner is the segment's end.
 
 use tutti_dsp::{COEFF_INTERVAL, Glide};
-use tutti_types::{MAX_CHANNELS, Phase, PhaseIncrement};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Phase, PhaseIncrement};
 
 /// The frames of a segment: a corner's glide takes this many steps.
 pub(crate) const SEGMENT: u32 = 16;

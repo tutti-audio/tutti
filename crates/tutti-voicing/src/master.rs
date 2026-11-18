@@ -32,8 +32,8 @@
 //! the total displacement in cents from A440 for each MIDI channel is the sum
 //! of the Master Tuning displacement and that of Fine Tuning using RPN.
 
-use tutti_types::{Amplitude, Semitones};
 use tutti_ump::{U7, U14};
+use tutti_units::{Amplitude, Semitones};
 
 use tutti_midi_protocol::Addressee;
 

@@ -17,7 +17,8 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, Source,
 };
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
-use tutti_types::{ChannelLayout, Latency, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{Latency, SampleRate, Samples, Tail};
 
 /// The `MaxBlock` every plan in this file is compiled for.
 const PREP: usize = 128;

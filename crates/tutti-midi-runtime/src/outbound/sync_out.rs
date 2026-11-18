@@ -46,8 +46,9 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, RtVec, Setting, counter};
-use tutti_types::{Beat, MeterMap, SampleRate};
+use tutti_types::MeterMap;
 use tutti_ump::{MidiGroup, Sysex7Packets};
+use tutti_units::{Beat, SampleRate};
 
 use super::clock_master::ClockMaster;
 use super::machine_control_out::MachineControlSender;

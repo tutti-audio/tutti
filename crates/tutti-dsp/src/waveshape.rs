@@ -11,7 +11,8 @@
 //! frequency. The bank then keeps each channel's last two inputs.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Drive, MAX_CHANNELS, SampleRate, Samples};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Drive, SampleRate, Samples};
 
 use crate::{GAIN_GLIDE, Glide, OversamplingFactor, Steps};
 

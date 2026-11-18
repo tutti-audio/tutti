@@ -16,7 +16,7 @@
 //! It is not called a "plane": a plane is one deinterleaved audio channel, a 1-D
 //! time series, and a grid is a 2-D matrix of frames by bins.
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::stft::error::{Result, StftError};
 

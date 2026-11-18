@@ -8,9 +8,10 @@ use tutti_engine::{BlockDates, Engine};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{Beat, Seconds};
-use tutti_types::{ChannelLayout, Frame, SampleRate, Samples};
+use tutti_units::{Beat, Seconds};
+use tutti_units::{Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 

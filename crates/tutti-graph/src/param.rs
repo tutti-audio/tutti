@@ -42,7 +42,7 @@ use std::sync::Arc;
 use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_types::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::spec::EventOut;
@@ -289,7 +289,7 @@ impl ParamRange {
     ///
     /// ```
     /// use tutti_graph::ParamRange;
-    /// use tutti_types::{ArcDegrees, Azimuth, UnitParam};
+    /// use tutti_units::{ArcDegrees, Azimuth, UnitParam};
     ///
     /// // 20 degrees either side of straight behind.
     /// let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
@@ -1112,7 +1112,7 @@ mod tests {
     use super::*;
     use crate::event::ParamRamp;
     use crate::time::Offset;
-    use tutti_types::{Hz, ParamKey, SamplePosition, Samples};
+    use tutti_units::{Hz, ParamKey, SamplePosition, Samples};
 
     const AZ: Option<UnitParam> = Some(UnitParam::Azimuth);
     const EL: Option<UnitParam> = Some(UnitParam::Elevation);

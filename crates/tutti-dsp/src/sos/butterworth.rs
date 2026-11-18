@@ -3,12 +3,12 @@
 
 use core::f64::consts::PI;
 
-use tutti_types::{Db, Hz, Q, SampleRate};
+use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::Sos;
 use crate::{Biquad, Complex64};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The order of a Butterworth filter, `1..=16`: `6 * order` dB per octave, up to 96. A
     /// [`LinkwitzRiley`] filter of this order halves has twice it.
     ButterworthOrder(u8), ButterworthOrderError, "an order within 1..=16",

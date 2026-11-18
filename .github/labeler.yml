@@ -5,6 +5,7 @@
           - crates/tutti-rt/**
           - crates/tutti-graph/**
           - crates/tutti-engine/**
+          - crates/tutti-units/**
           - crates/tutti-types/**
           - crates/tutti-transport/**
           - crates/tutti-tempo/**
