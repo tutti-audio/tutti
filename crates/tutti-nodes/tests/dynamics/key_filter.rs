@@ -107,8 +107,8 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
     }
 }
 
-fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode {
-    CompressorNode::new(
+fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
+    CompressorNode::<f32>::new(
         BusTopology::MONO,
         KeySource::Sidechain,
         compressor_controls(cutoff, q),
@@ -268,7 +268,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
         ..compressor_controls(1_000.0, BUTTERWORTH)
     };
     let mut node = prepared(
-        CompressorNode::new(BusTopology::MONO, KeySource::Sidechain, controls)
+        CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, controls)
             .key_filter(KeyFilter::HighPass),
         SR,
         1_024,
@@ -300,8 +300,8 @@ fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
     }
 }
 
-fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode {
-    GateNode::new(
+fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32> {
+    GateNode::<f32>::new(
         BusTopology::MONO,
         KeySource::Sidechain,
         gate_controls(threshold, cutoff, q),
@@ -321,7 +321,7 @@ fn a_high_passed_gate_decides_on_the_filtered_key() {
         let mut filtered = prepared(gate(KeyFilter::HighPass, threshold, fc, q), SR, 1_024);
         let gain = highest_gain(&run(&mut filtered, &key));
         let mut plain = prepared(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::MONO,
                 KeySource::Sidechain,
                 gate_controls(threshold, fc, q),
@@ -406,7 +406,7 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
         makeup: Db(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
-    let off = CompressorNode::new(BusTopology::MONO, KeySource::Sidechain, controls);
+    let off = CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, controls);
     assert_eq!(off.shape().params.len(), 6);
     assert!(!off.param_set().set(UnitParam::Cutoff, 500.0));
     assert!(!off.param_set().set(UnitParam::Q, 2.0));

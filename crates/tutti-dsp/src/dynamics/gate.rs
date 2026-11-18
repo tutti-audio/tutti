@@ -22,16 +22,16 @@
 //! The gate has no latency (the detector is on the key, never ahead of it) and no tail (the
 //! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{Db, Hz, Q, SampleRate, Seconds};
 
-use super::curves::{amplitude_to_db, gate_gain_at};
+use super::curves::{db_gain, gate_gain_at, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::finite::finite_or;
 use crate::follower::Follower;
-use crate::{Glide, Steps};
+use crate::{Glide, Lanes, Lerp, Steps};
 
 /// The controls of a [`GateBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,26 +79,27 @@ impl Default for GateControls {
     }
 }
 
-/// The figures the detector runs on, which land whole: the comparison, the times as
-/// one-pole coefficients at the rate, the hold in frames and the closed gain.
+/// The figures the detector runs on at the working precision `F`, which land whole: the
+/// comparison, the times as one-pole coefficients at the rate, the hold in frames and the
+/// closed gain.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Design {
+struct Design<F> {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
-    threshold: Amplitude,
+    threshold: F,
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
     /// The one-pole coefficients: the attack while the gate opens, the release while it
     /// closes.
-    ballistics: Follower<f32>,
+    ballistics: Follower<F>,
     /// `floor(hold * rate)`.
     hold_samples: usize,
     /// The closed gain's level in dB, at most 0.
     range: Db,
 }
 
-impl Design {
+impl<F: Float> Design<F> {
     /// The design of `c` at `rate`: a non-finite control is the default's, the times are
     /// floored at 0 and the range is capped at 0 dB.
     fn of(c: &GateControls, rate: SampleRate) -> Self {
@@ -109,7 +110,7 @@ impl Design {
         let hold = Seconds(c.hold.get().max(0.0));
         let ballistics = Follower::of(floored(c.attack, c.release), rate);
         Self {
-            threshold: threshold.to_amplitude(),
+            threshold: db_gain(F::from_f32(threshold.get())),
             silence_opens: Db::FLOOR >= threshold,
             ballistics,
             hold_samples: hold.to_samples_floor(rate).get(),
@@ -123,8 +124,8 @@ impl Design {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens(level: f32, threshold: Amplitude, silence_opens: bool) -> bool {
-    level >= threshold.get() || (level <= 0.0 && silence_opens)
+fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
+    level >= threshold || (level <= F::ZERO && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -140,25 +141,25 @@ pub struct GateLanes<'a, S: Float = f32> {
 /// gain applied to every channel, with the follower and the hold that smooth it and the
 /// range that glides.
 ///
-/// Built on the control side for one rate; the state is `f32`, and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
+/// another sample format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct GateBank {
-    design: Design,
+pub struct GateBank<F: Float + Lanes> {
+    design: Design<F>,
     /// The closed gain in dB, gliding over [`GAIN_GLIDE`].
-    range: Glide<f32>,
+    range: Glide<F>,
     /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
     /// The smoothed open fraction, 0 closed to 1 open.
-    follower: Amplitude,
+    follower: F,
     /// The frames of hold left.
     hold_counter: usize,
     /// The filter on the key, if the bank has one.
-    key: Option<KeyStage>,
+    key: Option<KeyStage<F>>,
 }
 
-impl GateBank {
+impl<F: Float + Lanes + Lerp> GateBank<F> {
     /// A gate that passes everything at `rate`, to be aimed.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
@@ -167,11 +168,11 @@ impl GateBank {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         let design = Design::of(&GateControls::DEFAULT, rate);
         Self {
-            range: Glide::landed(design.range.get()),
+            range: Glide::landed(<F as Float>::from_f32(design.range.get())),
             design,
             steps,
             rate,
-            follower: Amplitude::SILENT,
+            follower: F::ZERO,
             hold_counter: 0,
             key: None,
         }
@@ -192,7 +193,7 @@ impl GateBank {
     /// Back to silence: the gate closed and no hold left, and the range landed on its
     /// target. No allocation.
     pub fn reset(&mut self) {
-        self.follower = Amplitude::SILENT;
+        self.follower = F::ZERO;
         self.hold_counter = 0;
         self.range.settle();
         if let Some(key) = &mut self.key {
@@ -221,8 +222,10 @@ impl GateBank {
                 Q(finite_or(controls.key_q.get(), d.key_q.get())),
             );
         }
-        self.range
-            .aim_by(self.design.range.get(), Steps::Fixed(self.steps));
+        self.range.aim_by(
+            <F as Float>::from_f32(self.design.range.get()),
+            Steps::Fixed(self.steps),
+        );
     }
 
     /// Runs `input` into `output`, scaled by one gain decided from the loudest channel of
@@ -251,8 +254,8 @@ impl GateBank {
         let d = self.design;
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
-        let held = Db(self.range.target()).to_amplitude();
-        let mut gains = [0.0f32; CHUNK];
+        let held = db_gain(self.range.target());
+        let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -269,36 +272,36 @@ impl GateBank {
                 let open = match lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| Db(x.convert_to::<f32>()))
-                    .filter(|t| t.get().is_finite())
+                    .map(|x| x.convert_to::<F>())
+                    .filter(|t| t.is_finite())
                 {
-                    Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
+                    Some(t) => level_db(level) >= t,
                     None => opens(level, d.threshold, d.silence_opens),
                 };
                 if open {
                     self.hold_counter = d.hold_samples;
-                    self.follower = d.ballistics.follow(self.follower, Amplitude::UNITY);
+                    self.follower = d.ballistics.follow_raw(self.follower, F::ONE);
                 } else if self.hold_counter > 0 {
                     self.hold_counter -= 1;
                 } else {
-                    self.follower = d.ballistics.follow(self.follower, Amplitude::SILENT);
+                    self.follower = d.ballistics.follow_raw(self.follower, F::ZERO);
                 }
                 let range = if i < blended {
-                    let db = self
-                        .range
-                        .at(taken.saturating_add(1).saturating_add(i as u32));
-                    Db(db).to_amplitude()
+                    db_gain(
+                        self.range
+                            .at(taken.saturating_add(1).saturating_add(i as u32)),
+                    )
                 } else {
                     held
                 };
-                *g = gate_gain_at(self.follower.get(), range).get();
+                *g = gate_gain_at(self.follower, range);
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
                 }
             }
             start = end;

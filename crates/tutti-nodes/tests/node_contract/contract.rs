@@ -45,7 +45,7 @@ fn limiter_row() -> Row {
     Row::new(
         "LimiterNode (mono, 5 ms lookahead)",
         || {
-            Box::new(LimiterNode::mono(LimiterControls {
+            Box::new(LimiterNode::<f32>::mono(LimiterControls {
                 threshold: Db(-3.0),
                 ceiling: Db(-0.3),
                 ..LimiterControls::DEFAULT
@@ -63,7 +63,7 @@ fn stereo_limiter_row() -> Row {
     Row::new(
         "LimiterNode (stereo, right channel)",
         || {
-            Box::new(LimiterNode::stereo(LimiterControls {
+            Box::new(LimiterNode::<f32>::stereo(LimiterControls {
                 threshold: Db(-3.0),
                 ceiling: Db(-0.3),
                 ..LimiterControls::DEFAULT

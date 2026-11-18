@@ -26,8 +26,8 @@ fn detached() -> DetachedSession {
 }
 
 /// A limiter's lookahead is the latency; the one the engine ships.
-fn limiter() -> LimiterNode {
-    LimiterNode::mono(LimiterControls {
+fn limiter() -> LimiterNode<f32> {
+    LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT

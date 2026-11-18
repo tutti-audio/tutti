@@ -23,7 +23,7 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         .expect("builds");
     let (dry, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (lim, _) = s.graph().add(LimiterNode::mono(LimiterControls {
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT

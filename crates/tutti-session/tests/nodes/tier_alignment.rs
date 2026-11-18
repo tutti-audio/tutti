@@ -82,7 +82,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
 
     // The latent path, on output 2.
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(LimiterNode::mono(LimiterControls {
+    let (eff, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT

@@ -19,16 +19,16 @@
 //! of them) and no tail (the gain only scales, so a silent signal is a silent output
 //! whatever the follower is doing).
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
-use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
+use super::curves::{db_gain, gain_reduction, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
 use crate::finite::finite_or;
 use crate::follower::Follower;
-use crate::{Glide, Steps};
+use crate::{Glide, Lanes, Lerp, Steps};
 
 /// The controls of a [`CompressorBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -117,34 +117,34 @@ impl CompressorMember {
     }
 }
 
-/// The figures the detector runs on: the controls it follows, with the times as
-/// one-pole coefficients at the rate.
+/// The figures the detector runs on, at the working precision `F`: the controls it follows
+/// (the threshold and knee in dB), with the times as one-pole coefficients at the rate.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Detector {
-    threshold: Db,
-    knee: Db,
-    ratio: CompressionRatio,
+struct Detector<F> {
+    threshold: F,
+    knee: F,
+    ratio: F,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
-    ballistics: Follower<f32>,
+    ballistics: Follower<F>,
 }
 
-impl Detector {
-    /// The figures member `m` asks for: its controls, and the times as coefficients at
-    /// its rate.
+impl<F: Float> Detector<F> {
+    /// The figures member `m` asks for: its controls widened to `F`, and the times as
+    /// coefficients at its rate.
     fn of(m: &CompressorMember) -> Self {
         Self {
-            threshold: m.threshold,
-            knee: m.knee,
-            ratio: m.ratio,
+            threshold: F::from_f32(m.threshold.get()),
+            knee: F::from_f32(m.knee.get()),
+            ratio: F::from_f32(m.ratio.get()),
             ballistics: Follower::of(floored(m.attack, m.release), m.rate),
         }
     }
 
     /// The figures of a compressor that does nothing, for a target to start from.
     const NEUTRAL: Self = Self {
-        threshold: Db::UNITY,
-        knee: Db::UNITY,
-        ratio: CompressionRatio::UNITY,
+        threshold: F::ZERO,
+        knee: F::ZERO,
+        ratio: F::ONE,
         ballistics: Follower::NEUTRAL,
     };
 
@@ -153,11 +153,10 @@ impl Detector {
     /// coefficient while it rises, the release while it falls) and the linear gain
     /// `-reduction + makeup`.
     #[inline]
-    fn frame(&self, reduction: &mut Db, level: f32, threshold: Db, makeup: Db) -> f32 {
-        let input_db = amplitude_to_db(Amplitude::new(level));
-        let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
-        *reduction = self.ballistics.follow(*reduction, target);
-        (-*reduction + makeup).to_amplitude().get()
+    fn frame(&self, reduction: &mut F, level: F, threshold: F, makeup: F) -> F {
+        let target = gain_reduction(level_db(level), threshold, self.ratio, self.knee);
+        *reduction = self.ballistics.follow_raw(*reduction, target);
+        db_gain(makeup - *reduction)
     }
 }
 
@@ -173,26 +172,26 @@ pub struct CompressorLanes<'a, S: Float = f32> {
 /// A feed-forward compressor of any width: one gain from the loudest key channel, applied
 /// to every channel, with the follower that smooths it and the makeup that glides.
 ///
-/// Built on the control side for one rate; the state is `f32`, and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
+/// another sample format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct CompressorBank {
-    detector: Detector,
+pub struct CompressorBank<F: Float + Lanes> {
+    detector: Detector<F>,
     /// The makeup in dB, gliding over [`GAIN_GLIDE`].
-    makeup: Glide<f32>,
+    makeup: Glide<F>,
     /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
     /// The smoothed reduction, in dB and positive.
-    reduction: Db,
+    reduction: F,
     /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
     /// and positive.
-    deepest: Db,
+    deepest: F,
     /// The filter on the key, if the bank has one.
-    key: Option<KeyStage>,
+    key: Option<KeyStage<F>>,
 }
 
-impl CompressorBank {
+impl<F: Float + Lanes + Lerp> CompressorBank<F> {
     /// A compressor that does nothing at `rate`, to be aimed.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
@@ -201,11 +200,11 @@ impl CompressorBank {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             detector: Detector::NEUTRAL,
-            makeup: Glide::landed(0.0),
+            makeup: Glide::landed(F::ZERO),
             steps,
             rate,
-            reduction: Db::UNITY,
-            deepest: Db::UNITY,
+            reduction: F::ZERO,
+            deepest: F::ZERO,
             key: None,
         }
     }
@@ -225,8 +224,8 @@ impl CompressorBank {
     /// Back to silence: no reduction, nothing metered, and the makeup landed on its target.
     /// No allocation.
     pub fn reset(&mut self) {
-        self.reduction = Db::UNITY;
-        self.deepest = Db::UNITY;
+        self.reduction = F::ZERO;
+        self.deepest = F::ZERO;
         self.makeup.settle();
         if let Some(key) = &mut self.key {
             key.reset();
@@ -252,15 +251,18 @@ impl CompressorBank {
         if let Some(key) = &mut self.key {
             key.aim(member.key_cutoff, member.key_q);
         }
-        self.makeup
-            .aim_by(member.makeup.get(), Steps::Fixed(self.steps));
+        self.makeup.aim_by(
+            <F as Float>::from_f32(member.makeup.get()),
+            Steps::Fixed(self.steps),
+        );
     }
 
     /// The deepest smoothed reduction any frame reached since the last call (or since
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        core::mem::replace(&mut self.deepest, Db::UNITY)
+        // `Db` is `f32`: the reading narrows once, when it is taken.
+        Db(core::mem::replace(&mut self.deepest, F::ZERO).to_f32())
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
@@ -288,7 +290,7 @@ impl CompressorBank {
         let d = self.detector;
         let blended = self.makeup.blended(frames);
         let taken = self.makeup.taken();
-        let mut gains = [0.0f32; CHUNK];
+        let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -304,8 +306,8 @@ impl CompressorBank {
                 let threshold = lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| Db(x.convert_to::<f32>()))
-                    .filter(|t| t.get().is_finite())
+                    .map(|x| x.convert_to::<F>())
+                    .filter(|t| t.is_finite())
                     .unwrap_or(d.threshold);
                 let makeup = if i < blended {
                     self.makeup
@@ -313,7 +315,7 @@ impl CompressorBank {
                 } else {
                     self.makeup.target()
                 };
-                *g = d.frame(&mut self.reduction, *g, threshold, Db(makeup));
+                *g = d.frame(&mut self.reduction, *g, threshold, makeup);
                 self.deepest = self.deepest.max(self.reduction);
             }
             for c in 0..width {
@@ -321,7 +323,7 @@ impl CompressorBank {
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
                 }
             }
             start = end;

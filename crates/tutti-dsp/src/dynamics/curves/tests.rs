@@ -176,6 +176,6 @@ fn the_block_and_fed_forms_are_one_curve() {
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
     let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(Amplitude(f32::NAN)), curve.below);
-    assert!(curve.below > Amplitude(1.0));
+    assert_eq!(curve.gain(Amplitude(f32::NAN)), Amplitude(curve.below));
+    assert!(curve.below > 1.0);
 }
