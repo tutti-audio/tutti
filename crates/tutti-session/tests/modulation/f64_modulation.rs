@@ -4,7 +4,7 @@
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, Params};
-use tutti_session::{Offline, OutPort, ParamRef, Root, RouteSpec, SessionBuilder};
+use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
 use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
@@ -21,7 +21,8 @@ const BLOCK: usize = 128;
 #[test]
 fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
     assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
-    let mut s = SessionBuilder::<Offline<f64>>::default()
+    let mut s = Session::builder()
+        .float::<f64>()
         .sample_rate(SampleRate::SR_48K)
         .build()
         .expect("an f64 session builds");

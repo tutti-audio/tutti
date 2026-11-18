@@ -60,7 +60,7 @@ use tutti_engine::BlockDates;
 /// assert_eq!(session.graph_ref().outputs(), 6);
 /// ```
 pub struct SessionBuilder<C: Clock = Offline> {
-    opts: Options<C::Float>,
+    opts: Options,
     config: C::Config,
     dates: C::Dates,
 }
@@ -97,7 +97,7 @@ impl Default for BlockConfig {
 
 /// What every build shares, whichever state the builder is in.
 #[derive(Debug)]
-struct Options<F: Float> {
+struct Options {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     root: Option<ChannelTopology>,
@@ -111,7 +111,7 @@ struct Options<F: Float> {
     /// Where the session's inputs open, if not the sound card
     /// ([`input_opener`](Self::input_opener)).
     #[cfg(feature = "capture")]
-    input_opener: Option<Box<dyn crate::InputOpener<F>>>,
+    input_opener: Option<Box<dyn crate::input::Openers>>,
     render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
@@ -133,7 +133,6 @@ struct Options<F: Float> {
     hang: crate::HangPolicy,
     spawner: crate::jobs::Spawner,
     pool: crate::PoolConfig,
-    float: std::marker::PhantomData<fn() -> F>,
 }
 
 /// A MIDI backend a host supplies, held until the session takes it.
@@ -147,7 +146,7 @@ impl std::fmt::Debug for MidiBackend {
     }
 }
 
-impl<F: Float> Default for Options<F> {
+impl Default for Options {
     fn default() -> Self {
         Self {
             inputs: ChannelLayout::EMPTY,
@@ -177,7 +176,6 @@ impl<F: Float> Default for Options<F> {
             hang: crate::HangPolicy::default(),
             spawner: crate::jobs::Spawner::default(),
             pool: crate::PoolConfig::default(),
-            float: std::marker::PhantomData,
         }
     }
 }
@@ -295,6 +293,32 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
 }
 
 impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// The float format of the session's audio, `G` in place of `F`: every
+    /// option set so far carries over. Default `f32`.
+    ///
+    /// It is the one place the choice is made: [`system_clock`](Self::system_clock)
+    /// and [`device`](Self::device) carry the float, so
+    /// `.float::<f64>().device(..)` reaches every clock.
+    ///
+    /// ```
+    /// use tutti_session::Session;
+    /// use tutti_units::SampleRate;
+    ///
+    /// let session: tutti_session::OfflineSession<&str, f64> = Session::builder()
+    ///     .float::<f64>()
+    ///     .sample_rate(SampleRate::SR_44K1)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[must_use]
+    pub fn float<G: SessionFloat>(self) -> SessionBuilder<Offline<G>> {
+        SessionBuilder {
+            opts: self.opts,
+            config: self.config,
+            dates: self.dates,
+        }
+    }
+
     /// Steps the blocks with an OS timer thread instead: no sound card, for an
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.
@@ -707,9 +731,16 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Opens the session's inputs ([`Session::add_input`]) through `opener`
     /// instead of the sound card: a test's own capture, with no device.
+    ///
+    /// The opener serves both widths, so it carries over
+    /// [`float`](SessionBuilder::float); the session opens its inputs at its own
+    /// width, and an opener that refuses that width fails [`Session::add_input`].
     #[cfg(all(feature = "capture", feature = "testing"))]
     #[must_use]
-    pub fn input_opener(mut self, opener: impl crate::InputOpener<C::Float> + 'static) -> Self {
+    pub fn input_opener(
+        mut self,
+        opener: impl crate::InputOpener<f32> + crate::InputOpener<f64> + 'static,
+    ) -> Self {
         self.opts.input_opener = Some(Box::new(opener));
         self
     }

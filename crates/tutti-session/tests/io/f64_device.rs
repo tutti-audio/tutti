@@ -5,7 +5,7 @@
 use tutti_buffers::SampleFormat;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::{ForkByClone, Params};
-use tutti_session::{Offline, Root, SessionBuilder};
+use tutti_session::{Root, Session};
 use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
@@ -22,7 +22,8 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let (driver, stream) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
-    let mut s = SessionBuilder::<Offline<f64>>::default()
+    let mut s = Session::builder()
+        .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .device(Default::default())
         .build_device_on(spec, driver)
@@ -55,7 +56,8 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     assert_ne!(f64::from(FINE as f32), FINE);
     let (driver, stream) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
-    let mut live = SessionBuilder::<Offline<f64>>::default()
+    let mut live = Session::builder()
+        .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .device(Default::default())
         .build_device_on(spec, driver)

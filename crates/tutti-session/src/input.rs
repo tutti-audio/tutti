@@ -28,7 +28,7 @@ use tutti_types::Mint;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::graph::CrossfadeRefused;
-use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent};
+use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent, SessionFloat};
 
 /// What [`Session::add_input`] opens: the capture device, which of its inputs,
 /// and how deep the ring that carries them into the graph is.
@@ -225,6 +225,12 @@ pub trait InputOpener<F: Float = f32>: std::fmt::Debug + Send {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>>;
 }
 
+/// An opener that serves both session floats, which is what the builder holds
+/// so that its options do not depend on the float.
+pub trait Openers: InputOpener<f32> + InputOpener<f64> {}
+
+impl<O: InputOpener<f32> + InputOpener<f64>> Openers for O {}
+
 /// The sound card's capture streams.
 #[derive(Debug)]
 struct Capture;
@@ -251,7 +257,7 @@ pub(crate) struct Held<F: Float> {
 }
 
 /// The session's inputs, and what opens them.
-pub(crate) struct Inputs<F: Float> {
+pub(crate) struct Inputs<F: SessionFloat> {
     host: AudioHost,
     /// Where every input's capture callback reports its delay, which the
     /// [`Device`](crate::Device) reads.
@@ -265,7 +271,7 @@ pub(crate) struct Inputs<F: Float> {
     takes: Mint,
 }
 
-impl<F: Float> std::fmt::Debug for Inputs<F> {
+impl<F: SessionFloat> std::fmt::Debug for Inputs<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inputs")
             .field("host", &self.host)
@@ -274,12 +280,15 @@ impl<F: Float> std::fmt::Debug for Inputs<F> {
     }
 }
 
-impl<F: Float> Inputs<F> {
-    pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn InputOpener<F>>>) -> Self {
+impl<F: SessionFloat> Inputs<F> {
+    pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn Openers>>) -> Self {
         Self {
             host,
             latency: Arc::new(StreamLatency::new()),
-            opener: opener.unwrap_or_else(|| Box::new(Capture)),
+            opener: opener.map_or_else(
+                || Box::new(Capture) as Box<dyn InputOpener<F>>,
+                <F as crate::format::Sealed>::upcast_opener,
+            ),
             held: Vec::new(),
             output_latency: None,
             takes: Mint::new(),

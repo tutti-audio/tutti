@@ -3,7 +3,7 @@
 
 use tutti_codec::{Format, Pcm};
 use tutti_graph::{ForkByClone, Params};
-use tutti_session::{Bounce, BounceTail, Offline, Range, Root, SessionBuilder};
+use tutti_session::{Bounce, BounceTail, Range, Root, Session};
 use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, SampleRate, Seconds};
 
@@ -14,7 +14,8 @@ use f64_nodes::{Dc, FINE, Gain};
 /// A detached `f64` session of `0.75 * FINE` on one output: a gain set through
 /// `Session::set`, so the fork starts from the value set.
 fn session() -> tutti_session::DetachedSession<&'static str, f64> {
-    let mut s = SessionBuilder::<Offline<f64>>::default()
+    let mut s = Session::builder()
+        .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("an f64 session builds");
