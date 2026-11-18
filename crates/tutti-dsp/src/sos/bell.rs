@@ -3,7 +3,7 @@
 
 use core::f64::consts::TAU;
 
-use tutti_units::{Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain, gain_root};
@@ -91,9 +91,11 @@ impl MatchedBell {
     /// As [`design`](Self::design).
     pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
         let b = self.section(center, rate)?;
-        let eps = floor.to_amplitude().get();
+        let eps = floor.to_amplitude();
         Ok(match ring_frames(&b, eps) {
-            Some(frames) if eps.is_finite() && eps > 0.0 && frames <= MAX_TAIL_FRAMES as f64 => {
+            Some(frames)
+                if eps.get().is_finite() && eps.get() > 0.0 && frames <= MAX_TAIL_FRAMES as f64 =>
+            {
                 Ring::Finite(Seconds::new(frames / rate.get()))
             }
             _ => Ring::Unbounded,
@@ -105,7 +107,7 @@ impl MatchedBell {
         let fc = check_cutoff(center, rate)?;
         let q = self.checked_q()?;
         let db = check_gain(self.gain)?;
-        let boost = matched(fc, q, Db(db.get().abs()), rate.get());
+        let boost = matched(fc, q, Db(db.get().abs()), rate);
         Ok(if db.get() < 0.0 {
             inverse(boost)
         } else {
@@ -114,10 +116,10 @@ impl MatchedBell {
     }
 
     /// The quality factor as a number above 0.
-    fn checked_q(&self) -> Result<f64, SosError> {
+    fn checked_q(&self) -> Result<Q, SosError> {
         let q = self.q.get();
         if q.is_finite() && q > 0.0 {
-            Ok(q)
+            Ok(self.q)
         } else {
             Err(SosError::QOutOfRange { q: self.q })
         }
@@ -127,7 +129,8 @@ impl MatchedBell {
 /// The first frame `n` from which `sum |h[m]|` of `b` is at most `eps` for good, by the smaller
 /// of the residue and the repeated-root bounds ([`MatchedBell::ring_out`]); `None` for a pole
 /// not inside the unit circle.
-fn ring_frames(b: &Biquad, eps: f64) -> Option<f64> {
+fn ring_frames(b: &Biquad, eps: Amplitude) -> Option<f64> {
+    let eps = eps.get();
     let [p1, p2] = b.poles();
     let r = p1.norm().max(p2.norm());
     if r.is_nan() || r >= 1.0 {
@@ -200,7 +203,8 @@ fn inverse(b: Biquad) -> Biquad {
 /// `A^4`. Then `c0 + c2` is half the sum of `sqrt(C0)` and `sqrt(C1)`, `c1` is half their
 /// difference and `c0 c2 = -C2 / 4`; `c0` is the larger root, which puts the zeros inside
 /// the circle.
-fn matched(fc: f64, q: f64, db: Db, fs: f64) -> Biquad {
+fn matched(fc: Hz, q: Q, db: Db, rate: SampleRate) -> Biquad {
+    let (fc, q, fs) = (fc.get(), q.get(), rate.get());
     let a = gain_root(db);
     let w0 = TAU * fc / fs;
     let zeta = 1.0 / (2.0 * a * q);

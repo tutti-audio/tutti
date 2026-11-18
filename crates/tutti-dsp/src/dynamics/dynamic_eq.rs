@@ -336,9 +336,10 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
     /// level. No allocation.
     pub fn process<S: Float>(
         &mut self,
+        // The key is `S` until the dynamics banks run in one float (R1b).
         key: Planes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input
             .frames()

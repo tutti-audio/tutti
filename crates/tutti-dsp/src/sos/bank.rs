@@ -38,7 +38,7 @@ impl<F: Float + Lanes> SosCoefficients<F> {
     /// No sections: the input as it is.
     pub const THROUGH: Self = Self {
         sections: [SvfCoefficients {
-            a1: F::ZERO,
+            d: F::ZERO,
             a2: F::ZERO,
             a3: F::ZERO,
             m0: F::ONE,
@@ -62,7 +62,7 @@ impl<F: Float + Lanes> Lerp for SosCoefficients<F> {
 }
 
 /// The state of a cascade per channel: Simper's integrator pair `[ic1eq, ic2eq]` of each
-/// section in precision `F`, every channel read through one shared [`SosCoefficients`].
+/// section in the float `F`, every channel read through one shared [`SosCoefficients`].
 ///
 /// The width is fixed when it is built. A channel runs every section of a frame before the
 /// next, so its state stays in registers.
@@ -90,11 +90,11 @@ impl<F: Float + Lanes> SosBank<F> {
     /// takes the block's steps from the glide. Channel `c` of `input` feeds channel `c` of
     /// `output`; a channel past the bank's width or the narrower view is not touched. No
     /// allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         coefficients: &mut Glide<SosCoefficients<F>>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = self
@@ -126,14 +126,9 @@ impl<F: Float + Lanes> SosBank<F> {
 
 /// One frame `x` through the sections of `set`, over the channel's `state`.
 #[inline(always)]
-fn run<F: Float + Lanes, S: Float>(
-    set: &SosCoefficients<F>,
-    state: &mut [[F; 2]; MAX_SECTIONS],
-    x: S,
-) -> S {
-    let mut v = x.convert_to::<F>();
-    for (s, st) in set.sections[..set.len].iter().zip(state.iter_mut()) {
-        v = svf_step(s, st, v);
-    }
-    v.convert_to::<S>()
+fn run<F: Float + Lanes>(set: &SosCoefficients<F>, state: &mut [[F; 2]; MAX_SECTIONS], x: F) -> F {
+    set.sections[..set.len]
+        .iter()
+        .zip(state.iter_mut())
+        .fold(x, |v, (s, st)| svf_step(s, st, v))
 }

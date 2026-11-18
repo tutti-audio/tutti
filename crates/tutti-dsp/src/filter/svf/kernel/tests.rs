@@ -12,7 +12,7 @@ fn test_svf_coeffs_lowpass_m_values() {
     assert!((c.m0 - 0.0).abs() < 1e-10);
     assert!((c.m1 - 0.0).abs() < 1e-10);
     assert!((c.m2 - 1.0).abs() < 1e-10);
-    assert!(c.a1 > 0.0 && c.a1 < 1.0);
+    assert!(c.d > 0.0 && c.d < 1.0);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn an_absurd_gain_solves_finite_and_saturates() {
                 Db::new(db),
                 SampleRate::SR_48K,
             );
-            for v in [c.a1, c.a2, c.a3, c.m0, c.m1, c.m2] {
+            for v in [c.d, c.a2, c.a3, c.m0, c.m1, c.m2] {
                 assert!(v.is_finite(), "{ty:?} at {db} dB: {c:?}");
             }
         }
@@ -237,7 +237,7 @@ fn test_svf_coeffs_deterministic() {
         Db::new(0.0),
         SampleRate::SR_44K1,
     );
-    assert_eq!(c1.a1, c2.a1);
+    assert_eq!(c1.d, c2.d);
     assert_eq!(c1.a2, c2.a2);
     assert_eq!(c1.m0, c2.m0);
 }

@@ -6,6 +6,7 @@ use core::f64::consts::PI;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::Sos;
+use crate::design::prewarp;
 use crate::{Biquad, Complex64};
 
 tutti_units::ranged! {
@@ -57,18 +58,13 @@ pub enum SosError {
 /// amplitude is no longer a usable figure.
 pub const MAX_GAIN_MAGNITUDE: Db = Db(120.0);
 
-/// `cutoff` in hertz when it is inside `(0, Nyquist)` of `rate`.
-pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<f64, SosError> {
-    let nyquist_hz = rate.nyquist();
-    let nyquist = rate.get() / 2.0;
-    let fc = cutoff.get();
-    if fc > 0.0 && fc < nyquist {
-        Ok(fc)
+/// `cutoff` when it is inside `(0, Nyquist)` of `rate`.
+pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<Hz, SosError> {
+    let nyquist = rate.nyquist();
+    if cutoff.get() > 0.0 && cutoff < nyquist {
+        Ok(cutoff)
     } else {
-        Err(SosError::CutoffOutOfRange {
-            cutoff,
-            nyquist: nyquist_hz,
-        })
+        Err(SosError::CutoffOutOfRange { cutoff, nyquist })
     }
 }
 
@@ -203,7 +199,7 @@ fn cascade(
     into: &mut Sos,
 ) -> Result<(), SosError> {
     let fc = check_cutoff(cutoff, rate)?;
-    let g = libm::tan(PI * fc / rate.get());
+    let g = prewarp(fc, rate);
     let n = usize::from(order);
     let section = |a1: f64, a2: f64, first: bool| {
         let (gain, sign) = match response {

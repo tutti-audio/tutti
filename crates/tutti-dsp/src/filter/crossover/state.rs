@@ -20,10 +20,10 @@
 //!
 //! Each section is the topology-preserving (trapezoidal) state-variable filter of its
 //! split, with the damping `k = sqrt 2` of a Butterworth section: from its input `x`,
-//! `bp = a1 s1 + a2 (x - s2)` and `lp = s2 + a2 s1 + a3 (x - s2)`, then the state
-//! `s <- 2 (bp, lp) - s`, with `a1 = 1 / (1 + g (g + k))`, `a2 = g a1`, `a3 = g a2` and
-//! `g = tan(pi fc / fs)`. Its low-pass is `lp`, its high-pass `x - k bp - lp` and its
-//! all-pass `x - 2 k bp`, each the bilinear Butterworth response of `fc`. A split's two
+//! `bp = s1 - d s1 + a2 (x - s2)` and `lp = s2 + a2 s1 + a3 (x - s2)`, then the state
+//! `s <- 2 (bp, lp) - s`, with `a1 = 1 / (1 + g (g + k))`, `d = 1 - a1`, `a2 = g a1`,
+//! `a3 = g a2` and `g = tan(pi fc / fs)`. Its low-pass is `lp`, its high-pass `x - k bp - lp`
+//! and its all-pass `x - 2 k bp`, each the bilinear Butterworth response of `fc`. A split's two
 //! cascaded low-passes and two cascaded high-passes share the state of their first stage
 //! (the same input and coefficients, so the same state): per split one shared first
 //! section, a second low-pass section, a second high-pass section, and the all-pass

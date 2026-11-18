@@ -778,6 +778,22 @@ mod tests {
         libm::tan(PI * f / FS) / libm::tan(PI * fc / FS)
     }
 
+    /// How far a constant `0.5` can sit from its fixed point in an `f32` section of the split
+    /// `fc` (`k = sqrt 2`, `g = tan(pi fc / fs)`, `a1 = 1 / (1 + g (g + k))`, `d = 1 - a1`, `a2 =
+    /// g a1`, `a3 = g a2`): an offset `e` of `ic2` from the input holds `ic1` at `a2 e / d`, and
+    /// the section's restoring step `a2 ic1 + a3 v3 = e (a2^2 / d + a3)` rounds away once it is
+    /// under half an ulp of the state, `2^-25`, so the offset stalls at `2^-25 / (a2^2 / d +
+    /// a3)`. The node is `f32`, so its state is `f32` by design and the stall is its floor. It is an
+    /// upper bound: `2^-25` is half an ulp of a state at or above 0.5, the largest half-ulp the
+    /// constant's state can have.
+    fn dead_band(fc: f64) -> f64 {
+        let g = libm::tan(PI * fc / FS);
+        let h = g * (g + core::f64::consts::SQRT_2);
+        let a1 = 1.0 / (1.0 + h);
+        let (d, a2) = (h * a1, g * a1);
+        2f64.powi(-25) / (a2 * a2 / d + g * a2)
+    }
+
     /// A unit sine through `node`, steady-state amplitude at `hz`.
     fn gain_at(node: &mut MultibandCompressorNode<f32>, hz: f64) -> f64 {
         let x = sine(hz, FS, SETTLE + WINDOW);
@@ -1153,7 +1169,10 @@ mod tests {
         // Un-soloing restores the whole sum.
         c.band(2).set_solo(false);
         let out = render_chunked(&mut n, &[dc_and_tone(0.5, 0.2)], 512);
-        assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < TOL);
+        // The constant passes the low band's four sections (the split at 120 Hz twice, the
+        // all-passes of the splits above it), each within its own dead band.
+        let stall = 2.0 * dead_band(120.0) + dead_band(1_000.0) + dead_band(6_000.0);
+        assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < stall);
     }
 
     /// Soloing mutes the other bands over 5 ms, not at once.

@@ -119,26 +119,36 @@ impl<F: Float + Lanes + Lerp> KeyStage<F> {
         out.fill(F::ZERO);
         let n = frames.len().min(CHUNK);
         let heard = key.slice(Samples(frames.start)..Samples(frames.start + n));
-        // The filter's output is a stream like its input, so it leaves in the stream's sample
-        // format `S`; its state is `F`.
-        let mut scratch = [[S::ZERO; CHUNK]; MAX_CHANNELS];
-        let mut views: [&mut [S]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         let width = heard.channels().min(MAX_CHANNELS);
+        // The key is `S` until the dynamics banks run in one float (R1b); the bank takes it in
+        // `F`, and this is its copy and its filtered copy.
+        let mut staged = [[F::ZERO; CHUNK]; MAX_CHANNELS];
+        for (to, from) in staged.iter_mut().zip(heard.iter()) {
+            for (t, &x) in to.iter_mut().zip(from.samples()) {
+                *t = x.convert_to::<F>();
+            }
+        }
+        let views: [&[F]; MAX_CHANNELS] = staged.each_ref().map(|p| &p[..n]);
+        let mut scratch = [[F::ZERO; CHUNK]; MAX_CHANNELS];
+        let mut outs: [&mut [F]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         // Every plane is `n` frames long and `width` is within `MAX_CHANNELS`.
-        let Ok(mut filtered) = PlanesMut::new(&mut views[..width]) else {
+        let (Ok(keyed), Ok(mut filtered)) = (
+            Planes::new(&views[..width]),
+            PlanesMut::new(&mut outs[..width]),
+        ) else {
             debug_assert!(false, "the scratch planes are one length");
             return;
         };
         self.bank
-            .process(&mut self.coefficients, heard, filtered.reborrow());
+            .process(&mut self.coefficients, keyed, filtered.reborrow());
         let mut non_finite = false;
         for (plane, raw) in filtered.iter().zip(heard.iter()) {
             for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {
-                let y = y.convert_to::<F>();
                 let l = if y.is_finite() {
                     level(y)
                 } else {
                     non_finite = true;
+                    // The key is `S` until the dynamics banks run in one float (R1b).
                     level(x.convert_to::<F>())
                 };
                 *m = m.max(l);

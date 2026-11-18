@@ -4,20 +4,21 @@
 /// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
 ///
 /// Exact (no leakage) when `x` spans a whole number of periods of `hz`.
-pub(crate) fn lock_in(x: &[f32], hz: f64, rate: f64) -> (f64, f64) {
+pub(crate) fn lock_in<S: Copy + Into<f64>>(x: &[S], hz: f64, rate: f64) -> (f64, f64) {
     let w = 2.0 * core::f64::consts::PI * hz / rate;
     let (mut re, mut im) = (0.0, 0.0);
     for (n, &v) in x.iter().enumerate() {
         let a = w * n as f64;
-        re += f64::from(v) * libm::cos(a);
-        im -= f64::from(v) * libm::sin(a);
+        let v: f64 = v.into();
+        re += v * libm::cos(a);
+        im -= v * libm::sin(a);
     }
     let k = 2.0 / x.len() as f64;
     (re * k, im * k)
 }
 
 /// The amplitude of [`lock_in`].
-pub(crate) fn amplitude_at(x: &[f32], hz: f64, rate: f64) -> f64 {
+pub(crate) fn amplitude_at<S: Copy + Into<f64>>(x: &[S], hz: f64, rate: f64) -> f64 {
     let (re, im) = lock_in(x, hz, rate);
     re.hypot(im)
 }
@@ -61,4 +62,26 @@ pub(crate) fn butterworth_all_pass(x: &[f64], split: f64, rate: f64) -> Vec<f64>
         a2: (1.0 - k * g + g2) / a0,
     };
     direct_form(&b, x)
+}
+
+/// The sine `|h| sin(w n + arg h)` that fits `y[from..]` best in least squares, as the phasor `h
+/// = a + j b` of `a sin(w n) + b cos(w n)`, `n` counted from the start of `y`. Exact for a
+/// whole number of periods or not.
+pub(crate) fn sine_fit(y: &[f64], w: f64, from: usize) -> crate::Complex64 {
+    let (mut ss, mut sc, mut cc, mut ys, mut yc) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for (n, &v) in y.iter().enumerate().skip(from) {
+        let (s, c) = libm::sincos(w * n as f64);
+        (ss, sc, cc, ys, yc) = (ss + s * s, sc + s * c, cc + c * c, ys + v * s, yc + v * c);
+    }
+    let det = ss * cc - sc * sc;
+    crate::Complex64::new((ys * cc - yc * sc) / det, (yc * ss - ys * sc) / det)
+}
+
+/// The largest distance of `y[from..]` from the steady state `|h| sin(w n + arg h)`.
+pub(crate) fn steady_deviation(y: &[f64], w: f64, from: usize, h: crate::Complex64) -> f64 {
+    y.iter()
+        .enumerate()
+        .skip(from)
+        .map(|(n, &v)| (v - h.norm() * libm::sin(w * n as f64 + h.arg())).abs())
+        .fold(0.0, f64::max)
 }

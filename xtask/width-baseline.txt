@@ -22,7 +22,6 @@ crates/tutti-curve/src/piece.rs  6  migrating: foundation
 crates/tutti-curve/src/raw.rs  1  migrating: foundation
 crates/tutti-dsp/src/bit_crush.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/convolver.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/dc_block.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/delay/bank.rs  4  migrating: R1/S7
 crates/tutti-dsp/src/dither.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/dynamics/brickwall.rs  1  migrating: R1/S7
@@ -35,12 +34,6 @@ crates/tutti-dsp/src/dynamics/shared.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/dynamics/transient.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/fft/real.rs  4  migrating: R1/S7
 crates/tutti-dsp/src/fft/scratch.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/crossover/coefficients.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/filter/envelope.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/ladder/bank.rs  3  migrating: R1/S7
-crates/tutti-dsp/src/filter/ladder/kernel.rs  6  migrating: R1/S7
-crates/tutti-dsp/src/filter/lanes.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/svf/kernel.rs  9  migrating: R1/S7
 crates/tutti-dsp/src/follower.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/glide.rs  5  migrating: R1/S7
 crates/tutti-dsp/src/level.rs  1  migrating: R1/S7
