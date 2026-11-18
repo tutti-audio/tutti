@@ -108,6 +108,7 @@ impl GeneralMidi {
     }
 }
 
+/// `f32` because the strip's nodes (`BusStripNode`, the reverb and chorus kernels) are `Node<f32>` only.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.

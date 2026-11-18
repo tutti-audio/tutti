@@ -10,6 +10,7 @@
 
 use crate::pooled::{LoadPlugin, Spec};
 use std::path::PathBuf;
+use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
@@ -58,7 +59,7 @@ fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) ->
     let mut frame = [0.0f32; 2];
     for _ in 0..4 {
         let _ = session.update_on(main);
-        session.render_frame(&mut frame);
+        session.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
     }
     assert_eq!(session.retired_plugins(), 0, "the session let go of it");
     handle

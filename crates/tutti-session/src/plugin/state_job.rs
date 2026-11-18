@@ -98,6 +98,7 @@ pub enum StateJobFailed {
     Wait(#[from] WaitError),
 }
 
+/// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
     /// for `state_use` ([`StateUse::Project`] is the state a project keeps).

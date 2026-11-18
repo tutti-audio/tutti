@@ -8,6 +8,7 @@
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
+use tutti_buffers::PlanesMut;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
@@ -369,11 +370,11 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     // Off the main thread the re-prepare resumes, and the swap still waits.
     let mut s = thread::spawn(move || {
         let mut s = s;
-        let mut out = vec![Vec::new(), Vec::new()];
+        let mut out = vec![vec![0.0; 512]; 2];
         let deadline = Instant::now() + Duration::from_secs(10);
         while s.graph_ref().testing().is_repreparing() {
             assert!(Instant::now() < deadline, "the re-prepare never resumed");
-            side.render(512, 512, &mut out);
+            side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
             let _ = s.update();
         }
         let _ = s.update();
@@ -782,10 +783,10 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
     let node = s.add_pooled_plugin(&"fx").unwrap();
     let mut side = s.graph().take_audio_side();
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; 512]; 2];
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
-    side.render(512, 512, &mut out);
+    side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
@@ -794,7 +795,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     let deadline = Instant::now() + Duration::from_secs(30);
     while s.graph_ref().node_outputs(node).is_ok_and(|n| n != 3) {
         assert!(Instant::now() < deadline, "the wider node never came");
-        side.render(512, 512, &mut out);
+        side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
         events.extend(s.update());
         thread::sleep(Duration::from_millis(2));
     }

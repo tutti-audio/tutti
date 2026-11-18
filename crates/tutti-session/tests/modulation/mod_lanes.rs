@@ -13,6 +13,7 @@
 //! its latency, a target placed an update late) are not repeated here.
 
 use crate::common;
+use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -83,14 +84,14 @@ fn settle(s: &mut DetachedSession) {
 
 /// `frames` frames of `channels` outputs, stopped, in `block`-frame blocks.
 fn render_n(side: &mut AudioSide, channels: usize, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![Vec::new(); channels];
+    let mut out = vec![vec![0.0; frames]; channels];
     side.set_transport(tutti_graph::TransportPosition::new(
         false,
         TEMPO,
         Beat(0.0),
         None,
     ));
-    side.render(frames, block, &mut out);
+    side.render(block, PlanesMut::from_vecs(&mut out).unwrap());
     out
 }
 
@@ -229,7 +230,6 @@ fn an_export_is_the_live_render_on_a_native_param() {
     // Live: rolling from beat 0 (the play clock restarts there), in
     // ragged blocks.
     let mut live = [Vec::new(), Vec::new()];
-    let mut out = vec![Vec::new(), Vec::new()];
     let mut done = 0;
     for n in [1usize, 128, 7, 64, 127, 33, 2, 100].iter().cycle() {
         if done >= total {
@@ -243,7 +243,8 @@ fn an_export_is_the_live_render_on_a_native_param() {
             Beat(beat),
             None,
         ));
-        side.render(n, n, &mut out);
+        let mut out = vec![vec![0.0; n]; 2];
+        side.render(n, PlanesMut::from_vecs(&mut out).unwrap());
         for (l, o) in live.iter_mut().zip(&out) {
             l.extend_from_slice(o);
         }
@@ -1199,7 +1200,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
     // Past the lanes' connect declick (256 frames).
     let mut live = [0.0f32; 2];
     for _ in 0..512 {
-        s.render_frame(&mut live);
+        s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
     }
     let mut fork = s
         .graph_ref()
@@ -1207,7 +1208,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
         .fork_live()
         .expect("every knob is forkable");
     let mut forked = [0.0f32; 2];
-    fork.tick(&[], &mut forked);
+    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(live[0], 8.0, "the knob written under its modulation, live");
     assert_eq!(forked[0], 8.0, "and in the fork");
     assert_eq!(live[1], 3.0, "the knob built under its modulation, live");

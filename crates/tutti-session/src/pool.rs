@@ -95,6 +95,7 @@ pub(crate) use table::{Hold, HoldKind};
 #[cfg(test)]
 mod tests;
 
+/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
@@ -255,6 +256,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
+/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// What the `audio_file` entry under `key` read: its wave, or its stream's
     /// header ([`AudioEntry`]).
@@ -276,6 +278,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 }
 
 #[cfg(feature = "soundfont")]
+/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
     /// The handle owns nothing: dropping it leaves the entry loaded.

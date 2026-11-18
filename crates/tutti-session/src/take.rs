@@ -751,6 +751,7 @@ impl<S: InFlight> Take<S> {
     }
 }
 
+/// `f32` because a take is read back as an `f32` clip (`Clip<f32>`).
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
     /// pump into `target` on the session's spawner. The take records what the

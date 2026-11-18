@@ -11,6 +11,7 @@
 //! (`hp` is 1e-4 of it) and the right tone band 1's (`lp` is 6e-4).
 
 use std::f64::consts::{PI, TAU};
+use tutti_buffers::PlanesMut;
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
@@ -302,8 +303,8 @@ fn a_fork_keeps_each_index_to_itself() {
     s.set(mb.gain_db_at(0).to(Db(12.0))).unwrap();
     s.set(mb.gain_db_at(1).to(Db(-12.0))).unwrap();
 
-    let mut out = [Vec::new(), Vec::new()];
-    fork.render(24_064 + 9_600, 128, &mut out);
+    let mut out = [vec![0.0; 24_064 + 9_600], vec![0.0; 24_064 + 9_600]];
+    fork.render(128, PlanesMut::from_vecs(&mut out).unwrap());
     let [l, r] = out;
     let (l, r) = (amplitude(&l[24_064..], LOW), amplitude(&r[24_064..], HIGH));
     assert!((l - expected(LOW, -6.0, 6.0)).abs() < 1e-5, "fork left {l}");

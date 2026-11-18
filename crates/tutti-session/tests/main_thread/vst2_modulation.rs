@@ -7,6 +7,7 @@
 use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use std::time::{Duration, Instant};
+use tutti_buffers::PlanesMut;
 use tutti_session::Root;
 
 use tutti_graph::NodeKey;
@@ -126,7 +127,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
             tutti_units::Beat(0.0),
             None,
         ),
-        &mut out,
+        tutti_buffers::InterleavedMut::one_frame(&mut out).unwrap(),
     );
     probe_switch::<u32>(b"tutti_vst2_probe_set_automate_burst\0", 0);
     s.plugin_view(node)
@@ -199,14 +200,14 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
             .parameter_value(ParamId::new(0))
             .expect("a value")
     };
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; 1_024]; 2];
     let mut check = |s: &mut DetachedSession, want: &[NodeKey], what: &str| {
         let mut want = want.to_vec();
         want.sort();
         for _ in 0..2 {
             update(s, Instant::now());
         }
-        side.render(1_024, 128, &mut out);
+        side.render(128, PlanesMut::from_vecs(&mut out).unwrap());
         let mut sources: Vec<_> = s
             .graph_ref()
             .sources(EventInPort::new(node, 0))
@@ -253,9 +254,9 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
     probe_switch::<bool>(b"tutti_vst2_probe_set_echo_set_parameter\0", true);
 
     let mut side = s.graph().take_audio_side();
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; 1_024]; 2];
     for round in 0..4 {
-        side.render(1_024, 128, &mut out);
+        side.render(128, PlanesMut::from_vecs(&mut out).unwrap());
         let handle = s
             .plugin_view(node)
             .expect("the plugin's handle")

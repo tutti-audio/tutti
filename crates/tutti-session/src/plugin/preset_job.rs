@@ -67,6 +67,7 @@ pub enum PresetJobFailed {
     Wait(#[from] WaitError),
 }
 
+/// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Loads the listed `preset` into the plugin in the node over the entry
     /// under `key`, in the first [`update`](Self::update) on the main thread:

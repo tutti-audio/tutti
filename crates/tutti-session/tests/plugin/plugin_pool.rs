@@ -6,6 +6,7 @@
 //! -p tutti-plugin-probe`.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::PlanesMut;
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -925,9 +926,9 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         Err(AddPluginError::Installed("fx"))
     ));
 
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the swap", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         pid_of(s, node) != first
     });
     assert_eq!(
@@ -953,9 +954,9 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
     );
 
     s.remove(node).unwrap();
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the re-prepare to resume", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         !s.graph_ref().testing().is_repreparing()
     });
     assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
@@ -1036,9 +1037,9 @@ fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
     );
     assert!(s.graph_ref().contains(node));
 
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the stand-in", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         s.graph_ref().node_tail(node) == Ok(Tail::None)
     });
 }

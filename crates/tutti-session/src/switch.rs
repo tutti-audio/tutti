@@ -133,6 +133,7 @@ fn bind_inputs<K: crate::AppKey>(
     std::sync::Arc::default()
 }
 
+/// `f32` because a clock switch settles the pool's runs, which are `f32`.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// The first of what a switch makes before anything stops:
     ///

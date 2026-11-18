@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::Float;
+use tutti_buffers::{Float, InterleavedMut, PlanesMut};
 
 use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition};
 
@@ -196,16 +196,11 @@ impl<F: Float> AudioSide<F> {
         }
     }
 
-    /// Renders one frame: `input` one sample per global input, `output` one
-    /// per global output. Commits sent since the last call land first.
-    pub fn tick(&mut self, input: &[F], output: &mut [F]) {
-        render(
-            &mut self.exec,
-            &mut self.scratch,
-            &self.transport,
-            input,
-            output,
-        );
+    /// Renders one frame, with silence on every global input, into `output`:
+    /// one value per global output. Commits sent since the last call land
+    /// first.
+    pub fn tick(&mut self, output: InterleavedMut<'_, F>) {
+        render(&mut self.exec, &mut self.scratch, &self.transport, output);
     }
 
     /// The transport every block from here on renders under, as a device's
@@ -216,19 +211,20 @@ impl<F: Float> AudioSide<F> {
         self.transport = transport;
     }
 
-    /// Renders `frames` frames with no global input into `output`, planar,
-    /// one slice per global output, in the blocks a device would hand over:
+    /// Renders `output`'s frames with no global input into it, planar, one
+    /// plane per global output, in the blocks a device would hand over:
     /// executor blocks of up to `block` frames, each under the transport
-    /// last [set](Self::set_transport) (stopped at beat zero until one is).
+    /// last [set](Self::set_transport) (stopped at beat zero until one is). A
+    /// plane the graph has no output for stays silent.
     ///
     /// # Panics
     ///
     /// If `block` is zero, or past the graph's prepared maximum.
-    pub fn render(&mut self, frames: usize, block: usize, output: &mut [Vec<F>]) {
+    pub fn render(&mut self, block: usize, mut output: PlanesMut<'_, '_, F>) {
         assert!(block > 0, "a zero-frame block");
-        for o in output.iter_mut() {
-            o.clear();
-            o.resize(frames, F::ZERO);
+        let frames = output.frames().get();
+        for c in 0..output.channels() {
+            output.plane_mut(c).samples_mut().fill(F::ZERO);
         }
         let exec = &mut self.exec;
         let mut done = 0;
@@ -250,10 +246,11 @@ impl<F: Float> AudioSide<F> {
             if exec.plan().is_some() {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }
-            for (c, o) in output.iter_mut().enumerate() {
+            for c in 0..output.channels() {
                 let Some(new) = planes.get(c).filter(|_| c < root) else {
                     continue;
                 };
+                let o = output.plane_mut(c).into_samples_mut();
                 o[done..done + len].copy_from_slice(new);
                 // A root change crossfades by index, the old root's channels
                 // after the new root's.

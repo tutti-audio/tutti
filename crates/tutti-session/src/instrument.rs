@@ -210,6 +210,7 @@ where
     }
 }
 
+/// `f32` because the instruments (`PolySynth`, the SoundFont unit) are `Node<f32>` only.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
     /// to the master, so a note sent through its keys is heard. It holds no MPE

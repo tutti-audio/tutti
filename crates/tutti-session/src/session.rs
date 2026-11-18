@@ -769,7 +769,7 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
     /// # Panics
     ///
     /// On a session whose audio side was taken (`Graph::take_audio_side`).
-    pub fn render_frame(&mut self, output: &mut [F]) {
+    pub fn render_frame(&mut self, output: tutti_buffers::InterleavedMut<'_, F>) {
         self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
     }
 
@@ -778,7 +778,7 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
     pub fn render_frame_at(
         &mut self,
         transport: &tutti_graph::TransportPosition,
-        output: &mut [F],
+        output: tutti_buffers::InterleavedMut<'_, F>,
     ) {
         if self.graph.is_edited() {
             self.commit();
@@ -787,6 +787,7 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
     }
 }
 
+/// `f32` because jobs, modulation and plugins land on `f32` sessions only.
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The part of a phase only an `f32` session has: what serves the nodes
     /// the engine inserts and the features built of `f32` nodes (jobs and the
@@ -800,13 +801,6 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
                 self.pool_events(cx.main, out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
-            }
-            Step::Exports => {
-                #[cfg(feature = "export")]
-                {
-                    self.bounce.drop_leftovers();
-                    self.bounce.watch_stall(cx.now);
-                }
             }
             Step::Modulation => self
                 .mods
@@ -826,14 +820,6 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
                     self.plugins_phase(cx, out);
                     self.rebind_plugins(cx.main, out);
                 }
-            }
-            Step::RenderMode => {
-                #[cfg(feature = "plugin")]
-                self.render_mode_phase();
-            }
-            Step::Listing => {
-                #[cfg(feature = "device")]
-                self.listing_poll(cx.now, out);
             }
         }
     }
@@ -1229,7 +1215,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 }
                 // What an export left behind (a render's fork, an edit
                 // that never ran) drops here, on the main thread.
-                C::Float::host(self, Step::Exports, cx, out);
+                #[cfg(feature = "export")]
+                {
+                    self.bounce.drop_leftovers();
+                    self.bounce.watch_stall(cx.now);
+                }
                 let repreparing = self.graph.is_repreparing();
                 self.graph.collect();
                 self.sync_root_refusal();
@@ -1283,7 +1273,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 }
             }
             Phase::Plugins => C::Float::host(self, Step::Plugins, cx, out),
-            Phase::RenderMode => C::Float::host(self, Step::RenderMode, cx, out),
+            Phase::RenderMode => C::Float::announce_render_mode(self),
             Phase::Poll => {
                 // Who the session is on the wire is in force, and the devices
                 // and the tempo the session follows are read, before the
@@ -1332,7 +1322,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 }
                 out.append(&mut self.carried_events);
                 let lost = self.fault_poll(out);
-                C::Float::host(self, Step::Listing, cx, out);
+                #[cfg(feature = "device")]
+                self.listing_poll(cx.now, out);
                 crate::clock::sealed::Running::poll(&mut self.running, cx.now, lost, out);
             }
             Phase::Reclaim => {

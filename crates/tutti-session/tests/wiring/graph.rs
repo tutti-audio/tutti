@@ -399,7 +399,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
     let after = s.graph_ref().testing().sent_plan().expect("a plan");
     assert!(!Arc::ptr_eq(&plan, &after), "and it sent a new plan");
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 2.0, "the edit is what renders");
 }
 
@@ -465,7 +465,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
         .unwrap();
     assert!(s.update().is_empty());
     let mut out = [0.0f32];
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], Knob::BUILT_WITH, "the knob plays");
 
     // The rate changes on the running graph: the first half is sent, and
@@ -486,10 +486,10 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     // out (a silent block), the editor sends them back, the executor
     // resumes. The crossfade waits until an update finds the graph resumed.
     assert!(s.update().is_empty());
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert!(s.update().is_empty());
     assert!(old.set(UnitParam::Drive, 7.0));
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(
         out[0], 7.0,
         "the old unit plays on, steered by its controls"
@@ -508,14 +508,14 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     };
     assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
     for _ in 0..512 {
-        side.tick(&[], &mut out);
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 3.0, "the incoming knob is what sounds");
     assert!(controls.set(UnitParam::Drive, 8.0));
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 8.0, "its controls steer it");
     s.set(knob.drive().to(Drive(9.0))).unwrap();
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 9.0, "and its params are addressed");
 }
 
@@ -556,7 +556,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
                 .any(|e| matches!(e, SessionEvent::CrossfadeFailed { .. })),
             "{events:?}"
         );
-        side.tick(&[], &mut out);
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 
@@ -609,7 +609,7 @@ fn every_param_write_path_reaches_a_fork() {
     s.set(k0.drive().to(Drive(5.0))).unwrap();
     assert!(c1.set(UnitParam::Drive, 4.0));
     let mut live = [0.0f32; 2];
-    s.render_frame(&mut live);
+    s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [5.0, 4.0], "each write reaches the live node");
     let mut fork = s
         .graph_ref()
@@ -617,7 +617,7 @@ fn every_param_write_path_reaches_a_fork() {
         .fork_live()
         .expect("every knob forks");
     let mut forked = [0.0f32; 2];
-    fork.tick(&[], &mut forked);
+    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(forked, [5.0, 4.0], "and the fork");
 }
 
@@ -1027,9 +1027,9 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
         .add(SlotId(1), source, Playback::default())
         .expect("queued");
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     handle.remove(SlotId(1)).expect("queued");
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
 }
 
 /// **The update frees the slots a pool the graph holds retired**: `Graph::add`

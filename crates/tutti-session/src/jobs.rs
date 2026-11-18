@@ -306,6 +306,7 @@ pub(crate) trait JobSession {
     );
 }
 
+/// `f32` because a job lands through `JobSession`, whose pool and plugin landings are `f32`.
 impl<K: crate::AppKey, C: Clock<Float = f32>> JobSession for Session<K, C> {
     fn land_pool_load(
         &mut self,
@@ -565,6 +566,7 @@ impl Jobs {
     }
 }
 
+/// `f32` because a job lands through `JobSession`, whose pool and plugin landings are `f32`.
 impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// Lands what the jobs sent since the last update, in arrival order.
     /// What arrives during a lander (a job it submits that ends at once)

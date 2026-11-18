@@ -424,6 +424,8 @@ pub mod session {
     };
     pub use tutti_session::{Task, WorkerError};
 
+    #[cfg(feature = "export")]
+    pub use tutti_dsp::FftFloat;
     #[cfg(any(feature = "io", feature = "export"))]
     pub use tutti_session::DitherShape;
     #[cfg(feature = "sampler")]

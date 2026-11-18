@@ -38,6 +38,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tutti_buffers::Float;
 #[cfg(feature = "testing")]
+use tutti_buffers::InterleavedMut;
+#[cfg(feature = "testing")]
 use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]
@@ -1139,7 +1141,9 @@ impl Graph {
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
+}
 
+impl<F: Float> Graph<F> {
     /// The control-thread half of a copy of the master for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
     /// with `ForkMode::Offline`, prepared as a bounce is
@@ -1160,7 +1164,7 @@ impl Graph {
         rate: SampleRate,
         serial: bool,
         root: Option<Option<tutti_types::ChannelTopology>>,
-    ) -> tutti_export::Result<PendingExport> {
+    ) -> tutti_export::Result<PendingExport<F>> {
         let root = root.unwrap_or_else(|| self.root.clone());
         // Its own pool, not the live engine's: the live callback would find a
         // shared one busy with the bounce's job and render alone. No start
@@ -3698,17 +3702,21 @@ impl<F: Float> Graph<F> {
 
     /// Render one frame on the local executor, under `transport`.
     #[cfg(feature = "testing")]
-    pub(crate) fn render_local(&mut self, transport: &TransportPosition, output: &mut [F]) {
+    pub(crate) fn render_local(
+        &mut self,
+        transport: &TransportPosition,
+        output: InterleavedMut<'_, F>,
+    ) {
         let local = self
             .local
             .as_mut()
             .expect("render_frame needs the audio side, and it was taken");
-        render(&mut local.exec, &mut local.scratch, transport, &[], output);
+        render(&mut local.exec, &mut local.scratch, transport, output);
     }
 }
 
 /// Render one frame of `exec` into `output` (one sample per global output),
-/// reading `input` (one sample per global input).
+/// with silence on every global input.
 ///
 /// `output` wider than the plan reads silence past it; narrower, the extra
 /// channels are dropped — the width a caller passes is its own business.
@@ -3717,9 +3725,9 @@ fn render<F: Float>(
     exec: &mut Executor<F>,
     scratch: &mut Vec<Vec<F>>,
     transport: &TransportPosition,
-    input: &[F],
-    output: &mut [F],
+    mut output: InterleavedMut<'_, F>,
 ) {
+    let output = output.samples_mut();
     exec.apply_pending();
     let Some(plan) = exec.plan() else {
         output.fill(F::ZERO);
@@ -3732,13 +3740,7 @@ fn render<F: Float>(
     );
     scratch.resize_with(outs, || vec![F::ZERO]);
     let silence = F::ZERO;
-    let inputs: Vec<&[F]> = (0..ins)
-        .map(|c| {
-            input
-                .get(c)
-                .map_or(std::slice::from_ref(&silence), std::slice::from_ref)
-        })
-        .collect();
+    let inputs: Vec<&[F]> = (0..ins).map(|_| std::slice::from_ref(&silence)).collect();
     let fade = exec.root_fade();
     let mut outputs: Vec<&mut [F]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
