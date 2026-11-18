@@ -342,3 +342,13 @@ fn a_tally_outlives_every_writer_and_mints_more() {
     total.writer().add(3);
     assert_eq!(total.get(), 5);
 }
+
+#[test]
+fn a_tally_writer_reads_its_own_total_and_mints_a_reader_of_it() {
+    let lost = crate::tally::<u64>().writer();
+    lost.add(4);
+    let report = lost.tally();
+    lost.add(3);
+    assert_eq!(lost.get(), 7);
+    assert_eq!(report.get(), 7, "the minted reader reads the same cell");
+}

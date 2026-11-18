@@ -13,6 +13,9 @@
 //! - **Relaxed.** A tally publishes no data: nothing a reader may read is
 //!   written before an add. Each word is read in its own coherence order, so
 //!   no tally of a [`Tally::get`] is less than in an earlier `get`.
+//! - **One handle for an owner.** A writer reads its own total
+//!   ([`TallyWriter::get`]) and mints a reader ([`TallyWriter::tally`]), so an
+//!   owner that counts and reports through `&self` holds the writer alone.
 //! - **No closed flag.** The reader mints writers ([`Tally::writer`]), so
 //!   "the last writer dropped" is never final. Use a [`Counter`](super::Counter)
 //!   for a count with one writer that a reader must see end.
@@ -99,11 +102,7 @@ impl<U: Count> Tally<U> {
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        let mut words = U::Words::zeroed();
-        for (word, cell) in words.as_mut_slice().iter_mut().zip(&*self.cells.words) {
-            *word = cell.load(Ordering::Relaxed);
-        }
-        U::from_words(words)
+        read(&self.cells)
     }
 
     /// A new writer for the cell. It clones one `Arc`, so mint writers on the
@@ -127,6 +126,33 @@ impl<U: Count> TallyWriter<U> {
             cell.fetch_add(*add, Ordering::Relaxed);
         }
     }
+
+    /// The total counted so far, as [`Tally::get`] reads it: an owner that
+    /// counts and reports through `&self` holds the writer alone.
+    #[inline]
+    #[must_use]
+    pub fn get(&self) -> U {
+        read(&self.cells)
+    }
+
+    /// A reader for the same cell, to hand to whoever reports the count. It
+    /// clones one `Arc`: control side.
+    pub fn tally(&self) -> Tally<U> {
+        Tally {
+            cells: Arc::clone(&self.cells),
+            _count: PhantomData,
+        }
+    }
+}
+
+/// The total in `cells`: one relaxed load per word.
+#[inline]
+fn read<U: Count>(cells: &Cells) -> U {
+    let mut words = U::Words::zeroed();
+    for (word, cell) in words.as_mut_slice().iter_mut().zip(&*cells.words) {
+        *word = cell.load(Ordering::Relaxed);
+    }
+    U::from_words(words)
 }
 
 impl<U: Count> std::fmt::Debug for Tally<U> {
