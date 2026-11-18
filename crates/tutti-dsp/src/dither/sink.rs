@@ -88,7 +88,7 @@ impl<K: Sink, F: Float> DitherSink<K, F> {
             noise: DitherNoise::new(),
             shape,
             lsb: lsb_of::<K::Sample>(),
-            noisy: Vec::with_capacity(room),
+            noisy: Vec::with_capacity(if shape.is_some() { room } else { 0 }),
             converted: Vec::with_capacity(room),
             clipped: 0,
         }
