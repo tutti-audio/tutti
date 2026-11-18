@@ -371,8 +371,8 @@ impl ChannelState {
     /// `sin`. Constant power.
     #[must_use]
     pub fn pan(&self) -> Pan {
-        const STEPS: f32 = 126.0 * 128.0;
-        let along = (f32::from(self.pan.get().saturating_sub(128)) / STEPS).min(1.0);
+        const STEPS: f64 = 126.0 * 128.0;
+        let along = (f64::from(self.pan.get().saturating_sub(128)) / STEPS).min(1.0);
         Pan(2.0 * along - 1.0)
     }
 
@@ -464,9 +464,9 @@ mod tests {
     #[test]
     fn the_pan_angle_is_rp_036s_for_every_value() {
         for cc in 0..=127u8 {
-            let expected = std::f32::consts::FRAC_PI_2 * f32::from(cc.saturating_sub(1)) / 126.0;
-            let angle = std::f32::consts::FRAC_PI_4 * (pan_at(cc).get() + 1.0);
-            assert!((angle - expected).abs() < 1e-5, "CC 10 = {cc}");
+            let expected = std::f64::consts::FRAC_PI_2 * f64::from(cc.saturating_sub(1)) / 126.0;
+            let angle = std::f64::consts::FRAC_PI_4 * (pan_at(cc).get() + 1.0);
+            assert!((angle - expected).abs() < 1e-14, "CC 10 = {cc}");
         }
     }
 

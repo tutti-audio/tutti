@@ -205,7 +205,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
 /// constant `depth` of the rate port's 0..10 Hz span.
 fn render_chorus(
     node: ModDelayNode<f32>,
-    lane: Option<f32>,
+    lane: Option<f64>,
     input: &[f32],
 ) -> (Vec<Vec<f32>>, ParamSet) {
     let mut g = GraphBuilder::new(ChannelLayout::STEREO, ChannelLayout::STEREO);
@@ -368,7 +368,7 @@ fn convolver_addresses_nothing() {
 /// `LfoNode` at depth 0.25, with a control lane on `param` (knob: the LFO's
 /// own cell) adding a constant `depth` of `range`, and the cell's value
 /// after the render.
-fn render_lfo(param: UnitParam, range: ParamRange, depth: f32) -> (Vec<f32>, f32) {
+fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f32) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::new(LfoShape::Sine)
         .with_rate(Hz(1.0))
@@ -467,7 +467,7 @@ fn render_driven<N>(
     node: N,
     param: UnitParam,
     range: ParamRange,
-    depth: f32,
+    depth: f64,
     input: &[f32],
 ) -> Vec<f32>
 where

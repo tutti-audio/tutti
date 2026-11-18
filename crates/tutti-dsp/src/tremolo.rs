@@ -14,7 +14,7 @@
 //! a negative depth sweeps the opposite way.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_units::{Depth, Hz, Pan, SampleRate};
+use tutti_units::{Depth, Hz, Pan, Real, SampleRate};
 
 use crate::{Oscillator, OscillatorWave, PanLaw, pan_gains};
 
@@ -113,7 +113,8 @@ impl Tremolo {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
         let TremoloControls { rate, depth } = self.controls;
-        let d = depth.get();
+        // The depth crosses into the oscillator's `f32` lane once per block.
+        let d = f32::from_unit(depth);
         let start = self.lfo;
         let mut end = start;
         for c in 0..width {
@@ -186,8 +187,10 @@ impl AutoPan {
             &mut right.samples_mut()[..frames],
         );
         let AutoPanControls { rate, depth } = self.controls;
+        // The depth crosses into the oscillator's `f32` lane once per block.
+        let depth = f32::from_unit(depth);
         for (((&l, &r), o_l), o_r) in l.iter().zip(r).zip(out_l).zip(out_r) {
-            let pan = Pan(depth.get() * self.lfo.next(rate));
+            let pan = Pan(f64::from(depth * self.lfo.next(rate)));
             let (gl, gr) = pan_gains(pan, self.law);
             *o_l = l * S::from_f64(gl.get());
             *o_r = r * S::from_f64(gr.get());

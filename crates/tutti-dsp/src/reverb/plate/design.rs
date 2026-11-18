@@ -150,7 +150,7 @@ pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
 /// The share of Nyquist the input bandwidth is held under.
 const BANDWIDTH_CEILING: f64 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
-const MAX_DAMPING: f32 = 0.999;
+const MAX_DAMPING: f64 = 0.999;
 
 const _: () = assert!(MAX_STAGES >= 5 && MAX_LINES >= 4 && MAX_DENSE >= 16);
 
@@ -246,16 +246,14 @@ impl PlateControls {
         .clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
         // `diffusion` is an `f32` unit: it widens once into the `f64` design.
-        let diffusion =
-            f64::from(finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0));
+        let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
 
         let total = SampleSpan::clamped(loop_frames(rate));
         let loop_gain = loop_gain(total, rt60, rate).get();
         let c = libm::pow(loop_gain, 0.25);
         let lattice2 = Gain::new(diffusion * (c + 0.15).clamp(0.25, 0.5));
         let scale = |g: Gain| Gain::new(diffusion * g.get());
-        let excursion =
-            SampleSpan::clamped(EXCURSION * f64::from(depth) * rate.get() / PAPER_RATE.get());
+        let excursion = SampleSpan::clamped(EXCURSION * depth * rate.get() / PAPER_RATE.get());
 
         let span = |n: u32| SampleSpan::clamped(scaled(n, rate));
         let lattice = |delay: SampleSpan, gain: Gain, modulation: LineModulation| AllPass {

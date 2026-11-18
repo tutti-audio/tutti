@@ -16,7 +16,7 @@ const TYPES: [LadderType; 4] = [
     LadderType::HP24,
 ];
 
-fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f32) -> LadderDesign<F> {
+fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> LadderDesign<F> {
     let controls = LadderControls {
         ty,
         freq: Hz(fc),
@@ -269,7 +269,7 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
         .collect();
     for ty in TYPES {
         for fc in [1.0f64, 100.0, 12_000.0, 23_900.0] {
-            for (res, drive) in [(1.0f64, 1e3f32), (1.0, 1.0), (0.5, 1e6)] {
+            for (res, drive) in [(1.0f64, 1e3f64), (1.0, 1.0), (0.5, 1e6)] {
                 let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
                 let mut glide = Glide::landed(design(ty, fc, res, drive));
                 let y = run(&mut bank, &mut glide, std::slice::from_ref(&noise), &[64]).remove(0);
@@ -486,12 +486,7 @@ fn a_glides_midpoint_is_stable() {
     };
     fn reachable(next: &mut dyn FnMut(f64, f64) -> f64) -> LadderDesign<f64> {
         let ty = TYPES[next(0.0, 4.0) as usize % 4];
-        design(
-            ty,
-            next(20.0, 3_000.0),
-            next(0.0, 0.7),
-            next(0.1, 8.0) as f32,
-        )
+        design(ty, next(20.0, 3_000.0), next(0.0, 0.7), next(0.1, 8.0))
     }
     for _ in 0..200 {
         let (a, b) = (reachable(&mut next), reachable(&mut next));

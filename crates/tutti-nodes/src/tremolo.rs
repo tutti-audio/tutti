@@ -162,7 +162,7 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    fn node(width: u16, rate: f64, depth: f32) -> TremoloNode<f32> {
+    fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
         prepared(TremoloNode::from(
             TremoloConfig::new(width)
                 .rate(Hz(rate))

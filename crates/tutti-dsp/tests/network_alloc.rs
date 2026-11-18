@@ -24,10 +24,9 @@ fn freeverb_aims_and_renders_without_allocating() {
         let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
         for block in 0..64u32 {
             let c = FreeverbControls {
-                room: Mix([(block % 8) as f32 / 7.0, f32::NAN, 9.0][(block % 3) as usize]),
-                damp: Mix(
-                    [((block / 8) % 8) as f32 / 7.0, f32::INFINITY, -2.0][(block % 5 % 3) as usize]
-                ),
+                room: Mix([f64::from(block % 8) / 7.0, f64::NAN, 9.0][(block % 3) as usize]),
+                damp: Mix([f64::from((block / 8) % 8) / 7.0, f64::INFINITY, -2.0]
+                    [(block % 5 % 3) as usize]),
             };
             let n = allocations(|| {
                 bank.aim(&mut glides, &c);
@@ -62,19 +61,19 @@ fn the_fdn_aims_and_renders_without_allocating() {
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
     for block in 0..200u32 {
         let k = (block % 7) as f32 / 6.0;
-        let k_hz = f64::from(block % 7) / 6.0;
+        let k64 = f64::from(block % 7) / 6.0;
         let c = FdnControls {
             decay: [
                 Seconds::from_f32(0.2 + 7.0 * k),
                 Seconds::from_f32(1.0 + k),
                 Seconds::from_f32(0.5 + 3.0 * k),
             ],
-            size: Mix(k),
-            diffusion: Mix(1.0 - k),
+            size: Mix(k64),
+            diffusion: Mix(1.0 - k64),
             pre_delay: Seconds::from_f32(0.05 * k),
-            modulation: Depth::of(k),
-            rate: Hz(0.1 + k_hz),
-            width: StereoWidth(2.0 * k),
+            modulation: Depth::of(k64),
+            rate: Hz(0.1 + k64),
+            width: StereoWidth(2.0 * k64),
             wet: Db(-12.0 * f64::from(k)),
             freeze: block % 11 == 0,
         };
