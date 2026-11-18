@@ -76,8 +76,8 @@ fn render_stem(
 }
 
 /// A saw with an instant attack, built at the live graph's rate.
-fn poly() -> PolySynth {
-    PolySynth::new(SynthConfig {
+fn poly() -> PolySynth<f32> {
+    PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds(0.0),

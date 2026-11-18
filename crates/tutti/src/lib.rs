@@ -589,9 +589,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, OscillatorType,
-        PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig, Tuning, UnisonConfig,
-        UnisonVoices, UnisonVoicesError, VoiceMode,
+        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig,
+        SynthFloat, Tuning, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
     };
 }
 
@@ -720,9 +720,10 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
-        ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
-        MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
+        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
+        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
+        TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,

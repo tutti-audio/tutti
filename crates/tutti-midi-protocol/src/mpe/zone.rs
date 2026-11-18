@@ -8,7 +8,6 @@
 //! place the distinction bites is the two MPE 1.1 zone anchors: the lower
 //! zone's master is `0` and the upper zone's is `15`.
 
-#[cfg(feature = "serde")]
 use alloc::vec::Vec;
 use tutti_ump::{
     Address, ControlValue, Message, MidiChannel, MidiGroup, MpeZoneSet, MpeZoneSpan, Rpn, Ump,
@@ -106,6 +105,12 @@ struct MpeZoneConfigRaw {
     response: ChannelResponse,
 }
 
+/// A persisted zone that is not a zone.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("an MPE zone has a master, 1 or more members, and ends by channel 16")]
+pub struct InvalidMpeZoneConfig;
+
 #[cfg(feature = "serde")]
 impl From<MpeZoneConfig> for MpeZoneConfigRaw {
     fn from(c: MpeZoneConfig) -> Self {
@@ -119,12 +124,12 @@ impl From<MpeZoneConfig> for MpeZoneConfigRaw {
 
 #[cfg(feature = "serde")]
 impl TryFrom<MpeZoneConfigRaw> for MpeZoneConfig {
-    type Error = &'static str;
+    type Error = InvalidMpeZoneConfig;
 
     fn try_from(raw: MpeZoneConfigRaw) -> Result<Self, Self::Error> {
         Self::placed(raw.placement, raw.member_count)
             .map(|c| c.with_channel_response(raw.response))
-            .ok_or("an MPE zone has a master, 1 or more members, and ends by channel 16")
+            .ok_or(InvalidMpeZoneConfig)
     }
 }
 
@@ -333,6 +338,15 @@ impl MpeZoneConfig {
         self.is_master_channel(channel) || self.is_member_channel(channel)
     }
 
+    /// The lowest member channel: the first of [`member_channels`](Self::member_channels).
+    /// A zone has at least one member, so it always exists.
+    #[inline]
+    #[must_use]
+    pub const fn first_member(&self) -> MidiChannel {
+        // `members` starts at a channel number below 16.
+        MidiChannel::masked(*self.members().start())
+    }
+
     /// The member channels, in ascending order whichever direction the zone
     /// counts: `1..=n` for the lower zone, `15-n..=14` for the upper one.
     pub fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
@@ -454,23 +468,32 @@ pub struct MpeZones {
     zones: [Option<MpeZoneConfig>; Self::MAX_ZONES],
 }
 
-#[cfg(feature = "serde")]
+/// A list of zones that is not a zone layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum InvalidMpeZones {
+    /// The list holds no zone.
+    #[error("no MPE zone")]
+    Empty,
+    /// The zones overlap or follow different specifications.
+    #[error("MPE zones overlap or follow different specifications")]
+    Conflict,
+}
+
 impl From<MpeZones> for Vec<MpeZoneConfig> {
     fn from(zones: MpeZones) -> Self {
         zones.zones().copied().collect()
     }
 }
 
-#[cfg(feature = "serde")]
 impl TryFrom<Vec<MpeZoneConfig>> for MpeZones {
-    type Error = &'static str;
+    type Error = InvalidMpeZones;
 
     fn try_from(zones: Vec<MpeZoneConfig>) -> Result<Self, Self::Error> {
         let mut zones = zones.into_iter();
-        let first = zones.next().ok_or("no MPE zone")?;
+        let first = zones.next().ok_or(InvalidMpeZones::Empty)?;
         zones
             .try_fold(Self::single(first), |set, zone| set.with(zone))
-            .ok_or("MPE zones overlap or follow different specifications")
+            .ok_or(InvalidMpeZones::Conflict)
     }
 }
 

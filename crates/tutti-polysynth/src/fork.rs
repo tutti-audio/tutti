@@ -22,9 +22,9 @@
 //! bend, a CC-driven cutoff, an MPE toggle) — the clip replays whatever of
 //! that it holds.
 
-use crate::PolySynth;
+use crate::{PolySynth, SynthFloat};
 
-impl PolySynth {
+impl<F: SynthFloat> PolySynth<F> {
     /// Returns a fresh synth for a fork of the graph this one plays in (an
     /// offline export, for example).
     ///
@@ -38,7 +38,7 @@ impl PolySynth {
     /// A synth inserted into a graph registers this as its fork, so a graph
     /// fork needs no call to it; it is for hosts building a copy by hand.
     #[must_use]
-    pub fn fork_instance(&self) -> PolySynth {
+    pub fn fork_instance(&self) -> PolySynth<F> {
         let mut fork = self.clone();
         // Control cells: detached at their current values, so the fork
         // renders the controls it was taken with rather than following live

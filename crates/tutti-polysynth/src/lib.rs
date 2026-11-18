@@ -122,7 +122,8 @@
 //!
 //! ## Items
 //!
-//! - [`PolySynth`]: the synth, a graph node with one MIDI event input.
+//! - [`PolySynth`]: the synth, a graph node with one MIDI event input, generic over
+//!   the float it renders in ([`SynthFloat`]: `f32` or `f64`).
 //! - [`SynthConfig`]: everything a synth is built from, with
 //!   [`OscillatorType`], [`FilterType`] and [`SvfMode`], [`Adsr`]
 //!   and [`FilterModConfig`].
@@ -170,3 +171,7 @@ mod synth_voice;
 
 mod bank;
 mod kernel;
+
+mod lane;
+// Public: they appear in `PolySynth`'s bounds.
+pub use lane::{Lane, SynthFloat};

@@ -148,11 +148,11 @@ fn the_core_rules_hold() {
         assert!(bend(v) < bend(v + 1), "{v}");
     }
     for v in 0..=127u8 {
-        assert_eq!(velocity(v) >> 9, v.into(), "{v}");
-        assert_eq!(value(v) >> 25, v.into(), "{v}");
+        assert_eq!(velocity(v) >> 9, u16::from(v), "{v}");
+        assert_eq!(value(v) >> 25, u32::from(v), "{v}");
     }
     for v in 0..=16383u16 {
-        assert_eq!(bend(v) >> 18, v.into(), "{v}");
+        assert_eq!(bend(v) >> 18, u32::from(v), "{v}");
     }
 }
 
