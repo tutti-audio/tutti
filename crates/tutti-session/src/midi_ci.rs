@@ -335,7 +335,7 @@ impl WholeProfile {
 
     /// Whether it is the Group's or the Function Block's.
     #[must_use]
-    pub const fn whole(&self) -> tutti_midi_hardware::Whole {
+    pub const fn whole(&self) -> tutti_midi_device::Whole {
         self.inner.whole()
     }
 }

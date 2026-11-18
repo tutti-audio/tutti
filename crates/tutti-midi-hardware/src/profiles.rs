@@ -25,10 +25,10 @@ use std::sync::Arc;
 
 use tutti_midi_device::{
     CiDeviceId, DeviceId, Muid, ProfileChange, ProfileChannels, ProfileEntry, ProfileId,
-    ProfileState, ProfileTable, ProfileTarget, Request, SpecificData,
+    ProfileState, ProfileTable, ProfileTarget, Request, SpecificData, Whole,
 };
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
-use tutti_ump::{MidiChannel, MidiGroup, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan};
+use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
 
 use crate::ci::PeerId;
 
@@ -60,15 +60,6 @@ struct Listed {
 pub struct ChannelSwitcher {
     listed: Listed,
     channel: MidiChannel,
-}
-
-/// Where a [`WholeSwitcher`] is: the whole Group or the whole Function Block.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Whole {
-    /// The Group, not channelized (`0x7E`).
-    Group,
-    /// The Function Block, not channelized (`0x7F`).
-    FunctionBlock,
 }
 
 /// A Profile the peer lists on the whole Group or Function Block.
@@ -235,19 +226,13 @@ impl WholeSwitcher {
     /// Asks the peer to enable the Profile on the whole Group or Function Block.
     #[must_use]
     pub fn enable(&self) -> ProfileSwitch {
-        self.listed.on(match self.whole {
-            Whole::Group => ProfileTarget::Group,
-            Whole::FunctionBlock => ProfileTarget::FunctionBlock,
-        })
+        self.listed.on(self.whole.into())
     }
 
     /// Asks the peer to disable the Profile on the whole Group or Function Block.
     #[must_use]
     pub fn disable(&self) -> ProfileSwitch {
-        self.listed.off(match self.whole {
-            Whole::Group => CiDeviceId::Group,
-            Whole::FunctionBlock => CiDeviceId::FunctionBlock,
-        })
+        self.listed.off(self.whole.into())
     }
 
     /// Whether it is the Group's or the Function Block's.
@@ -368,8 +353,9 @@ impl PeerProfiles {
     /// [`refused_mpe_zones`](Self::refused_mpe_zones) lists those.
     #[must_use]
     pub fn mpe_zones(&self) -> Option<MpeZones> {
-        self.fold_mpe_zones()
-            .0
+        self.table
+            .mpe_zones()
+            .zones
             .map(|set| MpeZones::profile(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
     }
 
@@ -377,43 +363,7 @@ impl PeerProfiles {
     /// out, each as the overlap with the zone held that refused it.
     #[must_use]
     pub fn refused_mpe_zones(&self) -> Vec<MpeOverlap> {
-        self.fold_mpe_zones().1
-    }
-
-    /// The zones held together, and the overlaps that kept the others out.
-    fn fold_mpe_zones(&self) -> (Option<MpeZoneSet>, Vec<MpeOverlap>) {
-        let mut zones: Option<MpeZoneSet> = None;
-        let mut refused = Vec::new();
-        for address in self.table.addresses() {
-            let CiDeviceId::Channel(manager) = address else {
-                continue;
-            };
-            let Some((_, entry)) = self
-                .table
-                .profiles(address)
-                .find(|(profile, _)| *profile == ProfileId::MPE)
-            else {
-                continue;
-            };
-            let zone = (entry.state() == ProfileState::Enabled)
-                .then(|| entry.channels())
-                .flatten()
-                .and_then(|count| u8::try_from(count.get()).ok())
-                .and_then(MpeChannels::new)
-                .and_then(|count| MpeZoneSpan::new(manager, count));
-            let Some(zone) = zone else { continue };
-            zones = match zones {
-                None => Some(MpeZoneSet::single(zone)),
-                Some(held) => match held.with(zone) {
-                    Ok(joined) => Some(joined),
-                    Err(overlap) => {
-                        refused.push(overlap);
-                        Some(held)
-                    }
-                },
-            };
-        }
-        (zones, refused)
+        self.table.mpe_zones().refused
     }
 
     /// Every Profile the peer lists, as handles to switch them from.

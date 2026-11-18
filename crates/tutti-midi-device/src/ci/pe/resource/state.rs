@@ -16,7 +16,7 @@ use super::client::{CallError, CallId, ResourceInitiator};
 use super::data::{OpaqueBody, PeData};
 use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
 use super::fields::{
-    Fields, PeDataError, PeDataFault, PeExtensions, PeText, integer, required_text, text,
+    Fields, PeDataError, PeDataFault, PeExtensions, PeText, Place, integer, required_text, text,
 };
 use super::kind::PeResource;
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget};
@@ -410,14 +410,17 @@ impl StateStamp {
     pub(super) fn read(extra: &PeExtra) -> Result<Self, PeDataError> {
         let rev = match extra.get("stateRev") {
             Some(json) => Some(text(json).and_then(StateRev::new).ok_or_else(|| {
-                PeDataError::new("State.stateRev", PeDataFault::WrongType("a string"))
+                PeDataError::new(
+                    Place::of("State").property("stateRev"),
+                    PeDataFault::WrongType("a string"),
+                )
             })?),
             None => None,
         };
         let timestamp = match extra.get("timestamp") {
             Some(json) => Some(unix_seconds(json).ok_or_else(|| {
                 PeDataError::new(
-                    "State.timestamp",
+                    Place::of("State").property("timestamp"),
                     PeDataFault::NotValid("time in Unix seconds"),
                 )
             })?),

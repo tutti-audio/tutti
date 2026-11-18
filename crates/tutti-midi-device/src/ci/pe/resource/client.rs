@@ -364,7 +364,7 @@ impl ResourceInitiator {
             Some(list) => list
                 .entry(resource)
                 .map(Some)
-                .ok_or_else(|| RequestRefused::NotListed(resource.as_str().to_owned())),
+                .ok_or_else(|| RequestRefused::NotListed(resource.clone())),
         }
     }
 
@@ -423,9 +423,7 @@ impl ResourceInitiator {
         now: Instant,
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
         if !get.target().resource().is_list() {
-            return Err(
-                RequestRefused::NotPaginable(get.target().resource().as_str().to_owned()).into(),
-            );
+            return Err(RequestRefused::NotPaginable(get.target().resource().clone()).into());
         }
         let paginates = self
             .entry(get.target().resource())?

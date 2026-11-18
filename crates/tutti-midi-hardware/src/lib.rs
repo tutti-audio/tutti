@@ -278,7 +278,7 @@ pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, Str
 pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
-    ProfilesChange, Switcher, Whole, WholeSwitcher,
+    ProfilesChange, Switcher, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};

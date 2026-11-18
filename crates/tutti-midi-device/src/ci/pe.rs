@@ -143,7 +143,7 @@ pub use resource::{
     PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode,
     PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync, PeJsonSchema,
     PeLink, PeLocalOn, PeMidiMode, PeModeEntry, PeModeList, PeOpaque, PeProgramEntry,
-    PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText,
+    PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText, Place,
     Priority, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
     ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
     ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,

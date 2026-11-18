@@ -301,6 +301,21 @@ fn an_unreadable_ack_or_nak_is_not_nakked() {
     }
 }
 
+/// M2-101 Table 5: `7E` is the whole Group and `7F` the whole Function Block;
+/// each whole is the Device ID and the Profile target of its own byte.
+#[test]
+fn a_whole_is_the_device_id_and_profile_target_of_its_byte() {
+    for (whole, byte, target) in [
+        (Whole::Group, 0x7E, ProfileTarget::Group),
+        (Whole::FunctionBlock, 0x7F, ProfileTarget::FunctionBlock),
+    ] {
+        let id = CiDeviceId::from(whole);
+        assert_eq!(id.get(), byte);
+        assert_eq!(ProfileTarget::from(whole), target);
+        assert_eq!(target.address(), id);
+    }
+}
+
 #[cfg(feature = "serde")]
 #[test]
 fn the_device_id_and_version_are_range_checked_values() {
