@@ -98,8 +98,8 @@ pub trait Real:
     #[must_use]
     fn from_design(x: f64) -> Self;
     /// A numeric literal in a generic kernel: `F::lit(0.5)`. Only a literal
-    /// argument; any other value crosses with [`from_unit`](Self::from_unit) or
-    /// `From`.
+    /// argument; any other value crosses with [`from_unit`](Self::from_unit), a
+    /// computed design figure with [`from_design`](Self::from_design), or `From`.
     ///
     /// ```
     /// use tutti_units::Real;

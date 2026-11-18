@@ -72,7 +72,7 @@ pub(super) const MIN_FILES: usize = 500;
 pub(super) const EDGES: &[(&str, &str)] = &[
     (
         "crates/tutti-units/src/real.rs",
-        "`Real::from_unit`, `Real::from_design` and `Real::lit`: the quantity-to-data crossing",
+        "`Real::from_unit`, `Real::from_design` and `Real::lit`: the quantity and design-figure crossings into data",
     ),
     (
         "crates/tutti-buffers/src/sample.rs",
