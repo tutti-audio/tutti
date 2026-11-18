@@ -677,12 +677,13 @@ pub mod midi {
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MetricalView,
-        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind,
-        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
-        SmfTicksPerQuarterOutOfRange, SmpteView, TextKind, Timebase, Timeline, TimelineDrop,
-        TimelineError, WriteOptions,
+        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MetricalSequence,
+        MetricalSequences, MetricalView, MicrosPerQuarter, MicrosPerQuarterOutOfRange,
+        MidiFileKind, Moved, OtherMetaKind, OtherMetaKindOutOfRange, OtherSmfFormat,
+        OtherSmfFormatOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfTicksPerFrame,
+        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
+        SmpteSequence, SmpteSequences, SmpteView, TextKind, Timebase, Timeline, TimelineDrop,
+        WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -690,14 +691,14 @@ pub mod midi {
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::Error as HardwareError;
+    pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, Reporter,
         WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::{NotFound, SeedError};
+    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{

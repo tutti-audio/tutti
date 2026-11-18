@@ -12,7 +12,7 @@
 //! (`sudo modprobe snd-seq-dummy`) and fails without them.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::listener::Listener;
 
@@ -22,11 +22,6 @@ use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{MidiHardwareOptions, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
-
-/// Whether `ev` starts a note, in either protocol.
-fn is_note_on(ev: Ump) -> bool {
-    matches!(ev.note_key_event(), Some(NoteKeyEvent::On(_)))
-}
 
 /// The loopback endpoint.
 fn pick(list: &[DeviceInfo]) -> Option<&DeviceInfo> {
@@ -74,33 +69,102 @@ fn open() -> Loopback {
     }
 }
 
-/// One test, not three: `Midi Through` is a kernel-wide loopback, so tests
-/// running in parallel processes would hear each other's notes.
+/// What only this process sends: a channel and a run of ten notes derived from
+/// the process id, so that a note another process puts into the kernel-wide
+/// loopback is told from this test's. Ids are mapped to 96 distinct
+/// (channel, run) pairs, so any 96 consecutive process ids never share one. The
+/// notes sit above the probe's 59.
+struct Marker {
+    channel: MidiChannel,
+    base: u8,
+}
+
+impl Marker {
+    fn of_this_process() -> Self {
+        let slot = (std::process::id() % 96) as u8;
+        Self {
+            channel: MidiChannel::masked(slot % 16),
+            base: 60 + 10 * (slot / 16),
+        }
+    }
+
+    /// The notes of `events` that this process sent, as (is_on, note).
+    fn mine(&self, events: &[Ump]) -> Vec<(bool, u8)> {
+        events
+            .iter()
+            .filter_map(|ev| match ev.note_key_event()? {
+                NoteKeyEvent::On(k) => Some((true, k)),
+                NoteKeyEvent::Off(k) => Some((false, k)),
+                NoteKeyEvent::Sustain { .. } => None,
+            })
+            .filter(|(_, k)| {
+                let note = k.note().get();
+                k.address().channel == self.channel && (self.base..self.base + 10).contains(&note)
+            })
+            .map(|(on, k)| (on, k.note().get()))
+            .collect()
+    }
+}
+
+/// A hang guard: the waits below return when the events arrive.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+/// After the expected events, the loopback is drained this long for extras.
+const QUIET: Duration = Duration::from_millis(100);
+
+impl Marker {
+    /// Plays until `expected` is what `mine` holds of the arrivals, failing
+    /// with what was heard after [`PATIENCE`], then drains [`QUIET`] more so a
+    /// duplicate is heard too. Returns everything heard.
+    fn hear(&self, graph: &mut Listener, expected: &[(bool, u8)]) -> Vec<Ump> {
+        let end = Instant::now() + PATIENCE;
+        let mut heard = Vec::new();
+        while self.mine(&heard).len() < expected.len() {
+            assert!(
+                Instant::now() < end,
+                "{expected:?} never came back; heard {:?}",
+                self.mine(&heard)
+            );
+            heard.extend(graph.listen(Duration::from_millis(5)));
+        }
+        heard.extend(graph.listen(QUIET));
+        heard
+    }
+}
+
+/// `Midi Through` is a kernel-wide loopback, so a test running in parallel in
+/// another process puts its notes into the stream too: the test asserts on the
+/// events of its own [`Marker`] only.
 #[test]
 fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     let mut lb = open();
+    let m = Marker::of_this_process();
+    let base = m.base;
 
-    let on = note_on(MidiChannel::FIRST, 60, 0x8000);
+    let on = note_on(m.channel, base, 0x8000);
     assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
-    let heard = lb.graph.listen(Duration::from_millis(150));
-    assert_eq!(heard.len(), 1, "one event came back for the note on");
-    assert!(is_note_on(heard[0]), "the event is a note on");
+    let heard = m.hear(&mut lb.graph, &[(true, base)]);
+    assert_eq!(m.mine(&heard), [(true, base)], "the note on came back once");
 
-    let off = note_off(MidiChannel::FIRST, 60, 0x4000);
+    let off = note_off(m.channel, base, 0x4000);
     assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]).packets(), 1);
-    let heard = lb.graph.listen(Duration::from_millis(150));
-    assert_eq!(heard.len(), 1, "one event came back for the note off");
-    assert!(heard[0].is_note_off(), "the event is a note off");
+    let heard = m.hear(&mut lb.graph, &[(false, base)]);
+    assert_eq!(
+        m.mine(&heard),
+        [(false, base)],
+        "the note off came back once"
+    );
 
-    for n in 60..70u8 {
+    for n in base..base + 10 {
         let _ = lb
             .sink
-            .queue(&[(Offset::ZERO, note_on(MidiChannel::FIRST, n, 0xA000))]);
+            .queue(&[(Offset::ZERO, note_on(m.channel, n, 0xA000))]);
     }
-    let heard = lb.graph.listen(Duration::from_millis(250));
-    assert_eq!(heard.len(), 10, "all ten of the burst came back");
-    assert!(
-        heard.iter().all(|&ev| is_note_on(ev)),
-        "all ten are note ons"
+    let burst: Vec<(bool, u8)> = (base..base + 10).map(|n| (true, n)).collect();
+    let heard = m.hear(&mut lb.graph, &burst);
+    assert_eq!(
+        m.mine(&heard),
+        burst,
+        "all ten of the burst came back, in order"
     );
 }

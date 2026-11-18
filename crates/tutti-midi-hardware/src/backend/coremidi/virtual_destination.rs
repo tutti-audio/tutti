@@ -25,7 +25,7 @@ use tutti_ump::{Ump, split_stream};
 
 use super::virtual_source::protocol_of;
 use crate::endpoints::InputConnection;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{VirtualProtocol, VirtualSpec};
 
 /// A CoreMIDI virtual destination that speaks the UMP protocol it was created
@@ -69,14 +69,14 @@ impl UmpVirtualDestination {
     ///
     /// # Errors
     ///
-    /// [`Error::VirtualBlocksUnsupported`] when `spec` declares blocks, and
-    /// [`Error::Os`] if CoreMIDI refuses the client or the endpoint.
+    /// [`MidiHardwareError::VirtualBlocksUnsupported`] when `spec` declares blocks, and
+    /// [`MidiHardwareError::Os`] if CoreMIDI refuses the client or the endpoint.
     pub(crate) fn open(
         spec: &VirtualSpec,
         mut producer: crate::InputProducerHandle,
     ) -> Result<Self> {
         if !spec.function_blocks().is_empty() {
-            return Err(Error::VirtualBlocksUnsupported);
+            return Err(MidiHardwareError::VirtualBlocksUnsupported);
         }
         Self::stamped(
             spec.name().as_str(),
@@ -96,7 +96,7 @@ impl UmpVirtualDestination {
     ///
     /// # Errors
     ///
-    /// [`Error::Os`] if CoreMIDI refuses either the client or the
+    /// [`MidiHardwareError::Os`] if CoreMIDI refuses either the client or the
     /// destination endpoint.
     #[cfg(test)]
     pub(crate) fn new<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>

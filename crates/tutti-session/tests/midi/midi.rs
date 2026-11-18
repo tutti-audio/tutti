@@ -183,10 +183,10 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 }
 
 /// **A file plays as a clip at the beat it is given**: a note on its beat 1,
-/// in a file played from beat 1, sounds at beat 2 (frame 48 000), and a format
-/// 2 file, which has no one timeline, is refused with that reason.
+/// in a file played from beat 1, sounds at beat 2 (frame 48 000); a file in
+/// SMPTE time has no metrical view to play.
 #[test]
-fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
+fn a_file_plays_at_the_beat_it_is_given_and_smpte_time_has_no_view_to_play() {
     use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
     use tutti_ump::U7;
@@ -211,20 +211,6 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     let _ = s.update();
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
-
-    let sequential = MidiFile::smf(
-        SmfFormat::Sequential,
-        SmfDivision::per_quarter(480),
-        vec![track],
-    )
-    .unwrap();
-    assert!(matches!(
-        s.midi()
-            .play_file(synth, Beat(0.0), sequential.timebase().metrical().unwrap()),
-        Err(MidiError::NoTimeline(
-            tutti_midi_file::TimelineError::NoCommonTimeline
-        ))
-    ));
 
     // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
     // and no beats to play on: it has no metrical view to pass.
@@ -868,16 +854,21 @@ fn a_dead_device_watch_is_reported_once() {
         events
             .iter()
             .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.to_string()),
+                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
     };
     assert!(failed(&s.update()).is_empty());
-    fake.fail_watch("the sequencer went away");
-    assert_eq!(
-        failed(&s.update()),
-        ["MIDI port error: the sequencer went away"]
+    fake.fail_watch();
+    let died = failed(&s.update());
+    assert!(
+        matches!(
+            died.as_slice(),
+            [tutti_midi_hardware::WatchFailure::Failed(e)]
+                if matches!(**e, tutti_midi_hardware::MidiHardwareError::DescriptorBroken)
+        ),
+        "{died:?}"
     );
     assert!(failed(&s.update()).is_empty(), "once");
 }

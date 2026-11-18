@@ -11,7 +11,7 @@ use tutti_plugin_types::{
 };
 
 use crate::loaded::Vst2Loaded;
-use crate::processor::{ProcessorParts, Vst2Processor};
+use crate::processor::{EntryRefusals, ProcessorParts, Vst2Processor};
 use crate::scratch::RenderScratch;
 
 /// The main-thread half of an activation: the whole control surface of a
@@ -205,6 +205,12 @@ impl Loaded for Vst2Loaded {
             block_size: block,
             sample_rate: rate,
             host,
+            refusals: EntryRefusals {
+                gate: self.instance.gate_refusals().clone(),
+                pins: self.instance.pin_refusals().clone(),
+                entries: self.instance.entry_refusals().clone(),
+                dispatcher: self.instance.dispatcher_cleared().clone(),
+            },
         });
         Ok((processor, Vst2Controller::new(self)))
     }

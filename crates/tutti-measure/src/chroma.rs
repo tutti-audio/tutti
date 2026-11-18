@@ -50,17 +50,22 @@
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
 use crate::level::SILENCE_FLOOR;
+use crate::sequence::local_maxima;
 use core::marker::PhantomData;
+use core::ops::RangeInclusive;
 
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, to_f32};
-use crate::framing::{FrameCutter, Framing, check_nyquist};
+use crate::framing::{
+    FrameCutter, Framing, check_frame_count, check_nyquist, check_overlap, check_window,
+};
 use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::parabolic_peak;
 use tutti_dsp::{BinCount, FrameCount, Grid};
 use tutti_types::ranged;
 
@@ -69,15 +74,10 @@ pub(crate) const CLASSES: usize = 12;
 
 /// The smallest and largest window accepted. The FFT works on the window, so
 /// an absurd one would ask for gigabytes, and a tiny one resolves no pitch.
-const MIN_WINDOW: usize = 64;
-const MAX_WINDOW: usize = 1 << 18;
+const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 18);
 
 /// The most frames one call analyses, bounding the output (48 bytes a frame).
-pub(crate) const MAX_FRAMES: usize = 1 << 19;
-
-/// The most hops in one window. Each frame is a whole transform, so this
-/// bounds the cost of a tiny hop.
-const MAX_OVERLAP: usize = 64;
+pub(crate) const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
 
 /// Smallest positive magnitude, standing in for an empty neighbour bin before
 /// its logarithm is taken.
@@ -272,21 +272,8 @@ impl ChromaConfig {
     /// [`Error::AboveNyquist`] when it exceeds half `rate`.
     fn plan(&self, rate: SampleRate) -> Result<ChromaPlan> {
         let geometry = self.framing.geometry(rate)?;
-        let window = geometry.window().get();
-        if !(MIN_WINDOW..=MAX_WINDOW).contains(&window) {
-            return Err(Error::WindowOutOfRange {
-                window: Samples(window),
-                min: Samples(MIN_WINDOW),
-                max: Samples(MAX_WINDOW),
-            });
-        }
-        if window.div_ceil(geometry.hop().get()) > MAX_OVERLAP {
-            return Err(Error::TooManyOverlaps {
-                window: Samples(window),
-                hop: geometry.hop(),
-                max: MAX_OVERLAP,
-            });
-        }
+        check_window(geometry.window(), &WINDOWS)?;
+        check_overlap(geometry.window(), geometry.hop())?;
         let nyquist = rate.get() as f32 / 2.0;
         let (min_freq, max_freq) = match self.band {
             Some(band) => (band.min, band.max),
@@ -348,19 +335,13 @@ impl ChromaPlan {
             return Err(empty);
         }
         check_nyquist(max, self.geometry.sample_rate())?;
-        let width = self.bin_width();
-        let lo = ((f64::from(min.get()) / width).ceil() as usize).max(1);
-        let hi = ((f64::from(max.get()) / width).floor() as usize)
-            .min(self.geometry.window().get() / 2 - 1);
+        let lo = (self.geometry.bin_of(min).ceil() as usize).max(1);
+        let hi =
+            (self.geometry.bin_of(max).floor() as usize).min(self.geometry.window().get() / 2 - 1);
         if hi < lo + 2 {
             return Err(empty);
         }
         Ok((lo, hi))
-    }
-
-    /// The spacing of the bins, in hertz.
-    fn bin_width(&self) -> f64 {
-        self.geometry.sample_rate().get() / self.geometry.window().get() as f64
     }
 
     /// Calls `visit(frequency, energy)` for each peak of `magnitudes` that
@@ -377,18 +358,13 @@ impl ChromaPlan {
             return false;
         }
         let floor = top * self.peak_floor.get().to_amplitude().get();
-        let width = self.bin_width();
-        for i in lo..=hi {
+        // A floor that compares false with a peak (a NaN) keeps none.
+        for i in local_maxima(magnitudes, lo..hi + 1).filter(|&i| magnitudes[i] >= floor) {
             let m = magnitudes[i];
-            if !(m > magnitudes[i - 1] && m >= magnitudes[i + 1] && m >= floor) {
-                continue;
-            }
             let (offset, peak) = interpolate(magnitudes[i - 1], m, magnitudes[i + 1]);
-            let frequency = (i as f64 + offset) * width;
-            if frequency >= f64::from(self.min_freq.get())
-                && frequency <= f64::from(self.max_freq.get())
-            {
-                visit(frequency, peak * peak);
+            let frequency = self.geometry.frequency_of(i as f64 + offset);
+            if frequency >= self.min_freq && frequency <= self.max_freq {
+                visit(f64::from(frequency.get()), peak * peak);
             }
         }
         true
@@ -442,13 +418,8 @@ fn class_of(frequency: f64, tuning: Semitones) -> usize {
 /// `-0.5..=0.5`, and the magnitude there.
 fn interpolate(below: f32, mid: f32, above: f32) -> (f64, f32) {
     let ln = |m: f32| libm::log(f64::from(m).max(TINY));
-    let (a, b, c) = (ln(below), ln(mid), ln(above));
-    let curvature = a - 2.0 * b + c;
-    if curvature.is_nan() || curvature >= 0.0 {
-        return (0.0, mid);
-    }
-    let offset = (0.5 * (a - c) / curvature).clamp(-0.5, 0.5);
-    (offset, libm::exp(b - 0.25 * (a - c) * offset) as f32)
+    let peak = parabolic_peak(ln(below), ln(mid), ln(above));
+    (peak.offset, libm::exp(peak.value) as f32)
 }
 
 /// The energy-weighted circular mean of the peaks' off-grid distances, kept as
@@ -528,11 +499,11 @@ pub(crate) fn mean_of_rows(grid: &Grid<f32>) -> [f32; CLASSES] {
             *s += f64::from(v);
         }
     }
-    mean_of(&sum, grid.frames().get())
+    mean_of(&sum, grid.frames())
 }
 
-fn mean_of(sum: &[f64; CLASSES], frames: usize) -> [f32; CLASSES] {
-    let n = frames.max(1) as f64;
+fn mean_of(sum: &[f64; CLASSES], frames: FrameCount) -> [f32; CLASSES] {
+    let n = frames.get().max(1) as f64;
     sum.map(|s| (s / n) as f32)
 }
 
@@ -545,7 +516,7 @@ struct ChromaFold {
     spectrum: Vec<Complex32>,
     magnitudes: Vec<f32>,
     sum: [f64; CLASSES],
-    frames: usize,
+    frames: FrameCount,
     sums: TuningSums,
 }
 
@@ -559,7 +530,7 @@ impl ChromaFold {
             spectrum: vec![Complex32::default(); window / 2 + 1],
             magnitudes: vec![0.0; window / 2 + 1],
             sum: [0.0; CLASSES],
-            frames: 0,
+            frames: FrameCount(0),
             sums: TuningSums::default(),
         }
     }
@@ -567,7 +538,7 @@ impl ChromaFold {
     /// Forgets the carried frames and tuning, keeping the buffers.
     fn reset(&mut self) {
         self.sum = [0.0; CLASSES];
-        self.frames = 0;
+        self.frames = FrameCount(0);
         self.sums = TuningSums::default();
     }
 
@@ -621,7 +592,7 @@ impl ChromaFold {
         for (s, &v) in self.sum.iter_mut().zip(&frame) {
             *s += f64::from(v);
         }
-        self.frames += 1;
+        self.frames = FrameCount(self.frames.get() + 1);
         frame
     }
 }
@@ -793,12 +764,7 @@ pub fn chroma<S: Sample>(
         });
     }
     let frames = plan.geometry.frames_for(Samples(samples.len()));
-    if frames.get() > MAX_FRAMES {
-        return Err(Error::TooManyFrames {
-            frames,
-            max: FrameCount(MAX_FRAMES),
-        });
-    }
+    check_frame_count(frames, MAX_FRAMES)?;
     let frame_at = |i: usize| {
         let at = i * plan.geometry.hop().get();
         &samples[at..at + window]
@@ -1190,7 +1156,7 @@ mod tests {
             }
         );
         let tiny = cfg().framing(framing(64, 1));
-        let long = vec![0.0; MAX_FRAMES + 64];
+        let long = vec![0.0; MAX_FRAMES.get() + 64];
         assert!(matches!(
             one_shot(&long, &tiny, &mut fft),
             Err(Error::TooManyFrames { .. })

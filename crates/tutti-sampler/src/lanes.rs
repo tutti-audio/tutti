@@ -27,6 +27,7 @@
 //! renders in pieces that long, on a `#[cold]` path the prepared render
 //! never enters.
 
+use tutti_buffers::Float;
 use tutti_types::MAX_CHANNELS;
 use tutti_types::SamplePosition;
 
@@ -37,7 +38,7 @@ use tutti_types::SamplePosition;
 pub(crate) const UNPREPARED_FRAMES: usize = 64;
 
 /// One channel of a block, planar: as long as its scratch's frames.
-pub(crate) type Lane = Vec<f32>;
+pub(crate) type Lane<F = f32> = Vec<F>;
 
 /// A block of planar scratch: [`MAX_CHANNELS`] lanes, the first
 /// `width` (the owner's channel count) as long as the longest block its
@@ -48,9 +49,9 @@ pub(crate) type Lane = Vec<f32>;
 /// nothing between blocks: every read writes each frame it hands on. A read
 /// writes only lanes below its `n`, which every caller clamps to the
 /// owner's width.
-pub(crate) struct Lanes(Box<[Lane; MAX_CHANNELS]>);
+pub(crate) struct Lanes<F: Float = f32>(Box<[Lane<F>; MAX_CHANNELS]>);
 
-impl Lanes {
+impl<F: Float> Lanes<F> {
     /// No frames in any lane. Allocates the box: control thread.
     fn empty() -> Self {
         Self(Box::new(std::array::from_fn(|_| Vec::new())))
@@ -66,19 +67,19 @@ impl Lanes {
     /// empty. Allocates: control thread.
     fn resize(&mut self, frames: usize, width: usize) {
         for (c, lane) in self.0.iter_mut().enumerate() {
-            fit(lane, if c < width { frames } else { 0 }, 0.0);
+            fit(lane, if c < width { frames } else { 0 }, F::ZERO);
         }
     }
 
     /// The lanes, one per channel.
     #[inline]
-    pub(crate) fn lanes(&self) -> &[Lane; MAX_CHANNELS] {
+    pub(crate) fn lanes(&self) -> &[Lane<F>; MAX_CHANNELS] {
         &self.0
     }
 
     /// The lanes, one per channel, to write.
     #[inline]
-    pub(crate) fn lanes_mut(&mut self) -> &mut [Lane; MAX_CHANNELS] {
+    pub(crate) fn lanes_mut(&mut self) -> &mut [Lane<F>; MAX_CHANNELS] {
         &mut self.0
     }
 
@@ -86,20 +87,20 @@ impl Lanes {
     #[inline]
     pub(crate) fn clear(&mut self, width: usize, frames: usize) {
         for lane in self.0.iter_mut().take(width) {
-            lane[..frames].fill(0.0);
+            lane[..frames].fill(F::ZERO);
         }
     }
 
     /// Write `frame` (one sample per channel) into frame `i` of the lanes.
     #[inline]
-    pub(crate) fn put(&mut self, i: usize, frame: &[f32]) {
+    pub(crate) fn put(&mut self, i: usize, frame: &[F]) {
         for (lane, &s) in self.0.iter_mut().zip(frame) {
             lane[i] = s;
         }
     }
 }
 
-impl std::fmt::Debug for Lanes {
+impl<F: Float> std::fmt::Debug for Lanes<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Lanes")
             .field("frames", &self.frames())
@@ -120,21 +121,21 @@ impl std::fmt::Debug for Lanes {
 /// prepared at 1024 frames (`tests::a_resize_sizes_every_buffer_to_the_width`
 /// counts it).
 #[derive(Debug)]
-pub(crate) struct BlockScratch {
+pub(crate) struct BlockScratch<F: Float = f32> {
     /// The voice's output for the block, before the mix.
-    pub(crate) out: Lanes,
+    pub(crate) out: Lanes<F>,
     /// The source's frames, when a stretch filter sits between them and
     /// `out`.
-    pub(crate) raw: Lanes,
+    pub(crate) raw: Lanes<F>,
     /// Where each frame of the block reads (`None`: silence). The disk tier
     /// rewrites them in place to its ring positions.
     pub(crate) positions: Vec<Option<SamplePosition>>,
     /// The along-time reads' taps (`MemorySource::read_placed_lanes`, a
     /// steady live disk read).
-    pub(crate) gather: Gather,
+    pub(crate) gather: Gather<F>,
 }
 
-impl BlockScratch {
+impl<F: Float> BlockScratch<F> {
     /// Scratch for blocks of up to `frames` frames of `width` channels (see
     /// [`resize`](Self::resize)). Allocates: control thread.
     pub(crate) fn new(frames: usize, width: usize) -> Self {
@@ -199,15 +200,15 @@ fn fit<T: Clone>(v: &mut Vec<T>, frames: usize, fill: T) {
 /// The four taps of frame `i` are derived from `index[i]` per channel
 /// (`interp::tap`), rather than kept: 4 bytes a frame, not 32.
 #[derive(Debug)]
-pub(crate) struct Gather {
+pub(crate) struct Gather<F: Float = f32> {
     pub(crate) index: Vec<u32>,
-    pub(crate) frac: Vec<f32>,
+    pub(crate) frac: Vec<F>,
     /// Whether frame `i` has a sample (a position inside the file).
     pub(crate) live: Vec<bool>,
-    pub(crate) y: [Lane; 4],
+    pub(crate) y: [Lane<F>; 4],
 }
 
-impl Gather {
+impl<F: Float> Gather<F> {
     /// No frames. Allocation-free.
     pub(crate) fn empty() -> Self {
         Self {
@@ -228,10 +229,10 @@ impl Gather {
     /// thread.
     pub(crate) fn resize(&mut self, frames: usize) {
         fit(&mut self.index, frames, 0);
-        fit(&mut self.frac, frames, 0.0);
+        fit(&mut self.frac, frames, F::ZERO);
         fit(&mut self.live, frames, false);
         for lane in &mut self.y {
-            fit(lane, frames, 0.0);
+            fit(lane, frames, F::ZERO);
         }
     }
 }
@@ -239,7 +240,7 @@ impl Gather {
 /// `dst[i] += src[i]` over the shorter of the two: the one mix a block read
 /// ends in.
 #[inline]
-pub(crate) fn accumulate(dst: &mut [f32], src: &[f32]) {
+pub(crate) fn accumulate<F: Float>(dst: &mut [F], src: &[F]) {
     let n = dst.len().min(src.len());
     let (dst, src) = (&mut dst[..n], &src[..n]);
     for (d, &s) in dst.iter_mut().zip(src) {
@@ -250,13 +251,13 @@ pub(crate) fn accumulate(dst: &mut [f32], src: &[f32]) {
 /// A gain as it multiplies audio: a NaN or infinite one is silence. Every
 /// place a voice's gain scales a sample reads it through this.
 #[inline]
-pub(crate) fn audible(gain: f32) -> f32 {
-    if gain.is_finite() { gain } else { 0.0 }
+pub(crate) fn audible<F: Float>(gain: F) -> F {
+    if gain.is_finite() { gain } else { F::ZERO }
 }
 
 /// `lane[i] *= gain`: one voice gain over a lane.
 #[inline]
-pub(crate) fn scale(lane: &mut [f32], gain: f32) {
+pub(crate) fn scale<F: Float>(lane: &mut [F], gain: F) {
     for s in lane.iter_mut() {
         *s *= gain;
     }
@@ -309,7 +310,7 @@ mod tests {
     /// stereo frame).
     #[test]
     fn a_resize_sizes_every_buffer_to_the_width() {
-        let mut s = BlockScratch::new(UNPREPARED_FRAMES, 1);
+        let mut s = BlockScratch::<f32>::new(UNPREPARED_FRAMES, 1);
         assert_eq!((s.frames(), s.width()), (UNPREPARED_FRAMES, 1));
         for (frames, width) in [(512usize, 2usize), (64, 6), (1024, 2), (1, 1)] {
             s.resize(frames, width);

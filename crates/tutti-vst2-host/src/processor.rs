@@ -23,12 +23,12 @@ use tutti_plugin_types::{
 };
 
 use crate::host::HostState;
-use crate::loaded::AudioSide;
+use crate::loaded::{AudioSide, LossesTold};
 use crate::midi::MidiIo;
 use crate::scratch::RenderScratch;
-use crate::time_info::build_vst2_time_info;
+use crate::time_info::{advance_time_info, build_vst2_time_info};
 use crate::transport_cell::TransportWriter;
-use crate::types::{MidiEventVec, Vst2ProcessContext};
+use crate::types::{MidiEventVec, TransportInfo, Vst2ProcessContext};
 
 /// The realtime half of an activation: renders blocks.
 ///
@@ -61,6 +61,36 @@ pub struct Vst2Processor {
     sample_rate: SampleRate,
     /// The host's end of the plugin's callbacks, for its drop counters.
     host: Arc<HostState>,
+    /// The plugin's refused audio entries, as the plugin instance counts them.
+    refusals: EntryRefusals,
+    /// The losses `render` has already put in its `ProcessOutput`; a rejoin keeps them.
+    told: LossesTold,
+    /// The events staged for this block's pieces the plugin refused (the gate was closed,
+    /// or the entry missing), which never reached it: counted lost by
+    /// [`render`](Self::render).
+    refused_midi: u64,
+}
+
+/// The tallies of the audio entries the plugin refused, read from the plugin instance:
+/// the gate was closed or held, the plugin grew its pins past the buffer, it has no entry
+/// for the block, or its dispatcher was cleared. Each refusal is a block (or piece) that
+/// rendered silence.
+#[derive(Clone)]
+pub(crate) struct EntryRefusals {
+    pub gate: Tally<u64>,
+    pub pins: Tally<u64>,
+    pub entries: Tally<u64>,
+    pub dispatcher: Tally<u64>,
+}
+
+impl EntryRefusals {
+    fn total(&self) -> u64 {
+        self.gate
+            .get()
+            .saturating_add(self.pins.get())
+            .saturating_add(self.entries.get())
+            .saturating_add(self.dispatcher.get())
+    }
 }
 
 impl std::fmt::Debug for Vst2Processor {
@@ -82,6 +112,7 @@ pub(crate) struct ProcessorParts {
     pub block_size: usize,
     pub sample_rate: SampleRate,
     pub host: Arc<HostState>,
+    pub refusals: EntryRefusals,
 }
 
 impl Vst2Processor {
@@ -94,6 +125,7 @@ impl Vst2Processor {
             block_size,
             sample_rate,
             host,
+            refusals,
         } = parts;
         Self {
             render,
@@ -104,7 +136,28 @@ impl Vst2Processor {
             block_size,
             sample_rate,
             host,
+            refusals,
+            told: audio.told,
+            refused_midi: 0,
         }
+    }
+
+    /// Every MIDI event lost on the way in to the plugin since load: SysEx dropped whole,
+    /// messages of another group, and events past a block's room.
+    fn midi_in_lost_total(&self) -> u64 {
+        self.midi
+            .send
+            .sysex_dropped()
+            .get()
+            .saturating_add(self.midi.send.groups_dropped().get())
+            .saturating_add(self.midi.send.events_dropped().get())
+    }
+
+    /// How many audio entries the plugin refused since load: blocks, or pieces of a long
+    /// block, that rendered silence.
+    #[must_use]
+    pub fn entries_refused(&self) -> u64 {
+        self.refusals.total()
     }
 
     /// The audio handle: `deactivate` compares it with the Controller's instance.
@@ -137,6 +190,7 @@ impl Vst2Processor {
         AudioSide {
             time_info: self.time_info,
             midi: self.midi,
+            told: self.told,
         }
     }
 
@@ -242,9 +296,15 @@ impl Vst2Processor {
         let mut start = 0;
         while start < num_samples {
             let len = (num_samples - start).min(self.block_size.max(1));
-            self.begin_piece(ctx, start, len, num_samples);
+            let refused = self.refusals.total();
+            let staged = self.begin_piece(ctx, start, len, num_samples);
             self.scratch
                 .render_piece(&mut self.render, input, &mut output, start, len);
+            if self.refusals.total() != refused {
+                // The plugin never heard the events staged for the piece. Those staging
+                // dropped are already in the staging counters.
+                self.refused_midi += staged as u64;
+            }
             self.midi.drain_from(start);
             start += len;
         }
@@ -254,17 +314,22 @@ impl Vst2Processor {
     /// Sets up one piece of a block, `len` frames from `start` of `total`:
     /// the transport snapshot the plugin reads, then the MIDI events that fall
     /// in the piece. The piece's first call publishes `ctx`'s transport; each
-    /// later piece advances the last snapshot by the frames before it.
-    fn begin_piece(&mut self, ctx: &Vst2ProcessContext, start: usize, len: usize, total: usize) {
+    /// later piece advances that snapshot by the frames before it. Returns how many MIDI
+    /// events were staged for the plugin.
+    fn begin_piece(
+        &mut self,
+        ctx: &Vst2ProcessContext,
+        start: usize,
+        len: usize,
+        total: usize,
+    ) -> usize {
         if start == 0 {
             self.update_transport(ctx);
-        } else if ctx.transport.is_some() {
-            // Every earlier piece was a full `block_size`. Not without a
-            // transport: nothing was published for this block, and advancing
-            // the last block's snapshot would accumulate a stale one.
+        } else {
+            // Every earlier piece was a full `block_size`.
             self.advance_transport(self.block_size.max(1), ctx.sample_rate);
         }
-        self.dispatch_midi(ctx.midi, start, len, total);
+        self.dispatch_midi(ctx.midi, start, len, total)
     }
 
     /// Refreshes the snapshot the plugin reads back via `audioMasterGetTime`.
@@ -273,8 +338,9 @@ impl Vst2Processor {
     /// builder:
     /// `kVstTransportChanged` is an *edge*, so the only way to know whether the
     /// transport state moved is to compare against what this plugin was last
-    /// told. When `ctx.transport` is `None` the last snapshot is left in place,
-    /// so the next real update still sees the correct predecessor.
+    /// told. A block with no transport (`ctx.transport` of `None`) publishes a stopped
+    /// transport at the origin ([`TransportInfo::new`]), so a plugin never reads a
+    /// rolling transport that the host stopped reporting.
     ///
     /// Runs on the audio thread, so it must not allocate — hence
     /// [`TransportWriter`], which overwrites
@@ -287,59 +353,40 @@ impl Vst2Processor {
     /// `&mut self` makes the write the only one, and it returns before the
     /// plugin is called.
     fn update_transport(&mut self, ctx: &Vst2ProcessContext) {
-        if let Some(t) = ctx.transport {
-            let previous = self.time_info.last();
-            let next = build_vst2_time_info(
-                t,
-                ctx.sample_rate,
-                previous.as_ref(),
-                self.host.automation(),
-            );
-            self.time_info.write(next);
-        }
-    }
-
-    /// Advances the published snapshot by `frames` for the next piece of a
-    /// split block: sample position, host time and (while rolling) the
-    /// musical position move on, and the bar start moves to the last bar line
-    /// the position has passed; `kVstTransportChanged` was an edge of the
-    /// block's first piece and does not repeat.
-    fn advance_transport(&mut self, frames: usize, sample_rate: SampleRate) {
-        use vst::api::TimeInfoFlags as F;
-        let Some(mut t) = self.time_info.last() else {
-            return;
-        };
-        let flags = F::from_bits_truncate(t.flags);
-        let secs = frames as f64 / sample_rate.get();
-        t.sample_pos += frames as f64;
-        if flags.contains(F::NANOSECONDS_VALID) {
-            t.nanoseconds += secs * 1e9;
-        }
-        if flags.contains(F::TRANSPORT_PLAYING)
-            && flags.contains(F::PPQ_POS_VALID)
-            && flags.contains(F::TEMPO_VALID)
-        {
-            t.ppq_pos += secs * t.tempo / 60.0;
-            // A bar line inside the piece: the bar is `numerator` beats of
-            // `4 / denominator` quarters.
-            if flags.contains(F::BARS_VALID) && t.time_sig_denominator > 0 {
-                let bar = f64::from(t.time_sig_numerator) * 4.0 / f64::from(t.time_sig_denominator);
-                if bar > 0.0 && t.ppq_pos >= t.bar_start_pos + bar {
-                    t.bar_start_pos += ((t.ppq_pos - t.bar_start_pos) / bar).floor() * bar;
-                }
+        let stopped;
+        let transport = match ctx.transport {
+            Some(t) => t,
+            None => {
+                stopped = TransportInfo::new(ctx.sample_rate);
+                &stopped
             }
-        }
-        t.flags &= !F::TRANSPORT_CHANGED.bits();
-        self.time_info.write(t);
+        };
+        let previous = self.time_info.last();
+        let next = build_vst2_time_info(
+            transport,
+            ctx.sample_rate,
+            previous.as_ref(),
+            self.host.automation(),
+        );
+        self.time_info.write(next);
     }
 
-    fn dispatch_midi(&mut self, midi: &[UmpAt], start: usize, len: usize, total: usize) {
+    /// Advances the published snapshot for the next piece of a split block
+    /// ([`advance_time_info`]).
+    fn advance_transport(&mut self, frames: usize, sample_rate: SampleRate) {
+        if let Some(t) = self.time_info.last() {
+            self.time_info
+                .write(advance_time_info(t, frames, sample_rate));
+        }
+    }
+
+    fn dispatch_midi(&mut self, midi: &[UmpAt], start: usize, len: usize, total: usize) -> usize {
         // Marked live unless the host renders offline, as `audioMasterGetCurrentProcessLevel`
         // answers.
         self.midi.send.set_live(!self.host.is_offline());
         self.midi
             .send
-            .send_piece(&mut self.render, midi, start, len, total);
+            .send_piece(&mut self.render, midi, start, len, total)
     }
 }
 
@@ -420,8 +467,29 @@ impl Vst2Processor {
         // `out`'s parameter points.
         out.emit_midi(emitted.iter().copied());
         out.count_params_refused(refused as usize);
+        // What was lost since the last block, each in its own counter. Input the host refused
+        // (staging's drops and the events of a refused piece, in messages); the plugin's
+        // output that found no room is dropped.
+        let midi_in = self.midi_in_lost_total();
+        let midi_out = self.host.dropped_midi_out().get();
+        let entries = self.refusals.total();
+        let lost_in =
+            midi_in.saturating_sub(self.told.midi_in) + std::mem::take(&mut self.refused_midi);
+        out.count_input_refused(count_of(lost_in));
+        out.count_midi_dropped(count_of(midi_out.saturating_sub(self.told.midi_out)));
+        out.count_entries_refused(count_of(entries.saturating_sub(self.told.entries)));
+        self.told = LossesTold {
+            midi_in,
+            midi_out,
+            entries,
+        };
         Ok(())
     }
+}
+
+/// `n` as a count for a `ProcessOutput`, saturating.
+fn count_of(n: u64) -> usize {
+    usize::try_from(n).unwrap_or(usize::MAX)
 }
 
 impl Processor for Vst2Processor {

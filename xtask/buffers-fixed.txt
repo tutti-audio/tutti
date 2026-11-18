@@ -46,13 +46,6 @@ crates/tutti-plugin-types/src/contract.rs::positions  not-audio: a normalized pa
 crates/tutti-plugin-types/src/contract.rs::round_trip  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::steps  not-audio: a normalized parameter position, not audio
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  not-audio: a scale's frequency ratios, a tuning table not audio
-crates/tutti-sampler/src/stretch/unit.rs::Unit::process  pending
-crates/tutti-sampler/src/stretch/unit.rs::Unit::tick  pending
-crates/tutti-sampler/src/testing.rs::block  pending
-crates/tutti-sampler/src/testing.rs::play  pending
-crates/tutti-sampler/src/voice/interp.rs::read_frame  pending
-crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::sample_into  pending
-crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::sample_raw_into  pending
 crates/tutti-session/src/graph/testing.rs::AudioSide::render  engine-f32
 crates/tutti-session/src/graph/testing.rs::AudioSide::tick  engine-f32
 crates/tutti-session/src/session.rs::Session::render  engine-f32

@@ -51,7 +51,7 @@
 //! same row format and tag rules as the others.
 //!
 //! The rows whose id starts with a MIDI document's prefix (`m2-101/` to
-//! `m2-116/`) are held to that document's spec text in the directory
+//! `m2-116/`, and `smf/`) are held to that document's spec text in the directory
 //! `TUTTI_MIDI_SPECS` points at ([`super::midi_spec`]): the committed `(id,
 //! kind, section, facts)` quadruples equal the extracted ones. The MIDI specs
 //! are not in the repo and not in CI, so with the text absent the comparison
@@ -809,6 +809,43 @@ pub(super) fn regenerate_vst3(
 /// grammar.
 fn midi_header(doc: &midi_spec::Doc) -> String {
     let (p, label, title) = (doc.prefix, doc.label, doc.title);
+    if let midi_spec::Tables::Named(_) = doc.tables {
+        return format!(
+            "\
+# {title} inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the OCR text of the
+# spec in The Complete MIDI 1.0 (1996) book, a `{src}*.txt` in that directory;
+# the other columns are written by hand, in our own words. `cargo xtask
+# check-conformance` holds the generated columns to the text when
+# `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids, section
+# names, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
+#
+# Ids:
+#   {p}/<section>#<n>              the nth sentence under the named section (the
+#                                 headings of the spec: header-chunk, track-chunks,
+#                                 set-tempo, ..) that binds. The spec has no
+#                                 table of conformance words: must, shall, always,
+#                                 never, required and assumed give required,
+#                                 should (and polite, idea) recommended, may and
+#                                 optional permitted; `not required` reads as may
+#                                 and `not optional` as must; the negated forms
+#                                 keep the kind and carry the fact neg=1. A
+#                                 sentence with none of them that states how the
+#                                 format stores something (stored, represented,
+#                                 begins, followed, ..) is required with the fact
+#                                 def=1.
+# side: {sides} (todo marks a row not yet read).
+",
+            src = doc.source,
+            sides = doc.sides,
+        );
+    }
     let id = |shape: String, what: &str| format!("#   {shape:<30}{what}\n");
     let mut out = format!(
         "\

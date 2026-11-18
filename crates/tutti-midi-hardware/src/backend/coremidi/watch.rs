@@ -35,8 +35,8 @@ use coremidi::{Client, Notification};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
-use crate::error::Result;
-use tutti_coremidi_ffi::OsStatus;
+use crate::error::{MidiHardwareError, MidiThread, Result};
+use tutti_coremidi_ffi::{Operation, OsStatus};
 use tutti_midi_device::OsDevice;
 use tutti_rt::spawn_named;
 
@@ -141,7 +141,7 @@ impl Hub {
 
 /// The hub, started on first use, or why there is none (CoreMIDI refused the
 /// client). A refusal is not kept: the next watch tries again.
-pub(super) fn hub() -> std::result::Result<&'static Hub, String> {
+pub(super) fn hub() -> Result<&'static Hub> {
     static HUB: Mutex<Option<&'static Hub>> = Mutex::new(None);
     let mut slot = HUB.lock_recover();
     if let Some(hub) = *slot {
@@ -152,7 +152,7 @@ pub(super) fn hub() -> std::result::Result<&'static Hub, String> {
     Ok(started)
 }
 
-fn start_hub() -> std::result::Result<&'static Hub, String> {
+fn start_hub() -> Result<&'static Hub> {
     {
         let hub: &'static Hub = Box::leak(Box::new(Hub {
             watches: Mutex::new(Vec::new()),
@@ -160,7 +160,7 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
         }));
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
-        spawn_named("tutti-devwatch", None, move |_| {
+        spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
             let client = tutti_coremidi_ffi::create_client(|| {
                 Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
                     if matches!(
@@ -194,12 +194,19 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
                 }
             }
         })
-        .map_err(|e| format!("spawn the CoreMIDI watch thread: {e}"))?
+        .map_err(|source| MidiHardwareError::Spawn {
+            thread: MidiThread::DeviceWatch,
+            source,
+        })?
         .detach();
         match started.recv() {
             Ok(Ok(())) => Ok(hub),
-            Ok(Err(status)) => Err(format!("CoreMIDI refused the client: {status}")),
-            Err(_) => Err("the CoreMIDI watch thread ended at once".into()),
+            Ok(Err(status)) => {
+                Err(tutti_coremidi_ffi::Error::call(Operation::CreateClient, status).into())
+            }
+            Err(_) => Err(MidiHardwareError::ThreadEnded {
+                thread: MidiThread::DeviceWatch,
+            }),
         }
     }
 }
@@ -231,7 +238,7 @@ pub(super) fn start(sink: ChangeSink, snapshot: fn() -> Vec<OsDevice>) -> Result
     let hub = match hub() {
         Ok(hub) => hub,
         Err(why) => {
-            sink.fail(crate::Error::port(why));
+            sink.fail(why);
             return Ok(Box::new(NoWatch));
         }
     };

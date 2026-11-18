@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
@@ -294,7 +294,7 @@ fn open_lanes(
             tap,
             layout,
             placement,
-            scratch: vec![0.0; max_block * usize::from(layout.count())],
+            scratch: vec![0.0; layout.interleaved_len(Samples(max_block))],
             sink,
         });
     }
@@ -328,9 +328,10 @@ fn reserve_planes(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<f3
 /// Drains the `n` frames the block just rendered from a tap's rings into its
 /// planes, every block, whether or not the gate keeps them.
 fn drain_tap(output: usize, tap: &mut TapFeed, n: usize) -> Result<()> {
+    let mut planes = PlanesMut::from_vecs(&mut tap.planes)?;
     let got = tap
         .reader
-        .pop_planes(tap.planes.iter_mut().map(|p| &mut p[..n]), Samples(n));
+        .pop_planes(planes.slice_mut(Samples::ZERO..Samples(n)))?;
     let lost = tap.reader.take_lost();
     if lost.get() > 0 {
         return Err(Error::TapOverrun { output, lost });
@@ -530,7 +531,7 @@ fn measure(
     let mut staging: Vec<f32> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
-    let mut block = vec![0.0f32; chunk * ch];
+    let mut block = vec![0.0f32; layout.interleaved_len(Samples(chunk))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     loop {
         if control.is_cancelled() {

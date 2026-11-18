@@ -27,5 +27,5 @@ pub(crate) fn open_virtual_destination(
     Ok((Box::new(destination), spec.protocol()))
 }
 
-/// The platform's own error, as [`Error::Os`](crate::Error::Os) carries it.
+/// The platform's own error, as [`MidiHardwareError::Os`] carries it.
 pub(crate) type OsError = tutti_coremidi_ffi::Error;

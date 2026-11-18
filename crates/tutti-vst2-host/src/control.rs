@@ -39,12 +39,15 @@ pub(crate) fn plugin_error(error: Vst2Error) -> PluginError {
             reason: error_chain(&source),
         },
         Vst2Error::StateFrame(frame) => PluginError::State(frame.to_string()),
-        Vst2Error::NoEditor | Vst2Error::EditorOpenFailed => PluginError::Editor(
-            tutti_plugin_types::EditorError::PluginError(error.to_string()),
-        ),
+        Vst2Error::NoEditor | Vst2Error::EditorOpenFailed | Vst2Error::NoEditorSize { .. } => {
+            PluginError::Editor(tutti_plugin_types::EditorError::PluginError(
+                error.to_string(),
+            ))
+        }
         state @ (Vst2Error::ChunkSave(_)
         | Vst2Error::NoGetParameter { .. }
         | Vst2Error::TooManyParameters { .. }
+        | Vst2Error::ParameterOutOfRange { .. }
         | Vst2Error::NoSetParameter { .. }) => PluginError::State(error_chain(&state)),
     }
 }

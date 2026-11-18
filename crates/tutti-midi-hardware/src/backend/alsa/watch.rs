@@ -54,7 +54,7 @@ use super::{address_of, handle_of};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_alsa_ffi::{
     Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
@@ -63,9 +63,6 @@ use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Looks a settle takes before it reports the last one.
 const MAX_SETTLE: usize = 8;
-/// Linux truncates a thread name to 15 bytes.
-const THREAD_NAME: &str = "tutti-devwatch";
-
 /// A subscription to the announce port, and the descriptors to wait on.
 struct Announce {
     /// The client, and the read end of the stop pair: the owner drops the write
@@ -500,13 +497,17 @@ impl Announce {
     /// or `timeout` passes.
     fn wait(&mut self, timeout: Option<std::time::Duration>) -> Result<Woken> {
         let wait = match timeout {
-            None => Some(self.seq.wait()?),
-            Some(timeout) => self.seq.wait_for(timeout)?,
-        };
+            None => self.seq.wait().map(Some),
+            Some(timeout) => self.seq.wait_for(timeout),
+        }
+        .map_err(|source| MidiHardwareError::Io {
+            step: "wait on the sequencer descriptor",
+            source,
+        })?;
         match wait {
             None => Ok(Woken::TimedOut),
             Some(Wait::Stopped) => Ok(Woken::Stopped),
-            Some(Wait::Broken) => Err(Error::port("the sequencer descriptor failed")),
+            Some(Wait::Broken) => Err(MidiHardwareError::DescriptorBroken),
             Some(Wait::Ready) => Ok(Woken::Announced(self.drain())),
         }
     }
@@ -580,7 +581,10 @@ pub(super) fn start(
     sink: ChangeSink,
     snapshot: impl Fn(&Client) -> Option<Vec<OsDevice>> + Send + 'static,
 ) -> Result<Box<dyn Watch>> {
-    let (stop_tx, stop_rx) = UnixStream::pair()?;
+    let (stop_tx, stop_rx) = UnixStream::pair().map_err(|source| MidiHardwareError::Io {
+        step: "make the device watch's stop pair",
+        source,
+    })?;
     let mut announce = match Announce::open(stop_rx) {
         Ok(announce) => announce,
         Err(e) => {
@@ -591,7 +595,7 @@ pub(super) fn start(
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
     tracker.seed(|| announce.drain(), || snapshot(announce.seq.client()))?;
-    let thread = spawn_named(THREAD_NAME, None, move |_| {
+    let thread = spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             loop {
                 match announce.wait(tracker.retry_after()) {
@@ -616,6 +620,10 @@ pub(super) fn start(
             Ok(Some(why)) => failures.fail(why),
             Err(_) => failures.fail(crate::WatchFailure::Panicked),
         }
+    })
+    .map_err(|source| MidiHardwareError::Spawn {
+        thread: MidiThread::DeviceWatch,
+        source,
     })?;
     Ok(Box::new(AlsaWatch {
         stop: Some(stop_tx),

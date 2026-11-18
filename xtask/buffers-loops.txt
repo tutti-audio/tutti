@@ -12,18 +12,7 @@
 #                                 (complex re/im packing, a matrix row).
 #
 # A free-text `measured:` is refused.
-crates/tutti-cpal/src/mic.rs::Capture::block  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  not-interleave: complex re/im packing for the half-size FFT
 crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  not-interleave: complex re/im packing for the half-size FFT
 crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  not-interleave: complex re/im packing for the half-size FFT
-crates/tutti-engine/src/callback.rs::OutputBlock::render_unguarded  pending
-crates/tutti-engine/src/manual.rs::ManualStream::render_block_inner  pending
-crates/tutti-engine/src/timer.rs::TimerDriver::open  pending
-crates/tutti-export/src/render/outputs.rs::open_lanes  pending
-crates/tutti-export/src/spill.rs::SpillReplay::fill  pending
-crates/tutti-graph/src/arena.rs::Arena::leading_mut  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
-crates/tutti-sampler/src/streamer/io/wave_io.rs::read_wave  pending
-crates/tutti-sampler/src/streamer/loops.rs::RingLoop::blend_run  pending
-crates/tutti-sampler/src/streamer/loops.rs::apply_mapping  pending
-crates/tutti-sampler/src/voice/offline_read.rs::Pages::load  pending
+crates/tutti-graph/src/arena.rs::Arena::leading_mut  not-interleave: slot bookkeeping, the arena's lines per slot (`stride`), not a channel interleave

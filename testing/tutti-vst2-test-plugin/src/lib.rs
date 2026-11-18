@@ -237,7 +237,11 @@ struct ProbeEditor;
 
 impl Editor for ProbeEditor {
     fn size(&self) -> (i32, i32) {
-        (320, 240)
+        if switches::editor_has_no_size() {
+            (0, 0)
+        } else {
+            (320, 240)
+        }
     }
 
     fn position(&self) -> (i32, i32) {
@@ -252,7 +256,9 @@ impl Editor for ProbeEditor {
         switches::editor_opens()
     }
 
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        switches::record_editor_close();
+    }
 
     fn is_open(&mut self) -> bool {
         false
@@ -890,8 +896,7 @@ unsafe fn answer_midi_program_name(ptr: *mut std::os::raw::c_void) -> Option<i32
     name.midi_bank_msb = msb;
     name.midi_bank_lsb = lsb;
     name.parent_category_index = -1;
-    // Mark program 1 a drum kit so the key-name path has a reason to be
-    // queried, and program 0 not, so the flag is proven to vary.
+    // Mark program 1 omni (`kMidiIsOmni`) and program 0 not, so the flag is proven to vary.
     name.flags = if requested == 1 {
         api::MidiProgramFlags::IS_OMNI.bits()
     } else {

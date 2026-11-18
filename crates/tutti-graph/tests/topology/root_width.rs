@@ -42,7 +42,7 @@ fn a_channel_no_speaker_names_is_refused_for_every_destination() {
 fn an_unassigned_source_goes_by_index_and_only_widens() {
     let four = ChannelTopology::unassigned(ChannelLayout::QUAD);
     let mut out = [9.0f32; 6];
-    fold_to_width(&four, width(6))
+    fold_to_width::<f32>(&four, width(6))
         .unwrap()
         .frame(&[1.0, 2.0, 3.0, 4.0], &mut out);
     assert_eq!(out, [1.0, 2.0, 3.0, 4.0, 0.0, 0.0]);
@@ -60,7 +60,7 @@ fn an_unassigned_source_goes_by_index_and_only_widens() {
 #[test]
 fn a_bare_count_in_the_engines_order_places_by_speaker() {
     let mut out = [0.0f32; 2];
-    fold_to_width(
+    fold_to_width::<f32>(
         &ChannelTopology::assumed(ChannelLayout::QUAD),
         ChannelLayout::STEREO,
     )
@@ -74,7 +74,7 @@ fn a_bare_count_in_the_engines_order_places_by_speaker() {
 #[test]
 fn a_named_source_goes_by_index_into_a_width_with_no_order() {
     let mut five = [0.0f32; 5];
-    fold_to_width(&smpte(2), width(5))
+    fold_to_width::<f32>(&smpte(2), width(5))
         .unwrap()
         .frame(&[1.0, 2.0], &mut five);
     assert_eq!(five, [1.0, 2.0, 0.0, 0.0, 0.0]);
@@ -102,13 +102,13 @@ fn a_named_source_with_an_order_is_placed_by_speaker() {
     ])
     .unwrap();
     let mut out = [0.0f32; 8];
-    fold_to_width(&wav71, width(8))
+    fold_to_width::<f32>(&wav71, width(8))
         .unwrap()
         .frame(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], &mut out);
     assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
 
     let mut stereo = [0.0f32; 2];
-    fold_to_width(&smpte(6), ChannelLayout::STEREO)
+    fold_to_width::<f32>(&smpte(6), ChannelLayout::STEREO)
         .unwrap()
         .frame(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], &mut stereo);
     assert_eq!(stereo, [M, M], "a centre-only 5.1 reaches both sides");
