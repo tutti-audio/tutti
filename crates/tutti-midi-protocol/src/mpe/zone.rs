@@ -469,8 +469,7 @@ pub struct MpeZones {
     zones: [Option<MpeZoneConfig>; Self::MAX_ZONES],
 }
 
-/// A persisted list of zones that is not a zone layout.
-#[cfg(feature = "serde")]
+/// A list of zones that is not a zone layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum InvalidMpeZones {
     /// The list holds no zone.
@@ -481,14 +480,12 @@ pub enum InvalidMpeZones {
     Conflict,
 }
 
-#[cfg(feature = "serde")]
 impl From<MpeZones> for Vec<MpeZoneConfig> {
     fn from(zones: MpeZones) -> Self {
         zones.zones().copied().collect()
     }
 }
 
-#[cfg(feature = "serde")]
 impl TryFrom<Vec<MpeZoneConfig>> for MpeZones {
     type Error = InvalidMpeZones;
 

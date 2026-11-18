@@ -24,5 +24,6 @@ mod zone;
 
 pub use profile::{ChannelResponse, ControllerSupport, MpeFeatures, PitchBendSupport};
 #[cfg(feature = "serde")]
-pub use zone::{InvalidMpeZoneConfig, InvalidMpeZones};
+pub use zone::InvalidMpeZoneConfig;
+pub use zone::InvalidMpeZones;
 pub use zone::{MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones};

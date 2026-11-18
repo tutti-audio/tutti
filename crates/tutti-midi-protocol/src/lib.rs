@@ -157,12 +157,13 @@ mod voice;
 pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
 pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message, narrow_with};
 pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
+#[cfg(feature = "serde")]
+pub use mpe::InvalidMpeZoneConfig;
+pub use mpe::InvalidMpeZones;
 pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
 };
-#[cfg(feature = "serde")]
-pub use mpe::{InvalidMpeZoneConfig, InvalidMpeZones};
 pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use narrower::Narrower;
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
@@ -173,11 +174,10 @@ pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode};
 pub use song_position::song_position;
 pub use translator::Translator;
 pub use tuning::{
-    ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets,
-    Timing, TuningFrequency, TuningMessage, TuningName,
+    ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
+    MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency, TuningMessage,
+    TuningName,
 };
-#[cfg(feature = "serde")]
-pub use tuning::{InvalidKeyChanges, InvalidKeyTable};
 #[cfg(feature = "serde")]
 pub use universal::InvalidMtcTimeCode;
 pub use universal::{

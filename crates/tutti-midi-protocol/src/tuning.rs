@@ -107,29 +107,25 @@ impl TuningFrequency {
 )]
 pub struct KeyTable([TuningFrequency; 128]);
 
-/// A persisted key table that does not hold 128 words.
-#[cfg(feature = "serde")]
+/// A list of frequency words that is not a key table: it does not hold 128.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("a key table holds 128 frequency words, not {0}")]
 pub struct InvalidKeyTable(usize);
 
-#[cfg(feature = "serde")]
 impl InvalidKeyTable {
-    /// How many words the document held.
+    /// How many words the list held.
     #[must_use]
     pub const fn count(self) -> usize {
         self.0
     }
 }
 
-#[cfg(feature = "serde")]
 impl From<KeyTable> for Vec<TuningFrequency> {
     fn from(table: KeyTable) -> Self {
         table.0.to_vec()
     }
 }
 
-#[cfg(feature = "serde")]
 impl TryFrom<Vec<TuningFrequency>> for KeyTable {
     type Error = InvalidKeyTable;
 
@@ -274,29 +270,25 @@ impl KeyChanges {
     }
 }
 
-/// A persisted list of key changes longer than [`MAX_KEY_CHANGES`].
-#[cfg(feature = "serde")]
+/// A list of key changes longer than [`MAX_KEY_CHANGES`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("a Single Note Tuning Change holds at most {MAX_KEY_CHANGES} changes, not {0}")]
 pub struct InvalidKeyChanges(usize);
 
-#[cfg(feature = "serde")]
 impl InvalidKeyChanges {
-    /// How many changes the document held.
+    /// How many changes the list held.
     #[must_use]
     pub const fn count(self) -> usize {
         self.0
     }
 }
 
-#[cfg(feature = "serde")]
 impl From<KeyChanges> for Vec<KeyChange> {
     fn from(changes: KeyChanges) -> Self {
         changes.as_slice().to_vec()
     }
 }
 
-#[cfg(feature = "serde")]
 impl TryFrom<Vec<KeyChange>> for KeyChanges {
     type Error = InvalidKeyChanges;
 
