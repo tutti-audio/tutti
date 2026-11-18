@@ -208,9 +208,21 @@ one_to_one!(Hz, ParamUnit::Hertz);
 one_to_one!(Db, ParamUnit::Decibels);
 one_to_one!(Cents, ParamUnit::Cents);
 one_to_one!(Semitones, ParamUnit::Semitones);
-one_to_one!(ArcDegrees, ParamUnit::Degrees);
 one_to_one!(Amplitude, ParamUnit::LinearGain);
 one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
+
+/// An `f64` unit takes the plain figure whole.
+impl PlainUnit for ArcDegrees {
+    fn reads(unit: ParamUnit) -> bool {
+        unit == ParamUnit::Degrees
+    }
+    fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
+        (unit == ParamUnit::Degrees).then(|| Self::new(plain))
+    }
+    fn to_plain(self, _unit: ParamUnit) -> f64 {
+        self.get()
+    }
+}
 
 impl PlainUnit for Seconds {
     fn reads(unit: ParamUnit) -> bool {

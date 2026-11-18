@@ -384,7 +384,8 @@ impl ClickNode {
                 } else {
                     1.0 - (t - hold_end) / release_len
                 };
-                let sample = phase.sin() * env * accent_volume.get();
+                // The click is stored as `f32`: each sine value narrows into it.
+                let sample = phase.sin() as f32 * env * accent_volume.get();
                 phase = phase.advance(phase_inc);
                 sample
             })

@@ -147,3 +147,49 @@ fn simplify_reads_the_previous_breakpoints_law() {
     assert_eq!(build(Law::PowerIn(Exponent::of(2.0))), 2);
     assert_eq!(build(Law::Linear), 3);
 }
+
+/// A trajectory of an `f64` unit keeps its width: the endpoint a billionth of a
+/// degree past 90 is read back exactly, where an `f32` would round it to 90,
+/// and the midpoint of two bearings is their mean.
+#[test]
+fn an_f64_unit_is_read_at_its_own_width() {
+    use tutti_units::Azimuth;
+    let tiny = 90.0 + 1e-9;
+    let mut e = Trajectory::new();
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(10.0)))
+        .add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(tiny)));
+    assert_eq!(e.value_at(Beat(4.0)), Some(Azimuth(tiny)));
+    assert_ne!(tiny as f32 as f64, tiny, "the figure needs more than f32");
+    assert_eq!(
+        e.value_at(Beat(2.0)),
+        Some(Azimuth(10.0 + (tiny - 10.0) * 0.5))
+    );
+}
+
+/// An `f32` unit is evaluated in `f64` and narrowed once: the middle of
+/// `0.1..0.3` is the `f32` nearest the exact `0.2` to within 1 ulp.
+#[test]
+fn an_f32_unit_narrows_the_f64_evaluation_once() {
+    let mut e = Trajectory::new();
+    e.add_breakpoint(point(0.0, 0.1))
+        .add_breakpoint(point(2.0, 0.3));
+    let got = e.value_at(Beat(1.0)).unwrap().get();
+    assert!(
+        (got.to_bits() as i64 - 0.2f32.to_bits() as i64).abs() <= 1,
+        "{got}"
+    );
+}
+
+/// `simplify` takes its tolerance in the unit's own width.
+#[test]
+fn simplify_takes_its_tolerance_in_the_units_width() {
+    use tutti_units::Elevation;
+    let mut e = Trajectory::new();
+    for (b, v) in [(0.0, 0.0), (1.0, 10.0 + 1e-9), (2.0, 20.0)] {
+        e.add_breakpoint(Breakpoint::new(Beat(b), Elevation(v)));
+    }
+    e.simplify(1e-12);
+    assert_eq!(e.len(), 3, "a 1e-9 corner is above a 1e-12 tolerance");
+    e.simplify(1e-6);
+    assert_eq!(e.len(), 2);
+}

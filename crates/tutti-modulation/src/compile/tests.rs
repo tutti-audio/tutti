@@ -993,20 +993,20 @@ fn a_value_that_is_not_finite_is_refused() {
             "constant {v}"
         );
     }
-    let clock = |rate: f32, phase: f32| Clock::Seconds {
+    let clock = |rate: f32, phase: f64| Clock::Seconds {
         rate: Hz(rate),
         phase: PhaseIncrement(phase),
         anchor: None,
     };
-    let beat = |phase: f32| Clock::Beats {
+    let beat = |phase: f64| Clock::Beats {
         per_cycle: BeatsPerCycle::of(1.0),
         phase: PhaseIncrement(phase),
     };
     for c in [
         clock(f32::INFINITY, 0.0),
-        clock(1.0, f32::INFINITY),
-        clock(1.0, f32::NEG_INFINITY),
-        beat(f32::INFINITY),
+        clock(1.0, f64::INFINITY),
+        clock(1.0, f64::NEG_INFINITY),
+        beat(f64::INFINITY),
     ] {
         let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
         assert_eq!(
@@ -1033,7 +1033,7 @@ fn a_value_that_is_not_finite_is_refused() {
     let c1 = at(2.0, 0.0, Some(&c0), 1000).expect("compiles");
     assert!(anchor_of(c1.clocks[&SourceKey(10)]).is_some());
     assert_eq!(
-        at(2.0, f32::INFINITY, Some(&c1), 2000),
+        at(2.0, f64::INFINITY, Some(&c1), 2000),
         Err(CompileError::BadSource(SourceKey(10)))
     );
 }

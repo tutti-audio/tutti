@@ -160,7 +160,7 @@ fn shape_scurve_is_flatter_at_extremes() {
 /// `sqrt(1/2)` at an eighth, and 0 at the half.
 #[test]
 fn the_sine_shape_is_the_closed_form_of_the_phase() {
-    let at = |p: f32| LfoShape::Sine.evaluate_periodic(Phase(p));
+    let at = |p: f64| LfoShape::Sine.evaluate_periodic(Phase(p));
     assert_eq!(at(0.25), 1.0);
     assert_eq!(at(0.75), -1.0);
     assert!(at(0.5).abs() < 1e-7);

@@ -13,6 +13,8 @@
 //! Ending exactly on the target is what makes a block of one agree with a
 //! per-sample read: a one-sample ramp *is* the new value.
 
+use tutti_buffers::Float;
+
 /// The last finite value a control cell held — what a non-finite write reads
 /// as.
 ///
@@ -24,16 +26,19 @@
 /// finite one is written.
 ///
 /// Clamping cannot stand in for this: `f32::clamp` passes NaN through.
+///
+/// `F` is the width of the control's value: `f32` for a control the graph
+/// carries as a lane, `f64` for one held in an `f64` unit (an angle).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct LastGood(f32);
+pub(crate) struct LastGood<F: Float = f32>(F);
 
-impl LastGood {
+impl<F: Float> LastGood<F> {
     /// Starts at `initial`, or at `fallback` if `initial` is not finite.
     ///
     /// `fallback` is the control's own default, chosen by the caller: a
     /// control whose range excludes zero (a ratio, a Q) must not start at
     /// `0.0`, which is outside it.
-    pub(crate) fn new(initial: f32, fallback: f32) -> Self {
+    pub(crate) fn new(initial: F, fallback: F) -> Self {
         Self(if initial.is_finite() {
             initial
         } else {
@@ -43,18 +48,18 @@ impl LastGood {
 
     /// Starts at `initial` if `valid`, else at `fallback`: a control that accepts more
     /// than the finite values says so (`ControlSet::valid`).
-    pub(crate) fn new_if(initial: f32, fallback: f32, valid: bool) -> Self {
+    pub(crate) fn new_if(initial: F, fallback: F, valid: bool) -> Self {
         Self(if valid { initial } else { fallback })
     }
 
     /// Starts at a finite constant.
-    pub(crate) fn fixed(initial: f32) -> Self {
+    pub(crate) fn fixed(initial: F) -> Self {
         Self(initial)
     }
 
     /// `value` if finite (and remembered), otherwise the last finite value.
     #[inline]
-    pub(crate) fn read(&mut self, value: f32) -> f32 {
+    pub(crate) fn read(&mut self, value: F) -> F {
         self.read_if(value, value.is_finite())
     }
 
@@ -62,7 +67,7 @@ impl LastGood {
     /// control whose valid values are not the finite ones (a ceiling accepts
     /// `+-inf`, `ControlSet::valid`).
     #[inline]
-    pub(crate) fn read_if(&mut self, value: f32, valid: bool) -> f32 {
+    pub(crate) fn read_if(&mut self, value: F, valid: bool) -> F {
         if valid {
             self.0 = value;
         }

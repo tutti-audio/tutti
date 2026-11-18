@@ -155,7 +155,7 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
     // property the raw-f32 form could not offer.
     for deg in -180..=180 {
         for w in [0.0, 0.25, 0.5, 1.0] {
-            let (a, b) = virtual_sources(Azimuth(deg as f32), w);
+            let (a, b) = virtual_sources(Azimuth(f64::from(deg)), w);
             assert!(a.get() >= -180.0 && a.get() <= 180.0, "a={a:?}");
             assert!(b.get() >= -180.0 && b.get() <= 180.0, "b={b:?}");
         }
@@ -186,7 +186,7 @@ fn a_bearing_glide_takes_the_short_arc_and_a_height_glide_a_line() {
         let at = from.lerp(&to, k, 10);
         assert!(at.get().abs() >= 170.0, "step {k}: {at:?}");
         let height = Lerp::lerp(&Elevation(0.0), &Elevation(20.0), k, 10);
-        assert_eq!(height.get(), 2.0 * k as f32, "step {k}");
+        assert_eq!(height.get(), 2.0 * f64::from(k), "step {k}");
     }
     assert_eq!(from.lerp(&to, 5, 10).get().abs(), 180.0);
 }

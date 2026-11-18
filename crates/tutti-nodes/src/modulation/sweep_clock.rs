@@ -96,7 +96,8 @@ impl SweepClock {
         for _ in 0..COEFF_INTERVAL {
             end = end.advance(self.inc);
         }
-        let sine = |offset: PhaseIncrement, p: Phase| p.offset_by(offset).to_radians().get().sin();
+        // The effect's corner values are `f32`: the sine narrows once per segment end.
+        let sine = |offset: PhaseIncrement, p: Phase| p.offset_by(offset).sin() as f32;
         for c in 0..glides.len() {
             if c > 0 && self.offsets[c] == self.offsets[c - 1] {
                 glides[c] = glides[c - 1];

@@ -25,12 +25,12 @@ pub use layout::SpeakerLayout;
 const MONO_WIDTH: f32 = 0.001;
 
 /// How far each virtual source sits from the bearing at width 1.
-const WIDTH_HALF_ANGLE: f32 = 15.0;
+const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
 
 /// The width that puts the two virtual sources at the antipode of the bearing
 /// (an offset of half a turn). The solve saturates the width here by convention,
 /// so a huge one cannot overflow the offset.
-const MAX_WIDTH: f32 = 180.0 / WIDTH_HALF_ANGLE;
+const MAX_WIDTH: f32 = (180.0 / WIDTH_HALF_ANGLE.get()) as f32;
 
 /// One direction's speaker gains, as an end of a glide between two grid points.
 ///
@@ -167,14 +167,14 @@ impl Lerp for VbapGains {
 /// through the front.
 impl Lerp for Azimuth {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        self.lerp_shortest(*to, k as f32 / n as f32)
+        self.lerp_shortest(*to, f64::from(k) / f64::from(n))
     }
 }
 
 /// A glide of a height is a line.
 impl Lerp for Elevation {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        Elevation(self.get().lerp(&to.get(), k, n))
+        Elevation::lerp(*self, *to, f64::from(k) / f64::from(n))
     }
 }
 
@@ -186,7 +186,7 @@ pub struct VbapKernel {
     /// for (bearing, height, width, spread). The solve is a pure function of
     /// those four, so a held source reuses it instead of running two VBAP
     /// solves per block.
-    last_solve: Option<([u32; 4], VbapGains)>,
+    last_solve: Option<([u64; 4], VbapGains)>,
 }
 
 impl VbapKernel {
@@ -228,8 +228,8 @@ impl VbapKernel {
         let key = [
             azimuth.get().to_bits(),
             elevation.get().to_bits(),
-            width.get().to_bits(),
-            spread.get().to_bits(),
+            u64::from(width.get().to_bits()),
+            u64::from(spread.get().to_bits()),
         ];
         if let Some((solved_for, gains)) = self.last_solve
             && solved_for == key
@@ -284,7 +284,7 @@ impl VbapKernel {
 /// the node normalizes the target to, re-introduced here by adding to the
 /// already-wrapped value.
 fn virtual_sources(azimuth: Azimuth, width: f32) -> (Azimuth, Azimuth) {
-    let offset = ArcDegrees(WIDTH_HALF_ANGLE * width);
+    let offset = WIDTH_HALF_ANGLE * f64::from(width);
     (azimuth.rotate_by(offset), azimuth.rotate_by(-offset))
 }
 

@@ -321,7 +321,7 @@ impl Stagger {
     #[must_use]
     pub fn offset(&self, channel: ChannelIndex) -> PhaseIncrement {
         match self.kind {
-            Kind::Step(step) => wrap(PhaseIncrement(step.0 * channel.get() as f32)),
+            Kind::Step(step) => wrap(step * channel.get() as f64),
             Kind::Each { offsets, .. } => offsets
                 .get(channel.get())
                 .copied()

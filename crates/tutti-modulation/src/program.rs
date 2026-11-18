@@ -77,8 +77,8 @@ pub enum Clock {
 /// before it and at the layer's rate from it. An anchor from another epoch
 /// (a play start since, or a fork) is ignored.
 ///
-/// `phase` is a bare `f64` of cycles, where the types stop: an hour of play
-/// needs more precision than [`PhaseIncrement`]'s `f32`.
+/// `phase` is a bare `f64` of cycles, unwrapped: it runs past one cycle, where
+/// a [`Phase`] stays in `[0, 1)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RateAnchor {
     /// The play epoch the anchor is dated in.
@@ -714,9 +714,7 @@ impl Clock {
     /// gives none (a rate that is not finite).
     pub fn cycles(&self, at: &ProgramTime) -> Option<f64> {
         let c = match *self {
-            Self::Beats { per_cycle, phase } => {
-                at.beat.cycles_in(per_cycle) + f64::from(phase.get())
-            }
+            Self::Beats { per_cycle, phase } => at.beat.cycles_in(per_cycle) + phase.get(),
             Self::Seconds {
                 rate,
                 phase,
@@ -733,7 +731,7 @@ impl Clock {
                         let r = if d < 0.0 { a.prev_rate } else { rate };
                         a.phase + f64::from(r.get()) * d / sr
                     }
-                    None => f64::from(rate.get()) * play / sr + f64::from(phase.get()),
+                    None => f64::from(rate.get()) * play / sr + phase.get(),
                 }
             }
         };
@@ -751,7 +749,7 @@ impl Clock {
             Self::Beats { per_cycle, phase } => Corners {
                 beat: wave
                     .next_corner(c, true, kinks)
-                    .map(|n| Beat((n - f64::from(phase.get())) * per_cycle.get())),
+                    .map(|n| Beat((n - phase.get()) * per_cycle.get())),
                 play: None,
             },
             Self::Seconds {
@@ -781,7 +779,7 @@ impl Clock {
                             along(rate, t, a.phase)
                         }
                     }
-                    None => along(rate, 0.0, f64::from(phase.get())),
+                    None => along(rate, 0.0, phase.get()),
                 };
                 Corners {
                     beat: None,
@@ -857,15 +855,7 @@ impl Waveform {
                     let (a, b) = (hash_cycle(n - 1.0, *seed), hash_cycle(n, *seed));
                     a + (b - a) * frac as f32
                 }
-                periodic => {
-                    // A left limit stays left of a corner in `f32` too:
-                    // 0.5 - 1e-9 rounds to 0.5, a square's edge.
-                    let mut p = frac as f32;
-                    if before && f64::from(p) > frac {
-                        p = p.next_down();
-                    }
-                    periodic.evaluate_periodic(Phase(p.min(1.0)))
-                }
+                periodic => periodic.evaluate_periodic(Phase(frac.min(1.0))),
             },
             Self::Drawn(points) => drawn_value(points, frac),
             Self::Const(v) => *v,
@@ -941,13 +931,13 @@ impl Waveform {
             Self::Drawn(points) => {
                 let len = points.len();
                 for (i, p) in points.iter().enumerate() {
-                    let start = k + f64::from(p.at.get());
+                    let start = k + p.at.get();
                     f(start);
                     if kinks && len > 1 {
                         let (q, end) = if i + 1 < len {
-                            (points[i + 1], k + f64::from(points[i + 1].at.get()))
+                            (points[i + 1], k + points[i + 1].at.get())
                         } else {
-                            (points[0], k + 1.0 + f64::from(points[0].at.get()))
+                            (points[0], k + 1.0 + points[0].at.get())
                         };
                         if let Some(x) = crossing(p.curve, p.value, q.value) {
                             f(start + x * (end - start));
@@ -969,26 +959,16 @@ fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
     if points.len() == 1 {
         return first.value;
     }
-    let after = points.partition_point(|p| f64::from(p.at.get()) <= frac);
+    let after = points.partition_point(|p| p.at.get() <= frac);
     let (p, start, q, end) = if after == 0 {
         // Before the first point: the last piece, wrapped.
-        (
-            last,
-            f64::from(last.at.get()) - 1.0,
-            *first,
-            f64::from(first.at.get()),
-        )
+        (last, last.at.get() - 1.0, *first, first.at.get())
     } else if after == points.len() {
-        (
-            last,
-            f64::from(last.at.get()),
-            *first,
-            1.0 + f64::from(first.at.get()),
-        )
+        (last, last.at.get(), *first, 1.0 + first.at.get())
     } else {
         let p = points[after - 1];
         let q = points[after];
-        (p, f64::from(p.at.get()), q, f64::from(q.at.get()))
+        (p, p.at.get(), q, q.at.get())
     };
     let t = ((frac - start) / (end - start)) as f32;
     Piece::new(p.value, q.value, p.curve).value(None, t)

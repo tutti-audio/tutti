@@ -231,9 +231,9 @@ fn an_automation_curve_across_180_turns_through_it_and_a_height_does_not() {
     let mut crossed = false;
     for (i, (&a, &e)) in az.iter().zip(&el).enumerate().skip(8) {
         let b = 1.99 + i as f64 / FPB;
-        let want_az = Azimuth((170.0 + 5.0 * b) as f32).wrap().get();
+        let want_az = Azimuth(170.0 + 5.0 * b).wrap().get();
         assert!(
-            (a - want_az).abs() < 0.05,
+            (f64::from(a) - want_az).abs() < 0.05,
             "frame {i}: {a} against {want_az}"
         );
         assert!(a.abs() > 179.0, "frame {i}: {a} left the seam");
