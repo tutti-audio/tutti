@@ -156,6 +156,21 @@ impl Seconds {
         Self::one_pole(self.0 * rate.into().get())
     }
 
+    /// The fraction of the gap a one-pole smoother with this time constant leaves each sample
+    /// at `rate`: `r = exp(−1 / (τ · rate))`, the complement of
+    /// [`one_pole_coeff`](Self::one_pole_coeff) (`y = x + r · (y − x)`; 0 is instant, 1 holds).
+    ///
+    /// Designed directly, never as `1 − c`: for a time constant under a frame `c` is within
+    /// rounding of 1 and `1 − c` loses `r`'s digits, where `exp` keeps them. A decay length
+    /// that is not above zero (a zero, negative or NaN time constant) is instant: 0. An
+    /// infinite one holds: 1. A design figure, in `f64`; a bank narrows it once.
+    #[inline]
+    #[must_use]
+    pub fn one_pole_leave(self, rate: impl Into<SampleRate>) -> f64 {
+        let n = self.0 * rate.into().get();
+        if n > 0.0 { libm::exp(-1.0 / n) } else { 0.0 }
+    }
+
     /// The coefficient of a one-pole smoother with this time constant
     /// stepped once per `step` of audio time: `1 − exp(−step / τ)`, as
     /// [`one_pole_coeff`](Self::one_pole_coeff) with the step in seconds

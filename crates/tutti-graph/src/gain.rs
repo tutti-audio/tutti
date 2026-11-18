@@ -59,9 +59,9 @@ use tutti_curve::FadeLaw;
 use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
-use crate::event::Event;
 use crate::lane::{fade_in, ramp_in};
 use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
+use crate::param_event::ParamEvent;
 use crate::spec::EventOut;
 
 /// A fade an edge's lane runs over [`DECLICK`](crate::DECLICK), counted from the
@@ -483,7 +483,7 @@ impl<F: Float> SumLane<F> {
     pub(crate) fn weight<'a>(
         &'a mut self,
         frames: usize,
-        source: Option<(EventOut, &[Event])>,
+        source: Option<(EventOut, &[ParamEvent])>,
     ) -> Weight<'a, F> {
         if self.cell.is_none() {
             return Weight::Unit;
@@ -517,7 +517,7 @@ impl<F: Float> SumLane<F> {
                     EdgeFade::In => self.prev.unwrap_or(F::ZERO),
                     _ => self.prev.unwrap_or(self.target),
                 };
-                if start.to_f64().to_bits() == to.to_f64().to_bits() {
+                if Into::<f64>::into(start).to_bits() == Into::<f64>::into(to).to_bits() {
                     self.fade.finished = Some(want);
                     self.prev = Some(to);
                 } else {

@@ -324,7 +324,7 @@ impl<F: Float> Executor<F> {
                 let fifo = f.as_mut().expect("built by apply");
                 let out = &mut events[spec.slot as usize];
                 out.clear();
-                fifo.pop_due(out, frames);
+                fifo.pop_due_slot(out, frames);
             }
 
             let due = commands.deliveries();
@@ -522,7 +522,7 @@ impl<F: Float> Executor<F> {
                             let fifo = event_fb[feedback as usize]
                                 .as_mut()
                                 .expect("built by apply");
-                            let lost = fifo.push(st.events.ev(src));
+                            let lost = fifo.push_slot(st.events.slot(src));
                             st.dropped.charge_feedback(plan, feedback, u64::from(lost));
                         }
                     }

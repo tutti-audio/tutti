@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
-    Status,
+    Status, control_in,
 };
 use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Latency, Tail};
@@ -78,7 +78,7 @@ use super::Curve;
 /// ```
 pub struct AutomationLaneNode {
     curve: Arc<dyn Curve>,
-    last_value: f32,
+    last_value: f64,
 }
 
 impl std::fmt::Debug for AutomationLaneNode {
@@ -109,7 +109,7 @@ impl AutomationLaneNode {
     ///
     /// Returns `0.0` where the curve has no value — before its first point, or
     /// on an empty trajectory.
-    pub fn value_at(&self, beat: Beat) -> f32 {
+    pub fn value_at(&self, beat: Beat) -> f64 {
         self.curve.value_at(beat).unwrap_or(0.0)
     }
 
@@ -149,10 +149,11 @@ impl<F: Float> Node<F> for AutomationLaneNode {
         let out = io.output(0);
         let curve = &*self.curve;
         let mut last = self.last_value;
-        // A curve's value is an `f32`, written in the graph's float.
+        // A curve's value is the target's `f64` quantity, written in the
+        // graph's float.
         cx.env.for_each_beat(|i, beat| {
             last = curve.value_at(beat).unwrap_or(0.0);
-            out[i] = F::from_f32(last);
+            out[i] = control_in(last);
         });
         self.last_value = last;
         Status::Modified
@@ -367,21 +368,21 @@ mod tests {
     /// A curve that reads state written after it was built, and freezes it.
     struct Live(Arc<AtomicF32>);
 
-    struct Fixed(f32);
+    struct Fixed(f64);
 
     impl Curve for Fixed {
-        fn value_at(&self, _: Beat) -> Option<f32> {
+        fn value_at(&self, _: Beat) -> Option<f64> {
             Some(self.0)
         }
     }
 
     impl Curve for Live {
-        fn value_at(&self, _: Beat) -> Option<f32> {
-            Some(self.0.load(Ordering::Acquire))
+        fn value_at(&self, _: Beat) -> Option<f64> {
+            Some(f64::from(self.0.load(Ordering::Acquire)))
         }
 
         fn frozen(&self) -> Option<Arc<dyn Curve>> {
-            Some(Arc::new(Fixed(self.0.load(Ordering::Acquire))))
+            Some(Arc::new(Fixed(f64::from(self.0.load(Ordering::Acquire)))))
         }
     }
 
@@ -397,12 +398,13 @@ mod tests {
         assert_eq!(render(lane, stopped_at(1.0), 1)[0], 0.75);
     }
 
-    /// In an `f64` graph the lane writes the curve's `f32` value as it is, widened and not
-    /// rounded again.
+    /// The lane writes the curve's `f64` value as it is in an `f64` graph, and
+    /// narrowed once in an `f32` one.
     #[test]
-    fn in_an_f64_graph_the_lane_writes_its_f32_curve_value_widened_exactly() {
+    fn the_lane_writes_its_curve_value_at_the_graphs_width() {
         use crate::test_support::{RATE, render_f64};
         let out = render_f64(AutomationLaneNode::new(Fixed(0.1)), RATE, &[], 32);
-        assert!(out[0].iter().all(|&v| v == f64::from(0.1f32)));
+        assert!(out[0].iter().all(|&v| v == 0.1f64));
+        assert_eq!(control_in::<f32>(0.1), 0.1f32);
     }
 }

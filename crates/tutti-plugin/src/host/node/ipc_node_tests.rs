@@ -11,7 +11,8 @@
 
 use tutti_fixtures::machine_lock;
 use tutti_graph::{
-    Env, Event, Harmony, Node, Offset, ParamRamp, PlayClock, TransportChanges, TransportPosition,
+    Env, Event, Harmony, Node, Offset, ParamEvent, ParamRamp, PlayClock, TransportChanges,
+    TransportPosition,
 };
 use tutti_plugin_ipc::{HostMessage, ProcessAudioData};
 use tutti_ump::MidiChannel;
@@ -172,7 +173,13 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
 /// An absolute-frame item of the schedule below.
 struct Item {
     frame: u64,
-    event: fn(Offset) -> Event,
+    make: Make,
+}
+
+/// What an [`Item`] sends: an event, or a param event.
+enum Make {
+    Event(fn(Offset) -> Event),
+    Param(fn(Offset) -> ParamEvent),
 }
 
 fn note_on(o: Offset) -> Event {
@@ -185,15 +192,15 @@ fn note_on(o: Offset) -> Event {
     )
 }
 
-fn ramp_7(o: Offset) -> Event {
-    Event::ramp(
+fn ramp_7(o: Offset) -> ParamEvent {
+    ParamEvent::ramp(
         o,
         ParamRamp::foreign(ParamId::new(PARAMS[0]), 0.5, Samples(0)),
     )
 }
 
-fn ramp_9(o: Offset) -> Event {
-    Event::ramp(
+fn ramp_9(o: Offset) -> ParamEvent {
+    ParamEvent::ramp(
         o,
         ParamRamp::foreign(ParamId::new(PARAMS[1]), 0.25, Samples(0)),
     )
@@ -233,27 +240,27 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
     let items = [
         Item {
             frame: 130,
-            event: note_on,
+            make: Make::Event(note_on),
         },
         Item {
             frame: 140,
-            event: ramp_7,
+            make: Make::Param(ramp_7),
         },
         Item {
             frame: 150,
-            event: chord,
+            make: Make::Event(chord),
         },
         Item {
             frame: 250,
-            event: note_on,
+            make: Make::Event(note_on),
         },
         Item {
             frame: 360,
-            event: note_on,
+            make: Make::Event(note_on),
         },
         Item {
             frame: 370,
-            event: ramp_9,
+            make: Make::Param(ramp_9),
         },
     ];
     let blocks = [
@@ -270,12 +277,25 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
         if reset {
             unit.node.reset();
         }
-        let events: Vec<Event> = items
-            .iter()
-            .filter(|i| i.frame >= frame && i.frame < frame + len as u64)
-            .map(|i| (i.event)(at((i.frame - frame) as usize, len)))
+        let here = || {
+            items
+                .iter()
+                .filter(|i| i.frame >= frame && i.frame < frame + len as u64)
+        };
+        let events: Vec<Event> = here()
+            .filter_map(|i| match i.make {
+                Make::Event(f) => Some(f(at((i.frame - frame) as usize, len))),
+                Make::Param(_) => None,
+            })
+            .collect();
+        let params: Vec<ParamEvent> = here()
+            .filter_map(|i| match i.make {
+                Make::Param(f) => Some(f(at((i.frame - frame) as usize, len))),
+                Make::Event(_) => None,
+            })
             .collect();
         unit.events(0, &events);
+        unit.param_events(0, &params);
         unit.block_in(&block_env(frame, len));
         out_events.push(
             unit.events_out(0)
