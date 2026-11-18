@@ -12,9 +12,9 @@
 
 use super::RealFft;
 
-use rustfft::FftNum;
+use crate::FftFloat;
 use rustfft::num_complex::Complex;
-use tutti_buffers::{Float, Mono, MonoMut, Sample};
+use tutti_buffers::{Mono, MonoMut, Sample};
 
 /// The cached real-input plan plus the buffers a transform needs.
 ///
@@ -22,8 +22,8 @@ use tutti_buffers::{Float, Mono, MonoMut, Sample};
 /// (rustfft's scalar planner), so the spectra are the same bits on every CPU.
 /// It does about half the work of a complex transform over a real signal at an
 /// even size; an odd size runs a full-length complex transform. Generic over
-/// the [`Float`] it runs in, `f32` by default.
-pub struct FftScratch<F: Float + FftNum = f32> {
+/// the [`FftFloat`] it runs in, `f32` by default.
+pub struct FftScratch<F: FftFloat = f32> {
     /// The plan for the last size transformed; a different size re-plans.
     plan: Option<(usize, RealFft<F>)>,
     /// The windowed real input of a forward transform.
@@ -34,7 +34,7 @@ pub struct FftScratch<F: Float + FftNum = f32> {
     scratch: Vec<Complex<F>>,
 }
 
-impl<F: Float + FftNum> FftScratch<F> {
+impl<F: FftFloat> FftScratch<F> {
     /// An empty working set. The plan and buffers are built lazily on the
     /// first transform and reused while the size stays the same.
     #[must_use]
@@ -114,7 +114,7 @@ impl<F: Float + FftNum> FftScratch<F> {
 
 /// The plan for `size`, built on a change of size. A free function over the
 /// `plan` field alone, so the caller's other fields stay borrowable.
-fn plan_for<F: Float + FftNum>(plan: &mut Option<(usize, RealFft<F>)>, size: usize) -> &RealFft<F> {
+fn plan_for<F: FftFloat>(plan: &mut Option<(usize, RealFft<F>)>, size: usize) -> &RealFft<F> {
     match plan {
         Some((cached, _)) if *cached == size => {}
         _ => *plan = Some((size, RealFft::new(size))),
@@ -122,13 +122,13 @@ fn plan_for<F: Float + FftNum>(plan: &mut Option<(usize, RealFft<F>)>, size: usi
     &plan.as_ref().expect("just set").1
 }
 
-impl<F: Float + FftNum> Default for FftScratch<F> {
+impl<F: FftFloat> Default for FftScratch<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F: Float + FftNum> core::fmt::Debug for FftScratch<F> {
+impl<F: FftFloat> core::fmt::Debug for FftScratch<F> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let size = self.plan.as_ref().map(|(size, _)| *size);
         f.debug_struct("FftScratch").field("size", &size).finish()
