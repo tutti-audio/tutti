@@ -44,7 +44,7 @@ fn curves_are_pinned() {
 
     let half_pi = std::f64::consts::FRAC_PI_2;
     let closed = [
-        (ShapeKind::Tanh, 0.5f32, 2.0f32, 1.0f64.tanh()),
+        (ShapeKind::Tanh, 0.5f32, 2.0f64, 1.0f64.tanh()),
         (ShapeKind::Tanh, -1.0, 3.0, (-3.0f64).tanh()),
         (ShapeKind::Atan, 1.0, 1.0, half_pi.atan() / half_pi),
         (
@@ -77,8 +77,8 @@ const KINDS: [ShapeKind; 6] = [
 const TOL: f64 = 1e-4;
 
 /// The curve's closed form in `f64`, at `drive` (the staircases' levels floored at 1).
-fn closed(kind: ShapeKind, x: f32, drive: f32) -> f64 {
-    closed_f64(kind, f64::from(x), f64::from(drive))
+fn closed(kind: ShapeKind, x: f32, drive: f64) -> f64 {
+    closed_f64(kind, f64::from(x), drive)
 }
 
 /// [`closed`] at an `f64` input.
@@ -106,7 +106,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 // their tolerances are `f32`'s; the `f64` tests at the end run the bank at `F = f64`.
 
 /// A bank of `kind` landed on `drive`.
-fn landed(kind: ShapeKind, drive: f32) -> WaveshaperBank<f32> {
+fn landed(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE);
     bank.aim(&WaveshaperControls {
         drive: Drive(drive),
@@ -166,7 +166,7 @@ fn a_lane_is_read_per_frame_on_every_channel() {
             .enumerate()
         {
             for (i, (&y, &x)) in y.iter().zip(x).enumerate() {
-                let want = closed(kind, x, lane[i]);
+                let want = closed(kind, x, f64::from(lane[i]));
                 assert!(
                     (f64::from(y) - want).abs() < TOL,
                     "{kind:?} ch{c} frame {i}: {y} vs {want}"
@@ -298,7 +298,7 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
 // Antiderivative antialiasing.
 
 /// A bank of `kind` landed on `drive`, antialiased to `order`.
-fn antialiased(kind: ShapeKind, drive: f32, order: Antialiasing) -> WaveshaperBank<f32> {
+fn antialiased(kind: ShapeKind, drive: f64, order: Antialiasing) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
     bank.aim(&WaveshaperControls {
         drive: Drive(drive),
@@ -329,12 +329,7 @@ fn first_order_is_the_mean_of_the_curve_over_the_segment() {
         let y = run(&mut bank, None, std::slice::from_ref(&x)).remove(0);
         let mut before = 0.0;
         for (i, (&y, &x)) in y.iter().zip(&x).enumerate() {
-            let want = mean(
-                |t| closed_f64(kind, t, f64::from(drive)),
-                before,
-                f64::from(x),
-                20_000,
-            );
+            let want = mean(|t| closed_f64(kind, t, drive), before, f64::from(x), 20_000);
             assert!(
                 (f64::from(y) - want).abs() < 1e-4,
                 "{kind:?} frame {i}: {y} vs {want}"
@@ -355,7 +350,7 @@ fn integral(f: &impl Fn(f64) -> f64, u: f64, n: usize) -> f64 {
 /// `f1` (given), to `bound`.
 fn assert_second_order_is_quadrature(
     kind: ShapeKind,
-    drive: f32,
+    drive: f64,
     x: &[f32],
     f1: impl Fn(f64) -> f64,
     bound: f64,
@@ -385,8 +380,8 @@ fn assert_second_order_is_quadrature(
 }
 
 /// `F1` of the closed-form curve at `drive`, by the midpoint rule from 0 over 800 cells.
-fn quadrature_f1(kind: ShapeKind, drive: f32) -> impl Fn(f64) -> f64 {
-    move |t| integral(&|u| closed_f64(kind, u, f64::from(drive)), t, 800)
+fn quadrature_f1(kind: ShapeKind, drive: f64) -> impl Fn(f64) -> f64 {
+    move |t| integral(&|u| closed_f64(kind, u, drive), t, 800)
 }
 
 /// Second order, for the two kinds that have it, on noise: to 1e-5 (the midpoint rule's error
@@ -422,7 +417,7 @@ fn the_second_order_limits_match_quadrature_on_a_nonlinear_curve() {
 fn second_order_holds_at_large_u_on_a_slow_signal() {
     let kind = ShapeKind::Softsign;
     let drive = 1000.0;
-    let g = |t: f64| closed_f64(kind, t, f64::from(drive));
+    let g = |t: f64| closed_f64(kind, t, drive);
     let base = integral(&g, 1.0, 200_000);
     let f1 = |t: f64| base + (t - 1.0) * mean(g, 1.0, t, 16);
     let x: Vec<f32> = (0..16)
@@ -444,7 +439,7 @@ const PERIOD: usize = 64;
 
 /// A drive-`drive` sine of unit amplitude at 750 Hz through `kind` antialiased to `order`: the
 /// amplitude of each of the harmonics `ks` over 32 whole periods, after the first.
-fn harmonics(kind: ShapeKind, drive: f32, order: Antialiasing, ks: &[usize]) -> Vec<f64> {
+fn harmonics(kind: ShapeKind, drive: f64, order: Antialiasing, ks: &[usize]) -> Vec<f64> {
     let w0 = std::f64::consts::TAU / PERIOD as f64;
     let x: Vec<f32> = (0..33 * PERIOD)
         .map(|i| (w0 * i as f64).sin() as f32)
@@ -499,7 +494,7 @@ fn first_order_harmonics_are_the_fourier_coefficients_under_the_frame_mean_droop
     let rows: [(ShapeKind, &dyn Fn(usize) -> f64); 2] =
         [(ShapeKind::HardClip, &clip), (ShapeKind::Tanh, &tanh)];
     for (kind, coefficient) in rows {
-        let got = harmonics(kind, a as f32, Antialiasing::FirstOrder, &ks);
+        let got = harmonics(kind, a, Antialiasing::FirstOrder, &ks);
         for (&k, got) in ks.iter().zip(got) {
             let want = coefficient(k) * droop(k);
             assert!(
@@ -515,7 +510,7 @@ fn first_order_harmonics_are_the_fourier_coefficients_under_the_frame_mean_droop
 /// 9th, 11th, 13th and 15th harmonics (19.1, 9.1, 0.9, 10.9, 20.9 and 13.2 kHz), none of which
 /// is a harmonic itself. The window is 3 528 frames, 400 periods of the fold spacing of 100 Hz,
 /// so each bin is exact.
-fn alias_energy(kind: ShapeKind, drive: f32, order: Antialiasing) -> f64 {
+fn alias_energy(kind: ShapeKind, drive: f64, order: Antialiasing) -> f64 {
     let rate = 44_100.0;
     let x: Vec<f32> = (0..441 * 9)
         .map(|i| (0.9 * (std::f64::consts::TAU * 5_000.0 * i as f64 / rate).sin()) as f32)
@@ -597,7 +592,7 @@ fn a_drive_step_makes_no_step_beyond_the_curve() {
         let mut bank = antialiased(kind, 1.0, order);
         let y = run(&mut bank, Some(&lane), &[vec![0.2; 16]]).remove(0);
         for (i, (&y, &d)) in y.iter().zip(&lane).enumerate().skip(2) {
-            let want = closed(kind, 0.2, d);
+            let want = closed(kind, 0.2, f64::from(d));
             assert!(
                 (f64::from(y) - want).abs() < 1e-6,
                 "{kind:?} {order:?} frame {i}: {y} vs {want}"
@@ -768,7 +763,7 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
 }
 
 /// One block of `x` through an `f64` bank of `kind` landed on `drive`, at `order`.
-fn through_f64(kind: ShapeKind, drive: f32, order: Antialiasing, x: &[f64]) -> Vec<f64> {
+fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> Vec<f64> {
     let mut bank = WaveshaperBank::<f64>::new(kind, RATE).antialiasing(order);
     bank.aim(&WaveshaperControls {
         drive: Drive(drive),
@@ -784,7 +779,7 @@ fn through_f64(kind: ShapeKind, drive: f32, order: Antialiasing, x: &[f64]) -> V
 }
 
 /// An `f64` bank holds the drive and the signal in `f64`: on a 29-bit signal at a drive
-/// that is not an `f32` figure of the input's scale, each curve is its closed form in `f64`
+/// of 1.7, each curve is its closed form in `f64`
 /// (`tanh h x`, `atan(pi h x / 2) 2 / pi`, `h x / (1 + |h x|)`, `clamp(h x)` and
 /// `round(h x) / h`), to 2^-45; an `f32` curve is off by about 1e-8.
 #[test]
@@ -792,9 +787,9 @@ fn an_f64_bank_is_each_curve_in_f64() {
     use std::f64::consts::PI;
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = wide_signal(200);
-    let (drive, crush) = (1.7f32, 4096.0f32);
-    let h = f64::from(drive);
-    let closed: [(ShapeKind, f32, Box<dyn Fn(f64) -> f64>); 5] = [
+    let (drive, crush) = (1.7f64, 4096.0f64);
+    let h = drive;
+    let closed: [(ShapeKind, f64, Box<dyn Fn(f64) -> f64>); 5] = [
         (ShapeKind::Tanh, drive, Box::new(move |x| (h * x).tanh())),
         (
             ShapeKind::Atan,
@@ -814,7 +809,7 @@ fn an_f64_bank_is_each_curve_in_f64() {
         (
             ShapeKind::Crush,
             crush,
-            Box::new(move |x| (f64::from(crush) * x).round() / f64::from(crush)),
+            Box::new(move |x| (crush * x).round() / crush),
         ),
     ];
     for (kind, drive, f) in closed {

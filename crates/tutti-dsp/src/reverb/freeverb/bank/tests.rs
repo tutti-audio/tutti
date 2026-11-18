@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Db, Mix, Samples};
+use tutti_units::{Db, Mix, Real, Samples};
 
 use super::*;
 use crate::TAIL_FLOOR;
@@ -237,9 +237,10 @@ fn the_input_is_scaled_by_the_fixed_gain() {
 fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
     let l = 1_640usize;
     for room in [0.0f64, 0.5, 0.9, 1.0] {
-        let g = f64::from(controls(room, 0.0).feedback().get());
+        let feedback = controls(room, 0.0).feedback();
+        let g = feedback.get();
         let mut comb = CombFilter::new(l);
-        comb.feedback = g as f32;
+        comb.feedback = f32::from_unit(feedback);
         comb.damp1 = 0.0;
         comb.damp2 = 1.0;
         let trips = (-3.0 / g.log10()).ceil() as usize + 2;
@@ -273,7 +274,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     let Tail::Finite(tail) = bank.tail_of(&gm) else {
         panic!("a finite tail")
     };
-    let g = f64::from(gm.feedback().get());
+    let g = gm.feedback().get();
     let trips = (TAIL_FLOOR.get() / 20.0 * std::f64::consts::LN_10 / g.ln()).ceil();
     let comb = (1.0 + trips) * (1640.0 + 2.0);
     let chain: f64 = [579.0f64, 464.0, 364.0, 248.0]
@@ -334,9 +335,9 @@ fn a_moving_room_glides_its_combs_a_chunk_at_a_time() {
         (c.feedback, c.damp1)
     };
     let (from, from_damp) = chunk(&mut bank, &mut glides);
-    assert_eq!(from, from_c.feedback().get());
+    assert_eq!(from, f32::from_unit(from_c.feedback()));
     bank.aim(&mut glides, &to_c);
-    let (to, to_damp) = (to_c.feedback().get(), to_c.damping() as f32);
+    let (to, to_damp) = (f32::from_unit(to_c.feedback()), to_c.damping() as f32);
     let steps = 30;
     let mut last = from;
     for k in 1..=steps {
@@ -520,7 +521,7 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
 #[test]
 fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
     let c = controls(0.5, 0.0);
-    let g = f64::from(c.feedback().get());
+    let g = c.feedback().get();
     let comb_t60 = |l: f64| -3.0 * l / (RATE.get() * libm::log10(g));
     let (mut bank, mut glides) = settled(RATE, &c);
     let frames = (4.0 * comb_t60(1640.0) * RATE.get()) as usize;

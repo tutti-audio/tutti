@@ -54,7 +54,7 @@ fn every_control_designs_a_stable_network() {
                 size: Mix(x),
                 diffusion: Mix(x),
                 pre_delay: Seconds::from_f32(v),
-                modulation: Depth::clamped(v),
+                modulation: Depth::clamped(x),
                 rate: Hz(x),
                 width: StereoWidth(x),
                 wet: Db(x),

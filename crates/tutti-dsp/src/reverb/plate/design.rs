@@ -253,8 +253,7 @@ impl PlateControls {
         let c = libm::pow(loop_gain, 0.25);
         let lattice2 = Gain::new(diffusion * (c + 0.15).clamp(0.25, 0.5));
         let scale = |g: Gain| Gain::new(diffusion * g.get());
-        let excursion =
-            SampleSpan::clamped(EXCURSION * f64::from(depth) * rate.get() / PAPER_RATE.get());
+        let excursion = SampleSpan::clamped(EXCURSION * depth * rate.get() / PAPER_RATE.get());
 
         let span = |n: u32| SampleSpan::clamped(scaled(n, rate));
         let lattice = |delay: SampleSpan, gain: Gain, modulation: LineModulation| AllPass {

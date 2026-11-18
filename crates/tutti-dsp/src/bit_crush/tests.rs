@@ -23,7 +23,7 @@ fn run_blocks(crusher: &mut BitCrusher<f64>, input: &[Vec<f64>], block: usize) -
     out
 }
 
-fn crusher(bits: f32, hold: f32) -> BitCrusher<f64> {
+fn crusher(bits: f64, hold: f32) -> BitCrusher<f64> {
     BitCrusher::<f64>::new(
         ChannelLayout::MONO,
         BitCrusherControls {
@@ -62,7 +62,7 @@ fn the_output_is_round_x_q_over_q_at_whole_depths() {
 /// 1/128; 16 bits (`q = 32768`) of 2^-15. A value past `+-1` is held at the end level.
 #[test]
 fn the_output_matches_hand_worked_figures() {
-    let cases: [(f32, &[(f64, f64)]); 4] = [
+    let cases: [(f64, &[(f64, f64)]); 4] = [
         (1.0, &[(0.4, 0.0), (0.6, 1.0), (-0.6, -1.0), (1.3, 1.0)]),
         (
             4.0,
@@ -118,14 +118,18 @@ fn a_fractional_depth_has_a_real_q() {
 #[test]
 fn a_full_ramp_has_two_to_the_bits_plus_one_levels() {
     let ramp: Vec<f64> = (0..=4096).map(|i| -1.0 + f64::from(i) / 2048.0).collect();
-    let distinct = |bits: f32| {
+    let distinct = |bits: f64| {
         let mut out = run(&mut crusher(bits, 1.0), std::slice::from_ref(&ramp)).remove(0);
         out.sort_by(f64::total_cmp);
         out.dedup();
         out.len()
     };
     for bits in 1..=6u32 {
-        assert_eq!(distinct(bits as f32), (1usize << bits) + 1, "{bits} bits");
+        assert_eq!(
+            distinct(f64::from(bits)),
+            (1usize << bits) + 1,
+            "{bits} bits"
+        );
     }
     assert_eq!(distinct(3.5), 13);
 }
@@ -166,11 +170,11 @@ fn a_depth_is_read_within_its_range() {
     assert_eq!(quantize(x, BitDepth::new(0.2)), quantize(x, BitDepth::MIN));
     assert_eq!(quantize(x, BitDepth::new(99.0)), quantize(x, BitDepth::MAX));
     assert_eq!(
-        quantize(x, BitDepth::new(f32::NAN)),
+        quantize(x, BitDepth::new(f64::NAN)),
         quantize(x, DEFAULT_BIT_DEPTH)
     );
     assert_eq!(
-        quantize(x, BitDepth::new(f32::INFINITY)),
+        quantize(x, BitDepth::new(f64::INFINITY)),
         quantize(x, DEFAULT_BIT_DEPTH)
     );
     assert_eq!(quantize(f64::INFINITY, DEFAULT_BIT_DEPTH), 1.0);

@@ -219,7 +219,7 @@ impl DepthBy {
             // `(raw + 1) / 2` in `f64`, and exactly that at full depth:
             // `1.0 ×` is exact.
             let u = (f64::from(raw.clamp(-1.0, 1.0)) + 1.0) * 0.5;
-            f64::from(a.depth.get()) * u
+            a.depth.get() * u
         } else {
             a.offset(raw, 1.0)
         }

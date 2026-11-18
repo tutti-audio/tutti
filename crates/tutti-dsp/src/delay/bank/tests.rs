@@ -8,12 +8,11 @@ use crate::{ChannelTimes, GAIN_GLIDE, MaxDelay, Routing};
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
 
-/// A rate at which a time of `n / 1024` seconds is exactly `n` frames, in `f64` and in the
-/// `f32` a control is held in.
+/// A rate at which a time of `n / 1024` seconds is exactly `n` frames, in `f32` and in `f64`.
 const BINARY: SampleRate = SampleRate::of(1024.0);
 const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
 
-fn controls(time: f64, feedback: f32, cross: f32) -> DelayControls {
+fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
     DelayControls {
         time: Seconds(time),
         feedback: Feedback(feedback),
@@ -166,7 +165,7 @@ fn a_fractional_delay_blends_the_frames_around_it_by_the_fraction() {
 /// period on.
 #[test]
 fn feedback_decays_by_the_gain_each_trip() {
-    let (d, g) = (16usize, 0.6f32);
+    let (d, g) = (16usize, 0.6f64);
     let mut k = runner(
         &mono(InterpolationMode::Linear),
         &controls(d as f64 / 1024.0, g, 0.0),
@@ -178,7 +177,11 @@ fn feedback_decays_by_the_gain_each_trip() {
         } else {
             0.0
         };
-        assert!((s - want).abs() < 1e-6, "frame {i}: {s}, want {want}");
+        // The samples are `f32`, which sets the tolerance.
+        assert!(
+            (f64::from(s) - want).abs() < 1e-6,
+            "frame {i}: {s}, want {want}"
+        );
     }
 }
 
@@ -189,15 +192,12 @@ fn feedback_decays_by_the_gain_each_trip() {
 /// `((g + c)^n - (g - c)^n) / 2`.
 #[test]
 fn a_ping_pong_splits_into_a_common_and_a_differential_mode() {
-    let (d, g, c) = (8usize, 0.3f32, 0.4f32);
+    let (d, g, c) = (8usize, 0.3f64, 0.4f64);
     let mut k = runner(&stereo(), &controls(d as f64 / 1024.0, g, c));
     let len = d * 10 + 3;
     let y = k.run(&[impulse(len), vec![0.0; len]]);
     for n in 0..9usize {
-        let (sum, diff) = (
-            f64::from(g + c).powi(n as i32),
-            f64::from(g - c).powi(n as i32),
-        );
+        let (sum, diff) = ((g + c).powi(n as i32), (g - c).powi(n as i32));
         for (ch, want) in [(0, (sum + diff) / 2.0), (1, (sum - diff) / 2.0)] {
             let got = f64::from(y[ch][(n + 1) * d]);
             assert!(
@@ -417,7 +417,7 @@ fn a_hostile_time_is_a_delay_within_the_line() {
 #[test]
 fn a_feedback_past_the_stable_range_is_the_greatest_stable_one() {
     let d = 16;
-    for (ask, g) in [(5.0f32, 0.99f32), (f32::NAN, 0.0), (-1.0, 0.0)] {
+    for (ask, g) in [(5.0f64, 0.99f64), (f64::NAN, 0.0), (-1.0, 0.0)] {
         let mut k = runner(
             &mono(InterpolationMode::Linear),
             &controls(d as f64 / 1024.0, ask, 0.0),
@@ -428,7 +428,12 @@ fn a_feedback_past_the_stable_range_is_the_greatest_stable_one() {
         } else {
             g
         };
-        assert!((y[2 * d] - g).abs() < 1e-6, "asked {ask}: {}", y[2 * d]);
+        // The samples are `f32`, which sets the tolerance.
+        assert!(
+            (f64::from(y[2 * d]) - g).abs() < 1e-6,
+            "asked {ask}: {}",
+            y[2 * d]
+        );
     }
 }
 
@@ -551,8 +556,7 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
 
 /// An `f64` bank keeps its state in `f64`: at a whole delay `d` with no feedback a signal
 /// of more than 24 significant bits returns `d` frames later exactly, and with feedback `g`
-/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` (`g` the `f32` the
-/// control holds, widened), to 2^-45; an `f32` state is off by 1e-8.
+/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45; an `f32` state is off by 1e-8.
 #[test]
 fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -568,7 +572,7 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
     let y = run_wide(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
     assert_close_f64(&y[0], &delayed(&x), 0.0);
 
-    let g = f64::from(0.6f32);
+    let g = 0.6;
     let mut v = vec![0.0f64; len];
     for n in 0..len {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
@@ -584,7 +588,7 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let (d, len) = (8usize, 120usize);
     let x = wide_signal(len);
-    let (g, c) = (f64::from(0.3f32), f64::from(0.4f32));
+    let (g, c) = (0.3, 0.4);
     let (mut v0, mut v1) = (vec![0.0f64; len], vec![0.0f64; len]);
     for n in 0..len {
         let past = |v: &[f64]| n.checked_sub(d).map_or(0.0, |k| v[k]);

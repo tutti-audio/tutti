@@ -269,7 +269,7 @@ impl FdnLayout {
         } else {
             // `depth` is in `0..=1` and the rate finite and positive: the product is a
             // finite span, and `clamped` saturates where a span could not hold it.
-            SampleSpan::clamped(MAX_MODULATION.get() * (f64::from(depth) * rate.get() / 44_100.0))
+            SampleSpan::clamped(MAX_MODULATION.get() * (depth * rate.get() / 44_100.0))
         };
         let mut lines: Inline<Line, MAX_LINES> = Inline::new();
         for &base in &LENGTHS[..n] {

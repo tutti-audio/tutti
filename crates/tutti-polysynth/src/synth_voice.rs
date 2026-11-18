@@ -481,19 +481,18 @@ impl SynthVoice {
         let fm = &self.filter_mod;
         let mut cutoff = self.base_filter_cutoff;
 
-        // The cutoff is a `Hz` scaled by a chain of multipliers; each depth, an
-        // `f32` control reading, is widened exactly at its multiply.
+        // The cutoff is a `Hz` scaled by a chain of multipliers.
         if fm.mod_wheel_depth > Depth::of(0.0) {
             // The channel's wheel: its depth over the Modulation Depth Range
             // (RPN 5, CA-026) the depth is measured in, so at the default range
             // a full wheel is `mod_wheel_depth` and a range twice that opens
             // twice as far.
             let wheel = channel.modulation_depth().get() / DEFAULT_MODULATION_RANGE.get();
-            cutoff *= 1.0 + wheel * f64::from(fm.mod_wheel_depth.get());
+            cutoff *= 1.0 + wheel * fm.mod_wheel_depth.get();
         }
 
         if fm.velocity_depth > Depth::of(0.0) {
-            let depth = f64::from(fm.velocity_depth.get());
+            let depth = fm.velocity_depth.get();
             let vel_mult = 1.0 - depth * 0.5 + f64::from(self.velocity_mod_value) * depth * 0.5;
             cutoff *= vel_mult;
         }
@@ -506,7 +505,7 @@ impl SynthVoice {
             let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f64;
             self.lfo_phase = self.lfo_phase.advance(step);
             let lfo_val = self.lfo_phase.sin();
-            cutoff *= 1.0 + lfo_val * f64::from(fm.lfo_depth.get()) * 0.5;
+            cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
         }
 
         if self.cc_cutoff_value != 0.5 {
