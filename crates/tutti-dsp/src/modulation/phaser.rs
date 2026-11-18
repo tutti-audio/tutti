@@ -15,11 +15,11 @@
 //! and aims each channel's glide across it, so the cut of the blocks does not move the
 //! render.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Depth, Feedback, Hz};
 
-use crate::Glide;
+use crate::{Glide, Lerp};
 
 /// The most channels a phaser has: a bus's.
 pub const MAX_PHASER_CHANNELS: usize = MAX_CHANNELS;
@@ -179,24 +179,24 @@ impl Default for PhaserControls {
     }
 }
 
-/// The state of an all-pass chain: `stages` first-order all-pass sections per channel
-/// and each channel's last output, which feeds back into its input.
+/// The state of an all-pass chain in the float `F`: `stages` first-order all-pass sections
+/// per channel and each channel's last output, which feeds back into its input.
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block through it
 /// while each channel's coefficient and the feedback glide toward their targets.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PhaserChain {
+pub struct PhaserChain<F: Float> {
     stages: Stages,
     width: usize,
     /// Stage input history, stage-major: `x1[s * width + c]`.
-    x1: Box<[f32]>,
+    x1: Box<[F]>,
     /// Stage output history, stage-major: `y1[s * width + c]`.
-    y1: Box<[f32]>,
+    y1: Box<[F]>,
     /// Each channel's last chain output, fed back into its input.
-    last: Box<[f32]>,
+    last: Box<[F]>,
 }
 
-impl PhaserChain {
+impl<F: Float + Lerp> PhaserChain<F> {
     /// A silent chain of `stages` sections on `width` channels (at most
     /// [`MAX_PHASER_CHANNELS`]). Allocates: build it on the control side.
     ///
@@ -213,17 +213,17 @@ impl PhaserChain {
         Self {
             stages,
             width,
-            x1: vec![0.0; stages.get() * width].into_boxed_slice(),
-            y1: vec![0.0; stages.get() * width].into_boxed_slice(),
-            last: vec![0.0; width].into_boxed_slice(),
+            x1: vec![F::ZERO; stages.get() * width].into_boxed_slice(),
+            y1: vec![F::ZERO; stages.get() * width].into_boxed_slice(),
+            last: vec![F::ZERO; width].into_boxed_slice(),
         }
     }
 
     /// Back to silence. No allocation.
     pub fn reset(&mut self) {
-        self.x1.fill(0.0);
-        self.y1.fill(0.0);
-        self.last.fill(0.0);
+        self.x1.fill(F::ZERO);
+        self.y1.fill(F::ZERO);
+        self.last.fill(F::ZERO);
     }
 
     /// Runs `input` into `output`, frame `i` at `coefficients[c].at(taken + 1 + i)` for
@@ -248,8 +248,8 @@ impl PhaserChain {
     /// If `coefficients` has fewer glides than the chain has channels.
     pub fn process<S: Float>(
         &mut self,
-        coefficients: &mut [Glide<f32>],
-        feedback: &mut Glide<f32>,
+        coefficients: &mut [Glide<F>],
+        feedback: &mut Glide<F>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
     ) {
@@ -275,19 +275,19 @@ impl PhaserChain {
                 .map_or(0, |g| g.taken().saturating_add(1))
         });
         let fb_first = feedback.taken().saturating_add(1);
-        let mut coeff = [0.0f32; MAX_PHASER_CHANNELS];
-        let mut lane = [0.0f32; MAX_PHASER_CHANNELS];
+        let mut coeff = [F::ZERO; MAX_PHASER_CHANNELS];
+        let mut lane = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut step = 0u32;
         for i in 0..frames {
             let fb = feedback.at(fb_first.saturating_add(step));
             for c in 0..run {
                 coeff[c] = coefficients[c].at(first[c].saturating_add(step));
-                lane[c] = xs[c][i].convert_to::<f32>() + self.last[c] * fb;
+                lane[c] = F::from_f64(xs[c][i].to_f64()) + self.last[c] * fb;
             }
             self.chain(&coeff[..run], &mut lane[..run]);
             for c in 0..run {
                 self.last[c] = lane[c];
-                ys[c][i] = lane[c].convert_to::<S>();
+                ys[c][i] = S::from_f64(lane[c].to_f64());
             }
             step = step.saturating_add(1);
         }
@@ -302,7 +302,7 @@ impl PhaserChain {
     /// every channel in one inner loop, `coeffs` one coefficient per channel. Each stage's
     /// output is the next stage's input, and the last is left in `lane`.
     #[inline(always)]
-    fn chain(&mut self, coeffs: &[f32], lane: &mut [f32]) {
+    fn chain(&mut self, coeffs: &[F], lane: &mut [F]) {
         let w = self.width;
         for s in 0..self.stages.get() {
             let x1 = &mut self.x1[s * w..(s + 1) * w];

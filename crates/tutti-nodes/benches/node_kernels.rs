@@ -238,7 +238,7 @@ fn delay(c: &mut Criterion) {
         c,
         "delay",
         "1",
-        || DelayNode::mono(MaxDelay::of(Seconds::new(1.0)), delay_at_quarter()),
+        || DelayNode::<f32>::mono(MaxDelay::of(Seconds::new(1.0)), delay_at_quarter()),
         None,
     );
     run(
@@ -246,7 +246,7 @@ fn delay(c: &mut Criterion) {
         "delay",
         "6",
         || {
-            DelayNode::new(
+            DelayNode::<f32>::new(
                 BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
                 MaxDelay::of(Seconds::new(1.0)),
                 InterpolationMode::Linear,
@@ -267,7 +267,7 @@ fn delay(c: &mut Criterion) {
             )
             .with_times(ChannelTimes::each(&[Seconds::new(0.3)]).expect("a time"))
             .expect("one time for the right channel");
-            DelayNode::from_layout(
+            DelayNode::<f32>::from_layout(
                 layout,
                 DelayControls {
                     cross_feedback: Feedback::new(0.3),

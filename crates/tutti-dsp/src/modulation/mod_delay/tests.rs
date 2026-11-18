@@ -32,7 +32,7 @@ fn short_base() -> Sweep {
 }
 
 /// A mono swept delay of a base of `frames` at `rate`, in a 20 ms line.
-fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank {
+fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank<f32> {
     let sweep = Sweep::of(
         Seconds(frames / rate.get()),
         MaxDelay::of(Seconds(0.02)),
@@ -45,14 +45,14 @@ fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank {
 }
 
 /// The delay at the sweep's centre, in frames, floored at the frame a read takes at least.
-fn centre(bank: &ModDelayBank) -> f32 {
+fn centre(bank: &ModDelayBank<f32>) -> f32 {
     bank.swept(Gain::SILENT, SampleSpan::ZERO).get().max(1.0) as f32
 }
 
 /// `audio` (one slice per channel) through `bank` in blocks of `block`, `delays` and
 /// `feedback` carried across them.
 fn run(
-    bank: &mut ModDelayBank,
+    bank: &mut ModDelayBank<f32>,
     delays: &mut [Glide<f32>],
     feedback: &mut Glide<f32>,
     audio: &[Vec<f32>],
@@ -93,7 +93,7 @@ fn impulse_response(d: f64, g: f32, len: usize, rate: SampleRate) -> Vec<f32> {
 /// rate, and the depth is clamped into the sweep's own range first.
 #[test]
 fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
-    let reach = |bank: &ModDelayBank, depth: f64| {
+    let reach = |bank: &ModDelayBank<f32>, depth: f64| {
         let d = bank.design(&controls(1.0, depth, 0.0)).depth;
         (
             bank.swept(Gain(-1.0), d).get().max(1.0),
@@ -116,7 +116,7 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     // depth of none on the real flanger is its least, 0.1 ms.
     assert_eq!(chorus.design(&controls(1.0, 1.0, 0.0)).depth.get(), 1_920.0);
     assert_eq!(reach(&chorus, 1.0), (1.0, 2_400.0));
-    let real = ModDelayBank::new(&ModDelayLayout::flanger(bus(1)), RATE);
+    let real = ModDelayBank::<f32>::new(&ModDelayLayout::flanger(bus(1)), RATE);
     let least = real.design(&controls(1.0, 0.0, 0.0)).depth.get();
     assert!((least - 0.0001 * 48_000.0).abs() < 1e-3, "{least}");
     // The centre is the base, and the delay is held inside the line.
@@ -133,7 +133,7 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
 /// the default's.
 #[test]
 fn the_controls_are_made_safe() {
-    let chorus = ModDelayBank::new(&ModDelayLayout::chorus(bus(1)), RATE);
+    let chorus = ModDelayBank::<f32>::new(&ModDelayLayout::chorus(bus(1)), RATE);
     let step = |hz: f32| PhaseIncrement::per_sample(Hz(hz), RATE);
     for (hz, effective) in [
         (-3.0f32, 0.01),
@@ -441,4 +441,52 @@ fn the_slew_is_frames_of_delay_per_frame() {
     depth.aim_by(1_920.0, Steps::Rate(DELAY_SLEW));
     assert_eq!(depth.at(13_439), 240.0 + 1_680.0 * 13_439.0 / 13_440.0);
     assert_eq!(depth.at(13_440), 1_920.0);
+}
+
+/// With no sweep (depth 0, the glide at the base) an `f64` bank is a fixed delay of the
+/// base `d` whole frames: a signal of more than 24 significant bits returns `d` frames later
+/// exactly, and with feedback `g` (the `f32` the control holds, widened) it is the loop
+/// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45.
+#[test]
+fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (d, len) = (16usize, 200usize);
+    let rate = SampleRate::of(1_024.0);
+    let sweep = Sweep::of(
+        Seconds(d as f64 / rate.get()),
+        MaxDelay::of(Seconds(1.0)),
+        Seconds::ZERO,
+        Seconds(0.01),
+        Feedback::MAX_STABLE,
+    );
+    let layout = ModDelayLayout::new(bus(1), sweep, Stagger::NONE).unwrap();
+    let x = wide_signal(len);
+    let run_with = |g: f64| {
+        let mut bank = ModDelayBank::<f64>::new(&layout, rate);
+        let at = bank.swept(Gain::SILENT, SampleSpan::ZERO).get();
+        assert_eq!(at, d as f64, "the centre is the base");
+        let mut delays = [Glide::landed(at)];
+        let mut feedback = Glide::landed(g);
+        let mut y = vec![0.0f64; len];
+        bank.process(
+            &mut delays,
+            &mut feedback,
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        );
+        y
+    };
+    let delayed = |v: &[f64]| -> Vec<f64> {
+        (0..len)
+            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
+            .collect()
+    };
+    assert_close_f64(&run_with(0.0), &delayed(&x), 0.0);
+
+    let g = f64::from(0.6f32);
+    let mut v = vec![0.0f64; len];
+    for n in 0..len {
+        v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
+    }
+    assert_close_f64(&run_with(g), &delayed(&v), 2.0f64.powi(-45));
 }
