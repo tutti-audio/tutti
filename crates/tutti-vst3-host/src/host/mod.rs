@@ -17,6 +17,7 @@
 //! to it).
 
 #[cfg(feature = "conformance")]
+#[doc(hidden)]
 pub mod conformance;
 mod control;
 mod controller;
@@ -37,8 +38,8 @@ mod speakers;
 pub use control::descriptor_of;
 pub use controller::Vst3Controller;
 pub use editor_instance::Vst3Editor;
-pub use library::{ClassInfo, FactoryFlags, FactoryInfo, Library};
-pub use loaded::{LoadOptions, RestartOutcome, Vst3Loaded, class_id};
+pub use library::Library;
+pub use loaded::{LoadOptions, Vst3Loaded, class_id};
 pub use mapping::ControllerMapping;
 pub use processor::{ProcessFailed, ProcessorAny, Vst3Processor};
 
@@ -48,6 +49,7 @@ pub use processor::{ProcessFailed, ProcessorAny, Vst3Processor};
 /// *order*, and which `isPlatformTypeSupported` results count as a refusal —
 /// are worth pinning without either.
 #[cfg(feature = "conformance")]
+#[doc(hidden)]
 pub use tutti_vst3_ffi::{
     detach_view, platform_type_refused, send_key_down, send_key_up, send_wheel, set_view_focus,
 };

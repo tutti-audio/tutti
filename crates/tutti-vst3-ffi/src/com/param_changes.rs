@@ -20,13 +20,13 @@
 //! a queue keeps the parameter's latest value, counted
 //! ([`points_dropped`](ParameterChangesImpl::points_dropped)).
 
+use super::Lost;
 use crate::guard::Out;
 use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::Vst::{IParamValueQueue, IParameterChanges, IParameterChangesTrait};
 use vst3::{Class, ComWrapper};
 
 use super::param_queue::ParamValueQueueImpl;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_plugin_types::PointPool;
 use tutti_plugin_types::{ParameterChanges, ParameterPoint};
 use tutti_units::Normalized;
@@ -53,10 +53,10 @@ pub struct ParameterChangesImpl {
     queues: Box<[ComWrapper<ParamValueQueueImpl>]>,
     /// Points a refill or `addParameterData` could not hand on whole. Atomic, not in
     /// `inner`, so a COM entry that finds `inner` borrowed still counts its refusal.
-    dropped: AtomicU64,
+    dropped: Lost,
     /// Calls the audio thread skipped because a plugin thread held the list or
     /// one of its queues ([`busy`](Self::busy)).
-    busy: AtomicU64,
+    busy: Lost,
 }
 
 struct Inner {
@@ -95,8 +95,8 @@ impl ParameterChangesImpl {
             queues: (0..queues)
                 .map(|_| ParamValueQueueImpl::with_room(ParamId::new(0), floor))
                 .collect(),
-            dropped: AtomicU64::new(0),
-            busy: AtomicU64::new(0),
+            dropped: Lost::new(),
+            busy: Lost::new(),
         })
     }
 
@@ -109,24 +109,24 @@ impl ParameterChangesImpl {
     /// the room the list was built for.
     pub fn points_dropped(&self) -> u64 {
         let added: u64 = self.queues.iter().map(|q| q.points_dropped()).sum();
-        self.dropped.load(Ordering::Relaxed) + added
+        self.dropped.get() + added
     }
 
     /// How many calls the host skipped because a plugin thread held the list
     /// or one of its queues ([`try_begin`](Self::try_begin),
     /// [`try_fill_changes`](Self::try_fill_changes)).
     pub fn busy(&self) -> u64 {
-        self.busy.load(Ordering::Relaxed)
+        self.busy.get()
     }
 
     /// Counts refused points.
     fn count_dropped(&self, n: u64) {
-        self.dropped.fetch_add(n, Ordering::Relaxed);
+        self.dropped.add(n);
     }
 
     /// Counts one call skipped for a busy list or queue.
     fn count_busy(&self) {
-        self.busy.fetch_add(1, Ordering::Relaxed);
+        self.busy.add(1);
     }
 
     /// Every point the list has storage for, in its queues and its pool.
@@ -246,6 +246,7 @@ impl ParameterChangesImpl {
     /// A hold on queue `index` as a plugin thread inside `getPoint` has one,
     /// for a conformance test of what the host does while the plugin holds it.
     #[cfg(any(test, feature = "conformance"))]
+    #[doc(hidden)]
     pub fn hold_queue_as_plugin(&self, index: usize) -> impl Sized + '_ {
         self.queues[index].hold_as_plugin()
     }

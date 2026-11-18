@@ -7,6 +7,7 @@ mod attr_list;
 mod component_handler;
 mod event_list;
 mod host_application;
+mod lost;
 mod message;
 mod param_changes;
 mod param_queue;
@@ -44,11 +45,12 @@ pub use component_handler::{
     ComponentHandler, NOTIFICATION_CAPACITY, PROGRESS_DESCRIPTION_CAPACITY, ParameterEditEvent,
     PluginNotification, ProgressDescription, ProgressEvent, ProgressKind, RestartFlags, UnitEvent,
 };
+#[cfg(feature = "conformance")]
+pub use event_list::SYSEX_OUT_ROOM;
 pub(crate) use event_list::event_list_ptr;
-pub use event_list::{
-    EVENT_CAPACITY, EventList, NOTE_EXPRESSION_ROOM, SYSEX_OUT_ROOM, Staged, Staging,
-};
+pub use event_list::{EVENT_CAPACITY, EventList, NOTE_EXPRESSION_ROOM, Staged, Staging};
 pub(crate) use host_application::HostApplication;
+pub(crate) use lost::Lost;
 pub(crate) use param_changes::param_changes_ptr;
 pub use param_changes::{Busy, ParamStaging, ParameterChangesImpl};
 pub use param_queue::MIN_POINT_ROOM;

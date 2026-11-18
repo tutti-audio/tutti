@@ -28,8 +28,6 @@
 
 use std::path::Path;
 
-use tutti_plugin_types::LoadStage;
-
 use crate::module::LoadError;
 
 /// The module-entry state for one loaded DSO. Holds whatever the exit call
@@ -39,13 +37,12 @@ pub(crate) struct ModuleEntry {
     inner: platform::Entry,
 }
 
-/// Builds the [`LoadError`] every failure below reports: module entry runs
-/// while the DSO is being opened, so the stage is always
-/// [`LoadStage::Opening`].
-fn load_failed(_lib_path: &Path, reason: impl Into<String>) -> LoadError {
-    LoadError {
-        stage: LoadStage::Opening,
-        reason: reason.into(),
+/// The refusal every platform's entry point reports: `entry` answered `false`
+/// for the module at `path`.
+fn refused(path: &Path, entry: &'static str) -> LoadError {
+    LoadError::EntryRefused {
+        path: path.to_path_buf(),
+        entry,
     }
 }
 
@@ -80,7 +77,7 @@ fn symbol<'a, T>(
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{Path, load_failed, symbol};
+    use super::{Path, refused, symbol};
     use crate::module::LoadError;
     use core_foundation_sys::base::{CFRelease, kCFAllocatorDefault};
     use core_foundation_sys::bundle::{CFBundleCreate, CFBundleRef};
@@ -167,7 +164,7 @@ mod platform {
             if !accepted {
                 // SAFETY: `bundle` is the +1 reference created above, released once here.
                 unsafe { CFRelease(bundle as *const _) };
-                return Err(load_failed(lib_path, "bundleEntry returned false"));
+                return Err(refused(lib_path, "bundleEntry"));
             }
         }
         // No `bundleEntry` export: supported, nothing to do. The bundle ref is
@@ -192,7 +189,7 @@ mod platform {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod platform {
-    use super::{Path, load_failed, symbol};
+    use super::{Path, refused, symbol};
     use crate::module::LoadError;
     use std::ffi::c_void;
 
@@ -241,11 +238,9 @@ mod platform {
         // SAFETY: opening the same module again is what the caller already did once; the
         // reference is released through `Library`'s drop.
         let handle_raw = unsafe { libloading::os::unix::Library::new(lib_path) }
-            .map_err(|e| {
-                load_failed(
-                    lib_path,
-                    format!("reopening the module for ModuleEntry failed: {e}"),
-                )
+            .map_err(|source| LoadError::Library {
+                path: lib_path.to_path_buf(),
+                source,
             })?
             .into_raw();
 
@@ -259,7 +254,7 @@ mod platform {
         // SAFETY: `entry` is the module's `ModuleEntry`, called once with the module's own handle,
         // which the `handle` reference keeps valid.
         if !unsafe { entry(handle_raw) } {
-            return Err(load_failed(lib_path, "ModuleEntry returned false"));
+            return Err(refused(lib_path, "ModuleEntry"));
         }
 
         Ok(Entry {
@@ -282,7 +277,7 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    use super::{Path, load_failed, symbol};
+    use super::{Path, refused, symbol};
     use crate::module::LoadError;
     type InitDllFn = unsafe extern "system" fn() -> bool;
     type ExitDllFn = unsafe extern "system" fn() -> bool;
@@ -301,7 +296,7 @@ mod platform {
             // SAFETY: `entry` is the module's `InitDll`, called once.
             let accepted = unsafe { entry() };
             if !accepted {
-                return Err(load_failed(lib_path, "InitDll returned false"));
+                return Err(refused(lib_path, "InitDll"));
             }
         }
 

@@ -2772,6 +2772,7 @@ dependencies = [
  "tutti-types",
  "tutti-ump",
  "tutti-units",
+ "vst3",
 ]
 
 [[package]]

@@ -68,57 +68,21 @@ fn platform_type_name(platform_type: FIDString) -> String {
         .to_string()
 }
 
-/// Whether `platform_type` names a window whose geometry is in logical pixels
-/// (an `NSView` or a `UIView`), where the view carries its backing scale itself.
-fn uses_logical_pixels(platform_type: FIDString) -> bool {
-    use vst3::Steinberg::{kPlatformTypeNSView, kPlatformTypeUIView};
-    if platform_type.is_null() {
-        return false;
-    }
-    let name = platform_type_name(platform_type);
-    [kPlatformTypeNSView, kPlatformTypeUIView]
-        .iter()
-        .any(|&t| name == platform_type_name(t))
-}
-
-/// The unit a `ViewRect` of a view embedded as `platform_type` is in (`ViewRect`
-/// has no unit of its own): device pixels on Windows and X11, points on an
-/// `NSView` or a `UIView`.
-fn unit_of(platform_type: FIDString) -> EditorUnit {
-    if uses_logical_pixels(platform_type) {
-        EditorUnit::Logical
-    } else {
-        EditorUnit::Physical
-    }
-}
-
-/// `width` by `height` as this platform's `ViewRect` counts them: device pixels on
-/// Windows and X11, points on macOS. The one place a VST3 size gets its unit.
-#[must_use]
-pub fn rect_size(width: u32, height: u32) -> Size {
-    rect_unit().size(width, height)
-}
-
-fn rect_unit() -> EditorUnit {
-    unit_of(native_platform_type())
-}
-
-/// The factor `setContentScaleFactor` sends for a view embedded as
-/// `platform_type` in a window of backing scale `scale`, or `None` where it
-/// must not be sent.
+/// The factor `setContentScaleFactor` sends for a view in a window of backing
+/// scale `scale`, or `None` where it must not be sent.
 ///
 /// The interface exists "on systems where plug-ins cannot get this
 /// information directly like Microsoft Windows"
 /// (`iplugviewcontentscalesupport.h`). An `NSView` (or `UIView`) already
 /// carries its backing scale in logical-pixel geometry, so a plugin told the
-/// factor as well applies it twice and opens at 2× on a Retina display: the
+/// factor as well applies it twice and opens at 2x on a Retina display: the
 /// CLAP host withholds `set_scale` on cocoa for the same reason. VST3 takes a
 /// `float`; a display's scale is far inside its precision.
-fn content_scale_for(platform_type: FIDString, scale: ContentScale) -> Option<f32> {
-    if platform_type.is_null() {
-        return None;
+fn content_scale_for(scale: ContentScale) -> Option<f32> {
+    match EditorUnit::WINDOWING {
+        EditorUnit::Physical => Some(scale.get() as f32),
+        EditorUnit::Logical => None,
     }
-    (!uses_logical_pixels(platform_type)).then_some(scale.get() as f32)
 }
 
 /// Does this `isPlatformTypeSupported` result mean "no"?
@@ -240,7 +204,7 @@ pub fn set_view_focus(_main: MainThreadMarker, view: &ComPtr<IPlugView>, focused
 /// size: a negative extent, or one whose subtraction overflows.
 pub(crate) fn size_of_rect(rect: &ViewRect) -> Option<Size> {
     let extent = |high: i32, low: i32| high.checked_sub(low).and_then(|n| u32::try_from(n).ok());
-    Some(rect_unit().size(
+    Some(EditorUnit::WINDOWING.size(
         extent(rect.right, rect.left)?,
         extent(rect.bottom, rect.top)?,
     ))
@@ -250,7 +214,7 @@ pub(crate) fn size_of_rect(rect: &ViewRect) -> Option<Size> {
 /// saturating at `i32::MAX` (a rect cannot hold more, and a wrap would be
 /// negative).
 fn rect_of_size(size: Size, scale: ContentScale) -> ViewRect {
-    let (width, height) = rect_unit().native(size, scale);
+    let (width, height) = EditorUnit::WINDOWING.native(size, scale);
     ViewRect {
         left: 0,
         top: 0,
@@ -288,7 +252,7 @@ impl Editor {
             let _ = view.setFrame(frame_ptr);
         }
 
-        if let Some(factor) = content_scale_for(platform_type, scale)
+        if let Some(factor) = content_scale_for(scale)
             && let Some(support) = view.cast::<IPlugViewContentScaleSupport>()
         {
             // SAFETY: a plain call on a live interface.
@@ -343,7 +307,7 @@ impl Editor {
     /// view without `IPlugViewContentScaleSupport` or one that refused.
     pub(crate) fn set_scale(&mut self, scale: ContentScale) -> bool {
         self.scale = scale;
-        let Some(factor) = content_scale_for(native_platform_type(), scale) else {
+        let Some(factor) = content_scale_for(scale) else {
             return false;
         };
         let Some(support) = self.view.cast::<IPlugViewContentScaleSupport>() else {
@@ -382,44 +346,6 @@ impl Editor {
         // SAFETY: `rect` is a valid in-parameter for the call.
         check(unsafe { self.view.onSize(&mut rect) })?;
         size_of_rect(&rect).ok_or(Vst3Error::InvalidArgument)
-    }
-}
-
-#[cfg(test)]
-mod content_scale_tests {
-    use super::{content_scale_for, unit_of};
-    use tutti_plugin_types::{ContentScale, EditorUnit};
-    use vst3::Steinberg::{
-        kPlatformTypeHWND, kPlatformTypeNSView, kPlatformTypeUIView, kPlatformTypeX11EmbedWindowID,
-    };
-
-    /// **The window's scale reaches a view on a physical-pixel window system,
-    /// and never one on a logical-pixel system.** An HWND or X11 view is told
-    /// 2.0; an `NSView` or `UIView`, which already lays out in logical pixels,
-    /// is told nothing (it would apply the factor twice).
-    #[test]
-    fn the_scale_is_sent_only_on_a_physical_pixel_window_system() {
-        let two = ContentScale::new(2.0).expect("a scale");
-        assert_eq!(content_scale_for(kPlatformTypeHWND, two), Some(2.0));
-        assert_eq!(
-            content_scale_for(kPlatformTypeX11EmbedWindowID, two),
-            Some(2.0)
-        );
-        assert_eq!(content_scale_for(kPlatformTypeNSView, two), None);
-        assert_eq!(content_scale_for(kPlatformTypeUIView, two), None);
-        assert_eq!(content_scale_for(std::ptr::null(), two), None);
-    }
-
-    /// **A `ViewRect` is in device pixels for an HWND or X11 view and in
-    /// points for an `NSView` or `UIView`.**
-    #[test]
-    fn a_rect_is_in_the_unit_of_its_window_system() {
-        for physical in [kPlatformTypeHWND, kPlatformTypeX11EmbedWindowID] {
-            assert_eq!(unit_of(physical), EditorUnit::Physical);
-        }
-        for logical in [kPlatformTypeNSView, kPlatformTypeUIView] {
-            assert_eq!(unit_of(logical), EditorUnit::Logical);
-        }
     }
 }
 
