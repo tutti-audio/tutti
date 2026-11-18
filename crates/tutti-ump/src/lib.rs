@@ -76,7 +76,7 @@
 //! codec shifts bits: a consumer matches on [`Message`], and the graph's queues
 //! call [`Ump::is_note_off`].
 //!
-//! The crate depends on no other tutti crate and has no allocation, so the
+//! The crate names only `tutti-units`, which has no allocation either, so the
 //! audio graph can carry packets without linking a MIDI stack.
 
 #![forbid(unsafe_code)]
@@ -118,12 +118,16 @@ pub use articulation::{
     StringAssignment, Stroke,
 };
 pub use bend_value::BendValue;
-pub use cc_number::CCNumber;
+pub use cc_number::{CCNumber, CCNumberOutOfRange};
 pub use control_value::ControlValue;
 pub use field::{
-    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-    MonoChannels, MpeChannels, NotSharpsFlats, NoteNumber, OutOfRange, Pitch, SharpsFlats,
-    TicksPerQuarterNote, U4, U7, U14, U28, first_non_seven_bit,
+    ChordType, ChordTypeOutOfRange, DeltaTicks, DeltaTicksOutOfRange, FirstGroup,
+    FirstGroupOutOfRange, FunctionBlockCount, FunctionBlockCountOutOfRange, FunctionBlockId,
+    FunctionBlockIdOutOfRange, GroupSpan, GroupSpanOutOfRange, MonoChannels,
+    MonoChannelsOutOfRange, MpeChannels, MpeChannelsOutOfRange, NoteNumber, NoteNumberOutOfRange,
+    Pitch, SharpsFlats, SharpsFlatsOutOfRange, TicksPerQuarterNote, TicksPerQuarterNoteOutOfRange,
+    U4, U4OutOfRange, U7, U7OutOfRange, U14, U14OutOfRange, U28, U28OutOfRange,
+    first_non_seven_bit,
 };
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
@@ -145,8 +149,8 @@ pub use message::{
     Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 pub use messages::{Join, PacketSpan, Spans, spans, spans_joined};
-pub use midi_channel::MidiChannel;
-pub use midi_group::MidiGroup;
+pub use midi_channel::{MidiChannel, MidiChannelOutOfRange};
+pub use midi_group::{MidiGroup, MidiGroupOutOfRange};
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
 pub use mixed_data::{
     MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunks, MdsIdentity, MixedDataAssembler,

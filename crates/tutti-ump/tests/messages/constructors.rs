@@ -374,7 +374,7 @@ fn a_sysex7_payload_of_seven_bytes_is_two_packets() {
 }
 
 #[test]
-#[should_panic(expected = "a NoteNumber is 7 bits")]
+#[should_panic(expected = "not within 7 bits")]
 fn a_note_number_past_127_is_refused() {
     let _ = NoteNumber::of(128);
 }

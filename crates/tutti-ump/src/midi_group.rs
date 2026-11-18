@@ -12,19 +12,19 @@
 //! takes(MidiChannel::of(3), MidiGroup::of(1));
 //! ```
 
-use crate::OutOfRange;
-
-/// One of the 16 groups (virtual cables) in a UMP Endpoint.
-///
-/// Always in `0..=15`: [`new`](Self::new) refuses a larger number, and
-/// [`masked`](Self::masked) is the one constructor that masks.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-// Serialized as the bare number, and read back through `TryFrom<u8>`, so a
-// document cannot carry a value the type refuses.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
-pub struct MidiGroup(u8);
+tutti_units::ranged! {
+    /// One of the 16 groups (virtual cables) in a UMP Endpoint.
+    ///
+    /// Always in `0..=MAX`: [`new`](Self::new) refuses a larger number, and
+    /// [`masked`](Self::masked) is the one constructor that masks. Serialized
+    /// as the bare number, read back through `TryFrom<u8>`, so a document
+    /// cannot carry a value the type refuses.
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    MidiGroup(u8), MidiGroupOutOfRange, bits 4
+}
 
 impl MidiGroup {
     /// The first group — and the only one a single-cable endpoint uses.
@@ -37,49 +37,6 @@ impl MidiGroup {
     pub const LAST: MidiGroup = MidiGroup(15);
     /// How many groups a UMP Endpoint carries.
     pub const COUNT: u8 = 16;
-
-    /// The group, or `None` when `raw` is above 15.
-    ///
-    /// ```
-    /// use tutti_ump::MidiGroup;
-    ///
-    /// assert_eq!(MidiGroup::new(15), Some(MidiGroup::LAST));
-    /// assert_eq!(MidiGroup::new(16), None);
-    /// ```
-    #[inline]
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<MidiGroup> {
-        if raw < Self::COUNT {
-            Some(MidiGroup(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The group for a literal or a constant. For a value that arrives from
-    /// outside, use [`new`](Self::new).
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is above 15; in a `const` that is a compile error.
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u8) -> MidiGroup {
-        match Self::new(raw) {
-            Some(group) => group,
-            None => panic!("a group is 0 to 15"),
-        }
-    }
-
-    /// The low four bits of `raw`: the one place that masks. Use it where the
-    /// bits are known to be a Group field, as the decoder does; a value from
-    /// outside the wire is checked with [`new`](Self::new).
-    #[inline]
-    #[must_use]
-    pub const fn masked(raw: u8) -> MidiGroup {
-        MidiGroup(raw & 0x0F)
-    }
 
     /// The channel or group as an array index, `0..16`: the lane of a table
     /// with one slot for each of the groups.
@@ -122,13 +79,6 @@ impl MidiGroup {
             None => None,
         }
     }
-
-    /// Returns the raw 0-based group number, for a UMP constructor.
-    #[inline]
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
 }
 
 /// The 1-based number a person reads ([`numbered`](MidiGroup::numbered)'s): `MidiGroup::of(9)` is
@@ -136,26 +86,6 @@ impl MidiGroup {
 impl core::fmt::Display for MidiGroup {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(&(u16::from(self.0) + 1), f)
-    }
-}
-
-impl TryFrom<u8> for MidiGroup {
-    type Error = OutOfRange;
-
-    #[inline]
-    fn try_from(raw: u8) -> Result<Self, OutOfRange> {
-        Self::new(raw).ok_or(OutOfRange {
-            what: "group",
-            value: u32::from(raw),
-            max: u32::from(Self::LAST.0),
-        })
-    }
-}
-
-impl From<MidiGroup> for u8 {
-    #[inline]
-    fn from(g: MidiGroup) -> u8 {
-        g.0
     }
 }
 
@@ -176,14 +106,7 @@ mod tests {
         for raw in 0..=255u8 {
             assert_eq!(MidiGroup::try_from(raw).ok(), MidiGroup::new(raw));
         }
-        assert_eq!(
-            MidiGroup::try_from(16),
-            Err(OutOfRange {
-                what: "group",
-                value: 16,
-                max: 15
-            })
-        );
+        assert_eq!(MidiGroup::try_from(16), Err(MidiGroupOutOfRange(16)));
     }
 
     #[test]
@@ -208,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "a group is 0 to 15")]
+    #[should_panic(expected = "not within 4 bits")]
     fn of_panics_out_of_range() {
         let _ = MidiGroup::of(16);
     }

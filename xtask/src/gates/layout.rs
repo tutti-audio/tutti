@@ -53,11 +53,10 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
         "tutti-winmm-ffi",
-        "tutti-ump",
         "tutti-units",
         "tutti-plugin-ipc-ffi",
     ],
-    &["tutti-types"],
+    &["tutti-types", "tutti-ump"],
     &[
         "tutti-midi-protocol",
         "tutti-midi-device",
@@ -114,6 +113,7 @@ const ONLY: &[(&str, &[&str])] = &[
         &["tutti-ump", "tutti-types", "tutti-units"],
     ),
     ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
+    ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
@@ -231,9 +231,6 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
 ];
-
-/// Depend on no workspace crate, of any kind (a dev-dependency too).
-const ALONE: &[&str] = &["tutti-ump"];
 
 const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc", "vorbis_rs"];
 const ENCODERS: &[&str] = &["flacenc", "aifc", "vorbis_rs", "md-5"];
@@ -549,14 +546,6 @@ pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
     };
     let all = [Kind::Normal, Kind::Build, Kind::Dev];
     let built = [Kind::Normal, Kind::Build];
-    for name in ALONE.iter().filter(|n| by_name.contains_key(*n)) {
-        let extra = deps_of(name, &all);
-        if !extra.is_empty() {
-            bad.push(format!(
-                "{name} may depend on no workspace crate; it depends on {extra:?}"
-            ));
-        }
-    }
     for (name, allowed) in ONLY.iter().filter(|(n, _)| by_name.contains_key(n)) {
         let extra: BTreeSet<String> = deps_of(name, &built)
             .into_iter()
@@ -715,19 +704,31 @@ mod tests {
         assert!(r.findings.iter().any(|l| {
             l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 0 -> 4)")
         }));
-        // A dev-dependency may point anywhere, except where a crate is held to none.
+        // A dev-dependency may point anywhere.
         let r = with((
             "crates/tutti-units",
             "tutti-units",
             "[dev-dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.passed());
+        // A crate held to a list may not name another normal dependency, and its
+        // dev-dependencies are free.
         let r = with((
             "crates/tutti-ump",
             "tutti-ump",
-            "[dev-dependencies]\ntutti-units = { path = \"../tutti-units\" }\n",
+            "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
-        assert!(r.findings[1].contains("tutti-ump may depend on no workspace crate"));
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("tutti-ump may depend on [\"tutti-units\"] only"))
+        );
+        let r = with((
+            "crates/tutti-ump",
+            "tutti-ump",
+            "[dependencies]\ntutti-units = { path = \"../tutti-units\" }\n[dev-dependencies]\ntutti-fixtures = { path = \"../../testing/tutti-fixtures\" }\n",
+        ));
+        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
