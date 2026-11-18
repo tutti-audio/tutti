@@ -323,7 +323,7 @@ pub mod types {
         SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
         UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Phase, Resyncs};
+    pub use tutti_units::{Phase, Real, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
