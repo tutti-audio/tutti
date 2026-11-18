@@ -1,7 +1,7 @@
 //! A child process that cannot outlive its owner.
 
-use std::ops::{Deref, DerefMut};
 use std::process::{Child, ExitStatus};
+use tutti_plugin_ipc_ffi::ExitWait;
 
 /// A child process that is killed and reaped when it drops.
 ///
@@ -11,11 +11,11 @@ use std::process::{Child, ExitStatus};
 /// plugin-server, the probe) is held as one of these from the moment it is
 /// spawned, so no path out of the code that holds it leaves one behind.
 ///
-/// It derefs to the [`Child`], so `id`, `kill` and `wait` are std's own. A
-/// child that already exited (or was reaped through the deref) is dropped
-/// harmlessly: `kill` answers `Ok` and `wait` its status at once. Reap through
-/// [`try_reap`](Self::try_reap), not the deref's `try_wait`, when the child
-/// leads a [group](Self::leading_group).
+/// It does not deref to the [`Child`]: a `kill` or a `try_wait` through it would
+/// skip the child's [process group](Self::leading_group). Its calls are
+/// [`id`](Self::id), [`try_reap`](Self::try_reap), [`kill_all`](Self::kill_all),
+/// [`wait`](Self::wait) and [`exit_wait`](Self::exit_wait); a child that already
+/// exited is dropped harmlessly.
 #[derive(Debug)]
 pub struct Reaped {
     child: Child,
@@ -42,16 +42,33 @@ impl Reaped {
         Self { child, group: true }
     }
 
-    /// The child's status if it has ended, reaping it, and ending its group
-    /// with it: the id of a leader reaped and then left would name another
-    /// process later, so the group goes at the reaping.
+    /// The child's process id.
+    #[must_use]
+    pub fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// A wait on the OS's wake for the child's end, made while it is unreaped.
+    #[must_use]
+    pub fn exit_wait(&self) -> ExitWait {
+        ExitWait::of(&self.child)
+    }
+
+    /// The child's status if it has ended, reaping it. Its group is ended
+    /// first, while the unreaped leader still holds the group's id: a reaped
+    /// leader's id may name another process later.
     ///
     /// # Errors
     ///
     /// The OS error of `try_wait`.
     pub fn try_reap(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        if self.group && tutti_plugin_ipc_ffi::has_ended(self.child.id()) {
+            self.end_group();
+        }
         let status = self.child.try_wait()?;
         if status.is_some() {
+            // Ended between the look and the reaping (or a platform that cannot
+            // look): the id is as good as it was an instant ago.
             self.end_group();
         }
         Ok(status)
@@ -67,26 +84,23 @@ impl Reaped {
         self.child.kill()
     }
 
+    /// Ends the child's group, then waits for the child: unbounded, so for a
+    /// child already killed.
+    ///
+    /// # Errors
+    ///
+    /// The OS error of `wait`.
+    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.end_group();
+        self.child.wait()
+    }
+
     /// Ends the group while its leader's id is still the leader's: before the
     /// reaping, or at it. A `false` `group` has nothing to end.
     fn end_group(&mut self) {
         if std::mem::take(&mut self.group) {
             tutti_plugin_ipc_ffi::kill_group(self.child.id());
         }
-    }
-}
-
-impl Deref for Reaped {
-    type Target = Child;
-
-    fn deref(&self) -> &Child {
-        &self.child
-    }
-}
-
-impl DerefMut for Reaped {
-    fn deref_mut(&mut self) -> &mut Child {
-        &mut self.child
     }
 }
 

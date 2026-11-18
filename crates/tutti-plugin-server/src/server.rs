@@ -48,12 +48,17 @@ pub(crate) fn request_audio_priority(what: &str) {
 pub enum Ended {
     /// The session ended and every plugin it loaded was destroyed.
     Clean,
-    /// A plugin was leaked: its render thread never returned the processor, and
-    /// destroying the plugin would have freed what that thread still reads.
+    /// A plugin was leaked: its render thread returned the processor too late,
+    /// and destroying the plugin would have freed what that thread still reads.
+    /// A render thread that never returns ends the process outright instead
+    /// (status 1), and a host that runs the server kills it after
+    /// `Timeouts::shutdown`, so this status is for a supervisor that runs the
+    /// server itself.
     PluginLeaked,
 }
 
-/// The exit status of a server whose session ended with [`Ended::PluginLeaked`].
+/// The exit status of a server whose session ended with [`Ended::PluginLeaked`]
+/// (see there for who can read it).
 pub const EXIT_PLUGIN_LEAKED: u8 = 3;
 
 /// The subprocess-side server: one hosted plugin, one host connection.
@@ -233,7 +238,11 @@ impl PluginServer {
                 tracing::error!(
                     "plugin-server: the render thread is stuck in the plugin; ending the process"
                 );
+                crate::leak::note();
                 let _ = std::fs::remove_file(&self.socket);
+                // The group this server leads (the host spawned it as its leader)
+                // goes with it: the helpers a plugin spawned must not outlive it.
+                tutti_plugin_ipc_ffi::kill_group(std::process::id());
                 tutti_plugin_ipc_ffi::terminate_process()
             }
         }

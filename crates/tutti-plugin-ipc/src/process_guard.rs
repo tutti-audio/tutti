@@ -64,7 +64,7 @@ impl ProcessGuard {
     /// run, and `process` is killed and reaped as it drops.
     pub fn launched(process: Reaped, config: BridgeConfig) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
-        let wait = Arc::new(ExitWait::of(&process));
+        let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
         let spawned = tutti_rt::spawn_named("plugin-exit", None, {
             let process = Arc::clone(&process);
@@ -202,8 +202,9 @@ fn await_end(
     }
 }
 
-/// Reaps a killed `process` on a thread of its own, which ends with it; a
-/// thread that cannot start reaps it here.
+/// Reaps a killed `process` on a thread of its own, which ends with it. A
+/// thread that cannot start leaves the zombie to this process's end: the reap
+/// is a `wait`, which a process in uninterruptible sleep never returns from.
 fn reap_elsewhere(process: Reaped) {
     let slot = Arc::new(Mutex::new(Some(process)));
     let spawned = tutti_rt::spawn_named("plugin-reap", None, {
@@ -212,7 +213,7 @@ fn reap_elsewhere(process: Reaped) {
     });
     match spawned {
         Ok(handle) => handle.detach(),
-        Err(_) => drop(slot.lock_recover().take()),
+        Err(_) => std::mem::forget(slot.lock_recover().take()),
     }
 }
 
@@ -351,7 +352,7 @@ mod tests {
         let mut command = Command::new("sleep");
         command.arg("60");
         let mut process = Reaped::new(command.spawn().expect("sleep spawns"));
-        let wait = ExitWait::of(&process);
+        let wait = process.exit_wait();
         let start = Instant::now();
         let looks = std::cell::Cell::new(0_u32);
         let now = || {

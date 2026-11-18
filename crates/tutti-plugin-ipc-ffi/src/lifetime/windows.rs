@@ -22,6 +22,12 @@ pub fn own_group(_command: &mut Command) {}
 /// A server's helpers end with the job, not by a group's signal.
 pub fn kill_group(_leader: u32) {}
 
+/// Never known without reaping on Windows; a group is the job's, not a signal's.
+#[must_use]
+pub fn has_ended(_leader: u32) -> bool {
+    false
+}
+
 fn make_job() -> std::io::Result<HANDLE> {
     // SAFETY: null attributes and name make an unnamed job with default
     // security; the handle is kept for the process's life.
@@ -77,10 +83,10 @@ pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+    use windows_sys::Win32::System::JobObjects::{IsProcessInJob, QueryInformationJobObject};
 
     /// **A bound child is in the host's job**: the kernel then ends it with the
-    /// host. The job's limit is read back from the OS, not from this module.
+    /// host. The job's kill-on-close limit is read back from the OS.
     #[test]
     fn a_bound_child_is_in_the_host_job_that_kills_on_close() {
         let mut command = Command::new("cmd");
@@ -98,6 +104,25 @@ mod tests {
         // and `inside` is a live out-parameter.
         let asked = unsafe { IsProcessInJob(child.as_raw_handle(), job, &mut inside) };
         assert!(asked != 0 && inside != 0, "the child is not in the job");
+
+        // SAFETY: a plain C struct, for which all-zero is a valid value.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: `job` is live, and `info` is a live, correctly sized
+        // out-buffer of the class asked for; the returned length is not wanted.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of_mut!(info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(queried != 0, "the job's limits cannot be read");
+        assert!(
+            info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0,
+            "the job does not end its processes when it closes"
+        );
         let _ = child.kill();
         let _ = child.wait();
     }

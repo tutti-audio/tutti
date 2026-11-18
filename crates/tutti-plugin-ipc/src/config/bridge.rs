@@ -143,7 +143,9 @@ pub struct BridgeConfig {
     /// first server is spawned, so a plugin, which runs as the same user, cannot
     /// `ptrace` the host or write its memory. Off by default: the flag also
     /// stops the host dumping core and an unprivileged debugger or crash
-    /// handler attaching to it, which is the app's to choose. Nothing elsewhere
+    /// handler attaching to it, which is the app's to choose. Irreversible for the
+    /// process: the flag stays cleared, and a later `false` does not undo an
+    /// earlier `true`. Nothing elsewhere
     /// (macOS's hardened runtime is the app's signing).
     #[serde(default)]
     pub protect_host_memory: bool,

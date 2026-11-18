@@ -799,6 +799,12 @@ a separate, opt-in piece.
   helpers a plugin spawned go with it), and a Job Object with
   kill-on-close on Windows (the kernel ends the server when the host does). A
   server that is not told to shut down (a launch that failed) is killed at once.
+- **Windows binding fails open, with a gap:** if the Job Object cannot be made or
+  the server cannot be assigned to it, the load goes on (refusing every plugin
+  for it is worse) and logs a warning; the server's own watch on the host is
+  then what ends it. The assignment follows the spawn, so a process the server
+  started before it must stay outside the job. Closing that gap takes a
+  suspended spawn and a resume of its main thread, which std does not offer.
 - **The server's own teardown is bounded:** a stopped render thread is given
   3 s, and one still inside the plugin ends the process outright (a plugin that
   never returns from a block cannot be destroyed). A partial audio frame is

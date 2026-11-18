@@ -32,6 +32,22 @@ pub fn kill_group(leader: u32) {
     }
 }
 
+/// Whether the child `leader` has ended and is not yet reaped, without reaping
+/// it: a zombie keeps its id, so its group can still be ended by it
+/// ([`kill_group`]) before the reaping lets the id go.
+#[must_use]
+pub fn has_ended(leader: u32) -> bool {
+    use rustix::process::{WaitId, WaitIdOptions};
+    let Some(pid) = i32::try_from(leader).ok().and_then(Pid::from_raw) else {
+        return false;
+    };
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    matches!(
+        rustix::process::waitid(WaitId::Pid(pid), options),
+        Ok(Some(_))
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

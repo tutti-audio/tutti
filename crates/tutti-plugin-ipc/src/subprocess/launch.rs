@@ -223,11 +223,13 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reape
         .stderr(std::process::Stdio::inherit());
     tutti_plugin_ipc_ffi::own_group(&mut command);
     let child = command.spawn().map_err(BridgeError::Io)?;
-    let child = Reaped::leading_group(child);
+    // A host that cannot bind the server to its own end still hosts: the server
+    // then outlives a host that dies, which its own watch on the host ends. A
+    // child spawned before the assignment stays outside the job.
     if let Err(e) = tutti_plugin_ipc_ffi::bind_to_host(&child) {
         tracing::warn!("the server is not bound to the host's end: {e}");
     }
-    Ok(child)
+    Ok(Reaped::leading_group(child))
 }
 
 /// Clears the host's dumpable flag, once for the process, at the first server

@@ -221,12 +221,8 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
 
     write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
     let (status, logged) = ended(&mut server);
-    assert!(status.success(), "{status:?}: {logged}");
-    assert_ne!(
-        status.code(),
-        Some(i32::from(tutti_plugin_server::EXIT_PLUGIN_LEAKED)),
-        "the plugin was leaked: {logged}"
-    );
+    // Not 3 (`EXIT_PLUGIN_LEAKED`): the plugin was destroyed, not leaked.
+    assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
 }
 
 /// **A handshake frame that does not decode ends the server, with that cause

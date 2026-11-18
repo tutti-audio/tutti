@@ -136,7 +136,9 @@ pub struct AudioConfig {
     pub timeouts: Timeouts,
 
     /// Whether the host clears its dumpable flag before it spawns its first
-    /// plugin server ([`BridgeConfig::protect_host_memory`]). Off by default.
+    /// plugin server ([`BridgeConfig::protect_host_memory`]). Off by default, and
+    /// irreversible for the process: a later `false` does not undo an earlier
+    /// `true`.
     pub protect_host_memory: bool,
 }
 

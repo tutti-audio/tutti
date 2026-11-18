@@ -18,7 +18,7 @@
 //!   thread the OS wakes when a named process ends, which runs the caller's reply to that, and
 //!   [`terminate_process`], the end that runs no cleanup.
 //! - **What ties a server's life to its host's** ([`own_group`], [`kill_group`],
-//!   [`bind_to_host`]): the process group a server leads, whose end reaches the
+//!   [`has_ended`], [`bind_to_host`]): the process group a server leads, whose end reaches the
 //!   helpers a plugin spawned (unix), and the kill-on-close Job Object the
 //!   kernel ends a server with when the host dies (Windows). And
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
@@ -53,7 +53,7 @@ mod wakeups;
 pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
-pub use lifetime::{bind_to_host, kill_group, own_group};
+pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
 pub use mapping::{MappingWriter, SharedMapping};
 pub use os::*;
 pub use wakeups::{FdId, Interest, Ready, Watch};

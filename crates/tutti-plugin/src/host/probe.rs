@@ -11,7 +11,7 @@
 //! ([`HOST_PID_ENV`]), which ends itself with the host.
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tracing::warn;
 use tutti_plugin_ipc::Reaped;
@@ -199,18 +199,18 @@ enum Waited {
 
 /// Waits for `child` to exit, killing and reaping it at `timeout` or when
 /// `stop` is requested.
-fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
+fn wait(child: &mut Reaped, timeout: Duration, stop: &StopToken) -> Waited {
     let deadline = Deadline::after(Instant::now(), timeout);
     loop {
-        match child.try_wait() {
+        match child.try_reap() {
             Ok(Some(status)) => return Waited::Exited(status),
             Ok(None) if stop.is_stopped() => {
-                let _ = child.kill();
+                let _ = child.kill_all();
                 let _ = child.wait();
                 return Waited::Cancelled;
             }
             Ok(None) if deadline.passed(Instant::now()) => {
-                let _ = child.kill();
+                let _ = child.kill_all();
                 let _ = child.wait();
                 return Waited::TimedOut;
             }
@@ -219,7 +219,7 @@ fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
                 let _ = stop.wait(POLL);
             }
             Err(e) => {
-                let _ = child.kill();
+                let _ = child.kill_all();
                 let _ = child.wait();
                 return Waited::Lost(e);
             }

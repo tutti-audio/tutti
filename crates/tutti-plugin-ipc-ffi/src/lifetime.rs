@@ -10,4 +10,4 @@ mod platform;
 #[path = "lifetime/windows.rs"]
 mod platform;
 
-pub use platform::{bind_to_host, kill_group, own_group};
+pub use platform::{bind_to_host, has_ended, kill_group, own_group};
