@@ -9,13 +9,13 @@ use tutti_curve::Piece;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node,
     NodeParts, Offset, ParamRange, ParamRangeReader, ParamSegment, PlayReading, Prepare, Shape,
-    Status, TransportPosition,
+    Status, TransportPosition, control_word,
 };
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
 };
 use tutti_rt::{PackedAtomic, Publisher, Reader};
-use tutti_types::{AtomicF32, ParamCell};
+use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{
     Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };
@@ -24,7 +24,7 @@ use crate::SOURCE_EVENT_CAPACITY;
 
 /// How a lane builds a segment for its target: the typed key (or foreign
 /// id) bound in, so the lane itself is not generic.
-type MakeSegment = dyn Fn(f32, f32, Law) -> ParamSegment + Send + Sync;
+type MakeSegment = dyn Fn(f64, f64, Law) -> ParamSegment + Send + Sync;
 
 /// Where a lane reads its target's range.
 enum RangeSource {
@@ -154,7 +154,7 @@ impl LaneControls {
     /// Writes the knob the lane reads: a native lane's is its target's own
     /// `Param` cell (so this is a param write), a plugin lane's its own.
     /// `false` for a lane built without one.
-    pub fn set_knob(&self, value: f32) -> bool {
+    pub fn set_knob(&self, value: f64) -> bool {
         match &self.0.knob {
             Some(k) => {
                 k.store(value, Ordering::Release);
@@ -165,7 +165,7 @@ impl LaneControls {
     }
 
     /// The knob now, if the lane has one.
-    pub fn knob(&self) -> Option<f32> {
+    pub fn knob(&self) -> Option<f64> {
         self.0.knob.as_ref().map(|k| k.load(Ordering::Acquire))
     }
 
@@ -214,8 +214,8 @@ struct Flight {
     /// `None`: the lane had no value and sent nothing.
     seg: Option<ParamSegment>,
     /// The segment's raw endpoints (0 with no segment).
-    from: f32,
-    to: f32,
+    from: f64,
+    to: f64,
     sent: Frame,
     /// The next point; `None` while the value is steady (no point is due
     /// until something changes).
@@ -244,7 +244,7 @@ struct Seen {
     /// The sequence number of the program it read (`Loan::seq`); `None`
     /// before its first block, so that block counts as a change.
     seq: Option<u64>,
-    knob: Option<u32>,
+    knob: Option<u64>,
     range: (u32, u32),
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
@@ -388,7 +388,15 @@ impl ControlLaneNode {
             knob,
             range.map_or(RangeSource::None, RangeSource::Port),
             Some(param.param),
-            Arc::new(move |from, to, shape| ParamSegment::unit(param, from, to, Samples(0), shape)),
+            Arc::new(move |from, to, shape| {
+                ParamSegment::unit(
+                    param,
+                    control_word(from),
+                    control_word(to),
+                    Samples(0),
+                    shape,
+                )
+            }),
             true,
         )
     }
@@ -400,15 +408,17 @@ impl ControlLaneNode {
     pub fn for_foreign(
         id: ParamId,
         program: ControlProgram,
-        knob: Option<f32>,
+        knob: Option<f64>,
         range: (f32, f32),
     ) -> Self {
         Self::build(
             Arc::new(program),
-            knob.map(|k| Arc::new(AtomicF32::new(k)).into()),
+            knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
             RangeSource::Own(PackedAtomic::new(ParamRange::new(range.0, range.1))),
             None,
-            Arc::new(move |from, to, shape| ParamSegment::foreign(id, from, to, Samples(0), shape)),
+            Arc::new(move |from, to, shape| {
+                ParamSegment::foreign(id, control_word(from), control_word(to), Samples(0), shape)
+            }),
             false,
         )
     }
@@ -433,10 +443,7 @@ impl ControlLaneNode {
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
         let program = s.program.current();
-        let knob = s
-            .knob
-            .as_ref()
-            .map(|k| Arc::new(AtomicF32::new(k.load(Ordering::Acquire))).into());
+        let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
             r => RangeSource::Own(PackedAtomic::new(r.load())),
@@ -517,7 +524,7 @@ enum Overflow {
 struct Block<'b> {
     cx: &'b Cx<'b>,
     program: &'b ControlProgram,
-    knob: Option<f32>,
+    knob: Option<f64>,
     range: (f32, f32),
     span: f64,
     unit: Option<UnitParam>,
@@ -554,13 +561,13 @@ impl Block<'_> {
     }
 
     /// The program's value at `time`, for the lane's param.
-    fn value_at(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
+    fn value_at(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f64> {
         self.program
             .value_at(self.unit, self.knob, time, self.span, ins)
     }
 
     /// The program's left limit at `time`, for the lane's param.
-    fn value_before(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
+    fn value_before(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f64> {
         self.program
             .value_before(self.unit, self.knob, time, self.span, ins)
     }
@@ -623,7 +630,7 @@ impl Block<'_> {
         let moving = self.inputs_moving(walk, pf);
         let make = self.make;
         let next_at = |d: Option<f64>| d.map(|d| abs + Samples(d.ceil().max(1.0) as usize));
-        let flight = |seg: Option<(ParamSegment, f32, f32)>, next: Option<f64>| Flight {
+        let flight = |seg: Option<(ParamSegment, f64, f64)>, next: Option<f64>| Flight {
             seg: seg.map(|s| s.0),
             from: seg.map_or(0.0, |s| s.1),
             to: seg.map_or(0.0, |s| s.2),
@@ -634,7 +641,7 @@ impl Block<'_> {
         // end, same next point) leaves it alone: a republish that moves
         // nothing changes no frame.
         let old = walk.flight.filter(|f| glide && f.seg.is_some());
-        let unchanged = |from: Option<f32>, to: f32, next: Option<f64>, seg: &ParamSegment| {
+        let unchanged = |from: Option<f64>, to: f64, next: Option<f64>, seg: &ParamSegment| {
             old.is_some_and(|o| {
                 o.to.to_bits() == to.to_bits()
                     && from.is_none_or(|f| {
@@ -660,14 +667,14 @@ impl Block<'_> {
                         shape,
                     }) if from.is_finite() && to.is_finite() && end.get() > beat => {
                         let (s, e) = (start.get(), end.get());
-                        let seg = make(from, to, shape)
+                        let seg = make(f64::from(from), f64::from(to), shape)
                             .resumed(SamplePosition((beat - s) * f), SamplePosition((e - s) * f));
-                        Some((seg, from, to, Some((e - beat) * f)))
+                        Some((seg, f64::from(from), f64::from(to), Some((e - beat) * f)))
                     }
                     Some(CurveSegment::Hold { value, until }) if value.is_finite() => Some((
-                        make(value, value, Law::Linear),
-                        value,
-                        value,
+                        make(f64::from(value), f64::from(value), Law::Linear),
+                        f64::from(value),
+                        f64::from(value),
                         until.map(|u| (u.get() - beat) * f).filter(|d| *d > 0.0),
                     )),
                     None if curve.value_at(t.beat()).is_none() => {
@@ -695,9 +702,9 @@ impl Block<'_> {
         let n_in = self.program.inputs().len();
         let in_flight = walk.flight.and_then(|f| f.seg.map(|s| (s, f.sent)));
         let v0 = match (glide, in_flight) {
-            (true, Some((seg, sent))) => {
-                Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))))
-            }
+            (true, Some((seg, sent))) => Some(f64::from(
+                seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))),
+            )),
             _ => self.value_at(&time, &ins[..n_in]),
         };
         // What moves with time: a constant layer (a macro) does not.
@@ -758,7 +765,7 @@ impl Block<'_> {
         // A plugin lane clamps, split where the piece crosses a bound.
         if !self.native {
             let (lo, hi) = self.range;
-            let (a, b) = (f64::from(v0), f64::from(v1));
+            let (a, b) = (v0, v1);
             let cross = [lo, hi]
                 .into_iter()
                 .filter(|x| x.is_finite())
@@ -767,9 +774,9 @@ impl Block<'_> {
                 .map(|x| ((x - a) / (b - a), x))
                 .min_by(|p, q| p.0.total_cmp(&q.0));
             if let Some((x, bound)) = cross {
-                // The first frame at or past the crossing. `a` and `b` are
-                // `f32`s, so a crossing on a frame can compute a hair past
-                // it: a frame whose line value is the bound to `f32`
+                // The first frame at or past the crossing. The port renders the
+                // piece in `f32` (B3), so a crossing on a frame can compute a
+                // hair past it: a frame whose line value is the bound to `f32`
                 // precision is the crossing's own.
                 let line = |k: f64| a + (b - a) * k / d;
                 let mut k = (x * d).ceil();
@@ -778,7 +785,7 @@ impl Block<'_> {
                     k -= 1.0;
                 }
                 if k >= 1.0 && k < d {
-                    v1 = (a + (b - a) * k / d) as f32;
+                    v1 = a + (b - a) * k / d;
                     d = k;
                 }
             }
@@ -794,12 +801,13 @@ impl Block<'_> {
     }
 
     /// A plugin lane's clamp; a native port clamps for itself.
-    fn clamp(&self, v: f32) -> f32 {
+    fn clamp(&self, v: f64) -> f64 {
         let (lo, hi) = self.range;
         if self.native || lo.is_nan() || hi.is_nan() || lo > hi {
             v
         } else {
-            v.clamp(lo, hi)
+            // B2: the range bounds are `f32` words.
+            v.clamp(f64::from(lo), f64::from(hi))
         }
     }
 
@@ -987,7 +995,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             }
         }
         let changed = seq != self.seen.seq
-            || knob.map(f32::to_bits) != self.seen.knob
+            || knob.map(f64::to_bits) != self.seen.knob
             || range_bits != self.seen.range;
         // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
         let resync = s.resync.swap(false, Ordering::AcqRel);
@@ -1057,7 +1065,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
         let last = Offset::new(Samples(len - 1), env.block_len).unwrap_or(Offset::ZERO);
         self.seen = Seen {
             seq,
-            knob: knob.map(f32::to_bits),
+            knob: knob.map(f64::to_bits),
             range: range_bits,
             end: Some((
                 env.frame + Samples(len),

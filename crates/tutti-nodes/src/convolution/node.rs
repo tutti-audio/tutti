@@ -804,7 +804,7 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 
@@ -1066,8 +1066,7 @@ mod tests {
         .unwrap();
         assert_eq!(node.param_set().params().count(), 1);
         assert!(node.param_set().set(UnitParam::Volume, 0.7));
-        // The param word is `f32`.
-        assert_eq!(node.gain().load(), Amplitude(f64::from(0.7_f32)));
+        assert_eq!(node.gain().load(), Amplitude(0.7));
         node.set_gain(Amplitude::new(0.3));
         let fork = node.fork_fresh();
         node.set_gain(Amplitude::new(2.0));

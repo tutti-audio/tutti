@@ -137,11 +137,11 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     assert_no_alloc::assert_no_alloc(|| {
         for b in 0..2_000 {
             let k = (b % 40) as f32;
-            assert!(set.set(UnitParam::Ratio, 2.0 + 0.2 * k));
-            assert!(set.set(UnitParam::Attack, 0.0005 + 0.0002 * k));
-            assert!(set.set(UnitParam::Release, 0.01 + 0.005 * k));
-            assert!(set.set(UnitParam::Knee, 0.3 * k));
-            assert!(set.set(UnitParam::GainDb, k - 20.0));
+            assert!(set.set(UnitParam::Ratio, f64::from(2.0 + 0.2 * k)));
+            assert!(set.set(UnitParam::Attack, f64::from(0.0005 + 0.0002 * k)));
+            assert!(set.set(UnitParam::Release, f64::from(0.01 + 0.005 * k)));
+            assert!(set.set(UnitParam::Knee, f64::from(0.3 * k)));
+            assert!(set.set(UnitParam::GainDb, f64::from(k - 20.0)));
             node.block();
         }
     });
@@ -426,7 +426,10 @@ fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
     assert_no_alloc::assert_no_alloc(|| {
         for b in 0..2_000 {
             let db = -20.0 + (b % 40) as f32 * 0.5;
-            assert!(set.set(UnitParam::Ceiling, if b % 7 == 0 { f32::NAN } else { db }));
+            assert!(set.set(
+                UnitParam::Ceiling,
+                if b % 7 == 0 { f64::NAN } else { f64::from(db) }
+            ));
             node.block();
         }
     });
@@ -610,7 +613,7 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                                 1 => true,
                                 _ => b % 2 == 1,
                             };
-                            set.set(addr, if high { hi } else { lo });
+                            set.set(addr, if high { f64::from(hi) } else { f64::from(lo) });
                         }
                         if b == blocks * 90 / 100 || b == blocks * 99 / 100 {
                             d.node.reset();

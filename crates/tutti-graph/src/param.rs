@@ -43,7 +43,9 @@ use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_buffers::Float;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, Samples, UnitAddr, UnitParam};
+use tutti_units::{
+    ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Real, Samples, UnitAddr, UnitParam,
+};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::lane::{arc_in, fade_gains, piece_in, ramp_in, wrap_in};
@@ -236,6 +238,28 @@ pub struct ParamIn {
     /// Which of its declared params: a bare [`UnitParam`] converts to its
     /// index-0 address (`param.into()`).
     pub param: UnitAddr,
+}
+
+/// A param cell's value with its unit erased, as a quantity: what
+/// [`Node::param_base`](crate::Node::param_base) says, which crosses into a
+/// lane's data with `F::from_unit`. The crossing for a unit-erased cell value,
+/// inside this crate only.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CellValue(pub(crate) f64);
+
+/// The boundary to the `f32` word a param segment or range bound carries: a
+/// control value narrows here, saturating. Not API: B2 and B3 widen those
+/// words and delete it.
+#[doc(hidden)]
+#[must_use]
+pub fn control_word(v: f64) -> f32 {
+    f32::from_unit(CellValue(v))
+}
+
+impl Quantity for CellValue {
+    fn value(self) -> f64 {
+        self.0
+    }
 }
 
 /// The range a modulated param is held to, in the param's own units: clamped

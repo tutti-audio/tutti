@@ -269,7 +269,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             let _ = session.update();
             assert_eq!(
                 controls.get(UnitParam::Volume),
-                Some(v as f32),
+                Some(v),
                 "the write reaches the live synth's volume cell"
             );
         }

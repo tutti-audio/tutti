@@ -3870,7 +3870,8 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
                 let knob = self
                     .plugins
                     .get(&node)
-                    .map_or(Some(None), |p| p.param_value(id))?;
+                    .map_or(Some(None), |p| p.param_value(id))?
+                    .map(f64::from);
                 #[cfg(not(feature = "plugin"))]
                 let knob = None;
                 self.plugin_targets.borrow_mut().insert((node, id), target);

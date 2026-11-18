@@ -233,7 +233,7 @@ fn the_parallel_f64_render_of_param_nodes_is_bit_identical_to_the_serial_one() {
             assert!(r.executor_mut().is_parallel(), "the plan runs on the pool");
         }
         for (k, set) in sets.iter().enumerate() {
-            assert!(set.set(UnitParam::Volume, 0.125 * (k + 1) as f32));
+            assert!(set.set(UnitParam::Volume, 0.125 * (k + 1) as f64));
         }
         r.render(64)
     };

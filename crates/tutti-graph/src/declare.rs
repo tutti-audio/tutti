@@ -31,21 +31,13 @@ mod sealed {
 /// a switch (`Bypass`, `Solo`, `Freeze`: a cell at or above 0.5 is on). Sealed:
 /// the engine's units are listed, and a new one joins them.
 pub trait ParamUnit: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
-    /// The value as the `f32` the param's cell carries (a
-    /// [`Seconds`] is narrowed: the `ParamSet` and a lane's value are `f32`).
-    fn to_cell(self) -> f32;
-
-    /// The value a cell's `f32` stands for: the inverse of
-    /// [`to_cell`](Self::to_cell) (a `Seconds` is widened exactly).
-    fn from_cell(cell: f32) -> Self;
-
-    /// The value at the width its unit's cell holds, as an `f64`: exact for
-    /// every unit (a [`Seconds`] is not narrowed).
-    fn to_wide(self) -> f64;
+    /// The value as the `f64` the param's cell carries: the unit's raw, widened
+    /// exactly (an `f32` unit's raw is `f32`, which `f64` holds whole).
+    fn to_cell(self) -> f64;
 
     /// The value a cell's `f64` stands for: the inverse of
-    /// [`to_wide`](Self::to_wide).
-    fn from_wide(wide: f64) -> Self;
+    /// [`to_cell`](Self::to_cell) (an `f32` unit rounds to its own width).
+    fn from_cell(cell: f64) -> Self;
 }
 
 /// A [`ParamUnit`] that is a number in a unit (not a switch): what a range
@@ -56,17 +48,11 @@ macro_rules! scalar_units {
     ($($unit:ty),+ $(,)?) => {$(
         impl sealed::Sealed for $unit {}
         impl ParamUnit for $unit {
-            fn to_cell(self) -> f32 {
-                <<$unit as Unit>::Raw as ParamRaw>::to_f32(<$unit as Unit>::to_raw(self))
-            }
-            fn from_cell(cell: f32) -> Self {
-                <$unit as Unit>::from_raw(<<$unit as Unit>::Raw as ParamRaw>::from_f32(cell))
-            }
-            fn to_wide(self) -> f64 {
+            fn to_cell(self) -> f64 {
                 <<$unit as Unit>::Raw as ParamRaw>::to_f64(<$unit as Unit>::to_raw(self))
             }
-            fn from_wide(wide: f64) -> Self {
-                <$unit as Unit>::from_raw(<<$unit as Unit>::Raw as ParamRaw>::from_f64(wide))
+            fn from_cell(cell: f64) -> Self {
+                <$unit as Unit>::from_raw(<<$unit as Unit>::Raw as ParamRaw>::from_f64(cell))
             }
         }
         impl Scalar for $unit {}
@@ -101,20 +87,12 @@ scalar_units!(
 
 impl sealed::Sealed for bool {}
 impl ParamUnit for bool {
-    fn to_cell(self) -> f32 {
-        f32::from(u8::from(self))
-    }
-
-    fn from_cell(cell: f32) -> Self {
-        cell >= 0.5
-    }
-
-    fn to_wide(self) -> f64 {
+    fn to_cell(self) -> f64 {
         f64::from(u8::from(self))
     }
 
-    fn from_wide(wide: f64) -> Self {
-        wide >= 0.5
+    fn from_cell(cell: f64) -> Self {
+        cell >= 0.5
     }
 }
 
@@ -146,9 +124,9 @@ impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 /// node has the param only sometimes.
 #[doc(hidden)]
 pub trait Cells<U: ParamUnit> {
-    /// The cell's value as an `f32`, or `None` where the node has no such
+    /// The cell's value as an `f64`, or `None` where the node has no such
     /// param.
-    fn base(&self) -> Option<f32>;
+    fn base(&self) -> Option<f64>;
 
     /// The cell, shared. Clones the `Arc`: control thread.
     fn cell(&self) -> Option<ParamCell>;
@@ -159,7 +137,7 @@ where
     U: Scalar,
     Arc<<U::Raw as ParamRaw>::Atomic>: Into<ParamCell>,
 {
-    fn base(&self) -> Option<f32> {
+    fn base(&self) -> Option<f64> {
         Some(self.load().to_cell())
     }
 
@@ -169,8 +147,8 @@ where
 }
 
 impl Cells<bool> for &Arc<AtomicF32> {
-    fn base(&self) -> Option<f32> {
-        Some(self.load(Ordering::Acquire))
+    fn base(&self) -> Option<f64> {
+        Some(f64::from(self.load(Ordering::Acquire)))
     }
 
     fn cell(&self) -> Option<ParamCell> {
@@ -179,7 +157,7 @@ impl Cells<bool> for &Arc<AtomicF32> {
 }
 
 impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
-    fn base(&self) -> Option<f32> {
+    fn base(&self) -> Option<f64> {
         self.as_ref().and_then(Cells::base)
     }
 
@@ -193,7 +171,7 @@ impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
 pub struct Row<'a> {
     addr: UnitAddr,
     port: bool,
-    base: f32,
+    base: f64,
     cell: &'a dyn Fn() -> Option<ParamCell>,
 }
 
@@ -263,7 +241,7 @@ pub fn set(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamSet {
 /// Port `k`'s cell value: what [`Node::param_base`](crate::Node::param_base)
 /// answers.
 #[doc(hidden)]
-pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f32> {
+pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f64> {
     let (mut next, mut found) = (0, None);
     walk(&mut |row| {
         if !row.port {
@@ -461,7 +439,7 @@ pub fn input<'a, F: Float>(
 ///
 /// ```
 /// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
-/// use tutti_units::{Amplitude, Hz, UnitParam};
+/// use tutti_units::{Amplitude, Hz, Real, UnitParam};
 /// use tutti_types::{ChannelLayout, Param};
 ///
 /// struct Tone {
@@ -485,7 +463,7 @@ pub fn input<'a, F: Float>(
 ///         let level = self
 ///             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 ///             .last_frame()
-///             .unwrap_or_else(|| self.level.load().get() as f32);
+///             .unwrap_or_else(|| f32::from_unit(self.level.load()));
 ///         io.output(0).fill(level);
 ///         Status::Modified
 ///     }
@@ -575,7 +553,7 @@ macro_rules! declare_params {
 
             /// Port `k`'s cell value.
             #[allow(dead_code)]
-            fn declared_base(&self, k: usize) -> Option<f32> {
+            fn declared_base(&self, k: usize) -> Option<f64> {
                 $crate::__private::base(|visit| self.declared_visit(visit), k)
             }
 

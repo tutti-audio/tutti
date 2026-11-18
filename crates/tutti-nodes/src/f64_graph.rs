@@ -137,8 +137,7 @@ fn the_bit_crusher_at_thirty_two_bits_passes_a_wide_signal_exactly() {
 #[test]
 fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
     let x = wide_signal(300);
-    // `Drive` holds an `f32`: the curve runs at the drive as the unit holds it.
-    let h = f64::from(1.7f32);
+    let h = 1.7;
     let want: Vec<f64> = x.iter().map(|&x| h * x / (1.0 + (h * x).abs())).collect();
     let node = DistortionNode::<f64>::new(ShapeKind::Softsign, Drive(1.7));
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);

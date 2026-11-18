@@ -486,10 +486,10 @@ fn an_f64_param_round_trips_bit_for_bit() {
     }
 }
 
-/// **A `Seconds` that is not a finite number, or that an `f32` cell cannot hold, is
-/// refused, and an `f64` cell takes what an `f32` cannot**.
+/// **A `Seconds` that is not a finite number is refused, and an `f64` cell takes
+/// what an `f32` cannot hold**.
 #[test]
-fn a_seconds_value_the_cell_cannot_hold_is_refused() {
+fn a_non_finite_seconds_value_is_refused_and_a_huge_one_is_held() {
     let mut s = detached();
     let mb = multiband(&mut s);
     let comp = compressor(&mut s);
@@ -501,18 +501,13 @@ fn a_seconds_value_the_cell_cannot_hold_is_refused() {
             assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::NotFinite));
         }
     }
-    let before = s.get(comp.attack()).unwrap();
-    let e = s
-        .set((
-            comp.release().to(Seconds(0.5)),
-            comp.attack().to(Seconds(1e300)),
-        ))
-        .unwrap_err();
     assert_eq!(
-        (e.at, e.kind),
-        (1, ValueErrorKind::Refused(SetRefusal::OutOfRange))
+        f64::from(1e300_f64 as f32),
+        f64::INFINITY,
+        "setup: f32 cannot hold 1e300"
     );
-    assert_eq!(s.get(comp.attack()).unwrap(), before, "no infinity stored");
+    s.set(comp.attack().to(Seconds(1e300))).unwrap();
+    assert_eq!(s.get(comp.attack()).unwrap(), Seconds(1e300));
     s.set(mb.attack_at(0).to(Seconds(1e300))).unwrap();
     assert_eq!(s.get(mb.attack_at(0)).unwrap(), Seconds(1e300));
 }

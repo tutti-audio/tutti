@@ -803,7 +803,7 @@ mod tests {
         f.param_set()
             .cell(UnitParam::Cutoff)
             .unwrap()
-            .store(f32::NAN, std::sync::atomic::Ordering::Release);
+            .store(f64::NAN, std::sync::atomic::Ordering::Release);
         let held = next(&mut f);
         assert!(held.iter().all(|s| s.is_finite()), "a NaN alone");
         assert!(f.param_set().set(UnitParam::Q, 3.0));

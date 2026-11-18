@@ -416,7 +416,7 @@ impl<F: RingFloat> Node<F> for VoiceNode<F> {
         self.clock.reset();
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }
@@ -475,7 +475,7 @@ impl<F: RingFloat> ForkSource<F> for VoiceNodeFork<F> {
         let gain = self
             .params
             .get(UnitParam::Volume)
-            .map_or(voice.play.gain, |v| Amplitude(f64::from(v)));
+            .map_or(voice.play.gain, Amplitude);
         voice.play.gain = gain;
         voice.source.apply_gain(gain);
         let health = voice.fault().map(VoiceHealth);

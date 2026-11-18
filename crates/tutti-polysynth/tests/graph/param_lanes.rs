@@ -83,7 +83,7 @@ fn render(synth: PolySynth, drive: Option<Drive>) -> [Vec<f32>; 2] {
 
 /// [`render`], and the driven param's knob as the synth's `ParamSet` holds it
 /// after the render (`None` without a lane).
-fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f32>) {
+fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f64>) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),
