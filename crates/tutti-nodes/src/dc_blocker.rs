@@ -173,7 +173,7 @@ mod tests {
     use tutti_units::UnitParam;
 
     // The node tests run `F = f32`, the session's audio format: their tolerances are `f32`'s.
-    fn node(width: u16, corner: f32) -> DcBlockerNode<f32> {
+    fn node(width: u16, corner: f64) -> DcBlockerNode<f32> {
         prepared(DcBlockerNode::<f32>::from(
             DcBlockerConfig::new(width).corner(Hz(corner)),
         ))

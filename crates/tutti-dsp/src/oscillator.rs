@@ -125,7 +125,7 @@ impl Oscillator {
     #[inline]
     pub fn step(&mut self, frequency: Hz, rate: SampleRate) -> f32 {
         // A non-finite frequency holds the phase.
-        let f = f64::from(finite_or(frequency.get(), 0.0));
+        let f = finite_or(frequency.get(), 0.0);
         let dt = (f / rate.get()).clamp(0.0, 0.5);
         let p = self.phase;
         let y = match self.wave {

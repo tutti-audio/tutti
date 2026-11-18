@@ -2,10 +2,12 @@
 
 use std::any::{Any, TypeId};
 use std::fmt;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use tutti_buffers::Float;
 use tutti_rt::MainThreadMarker;
 
 use crate::pool::open::OpenCx;
@@ -35,7 +37,7 @@ pub(crate) type Value = Box<dyn Any + Send>;
 /// A peer handle keeps the entry's [`Life`] and reads
 /// [`Presence::Closed`] through [`Life::presence`] once the entry is
 /// released.
-pub trait PoolEntry: Send + 'static {
+pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// What loads the entry: equal identities under one key are one entry.
     type Identity: Eq + fmt::Debug + Send + 'static;
     /// What the load makes and the session holds.
@@ -47,7 +49,7 @@ pub trait PoolEntry: Send + 'static {
     fn identity(&self) -> Self::Identity;
 
     /// The job that loads the entry, described and not started.
-    fn load(&self) -> Load<Self::Loaded>;
+    fn load(&self) -> Load<Self::Loaded, S>;
 
     /// The file the load reads, for a kind whose value comes from one.
     ///
@@ -116,17 +118,17 @@ pub enum Parking<T> {
 /// - [`ready`](Self::ready): no stage; the value lands when the pool declares
 ///   the entry.
 #[must_use = "a load runs when the pool declares its entry"]
-pub struct Load<T> {
-    pub(crate) step: Step<T>,
+pub struct Load<T, S: Float = f32> {
+    pub(crate) step: Step<T, S>,
     /// Whether a worker stage hands on to a main-thread stage.
     main: bool,
 }
 
 /// What a load's stages are, by the thread the first one runs on.
-pub(crate) enum Step<T> {
+pub(crate) enum Step<T, S: Float> {
     Ready(T),
     Worker(Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>),
-    Session(Box<dyn FnOnce(&mut OpenCx<'_>) -> Result<T, LoadError> + Send>),
+    Session(Box<dyn FnOnce(&mut OpenCx<'_, S>) -> Result<T, LoadError> + Send>),
 }
 
 /// What a worker stage hands on: the finished value, or the main-thread stage
@@ -241,7 +243,7 @@ impl Staged {
     }
 }
 
-impl<T: Send + 'static> Load<T> {
+impl<T: Send + 'static, S: Float> Load<T, S> {
     /// A load that finishes in one stage: `work`, on a thread of the session's
     /// spawner.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
@@ -290,7 +292,7 @@ impl<T: Send + 'static> Load<T> {
     /// needs ([`OpenCx`]); the entry reads
     /// [`PoolState::Opening`](crate::PoolState::Opening) until it runs.
     pub fn on_session(
-        open: impl FnOnce(&mut OpenCx<'_>) -> Result<T, LoadError> + Send + 'static,
+        open: impl FnOnce(&mut OpenCx<'_, S>) -> Result<T, LoadError> + Send + 'static,
     ) -> Self {
         Self {
             step: Step::Session(Box::new(open)),
@@ -312,7 +314,7 @@ impl<T: Send + 'static> Load<T> {
         self.main
     }
 
-    pub(crate) fn erase(self) -> Load<Value> {
+    pub(crate) fn erase(self) -> Load<Value, S> {
         let step = match self.step {
             Step::Ready(value) => Step::Ready(Box::new(value) as Value),
             Step::Worker(work) => Step::Worker(work),
@@ -327,7 +329,7 @@ impl<T: Send + 'static> Load<T> {
     }
 }
 
-impl<T> fmt::Debug for Load<T> {
+impl<T, S: Float> fmt::Debug for Load<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Load").finish_non_exhaustive()
     }
@@ -455,20 +457,20 @@ impl<T: Eq + fmt::Debug + Send + 'static> ErasedIdentity for T {
 }
 
 /// What loads an entry again: the kind's `load`, kept for a retry.
-pub(crate) type Reload = Box<dyn Fn() -> Load<Value> + Send>;
+pub(crate) type Reload<S> = Box<dyn Fn() -> Load<Value, S> + Send>;
 
 /// Another owner of a loaded value, for an entry declared with
 /// [`Declared::shared`].
 pub(crate) type Cloner = fn(&Value) -> Option<Value>;
 
 /// One declared entry, its kind and its load erased.
-pub(crate) struct Item<K> {
+pub(crate) struct Item<K, S: Float> {
     pub(crate) key: K,
     pub(crate) kind: TypeId,
     pub(crate) identity: Box<dyn ErasedIdentity>,
     /// The load, described when the set was made.
-    pub(crate) load: Load<Value>,
-    pub(crate) reload: Reload,
+    pub(crate) load: Load<Value, S>,
+    pub(crate) reload: Reload<S>,
     pub(crate) lost: fn(&Value) -> bool,
     pub(crate) park: fn(Value) -> Option<Value>,
     /// The file the load reads, as the entry declared it.
@@ -478,17 +480,17 @@ pub(crate) struct Item<K> {
 
 /// The entries of one [`Session::pool`](crate::Session::pool) call, in
 /// declaration order.
-pub struct PoolSet<K> {
-    pub(crate) items: Vec<Item<K>>,
+pub struct PoolSet<K, S: Float = f32> {
+    pub(crate) items: Vec<Item<K, S>>,
 }
 
-impl<K> PoolSet<K> {
+impl<K, S: Float> PoolSet<K, S> {
     pub(crate) const fn new() -> Self {
         Self { items: Vec::new() }
     }
 }
 
-impl<K> fmt::Debug for PoolSet<K> {
+impl<K, S: Float> fmt::Debug for PoolSet<K, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PoolSet")
             .field("entries", &self.items.len())
@@ -497,16 +499,27 @@ impl<K> fmt::Debug for PoolSet<K> {
 }
 
 /// One entry, declared under the pool key `K`: what a kind's builder
-/// (`audio_file(key, path)`) returns.
+/// (`audio_file(key, path)`) returns. `M` says whether it is one instance per
+/// key ([`Owned`]) or shares its load with the keys of the same identity
+/// ([`Sharing`]).
 #[must_use = "an entry is declared by passing it to Session::pool"]
 #[derive(Clone, Debug)]
-pub struct Declared<K, E> {
+pub struct Declared<K, E, M = Owned> {
     key: K,
     pub(crate) entry: E,
-    share: Option<Cloner>,
+    _mode: PhantomData<M>,
 }
 
-impl<K, E> Declared<K, E> {
+/// A [`Declared`] that is one instance per key: [`Declared::new`].
+#[derive(Clone, Copy, Debug)]
+pub struct Owned;
+
+/// A [`Declared`] that shares its load: [`Declared::shared`]. Its kind's loaded
+/// value is `Clone`, which [`Session::pool`](crate::Session::pool) checks.
+#[derive(Clone, Copy, Debug)]
+pub struct Sharing;
+
+impl<K, E, M> Declared<K, E, M> {
     /// The entry, for a kind's builder to set its options on.
     #[cfg(feature = "midi")]
     pub(crate) fn entry_mut(&mut self) -> &mut E {
@@ -514,41 +527,86 @@ impl<K, E> Declared<K, E> {
     }
 }
 
-impl<K, E: PoolEntry> Declared<K, E> {
+impl<K, E> Declared<K, E, Owned> {
     /// `entry`, declared under `key`: one instance per key, even when another
     /// key is declared with the same identity.
     pub const fn new(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: None,
+            _mode: PhantomData,
         }
     }
+}
 
+impl<K, E> Declared<K, E, Sharing> {
     /// `entry`, declared under `key` as a resource that shares: another key
     /// declared with the same kind and identity, and shared too, shares this
     /// one's load, and every handle reads the same loaded value (a
     /// [`Clone`] of it, an `Arc`). The data kinds (`audio_file` and
     /// `soundfont`) are declared this way; a kind with
     /// something live behind it (a plugin client, a capture) uses
-    /// [`new`](Self::new).
+    /// [`new`](Declared::new).
     ///
     /// Every key's handle reads a clone of the loaded value, and the clones drop
     /// on whatever thread releases their key: a kind whose loaded value must
     /// drop on the main thread must not be shared.
-    pub const fn shared(key: K, entry: E) -> Self
-    where
-        E::Loaded: Clone,
-    {
+    ///
+    /// A kind whose loaded value is not `Clone` cannot be shared: declaring it
+    /// fails to build at the [`pool`](crate::Session::pool) call.
+    ///
+    /// ```
+    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    ///
+    /// struct Kind;
+    /// impl PoolEntry for Kind {
+    ///     type Identity = ();
+    ///     type Loaded = u32;
+    ///     type Handle = ();
+    ///     fn identity(&self) {}
+    ///     fn load(&self) -> Load<u32> {
+    ///         Load::ready(0)
+    ///     }
+    ///     fn handle(_: &u32, _: &Life) {}
+    /// }
+    ///
+    /// fn declare(session: &mut Session) {
+    ///     session.pool(Declared::shared("a", Kind)).unwrap();
+    /// }
+    /// ```
+    ///
+    /// With a `Loaded` that is not `Clone` the same call is refused:
+    ///
+    /// ```compile_fail,E0277
+    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    ///
+    /// struct NotClone;
+    /// struct Kind;
+    /// impl PoolEntry for Kind {
+    ///     type Identity = ();
+    ///     type Loaded = NotClone;
+    ///     type Handle = ();
+    ///     fn identity(&self) {}
+    ///     fn load(&self) -> Load<NotClone> {
+    ///         Load::ready(NotClone)
+    ///     }
+    ///     fn handle(_: &NotClone, _: &Life) {}
+    /// }
+    ///
+    /// fn declare(session: &mut Session) {
+    ///     session.pool(Declared::shared("a", Kind)).unwrap();
+    /// }
+    /// ```
+    pub const fn shared(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: Some(clone_loaded::<E>),
+            _mode: PhantomData,
         }
     }
 }
 
-fn clone_loaded<E: PoolEntry>(value: &Value) -> Option<Value>
+fn clone_loaded<E: PoolEntry<S>, S: Float>(value: &Value) -> Option<Value>
 where
     E::Loaded: Clone,
 {
@@ -559,7 +617,7 @@ where
 
 /// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
 /// kind keeps it.
-fn park<E: PoolEntry>(value: Value) -> Option<Value> {
+fn park<E: PoolEntry<S>, S: Float>(value: Value) -> Option<Value> {
     match value.downcast::<E::Loaded>() {
         Ok(loaded) => match E::park(*loaded) {
             Parking::Keep(loaded) => Some(Box::new(loaded) as Value),
@@ -569,48 +627,66 @@ fn park<E: PoolEntry>(value: Value) -> Option<Value> {
     }
 }
 
-fn lost<E: PoolEntry>(value: &Value) -> bool {
+fn lost<E: PoolEntry<S>, S: Float>(value: &Value) -> bool {
     value.downcast_ref::<E::Loaded>().is_some_and(E::is_lost)
 }
 
 /// What [`Session::pool`](crate::Session::pool) takes: an entry, a tuple of
 /// them, or a collection of them.
-pub trait IntoPool<K> {
+pub trait IntoPool<K, S: Float = f32> {
     /// Adds the entries to `set`, in order.
-    fn into_pool(self, set: &mut PoolSet<K>);
+    fn into_pool(self, set: &mut PoolSet<K, S>);
 }
 
-impl<K, E: PoolEntry> IntoPool<K> for Declared<K, E> {
-    fn into_pool(self, set: &mut PoolSet<K>) {
-        let Self { key, entry, share } = self;
-        set.items.push(Item {
+impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E, Owned> {
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
+        let Self { key, entry, .. } = self;
+        set.items.push(Item::of(key, entry, None));
+    }
+}
+
+impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E, Sharing>
+where
+    E::Loaded: Clone,
+{
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
+        let Self { key, entry, .. } = self;
+        set.items
+            .push(Item::of(key, entry, Some(clone_loaded::<E, S>)));
+    }
+}
+
+impl<K, S: Float> Item<K, S> {
+    /// The item for `entry` under `key`, its kind and load erased.
+    fn of<E: PoolEntry<S>>(key: K, entry: E, share: Option<Cloner>) -> Self {
+        Self {
             key,
             kind: TypeId::of::<E>(),
             identity: Box::new(entry.identity()),
             load: entry.load().erase(),
-            lost: lost::<E>,
-            park: park::<E>,
+            lost: lost::<E, S>,
+            park: park::<E, S>,
             file: entry.file().map(Path::to_path_buf),
             share,
             reload: Box::new(move || entry.load().erase()),
-        });
+        }
     }
 }
 
-impl<K> IntoPool<K> for () {
-    fn into_pool(self, _: &mut PoolSet<K>) {}
+impl<K, S: Float> IntoPool<K, S> for () {
+    fn into_pool(self, _: &mut PoolSet<K, S>) {}
 }
 
-impl<K, T: IntoPool<K>> IntoPool<K> for Vec<T> {
-    fn into_pool(self, set: &mut PoolSet<K>) {
+impl<K, S: Float, T: IntoPool<K, S>> IntoPool<K, S> for Vec<T> {
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
         for part in self {
             part.into_pool(set);
         }
     }
 }
 
-impl<K, T: IntoPool<K>, const N: usize> IntoPool<K> for [T; N] {
-    fn into_pool(self, set: &mut PoolSet<K>) {
+impl<K, S: Float, T: IntoPool<K, S>, const N: usize> IntoPool<K, S> for [T; N] {
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
         for part in self {
             part.into_pool(set);
         }
@@ -619,9 +695,9 @@ impl<K, T: IntoPool<K>, const N: usize> IntoPool<K> for [T; N] {
 
 macro_rules! tuples {
     ($(($($part:ident),+))+) => {$(
-        impl<K, $($part: IntoPool<K>),+> IntoPool<K> for ($($part,)+) {
+        impl<K, S: Float, $($part: IntoPool<K, S>),+> IntoPool<K, S> for ($($part,)+) {
             #[expect(non_snake_case, reason = "the parts are named by their type parameters")]
-            fn into_pool(self, set: &mut PoolSet<K>) {
+            fn into_pool(self, set: &mut PoolSet<K, S>) {
                 let ($($part,)+) = self;
                 $($part.into_pool(set);)+
             }

@@ -31,7 +31,7 @@ use tutti_nodes::{SvfFilterNode, SvfType};
 
 const SR: f64 = 48_000.0;
 const Q: f32 = 0.707;
-const CUTOFF: f32 = 1_000.0;
+const CUTOFF: f64 = 1_000.0;
 
 /// Steady-state gain of `f` at `freq`, measured as an RMS ratio.
 ///
@@ -39,12 +39,12 @@ const CUTOFF: f32 = 1_000.0;
 /// half, and compares output RMS to input RMS. Measuring rather than evaluating
 /// the transfer function is deliberate: it tests the filter that actually runs,
 /// including its coefficient update path, not a formula restated in the test.
-fn measured_gain_db(mut render: impl FnMut(f32) -> f32, freq: f32) -> f64 {
+fn measured_gain_db(mut render: impl FnMut(f32) -> f32, freq: f64) -> f64 {
     let n = 24_000usize; // 0.5 s at 48 kHz — plenty for a 12 dB/oct settle.
     let mut input = Vec::with_capacity(n);
     let mut output = Vec::with_capacity(n);
     for i in 0..n {
-        let x = (std::f64::consts::TAU * freq as f64 * i as f64 / SR).sin() as f32;
+        let x = (std::f64::consts::TAU * freq * i as f64 / SR).sin() as f32;
         input.push(x);
         output.push(render(x));
     }
@@ -54,7 +54,7 @@ fn measured_gain_db(mut render: impl FnMut(f32) -> f32, freq: f32) -> f64 {
 }
 
 /// Drive tutti's SVF one sample at a time, as a graph node prepared at `SR`.
-fn svf_gain_db(kind: SvfType, cutoff: f32, freq: f32) -> f64 {
+fn svf_gain_db(kind: SvfType, cutoff: f64, freq: f64) -> f64 {
     let rate = tutti_units::SampleRate::of(SR);
     let mut node = tutti_graph::contract::prepared(
         SvfFilterNode::<f64>::new(kind, tutti_units::Hz::new(cutoff), tutti_units::Q::new(Q)),
@@ -102,14 +102,14 @@ fn cookbook_gain_db(kind: SvfType, f0: f64, freq: f64) -> f64 {
 }
 
 /// Five frequencies spanning two decades around the 1 kHz corner.
-const PROBES: [f32; 5] = [100.0, 500.0, 1_000.0, 2_000.0, 10_000.0];
+const PROBES: [f64; 5] = [100.0, 500.0, 1_000.0, 2_000.0, 10_000.0];
 
 /// Largest |measured - analytic| in dB over [`PROBES`] for `kind`.
 fn worst_delta_db(label: &str, kind: SvfType) -> f64 {
     let mut worst = 0.0f64;
     for f in PROBES {
         let measured = svf_gain_db(kind, CUTOFF, f);
-        let analytic = cookbook_gain_db(kind, CUTOFF as f64, f as f64);
+        let analytic = cookbook_gain_db(kind, CUTOFF, f);
         let d = (measured - analytic).abs();
         println!(
             "{label} {f:>8} Hz: svf {measured:>8.3} dB, cookbook {analytic:>8.3} dB, delta {d:.4} dB"
@@ -188,8 +188,8 @@ fn svf_bandpass_peak_at_the_cutoff_is_20_log10_q() {
 fn svf_lowpass_falls_12_db_per_octave_above_the_cutoff() {
     let fc = 250.0;
     let (f1, f2) = (8.0 * fc, 16.0 * fc);
-    let analytic = cookbook_gain_db(SvfType::LowPass, fc as f64, f2 as f64)
-        - cookbook_gain_db(SvfType::LowPass, fc as f64, f1 as f64);
+    let analytic =
+        cookbook_gain_db(SvfType::LowPass, fc, f2) - cookbook_gain_db(SvfType::LowPass, fc, f1);
     let slope_db = 40.0 * 2f64.log10();
     let bound = (analytic + slope_db).abs() + 0.02;
     println!("closed-form octave drop {analytic:.4} dB, bound {bound:.4} dB around -{slope_db:.4}");

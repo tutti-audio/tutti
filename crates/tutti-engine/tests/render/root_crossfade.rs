@@ -63,7 +63,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
         ed.insert(
             NodeKey(k + 1),
             "sine",
-            ForkByClone(support::Sine::new(Hz(220.0 * (k + 1) as f32))),
+            ForkByClone(support::Sine::new(Hz(220.0 * (k + 1) as f64))),
         );
         ed.insert(
             NodeKey(k + 11),

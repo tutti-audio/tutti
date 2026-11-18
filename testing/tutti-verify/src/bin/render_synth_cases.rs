@@ -140,7 +140,7 @@ fn main() {
     // is harmonically rich, so the filter's effect on each harmonic is directly
     // measurable. Cutoffs are placed so a fixed number of harmonics of note 45
     // (110 Hz) survive, which the judge re-derives.
-    for cutoff in [500.0f32, 1000.0, 2000.0, 4000.0] {
+    for cutoff in [500.0f64, 1000.0, 2000.0, 4000.0] {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
             cutoff: Hz(cutoff),
@@ -157,7 +157,7 @@ fn main() {
     }
 
     // Highpass, so a judge that merely detected "less energy" cannot pass both.
-    for cutoff in [500.0f32, 2000.0] {
+    for cutoff in [500.0f64, 2000.0] {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
             cutoff: Hz(cutoff),
@@ -179,7 +179,7 @@ fn main() {
     // detune in cents and is measurable from the amplitude envelope. Stereo
     // spread should also decorrelate the channels, which the Rust tests
     // explicitly assert does *not* happen without unison.
-    for (voices, detune) in [(2u8, 10.0f32), (3, 20.0), (7, 25.0)] {
+    for (voices, detune) in [(2u8, 10.0f64), (3, 20.0), (7, 25.0)] {
         let mut cfg = base(OscillatorType::Saw);
         cfg.unison = Some(UnisonConfig {
             voice_count: UnisonVoices::new(voices).expect("a unison count"),

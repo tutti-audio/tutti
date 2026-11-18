@@ -372,7 +372,7 @@ fn a_non_finite_typed_write_is_not_finite_and_out_of_range_stays_out_of_range() 
         .params()
         .typed::<Hz>(CUTOFF)
         .unwrap();
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
             cutoff.set(Hz::new(bad)),
             Err(PluginParamError::NotFinite(CUTOFF)),

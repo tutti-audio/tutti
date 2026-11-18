@@ -382,10 +382,10 @@ where
 /// An `f32` unit is not a `Param64`:
 ///
 /// ```compile_fail
-/// use tutti_units::Hz;
+/// use tutti_units::Db;
 /// use tutti_types::Param64;
 /// struct Filter {
-///     cutoff: Param64<Hz>, // `Param<Hz>`
+///     threshold: Param64<Db>, // `Param<Db>`
 /// }
 /// ```
 pub struct Param64<U: Unit<Raw = f64>> {

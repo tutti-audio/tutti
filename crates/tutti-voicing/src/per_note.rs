@@ -405,7 +405,7 @@ impl PerNoteState {
             .channel_index(address)
             .map_or(self.default_range, |c| self.ranges[c]);
         let bend = self.held[at].get(Held::BEND).map_or(0.0, |v| {
-            f64::from(bend_to_signed_f32(BendValue::new(v)) * range.get())
+            f64::from(bend_to_signed_f32(BendValue::new(v))) * range.get()
         });
         let q = f64::from(told.q7_25()) + bend * f64::from(1u32 << 25);
         Pitch::from_q7_25(libm::round(q).clamp(0.0, f64::from(u32::MAX)) as u32)
@@ -599,7 +599,7 @@ mod tests {
     }
 
     /// The sounding pitch of a `Pitch` event, as a fractional note number.
-    fn sounding(e: &NoteEvent) -> f32 {
+    fn sounding(e: &NoteEvent) -> f64 {
         match e {
             NoteEvent::Control {
                 control: NoteControl::Pitch(p),
@@ -933,11 +933,11 @@ mod tests {
         let id = started(&start(&mut s, a, 5));
         let e = pitch_of(&mut s, a, 5, PITCH_60 + (1 << 24));
         assert_eq!(e.len(), 1);
-        assert!((sounding(&e[0]) - 60.5).abs() < 1e-4);
+        assert_eq!(sounding(&e[0]), 60.5);
         // Half the wheel up over 48 semitones: +24.
         let e = bend(&mut s, a, 5, 0xC000_0000);
         assert!(matches!(e[..], [NoteEvent::Control { id: i, .. }] if i == id));
-        assert!((sounding(&e[0]) - 84.5).abs() < 1e-4, "{e:?}");
+        assert_eq!(sounding(&e[0]), 84.5, "{e:?}");
     }
 
     /// A Pitch 7.25 keeps at least nine fractional bits: each of the 512
@@ -950,8 +950,8 @@ mod tests {
         start(&mut s, a, 5);
         for step in (1..512u32).step_by(7) {
             let e = pitch_of(&mut s, a, 5, PITCH_60 + (step << 16));
-            let want = 60.0 + step as f32 / 512.0;
-            assert!((sounding(&e[0]) - want).abs() < 1e-5, "{step}: {e:?}");
+            let want = 60.0 + f64::from(step) / 512.0;
+            assert_eq!(sounding(&e[0]), want, "{step}: {e:?}");
         }
     }
 
@@ -965,7 +965,7 @@ mod tests {
         let e = bend(&mut s, a, 5, 0xC000_0000);
         assert!((sounding(&e[0]) - 29.0).abs() < 1e-4, "key 5 plus 24");
         let e = pitch_of(&mut s, a, 5, PITCH_60 + (1 << 24));
-        assert!((sounding(&e[0]) - 84.5).abs() < 1e-4, "{e:?}");
+        assert_eq!(sounding(&e[0]), 84.5, "{e:?}");
         // And a note that starts after both is handed the sum at once.
         let e = start(&mut s, a, 5);
         assert!((sounding(&e[1]) - 84.5).abs() < 1e-4, "{e:?}");

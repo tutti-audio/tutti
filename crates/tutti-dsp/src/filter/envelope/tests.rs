@@ -58,7 +58,7 @@ fn measured_gain(x: &[f32], y: &[f32]) -> f64 {
     amplitude_at(&y[from..], TONE, RATE.get()) / amplitude_at(&x[from..], TONE, RATE.get())
 }
 
-fn controls(base: f32, depth: f32, q: f32) -> EnvelopeFilterControls {
+fn controls(base: f64, depth: f64, q: f32) -> EnvelopeFilterControls {
     EnvelopeFilterControls {
         base: Hz(base),
         depth: Semitones(depth),
@@ -91,7 +91,7 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
             let x = sine(TONE, amplitude, 96_000);
             let y = run(&mut b, &x, 480);
             let env = 2.0 * amplitude / core::f64::consts::PI;
-            let cutoff = f64::from(base) * (f64::from(depth) / 12.0 * env).exp2();
+            let cutoff = base * (depth / 12.0 * env).exp2();
             let want = magnitude(ty, cutoff, q, TONE);
             let got = measured_gain(&x, &y);
             assert!(
@@ -99,7 +99,7 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
                 "{ty:?} base {base} depth {depth} A {amplitude}: gain {got} vs {want} at {cutoff} Hz"
             );
             // The cutoff moved: the gain is not the fixed filter's.
-            let fixed = magnitude(ty, f64::from(base), q, TONE);
+            let fixed = magnitude(ty, base, q, TONE);
             assert!(
                 (want - fixed).abs() > 0.02,
                 "{ty:?}: the case moves the gain"
@@ -148,7 +148,7 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
 fn the_controls_are_held_in_range() {
     let mut b = bank(
         SvfType::LowPass,
-        &controls(f32::NAN, f32::INFINITY, f32::NAN),
+        &controls(f64::NAN, f64::INFINITY, f32::NAN),
     );
     let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
     assert!(y.iter().all(|s| s.is_finite()));
@@ -241,7 +241,7 @@ fn the_attack_and_the_release_are_told_apart() {
         );
         let x = square(&[(rise, high), (fall, low)]);
         let y = run(&mut b, &x, 480);
-        let cutoff = |env: f64| f64::from(base) * (f64::from(depth) / 12.0 * env).exp2();
+        let cutoff = |env: f64| base * (depth / 12.0 * env).exp2();
         let gain = |from: usize| {
             amplitude_at(&y[from..from + 480], TONE, RATE.get())
                 / amplitude_at(&x[from..from + 480], TONE, RATE.get())

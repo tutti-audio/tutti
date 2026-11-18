@@ -72,7 +72,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
             diffusion: Mix(1.0 - k),
             pre_delay: Seconds::from_f32(0.05 * k),
             modulation: Depth::of(k),
-            rate: Hz(0.1 + k),
+            rate: Hz(f64::from(0.1 + k)),
             width: StereoWidth(2.0 * k),
             wet: Db(-12.0 * k),
             freeze: block % 11 == 0,

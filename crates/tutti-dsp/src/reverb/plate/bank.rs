@@ -399,9 +399,8 @@ impl<F: Float + Lerp> PlateBank<F> {
             self.fresh = false;
             c.next = at(self.phase);
         }
-        self.phase = (self.phase
-            + f64::from(self.shape.mod_rate.get()) * Self::CHUNK as f64 / self.rate.get())
-            % 1.0;
+        self.phase =
+            (self.phase + self.shape.mod_rate.get() * Self::CHUNK as f64 / self.rate.get()) % 1.0;
         c.prev = c.next;
         c.next = at(self.phase);
         c.k = k;

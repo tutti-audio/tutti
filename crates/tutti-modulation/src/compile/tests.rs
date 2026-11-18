@@ -46,7 +46,7 @@ fn beats(per_cycle: f64) -> Clock {
     }
 }
 
-fn seconds(rate: f32) -> Clock {
+fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
         rate: Hz(rate),
         phase: PhaseIncrement(0.0),
@@ -717,7 +717,7 @@ fn each_refusal_fires_by_name() {
                 ..adsr()
             },
         },
-        lfo(LfoShape::Sine, seconds(f32::NAN)),
+        lfo(LfoShape::Sine, seconds(f64::NAN)),
         Source::Lfo {
             wave: Waveform::Const(f32::NAN),
             clock: beats(1.0),
@@ -993,7 +993,7 @@ fn a_value_that_is_not_finite_is_refused() {
             "constant {v}"
         );
     }
-    let clock = |rate: f32, phase: f64| Clock::Seconds {
+    let clock = |rate: f64, phase: f64| Clock::Seconds {
         rate: Hz(rate),
         phase: PhaseIncrement(phase),
         anchor: None,
@@ -1003,7 +1003,7 @@ fn a_value_that_is_not_finite_is_refused() {
         phase: PhaseIncrement(phase),
     };
     for c in [
-        clock(f32::INFINITY, 0.0),
+        clock(f64::INFINITY, 0.0),
         clock(1.0, f64::INFINITY),
         clock(1.0, f64::NEG_INFINITY),
         beat(f64::INFINITY),

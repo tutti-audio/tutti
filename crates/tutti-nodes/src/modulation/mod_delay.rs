@@ -336,7 +336,7 @@ mod tests {
         BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
-    fn controls(rate: f32, depth: f64, feedback: f32) -> ModDelayControls {
+    fn controls(rate: f64, depth: f64, feedback: f32) -> ModDelayControls {
         ModDelayControls {
             rate: Hz(rate),
             depth: Seconds(depth),
@@ -463,12 +463,10 @@ mod tests {
     const BASE: f64 = 0.02 * SR;
 
     /// The exact sweep's delay at every frame, in frames, from the sweep's definition
-    /// `base + depth sin(2 pi phase)`: the sine of the LFO's own phase, which accumulates in
-    /// `f32` (`Phase::advance`) and so runs a little off the ideal `rate * n / sr` over a long
-    /// render. The LFO steps before the frame it sounds in: frame `n` sounds the phase `n + 1`
+    /// `base + depth sin(2 pi phase)`: the sine of the LFO's own phase. The LFO steps before the frame it sounds in: frame `n` sounds the phase `n + 1`
     /// steps on, so the corners (frame `16 k + 15`) are the sine itself. `rates` are `(frame,
     /// hz)`: the rate in force from that frame on.
-    fn exact_delays(len: usize, depth: f32, rate: f32, rates: &[(usize, f32)]) -> Vec<f64> {
+    fn exact_delays(len: usize, depth: f64, rate: f64, rates: &[(usize, f64)]) -> Vec<f64> {
         let mut inc = PhaseIncrement::per_sample(Hz(rate), RATE);
         let mut phase = Phase::START;
         (0..len)
@@ -478,16 +476,16 @@ mod tests {
                 }
                 phase = phase.advance(inc);
                 let turns = phase.get();
-                BASE + f64::from(depth) * SR * (std::f64::consts::TAU * turns).sin()
+                BASE + depth * SR * (std::f64::consts::TAU * turns).sin()
             })
             .collect()
     }
 
     /// The chord bound of a sine over one control interval, as a delay in frames: `h^2 / 8`
     /// of the depth, `h` the radians the interval spans.
-    fn chord_bound(depth: f32, hz: f32) -> f64 {
-        let h = std::f64::consts::TAU * f64::from(hz) * COEFF_INTERVAL as f64 / SR;
-        f64::from(depth) * SR * h * h / 8.0
+    fn chord_bound(depth: f64, hz: f64) -> f64 {
+        let h = std::f64::consts::TAU * hz * COEFF_INTERVAL as f64 / SR;
+        depth * SR * h * h / 8.0
     }
 
     /// A held depth of zero is a pure delay of the declared span: the 20 ms base is 960
@@ -495,7 +493,7 @@ mod tests {
     /// exactly, whatever the rate says, with no feedback to add an echo.
     #[test]
     fn a_held_depth_of_zero_is_a_pure_delay_of_the_declared_span() {
-        for hz in [0.01f32, 1.0, 37.0] {
+        for hz in [0.01f64, 1.0, 37.0] {
             let mut k = trajectory();
             let d = trace(&mut k, &[(0, controls(hz, 0.0, 0.0))], 3_000);
             for (n, &got) in d.iter().enumerate().skip(1_000) {
@@ -516,14 +514,10 @@ mod tests {
     /// depth]` and reaches both ends.
     #[test]
     fn the_rendered_delay_stays_within_the_sweeps_range_and_reaches_it() {
-        let depth = 0.01f32;
-        let amp = f64::from(depth) * SR;
+        let depth = 0.01f64;
+        let amp = depth * SR;
         let mut k = trajectory();
-        let trace = trace(
-            &mut k,
-            &[(0, controls(20.0, f64::from(depth), 0.0))],
-            12_000,
-        );
+        let trace = trace(&mut k, &[(0, controls(20.0, depth, 0.0))], 12_000);
         let (mut lo, mut hi) = (f64::MAX, f64::MIN);
         for &d in &trace[FROM..] {
             let e = d - BASE;
@@ -539,9 +533,9 @@ mod tests {
     /// `h^2 / 8` of the depth, and the chord does miss (not vacuous).
     #[test]
     fn the_delay_is_the_exact_sine_at_control_points_and_within_the_chord_between() {
-        let (depth, hz) = (0.01f32, 20.0f32);
+        let (depth, hz) = (0.01f64, 20.0f64);
         let mut k = trajectory();
-        let trace = trace(&mut k, &[(0, controls(hz, f64::from(depth), 0.0))], 12_000);
+        let trace = trace(&mut k, &[(0, controls(hz, depth, 0.0))], 12_000);
         let exact = exact_delays(12_000, depth, hz, &[]);
         for n in (FROM..12_000).filter(|n| (n + 1).is_multiple_of(COEFF_INTERVAL)) {
             let err = trace[n] - exact[n];
@@ -559,9 +553,9 @@ mod tests {
     /// apart.
     #[test]
     fn the_sweeps_period_is_one_over_the_rate() {
-        let (depth, hz) = (0.01f32, 20.0f32);
+        let (depth, hz) = (0.01f64, 20.0f64);
         let mut k = trajectory();
-        let trace = trace(&mut k, &[(0, controls(hz, f64::from(depth), 0.0))], 16_000);
+        let trace = trace(&mut k, &[(0, controls(hz, depth, 0.0))], 16_000);
         let mut ups = Vec::new();
         for n in FROM..15_999 {
             let (a, b) = (trace[n] - BASE, trace[n + 1] - BASE);
@@ -571,7 +565,7 @@ mod tests {
         }
         assert!(ups.len() >= 5, "{} crossings", ups.len());
         let period = (ups[ups.len() - 1] - ups[0]) / (ups.len() - 1) as f64;
-        let want = SR / f64::from(hz);
+        let want = SR / hz;
         assert!((period - want).abs() < 0.5, "{period} vs {want}");
     }
 
@@ -583,13 +577,13 @@ mod tests {
     /// or a rate that landed a segment early or late, is several frames off.
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
-        let depth = 0.01f32;
-        let (old, new, len) = (20.0f32, 30.0f32, 4_000);
+        let depth = 0.01f64;
+        let (old, new, len) = (20.0f64, 30.0f64, 4_000);
         let (at, grid) = (2_500usize, 2_512usize);
         assert!(!at.is_multiple_of(COEFF_INTERVAL), "mid-segment");
         assert!(grid.is_multiple_of(COEFF_INTERVAL));
-        let first = controls(old, f64::from(depth), 0.0);
-        let to = controls(new, f64::from(depth), 0.0);
+        let first = controls(old, depth, 0.0);
+        let to = controls(new, depth, 0.0);
         let exact = exact_delays(len, depth, old, &[(grid, new)]);
         let bound = chord_bound(depth, new) + 0.05;
         let trace = trace(&mut trajectory(), &[(0, first), (at, to)], len);
@@ -599,7 +593,7 @@ mod tests {
         assert!(worst <= bound, "worst {worst} over {bound}");
         // Continuous: no frame of the render moves faster than the sweep's own greatest
         // slope at the new rate (`2 pi rate depth`, in frames a frame) and the chord's kink.
-        let slope = std::f64::consts::TAU * f64::from(new) * f64::from(depth);
+        let slope = std::f64::consts::TAU * new * depth;
         let jump = (FROM..len - 1)
             .map(|n| (trace[n + 1] - trace[n]).abs())
             .fold(0.0, f64::max);
@@ -625,26 +619,25 @@ mod tests {
     /// the default's.
     #[test]
     fn a_rate_below_the_floor_is_the_floor() {
-        let depth = 0.01f32;
+        let depth = 0.01f64;
         let (len, at) = (6_000, 4_800);
-        let default_hz = f64::from(ModDelayControls::DEFAULT.rate.get());
+        let default_hz = ModDelayControls::DEFAULT.rate.get();
         for (hz, effective) in [
-            (0.01f32, 0.01),
+            (0.01f64, 0.01),
             (0.005, 0.01),
             (0.0, 0.01),
             (-3.0, 0.01),
             (-1e-9, 0.01),
-            (f32::NEG_INFINITY, default_hz),
-            (f32::NAN, default_hz),
+            (f64::NEG_INFINITY, default_hz),
+            (f64::NAN, default_hz),
         ] {
-            let c = controls(hz, f64::from(depth), 0.0);
+            let c = controls(hz, depth, 0.0);
             let trace = trace(&mut trajectory(), &[(0, c)], len);
             let rise = trace[at] - BASE;
             // The LFO steps before the frame it sounds in: frame `at` sounds the
             // phase `at + 1` steps on.
             let sounded = (at + 1) as f64;
-            let figure =
-                f64::from(depth) * SR * (std::f64::consts::TAU * effective * sounded / SR).sin();
+            let figure = depth * SR * (std::f64::consts::TAU * effective * sounded / SR).sin();
             assert!(
                 (rise - figure).abs() < 0.05,
                 "rate {hz} rose {rise}, the {effective} Hz sweep {figure}"
@@ -660,7 +653,7 @@ mod tests {
     /// does.
     #[test]
     fn a_depth_glide_is_bounded_by_the_slew_and_lands_exactly() {
-        let (from, to, hz) = (0.005f64, 0.04f64, 0.1f32);
+        let (from, to, hz) = (0.005f64, 0.04f64, 0.1f64);
         // The glide of 13,440 frames straddles the sweep's crest (the quarter period, frame
         // 120,000, where the LFO is at 1), so the excursion's growth is the delay's, a
         // frame a frame at its fastest.
@@ -670,7 +663,7 @@ mod tests {
             &[(0, controls(hz, from, 0.0)), (moved, controls(hz, to, 0.0))],
             len,
         );
-        let steady = std::f64::consts::TAU * f64::from(hz) * to;
+        let steady = std::f64::consts::TAU * hz * to;
         let worst = (FROM..len - 1)
             .map(|n| (trace[n + 1] - trace[n]).abs())
             .fold(0.0, f64::max);
@@ -682,7 +675,7 @@ mod tests {
         assert!(worst > slew * 0.9, "it glides at the slew: {worst}");
         let landed = moved + 13_440 + 64;
         let amp_at = |n: usize| (trace[n] - BASE) / (to * SR);
-        let sine_at = |n: usize| (std::f64::consts::TAU * f64::from(hz) * n as f64 / SR).sin();
+        let sine_at = |n: usize| (std::f64::consts::TAU * hz * n as f64 / SR).sin();
         for n in [landed + 1_000, landed + 6_000, len - 100] {
             let want = sine_at(n);
             assert!(
@@ -806,8 +799,8 @@ mod tests {
     /// emptied too: the rate is new, and the delays in frames were the old one's.
     #[test]
     fn a_re_prepare_restarts_the_sweep() {
-        let (depth, hz) = (0.01f32, 20.0f32);
-        let c = controls(hz, f64::from(depth), 0.0);
+        let (depth, hz) = (0.01f64, 20.0f64);
+        let c = controls(hz, depth, 0.0);
         let mut k = trajectory();
         drive_kernel(&mut k, &[(0, c)], &[vec![1.0; 1_003]]);
         assert_ne!(k.clock.state().0, Phase::START, "the sweep was running");

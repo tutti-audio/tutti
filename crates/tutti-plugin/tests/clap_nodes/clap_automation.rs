@@ -386,7 +386,8 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
         0,
         1500,
         32,
-        |f| env.value_at(beat(f)).expect("a value").get(),
+        // The followed value is an `f32` lane word.
+        |f| env.value_at(beat(f)).expect("a value").get() as f32,
         0.75,
     );
 }

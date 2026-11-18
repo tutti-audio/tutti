@@ -21,10 +21,10 @@ fn magnitudes_of(samples: &[f32]) -> StftMagnitude {
 }
 
 fn bin_width() -> Hz {
-    Hz((RATE / WINDOW as f64) as f32)
+    Hz(RATE / WINDOW as f64)
 }
 
-fn sine(hz: f32, len: usize) -> Vec<f32> {
+fn sine(hz: f64, len: usize) -> Vec<f32> {
     tutti_fixtures::signal::sine(
         tutti_units::Hz(hz),
         tutti_units::Amplitude(1.0),
@@ -36,7 +36,7 @@ fn sine(hz: f32, len: usize) -> Vec<f32> {
 /// A pure sine's centroid is its frequency, to within a bin.
 #[test]
 fn a_sine_centroid_is_its_frequency_within_a_bin() {
-    for hz in [1000.0f32, 3517.0, 9000.0] {
+    for hz in [1000.0f64, 3517.0, 9000.0] {
         let stft = magnitudes_of(&sine(hz, 16_384));
         let features = spectral_features(&stft, 0.85);
         assert!(!features.is_empty());
@@ -107,14 +107,14 @@ fn band_limited_noise_rolls_off_at_the_edge() {
     }
     let mut x = vec![0.0f32; size];
     fft.inverse(&bins, tutti_buffers::MonoMut::new(&mut x));
-    let width = RATE as f32 / size as f32;
+    let width = RATE / size as f64;
     let row = {
         let mut out = vec![tutti_dsp::Complex32::default(); size / 2 + 1];
         fft.forward_unwindowed(tutti_buffers::Mono::new(&x), &mut out);
         out.iter().map(|b| b.norm()).collect::<Vec<_>>()
     };
     let r = spectral_rolloff(&row, Hz(width), 0.99);
-    let edge = edge_bin as f32 * width;
+    let edge = edge_bin as f64 * width;
     assert!(r.get() <= edge && r.get() > 0.98 * edge, "{r} vs {edge}");
 }
 
@@ -181,5 +181,5 @@ fn the_grid_helper_applies_the_kernels_row_by_row() {
         assert_eq!(f.flatness, spectral_flatness(row));
         assert_eq!(f.rolloff, spectral_rolloff(row, width, 0.5));
     }
-    assert!((width.get() - 23.4375).abs() < 1e-4);
+    assert_eq!(width.get(), 23.4375);
 }

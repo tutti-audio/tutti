@@ -8,7 +8,7 @@ fn rate() -> SampleRate {
     SampleRate::of(RATE)
 }
 
-fn hz(v: f32) -> Hz {
+fn hz(v: f64) -> Hz {
     Hz(v)
 }
 
@@ -28,10 +28,9 @@ fn magnitude(h: &[f64], omega: f64) -> f64 {
 
 /// The ideal gain at `f` of a response: 1 in a passband, 0 in a stopband,
 /// `None` in a transition band.
-fn ideal(response: FirResponse, transition: f32, f: f64) -> Option<f64> {
-    let half = f64::from(transition) / 2.0;
-    let side = |edge: f32, pass_below: bool| -> Option<f64> {
-        let edge = f64::from(edge);
+fn ideal(response: FirResponse, transition: f64, f: f64) -> Option<f64> {
+    let half = transition / 2.0;
+    let side = |edge: f64, pass_below: bool| -> Option<f64> {
         if (f - edge).abs() < half {
             None
         } else {
@@ -41,7 +40,7 @@ fn ideal(response: FirResponse, transition: f32, f: f64) -> Option<f64> {
     match response {
         FirResponse::LowPass { cutoff } => side(cutoff.get(), true),
         FirResponse::HighPass { cutoff } => side(cutoff.get(), false),
-        FirResponse::HalfBand => side((RATE / 4.0) as f32, true),
+        FirResponse::HalfBand => side(RATE / 4.0, true),
         FirResponse::BandPass { low, high } => {
             Some(side(low.get(), false)? * side(high.get(), true)?)
         }
@@ -139,7 +138,7 @@ fn every_response_meets_its_ripple_and_attenuation() {
     for a in [40.0f32, 60.0, 80.0] {
         let delta = 10f64.powf(-f64::from(a) / 20.0);
         for response in responses() {
-            let transition = 1_000.0f32;
+            let transition = 1_000.0f64;
             let fir = FirDesign::new(response, hz(transition))
                 .attenuation(Db(a))
                 .design(rate())
@@ -184,7 +183,7 @@ fn the_taps_are_symmetric_bit_for_bit() {
 
 #[test]
 fn the_half_band_has_exact_zeros_and_a_centre_of_one_half() {
-    for transition in [500.0f32, 2_000.0, 6_000.0] {
+    for transition in [500.0f64, 2_000.0, 6_000.0] {
         let fir = FirDesign::new(FirResponse::HalfBand, hz(transition))
             .attenuation(Db(70.0))
             .design(rate())
@@ -245,7 +244,7 @@ fn the_low_pass_has_unit_dc_gain_and_the_high_pass_unit_nyquist_gain() {
 
 #[test]
 fn a_cutoff_outside_the_open_band_is_refused() {
-    for cutoff in [0.0, -10.0, 24_000.0, 30_000.0, f32::NAN] {
+    for cutoff in [0.0, -10.0, 24_000.0, 30_000.0, f64::NAN] {
         let err = FirDesign::new(FirResponse::LowPass { cutoff: hz(cutoff) }, hz(100.0))
             .design(rate())
             .unwrap_err();
@@ -330,7 +329,7 @@ fn a_non_positive_transition_or_attenuation_is_refused() {
     let low = FirResponse::LowPass {
         cutoff: hz(6_000.0),
     };
-    for t in [0.0, -5.0, f32::NAN, f32::INFINITY] {
+    for t in [0.0, -5.0, f64::NAN, f64::INFINITY] {
         let err = FirDesign::new(low, hz(t)).design(rate()).unwrap_err();
         assert!(matches!(err, FirError::NonPositiveTransition(_)), "{err:?}");
     }

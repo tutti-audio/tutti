@@ -64,7 +64,7 @@ fn db(raws: &[f32]) -> Vec<Db> {
     raws.iter().map(|&r| Db(r)).collect()
 }
 
-fn cents(raws: &[f32]) -> Vec<Cents> {
+fn cents(raws: &[f64]) -> Vec<Cents> {
     raws.iter().map(|&r| Cents(r)).collect()
 }
 
@@ -120,7 +120,7 @@ fn tuning_offset_keeps_the_range_checked_shape() {
         get: TuningOffset::get,
         of: Some(TuningOffset::of),
         valid: &cents(&[-50.0, 0.0, 12.0, 50.0]),
-        invalid: &cents(&[51.0, -51.0, NAN, INF, NEG_INF]),
+        invalid: &cents(&[51.0, -51.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 
@@ -227,8 +227,15 @@ fn pitch_split_keeps_the_range_checked_shape() {
         new: PitchSplit::new,
         get: PitchSplit::get,
         of: Some(PitchSplit::of),
-        valid: &cents(&[f32::MIN_POSITIVE, 50.0, 1200.0]),
-        invalid: &cents(&[0.0, -5.0, 1201.0, NAN, INF, NEG_INF]),
+        valid: &cents(&[f64::MIN_POSITIVE, 50.0, 1200.0]),
+        invalid: &cents(&[
+            0.0,
+            -5.0,
+            1201.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ]),
     });
 }
 

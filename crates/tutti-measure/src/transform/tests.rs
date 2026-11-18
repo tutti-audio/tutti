@@ -22,7 +22,7 @@ fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
     super::istft(transform, fft)
 }
 
-fn tone(len: usize, freq: f32, sample_rate: f32) -> Vec<f32> {
+fn tone(len: usize, freq: f64, sample_rate: f32) -> Vec<f32> {
     tutti_fixtures::signal::sine(
         tutti_units::Hz(freq),
         tutti_units::Amplitude(0.5),

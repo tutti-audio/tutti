@@ -65,7 +65,7 @@ fn built(g: GraphBuilder) -> RenderGraph {
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
 
-fn sine_graph(freq: f32) -> RenderGraph {
+fn sine_graph(freq: f64) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
         Osc::sine(Hz(freq))

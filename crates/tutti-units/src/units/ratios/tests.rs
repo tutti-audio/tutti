@@ -8,7 +8,7 @@ use super::*;
 ///   distances can be negative, which is outside the range. Add or subtract as
 ///   offsets, `to_cents()` and arithmetic on `Cents`, then `CentsSpan::new` the
 ///   result.
-/// - `CentsSpan * f32`, `-CentsSpan` — a negative factor leaves the range.
+/// - `CentsSpan * f64`, `-CentsSpan` — a negative factor leaves the range.
 ///   Scale the raw number and call `new` (or `clamped`, where saturating is
 ///   meant).
 /// - `HoldFactor + HoldFactor`, `HoldFactor * f32` — a hold is a count of frames
@@ -19,7 +19,7 @@ use super::*;
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
 ///   quantity it was. Build with `new`, read with `get` (generic code: the
 ///   `Unit` trait's `from_raw` / `to_raw`). `CentsSpan` is range-checked and has
-///   `From<CentsSpan> for f32` beside `TryFrom<f32>`, as `Depth` does.
+///   `From<CentsSpan> for f64` beside `TryFrom<f64>`, as `Depth` does.
 ///
 /// The body is empty and this test cannot fail; see the note in `units/tests.rs`.
 #[test]
@@ -49,10 +49,10 @@ fn cents_and_semitones_convert_rather_than_scale() {
 /// omission rule is meant to catch.
 #[test]
 fn a_pitch_ratio_round_trips_through_cents() {
-    for ratio in [0.5_f32, 1.0, 1.5, 2.0, 3.0] {
+    for ratio in [0.5_f64, 1.0, 1.5, 2.0, 3.0] {
         let back = Cents::from_pitch_ratio(ratio).to_pitch_ratio();
         assert!(
-            (back - ratio).abs() < 1e-4,
+            (back - ratio).abs() <= ratio * f64::EPSILON * 4.0,
             "{ratio} round-tripped to {back}"
         );
     }
@@ -96,7 +96,7 @@ fn cents_span_keeps_the_range_contract() {
         get: CentsSpan::get,
         of: Some(CentsSpan::of),
         valid: &[0.0, 0.5, 12.0, 1200.0],
-        invalid: &[-0.001, -50.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+        invalid: &[-0.001, -50.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
     });
 }
 
@@ -106,8 +106,8 @@ fn cents_span_keeps_the_range_contract() {
 #[test]
 fn cents_span_saturates_only_by_name_and_through_a_cell() {
     assert_eq!(CentsSpan::clamped(-10.0), CentsSpan::ZERO);
-    assert_eq!(CentsSpan::clamped(f32::NAN), CentsSpan::ZERO);
-    assert_eq!(CentsSpan::clamped(f32::INFINITY).get(), f32::MAX);
+    assert_eq!(CentsSpan::clamped(f64::NAN), CentsSpan::ZERO);
+    assert_eq!(CentsSpan::clamped(f64::INFINITY).get(), f64::MAX);
     assert_eq!(<CentsSpan as Unit>::from_raw(-10.0), CentsSpan::ZERO);
     assert_eq!(<CentsSpan as Unit>::from_raw(12.0).get(), 12.0);
 }
@@ -127,9 +127,9 @@ fn twelve_semitones_and_twelve_hundred_cents_are_exactly_an_octave() {
 
 #[test]
 fn a_semitone_is_the_twelfth_root_of_two() {
-    let want = 1.059_463_1_f32;
-    assert!((Semitones(1.0).to_pitch_ratio() - want).abs() < 1e-6);
-    assert!((Cents(100.0).to_pitch_ratio() - want).abs() < 1e-6);
+    let want = 1.059_463_094_359_295_3_f64;
+    assert!((Semitones(1.0).to_pitch_ratio() - want).abs() <= want * f64::EPSILON * 4.0);
+    assert!((Cents(100.0).to_pitch_ratio() - want).abs() <= want * f64::EPSILON * 4.0);
 }
 
 /// A hold factor is at least 1: `new_clamped` raises a smaller value to `NONE`,
@@ -142,4 +142,35 @@ fn a_hold_factor_is_at_least_one() {
     assert_eq!(HoldFactor::new_clamped(f32::INFINITY).get(), f32::INFINITY);
     assert!(HoldFactor::new_clamped(f32::NAN).get().is_nan());
     assert_eq!(HoldFactor::NONE.get(), 1.0);
+}
+
+/// A kernel that runs in `f32` narrows the converter's `f64` once; the narrowed ratio is the
+/// `f32` closed form within 2 ulp.
+#[test]
+fn a_pitch_ratio_narrows_to_the_f32_closed_form() {
+    for st in [-24.0_f32, -7.0, -1.0, 0.5, 3.0, 7.0, 19.0] {
+        let by_semitones = Semitones(f64::from(st)).to_pitch_ratio() as f32;
+        let by_cents = Cents(f64::from(st) * 100.0).to_pitch_ratio() as f32;
+        let closed = 2.0_f32.powf(st / 12.0);
+        for got in [by_semitones, by_cents] {
+            assert!(
+                (got - closed).abs() <= closed * f32::EPSILON * 2.0,
+                "{st} st: {got} against {closed}"
+            );
+        }
+    }
+}
+
+/// The inverse converters narrow to the `f32` closed form within 2 ulp.
+#[test]
+fn a_pitch_interval_narrows_to_the_f32_closed_form() {
+    for ratio in [0.25_f32, 0.5, 1.5, 2.0, 3.0, 7.0] {
+        let st = Semitones::from_pitch_ratio(f64::from(ratio)).0 as f32;
+        let cents = Cents::from_pitch_ratio(f64::from(ratio)).0 as f32;
+        let closed = 12.0 * ratio.log2();
+        assert!((st - closed).abs() <= closed.abs().max(1.0) * f32::EPSILON * 2.0);
+        assert!(
+            (cents - closed * 100.0).abs() <= (closed * 100.0).abs().max(1.0) * f32::EPSILON * 2.0
+        );
+    }
 }

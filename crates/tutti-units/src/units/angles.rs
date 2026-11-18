@@ -288,7 +288,7 @@ impl PhaseIncrement {
     /// At 20 Hz against 192 kHz the step is ~1.04e-4.
     #[inline]
     pub fn per_sample(frequency: Hz, sample_rate: impl Into<SampleRate>) -> PhaseIncrement {
-        PhaseIncrement(f64::from(frequency.0) / sample_rate.into().get())
+        PhaseIncrement(frequency.0 / sample_rate.into().get())
     }
 }
 

@@ -15,7 +15,7 @@ fn sine(freq: Hz, amp: f32) -> Vec<f32> {
 }
 
 fn saw(freq: Hz, amp: f32) -> Vec<f32> {
-    let f = f64::from(freq.get());
+    let f = freq.get();
     (0..N)
         .map(|i| {
             let phase = (f * i as f64 / SR.get()).fract();
@@ -41,7 +41,7 @@ fn detector() -> PitchDetector {
 }
 
 fn period_samples(freq: Hz) -> f64 {
-    SR.get() / f64::from(freq.get())
+    SR.get() / freq.get()
 }
 
 fn fill_cmndf(det: &mut PitchDetector, samples: &[f32]) -> (usize, usize) {
@@ -119,7 +119,7 @@ fn first_local_minimum_beats_a_deeper_later_dip() {
 #[test]
 fn parabolic_interpolation_recovers_a_half_sample_period() {
     let true_period = 100.5;
-    let freq = Hz((SR.get() / true_period) as f32);
+    let freq = Hz(SR.get() / true_period);
     let mut det = detector();
     let (min_period, max_period) = fill_cmndf(&mut det, &sine(freq, 1.0));
     let (tau, _) = det.find_best_period_full(min_period, max_period);

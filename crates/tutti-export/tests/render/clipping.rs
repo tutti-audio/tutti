@@ -50,7 +50,7 @@ fn dc(value: f32) -> RenderGraph {
 /// on full scale.
 fn quarter_rate_sine() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    let id = g.add(Osc::sine(Hz(RATE.get() as f32 / 4.0)));
+    let id = g.add(Osc::sine(Hz(RATE.get() / 4.0)));
     g.pipe_output(id);
     built(g)
 }

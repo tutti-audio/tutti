@@ -246,7 +246,7 @@ impl InstrumentRegion {
     /// The sample header's pitch correction.
     #[must_use]
     pub fn sample_pitch_correction(&self) -> Cents {
-        Cents(self.sample_pitch_correction as f32)
+        Cents(f64::from(self.sample_pitch_correction))
     }
 
     /// How the sample loops.

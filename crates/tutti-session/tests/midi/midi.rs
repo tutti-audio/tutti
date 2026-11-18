@@ -1768,7 +1768,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     for channel in 1..=3 {
         assert_eq!(
             ranges.semitones(MidiChannel::of(channel)),
-            48.0,
+            tutti_units::Semitones(48.0),
             "member {channel}"
         );
     }

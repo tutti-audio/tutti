@@ -156,16 +156,14 @@ mod tests {
         prepared(BellFilterNode::from(config))
     }
 
-    fn gain_of(config: BellFilterConfig, f: f32) -> f64 {
+    fn gain_of(config: BellFilterConfig, f: f64) -> f64 {
         gain(BellFilterNode::from(config), f)
     }
 
     /// The design's magnitude at `f`, read from the section's coefficients.
-    fn designed(fc: Hz, q: Q, db: Db, f: f32) -> f64 {
+    fn designed(fc: Hz, q: Q, db: Db, f: f64) -> f64 {
         let sos = MatchedBell::new(q, db).design(fc, RATE).unwrap();
-        sos.sections()[0]
-            .response(2.0 * PI * f64::from(f) / RATE.get())
-            .norm()
+        sos.sections()[0].response(2.0 * PI * f / RATE.get()).norm()
     }
 
     /// The analog bell `(s^2 + s A / Q + 1) / (s^2 + s / (A Q) + 1)` at `s = j f / fc`, as a
@@ -225,12 +223,7 @@ mod tests {
             // The matched points against the analog bell itself: DC (bin 1), the center and
             // Nyquist (bin 4095), where the render is the analog magnitude.
             for f in [bin(1), center.get(), bin(4_095)] {
-                let want = analog(
-                    f64::from(center.get()),
-                    f64::from(q),
-                    f64::from(db),
-                    f64::from(f),
-                );
+                let want = analog(center.get(), f64::from(q), f64::from(db), f);
                 let got = gain_of(config(center, Q(q), Db(db)), f);
                 assert!(
                     (got - want).abs() < 2e-3 * want,
@@ -283,7 +276,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f32, q: f32, db: f32| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
+        let at = |hz: f64, q: f32, db: f32| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
         assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
         assert_eq!(
             at(90_000.0, 1.0, 6.0),
@@ -306,7 +299,7 @@ mod tests {
             other => panic!("{other:?}"),
         };
         assert_eq!(kernel.tail(), Tail::Unbounded);
-        for fc in [20.0f32, 90.0, 700.0, 4_000.0, 15_000.0, 22_000.0] {
+        for fc in [20.0f64, 90.0, 700.0, 4_000.0, 15_000.0, 22_000.0] {
             for q in [0.1f32, 0.7, 4.0, 30.0] {
                 for db in [-24.0f32, -6.0, 6.0, 24.0] {
                     let controls = BellFilterControls {

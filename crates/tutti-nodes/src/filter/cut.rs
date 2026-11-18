@@ -171,6 +171,11 @@ impl CutFilterKernel {
     }
 }
 
+/// The cutoff of ladder rung `rung`: `rung` octaves above [`MIN_CUT_CUTOFF`].
+fn rung_cutoff(rung: usize) -> Hz {
+    MIN_CUT_CUTOFF * f64::from(1u32 << rung)
+}
+
 impl Kernel for CutFilterKernel {
     type Set = CutFilterSet;
 
@@ -185,10 +190,9 @@ impl Kernel for CutFilterKernel {
         self.sos.at_rate(rate);
         let first = self.design(CutFilterControls::DEFAULT.cutoff);
         self.sos.restart(first);
-        let top = self.rate.nyquist_scaled(0.99).get();
+        let top = self.rate.nyquist_scaled(0.99);
         for rung in 0..LADDER {
-            let cutoff = MIN_CUT_CUTOFF.get() * (1u32 << rung) as f32;
-            let _ = self.design(Hz(cutoff.min(top)));
+            let _ = self.design(rung_cutoff(rung).min(top));
             self.ladder[rung] = match self.sos.scratch().tail(TAIL_FLOOR) {
                 Ring::Finite(s) => Tail::Finite(Samples((s.get() * rate.get()).ceil() as usize)),
                 Ring::Unbounded => Tail::Unbounded,
@@ -222,10 +226,10 @@ impl Kernel for CutFilterKernel {
     /// The tail found for the highest octave from [`MIN_CUT_CUTOFF`] at or below the
     /// cutoff in force: a lower cutoff rings longer, so it errs long. No simulation.
     fn tail_of(&mut self, controls: &CutFilterControls) -> Tail {
-        let top = self.rate.nyquist_scaled(0.99).get();
-        let cutoff = controls.cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top);
+        let top = self.rate.nyquist_scaled(0.99);
+        let cutoff = controls.cutoff.clamp(MIN_CUT_CUTOFF, top);
         let octave = (1..LADDER)
-            .take_while(|&rung| MIN_CUT_CUTOFF.get() * (1u32 << rung) as f32 <= cutoff)
+            .take_while(|&rung| rung_cutoff(rung) <= cutoff)
             .count();
         self.ladder[octave]
     }
@@ -261,8 +265,8 @@ mod tests {
 
     /// The frequency of bin `m` of the 8192-frame window the levels are read over: a sine
     /// there has whole cycles in it, so its RMS is exact.
-    fn bin(m: u32) -> f32 {
-        (RATE.get() * f64::from(m) / 8192.0) as f32
+    fn bin(m: u32) -> f64 {
+        RATE.get() * f64::from(m) / 8192.0
     }
 
     /// The amplitude of a sine whose samples are `x`.
@@ -279,7 +283,7 @@ mod tests {
     }
 
     /// The RMS of the settled half of a unit sine at `f` through the filter.
-    fn gain(config: CutFilterConfig, f: f32) -> f64 {
+    fn gain(config: CutFilterConfig, f: f64) -> f64 {
         let out = render(&mut node(config), &generate_sine(f, 48_000.0, 16_384));
         level(&out[8_192..])
     }
@@ -320,7 +324,7 @@ mod tests {
         for response in [LP, HP] {
             for order in [1u8, 2, 3, 5, 8, 16] {
                 for f in [51, 137, 171, 256, 683].map(bin) {
-                    let want = analog(response, order, 1000.0, f64::from(f));
+                    let want = analog(response, order, 1000.0, f);
                     let got = gain(CutFilterConfig::new(1u16, response, bw(order)), f);
                     assert!(
                         (got - want).abs() < 5e-7 + 1e-4 * want,
@@ -340,7 +344,7 @@ mod tests {
                 |response| CutFilterConfig::new(1u16, response, lr(order / 2)).cutoff(Hz(bin(171)));
             assert!((gain(lr(LP), bin(171)) - 0.5).abs() < 1e-4, "LR{order}");
             for f in [34, 120, 171, 512].map(bin) {
-                let want = analog(LP, order / 2, f64::from(bin(171)), f64::from(f)).powi(2);
+                let want = analog(LP, order / 2, bin(171), f).powi(2);
                 assert!((gain(lr(LP), f) - want).abs() < 5e-7 + 1e-4 * want);
                 let input = generate_sine(f, 48_000.0, 16_384);
                 let lows = render(&mut node(lr(LP)), &input);
@@ -386,7 +390,7 @@ mod tests {
         }
         assert!(node.param_set().set(UnitParam::Cutoff, 4_000.0));
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
-        let want = analog(LP, 8, 4_000.0, f64::from(bin(256))).powi(2);
+        let want = analog(LP, 8, 4_000.0, bin(256)).powi(2);
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4);
     }
 
@@ -395,7 +399,7 @@ mod tests {
     #[test]
     fn a_cutoff_out_of_range_is_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f32| {
+        let at = |hz: f64| {
             let config = CutFilterConfig::new(1u16, HP, bw(4)).cutoff(Hz(hz));
             render(&mut node(config), &input)
         };
@@ -420,7 +424,7 @@ mod tests {
                     assert!(peak < 4.0, "{response:?} {order} at {hz}: {peak}");
                 }
                 let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
-                let want = analog(response, order, 4_000.0, f64::from(bin(256)));
+                let want = analog(response, order, 4_000.0, bin(256));
                 assert!(
                     (level(&settled[16_384..]) - want).abs() < 1e-4,
                     "{response:?} {order}"
@@ -431,7 +435,7 @@ mod tests {
 
     /// The frames an `f64` impulse response (transposed direct form II, never the kernel's
     /// realization) of LR16 at `cutoff` last carries the tail floor of its peak.
-    fn ring_at(response: CutResponse, cutoff: f32) -> usize {
+    fn ring_at(response: CutResponse, cutoff: f64) -> usize {
         let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
             .design(Hz(cutoff), RATE)
             .unwrap();
@@ -472,7 +476,7 @@ mod tests {
                 kernel.tail_of(&CutFilterControls { cutoff: Hz(10.0) })
             );
             let mut last = usize::MAX;
-            for cutoff in [14.0f32, 27.0, 55.0, 110.0, 230.0, 470.0, 1500.0, 3000.0] {
+            for cutoff in [14.0f64, 27.0, 55.0, 110.0, 230.0, 470.0, 1500.0, 3000.0] {
                 let reported = frames(kernel.tail_of(&CutFilterControls { cutoff: Hz(cutoff) }));
                 let ring = ring_at(response, cutoff);
                 assert!(

@@ -409,7 +409,7 @@ impl SpectrumPlan {
         };
         let empty = Error::EmptyFrequencyRange { min, max };
         check_nyquist(max, self.geometry.sample_rate())?;
-        let (lo, hi) = (f64::from(min.get()), f64::from(max.get()));
+        let (lo, hi) = (min.get(), max.get());
         let edges: Vec<f64> = match per_octave {
             Some(n) => {
                 let bands = (n as f64 * libm::log2(hi / lo) + 1e-9).floor() as usize;
@@ -442,7 +442,7 @@ impl SpectrumPlan {
         let bins = self.bins();
         let first: Vec<usize> = edges
             .iter()
-            .map(|&e| (self.geometry.bin_of_f64(e).ceil() as usize).min(bins))
+            .map(|&e| (self.geometry.bin_of(Hz(e)).ceil() as usize).min(bins))
             .collect();
         if let Some(band) = first.windows(2).position(|w| w[0] >= w[1]) {
             // A band `w` Hz wide holds a bin once the bin spacing is within `w`.
@@ -453,8 +453,8 @@ impl SpectrumPlan {
             let needed = (self.geometry.sample_rate().get() / narrowest).ceil();
             return Err(Error::EmptyBand {
                 band,
-                lower: Hz(edges[band] as f32),
-                upper: Hz(edges[band + 1] as f32),
+                lower: Hz(edges[band]),
+                upper: Hz(edges[band + 1]),
                 window: Samples((needed.min((1u64 << 40) as f64) as usize).next_power_of_two()),
             });
         }
@@ -523,10 +523,7 @@ impl<S: Sample> SpectrumMeter<S> {
         let band_bins = edges.unwrap_or_default();
         let size = cfg.geometry.window().get();
         let frequencies: Vec<Hz> = match cfg.edge_frequencies()? {
-            Some(edges) => edges
-                .windows(2)
-                .map(|e| Hz((e[0] * e[1]).sqrt() as f32))
-                .collect(),
+            Some(edges) => edges.windows(2).map(|e| Hz((e[0] * e[1]).sqrt())).collect(),
             None => (0..cfg.bins())
                 .map(|k| cfg.geometry.bin_frequency(BinIndex(k)))
                 .collect(),

@@ -148,7 +148,7 @@ pub(crate) fn check_frame_count(frames: FrameCount, max: FrameCount) -> Result<(
 ///
 /// [`Error::AboveNyquist`] when `top` exceeds half the sample rate.
 pub(crate) fn check_nyquist(top: Hz, rate: SampleRate) -> Result<()> {
-    let nyquist = Hz((rate.get() / 2.0) as f32);
+    let nyquist = rate.nyquist();
     if top > nyquist {
         return Err(Error::AboveNyquist { freq: top, nyquist });
     }

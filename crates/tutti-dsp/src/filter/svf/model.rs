@@ -55,7 +55,7 @@ impl SvfControls {
     /// through `LastGood`, which does.
     #[must_use]
     pub fn moved_from(&self, applied: &Self) -> bool {
-        const FREQ_EPS: f32 = 0.01;
+        const FREQ_EPS: f64 = 0.01;
         const Q_EPS: f32 = 0.0001;
         const GAIN_EPS: f32 = 0.01;
         self.ty != applied.ty
@@ -69,9 +69,10 @@ impl SvfControls {
     /// [`SvfCoeffs::new`]'s to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        let finite_hz = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
             ty: self.ty,
-            freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
+            freq: Hz(finite_hz(self.freq.get(), Self::DEFAULT.freq.get())),
             q: Q(finite(self.q.get(), Self::DEFAULT.q.get()).clamp(0.01, Self::MAX_Q)),
             gain: Db(if self.gain.get().is_nan() {
                 0.0
@@ -307,7 +308,7 @@ impl Lti for SvfModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output == 0 {
-                self.at(2.0 * PI * f64::from(f.get()) / self.rate.get())
+                self.at(2.0 * PI * f.get() / self.rate.get())
             } else {
                 Complex64::new(f64::NAN, f64::NAN)
             };

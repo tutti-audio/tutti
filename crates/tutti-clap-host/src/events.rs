@@ -794,7 +794,7 @@ fn control_expression(
     match *control {
         NoteControl::Pitch(pitch) => Some((
             NoteExpressionType::Tuning,
-            f64::from(pitch.note_number()) - f64::from(note.get()),
+            pitch.note_number() - f64::from(note.get()),
         )),
         NoteControl::Pressure(value) => Some((
             NoteExpressionType::Pressure,

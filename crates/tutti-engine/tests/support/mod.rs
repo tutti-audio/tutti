@@ -64,7 +64,7 @@ impl Sine {
 
     fn next(&mut self) -> f32 {
         let y = (self.phase * TAU).sin() as f32;
-        self.phase += f64::from(self.frequency.get()) / self.sample_rate.get();
+        self.phase += self.frequency.get() / self.sample_rate.get();
         self.phase -= self.phase.floor();
         y
     }

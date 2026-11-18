@@ -404,7 +404,7 @@ fn control_event(
     match *control {
         NoteControl::Pitch(pitch) => expression(
             NoteExpressionType::Tuning,
-            tuning_expression(f64::from(pitch.note_number()) - f64::from(note.get())),
+            tuning_expression(pitch.note_number() - f64::from(note.get())),
         ),
         NoteControl::Pressure(value) => Some(pressure_event(
             offset,

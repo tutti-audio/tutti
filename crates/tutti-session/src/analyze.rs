@@ -73,8 +73,8 @@ impl<S: Float> From<&std::path::Path> for Audio<S> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl From<crate::AudioEntry> for Audio<f32> {
-    fn from(entry: crate::AudioEntry) -> Self {
+impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
+    fn from(entry: crate::AudioEntry<S>) -> Self {
         match entry {
             crate::AudioEntry::Resident(wave) => Self::Wave(wave),
             crate::AudioEntry::Streamed(info) => Self::File(info.path().to_path_buf()),
@@ -135,8 +135,7 @@ where
     type Error = AnalyzeError;
 }
 
-/// `f32` because an analysis job lands through the session's jobs, which land on `f32` sessions.
-impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// Folds `audio` through the meter `analysis` builds, on a worker, and
     /// lands the meter's output in a later [`update`](Self::update).
     ///

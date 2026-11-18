@@ -35,7 +35,7 @@ const SR: f64 = 48_000.0;
 const DUR: f64 = 1.0;
 /// The reference tone. Chosen to sit well inside every rate under test, so a
 /// resampled case cannot alias it into a different bin and look correct.
-const TONE_HZ: f32 = 1_000.0;
+const TONE_HZ: f64 = 1_000.0;
 
 /// `g` as an export renders it: built at [`SR`], the rate every case renders
 /// at (a graph prepared at another rate is refused, not re-rated).

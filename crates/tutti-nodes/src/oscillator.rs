@@ -55,7 +55,7 @@ pub struct OscillatorNode {
     /// `None` until [`Node::prepare`]: no value is computed from a guessed rate.
     rate: Option<SampleRate>,
     /// The last finite frequency read from the cell or the port.
-    good_frequency: LastGood,
+    good_frequency: LastGood<f64>,
     /// The last finite level read from the cell or the port.
     good_level: LastGood,
 }
@@ -179,7 +179,7 @@ impl Node for OscillatorNode {
         for (i, o) in out[..size].iter_mut().enumerate() {
             let f = self
                 .good_frequency
-                .read(frequency.map_or(frequency_cell, |l| l[i]));
+                .read(frequency.map_or(frequency_cell, |l| f64::from(l[i])));
             let g = self.good_level.read(level.map_or(level_cell, |l| l[i]));
             *o = self.wave.step(Hz(f), rate) * g;
         }
