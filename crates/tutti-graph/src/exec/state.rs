@@ -223,10 +223,6 @@ pub(super) struct State<F: Float = f32> {
     pub(super) has_inject: Vec<bool>,
     /// Plan units with a scheduled command landing this block.
     pub(super) has_due: Vec<bool>,
-    /// Per plan unit, the events its declared input bound cut from this
-    /// block, for `Io::event_input_cut`.
-    /// Atomic: a unit's event inputs are merged by concurrent ops.
-    pub(super) cut_in: Vec<std::sync::atomic::AtomicU32>,
     /// Where a node's scheduled events are merged into its inputs; sized
     /// when applying so the merge never grows (`command::overlay_capacity`).
     pub(super) overlay: Vec<Event>,
@@ -251,7 +247,6 @@ impl<F: Float> State<F> {
             inject: Vec::new(),
             has_inject: Vec::new(),
             has_due: Vec::new(),
-            cut_in: Vec::new(),
             overlay: Vec::new(),
             par: None,
         }

@@ -334,9 +334,6 @@ pub(crate) struct OpState<'s, A: ?Sized, Fl: ?Sized, E: ?Sized> {
     /// Per plan unit, whether a scheduled command lands on it this block;
     /// indexed like `has_inject`.
     pub(crate) has_due: &'s mut [bool],
-    /// Per plan unit, the events the unit's input bound cut this block (a
-    /// merge's, then the node's own overlay's), by unit index.
-    pub(crate) cut_in: &'s [std::sync::atomic::AtomicU32],
     /// This unit's index into `has_inject` and `has_due`.
     pub(crate) at: usize,
     /// Where a node's scheduled events are merged into its inputs.
@@ -528,7 +525,6 @@ pub(super) fn node_op_with<
             n_views = n;
             cut = true;
             st.dropped.at_node(rec.unit, lost);
-            crate::loss::add_cut(&st.cut_in[unit as usize], u64::from(lost));
         }
     }
     // Scheduled commands landing on this node this block: one more source
@@ -594,7 +590,6 @@ pub(super) fn node_op_with<
         injected,
         scheduled: &views[..n_views],
         params,
-        cut: st.cut_in[unit as usize].swap(0, std::sync::atomic::Ordering::Relaxed),
     };
     let status = call_node(&call, &mut *u.node, st);
     log.flush(h.plan.units[unit as usize].key, h.env.frame, &mut *st.sink);
@@ -718,8 +713,6 @@ pub(super) struct Call<'p, 'e> {
     reported: &'p Cell<Option<Tail>>,
     /// Where the node's [`Io::log`] lands.
     log: &'p LogSlots,
-    /// What its declared input bound cut from this block.
-    cut: u32,
 }
 
 impl<'p> Call<'p, '_> {
@@ -854,7 +847,6 @@ impl<'p> Call<'p, '_> {
         .with_wired(rec.wired)
         .with_params(self.params)
         .with_lost(&unplaced)
-        .with_cut(self.cut)
         .with_tail(self.reported)
         .with_log(self.log);
         let status = node.process(&self.cx(), io);

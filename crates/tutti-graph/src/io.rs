@@ -85,9 +85,6 @@ pub struct Io<'a, F: Float = f32> {
     /// Where [`count_lost`](Self::count_lost) adds; `None` where nothing
     /// counts (a hand-built `Io`).
     lost: Option<&'a std::cell::Cell<u32>>,
-    /// Events the node's declared input bound cut from this block
-    /// ([`event_input_cut`](Self::event_input_cut)); zero for a hand-built `Io`.
-    cut: u32,
     /// Where [`report_tail`](Self::report_tail) stores; `None` where nothing
     /// reads it (a hand-built `Io`).
     tail: Option<&'a std::cell::Cell<Option<Tail>>>,
@@ -276,7 +273,6 @@ impl<'a, F: Float> Io<'a, F> {
             events_out,
             params: &[],
             lost: None,
-            cut: 0,
             tail: None,
             log: None,
         }
@@ -437,23 +433,6 @@ impl<'a, F: Float> Io<'a, F> {
     #[inline]
     pub(crate) fn with_lost(mut self, lost: &'a std::cell::Cell<u32>) -> Self {
         self.lost = Some(lost);
-        self
-    }
-
-    /// This block's events cut before the node ran: `n` events `Shape::event_input_capacity` left
-    /// out of its event inputs. The executor has already charged them to the node
-    /// ([`EventLoss`](crate::EventLoss), `port: None`), so a node that tallies
-    /// its own losses adds them to its tally and does not
-    /// [`count_lost`](Self::count_lost) them.
-    #[inline]
-    pub fn event_input_cut(&self) -> u64 {
-        u64::from(self.cut)
-    }
-
-    /// These buffers, with `cut` events cut from the node's declared input bound.
-    #[inline]
-    pub(crate) fn with_cut(mut self, cut: u32) -> Self {
-        self.cut = cut;
         self
     }
 

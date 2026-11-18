@@ -26,22 +26,13 @@
 //! [`Editor::take_event_losses`]: crate::Editor::take_event_losses
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
 use tutti_rt::RingWriter;
 
 use crate::plan::{FeedbackKey, Plan};
 use crate::spec::EventOut;
-
-/// Adds `lost` events cut from a unit's input bound to its per-block count
-/// (`Io::event_input_cut`), saturating.
-pub(crate) fn add_cut(cell: &AtomicU32, lost: u64) {
-    let lost = u32::try_from(lost).unwrap_or(u32::MAX);
-    let _ = cell.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-        Some(n.saturating_add(lost))
-    });
-}
 
 /// Entries one block's log holds (and, per worker, one parallel block's).
 pub(crate) const LOG_CAPACITY: usize = 64;
