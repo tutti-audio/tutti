@@ -242,6 +242,15 @@ pub struct FeedbackSpec {
     pub slot: u32,
 }
 
+/// A node's declared event-input bound, as its merge holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputBound {
+    /// The most events the merged input keeps ([`Shape::event_input_capacity`]).
+    pub capacity: NonZeroU32,
+    /// The plan unit whose input it is: what is cut is charged to it.
+    pub unit: u32,
+}
+
 /// How many events one event slot holds per block, in the two currencies a
 /// plan knows: events that ports **declared**
 /// ([`Shape::event_capacity`]), and ports that declared nothing, each worth
@@ -472,8 +481,9 @@ pub enum Op {
         /// Event slot written.
         dst: u32,
         /// The node's [`Shape::event_input_capacity`] when `dst` is its
-        /// input: the merge keeps at most this many events.
-        bound: Option<NonZeroU32>,
+        /// input: the merge keeps at most this many events and charges what
+        /// it cuts to the node.
+        bound: Option<InputBound>,
     },
     /// Run a unit.
     Node {

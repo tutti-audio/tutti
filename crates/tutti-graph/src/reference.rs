@@ -1480,10 +1480,15 @@ impl<F: Float> Reference<F> {
             }
             parked = m.parked();
             if m.heading == NodeMode::Bypassed {
-                // What the node holds is closed, and nothing else reaches it.
+                // What the node holds is closed, and nothing else reaches it:
+                // at most the declared input bound of closes a block, all its
+                // inputs together, the rest staying held.
+                let mut budget = shape
+                    .event_input_capacity
+                    .map_or(usize::MAX, |n| n.get() as usize);
                 for (held, events) in m.held_in.iter_mut().zip(&mut ev_ins) {
-                    *events = held.closing(Offset::ZERO);
-                    *held = RefHeld::default();
+                    *events = held.close_upto(Offset::ZERO, budget);
+                    budget -= events.len();
                 }
             } else {
                 self.dropped += bound_all(&mut ev_ins, shape.event_input_capacity);
@@ -2333,6 +2338,20 @@ impl RefHeld {
                 None => {}
             }
         }
+    }
+
+    /// The first `max` of [`closing`](Self::closing), forgotten as taken.
+    fn close_upto(&mut self, offset: Offset, max: usize) -> Vec<Event> {
+        let mut out = self.closing(offset);
+        out.truncate(max);
+        let pedals = out.len().min(self.pedals.len());
+        for _ in 0..pedals {
+            self.pedals.pop_first();
+        }
+        for _ in pedals..out.len() {
+            self.notes.pop_first();
+        }
+        out
     }
 
     /// Pedals up, then every note off, at one offset.

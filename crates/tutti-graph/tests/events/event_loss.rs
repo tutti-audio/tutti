@@ -369,6 +369,16 @@ fn a_declared_input_bound_keeps_the_earliest_and_counts_the_rest() {
         assert_eq!(got, vec![vec![0, 0, 1, 1, 2, 2, 3, 3]; 2], "{workers}");
         assert_eq!(rig.exec.dropped_event_count(), 6, "{workers}");
         assert_eq!(rig.exec.lost_event_count(), 6, "{workers}");
+        // Every cut is the node's: charged to it, at no port.
+        let losses: Vec<EventLoss> = rig.ed.take_event_losses().collect();
+        let each = EventLoss {
+            node: NodeKey(100),
+            port: None,
+            count: 3,
+            recovered: 0,
+        };
+        assert_eq!(losses, vec![each, each], "{workers}");
+        assert_eq!(rig.ed.take_unreported_event_losses(), 0, "{workers}");
     }
 }
 
@@ -445,12 +455,12 @@ fn the_merge_slot_is_sized_to_the_smaller_of_the_bound_and_the_writers() {
     let sum = 2 * note_off_room(64) as u32;
     let (cap, bound) = sized(8);
     assert_eq!(
-        (cap.declared, cap.defaults, bound.map(|n| n.get())),
+        (cap.declared, cap.defaults, bound.map(|b| b.capacity.get())),
         (8, 0, Some(8))
     );
     let (cap, bound) = sized(10_000);
     assert_eq!(
-        (cap.declared, cap.defaults, bound.map(|n| n.get())),
+        (cap.declared, cap.defaults, bound.map(|b| b.capacity.get())),
         (sum, 0, Some(10_000))
     );
 }
@@ -578,5 +588,198 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         exec.process(BLOCK, &transport, &[], &mut []);
         assert_eq!(blocks.lock().unwrap().last().unwrap(), &[0, 1, 2, 3]);
         assert_eq!(exec.dropped_event_count(), 2, "{workers}");
+    }
+}
+
+/// A lone writer whose port cannot hold more than the bound needs no merge:
+/// the node reads the writer's own slot. A writer declaring 4 fills at most
+/// `note_off_room(4)` = 12 events; a bound of 12 leaves it be, a bound of 11
+/// puts a merge in front of the node, and so does a writer that declared
+/// nothing.
+#[test]
+fn a_lone_writer_within_the_bound_gets_no_merge() {
+    let merges = |bound: u32, cap: u32| {
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let (mut ed, mut exec) = Editor::new(prep);
+        ed.insert(
+            NodeKey(100),
+            "recorder",
+            tutti_graph::Unforkable(Recorder {
+                bound: Some(bound),
+                blocks: Arc::default(),
+            }),
+        );
+        ed.insert(
+            NodeKey(1),
+            "writer",
+            tutti_graph::Unforkable(Writer {
+                cap,
+                scripts: vec![Script { ons: 1, offs: 0 }],
+            }),
+        );
+        ed.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(100),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut {
+                node: NodeKey(1),
+                port: 0,
+            }),
+        );
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        let plan = exec.plan().expect("applied");
+        plan.ops()
+            .iter()
+            .filter(|op| matches!(op, tutti_graph::Op::EventMerge { .. }))
+            .count()
+    };
+    assert_eq!(note_off_room(4), 12);
+    assert_eq!(merges(12, 4), 0);
+    assert_eq!(merges(11, 4), 1);
+    assert_eq!(merges(1_000, 4), 0);
+}
+
+/// A replacement whose only difference is its input bound swaps in whole,
+/// not through a crossfade the plan cannot hold, and the new bound holds in
+/// the next block.
+#[test]
+fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
+        assert_eq!(rig.run(1)[0].len(), 8);
+        let fade = tutti_graph::Fade::new(Samples(100), tutti_graph::FadeLaw::EqualAmplitude);
+        rig.ed
+            .replace_or_swap(
+                NodeKey(100),
+                tutti_graph::Unforkable(Recorder {
+                    bound: Some(3),
+                    blocks: Arc::clone(&rig.blocks),
+                }),
+                fade,
+            )
+            .expect("not poisoned, not re-preparing");
+        rig.commit();
+        assert_eq!(rig.ed.fades_in_flight(), 0, "a changed bound is a swap");
+        assert_eq!(rig.run(1), vec![vec![0, 0, 1]], "{workers}");
+    }
+}
+
+/// Holds what it is sent, counting each block's events and how many are
+/// note-offs; declares `bound` and an event output so it can be bypassed.
+struct Holder {
+    bound: u32,
+    blocks: Arc<Mutex<Vec<(usize, usize)>>>,
+}
+
+impl Node for Holder {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+            .with_events(1, 1)
+            .with_event_input_capacity(self.bound)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        let evs = io.events(0);
+        let offs = evs.iter().filter(|e| e.is_note_off()).count();
+        self.blocks.lock().unwrap().push((evs.len(), offs));
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Writes `per_block[i]` note-ons of fresh keys in block `i`, then nothing.
+struct Keys {
+    per_block: Vec<u32>,
+    block: usize,
+    next: u32,
+}
+
+impl Node for Keys {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let n = self.per_block.get(self.block).copied().unwrap_or(0);
+        self.block += 1;
+        for i in 0..n {
+            let at = cx.env.offset(i as usize).expect("inside the block");
+            let _ = io
+                .event_out(0)
+                .push(Event::midi(at, Ump(note_on(self.next))));
+            self.next += 1;
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A bypassed node is sent the closes of what it holds, and a bound of 4
+/// holds those too: 10 held keys close 4, 4 and 2 in three blocks, the rest
+/// staying held rather than cut, so no loss is counted.
+#[test]
+fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let (mut ed, mut exec) = Editor::new(prep);
+        if workers > 1 {
+            exec.set_pool(Some(test_pool(workers)));
+        }
+        let blocks = Arc::default();
+        ed.insert(
+            NodeKey(100),
+            "holder",
+            tutti_graph::Unforkable(Holder {
+                bound: 4,
+                blocks: Arc::clone(&blocks),
+            }),
+        );
+        ed.insert(
+            NodeKey(1),
+            "keys",
+            tutti_graph::Unforkable(Keys {
+                per_block: vec![4, 4, 2],
+                block: 0,
+                next: 40,
+            }),
+        );
+        ed.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(100),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut {
+                node: NodeKey(1),
+                port: 0,
+            }),
+        );
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        let transport = TransportPosition::default();
+        for _ in 0..3 {
+            exec.process(BLOCK, &transport, &[], &mut []);
+        }
+        assert_eq!(*blocks.lock().unwrap(), vec![(4, 0), (4, 0), (2, 0)]);
+        blocks.lock().unwrap().clear();
+        ed.set_mode(NodeKey(100), tutti_graph::NodeMode::Bypassed)
+            .expect("a node");
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        for _ in 0..5 {
+            exec.process(BLOCK, &transport, &[], &mut []);
+        }
+        let got: Vec<(usize, usize)> = blocks
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .filter(|&(n, _)| n > 0)
+            .collect();
+        assert_eq!(got, vec![(4, 4), (4, 4), (2, 2)], "{workers}");
+        assert_eq!(exec.dropped_event_count(), 0, "{workers}");
     }
 }

@@ -58,7 +58,6 @@ mod order;
 pub(crate) mod verify;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::num::NonZeroU32;
 
 use crate::NodeKey;
 use crate::NodeMix;
@@ -69,8 +68,8 @@ use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};
 use crate::param::ParamIn;
 use crate::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
-    ZERO_SLOT,
+    GainPortOp, InputBound, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx,
+    Value, ZERO_SLOT,
 };
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
 
@@ -301,7 +300,7 @@ enum Pre {
     EventMerge {
         srcs: Vec<ERef>,
         dst: u32,
-        bound: Option<NonZeroU32>,
+        bound: Option<InputBound>,
     },
     Node {
         unit: u32,
@@ -890,7 +889,30 @@ pub fn compile(
                     }
                 });
             }
-            let merged = merge_tree(&mut em, refs, shape.event_input_capacity);
+            // A lone undelayed writer whose port cannot hold more than the
+            // bound needs no merge to keep it.
+            let within = |e: &EventEdge| match *e {
+                EventEdge::Direct(from) => {
+                    refs[..] == [ERef::Val(event_out_val[&from])]
+                        && node_shapes[dense[&from.node]]
+                            .event_capacity
+                            .is_some_and(|c| {
+                                shape.event_input_capacity.is_some_and(|b| {
+                                    crate::event::note_off_room(c.get() as usize)
+                                        <= b.get() as usize
+                                })
+                            })
+                }
+                EventEdge::Feedback { .. } => false,
+            };
+            let bound = shape
+                .event_input_capacity
+                .filter(|_| !(sources.len() == 1 && within(&sources[0])))
+                .map(|capacity| InputBound {
+                    capacity,
+                    unit: n as u32,
+                });
+            let merged = merge_tree(&mut em, refs, bound);
             event_in_val.insert(at, merged);
             ein.push(merged);
         }
@@ -1454,7 +1476,7 @@ pub fn compile(
                             ERef::Empty => EventSlotCapacity::NONE,
                         })
                     })
-                    .bounded(*bound);
+                    .bounded(bound.map(|b| b.capacity));
             }
             _ => {}
         }
@@ -2000,7 +2022,7 @@ fn sum_chain(em: &mut Emitted, refs: Vec<Addend>) -> ARef {
 /// keeps at most that many events, and a single source goes through it too:
 /// the bound holds whatever the edges are. The runs below it hold all their
 /// sources.
-fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<NonZeroU32>) -> ERef {
+fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
     match refs.len() {
         0 => ERef::Empty,
         1 if bound.is_none() || refs[0] == ERef::Empty => refs[0],

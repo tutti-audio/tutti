@@ -1151,9 +1151,10 @@ impl<'a> EventWriter<'a> {
 ///
 /// When the sources hold more than `cap`, the note-offs keep their room: the
 /// others are cut (the later ones first) so that every note-off lands, up to
-/// `cap`. Order is that of the merge either way. When they fit, which is the
-/// case by construction (a merge's slot holds all its sources), nothing but
-/// the sum of the sources' lengths is looked at.
+/// `cap`. Order is that of the merge either way. A merge slot holds all its
+/// sources unless the merge is a node's input under its declared bound
+/// (`Shape::event_input_capacity`), which is the one merge that cuts; the
+/// caller charges the returned count.
 pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize) -> u32 {
     let room = cap.saturating_sub(out.len());
     merge_walk(sources, room, |_, e| out.push(e))

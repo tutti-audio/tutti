@@ -510,14 +510,10 @@ pub(super) fn node_op_with<
     // A node declaring an input bound is sent at most that many events on its
     // inputs together, whatever the edges, flushed events and scheduled
     // commands brought: the cut is the earliest by frame, note-offs first.
-    if !discards && let Some(bound) = h.plan.units[unit as usize].shape.event_input_capacity {
+    let bound = h.plan.units[unit as usize].shape.event_input_capacity;
+    if !discards && let Some(bound) = bound {
         let (inject, events) = (&*st.inject, &*st.events);
-        let base = |port: u16| -> &[Event] {
-            inject
-                .iter()
-                .find(|i| i.live && i.unit == unit && i.port == port)
-                .map_or(&events.ev(ein[port as usize])[..], |i| &i.merged)
-        };
+        let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
         if let Some((n, lost)) = st.due.overlay_bounded(
             unit,
             ein.len(),
@@ -535,12 +531,7 @@ pub(super) fn node_op_with<
     // per port, after everything else, merged into the overlay buffer.
     if scheduled && !cut {
         let (inject, events) = (&*st.inject, &*st.events);
-        let base = |port: u16| -> &[Event] {
-            inject
-                .iter()
-                .find(|i| i.live && i.unit == unit && i.port == port)
-                .map_or(&events.ev(ein[port as usize])[..], |i| &i.merged)
-        };
+        let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
         let (n, lost) = st.due.overlay(unit, base, st.overlay, &mut views);
         n_views = n;
         st.dropped.at_node(rec.unit, lost);
@@ -551,7 +542,11 @@ pub(super) fn node_op_with<
         st.overlay.clear();
         for (port, held) in u.mode.held_in().iter_mut().enumerate() {
             let from = st.overlay.len() as u32;
-            held.drain_into(st.overlay);
+            // A node with an input bound is sent at most that many closes a
+            // block, all its inputs together; the rest stays held for the
+            // next block.
+            let budget = bound.map_or(usize::MAX, |n| n.get() as usize - st.overlay.len());
+            held.drain_upto(st.overlay, budget);
             views[n_views] = (port as u16, from, st.overlay.len() as u32);
             n_views += 1;
         }
@@ -562,14 +557,9 @@ pub(super) fn node_op_with<
         // of it. A bypass closes what is held (`mode.rs`).
         for (port, held) in u.mode.held_in().iter_mut().enumerate() {
             let view = views[..n_views].iter().find(|v| usize::from(v.0) == port);
-            let flushed = st
-                .inject
-                .iter()
-                .find(|i| i.live && i.unit == unit && usize::from(i.port) == port);
-            let events: &[Event] = match (view, flushed) {
-                (Some(&(_, a, b)), _) => &st.overlay[a as usize..b as usize],
-                (None, Some(i)) if injected => &i.merged,
-                _ => &st.events.ev(ein[port])[..],
+            let events: &[Event] = match view {
+                Some(&(_, a, b)) => &st.overlay[a as usize..b as usize],
+                None => input_events(st.inject, st.events, unit, ein[port], port as u16),
             };
             held.observe(events);
         }
@@ -675,6 +665,21 @@ pub(super) fn direct_op<
         let (ins, mut outs) = st.arena.direct::<I, O>(frames, d);
         call.process(node, &ins, &mut outs)
     });
+}
+
+/// What event input `port` of plan unit `unit` is sent before scheduled
+/// commands: the flushed events merged into its slot, or the slot `slot`.
+fn input_events<'a, E: EventSlots + ?Sized>(
+    inject: &'a [Inject],
+    events: &'a E,
+    unit: u32,
+    slot: u32,
+    port: u16,
+) -> &'a [Event] {
+    inject
+        .iter()
+        .find(|i| i.live && i.unit == unit && i.port == port)
+        .map_or(&events.ev(slot)[..], |i| &i.merged[..])
 }
 
 /// Event sources a general node call reads besides its slots: flushed

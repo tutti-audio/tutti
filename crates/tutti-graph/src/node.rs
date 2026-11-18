@@ -119,16 +119,19 @@ pub struct Shape {
     /// is sent the earliest by frame (a note-off is kept ahead of any other
     /// event while the bound has room, so an end is never what is cut), and
     /// the executor counts each event cut as it counts a full output port
-    /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).
+    /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)),
+    /// and per node ([`Editor::take_event_losses`](crate::Editor::take_event_losses)).
     /// The cut falls on the same events on the serial and the parallel
     /// executor. Each input's merge slot is sized `min(bound, what its edges
     /// can send)` on the control side, and the cut over everything is made in
     /// buffers sized at a commit, so nothing allocates on the audio thread
     /// however the edges change.
     ///
-    /// A bypassed node is sent only the closes of what it holds, which the
-    /// bound does not cover. A node that computes its bound from the block
-    /// reads it in [`Node::prepare`] ([`EventDensity`](crate::EventDensity)),
+    /// A bypassed node is sent only the closes of what it holds, at most the
+    /// bound of them a block across its inputs; the rest stays held and is
+    /// closed in the following blocks, never cut and never counted. Every cut
+    /// event is charged to the node (`EventLoss` with no port). A node that
+    /// computes its bound from the block reads it in [`Node::prepare`] ([`EventDensity`](crate::EventDensity)),
     /// as an output's capacity is.
     pub event_input_capacity: Option<NonZeroU32>,
     /// **Processing latency only** — frames the node buffers as a side effect

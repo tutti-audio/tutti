@@ -556,7 +556,7 @@ impl<F: Float> Shared<'_, '_, F> {
                     view: self.events.view(held_events),
                 };
                 let lost = event_merge_op(&self.plan.event_list[srcs.range()], dst, bound, &mut e);
-                dropped.count(lost);
+                dropped.charge_merge(bound, lost);
             }
             Op::Node { unit, .. } => {
                 let rec = &self.plan.nodes.recs[unit as usize];

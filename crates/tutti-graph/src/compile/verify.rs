@@ -909,7 +909,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 for &s in &plan.event_list[srcs.range()] {
                     need = need.plus(read_need(s, &op_need)?);
                 }
-                need.bounded(bound)
+                need.bounded(bound.map(|b| b.capacity))
             }
             _ => EventSlotCapacity::NONE,
         };

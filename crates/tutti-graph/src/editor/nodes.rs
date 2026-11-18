@@ -246,6 +246,7 @@ impl<F: Float> Editor<F> {
                 && shape.in_place == r.in_place
                 && shape.event_resolution == r.event_resolution
                 && shape.event_capacity == r.event_capacity
+                && shape.event_input_capacity == r.event_input_capacity
                 && shape.params == r.params
         });
         let unwired = self.place(key, kind, unit, wake, shape, fork);

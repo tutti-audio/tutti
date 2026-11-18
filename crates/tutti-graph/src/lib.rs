@@ -676,7 +676,8 @@ pub use param::{
 pub use pass::{Pass, PassError};
 pub use plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value, ZERO_SLOT,
+    GainPortOp, InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+    ZERO_SLOT,
 };
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};

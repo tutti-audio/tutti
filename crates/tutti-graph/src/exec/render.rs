@@ -449,7 +449,7 @@ impl<F: Float> Executor<F> {
                                 bound,
                                 &mut *st.events,
                             );
-                            st.dropped.count(lost);
+                            st.dropped.charge_merge(bound, lost);
                         }
                         Op::Node { unit, .. } => {
                             // One record per node op, lowered at compile time and
