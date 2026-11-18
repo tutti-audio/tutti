@@ -264,10 +264,7 @@ fn a_sysex_between_notes_does_not_shift_the_beat_grid() {
             RawEvent::note_on(BEAT, 0, 62, 100),
         ]],
     ));
-    let ticks: Vec<u64> = unspecified(&file.tracks()[0])
-        .iter()
-        .map(|(t, _)| t.0)
-        .collect();
+    let ticks: Vec<u64> = unspecified(&file, 0).iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 240, 480, 960]);
     assert_eq!(metrical(&file).beat_at(Tick(960)), Beat(2.0));
 }
@@ -812,7 +809,7 @@ fn a_velocity_zero_note_on_closes_the_note() {
 #[test]
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
-    assert_eq!(unspecified(&file.tracks()[0])[0].1, on(0, 60, 0));
+    assert_eq!(unspecified(&file, 0)[0].1, on(0, 60, 0));
     assert_eq!(read(&file.to_bytes()), file);
 }
 

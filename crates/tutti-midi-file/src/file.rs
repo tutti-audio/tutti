@@ -1418,11 +1418,14 @@ impl MidiFile {
     ///
     /// The file specifies its tempo and time signature (SMF 1.0 section 2.2:
     /// without them a reader assumes 120 beats a minute in 4/4): a Set Tempo
-    /// and a Time Signature that the first track of a format 0 or 1 file, or a
-    /// format 2 pattern, does not have at tick 0 are added there, after the
-    /// meta events that open the track, as 120 BPM and 4/4 with 24 clocks a
-    /// click and 8 32nd notes to the quarter. [`tracks`](Self::tracks) holds
-    /// them.
+    /// and a Time Signature that no track of a format 0 or 1 file (they share
+    /// one timeline) or that a format 2 pattern does not have at tick 0 are
+    /// added at tick 0 of the first track or of the pattern, after the meta
+    /// events that open it, as 120 BPM and 4/4 with 24 clocks a click and 8
+    /// 32nd notes to the quarter. [`tracks`](Self::tracks) holds them. A file
+    /// in SMPTE time gets them too, where they are inert. A format above 2
+    /// cannot be authored; a read treats it as format 2, each track its own
+    /// pattern, as SMF 1.0 section 2.1 lets a reader.
     #[must_use = "an Err means no file was built"]
     pub fn smf(division: SmfDivision, layout: Layout) -> Result<Self, TracksError> {
         let (format, tracks, openings, copyright) = layout.into_parts();
@@ -1794,9 +1797,11 @@ impl MidiFile {
     /// here. Section 2.2 asks every file to specify its tempo and time
     /// signature ("All MIDI Files should specify tempo and time signature. If
     /// they don't, the time signature is assumed to be 4/4, and the tempo 120
-    /// beats per minute"), so a read adds the ones the first track of a format
-    /// 0 or 1 file, or a format 2 pattern, lacks at tick 0
-    /// ([`Normalized::DefaultTempo`], [`Normalized::DefaultTimeSignature`]).
+    /// beats per minute"), so a read adds the ones that no track of a format 0 or
+    /// 1 file, or that a format 2 pattern (or a track of a format above 2),
+    /// lacks at tick 0 ([`Normalized::DefaultTempo`],
+    /// [`Normalized::DefaultTimeSignature`]), in an SMPTE division too, where
+    /// they are inert.
     #[must_use]
     pub fn normalized(&self) -> &[Normalized] {
         &self.normalized
@@ -2513,31 +2518,37 @@ fn check_smf(format: SmfFormat, tracks: &[Track]) -> Result<(), TracksError> {
     Ok(())
 }
 
-/// Gives the tracks that hold the tempo map (a format 0 file's track, a format 1
-/// file's first track) or a timeline of their own (each track of a format 2 file
-/// or above) the Set Tempo and Time Signature SMF 1.0 section 2.2 asks every
-/// file to specify, at tick 0 after the meta events that open the track,
-/// unless the track has one there already. What it adds is what a reader
-/// assumes without them (120 beats a minute in 4/4, the Time Signature
-/// example's 24 clocks a click and 8 32nd notes to the quarter), so the file
-/// plays as it did. Returns what it added.
+/// Gives each timeline the Set Tempo and Time Signature SMF 1.0 section 2.2 asks
+/// every file to specify, at tick 0 of the timeline's first track after the
+/// meta events that open it, unless a track of the timeline has one there
+/// already. A timeline is all the tracks of a format 0 or 1 file, which share
+/// one, and each track of any other format (a format above 2 is read as format
+/// 2, each track its own pattern, as section 2.1 lets a reader do). What it
+/// adds is what a reader assumes without them (120 beats a minute in 4/4, the
+/// Time Signature example's 24 clocks a click and 8 32nd notes to the
+/// quarter), so the file plays as it did. In an SMPTE division they are as
+/// inert as any other tempo. Returns what it added.
 fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Normalized> {
-    let holders = if format.shares_timeline() {
-        1
+    let timelines: Vec<std::ops::Range<usize>> = if format.shares_timeline() {
+        std::iter::once(0..tracks.len()).collect()
     } else {
-        tracks.len()
+        (0..tracks.len()).map(|i| i..i + 1).collect()
     };
     let mut added = Vec::new();
-    for (index, track) in tracks.iter_mut().take(holders).enumerate() {
+    for timeline in timelines {
+        let first = timeline.start;
         let has = |wanted: fn(&Meta) -> bool| {
-            track.events.iter().any(|(tick, event)| {
-                *tick == Tick(0) && matches!(event, FileEvent::Meta(meta) if wanted(meta))
+            tracks[timeline.clone()].iter().any(|track| {
+                track.events.iter().any(|(tick, event)| {
+                    *tick == Tick(0) && matches!(event, FileEvent::Meta(meta) if wanted(meta))
+                })
             })
         };
         let tempo = !has(|m| matches!(m, Meta::Tempo { .. }));
         let meter = !has(|m| matches!(m, Meta::TimeSignature { .. }));
         // After the meta events that open the track, so a Sequence Number
         // or a track-opening text stays first.
+        let track = &mut tracks[first];
         let lead = track
             .events
             .iter()
@@ -2551,10 +2562,10 @@ fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Norma
             track.events.insert(lead + offset, (Tick(0), meta.into()));
         }
         if tempo {
-            added.push(Normalized::DefaultTempo { track: index });
+            added.push(Normalized::DefaultTempo { track: first });
         }
         if meter {
-            added.push(Normalized::DefaultTimeSignature { track: index });
+            added.push(Normalized::DefaultTimeSignature { track: first });
         }
     }
     added
@@ -2647,8 +2658,9 @@ fn tempo_map(
     ticks_per_quarter: TicksPerQuarterNote,
     tracks: &[Track],
 ) -> Result<Arc<TempoMap>, tutti_tempo::TempoError> {
-    // The MIDI default, which a file that sets none at its start plays at.
-    let default = Bpm::of(120.0);
+    // The default, which a timeline with no valid Set Tempo at its start plays
+    // at: a Clip File with none, or a Set Tempo of zero.
+    let default = DEFAULT_TEMPO;
     let mut changes: Vec<(Tick, Bpm)> = Vec::new();
     for track in tracks {
         // A Clip File's header Set Tempo counts from the start of the

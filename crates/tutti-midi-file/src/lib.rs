@@ -42,11 +42,13 @@
 //!   [`MidiFile::normalized`].
 //!   SMF 1.0 section 2.2 asks every file to specify its tempo and time
 //!   signature, so a file is never without them: [`MidiFile::smf`] and a read
-//!   give the track that holds the tempo map (format 0's, format 1's first) or
-//!   each format 2 pattern a Set Tempo and a Time Signature at tick 0 when it
-//!   has none, the 120 beats a minute in 4/4 a reader assumes without them. A
-//!   read lists each one it added ([`Normalized::DefaultTempo`],
-//!   [`Normalized::DefaultTimeSignature`]).
+//!   add a Set Tempo and a Time Signature at tick 0 of the first track of a
+//!   format 0 or 1 file (its tracks share one timeline, so one in any track
+//!   counts) or of each format 2 pattern, when it has none, the 120 beats a
+//!   minute in 4/4 a reader assumes without them. A format above 2 is read as
+//!   format 2, each track its own pattern (section 2.1). An SMPTE division gets
+//!   them too, where they are inert. A read lists each one it added
+//!   ([`Normalized::DefaultTempo`], [`Normalized::DefaultTimeSignature`]).
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: [`MidiFile::timebase`] gives it
 //!   [`MetricalSequences`] (or [`SmpteSequences`]), whose sequences each have
