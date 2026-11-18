@@ -148,7 +148,6 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
             }
             if report.passed() { Ok(()) } else { Err(1) }
         }
-        Step::DocFeatures => doc_features(ctx),
         Step::Package => package(ctx),
         Step::FuzzList => {
             for t in fuzz_targets(ctx)? {
@@ -226,38 +225,6 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
             }
         }
     }
-}
-
-/// `cargo doc` for each member's features together and the listed crates'
-/// features alone, every one attempted; the failures are named together at
-/// the end.
-fn doc_features(ctx: &Ctx) -> Result<(), u8> {
-    let tree = gates::RealTree {
-        root: ctx.root.clone(),
-    };
-    let (runs, errors) = gates::doc_runs(&tree);
-    let flags = std::env::var("RUSTDOCFLAGS").ok();
-    let mut failed = Vec::new();
-    for r in &runs {
-        println!("{}", r.heading());
-        let c = r.command(flags.as_deref());
-        match command(&c, ctx).status() {
-            Ok(s) if s.success() => {}
-            Ok(_) => failed.push(r.label()),
-            Err(e) => return Err(spawn_failed(&c, &e)),
-        }
-    }
-    if !errors.is_empty() {
-        for e in &errors {
-            eprintln!("{e}");
-        }
-        return Err(1);
-    }
-    if failed.is_empty() {
-        return Ok(());
-    }
-    eprintln!("FAIL: rustdoc failed for: {}", failed.join(" "));
-    Err(1)
 }
 
 /// `umbrella-api [<dir>]`: the unnameable types of what the umbrella exports and
