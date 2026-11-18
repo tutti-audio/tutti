@@ -41,7 +41,7 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_units::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
+use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -463,13 +463,13 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// A take is typed over the unit `U` of the value it records, which is the unit
 /// of the target it is opened on.
 #[derive(Debug)]
-pub struct AutomationTake<U: Unit<Raw = f64> + Send + Sync> {
+pub struct AutomationTake<U: crate::Scalar> {
     recorder: Recorder<U>,
     touched: bool,
     closed: bool,
 }
 
-impl<U: Unit<Raw = f64> + Send + Sync> AutomationTake<U> {
+impl<U: crate::Scalar> AutomationTake<U> {
     /// A take recording into `recorder` (a fresh one, or
     /// `Recorder::overdub` over the lane's trajectory).
     #[must_use]
@@ -533,7 +533,7 @@ trait OpenTake: std::fmt::Debug + Send {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-impl<U: Unit<Raw = f64> + Send + Sync + 'static> OpenTake for AutomationTake<U> {
+impl<U: crate::Scalar> OpenTake for AutomationTake<U> {
     fn is_done(&mut self) -> bool {
         AutomationTake::is_done(self)
     }
@@ -1631,10 +1631,7 @@ impl Mods<'_> {
         &mut self,
         target: T,
         take: AutomationTake<T::Unit>,
-    ) -> Result<(), NoAutomation>
-    where
-        T::Unit: Unit<Raw = f64> + Send + Sync + 'static,
-    {
+    ) -> Result<(), NoAutomation> {
         let target = target.into();
         let key = self.own.key_of(target);
         match self.own.automation.get_mut(&key) {
@@ -1649,10 +1646,7 @@ impl Mods<'_> {
     /// The open take on `target`, to feed its recorder; `None` when no take is
     /// open on it. A take is opened only through [`record`](Self::record), whose
     /// take is in the target's own unit, so the take read back is in that unit.
-    pub fn take_mut<T: Ranged>(&mut self, target: T) -> Option<&mut AutomationTake<T::Unit>>
-    where
-        T::Unit: Unit<Raw = f64> + Send + Sync + 'static,
-    {
+    pub fn take_mut<T: Ranged>(&mut self, target: T) -> Option<&mut AutomationTake<T::Unit>> {
         let key = self.own.key_of(target.into());
         self.own
             .automation
