@@ -19,7 +19,6 @@ crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  not-interleave:
 crates/tutti-engine/src/callback.rs::OutputBlock::render_unguarded  pending
 crates/tutti-engine/src/manual.rs::ManualStream::render_block_inner  pending
 crates/tutti-engine/src/timer.rs::TimerDriver::open  pending
-crates/tutti-export/src/encode/mod.rs::replay_through  pending
 crates/tutti-export/src/render/outputs.rs::open_lanes  pending
 crates/tutti-export/src/spill.rs::SpillReplay::fill  pending
 crates/tutti-graph/src/arena.rs::Arena::leading_mut  pending

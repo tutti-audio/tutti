@@ -1,29 +1,21 @@
 use super::*;
-
-const LSB16: Amplitude = Amplitude(1.0 / 32768.0);
-
-fn triangular() -> Option<DitherSpec> {
-    Some(DitherSpec {
-        shape: DitherShape::Triangular,
-        lsb: LSB16,
-    })
-}
+use tutti_buffers::I24;
 
 /// Collects what reaches it, and refuses on demand.
 #[derive(Default)]
-struct Collect {
-    got: Vec<f32>,
+struct Collect<S> {
+    got: Vec<S>,
     writes: usize,
     refuse_after: Option<usize>,
 }
 
-impl Sink for Collect {
-    type Sample = f32;
+impl<S: Sample> Sink for Collect<S> {
+    type Sample = S;
     type Error = std::io::Error;
     fn layout(&self) -> ChannelLayout {
         ChannelLayout::STEREO
     }
-    fn write(&mut self, block: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
+    fn write(&mut self, block: Interleaved<'_, S>) -> Result<(), SinkFailed> {
         if self.refuse_after.is_some_and(|n| self.writes >= n) {
             return Err(SinkFailed);
         }
@@ -36,7 +28,7 @@ impl Sink for Collect {
     }
 }
 
-fn stereo(samples: &[f32]) -> Interleaved<'_, f32> {
+fn stereo<F: Float>(samples: &[F]) -> Interleaved<'_, F> {
     Interleaved::new(samples, ChannelLayout::STEREO).unwrap()
 }
 
@@ -44,33 +36,68 @@ fn signal(n: usize) -> Vec<f32> {
     (0..n).map(|i| ((i % 97) as f32 / 97.0) - 0.5).collect()
 }
 
-/// TPDF is `r1 - r2` with both draws in `[0, 1]`: at most one LSB either way,
-/// whatever the signal. One f32 rounding of the sum is allowed on top.
-#[test]
-fn the_noise_added_is_within_one_lsb() {
-    let input = signal(4096 * 2);
-    let mut sink = DitherSink::new(Collect::default(), triangular());
-    sink.write(stereo(&input)).unwrap();
-    let out = sink.into_inner().got;
-    let mut widest = 0.0f32;
-    for (o, i) in out.iter().zip(&input) {
-        let d = (o - i).abs();
-        assert!(d <= LSB16.0 + 1e-7, "|{o} - {i}| = {d} exceeds one LSB");
-        widest = widest.max(d);
-    }
-    assert!(widest > 0.5 * LSB16.0, "the range is used, widest {widest}");
+fn tpdf_i16() -> DitherSink<Collect<i16>, f32> {
+    DitherSink::new(Collect::default(), Some(DitherShape::Triangular))
 }
 
-/// `None` hands the block on untouched, in one write.
+/// One LSB is `2^-(bits - 1)`, from the format's step: 16 bit is 2^-15, 24 bit
+/// is 2^-23, and a float format has none.
 #[test]
-fn without_a_spec_it_is_the_identity() {
-    let input = signal(3000 * 2);
-    let mut sink = DitherSink::new(Collect::default(), None);
-    assert!(sink.is_identity());
-    sink.write(stereo(&input)).unwrap();
-    let inner = sink.into_inner();
-    assert_eq!(inner.got, input);
-    assert_eq!(inner.writes, 1, "uncopied and unsplit");
+fn the_lsb_is_the_step_of_the_integer_format() {
+    assert_eq!(lsb_of::<i16>().0, 1.0 / 32768.0);
+    assert_eq!(lsb_of::<I24>().0, 1.0 / 8_388_608.0);
+    assert_eq!(lsb_of::<f32>(), Amplitude::SILENT);
+}
+
+/// A full-scale square, undithered into i16: `+1.0` clips to `MAX` and `-1.0`
+/// is `MIN`, as the rule in `Sample` says, and the stage counts exactly the
+/// values at or above `+1.0`, across chunks.
+#[test]
+fn a_full_scale_square_into_i16_is_max_or_min_and_counts_its_positive_peaks() {
+    let frames = 3 * 1024 + 17;
+    let square: Vec<f32> = (0..frames * 2)
+        .map(|i| if (i / 2) % 8 < 4 { 1.0 } else { -1.0 })
+        .collect();
+    let positive = square.iter().filter(|&&s| s >= 1.0).count() as u64;
+    let mut sink = DitherSink::<_, f32>::new(Collect::<i16>::default(), None);
+    sink.write(stereo(&square)).unwrap();
+    assert_eq!(sink.clipped(), positive);
+    let got = sink.into_inner().got;
+    assert_eq!(got.len(), square.len());
+    for (out, s) in got.iter().zip(&square) {
+        assert_eq!(*out, if *s >= 1.0 { 32767 } else { -32768 });
+    }
+}
+
+/// `32767/32768` is the top step, not a clip; NaN reads as 0 and is not a clip.
+#[test]
+fn the_top_step_and_a_nan_are_not_clips() {
+    let block = [32767.0 / 32768.0, f32::NAN, 0.0, -1.0];
+    let mut sink = DitherSink::<_, f32>::new(Collect::<i16>::default(), None);
+    sink.write(stereo(&block)).unwrap();
+    assert_eq!(sink.clipped(), 0);
+    assert_eq!(sink.into_inner().got, [32767, 0, 0, -32768]);
+}
+
+/// TPDF is `r1 - r2`, within one LSB, so a silent block rounds to -1, 0 or 1
+/// and never strays past 2 LSB; its mean over many blocks is 0. The rounded
+/// noise has the TPDF variance `lsb^2/6` plus the rounding's `lsb^2/12`, which
+/// is `1/4` in LSBs squared, so the mean of `n` samples is within six standard
+/// deviations, `6 * sqrt(1 / (4 n))`.
+#[test]
+fn tpdf_on_silence_stays_within_two_lsb_and_averages_to_zero() {
+    let silence = vec![0.0f32; 4096 * 2];
+    let mut sink = tpdf_i16();
+    for _ in 0..64 {
+        sink.write(stereo(&silence)).unwrap();
+    }
+    let got = sink.into_inner().got;
+    assert!(got.iter().all(|v| v.abs() <= 2), "past 2 LSB");
+    assert!(got.iter().any(|&v| v != 0), "the noise is audible");
+    let n = got.len() as f64;
+    let mean = got.iter().map(|&v| f64::from(v)).sum::<f64>() / n;
+    let bound = 6.0 * (0.25 / n).sqrt();
+    assert!(mean.abs() <= bound, "mean {mean} past {bound}");
 }
 
 /// Frames in are frames out: a block longer than the scratch is split but
@@ -78,9 +105,8 @@ fn without_a_spec_it_is_the_identity() {
 #[test]
 fn frames_in_are_frames_out() {
     for frames in [0usize, 1, 1023, 1024, 1025, 5000] {
-        let input = signal(frames * 2);
-        let mut sink = DitherSink::new(Collect::default(), triangular());
-        sink.write(stereo(&input)).unwrap();
+        let mut sink = tpdf_i16();
+        sink.write(stereo(&signal(frames * 2))).unwrap();
         assert_eq!(sink.into_inner().got.len(), frames * 2, "frames {frames}");
     }
 }
@@ -90,25 +116,36 @@ fn frames_in_are_frames_out() {
 #[test]
 fn the_noise_continues_across_writes() {
     let input = signal(3000 * 2);
-    let mut whole = DitherSink::new(Collect::default(), triangular());
+    let mut whole = tpdf_i16();
     whole.write(stereo(&input)).unwrap();
-    let mut cut = DitherSink::new(Collect::default(), triangular());
+    let mut cut = tpdf_i16();
     for piece in input.chunks(2 * 700 + 2) {
         cut.write(stereo(piece)).unwrap();
     }
     assert_eq!(whole.into_inner().got, cut.into_inner().got);
 }
 
+/// An f64 signal runs the same stage into i24, whose full-scale step is 2^-23.
+#[test]
+fn an_f64_signal_converts_into_i24_by_the_rule() {
+    let block = [0.5f64, -0.5, 1.0, -1.0];
+    let mut sink = DitherSink::<_, f64>::new(Collect::<I24>::default(), None);
+    sink.write(stereo(&block)).unwrap();
+    assert_eq!(sink.clipped(), 1);
+    let got: Vec<i32> = sink.into_inner().got.iter().map(|v| v.get()).collect();
+    assert_eq!(got, [4_194_304, -4_194_304, 8_388_607, -8_388_608]);
+}
+
 /// The inner sink's refusal passes through, and so does its finalize.
 #[test]
 fn the_inner_sinks_errors_pass_through() {
-    let inner = Collect {
+    let inner = Collect::<i16> {
         refuse_after: Some(0),
         ..Collect::default()
     };
-    let mut sink = DitherSink::new(inner, triangular());
+    let mut sink = DitherSink::<_, f32>::new(inner, Some(DitherShape::Triangular));
     assert_eq!(sink.write(stereo(&signal(8))), Err(SinkFailed));
-    let mut open = DitherSink::new(Collect::default(), None);
+    let mut open = DitherSink::<_, f32>::new(Collect::<i16>::default(), None);
     assert_eq!(open.write(stereo(&signal(8))), Ok(()));
     let err = open.finalize().unwrap_err();
     assert_eq!(err.to_string(), "inner finalize");
@@ -119,8 +156,8 @@ fn the_inner_sinks_errors_pass_through() {
 #[test]
 fn a_view_of_the_wrong_width_fails_the_write() {
     let mono = Interleaved::new(&[0.0f32; 8], ChannelLayout::MONO).unwrap();
-    for spec in [triangular(), None] {
-        let mut sink = DitherSink::new(Collect::default(), spec);
+    for shape in [Some(DitherShape::Triangular), None] {
+        let mut sink = DitherSink::<_, f32>::new(Collect::<i16>::default(), shape);
         assert_eq!(sink.write(mono), Err(SinkFailed));
         assert_eq!(sink.into_inner().writes, 0);
     }

@@ -3,31 +3,34 @@
 
 use crate::Result;
 use tutti_buffers::{
-    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, deinterleave, interleave,
+    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, Sample, deinterleave, interleave,
 };
 use tutti_types::{ChannelLayout, Samples};
 
-/// Deinterleaves `block` into `planes`, each sized to the block's frames (a
-/// plane grows only past its capacity).
-pub(crate) fn split(block: Interleaved<'_>, planes: &mut [Vec<f32>]) -> Result<()> {
+/// Deinterleaves `block` into `planes`, converting to the planes' format, each
+/// plane sized to the block's frames (a plane grows only past its capacity).
+pub(crate) fn split<A: Sample, B: Sample>(
+    block: Interleaved<'_, A>,
+    planes: &mut [Vec<B>],
+) -> Result<()> {
     for plane in planes.iter_mut() {
         plane.clear();
-        plane.resize(block.frames().get(), 0.0);
+        plane.resize(block.frames().get(), B::SILENCE);
     }
     deinterleave(block, PlanesMut::from_vecs(planes)?)?;
     Ok(())
 }
 
-/// Interleaves `planes` into `staging`, which is resized to hold exactly
-/// them. No planes interleave to no frames.
-pub(crate) fn join(
-    planes: &[Vec<f32>],
-    staging: &mut Vec<f32>,
+/// Interleaves `planes` into `staging`, converting to its format; `staging` is
+/// resized to hold exactly them. No planes interleave to no frames.
+pub(crate) fn join<A: Sample, B: Sample>(
+    planes: &[Vec<A>],
+    staging: &mut Vec<B>,
     layout: ChannelLayout,
 ) -> Result<()> {
     let frames = Samples(planes.first().map_or(0, Vec::len));
     staging.clear();
-    staging.resize(layout.interleaved_len(frames), 0.0);
+    staging.resize(layout.interleaved_len(frames), B::SILENCE);
     if planes.is_empty() {
         return Ok(());
     }
@@ -45,7 +48,7 @@ pub(crate) fn join(
 ///
 /// [`BufferError::WidthMismatch`] when `planes` is not as wide as `block`;
 /// nothing is appended.
-pub(crate) fn append(block: Interleaved<'_>, planes: &mut [Vec<f32>]) -> Result<()> {
+pub(crate) fn append<S: Sample>(block: Interleaved<'_, S>, planes: &mut [Vec<S>]) -> Result<()> {
     if planes.len() != block.channels() {
         return Err(BufferError::WidthMismatch {
             src: block.layout(),
