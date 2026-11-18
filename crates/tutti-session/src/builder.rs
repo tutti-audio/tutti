@@ -110,7 +110,7 @@ struct Options<F: Float> {
     host: tutti_cpal::AudioHost,
     /// Where the session's inputs open, if not the sound card
     /// ([`input_opener`](Self::input_opener)).
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     input_opener: Option<Box<dyn crate::InputOpener<F>>>,
     render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
@@ -157,7 +157,7 @@ impl<F: Float> Default for Options<F> {
             render_workers: Workers::SERIAL,
             #[cfg(feature = "device")]
             host: tutti_cpal::AudioHost::Default,
-            #[cfg(all(feature = "device", feature = "audio-io"))]
+            #[cfg(feature = "capture")]
             input_opener: None,
             render_worker_start: None,
             #[cfg(feature = "midi-hardware")]
@@ -601,13 +601,13 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
                 audio_engine.latency(),
             ));
         session.transport_handle.set_clock(clock);
-        #[cfg(feature = "audio-io")]
+        #[cfg(feature = "capture")]
         session.inputs.set_output_latency(audio_engine.latency());
         let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
         start(&mut audio_engine, Arc::clone(&state))?;
-        #[cfg(feature = "audio-io")]
+        #[cfg(feature = "capture")]
         let input_latency = session.inputs.latency();
-        #[cfg(not(feature = "audio-io"))]
+        #[cfg(not(feature = "capture"))]
         let input_latency = Arc::default();
         let device = crate::Device::new(
             tutti_cpal::TuttiDriver::new(audio_engine, state),
@@ -630,7 +630,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The platform audio host the output device and every input the session
-    /// opens (`Session::add_input`, feature `audio-io`) go through.
+    /// opens (`Session::add_input`, feature `capture`) go through.
     /// Default [`AudioHost::Default`](tutti_cpal::AudioHost::Default); asking for
     /// one this build cannot reach (JACK without the `jack` feature, or with
     /// no server running) is refused when the device opens, as
@@ -707,7 +707,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Opens the session's inputs ([`Session::add_input`]) through `opener`
     /// instead of the sound card: a test's own capture, with no device.
-    #[cfg(all(feature = "device", feature = "audio-io", feature = "testing"))]
+    #[cfg(all(feature = "capture", feature = "testing"))]
     #[must_use]
     pub fn input_opener(mut self, opener: impl crate::InputOpener<C::Float> + 'static) -> Self {
         self.opts.input_opener = Some(Box::new(opener));
@@ -726,7 +726,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), so a spawner that
     /// refuses work loses none silently.
     ///
-    /// A recording take (`Session::record`, feature `audio-io`) holds one job for the whole take:
+    /// A recording take (`Session::record`, feature `capture`) holds one job for the whole take:
     /// over a bounded pool with no worker free it does not start until one is.
     ///
     /// ```
@@ -1018,7 +1018,7 @@ impl<C: Clock> SessionBuilder<C> {
             output_listing: None,
             #[cfg(feature = "device")]
             outputs_listed: false,
-            #[cfg(all(feature = "device", feature = "audio-io"))]
+            #[cfg(feature = "capture")]
             inputs: crate::input::Inputs::new(self.opts.host, self.opts.input_opener.take()),
             #[cfg(feature = "plugin")]
             snapshot_interval: self.opts.snapshot_interval,
