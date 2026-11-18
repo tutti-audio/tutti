@@ -115,3 +115,94 @@ fn trips_count_the_echoes_to_the_floor_in_decibels() {
     assert_eq!(taps::trips(0.5, Db(-120.0)), 20.0);
     assert_eq!(taps::trips(0.0, Db(-60.0)), 0.0);
 }
+
+/// A line in `f64` returns the 29-bit signal `d` frames later exactly at every mode and
+/// every whole delay, across the wrap.
+#[test]
+fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    const MAX: usize = 6;
+    let signal = wide_signal(4 * MAX + 1);
+    for mode in [
+        InterpolationMode::None,
+        InterpolationMode::Linear,
+        InterpolationMode::CubicHermite,
+    ] {
+        for d in 0..=MAX {
+            let mut line = DelayLine::<f64>::new(Samples(MAX));
+            let got: Vec<f64> = signal
+                .iter()
+                .map(|&x| {
+                    line.push_sample(x);
+                    line.read_sample(d as f64, mode)
+                })
+                .collect();
+            let want: Vec<f64> = (0..signal.len())
+                .map(|i| if i >= d { signal[i - d] } else { 0.0 })
+                .collect();
+            assert_close_f64(&got, &want, 0.0);
+        }
+    }
+}
+
+/// A feedback-free `delay_step` of `d` frames in `f64` returns the wide input `d` frames
+/// later exactly.
+#[test]
+fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    const D: usize = 4;
+    let signal = wide_signal(20);
+    let mut line = DelayLine::<f64>::new(Samples(8));
+    let got: Vec<f64> = signal
+        .iter()
+        .map(|&x| delay_step(&mut line, x, D as f64, 0.0, InterpolationMode::Linear))
+        .collect();
+    let want: Vec<f64> = (0..signal.len())
+        .map(|i| if i >= D { signal[i - D] } else { 0.0 })
+        .collect();
+    assert_close_f64(&got, &want, 0.0);
+}
+
+/// A feedback `delay_step` in `f64` with `fb = 0.3` (not an `f32` value) follows the
+/// recursion `w[n] = x[n] + fb * w[n - d]`, output `w[n - d]`, to `2^-50`: an `f32`
+/// feedback misses it by about `1e-9`.
+#[test]
+fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    const D: usize = 4;
+    const FB: f64 = 0.3;
+    let signal = wide_signal(40);
+    let mut line = DelayLine::<f64>::new(Samples(8));
+    let got: Vec<f64> = signal
+        .iter()
+        .map(|&x| delay_step(&mut line, x, D as f64, FB, InterpolationMode::Linear))
+        .collect();
+    let mut w = vec![0.0_f64; signal.len()];
+    for n in 0..signal.len() {
+        w[n] = signal[n] + if n >= D { FB * w[n - D] } else { 0.0 };
+    }
+    let want: Vec<f64> = (0..signal.len())
+        .map(|n| if n >= D { w[n - D] } else { 0.0 })
+        .collect();
+    assert_close_f64(&got, &want, 2f64.powi(-50));
+}
+
+/// A linear read at `100000.3` frames on a long `f64` line is the lerp of its two
+/// wide slots at the `f64` fraction, to `2^-45`.
+#[test]
+fn an_f64_line_read_at_a_wide_position_is_the_lerp_of_the_wide_slots() {
+    use tutti_fixtures::signal::wide_signal;
+    const N: usize = 200_000;
+    let signal = wide_signal(N);
+    let mut line = DelayLine::<f64>::new(Samples(N));
+    signal.iter().for_each(|&x| line.push_sample(x));
+    let pos = 100_000.3_f64;
+    let frac = pos - 100_000.0;
+    let (a, b) = (signal[N - 1 - 100_000], signal[N - 1 - 100_001]);
+    let want = a + frac * (b - a);
+    let got = line.read_sample(pos, InterpolationMode::Linear);
+    assert!(
+        (got - want).abs() <= 2f64.powi(-45),
+        "got {got} want {want}"
+    );
+}

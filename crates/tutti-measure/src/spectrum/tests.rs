@@ -273,11 +273,9 @@ fn averaging_converges_to_the_mean_noise_power() {
             / picked.len() as f64;
         stats.push(mean / want);
     }
-    let alpha = f64::from(
-        Ballistics::new(tau, tau)
-            .expect("a valid time")
-            .coeff_over(true, plan(&cfg).geometry.frame_interval()),
-    );
+    let alpha = Ballistics::new(tau, tau)
+        .expect("a valid time")
+        .coeff_over(true, plan(&cfg).geometry.frame_interval());
     let b = picked.len() as f64;
     let rel_sigma = (alpha / (2.0 - alpha) / b).sqrt();
     let last = *stats.last().unwrap();

@@ -203,7 +203,7 @@ impl LoadRecorder {
         } else {
             // Exact exponential smoothing over audio time, so the mean's
             // response does not depend on the block size.
-            let a = LOAD_MEAN_TIME_CONSTANT.one_pole_coeff_over(budget);
+            let a = LOAD_MEAN_TIME_CONSTANT.one_pole_coeff_over(budget) as f32;
             let m = c.mean.load(Ordering::Relaxed);
             m + a * (load - m)
         };

@@ -7,13 +7,19 @@ fn pair(attack: f64, release: f64) -> Ballistics {
 }
 
 /// The coefficients are `1 - exp(-1 / (t * rate))`, the one-pole step that closes `1 - 1/e`
-/// of the gap in `t` seconds, pinned against the closed form.
+/// of the gap in `t` seconds, pinned against the closed form to `1e-15` relative; narrowed
+/// once they are the closed form's `f32`.
 #[test]
 fn coeffs_are_one_minus_exp_of_minus_one_over_time_times_rate() {
     let (attack, release) = pair(0.01, 0.1).coeffs(SampleRate::of(RATE));
-    let closed = |t: f64| (1.0 - (-1.0 / (t * RATE)).exp()) as f32;
-    assert!((attack - closed(0.01)).abs() < 1e-9, "{attack}");
-    assert!((release - closed(0.1)).abs() < 1e-9, "{release}");
+    let closed = |t: f64| 1.0 - (-1.0 / (t * RATE)).exp();
+    assert!(((attack - closed(0.01)) / attack).abs() < 1e-15, "{attack}");
+    assert!(
+        ((release - closed(0.1)) / release).abs() < 1e-15,
+        "{release}"
+    );
+    assert_eq!(attack as f32, closed(0.01) as f32);
+    assert_eq!(release as f32, closed(0.1) as f32);
 }
 
 /// A step of one sample of audio time is the per-sample coefficient.
@@ -32,8 +38,8 @@ fn coeff_over_one_sample_is_the_coefficient_at_that_rate() {
 fn coeff_over_one_time_constant_closes_one_minus_inverse_e() {
     let b = pair(0.01, 0.1);
     let want = 1.0 - (-1.0f64).exp();
-    assert!((f64::from(b.coeff_over(true, Seconds(0.01))) - want).abs() < 1e-6);
-    assert!((f64::from(b.coeff_over(false, Seconds(0.1))) - want).abs() < 1e-6);
+    assert!((b.coeff_over(true, Seconds(0.01)) - want).abs() < 1e-6);
+    assert!((b.coeff_over(false, Seconds(0.1)) - want).abs() < 1e-6);
 }
 
 /// The convention: an instant (zero) time is coefficient 1, closing the whole gap, and a

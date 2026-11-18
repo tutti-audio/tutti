@@ -38,13 +38,13 @@ const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
 
 /// A delay line of `frames` and the slack that keeps a modulated read inside it.
-fn line(frames: Samples) -> DelayRing {
+fn line(frames: Samples) -> DelayRing<f32> {
     DelayRing::new(frames.get() + SLACK)
 }
 
 /// A lattice of coefficient `g` over `line` at `delay` frames: `x` in, `y` out.
 #[inline]
-fn lattice(line: &mut DelayRing, x: f32, g: f32, delay: f32) -> f32 {
+fn lattice(line: &mut DelayRing<f32>, x: f32, g: f32, delay: f32) -> f32 {
     let z = line.at(delay);
     let v = x + g * z;
     line.put(v);
@@ -169,10 +169,10 @@ struct TapAt {
 /// The state of one tank half.
 #[derive(Clone, Debug)]
 struct Half {
-    modulated: DelayRing,
-    delay1: DelayRing,
-    lattice2: DelayRing,
-    delay2: DelayRing,
+    modulated: DelayRing<f32>,
+    delay1: DelayRing<f32>,
+    lattice2: DelayRing<f32>,
+    delay2: DelayRing<f32>,
     /// The damping low-pass's output.
     damped: f32,
 }
@@ -200,10 +200,10 @@ pub struct PlateBank {
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: Samples,
-    pre: DelayRing,
+    pre: DelayRing<f32>,
     /// The bandwidth low-pass's output.
     bandwidth: f32,
-    input: [DelayRing; 4],
+    input: [DelayRing<f32>; 4],
     halves: [Half; 2],
     /// The phase of the modulation, in turns.
     phase: f64,

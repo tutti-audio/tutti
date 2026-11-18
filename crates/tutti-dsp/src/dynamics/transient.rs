@@ -118,8 +118,8 @@ fn gain_db(fast: Amplitude, slow: Amplitude, attack: Db, sustain: Db) -> Db {
 /// format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct TransientBank {
-    fast: Follower,
-    slow: Follower,
+    fast: Follower<f32>,
+    slow: Follower<f32>,
     /// The fast and the slow envelope, both at 0 until a level is heard.
     envelopes: (Amplitude, Amplitude),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].

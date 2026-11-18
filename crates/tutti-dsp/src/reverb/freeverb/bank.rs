@@ -293,7 +293,7 @@ impl FreeverbBank {
 
 #[derive(Debug, Clone)]
 struct CombFilter {
-    buffer: DelayRing,
+    buffer: DelayRing<f32>,
     filter_store: f32,
 
     feedback: f32,
@@ -331,7 +331,7 @@ impl CombFilter {
 
 #[derive(Debug, Clone)]
 struct AllPassFilter {
-    buffer: DelayRing,
+    buffer: DelayRing<f32>,
 
     feedback: f32,
 }

@@ -2,11 +2,11 @@
 //! an impulse, the level readings [`peak`], [`peak_planes`], [`rms`] and
 //! [`rms_f64`], the bit patterns of a render ([`bits`]), the impulse responses
 //! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
-//! [`read_wav_f32`]).
+//! [`read_wav_f32`]), and the narrowing check [`wide_signal`] with [`assert_close_f64`].
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
-//! this crate's root. Every figure here is plain
-//! `f32` samples; only the arguments that name a quantity are units.
+//! this crate's root. The figures are plain `f32` samples, except the `f64` narrowing
+//! check's; only the arguments that name a quantity are units.
 //!
 //! These are definitions, not references: a test pins an analytic figure with
 //! them (a sine's amplitude, an impulse's position), never a render against
@@ -185,6 +185,40 @@ pub fn room_ir(
         *slot += noise * (decay_rate * offset as f32).exp() * 0.1;
     }
     out
+}
+
+/// `frames` of an `f64` signal that needs more than 24 significant bits: frame `k` is
+/// `(0x2000_0001 + 3k) / 2^31`, an odd 29-bit integer over a power of two, so an `f32`
+/// cannot hold it and a processor that narrows to `f32` anywhere returns a different
+/// value.
+pub fn wide_signal(frames: usize) -> Vec<f64> {
+    const BASE: i64 = 0x2000_0001;
+    const SCALE: f64 = 2_147_483_648.0;
+    (0..frames as i64)
+        .map(|k| (BASE + 3 * k) as f64 / SCALE)
+        .collect()
+}
+
+/// Asserts `got` and `want` have one length and agree to `tolerance` at every frame; the
+/// failure names the first frame that does not (a NaN never agrees), with both values.
+///
+/// # Panics
+///
+/// If the lengths differ or a frame is farther than `tolerance`.
+#[track_caller]
+pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
+    assert_eq!(got.len(), want.len(), "block lengths differ");
+    if let Some(i) = (0..got.len()).find(|&i| {
+        let diff = (got[i] - want[i]).abs();
+        diff.is_nan() || diff > tolerance
+    }) {
+        panic!(
+            "frame {i}: got {} want {} (|diff| {:e} over tolerance {tolerance:e})",
+            got[i],
+            want[i],
+            (got[i] - want[i]).abs()
+        );
+    }
 }
 
 #[cfg(test)]
