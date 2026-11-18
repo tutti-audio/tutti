@@ -30,8 +30,8 @@ fn a_network_stays_under_80_kib() {
 #[test]
 fn an_empty_network_is_silent_and_stable() {
     let n = Network::new(SampleRate::SR_44K1);
-    assert_eq!(n.rt60(Band::Mid), Seconds(0.0));
-    assert_eq!(n.tail(Db(-60.0)), Ring::Finite(Seconds(0.0)));
+    assert_eq!(n.rt60(Band::Mid), Seconds::ZERO);
+    assert_eq!(n.tail(Db(-60.0)), Ring::Finite(Seconds::ZERO));
     assert!(n.is_stable() && !n.is_lossless());
 }
 

@@ -15,7 +15,8 @@ pub(super) const MAX_BANDS: usize = MAX_SPLITS + 1;
 
 /// Highest frequency the coefficients are solved at, as a fraction of the
 /// sample rate. `tan` diverges at Nyquist; a frequency a rate change leaves
-/// above this is solved here instead.
+/// above this is solved here instead. It is 0.998 of Nyquist, the margin of
+/// `NYQUIST_MARGIN`, kept in `f64` for the solve.
 pub const SOLVE_CEILING: f64 = 0.499;
 
 /// Why a crossover or a crossover-based node refused its settings.

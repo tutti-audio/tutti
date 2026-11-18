@@ -101,7 +101,7 @@ fn the_response_is_the_rbj_closed_form() {
             let (fc, q, gain) = (f64::from(fc), f64::from(q), f64::from(gain));
             let want = rbj(ty, fc, q, gain, rate);
             let m = model(ty, fc as f32, q as f32, gain as f32, rate);
-            let mut freqs = vec![Hz(0.0), Hz(fc as f32), Hz(24_000.0)];
+            let mut freqs = vec![Hz::ZERO, Hz(fc as f32), Hz(24_000.0)];
             freqs.extend(
                 (0..40).map(|i| Hz(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0) as f32)),
             );

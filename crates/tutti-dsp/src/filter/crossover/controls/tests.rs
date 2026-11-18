@@ -20,7 +20,7 @@ fn ordered_controls_refuse_structure_and_leave_nyquist_to_the_rate() {
     assert!(CrossoverControls::ordered(&[Hz(100.0), Hz(1_000.0)]).is_ok());
     assert!(CrossoverControls::ordered(&[Hz(1_000.0), Hz(100.0)]).is_err());
     assert!(CrossoverControls::ordered(&[Hz(f32::NAN)]).is_err());
-    assert!(CrossoverControls::ordered(&[Hz(0.0)]).is_err());
+    assert!(CrossoverControls::ordered(&[Hz::ZERO]).is_err());
     assert!(CrossoverControls::ordered(&[]).is_err());
     let high = [Hz(30_000.0)];
     assert!(CrossoverControls::new(&high, SampleRate::SR_48K).is_err());
@@ -37,6 +37,6 @@ fn the_octave_set_is_increasing_and_under_nyquist_at_every_rate() {
     for rate in [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K] {
         let set = CrossoverControls::octaves(rate).frequencies;
         assert!(set.windows(2).all(|w| w[0] < w[1]), "{set:?}");
-        assert!(set.iter().all(|&f| f > Hz(0.0) && f < rate.nyquist()));
+        assert!(set.iter().all(|&f| f > Hz::ZERO && f < rate.nyquist()));
     }
 }

@@ -101,7 +101,14 @@ impl SvfCoeffs {
         let (freq, q, gain_db) = (freq.into().get(), q.into().get(), gain_db.into().get());
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
-        let fc = (freq as f64).clamp(1.0, f64::from(sample_rate.nyquist_scaled(0.998).get()));
+        let fc = (freq as f64).clamp(
+            1.0,
+            f64::from(
+                sample_rate
+                    .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
+                    .get(),
+            ),
+        );
         let g0 = libm::tan(core::f64::consts::PI * fc / sample_rate.get());
         let q = (q as f64).max(0.01);
         // A gain past `MAX_GAIN_DB` either way is that gain: `10^(dB / 40)`

@@ -204,7 +204,7 @@ fn cutoff_and_q_are_not_interchangeable() {
         SvfType::LowPass,
         Hz(1000.0),
         Q(0.707),
-        Db(0.0),
+        Db::UNITY,
         SampleRate::SR_44K1,
     );
     // What the transposed call computes: a 0.707 Hz cutoff at Q 1000.
@@ -212,7 +212,7 @@ fn cutoff_and_q_are_not_interchangeable() {
         SvfType::LowPass,
         Hz(0.707),
         Q(1000.0),
-        Db(0.0),
+        Db::UNITY,
         SampleRate::SR_44K1,
     );
     assert!(

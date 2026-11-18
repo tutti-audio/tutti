@@ -3,7 +3,7 @@
 use tutti_types::{Azimuth, Bed, Direction, Elevation, MAX_CHANNELS, Spread};
 
 use super::error::SpeakerGeometryError;
-use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3, wrapped_deg};
+use super::math::{DEG, Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3, wrapped_deg};
 use super::select;
 
 /// How many times [`SpeakerLayout::gains_into`] may retreat a source's elevation
@@ -159,8 +159,8 @@ impl SpeakerLayout {
                     .filter_map(|[a, b]| {
                         let (azi_a, azi_b) = (azimuths[usize::from(a)], azimuths[usize::from(b)]);
                         // The matrix's columns are the speakers' (sin, cos).
-                        let (sin_a, cos_a) = libm::sincos(azi_a * (core::f64::consts::PI / 180.0));
-                        let (sin_b, cos_b) = libm::sincos(azi_b * (core::f64::consts::PI / 180.0));
+                        let (sin_a, cos_a) = libm::sincos(azi_a * DEG);
+                        let (sin_b, cos_b) = libm::sincos(azi_b * DEG);
                         Some(Tuple {
                             speakers: [a, b, 0],
                             inverse: Inverse::Pair(inverse2([sin_a, cos_a], [sin_b, cos_b])?),

@@ -84,7 +84,7 @@ impl Default for GateControls {
 struct Design {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
-    threshold_linear: f32,
+    threshold: Amplitude,
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
@@ -109,7 +109,7 @@ impl Design {
         let hold = Seconds(c.hold.get().max(0.0));
         let (attack, release) = floored(c.attack, c.release).coeffs(rate);
         Self {
-            threshold_linear: threshold.to_amplitude().get(),
+            threshold: threshold.to_amplitude(),
             silence_opens: Db::FLOOR >= threshold,
             attack,
             release,
@@ -124,8 +124,8 @@ impl Design {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens(level: f32, threshold_linear: f32, silence_opens: bool) -> bool {
-    level >= threshold_linear || (level <= 0.0 && silence_opens)
+fn opens(level: f32, threshold: Amplitude, silence_opens: bool) -> bool {
+    level >= threshold.get() || (level <= 0.0 && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -252,7 +252,7 @@ impl GateBank {
         let d = self.design;
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
-        let held = Db(self.range.target()).to_amplitude().get();
+        let held = Db(self.range.target()).to_amplitude();
         let mut gains = [0.0f32; CHUNK];
         let mut start = 0;
         while start < frames {
@@ -274,7 +274,7 @@ impl GateBank {
                     .filter(|t| t.get().is_finite())
                 {
                     Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
-                    None => opens(level, d.threshold_linear, d.silence_opens),
+                    None => opens(level, d.threshold, d.silence_opens),
                 };
                 if open {
                     self.hold_counter = d.hold_samples;
@@ -288,7 +288,7 @@ impl GateBank {
                     let db = self
                         .range
                         .at(taken.saturating_add(1).saturating_add(i as u32));
-                    Db(db).to_amplitude().get()
+                    Db(db).to_amplitude()
                 } else {
                     held
                 };

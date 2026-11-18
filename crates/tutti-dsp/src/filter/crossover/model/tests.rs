@@ -200,7 +200,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
 
 fn controls(low: f32, high: f32) -> CrossoverControls {
     CrossoverControls {
-        frequencies: [Hz(low), Hz(high), Hz(0.0), Hz(0.0), Hz(0.0)],
+        frequencies: [Hz(low), Hz(high), Hz::ZERO, Hz::ZERO, Hz::ZERO],
     }
 }
 

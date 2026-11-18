@@ -114,7 +114,8 @@ impl FirDesign {
     ///   taps cannot resolve.
     /// - [`FirError::TooLong`] when the filter would exceed `2^20` taps.
     pub fn design(&self, rate: SampleRate) -> Result<Fir, FirError> {
-        let nyquist = rate.get() / 2.0;
+        let nyquist_hz = rate.nyquist();
+        let nyquist = f64::from(nyquist_hz.get());
         let transition = f64::from(self.transition.get());
         let attenuation = f64::from(self.attenuation.get());
         if !(transition.is_finite() && transition > 0.0) {
@@ -139,7 +140,7 @@ impl FirDesign {
                 if !inside(cutoff) {
                     return Err(FirError::CutoffOutOfRange {
                         cutoff,
-                        nyquist: Hz(nyquist as f32),
+                        nyquist: nyquist_hz,
                     });
                 }
                 vec![f64::from(cutoff.get())]
@@ -149,7 +150,7 @@ impl FirDesign {
                     if !inside(cutoff) {
                         return Err(FirError::CutoffOutOfRange {
                             cutoff,
-                            nyquist: Hz(nyquist as f32),
+                            nyquist: nyquist_hz,
                         });
                     }
                 }
