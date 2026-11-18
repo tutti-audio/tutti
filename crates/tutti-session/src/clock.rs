@@ -118,7 +118,7 @@ pub trait RealTime: Clock<Running: sealed::Streaming> {}
 /// [`Session::render`](crate::Session::render), from a game's or a plugin's own
 /// real-time callback or from a loop faster than real time. `F` is the float
 /// format of the session's audio: `f32` unless the builder says otherwise
-/// (`SessionBuilder::<Offline<f64>>::default()`).
+/// (`Session::builder().float::<f64>()`).
 pub struct Offline<F: SessionFloat = f32>(PhantomData<fn() -> F>);
 
 impl<F: SessionFloat> Clone for Offline<F> {
