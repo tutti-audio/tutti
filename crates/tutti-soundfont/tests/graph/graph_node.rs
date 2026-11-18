@@ -30,13 +30,13 @@ fn font() -> Arc<SoundFont> {
     Arc::new(SoundFont::from_reader(&mut file).expect("parses"))
 }
 
-fn unit() -> SoundFontUnit {
+fn unit() -> SoundFontUnit<f32> {
     SoundFontUnit::new(font(), Settings::new()).expect("builds")
 }
 
 /// A clip playing middle C at `frame` into the unit, both at key 1 and 2,
 /// the unit on the outputs; prepared at `rate`.
-fn graph(unit: SoundFontUnit, rate: f64, frame: u64) -> (Editor, Executor) {
+fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(rate),
         MaxBlock::of(Samples(BLOCK)),

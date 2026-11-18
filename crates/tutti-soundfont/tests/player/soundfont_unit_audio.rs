@@ -622,7 +622,7 @@ fn test_clone_creates_independent_instance() {
 
 /// One note on channel 3: middle C at velocity 100, `blocks` blocks of
 /// `support::BLOCK` frames from `unit` as it stands.
-fn first_note(unit: SoundFontUnit, blocks: usize) -> Vec<(f32, f32)> {
+fn first_note(unit: SoundFontUnit<f32>, blocks: usize) -> Vec<(f32, f32)> {
     const CHANNEL: MidiChannel = MidiChannel::of(3);
     let mut hand = Hand::new(unit);
     hand.note_on(

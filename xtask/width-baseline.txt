@@ -77,13 +77,9 @@ crates/tutti-session/src/bounce.rs  1  migrating: B2/B3
 crates/tutti-session/src/builder.rs  1  migrating: B2/B3
 crates/tutti-session/src/clock.rs  3  migrating: B2/B3
 crates/tutti-session/src/device.rs  1  migrating: B2/B3
-crates/tutti-session/src/general_midi.rs  2  migrating: dsp S7/instruments
+crates/tutti-session/src/general_midi.rs  5  migrating: B2/B3
 crates/tutti-session/src/modulation.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin/lost.rs  1  migrating: plugins step 7
-crates/tutti-soundfont/src/node.rs  1  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/oscillator.rs  10  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/player.rs  5  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/voice.rs  5  migrating: dsp S7/instruments
 crates/tutti-types/src/lib.rs  1  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation
