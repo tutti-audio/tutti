@@ -105,12 +105,13 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         place: Placement,
     ) -> Result<SamplerLoad, SamplerError> {
         let streamer = self
-            .disk_streamer
+            .sampler
+            .streamer
             .as_ref()
             .ok_or(SamplerError::NoStreamer)?;
         let opening = streamer.open(&path.into(), place);
-        let id = SamplerLoad::mint(&self.sampler_opens);
-        let landed = Arc::clone(&self.sampler_streams);
+        let id = SamplerLoad::mint(&self.sampler.opens);
+        let landed = Arc::clone(&self.sampler.streams);
         self.jobs.submit(
             move || opening.wait(),
             move |_, done, events| {
@@ -148,6 +149,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         &mut self,
         id: SamplerLoad,
     ) -> Option<(Stream<C::Float>, StreamReader<C::Float>)> {
-        self.sampler_streams.lock_recover().remove(&id)
+        self.sampler.streams.lock_recover().remove(&id)
     }
 }
