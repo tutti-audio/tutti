@@ -889,7 +889,8 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // A map names the root's own channels, so a device swap does not widen
         // a root that has one; without it a wider device widens an undeclared
         // root by the build's rule.
-        let mapped = self.output_policy.map.targets().is_some();
+        let policy = self.output_policy.current();
+        let mapped = policy.map.targets().is_some();
         let root = self.graph.root_topology().cloned().unwrap_or_else(|| {
             let width = if mapped {
                 self.graph.outputs()
@@ -901,7 +902,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // The policy in force has to place the root on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
-        self.output_policy
+        policy
             .routing()
             .fold::<C::Float>(&root, &placed)
             .map_err(|refusal| match refusal {
@@ -912,7 +913,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
                     source,
                 },
                 map => Error::MapUnplaceable {
-                    map: self.output_policy.map.clone(),
+                    map: policy.map.clone(),
                     device: channels,
                     source: map,
                 },
@@ -982,7 +983,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // edit flag set, and the next update retries.
         // A declared root keeps the width it declared: the device is no floor
         // under it.
-        let mapped = self.output_policy.map.targets().is_some();
+        let mapped = self.output_policy.current().map.targets().is_some();
         let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
         if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.

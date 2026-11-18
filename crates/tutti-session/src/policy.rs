@@ -1,27 +1,28 @@
 //! [`Policy`]: a setting a session holds, and [`OutputPolicy`], where the mix
 //! lands.
 //!
-//! The settings are read and changed through [`Session::policy`]; a change is
-//! checked when it is set, staged, and applied by the next
-//! [`Session::update`] (in [`Phase::Commit`](crate::Phase::Commit), before the
-//! commit), live, with no restart.
+//! The settings are targets of [`Session::set`] and [`Session::get`], named by
+//! [`Session::policy`]; a write is checked when it is set, staged, and applied
+//! by the next [`Session::update`] (in [`Phase::Commit`](crate::Phase::Commit),
+//! before the commit), live, with no restart.
 
-use tutti_buffers::{Float, FoldLevels};
+use std::sync::{Arc, Mutex};
+
+use tutti_buffers::FoldLevels;
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
+use tutti_rt::LockExt;
 use tutti_types::{ChannelLayout, ChannelTopology};
 
-use crate::graph::Graph;
+use crate::value::{Cell, SetRefusal, Target};
 use crate::{Clock, Session};
 
-/// A session setting reached through a typed handle.
-pub trait Policy {
-    /// What reads and changes the setting, borrowing the session.
-    type Handle<'a, F: Float>;
+/// A session setting, written and read as a target: `session.policy::<P>()`.
+pub trait Policy: Clone + PartialEq + Send + Sync + 'static {
+    /// The target of the setting.
+    type Target: Target<Value = Self>;
 
-    /// The handle on `session`'s setting.
-    fn handle<K: crate::AppKey, C: Clock>(
-        session: &mut Session<K, C>,
-    ) -> Self::Handle<'_, C::Float>;
+    /// The setting's target.
+    fn target() -> Self::Target;
 }
 
 /// Where the mix lands: the format the root is heard in, the root's channels to
@@ -102,87 +103,72 @@ pub enum OutputPolicyError {
 }
 
 impl Policy for OutputPolicy {
-    type Handle<'a, F: Float> = OutputPolicyHandle<'a, F>;
+    type Target = crate::OutputPolicyTarget;
 
-    fn handle<K: crate::AppKey, C: Clock>(
-        session: &mut Session<K, C>,
-    ) -> OutputPolicyHandle<'_, C::Float> {
-        OutputPolicyHandle {
-            graph: &session.graph,
-            policy: &mut session.output_policy,
-            staged: &mut session.output_policy_staged,
-        }
+    fn target() -> crate::OutputPolicyTarget {
+        crate::OutputPolicyTarget::new()
     }
 }
 
-/// Reads and changes a session's [`OutputPolicy`].
-pub struct OutputPolicyHandle<'a, F: Float = f32> {
-    graph: &'a Graph<F>,
-    policy: &'a mut OutputPolicy,
-    staged: &'a mut bool,
+/// What the device and the root are, as the graph last placed them: what an
+/// [`OutputPolicy`] is checked against. The graph publishes it at each
+/// change; it is `None` with no engine.
+#[derive(Clone, Debug)]
+pub(crate) struct OutputFacts {
+    /// The device's width.
+    pub device: ChannelLayout,
+    /// What the device is, for a fold.
+    pub placed: ChannelTopology,
+    /// The root the next commit renders.
+    pub root: ChannelTopology,
 }
 
-impl<F: Float> std::fmt::Debug for OutputPolicyHandle<'_, F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OutputPolicyHandle")
-            .field("policy", &*self.policy)
-            .finish()
-    }
-}
+/// [`OutputFacts`] behind a lock the value lock does not cover: the graph
+/// writes it, a policy write reads it.
+pub(crate) type FactsCell = Arc<Mutex<Option<OutputFacts>>>;
 
-impl<F: Float> OutputPolicyHandle<'_, F> {
-    /// The policy in force, or the one set and not yet applied.
-    #[must_use]
-    pub fn get(&self) -> &OutputPolicy {
-        self.policy
-    }
-
-    /// Sets the policy. It is checked against the device and the root now, and
-    /// applied by the next [`Session::update`], live: the outputs ramp to their
-    /// gains over the declick length, and a changed monitor or map folds from
-    /// the next block on, crossfading from the old routing to the new over the
-    /// declick length (a change made while a root change crossfades, or while
-    /// the last routing change still fades, cuts instead).
-    ///
-    /// # Errors
-    ///
-    /// [`OutputPolicyError`] naming what has no place; the policy in force is
-    /// kept.
-    pub fn set(&mut self, policy: OutputPolicy) -> Result<(), OutputPolicyError> {
-        let (device, placed) = self
-            .graph
-            .placed_device()
-            .ok_or(OutputPolicyError::Detached)?;
-        if policy.outputs.len() > usize::from(device.count()) {
+/// The cell of the session's output policy, checking against `facts`.
+pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
+    Cell::new(OutputPolicy::default(), move |policy| {
+        let facts = facts.lock_recover();
+        let facts = facts.as_ref().ok_or(OutputPolicyError::Detached)?;
+        if policy.outputs.len() > usize::from(facts.device.count()) {
             return Err(OutputPolicyError::StripPast {
                 output: policy.outputs.len() - 1,
-                device,
-            });
+                device: facts.device,
+            }
+            .into());
         }
         // A level that is not a gain is refused even where no monitor uses it.
-        policy.levels.check().map_err(RoutingError::Fold)?;
-        let root = self.graph.root_in_force();
-        policy.routing().fold::<F>(&root, &placed)?;
-        *self.policy = policy;
-        *self.staged = true;
-        Ok(())
-    }
+        policy
+            .levels
+            .check()
+            .map_err(RoutingError::Fold)
+            .map_err(OutputPolicyError::from)?;
+        // Whether a routing has a place does not depend on the sample format.
+        policy
+            .routing()
+            .fold::<f32>(&facts.root, &facts.placed)
+            .map_err(OutputPolicyError::from)?;
+        Ok::<(), SetRefusal>(())
+    })
 }
 
 impl<K: crate::AppKey, C: Clock> Session<K, C> {
-    /// The setting `P`, to read and change: `session.policy::<OutputPolicy>()`.
-    pub fn policy<P: Policy>(&mut self) -> P::Handle<'_, C::Float> {
-        P::handle(self)
+    /// The setting `P`, as a target: `session.set(session.policy::<OutputPolicy>().to(p))`.
+    #[must_use]
+    pub fn policy<P: Policy>(&self) -> P::Target {
+        P::target()
     }
 
     /// Applies a staged policy to the engine, in [`Phase::Commit`](crate::Phase::Commit).
     pub(crate) fn apply_output_policy(&mut self) {
-        if !std::mem::take(&mut self.output_policy_staged) {
+        let Some(policy) = self.output_policy.take_staged() else {
             return;
-        }
+        };
         if let Some(control) = self.graph.output_control() {
-            control.set_routing(self.output_policy.routing());
-            control.set_levels(&self.output_policy.outputs);
+            control.set_routing(policy.routing());
+            control.set_levels(&policy.outputs);
         }
     }
 }

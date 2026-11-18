@@ -697,6 +697,18 @@ struct Live {
     target: NodeKey,
 }
 
+/// The outputs' latency and offset, a cell the value table names.
+struct LatencyCell(Arc<crate::value::Cell<OutputLatency>>);
+
+impl Default for LatencyCell {
+    fn default() -> Self {
+        Self(crate::value::Cell::new(
+            OutputLatency::default(),
+            |_| Ok(()),
+        ))
+    }
+}
+
 /// The session's MIDI state.
 #[derive(Default)]
 pub(crate) struct MidiState {
@@ -737,8 +749,8 @@ pub(crate) struct MidiState {
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
     output_clock: Option<OutputClockSource>,
-    /// The outputs' own latency and offset ([`Midi::set_output_latency`]).
-    output_latency: OutputLatency,
+    /// The outputs' own latency and offset ([`Midi::output_latency`]).
+    output_latency: LatencyCell,
     /// The session's subscription to the device list: `Phase::Poll` reads it
     /// and nothing else does.
     #[cfg(feature = "midi-hardware")]
@@ -886,12 +898,17 @@ impl MidiState {
     pub(crate) fn output_timing(&self, now: Instant) -> Option<OutputTiming> {
         self.output_clock
             .as_ref()
-            .map(|source| source.timing(self.output_latency, now))
+            .map(|source| source.timing(self.output_latency.0.current(), now))
     }
 
     /// Whether the session follows a live tempo now.
     pub(crate) fn is_following(&self) -> bool {
         self.follow.is_some() || self.clock.as_ref().is_some_and(ClockFollow::owns_tempo)
+    }
+
+    /// The cell of the outputs' latency, for the value table.
+    pub(crate) fn output_latency_cell(&self) -> Arc<crate::value::Cell<OutputLatency>> {
+        Arc::clone(&self.output_latency.0)
     }
 
     /// The flag the tempo target reads, shared with this state.
@@ -2050,26 +2067,22 @@ impl<F: Float> Midi<'_, F> {
         (node, tap)
     }
 
-    /// Sets the outputs' own latency and offset: what a MIDI device
-    /// takes to sound an event (it is sent that much earlier) and a trim on top
+    /// The outputs' own latency and offset, a target of
+    /// [`Session::set`](crate::Session::set): what a MIDI device takes to
+    /// sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
-    /// ([`output_terms`](Self::output_terms)). Applies from the next drain, to
-    /// every `midi_sink` and `midi_output` entry: it is one setting of the
-    /// session, not an output's.
-    pub fn set_output_latency(&mut self, latency: OutputLatency) {
-        self.state.output_latency = latency;
-    }
-
-    /// The outputs' own latency and offset, as set.
+    /// ([`output_terms`](Self::output_terms)). A write applies from the next
+    /// drain, to every `midi_sink` and `midi_output` entry: it is one setting
+    /// of the session, not an output's.
     #[must_use]
-    pub fn output_latency(&self) -> OutputLatency {
-        self.state.output_latency
+    pub const fn output_latency(&self) -> crate::OutputLatencyTarget {
+        crate::OutputLatencyTarget::new()
     }
 
     /// The terms every output's events are timed by now: the audio
     /// output's latency as the device reports it (zero on a system clock, which
     /// has no device), and the output's own
-    /// ([`set_output_latency`](Self::set_output_latency)). `None` on an offline
+    /// ([`output_latency`](Self::output_latency)). `None` on an offline
     /// session, which has no clock of its own and sends every event at once.
     ///
     /// **While [`is_complete`](OutputTerms::is_complete) is false the audio
@@ -2081,7 +2094,7 @@ impl<F: Float> Midi<'_, F> {
         let source = self.state.output_clock.as_ref()?;
         Some(OutputTerms {
             audio_output: source.audio_output(),
-            latency: self.state.output_latency,
+            latency: self.state.output_latency.0.current(),
         })
     }
 }

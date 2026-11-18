@@ -973,6 +973,8 @@ impl<C: Clock> SessionBuilder<C> {
         let main_work = crate::session::SharedWork::new(main_work);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
+        #[cfg(feature = "midi-hardware")]
+        let midi_attached = parts.midi_io.is_some();
         let session = Session {
             values: crate::value::ValueState::new(Arc::clone(&table)),
             #[cfg(feature = "plugin")]
@@ -989,8 +991,7 @@ impl<C: Clock> SessionBuilder<C> {
             heard: None,
             root_request: self.opts.root.clone(),
             root_refusal: None,
-            output_policy: crate::OutputPolicy::default(),
-            output_policy_staged: false,
+            output_policy: crate::policy::output_cell(table.output_facts()),
             click: parts.click,
             compensation: parts.compensation,
             latency: Samples(0),
@@ -1007,7 +1008,7 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "midi-hardware")]
             midi_io: parts.midi_io,
             #[cfg(feature = "midi-hardware")]
-            midi_policy: crate::MidiPolicy::default(),
+            midi_policy: crate::midi_hardware::policy_cell(midi_attached),
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]

@@ -136,10 +136,15 @@ fn an_output_offset_shifts_the_send_times() {
     let newest_after_block = |offset: f64| {
         let wire = Wire::default();
         let (mut s, stream) = rig(&wire);
-        s.midi().set_output_latency(
-            OutputLatency::new(Duration::ZERO, OutputOffset::new(Seconds(offset)).unwrap())
-                .unwrap(),
-        );
+        let target = s.midi().output_latency();
+        s.set(
+            target.to(OutputLatency::new(
+                Duration::ZERO,
+                OutputOffset::new(Seconds(offset)).unwrap(),
+            )
+            .unwrap()),
+        )
+        .unwrap();
         let last_block = render(&stream, 100, latency);
         let _ = s.update();
         let ticks = Wire::tick_times(&wire.take());
@@ -222,13 +227,15 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .sync_controls
         .messages()
         .set(tutti_midi_runtime::SyncMessages::OFF);
-    s.midi().set_output_latency(
-        OutputLatency::new(
+    let target = s.midi().output_latency();
+    s.set(
+        target.to(OutputLatency::new(
             Duration::from_millis(5),
             OutputOffset::new(Seconds(0.0)).unwrap(),
         )
-        .unwrap(),
-    );
+        .unwrap()),
+    )
+    .unwrap();
     let note = |on: bool, at: Beat| {
         let voice = if on {
             Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0xC800))

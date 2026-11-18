@@ -8,9 +8,20 @@ use tutti_buffers::{Float, InterleavedMut};
 use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder};
+use tutti_session::{
+    OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder, SetRefusal,
+    ValueError, ValueErrorKind,
+};
 use tutti_types::{Bed, ChannelLayout, MaxBlock};
 use tutti_units::{Amplitude, SampleRate, Samples};
+
+/// The output policy error a write was refused with.
+fn refused(result: Result<(), ValueError<&'static str>>) -> OutputPolicyError {
+    match result.expect_err("the write is refused").kind {
+        ValueErrorKind::Refused(SetRefusal::OutputPolicy(error)) => error,
+        other => panic!("expected an output policy refusal, got {other:?}"),
+    }
+}
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -60,7 +71,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
         map: OutputMap::channels([2, 3]).unwrap(),
         ..OutputPolicy::default()
     };
-    s.policy::<OutputPolicy>().set(policy).unwrap();
+    s.set(s.policy::<OutputPolicy>().to(policy)).unwrap();
     let m = f32::MINUS_3_DB;
     let (l, r) = (1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0);
     // Heard once the routing's crossfade (the declick length) has run out: the
@@ -87,49 +98,52 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
 /// device. Nothing is kept.
 #[test]
 fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
-    let mut s = offline(Session::builder(), 2);
+    let s = offline(Session::builder(), 2);
     let map = OutputPolicy {
         monitor: Some(Bed::Stereo.topology()),
         map: OutputMap::channels([2, 3]).unwrap(),
         ..OutputPolicy::default()
     };
     assert_eq!(
-        s.policy::<OutputPolicy>().set(map),
-        Err(OutputPolicyError::Routing(RoutingError::MapPast {
+        refused(s.set(s.policy::<OutputPolicy>().to(map))),
+        OutputPolicyError::Routing(RoutingError::MapPast {
             output: 2,
             device: ChannelLayout::STEREO
-        }))
+        })
     );
     let wide = OutputPolicy {
         map: OutputMap::channels([0, 1, 2]).unwrap(),
         ..OutputPolicy::default()
     };
     assert_eq!(
-        s.policy::<OutputPolicy>().set(wide),
-        Err(OutputPolicyError::Routing(RoutingError::MapWidth {
+        refused(s.set(s.policy::<OutputPolicy>().to(wide))),
+        OutputPolicyError::Routing(RoutingError::MapWidth {
             map: 3,
             heard: ChannelLayout::STEREO
-        }))
+        })
     );
     let mut strip = OutputPolicy::default();
     strip.outputs.set_strip(2, OutputStrip::default()).unwrap();
     assert_eq!(
-        s.policy::<OutputPolicy>().set(strip),
-        Err(OutputPolicyError::StripPast {
+        refused(s.set(s.policy::<OutputPolicy>().to(strip))),
+        OutputPolicyError::StripPast {
             output: 2,
             device: ChannelLayout::STEREO
-        })
+        }
     );
-    assert_eq!(*s.policy::<OutputPolicy>().get(), OutputPolicy::default());
+    assert_eq!(
+        s.get(s.policy::<OutputPolicy>()).unwrap(),
+        OutputPolicy::default()
+    );
 }
 
 /// A session with no engine has no device to route to.
 #[test]
 fn a_detached_session_has_nothing_to_route() {
-    let mut s = Session::builder().build_detached(RATE).unwrap();
+    let s = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(
-        s.policy::<OutputPolicy>().set(OutputPolicy::default()),
-        Err(OutputPolicyError::Detached)
+        refused(s.set(s.policy::<OutputPolicy>().to(OutputPolicy::default()))),
+        OutputPolicyError::Detached
     );
 }
 
@@ -155,7 +169,7 @@ fn a_mute_and_a_dim_ramp_and_settle() {
     policy.outputs = std::mem::take(&mut policy.outputs)
         .with_dim(Some(Amplitude(0.5)))
         .unwrap();
-    s.policy::<OutputPolicy>().set(policy).unwrap();
+    s.set(s.policy::<OutputPolicy>().to(policy)).unwrap();
     let _ = s.update();
     let n = tutti_graph::declick_frames(RATE).get();
     let mut out = vec![0.0f32; 2 * (n + 8)];
@@ -183,7 +197,7 @@ fn a_mute_and_a_dim_ramp_and_settle() {
 #[test]
 fn a_level_that_is_not_a_gain_is_refused_when_set() {
     use tutti_buffers::{FoldError, FoldLevel, FoldLevels};
-    let mut s = offline(Session::builder(), 2);
+    let s = offline(Session::builder(), 2);
     let policy = OutputPolicy {
         levels: FoldLevels {
             surround: Amplitude(f64::NAN),
@@ -192,12 +206,13 @@ fn a_level_that_is_not_a_gain_is_refused_when_set() {
         ..OutputPolicy::default()
     };
     assert_eq!(
-        s.policy::<OutputPolicy>().set(policy),
-        Err(OutputPolicyError::Routing(RoutingError::Fold(
-            FoldError::NotAGain {
-                level: FoldLevel::Surround
-            }
-        )))
+        refused(s.set(s.policy::<OutputPolicy>().to(policy))),
+        OutputPolicyError::Routing(RoutingError::Fold(FoldError::NotAGain {
+            level: FoldLevel::Surround
+        }))
     );
-    assert_eq!(*s.policy::<OutputPolicy>().get(), OutputPolicy::default());
+    assert_eq!(
+        s.get(s.policy::<OutputPolicy>()).unwrap(),
+        OutputPolicy::default()
+    );
 }

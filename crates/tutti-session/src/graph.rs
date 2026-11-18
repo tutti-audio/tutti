@@ -82,6 +82,7 @@ use crate::{
     ConnectError, Connection, Edge, EdgeGainError, EventInPort, EventOutPort, InPort, InletError,
     Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
 };
+use tutti_rt::LockExt;
 
 /// The largest block a device's graph is prepared for.
 ///
@@ -647,6 +648,7 @@ impl<F: Float> Graph<F> {
         control.support(device)?;
         control.state_device(device, topology)?;
         self.output = Some(Placed { control, device });
+        self.publish_output_facts();
         self.rt_log = Some(rt_log);
         Ok(engine)
     }
@@ -3241,6 +3243,7 @@ impl<F: Float> Graph<F> {
             outputs.resize(target, Vec::new());
             self.edited = true;
         }
+        self.publish_output_facts();
         refused.map_or(Ok(()), Err)
     }
 
@@ -3324,6 +3327,20 @@ impl<F: Float> Graph<F> {
         Some((placed.device, self.placed_topology()?))
     }
 
+    /// Publishes the device and the root the output policy is checked
+    /// against ([`placed_device`](Self::placed_device),
+    /// [`root_in_force`](Self::root_in_force)), after any of them changed.
+    fn publish_output_facts(&self) {
+        let facts = self
+            .placed_device()
+            .map(|(device, placed)| crate::policy::OutputFacts {
+                device,
+                placed,
+                root: self.root_in_force(),
+            });
+        *self.values.output_facts().lock_recover() = facts;
+    }
+
     /// The control side of the engine's output folds; `None` with no engine.
     pub(crate) fn output_control(&self) -> Option<&tutti_engine::OutputControl<F>> {
         self.output.as_ref().map(|placed| &placed.control)
@@ -3367,6 +3384,7 @@ impl<F: Float> Graph<F> {
             placed.control.state_device(device, topology)?;
             placed.device = device;
         }
+        self.publish_output_facts();
         Ok(())
     }
 
@@ -3531,6 +3549,7 @@ impl<F: Float> Graph<F> {
             resized = true;
         }
         self.reopen_root_readers(resized);
+        self.publish_output_facts();
         Ok(())
     }
 

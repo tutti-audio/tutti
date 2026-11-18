@@ -67,6 +67,9 @@ thread_local! {
 #[derive(Default)]
 pub struct ValueTable {
     params: Mutex<Params>,
+    /// What the output policy is checked against, which the graph publishes.
+    /// A lock of its own: a check reads it under the value lock.
+    output: crate::policy::FactsCell,
 }
 
 /// The value lock, held; released and forgotten by this thread when dropped.
@@ -107,6 +110,11 @@ impl ValueTable {
         let guard = self.params.lock_recover();
         HELD.with(|held| held.borrow_mut().push(token));
         Some(Held { guard, token })
+    }
+
+    /// The cell the graph publishes the output device and root to.
+    pub(crate) fn output_facts(&self) -> crate::policy::FactsCell {
+        Arc::clone(&self.output)
     }
 
     /// Addresses `node`'s params, replacing any it had. Control thread.
