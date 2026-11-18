@@ -107,14 +107,9 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
             let deadline = Instant::now() + Duration::from_secs(10);
             let (stream, reader) = 'opened: loop {
                 for event in s.update() {
-                    if let SessionEvent::Sampler(SamplerEvent::Opened {
-                        id: opened,
-                        stream,
-                        reader,
-                    }) = event
-                    {
+                    if let SessionEvent::Sampler(SamplerEvent::Opened { id: opened }) = event {
                         assert_eq!(opened, id);
-                        break 'opened (stream, reader);
+                        break 'opened s.take_stream(id).expect("the landed stream");
                     }
                 }
                 assert!(Instant::now() < deadline, "the stream did not open");

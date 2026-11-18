@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry};
+use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
 
 /// A wave file: [`audio_file`]'s entry, decoded whole (resident) or probed for
 /// a disk stream ([`streamed`](Declared::streamed)).
@@ -27,7 +27,8 @@ pub enum Tier {
     /// Read from disk by a stream.
     Streamed,
     /// By the file's size: streamed when the file can be streamed and its
-    /// decoded size (`frames * channels * 4` bytes of `f32`) is more than
+    /// decoded size (`frames * channels * size_of::<S>()` bytes in the session's
+    /// float `S`) is more than
     /// `above` bytes, resident otherwise.
     Auto {
         /// The decoded size, in bytes, past which the file streams.
@@ -42,9 +43,10 @@ pub enum Tier {
 #[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub enum AudioEntry {
-    /// The file, decoded whole; every handle shares the `Arc`.
-    Resident(Arc<tutti_buffers::Wave>),
+pub enum AudioEntry<S: tutti_buffers::Float = f32> {
+    /// The file, decoded whole into the session's float; every handle shares
+    /// the `Arc`.
+    Resident(Arc<tutti_buffers::Wave<S>>),
     /// The file's header, read; its samples stay on disk until a stream opens
     /// ([`Session::open_stream`](crate::Session::open_stream) over
     /// [`StreamInfo::path`]).
@@ -79,7 +81,7 @@ impl StreamInfo {
 #[cfg(all(feature = "sampler", codec))]
 impl AudioFile {
     /// The default threshold of [`auto`](Declared::auto): 32 MiB of decoded
-    /// `f32` samples, 95 seconds of 44.1 kHz stereo.
+    /// samples, 95 seconds of 44.1 kHz stereo in `f32`.
     ///
     /// A resident wave costs its decoded size for as long as it lives, and a
     /// session holds one per file in use; a stream costs a ring and a decode
@@ -93,7 +95,7 @@ impl AudioFile {
 /// as [`AudioEntry::Resident`]. Another key declared with the same path shares
 /// the one decode, and every handle is the same `Arc`.
 #[cfg(all(feature = "sampler", codec))]
-pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile> {
+pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile, Sharing> {
     Declared::shared(
         key,
         AudioFile {
@@ -104,7 +106,7 @@ pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile>
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl<K> Declared<K, AudioFile> {
+impl<K, M> Declared<K, AudioFile, M> {
     /// The file played from disk: its entry reads as [`AudioEntry::Streamed`]
     /// and fails with [`LoadError::NotStreamable`] for a file this build cannot
     /// stream. The tier is part of the identity: changing it reloads.
@@ -137,19 +139,19 @@ impl<K> Declared<K, AudioFile> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl PoolEntry for AudioFile {
+impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
     type Identity = (PathBuf, Tier);
-    type Loaded = AudioEntry;
-    type Handle = AudioEntry;
+    type Loaded = AudioEntry<S>;
+    type Handle = AudioEntry<S>;
 
     fn identity(&self) -> Self::Identity {
         (self.path.clone(), self.tier)
     }
 
-    fn load(&self) -> Load<Self::Loaded> {
+    fn load(&self) -> Load<Self::Loaded, S> {
         let (path, tier) = (self.path.clone(), self.tier);
         Load::on_worker(move || match tier {
-            Tier::Resident => resident(path),
+            Tier::Resident => resident::<S>(path),
             Tier::Streamed => {
                 let facts = probe(&path)?;
                 if facts.streamable {
@@ -160,13 +162,18 @@ impl PoolEntry for AudioFile {
             }
             Tier::Auto { above } => {
                 let facts = probe(&path)?;
+                // A decoded wave's size in bytes, saturating: a count past
+                // `u64` is past any threshold.
+                let wide = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
                 let bytes = facts.frames.map_or(0, |frames| {
-                    frames.get() as u64 * u64::from(facts.layout.count()) * 4
+                    wide(frames.get())
+                        .saturating_mul(u64::from(facts.layout.count()))
+                        .saturating_mul(wide(size_of::<S>()))
                 });
                 if facts.streamable && bytes > above {
                     Ok(streamed(path, facts))
                 } else {
-                    resident(path)
+                    resident::<S>(path)
                 }
             }
         })
@@ -187,13 +194,16 @@ fn probe(path: &std::path::Path) -> Result<tutti_sampler::SampleFacts, LoadError
 }
 
 #[cfg(all(feature = "sampler", codec))]
-fn streamed(path: PathBuf, facts: tutti_sampler::SampleFacts) -> AudioEntry {
+fn streamed<S: tutti_buffers::Float>(
+    path: PathBuf,
+    facts: tutti_sampler::SampleFacts,
+) -> AudioEntry<S> {
     AudioEntry::Streamed(Arc::new(StreamInfo { path, facts }))
 }
 
 #[cfg(all(feature = "sampler", codec))]
-fn resident(path: PathBuf) -> Result<AudioEntry, LoadError> {
-    tutti_codec::read_wave::<f32>(path)
+fn resident<S: tutti_buffers::Float>(path: PathBuf) -> Result<AudioEntry<S>, LoadError> {
+    tutti_codec::read_wave::<S>(path)
         .map(|wave| AudioEntry::Resident(Arc::new(wave)))
         .map_err(|error| LoadError::Decode(Arc::new(error)))
 }
@@ -210,12 +220,12 @@ pub struct SoundFontFile {
 /// Declares the SoundFont at `path` under `key`. Another key declared with the
 /// same path shares the one parse, and every handle is the same `Arc`.
 #[cfg(feature = "soundfont")]
-pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile> {
+pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile, Sharing> {
     Declared::shared(key, SoundFontFile { path: path.into() })
 }
 
 #[cfg(feature = "soundfont")]
-impl PoolEntry for SoundFontFile {
+impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
     type Identity = PathBuf;
     type Loaded = Arc<tutti_sf2::SoundFont>;
     type Handle = Arc<tutti_sf2::SoundFont>;
@@ -224,7 +234,7 @@ impl PoolEntry for SoundFontFile {
         self.path.clone()
     }
 
-    fn load(&self) -> Load<Self::Loaded> {
+    fn load(&self) -> Load<Self::Loaded, S> {
         let path = self.path.clone();
         Load::on_worker(move || {
             tutti_sf2::SoundFont::open(path)

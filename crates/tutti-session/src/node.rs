@@ -355,16 +355,16 @@ param_session_node!(tutti_polysynth::PolySynth);
 /// param write reaches the cell the node reads and a fork starts from the
 /// gain as set; the placements it replaced freed by its reclaimer.
 #[cfg(feature = "sampler")]
-impl SessionNode for tutti_sampler::VoiceNode {
+impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
-    fn params(controls: &tutti_sampler::VoiceNodeHandle) -> Option<ParamSet> {
+    fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
         Some(controls.params().clone())
     }
 
-    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Reclaims {
+    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {
         Reclaims::of(controls)
     }
 }
@@ -372,19 +372,19 @@ impl SessionNode for tutti_sampler::VoiceNode {
 /// A pool as a graph node; its controls are its `VoicePoolHandle`, whose
 /// retired voices its reclaimer frees.
 #[cfg(feature = "sampler")]
-impl SessionNode for tutti_sampler::VoicePool {
+impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
-    fn reclaimer(controls: &tutti_sampler::VoicePoolHandle) -> Reclaims {
+    fn reclaimer(controls: &tutti_sampler::VoicePoolHandle<F>) -> Reclaims {
         Reclaims::of(controls)
     }
 }
 
 /// A bare clip reader as a graph node, its gain addressed by its set.
 #[cfg(feature = "sampler")]
-impl SessionNode for tutti_sampler::MemorySource {
+impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -403,16 +403,16 @@ impl SessionNode for tutti_sampler::MemorySource {
 /// a streamed clip's stream) kept by its reclaimer for as long as the node is
 /// in the graph.
 #[cfg(feature = "sampler")]
-impl SessionNode for tutti_sampler::Clip {
+impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::Clip<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
-    fn params(controls: &tutti_sampler::VoiceNodeHandle) -> Option<ParamSet> {
+    fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
         Some(controls.params().clone())
     }
 
-    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Reclaims {
+    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {
         Reclaims::of(controls)
     }
 }
@@ -420,7 +420,7 @@ impl SessionNode for tutti_sampler::Clip {
 /// A streamed voice as a graph node; its controls are its
 /// `DiskVoiceControls`.
 #[cfg(feature = "sampler")]
-impl SessionNode for tutti_sampler::DiskVoice {
+impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }

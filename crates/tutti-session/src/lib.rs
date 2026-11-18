@@ -230,9 +230,10 @@ pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
-    PoolState, RefreshPool, RefreshReport, RetryError, WhenLoadedError, stranded_loads,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, Parking, PoolConfig,
+    PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport,
+    PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing, WhenLoadedError,
+    stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
