@@ -697,7 +697,7 @@ impl RenderSide {
             && frames <= room
             && self
                 .pipeline
-                .fits(self.config.inputs.max(self.config.outputs), frames);
+                .fits(self.config.inputs.max(self.config.outputs), Samples(frames));
         if !fits {
             self.losses.refused_blocks.add(1);
         }

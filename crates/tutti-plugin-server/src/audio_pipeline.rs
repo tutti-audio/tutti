@@ -114,9 +114,9 @@ impl AudioScratch {
     }
 
     /// Whether a block of `frames` over `channels` channels fits.
-    pub(crate) fn fits(&self, channels: usize, frames: usize) -> bool {
-        fn holds<T>(bufs: &[Channel<T>], channels: usize, frames: usize) -> bool {
-            bufs.len() >= channels && bufs.iter().all(|chan| chan.len() >= frames)
+    pub(crate) fn fits(&self, channels: usize, frames: Samples) -> bool {
+        fn holds<T>(bufs: &[Channel<T>], channels: usize, frames: Samples) -> bool {
+            bufs.len() >= channels && bufs.iter().all(|chan| chan.len() >= frames.0)
         }
         match self {
             Self::F32 { input, output } => {
@@ -283,7 +283,7 @@ impl AudioPipeline {
     }
 
     /// Whether the scratch holds a block of `frames` over `channels` channels.
-    pub(crate) fn fits(&self, channels: usize, frames: usize) -> bool {
+    pub(crate) fn fits(&self, channels: usize, frames: Samples) -> bool {
         self.scratch.fits(channels, frames)
     }
 
@@ -348,7 +348,7 @@ impl AudioPipeline {
         // flat, bus-ordered input view handed to the plugin's `process` (the
         // host crate splits it back into per-bus `AudioBusBuffers`).
         let num_channels = total_in.max(total_out);
-        if !self.scratch.fits(num_channels, num_samples) {
+        if !self.scratch.fits(num_channels, Samples(num_samples)) {
             // A block the scratch cannot hold reads silence; the render side
             // checks this before it gets here (`RenderSide::block_fits`).
             self.plugin_output.clear();
@@ -649,10 +649,10 @@ mod tests {
         };
         assert_eq!((input.len(), output.len()), (3, 3));
         assert!(input.iter().chain(output.iter()).all(|c| c.len() == 512));
-        assert!(scratch.fits(3, 512));
-        assert!(!scratch.fits(4, 512), "one channel too wide");
-        assert!(!scratch.fits(3, 513), "one frame too long");
-        assert!(AudioScratch::empty(SampleFormat::Float32).fits(0, 0));
+        assert!(scratch.fits(3, Samples(512)));
+        assert!(!scratch.fits(4, Samples(512)), "one channel too wide");
+        assert!(!scratch.fits(3, Samples(513)), "one frame too long");
+        assert!(AudioScratch::empty(SampleFormat::Float32).fits(0, Samples::ZERO));
     }
 
     /// **A block the scratch cannot hold is refused, never sized for**: the
@@ -683,7 +683,7 @@ mod tests {
         };
         let out = pipeline.process(&mut plugin, &mut shm, block).unwrap();
         assert!(out.refused, "an empty scratch holds no block");
-        assert!(!pipeline.fits(2, N));
+        assert!(!pipeline.fits(2, Samples(N)));
     }
 
     use tutti_plugin_ipc::SlabLayout;
