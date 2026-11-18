@@ -25,10 +25,10 @@ impl MidSide {
     /// is written when either view has fewer than two. The frames are the fewer of the two
     /// views'. No allocation.
     ///
-    /// Decoding an encoding returns each channel within `S::EPSILON * max(|L|, |R|)`
+    /// Decoding an encoding returns each channel within `F::EPSILON * max(|L|, |R|)`
     /// (the half sum, the half difference and their sum each round once; halving is
     /// exact), and exactly where the sums are exact.
-    pub fn process<S: Float>(self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process<F: Float>(self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         if input.channels() < 2 || output.channels() < 2 {
             return;
         }
@@ -43,7 +43,7 @@ impl MidSide {
             &mut first.samples_mut()[..frames],
             &mut second.samples_mut()[..frames],
         );
-        let half = S::lit(0.5);
+        let half = F::lit(0.5);
         for (((&a, &b), o0), o1) in a.iter().zip(b).zip(first).zip(second) {
             match self {
                 Self::Encode => {
@@ -115,7 +115,7 @@ impl<F: Float + Lerp> WidthBank<F> {
     }
 
     /// Runs `input` into `output` at the width in force. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         if input.channels() < 2 || output.channels() < 2 {
             return;
         }
@@ -145,10 +145,9 @@ impl<F: Float + Lerp> WidthBank<F> {
                 } else {
                     held
                 };
-                let (l, r) = (l.convert_to::<F>(), r.convert_to::<F>());
                 let (mid, side) = ((l + r) * half, (l - r) * half);
-                *o_l = (mid + w * side).convert_to::<S>();
-                *o_r = (mid - w * side).convert_to::<S>();
+                *o_l = mid + w * side;
+                *o_r = mid - w * side;
             }
         }
         self.width

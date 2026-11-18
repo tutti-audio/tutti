@@ -8,7 +8,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Hz, SampleRate};
 
-use crate::{Oscillator, OscillatorWave};
+use crate::{Oscillator, OscillatorStep, OscillatorWave};
 
 /// The controls of a [`RingModulator`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,10 +58,11 @@ impl RingModulator {
 
     /// Runs `input` into `output`. The channels rendered are the fewer of the two views',
     /// the frames the fewer of the two views'. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
         let RingModControls { frequency } = self.controls;
+        let step = OscillatorStep::<F>::new(frequency, self.rate);
         let start = self.carrier;
         let mut end = start;
         for c in 0..width {
@@ -70,7 +71,7 @@ impl RingModulator {
             let mut plane = output.plane_mut(c);
             let y = &mut plane.samples_mut()[..frames];
             for (y, &x) in y.iter_mut().zip(x) {
-                *y = x * carrier.step::<S>(frequency, self.rate);
+                *y = x * carrier.step(step);
             }
             end = carrier;
         }

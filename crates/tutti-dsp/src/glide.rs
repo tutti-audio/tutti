@@ -3,6 +3,8 @@
 
 use tutti_buffers::Float;
 
+use crate::design::along;
+
 /// A value that can be blended toward another.
 ///
 /// A glide assumes the space is affine: a blend of two values is a value the reader can
@@ -18,14 +20,14 @@ pub trait Lerp: Copy + PartialEq + core::fmt::Debug {
 impl Lerp for f32 {
     #[inline]
     fn lerp(&self, to: &f32, k: u32, n: u32) -> f32 {
-        crate::lerp(*self, *to, k as f32 / n as f32)
+        crate::lerp(*self, *to, along(k, n))
     }
 }
 
 impl Lerp for f64 {
     #[inline]
     fn lerp(&self, to: &f64, k: u32, n: u32) -> f64 {
-        crate::lerp(*self, *to, f64::from(k) / f64::from(n))
+        crate::lerp(*self, *to, along(k, n))
     }
 }
 
@@ -36,7 +38,12 @@ pub enum Steps {
     Fixed(u32),
     /// No faster than this much a step: `ceil(distance / rate)` steps, so a length
     /// whose sweep is a pitch shift has its speed bounded whatever the distance.
-    Rate(f32),
+    ///
+    /// The rate is in the glided value's own units per step (frames of delay per frame, for a
+    /// delay), a plain positive finite number: no unit covers a dimensionless slope. A rate
+    /// of zero is the slowest glide, `u32::MAX` steps; one that is negative or NaN lands at
+    /// once.
+    Rate(f64),
 }
 
 /// A linear approach to a target in `n` steps, from where it was when it was aimed.
@@ -171,9 +178,13 @@ impl<F: Float + Lerp> Glide<F> {
         }
         let n = match steps {
             Steps::Fixed(n) => n,
-            Steps::Rate(rate) => ((to - self.now()).abs() / F::from_f32(rate))
-                .ceil()
-                .to_f64() as u32,
+            Steps::Rate(rate) => {
+                let steps: f64 = ((to - self.now()).abs() / F::from_design(rate))
+                    .ceil()
+                    .into();
+                // `as` saturates at `u32::MAX`, so a rate of zero is the slowest glide.
+                steps as u32
+            }
         };
         self.aim_in(to, n);
     }

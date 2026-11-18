@@ -13,7 +13,7 @@ use tutti_dsp::{
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
-use tutti_units::{Feedback, Gain, Hz, SampleRate, SampleSpan, Seconds, Tail};
+use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -194,7 +194,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
             bank: None,
             steps: 0,
             delays: vec![Glide::landed(F::ZERO); layout.width()].into_boxed_slice(),
-            depth: Glide::landed(F::from_f64(d.depth.get())),
+            depth: Glide::landed(F::ZERO),
             feedback: Glide::landed(F::from_unit(d.feedback)),
             clock: SweepClock::new(layout.offsets()),
             layout,
@@ -208,12 +208,12 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
         let Some(bank) = &self.bank else {
             return;
         };
-        let span = |frames: F| SampleSpan::clamped(frames.to_f64());
+        let span = |frames: F| SampleSpan::clamped(frames.into());
         let depth_start = span(self.depth.now());
         let depth_end = span(self.depth.at(self.depth.taken().saturating_add(SEGMENT)));
         self.clock.solve(&mut self.delays, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            bank.swept(Gain(f64::from(lfo)), depth)
+            bank.swept(lfo, depth)
         });
     }
 }
@@ -278,7 +278,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         let design = bank.design(controls);
         self.clock.set_inc(design.inc);
         self.depth
-            .aim_by(F::from_f64(design.depth.get()), Steps::Rate(DELAY_SLEW));
+            .aim_by(F::from_unit(design.depth), Steps::Rate(DELAY_SLEW));
         self.feedback
             .aim_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
         if first {
@@ -669,7 +669,7 @@ mod tests {
         let worst = (FROM..len - 1)
             .map(|n| (trace[n + 1] - trace[n]).abs())
             .fold(0.0, f64::max);
-        let slew = f64::from(DELAY_SLEW);
+        let slew = DELAY_SLEW;
         assert!(
             worst <= slew + steady * 1.02 + 0.01,
             "the delay moved {worst} frames in one"

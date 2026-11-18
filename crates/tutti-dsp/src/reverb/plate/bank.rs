@@ -44,7 +44,7 @@ use crate::reverb::network::{Absorption, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
 
-const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
+const PRE_STEP: f64 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
 
 /// A delay line of `frames` and the slack that keeps a modulated read inside it.

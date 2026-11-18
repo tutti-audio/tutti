@@ -9,14 +9,15 @@
 //!
 //! A [`Depth`] `d` in `-1..=1` is the amount. Tremolo's gain is
 //! `g = 1 - (|d| - d u) / 2`: depth 0 is unity, and depth 1 swings from unity (at the wave's
-//! peak) to silence (at its trough); a negative depth swings the other way, `g = 1 - |d| (1 + u) / 2`.
-//! Auto-pan's position is `d u` as a [`Pan`], so `d = 1` sweeps the whole way across and
-//! a negative depth sweeps the opposite way.
+//! peak) to silence (at its trough); a negative depth swings the other way,
+//! `g = 1 - |d| (1 + u) / 2`. Auto-pan's position is `d u`, a [`Pan`](tutti_units::Pan), so
+//! `d = 1` sweeps the whole way across and a negative depth sweeps the opposite way.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_units::{Depth, Hz, Pan, Real, SampleRate};
+use tutti_units::{Depth, Hz, SampleRate};
 
-use crate::{Oscillator, OscillatorWave, PanLaw, pan_gains};
+use crate::pan::pan_gains_in;
+use crate::{Oscillator, OscillatorStep, OscillatorWave, PanLaw};
 
 /// The controls of a [`Tremolo`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,11 +70,14 @@ impl Lfo {
         }
     }
 
-    /// The wave at the current phase, then the phase one frame on.
-    fn next(&mut self, rate: Hz) -> f32 {
-        self.osc
-            .step::<f32>(rate, self.sample_rate)
-            .clamp(-1.0, 1.0)
+    /// The wave at the current phase in the float `F`, then the phase one frame on.
+    fn next<F: Float>(&mut self, step: OscillatorStep<F>) -> F {
+        self.osc.step(step).clamp(-F::ONE, F::ONE)
+    }
+
+    /// The step of `rate` at the stream's rate, crossed once per block.
+    fn step<F: Float>(&self, rate: Hz) -> OscillatorStep<F> {
+        OscillatorStep::new(rate, self.sample_rate)
     }
 }
 
@@ -109,12 +113,14 @@ impl Tremolo {
 
     /// Runs `input` into `output`. The channels rendered are the fewer of the two views',
     /// the frames the fewer of the two views'. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
         let TremoloControls { rate, depth } = self.controls;
-        // The depth crosses into the oscillator's `f32` lane once per block.
-        let d = f32::from_unit(depth);
+        // The depth crosses into the data's float once per block.
+        let d = F::from_unit(depth);
+        let half = F::lit(0.5);
+        let step = self.lfo.step::<F>(rate);
         let start = self.lfo;
         let mut end = start;
         for c in 0..width {
@@ -123,8 +129,8 @@ impl Tremolo {
             let mut plane = output.plane_mut(c);
             let y = &mut plane.samples_mut()[..frames];
             for (y, &x) in y.iter_mut().zip(x) {
-                let g = 1.0 - (d.abs() - d * lfo.next(rate)) * 0.5;
-                *y = x * S::from_f32(g);
+                let g = F::ONE - (d.abs() - d * lfo.next(step)) * half;
+                *y = x * g;
             }
             end = lfo;
         }
@@ -133,7 +139,8 @@ impl Tremolo {
     }
 }
 
-/// An auto-pan of a left/right pair: the left scaled by the left gain of [`pan_gains`] and
+/// An auto-pan of a left/right pair: the left scaled by the left gain of
+/// [`pan_gains`](crate::pan_gains) and
 /// the right by its right gain, at the position `d u` of the depth `d` and the wave `u`.
 ///
 /// Under [`PanLaw::SquareRoot`] and [`PanLaw::Rp036`] the two gains' squares sum to 1 at every
@@ -171,7 +178,7 @@ impl AutoPan {
     /// Runs the first two channels of `input` into the first two of `output`; nothing is
     /// written when either view has fewer than two. The frames are the fewer of the two
     /// views'. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         if input.channels() < 2 || output.channels() < 2 {
             return;
         }
@@ -187,13 +194,13 @@ impl AutoPan {
             &mut right.samples_mut()[..frames],
         );
         let AutoPanControls { rate, depth } = self.controls;
-        // The depth crosses into the oscillator's `f32` lane once per block.
-        let depth = f32::from_unit(depth);
+        // The depth crosses into the data's float once per block.
+        let depth = F::from_unit(depth);
+        let step = self.lfo.step::<F>(rate);
         for (((&l, &r), o_l), o_r) in l.iter().zip(r).zip(out_l).zip(out_r) {
-            let pan = Pan(f64::from(depth * self.lfo.next(rate)));
-            let (gl, gr) = pan_gains(pan, self.law);
-            *o_l = l * S::from_f64(gl.get());
-            *o_r = r * S::from_f64(gr.get());
+            let (gl, gr) = pan_gains_in(depth * self.lfo.next(step), self.law);
+            *o_l = l * gl;
+            *o_r = r * gr;
         }
     }
 }

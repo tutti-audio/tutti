@@ -1,7 +1,7 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::BusTopology;
 use tutti_units::{
-    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, Real, SampleRate, SampleSpan, Seconds,
+    Feedback, Hz, PhaseIncrement, ReadPosition, Real, SampleRate, SampleSpan, Seconds,
 };
 
 use super::*;
@@ -101,8 +101,8 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     let reach = |bank: &ModDelayBank<f32>, depth: f64| {
         let d = bank.design(&controls(1.0, depth, 0.0)).depth;
         (
-            bank.position(bank.swept(Gain(-1.0), d)).span().get(),
-            bank.position(bank.swept(Gain(1.0), d)).span().get(),
+            bank.position(bank.swept(Bipolar::of(-1.0), d)).span().get(),
+            bank.position(bank.swept(Bipolar::of(1.0), d)).span().get(),
         )
     };
     let chorus = ModDelayBank::new(&ModDelayLayout::chorus(bus(1)), RATE);
@@ -127,7 +127,7 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     // The centre is the base, and the delay is held inside the line.
     assert_eq!(chorus.position(0.0), frames(480.0));
     assert_eq!(
-        chorus.position(chorus.swept(Gain(1.0), SampleSpan::of(1e9))),
+        chorus.position(chorus.swept(Bipolar::of(1.0), SampleSpan::of(1e9))),
         frames(2_400.0),
         "no delay is past the line"
     );
@@ -393,47 +393,6 @@ fn a_silent_channel_stays_silent() {
     );
     assert!(y[1].iter().all(|&s| s == 0.0));
     assert!(y[0].iter().any(|&s| s != 0.0) && y[2].iter().any(|&s| s != 0.0));
-}
-
-/// A view of `f64` is the `f32` render converted, to the last bit, with glides in flight.
-#[test]
-fn an_f64_view_is_the_f32_render_converted() {
-    let layout = ModDelayLayout::chorus(bus(2));
-    let x: Vec<Vec<f32>> = (0..2)
-        .map(|c| {
-            (0..500)
-                .map(|n| ((n * (3 + c)) % 17) as f32 / 8.0 - 1.0)
-                .collect()
-        })
-        .collect();
-    let glides = || {
-        let mut d = [Glide::landed(0.0f32), Glide::landed(0.0)];
-        d[0].aim_in(-240.0, 300);
-        let mut f = Glide::landed(0.3f32);
-        f.aim_in(0.6, 200);
-        (d, f)
-    };
-    let (mut d, mut f) = glides();
-    let mut bank = ModDelayBank::new(&layout, RATE);
-    let want = run(&mut bank, &mut d, &mut f, &x, 100);
-    let (mut d, mut f) = glides();
-    let mut bank = ModDelayBank::new(&layout, RATE);
-    let wide: Vec<Vec<f64>> = x
-        .iter()
-        .map(|c| c.iter().map(|&s| f64::from(s)).collect())
-        .collect();
-    let mut got = vec![vec![0.0f64; 500]; 2];
-    let ins: Vec<&[f64]> = wide.iter().map(Vec::as_slice).collect();
-    let mut outs: Vec<&mut [f64]> = got.iter_mut().map(Vec::as_mut_slice).collect();
-    bank.process(
-        &mut d,
-        &mut f,
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
-    for (g, w) in got.iter().flatten().zip(want.iter().flatten()) {
-        assert_eq!(*g, f64::from(*w));
-    }
 }
 
 /// The slew is a span of frames: a depth glide aimed at `DELAY_SLEW` a frame takes
