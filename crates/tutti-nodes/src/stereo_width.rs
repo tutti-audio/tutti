@@ -230,8 +230,8 @@ mod tests {
         let out = run(1.0);
         assert_close_f64(&out[0], &l, 0.0);
         assert_close_f64(&out[1], &r, 0.0);
-        let w = f64::from(0.3f32);
-        let out = run(0.3);
+        let w = 0.3;
+        let out = run(w);
         for (n, (a, b)) in out[0].iter().zip(&out[1]).enumerate() {
             let (mid, side) = ((l[n] + r[n]) / 2.0, w * (l[n] - r[n]) / 2.0);
             assert_close_f64(&[*a, *b], &[mid + side, mid - side], 2.0f64.powi(-45));

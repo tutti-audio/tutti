@@ -476,7 +476,7 @@ impl Network {
         let wet = self.wet.to_amplitude().get();
         if width >= 2 {
             let (m, s) = ((v[0] + v[1]) * 0.5, (v[0] - v[1]) * 0.5);
-            let k = f64::from(self.width.get());
+            let k = self.width.get();
             v[0] = (m + s * k) * wet;
             v[1] = (m - s * k) * wet;
             for c in &mut v[2..width] {
@@ -522,7 +522,7 @@ impl Network {
         }
         let wet = self.wet.to_amplitude().get();
         let width = if self.width_after() >= 2 {
-            f64::from(self.width.get()).abs().max(1.0)
+            self.width.get().abs().max(1.0)
         } else {
             1.0
         };

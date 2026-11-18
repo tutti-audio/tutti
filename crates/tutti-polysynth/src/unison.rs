@@ -212,7 +212,8 @@ impl UnisonEngine {
             || self.detune.load(),
             |lane| CentsSpan::clamped(f64::from(lane)),
         );
-        let spread = Spread::new_clamped(spread.map_or_else(|| self.spread.load().get(), f64::from));
+        let spread =
+            Spread::new_clamped(spread.map_or_else(|| self.spread.load().get(), f64::from));
         let changed = detune != self.config.detune_cents
             || (spread.get() - self.config.stereo_spread.get()).abs() > f64::EPSILON;
         if changed {

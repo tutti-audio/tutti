@@ -236,7 +236,7 @@ fn the_input_is_scaled_by_the_fixed_gain() {
 #[test]
 fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
     let l = 1_640usize;
-    for room in [0.0f32, 0.5, 0.9, 1.0] {
+    for room in [0.0f64, 0.5, 0.9, 1.0] {
         let g = f64::from(controls(room, 0.0).feedback().get());
         let mut comb = CombFilter::new(l);
         comb.feedback = g as f32;
@@ -303,7 +303,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     assert!(last(tail.get()) < 1e-3 * peak, "under -60 dB past the tail");
     assert!(last(tail.get() / 4) > 1e-3 * peak, "not absurdly loose");
     // A bigger room rings longer, a smaller one shorter; the damping does not change it.
-    let at = |room: f32, damp: f32| match bank.tail_of(&controls(room, damp)) {
+    let at = |room: f64, damp: f64| match bank.tail_of(&controls(room, damp)) {
         Tail::Finite(n) => n.get(),
         other => panic!("{other:?}"),
     };

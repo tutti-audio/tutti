@@ -231,8 +231,7 @@ impl PlainUnit for Mix {
     /// A percentage as a position on `0..=1`; a negative percentage is not one.
     fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
         let fraction = plain / 100.0;
-        (unit == ParamUnit::Percent && (0.0..=1.0).contains(&fraction))
-            .then(|| Self::new(fraction))
+        (unit == ParamUnit::Percent && (0.0..=1.0).contains(&fraction)).then(|| Self::new(fraction))
     }
     fn to_plain(self, _unit: ParamUnit) -> f64 {
         self.get() * 100.0

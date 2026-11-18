@@ -505,9 +505,9 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         -2.0,
         1.0,
         -1.0,
-        f32::NAN,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
     ] {
         let a = one_pole(0.9, damp);
         for band in Band::ALL {

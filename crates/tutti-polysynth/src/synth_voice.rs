@@ -128,8 +128,7 @@ fn channel_pan(channel: &ChannelState) -> (Amplitude, Amplitude) {
 
 /// [`channel_pan`] of a pan position.
 fn unity_centre_pan(pan: Pan) -> (Amplitude, Amplitude) {
-    // `Pan` is an `f32` unit; the law runs in `f64`.
-    let p = f64::from(pan.get());
+    let p = pan.get();
     let p = if p.is_nan() { 0.0 } else { p.clamp(-1.0, 1.0) };
     if p <= -1.0 {
         return (Amplitude(std::f64::consts::SQRT_2), Amplitude::SILENT);

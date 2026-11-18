@@ -104,14 +104,14 @@ fn tail_of(c: FreeverbControls) -> usize {
 /// its loop gain `g = room * 0.28 + 0.7`, each a period and the interpolation's two frames,
 /// and the four all-passes add their own echoes, `a^(k-1)` at `kD` for `a = 0.5`: ten trips
 /// to -60 dB, eleven periods. The figure errs long.
-fn schroeder_tail(room: f32) -> i64 {
+fn schroeder_tail(room: f64) -> i64 {
     let scale = |t: usize| (SR.get() / 44_100.0 * t as f64).round();
     let trips = |q: f64| (libm::log(1e-3) / libm::log(q)).ceil();
     let chain: f64 = [556usize, 441, 341, 225]
         .iter()
         .map(|&d| (1.0 + trips(0.5)) * (scale(d + 23) + 2.0))
         .sum();
-    let g = f64::from(room * 0.28 + 0.7);
+    let g = room * 0.28 + 0.7;
     let comb = (1.0 + trips(g)) * (scale(1617 + 23) + 2.0);
     (comb + chain).ceil() as i64
 }
@@ -120,8 +120,8 @@ fn schroeder_tail(room: f32) -> i64 {
 /// damping (it only shortens the ring).
 #[test]
 fn the_tail_is_the_schroeder_figure() {
-    for room in [0.0f32, 0.1, 0.5, 0.9, 1.0] {
-        for damp in [0.0f32, 0.5, 1.0] {
+    for room in [0.0f64, 0.1, 0.5, 0.9, 1.0] {
+        for damp in [0.0f64, 0.5, 1.0] {
             let got = tail_of(controls(room, damp)) as i64;
             let want = schroeder_tail(room);
             assert!((got - want).abs() <= 1, "room {room}: {got} against {want}");

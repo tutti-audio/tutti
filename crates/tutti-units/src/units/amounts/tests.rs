@@ -7,16 +7,16 @@ use super::*;
 /// - `Bipolar + Bipolar`, `Bipolar * f32` — a sum or a scaled amount can leave
 ///   `-1..=1`. Do the arithmetic on the raw number and call `Bipolar::new` (or
 ///   `clamped`). `Neg` stays: the other sign of an amount is in range.
-/// - `Mix + Mix`, `Mix * f32` — a blend *position* does
+/// - `Mix + Mix`, `Mix * f64` — a blend *position* does
 ///   not compose or scale; half of a crossfade point is not a crossfade
 ///   point. (`Depth` has a sign, and its own range check — that is the difference
 ///   between a position and a signed magnitude.)
-/// - `Pan * f32`, `Pan + Pan` — a position on a segment, so the same argument
+/// - `Pan * f64`, `Pan + Pan` — a position on a segment, so the same argument
 ///   `Mix` makes: half a pan position is not a pan position, and two of them do
 ///   not sum. Interpolation is a `lerp`, not a `*`. A measured balance is
 ///   [`StereoBalance`], and there is no `From` either way: a reading fed back
 ///   as a pan is `Pan(balance.get())`.
-/// - `Balance * f32`, `Balance + Balance` — a position on a segment, as `Pan`
+/// - `Balance * f64`, `Balance + Balance` — a position on a segment, as `Pan`
 ///   is. There is no `From` between `Balance`, `Pan` and `StereoBalance`: a
 ///   balance only attenuates, a pan places a source, a reading is not a control.
 /// - `Feedback * f32` — scaling walks a coefficient across the stability
@@ -41,7 +41,7 @@ fn omitted_operators_are_documented() {}
 fn mix_clamps_into_range_and_refuses_to_scale() {
     assert_eq!(Mix::new_clamped(1.5), Mix::WET);
     assert_eq!(Mix::new_clamped(-0.5), Mix::DRY);
-    // `Mix * f32` and `Mix + Mix` are deliberately absent — see the
+    // `Mix * f64` and `Mix + Mix` are deliberately absent — see the
     // omission ledger.
 }
 

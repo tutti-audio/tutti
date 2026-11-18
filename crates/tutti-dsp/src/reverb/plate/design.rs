@@ -246,8 +246,7 @@ impl PlateControls {
         .clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
         // `diffusion` is an `f32` unit: it widens once into the `f64` design.
-        let diffusion =
-            f64::from(finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0));
+        let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
 
         let total = SampleSpan::clamped(loop_frames(rate));
         let loop_gain = loop_gain(total, rt60, rate).get();

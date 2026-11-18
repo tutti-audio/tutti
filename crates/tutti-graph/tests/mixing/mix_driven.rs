@@ -105,7 +105,8 @@ fn latent_dc(value: f32, latency: usize) -> Kind {
     }
 }
 
-/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes.
+/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes, with `m` the
+/// mix narrowed to the `f32` graph's float.
 fn blend(y: f32, x_hat: f32, m: f32) -> f32 {
     y * m + x_hat * (1.0 - m)
 }
@@ -357,6 +358,7 @@ fn a_source_that_goes_is_declicked_to_the_base() {
             base as f32
         };
         let want = blend(3.0 * x[j], x[j], m);
+        // `f32` samples: the tolerance is a few ulps of the sample width.
         assert!((g - want).abs() < 1e-5, "frame {j}: {g}, want {want}");
     }
 }

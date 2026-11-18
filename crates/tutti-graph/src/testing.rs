@@ -444,7 +444,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     if f.is_multiple_of(period) {
                         let ramp = crate::ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Amplitude>::VOLUME,
-                            tutti_units::Amplitude::new(f64::from(driver_value(f, period))),
+                            tutti_units::Amplitude::new(driver_value(f, period)),
                             Samples(0),
                         );
                         let _ = io.event_out(0).push(Event::ramp(at, ramp));

@@ -82,7 +82,8 @@ fn latent() -> Kind {
     }
 }
 
-/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes.
+/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes, with `m` the
+/// mix narrowed to the `f32` graph's float.
 fn blend(y: f32, x_hat: f32, m: f32) -> f32 {
     y * m + x_hat * (1.0 - m)
 }

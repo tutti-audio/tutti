@@ -25,9 +25,8 @@ fn freeverb_aims_and_renders_without_allocating() {
         for block in 0..64u32 {
             let c = FreeverbControls {
                 room: Mix([f64::from(block % 8) / 7.0, f64::NAN, 9.0][(block % 3) as usize]),
-                damp: Mix(
-                    [f64::from((block / 8) % 8) / 7.0, f64::INFINITY, -2.0][(block % 5 % 3) as usize]
-                ),
+                damp: Mix([f64::from((block / 8) % 8) / 7.0, f64::INFINITY, -2.0]
+                    [(block % 5 % 3) as usize]),
             };
             let n = allocations(|| {
                 bank.aim(&mut glides, &c);

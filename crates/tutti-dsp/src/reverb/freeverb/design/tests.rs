@@ -29,28 +29,28 @@ fn the_scalings_are_freeverbs() {
 #[test]
 fn a_hostile_control_is_made_safe() {
     let gm = FreeverbControls::GENERAL_MIDI;
-    assert_eq!(controls(f32::NAN, f32::INFINITY).feedback(), gm.feedback());
-    assert_eq!(controls(f32::NAN, f32::NAN).damping(), gm.damping());
+    assert_eq!(controls(f64::NAN, f64::INFINITY).feedback(), gm.feedback());
+    assert_eq!(controls(f64::NAN, f64::NAN).damping(), gm.damping());
     assert_eq!(
         controls(9.0, -2.0).feedback(),
         controls(1.0, 0.0).feedback()
     );
     assert_eq!(controls(9.0, -2.0).damping(), 0.0);
     assert_eq!(
-        controls(f32::INFINITY, 0.0).feedback(),
+        controls(f64::INFINITY, 0.0).feedback(),
         gm.feedback(),
         "not a number: General MIDI"
     );
     for room in [
-        -1e30f32,
+        -1e30f64,
         -1.0,
         0.0,
         0.3,
         1.0,
         5.0,
         1e30,
-        f32::NAN,
-        f32::INFINITY,
+        f64::NAN,
+        f64::INFINITY,
     ] {
         let g = controls(room, 0.5).feedback();
         assert!(

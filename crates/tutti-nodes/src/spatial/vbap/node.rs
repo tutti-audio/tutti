@@ -286,8 +286,16 @@ impl VbapPannerNode {
             .good
             .elevation
             .read(lane(1).map_or(cells.1.get(), f64::from));
-        let spread = Spread::new_clamped(self.good.spread.read(lane(2).map_or(cells.2.get(), f64::from)));
-        let width = StereoWidth(self.good.width.read(lane(3).map_or(cells.3.get(), f64::from)));
+        let spread = Spread::new_clamped(
+            self.good
+                .spread
+                .read(lane(2).map_or(cells.2.get(), f64::from)),
+        );
+        let width = StereoWidth(
+            self.good
+                .width
+                .read(lane(3).map_or(cells.3.get(), f64::from)),
+        );
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,

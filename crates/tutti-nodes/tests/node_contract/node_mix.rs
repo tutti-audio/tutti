@@ -141,6 +141,8 @@ fn check_io<N: IntoNode>(
     // A mix between is the formula.
     let m = 0.3_f64;
     let mixed = rendered(make, &x, Mix::new(m));
+    // The blend runs in the `f32` samples' width.
+    let m = m as f32;
     for c in 0..outputs {
         let want: Vec<f32> = if c < inputs || inputs == 1 {
             wet[c]

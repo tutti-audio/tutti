@@ -382,10 +382,10 @@ where
 /// An `f32` unit is not a `Param64`:
 ///
 /// ```compile_fail
-/// use tutti_units::Mix;
+/// use tutti_units::Resonance;
 /// use tutti_types::Param64;
 /// struct Filter {
-///     wet: Param64<Mix>, // `Param<Mix>`
+///     resonance: Param64<Resonance>, // `Param<Resonance>`
 /// }
 /// ```
 pub struct Param64<U: Unit<Raw = f64>> {
