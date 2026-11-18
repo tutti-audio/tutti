@@ -460,6 +460,67 @@ pub(crate) struct LogLane {
     pub(crate) sink: LogSink,
 }
 
+impl LogLane {
+    /// A lane and the reader of its ring.
+    fn new() -> (Self, RtLogReader) {
+        let (writer, reader) = ring(RING_CAPACITY, Overflow::DropNewest);
+        let (lost, slots_lost) = counter();
+        (
+            Self {
+                slots: LogSlots::new(),
+                sink: LogSink { ring: writer, lost },
+            },
+            RtLogReader {
+                ring: reader,
+                slots_lost,
+            },
+        )
+    }
+}
+
+/// One lane and its reader, for a driver that renders blocks by hand: the
+/// slots a block's `Io` writes into, flushed after the block through the
+/// executor's own path.
+#[cfg(feature = "contract")]
+pub(crate) struct LogCapture {
+    lane: LogLane,
+    reader: RtLogReader,
+    filter: LogFilter,
+}
+
+#[cfg(feature = "contract")]
+impl LogCapture {
+    /// A capture that keeps what `filter` lets in.
+    pub(crate) fn new(filter: LogFilter) -> Self {
+        let (lane, reader) = LogLane::new();
+        Self {
+            lane,
+            reader,
+            filter,
+        }
+    }
+
+    /// The slots of the block about to run, under the capture's filter.
+    pub(crate) fn begin_block(&self) -> &LogSlots {
+        self.lane.slots.set_filter(self.filter);
+        &self.lane.slots
+    }
+
+    /// Moves the block's records, as `source`'s at the block starting at
+    /// `block`, onto the end of `out`.
+    pub(crate) fn end_block(&mut self, source: NodeKey, block: Frame, out: &mut Vec<RtRecord>) {
+        self.lane.slots.flush(source, block, &mut self.lane.sink);
+        while let Some(record) = self.reader.pop() {
+            out.push(record);
+        }
+    }
+
+    /// Records past a node call's fourth, since the capture was built.
+    pub(crate) fn lost(&self) -> u64 {
+        self.reader.lost()
+    }
+}
+
 /// The control side of one participant's ring: what it holds, and what was
 /// lost on the way (a full ring, or a fifth record in one node call).
 #[derive(Debug)]
@@ -650,16 +711,9 @@ impl Logs {
         let n = participants.max(1);
         self.lanes = (0..n)
             .map(|_| {
-                let (writer, reader) = ring(RING_CAPACITY, Overflow::DropNewest);
-                let (lost, slots_lost) = counter();
-                self.fresh.push(RtLogReader {
-                    ring: reader,
-                    slots_lost,
-                });
-                LogLane {
-                    slots: LogSlots::new(),
-                    sink: LogSink { ring: writer, lost },
-                }
+                let (lane, reader) = LogLane::new();
+                self.fresh.push(reader);
+                lane
             })
             .collect();
         self.claims = ClaimTable::new(n);
