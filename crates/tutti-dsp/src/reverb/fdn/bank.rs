@@ -56,7 +56,7 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Db, Hz, SampleRate, Seconds, Tail};
+use tutti_units::{Amplitude, Hz, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::delay::DelayRing;
@@ -429,11 +429,11 @@ impl<F: Float + Lerp> FdnBank<F> {
         let t = &mut self.target;
         t.n = n;
         let max_len = (self.cap - 4) as f64;
-        // A coefficient of the network is an `f32` unit, or zero when it is not finite; a
-        // span is `f64`. Each narrows to `F` once, here.
-        let unit = |x: f32| {
+        // A coefficient of the network is a unit, or zero when it is not finite. Each narrows
+        // to `F` once, here.
+        let unit = |x: f64| {
             if x.is_finite() {
-                F::from_f32(x)
+                F::from_f64(x)
             } else {
                 F::ZERO
             }
@@ -446,7 +446,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         for j in 0..n {
             let line = &f.lines[j];
             t.len[j] = F::from_f64(line.length.get().clamp(1.0, max_len));
-            t.gain[j] = absorption_gains(line.absorption, t.pole).map(F::from_f32);
+            t.gain[j] = absorption_gains(line.absorption, t.pole).map(|g| F::from_f64(g.get()));
             // A diagonal network is `m = 0`; its `v` is a unit vector (line 0)
             // like the rest, so a ramp to a mixing matrix moves between unit
             // vectors and `v_len` stays 1.
@@ -485,7 +485,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         });
         let pre = self.network.pre_delay.get() as f64;
         t.pre_len = F::from_f64(pre.clamp(0.0, (self.pre_cap - 4) as f64));
-        let wet = Db::to_amplitude_f64(f64::from(self.network.wet.get()));
+        let wet = self.network.wet.to_amplitude().get();
         t.wet = if wet.is_finite() {
             F::from_f64(wet)
         } else {
@@ -681,8 +681,8 @@ fn set_poles<F>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) {
 }
 
 /// The gains of a line's absorption, scaled if their response would peak above 1.
-fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [f32; 3] {
-    let g = [Band::Low, Band::Mid, Band::High].map(|b| a.gain(b).get());
+fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [Amplitude; 3] {
+    let g = [Band::Low, Band::Mid, Band::High].map(|b| a.gain(b));
     rescale_bands(g, pole)
 }
 
@@ -691,14 +691,13 @@ fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [f32; 3] {
 /// if their response would exceed 1 anywhere; NaN, infinite or negative gains
 /// are silence. The model's design applies it too, so the gains a network
 /// carries are the ones the bank runs.
-pub(crate) fn rescale_bands(g: [f32; 3], pole: [f64; 2]) -> [f32; 3] {
-    if !g.iter().all(|x| x.is_finite() && *x >= 0.0) {
-        return [0.0; 3];
+pub(crate) fn rescale_bands(g: [Amplitude; 3], pole: [f64; 2]) -> [Amplitude; 3] {
+    if !g.iter().all(|x| x.get().is_finite() && x.get() >= 0.0) {
+        return [Amplitude::SILENT; 3];
     }
     let peak = peak_response(g, pole);
     if peak > 1.0 {
-        // The gains are `Amplitude` (`f32`) figures: the rescale narrows back to them.
-        g.map(|x| (f64::from(x) * 0.9999 / peak) as f32)
+        g.map(|x| x * (0.9999 / peak))
     } else {
         g
     }
@@ -706,8 +705,8 @@ pub(crate) fn rescale_bands(g: [f32; 3], pole: [f64; 2]) -> [f32; 3] {
 
 /// The largest `|y(w)|` of the absorption with gains `g = [low, mid, high]`,
 /// over a grid of frequencies.
-pub(crate) fn peak_response(g: [f32; 3], pole: [f64; 2]) -> f64 {
-    let (low, mid, high) = (f64::from(g[0]), f64::from(g[1]), f64::from(g[2]));
+pub(crate) fn peak_response(g: [Amplitude; 3], pole: [f64; 2]) -> f64 {
+    let (low, mid, high) = (g[0].get(), g[1].get(), g[2].get());
     let (c2, c1) = (mid - high, low - mid);
     // |L1|, |L2| <= 1, so the response is at most the sum of the magnitudes
     // of its three terms: when that is under 1 (every gain falling with

@@ -4,11 +4,11 @@ use super::*;
 /// These must not compile; the ledger is here so a future contributor does
 /// not "helpfully" add them.
 ///
-/// - `Db * f32` — squares the amplitude rather than doubling the gain.
+/// - `Db * f64` — squares the amplitude rather than doubling the gain.
 /// - `Db / Db` — a quotient of logarithms is not a quantity.
 /// - `Amplitude + Amplitude` — cascading gains multiply; summing is what
 ///   the *signals* do, not their gains.
-/// - `Gain * f32`, `f32 * Gain`, `Gain / f32` — `Amplitude` is `Scalable`, so
+/// - `Gain * f64`, `f64 * Gain`, `Gain / f64` — `Amplitude` is `Scalable`, so
 ///   the same `x * 0.5` would read as scaling the gain there and as applying
 ///   it here. `Gain::apply` applies a gain to a sample; compose with
 ///   `Gain * Gain`.
@@ -18,9 +18,8 @@ use super::*;
 /// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
 ///   refuses it; `magnitude` names dropping the sign. (`From<Amplitude> for Gain`
 ///   is present: total and lossless.)
-/// - `Db(f64)`, `Amplitude(f64)`, an `f64` method on a `Db` value — `f64` is a working
-///   precision for design and analysis, not a second unit. The one `f64` path is the pair of
-///   associated functions `Db::to_amplitude_f64` and `Db::from_amplitude_f64` over bare `f64`.
+/// - an `f32` twin of a unit or of a converter (`Db::to_amplitude_f32`): the level units are
+///   `f64`, and a kernel that runs in `f32` narrows the value once per block, not per call.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -34,13 +33,13 @@ fn omitted_operators_are_documented() {}
 #[test]
 fn db_round_trips_through_amplitude() {
     assert_eq!(Db::UNITY.to_amplitude(), Amplitude(1.0));
-    // -6 dB is very nearly half amplitude.
-    assert!((Db(-6.0).to_amplitude().get() - 0.501_187).abs() < 1e-5);
+    // -6 dB is very nearly half amplitude: 10^(-0.3).
+    assert!((Db(-6.0).to_amplitude().get() - 0.501_187_233_627_272_3).abs() < 1e-15);
     // +6 dB exceeds 1.0 — amplitude is not a 0..1 quantity.
     assert!(Db(6.0).to_amplitude().get() > 1.99);
 
     let round = Db::from_amplitude(Db(-12.0).to_amplitude());
-    assert!((round.get() - -12.0).abs() < 1e-4);
+    assert!((round.get() - -12.0).abs() < 1e-12);
 }
 
 #[test]
@@ -90,11 +89,11 @@ fn db_adds_because_gain_stages_cascade() {
 /// decibel definition: `20 · log10(2) = 6.0206`.
 #[test]
 fn amplitude_to_db_leaves_silence_at_minus_infinity() {
-    assert_eq!(Amplitude::SILENT.to_db().get(), f32::NEG_INFINITY);
+    assert_eq!(Amplitude::SILENT.to_db().get(), f64::NEG_INFINITY);
     assert_eq!(Amplitude::UNITY.to_db(), Db::UNITY);
-    assert!((Amplitude(2.0).to_db().get() - 6.0206).abs() < 1e-4);
-    assert!((Amplitude(0.5).to_db().get() + 6.0206).abs() < 1e-4);
-    assert!((Amplitude(0.1).to_db().get() + 20.0).abs() < 1e-5);
+    assert!((Amplitude(2.0).to_db().get() - 6.020_599_913_279_624).abs() < 1e-12);
+    assert!((Amplitude(0.5).to_db().get() + 6.020_599_913_279_624).abs() < 1e-12);
+    assert!((Amplitude(0.1).to_db().get() + 20.0).abs() < 1e-12);
     // The floor is the caller's: it is a different, finite number.
     assert_ne!(Amplitude::SILENT.to_db(), Db::FLOOR);
 }
@@ -105,7 +104,7 @@ fn amplitude_to_db_leaves_silence_at_minus_infinity() {
 fn the_metering_floor_is_144_db_down() {
     assert_eq!(Db::FLOOR.get(), -144.0);
     let amp = Db::FLOOR.to_amplitude().get();
-    assert!((amp - 6.31e-8).abs() < 1e-9, "{amp:e}");
+    assert!((amp - 6.309_573_444_801_93e-8).abs() < 1e-22, "{amp:e}");
 }
 
 /// Signs multiply and magnitudes multiply: two inversions cancel.
@@ -154,7 +153,7 @@ fn a_gain_converts_to_and_from_an_amplitude() {
     assert_eq!(Gain::SILENT.to_amplitude(), Some(Amplitude::SILENT));
     assert_eq!(Gain(-0.0).to_amplitude(), Some(Amplitude::SILENT));
     assert_eq!(Gain(-2.0).to_amplitude(), None);
-    assert_eq!(Gain(f32::NAN).to_amplitude(), None);
+    assert_eq!(Gain(f64::NAN).to_amplitude(), None);
 
     assert_eq!(Gain(0.5).to_amplitude(), Some(Amplitude(0.5)));
     assert_eq!(Gain(-0.5).to_amplitude(), None);
@@ -162,7 +161,7 @@ fn a_gain_converts_to_and_from_an_amplitude() {
         Gain(1.0).to_amplitude().map(Amplitude::to_db),
         Some(Db::UNITY)
     );
-    for a in [0.0_f32, 0.25, 1.0, 8.0] {
+    for a in [0.0_f64, 0.25, 1.0, 8.0] {
         assert_eq!(Gain::from(Amplitude(a)).to_amplitude(), Some(Amplitude(a)));
     }
 }
@@ -173,8 +172,8 @@ fn a_gain_magnitude_drops_the_sign_and_keeps_the_level() {
     assert_eq!(Gain(0.5).magnitude(), Amplitude(0.5));
     assert_eq!(Gain::INVERTING.magnitude(), Amplitude::UNITY);
     assert_eq!(Gain::SILENT.magnitude(), Amplitude::SILENT);
-    assert_eq!(Gain(-0.0).magnitude().get().to_bits(), 0.0f32.to_bits());
-    assert!(Gain(f32::NAN).magnitude().get().is_nan());
+    assert_eq!(Gain(-0.0).magnitude().get().to_bits(), 0.0f64.to_bits());
+    assert!(Gain(f64::NAN).magnitude().get().is_nan());
     for g in [-4.0, -1.0, -0.25, 0.0, 0.25, 1.0, 4.0] {
         assert_eq!(Gain(g).magnitude(), Gain(-g).magnitude());
         assert_eq!(Gain(g).magnitude().get(), g.abs());
@@ -187,46 +186,46 @@ fn a_gain_reciprocal_undoes_it_and_refuses_zero() {
     assert_eq!(Gain(-0.5).recip(), Some(Gain(-2.0)));
     assert_eq!(Gain::SILENT.recip(), None);
     assert_eq!(Gain(-0.0).recip(), None);
-    // 1 / 1e-45 overflows f32, and NaN has no reciprocal.
-    assert_eq!(Gain::new(1e-45).recip(), None);
-    assert_eq!(Gain(f32::NAN).recip(), None);
+    // 1 / 1e-320 overflows f64, and NaN has no reciprocal.
+    assert_eq!(Gain::new(1e-320).recip(), None);
+    assert_eq!(Gain(f64::NAN).recip(), None);
     assert_eq!(Gain(-4.0) * Gain(-4.0).recip().unwrap(), Gain::UNITY);
 }
 
 #[test]
 fn a_gain_has_no_range_so_a_cell_holds_any_float() {
     assert_eq!(<Gain as Unit>::from_raw(-3.0), Gain(-3.0));
-    assert!(<Gain as Unit>::from_raw(f32::NAN).get().is_nan());
+    assert!(<Gain as Unit>::from_raw(f64::NAN).get().is_nan());
 }
 
 #[test]
 fn minus_twenty_db_is_a_tenth_of_the_amplitude() {
-    assert!((Db(-20.0).to_amplitude().get() - 0.1).abs() < 1e-7);
-    assert!((Db(20.0).to_amplitude().get() - 10.0).abs() < 1e-5);
+    assert!((Db(-20.0).to_amplitude().get() - 0.1).abs() < 1e-16);
+    assert_eq!(Db(20.0).to_amplitude(), Amplitude(10.0));
 }
 
 #[test]
 fn a_tenth_of_the_amplitude_is_minus_twenty_db() {
-    assert!((Db::from_amplitude(Amplitude(0.1)).get() + 20.0).abs() < 1e-5);
+    assert!((Db::from_amplitude(Amplitude(0.1)).get() + 20.0).abs() < 1e-12);
 }
 
 #[test]
 fn half_power_is_minus_three_point_zero_one_db() {
-    assert!((Db::from_power(0.5).get() + 3.010_3).abs() < 1e-4);
+    assert!((Db::from_power(0.5).get() + 3.010_299_956_639_812).abs() < 1e-12);
     assert_eq!(Db::from_power(1.0), Db::UNITY);
-    assert!((Db::from_power(100.0).get() - 20.0).abs() < 1e-5);
+    assert_eq!(Db::from_power(100.0), Db(20.0));
 }
 
 #[test]
 fn power_is_the_square_of_amplitude_in_db() {
     let amp = Amplitude(0.25);
     let via_power = Db::from_power(amp.get() * amp.get()).get();
-    assert!((via_power - Db::from_amplitude(amp).get()).abs() < 1e-5);
+    assert!((via_power - Db::from_amplitude(amp).get()).abs() < 1e-12);
 }
 
 #[test]
 fn zero_power_is_negative_infinity_not_the_floor() {
-    assert_eq!(Db::from_power(0.0).get(), f32::NEG_INFINITY);
+    assert_eq!(Db::from_power(0.0).get(), f64::NEG_INFINITY);
 }
 
 /// A negative power or amplitude has no logarithm: the conversion is NaN,
@@ -237,19 +236,61 @@ fn a_negative_power_or_amplitude_is_nan() {
     assert!(Db::from_amplitude(Amplitude(-0.5)).get().is_nan());
 }
 
-/// The `f64` pair is the amplitude-decibel definition: 20 dB is a ratio of 10, a ratio of 100 is
+/// The converters are the amplitude-decibel definition: 20 dB is a ratio of 10, a ratio of 100 is
 /// 40 dB, a half is `20 log10 0.5`, silence is `-inf`, a negative ratio is NaN, and the pair
 /// round-trips to `1e-12`.
 #[test]
-fn the_f64_pair_is_the_amplitude_decibel_definition() {
-    assert_eq!(Db::to_amplitude_f64(20.0), 10.0);
-    assert_eq!(Db::to_amplitude_f64(0.0), 1.0);
-    assert_eq!(Db::from_amplitude_f64(100.0), 40.0);
-    assert!((Db::from_amplitude_f64(0.5) + 6.020_599_913_279_624).abs() < 1e-12);
-    assert_eq!(Db::from_amplitude_f64(0.0), f64::NEG_INFINITY);
-    assert!(Db::from_amplitude_f64(-1.0).is_nan());
+fn the_converters_are_the_amplitude_decibel_definition() {
+    assert_eq!(Db(20.0).to_amplitude(), Amplitude(10.0));
+    assert_eq!(Db(0.0).to_amplitude(), Amplitude::UNITY);
+    assert_eq!(Db::from_amplitude(Amplitude(100.0)), Db(40.0));
+    assert!((Db::from_amplitude(Amplitude(0.5)).get() + 6.020_599_913_279_624).abs() < 1e-12);
+    assert!((Db::from_amplitude(Amplitude(2.0)).get() - 6.020_599_913_279_624).abs() < 1e-12);
+    assert_eq!(
+        Db::from_amplitude(Amplitude::SILENT).get(),
+        f64::NEG_INFINITY
+    );
+    assert!(Db::from_amplitude(Amplitude(-1.0)).get().is_nan());
     for db in [-120.0, -60.0, -3.0, 0.0, 12.0] {
-        let round = Db::from_amplitude_f64(Db::to_amplitude_f64(db));
+        let round = Db::from_amplitude(Db(db).to_amplitude()).get();
         assert!((round - db).abs() < 1e-12, "{db}");
     }
+}
+
+/// A kernel that runs in `f32` narrows a converter's `f64` once; the narrowed value is the `f32`
+/// closed form to two ulps.
+#[test]
+fn a_decibel_narrows_to_the_f32_closed_form() {
+    for db in [-60.0_f32, -6.0, -3.0, 0.0, 6.0, 12.0] {
+        let narrowed = Db(f64::from(db)).to_amplitude().get() as f32;
+        let closed = 10.0_f32.powf(db / 20.0);
+        assert!(
+            (narrowed - closed).abs() <= closed * f32::EPSILON * 2.0,
+            "{db} dB: {narrowed} against {closed}"
+        );
+    }
+    for amp in [0.001_f32, 0.25, 0.5, 2.0, 10.0] {
+        let narrowed = Db::from_amplitude(Amplitude(f64::from(amp))).get() as f32;
+        let closed = 20.0 * amp.log10();
+        assert!(
+            (narrowed - closed).abs() <= closed.abs() * f32::EPSILON * 2.0,
+            "{amp}: {narrowed} against {closed}"
+        );
+    }
+    for power in [0.001_f32, 0.5, 2.0, 100.0] {
+        let narrowed = Db::from_power(f64::from(power)).get() as f32;
+        let closed = 10.0 * power.log10();
+        assert!(
+            (narrowed - closed).abs() <= closed.abs() * f32::EPSILON * 2.0,
+            "{power}: {narrowed} against {closed}"
+        );
+    }
+}
+
+/// +20 dB is exactly a factor of 10 and -6.0206 dB is a half.
+#[test]
+fn twenty_db_is_ten_and_minus_six_db_is_a_half() {
+    assert_eq!(Db(20.0).to_amplitude().get(), 10.0);
+    assert!((Db(-6.020_599_913_279_624).to_amplitude().get() - 0.5).abs() < 1e-12);
+    assert_eq!(Db(0.0).to_amplitude().get(), 1.0);
 }

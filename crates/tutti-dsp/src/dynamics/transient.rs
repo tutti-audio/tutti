@@ -90,10 +90,9 @@ struct Amounts {
 impl Lerp for Amounts {
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        let t = k as f32 / n as f32;
         Self {
-            attack: Db(crate::lerp(self.attack.get(), to.attack.get(), t)),
-            sustain: Db(crate::lerp(self.sustain.get(), to.sustain.get(), t)),
+            attack: Db(self.attack.get().lerp(&to.attack.get(), k, n)),
+            sustain: Db(self.sustain.get().lerp(&to.sustain.get(), k, n)),
         }
     }
 }
@@ -114,12 +113,12 @@ fn gain_db(fast: Amplitude, slow: Amplitude, attack: Db, sustain: Db) -> Db {
 /// A transient shaper of any width: one gain from the loudest channel's fast and slow
 /// envelopes, applied to every channel.
 ///
-/// Built on the control side for one rate; the state is `f32` and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `f64` and a view's samples are
+/// converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct TransientBank {
-    fast: Follower<f32>,
-    slow: Follower<f32>,
+    fast: Follower<f64>,
+    slow: Follower<f64>,
     /// The fast and the slow envelope, both at 0 until a level is heard.
     envelopes: (Amplitude, Amplitude),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
@@ -177,7 +176,7 @@ impl TransientBank {
         let width = input.channels().min(output.channels());
         let blended = self.amounts.blended(frames);
         let taken = self.amounts.taken();
-        let mut gains = [0.0f32; CHUNK];
+        let mut gains = [Amplitude::SILENT; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -192,20 +191,18 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let level = Amplitude::new(*g);
+                let level = *g;
                 let fast = self.fast.follow(self.envelopes.0, level);
                 let slow = self.slow.follow(self.envelopes.1, level);
                 self.envelopes = (fast, slow);
-                *g = gain_db(fast, slow, a.attack, a.sustain)
-                    .to_amplitude()
-                    .get();
+                *g = gain_db(fast, slow, a.attack, a.sustain).to_amplitude();
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<f64>() * g.get()).convert_to::<S>();
                 }
             }
             start = end;

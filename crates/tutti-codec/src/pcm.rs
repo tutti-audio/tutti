@@ -53,7 +53,7 @@ impl IntDepth {
             Self::Int16 => i16::STEP,
             Self::Int24 => I24::STEP,
         };
-        Amplitude::new(step.expect("an integer format has a step") as f32)
+        Amplitude::new(step.expect("an integer format has a step"))
     }
 
     /// One sample as this depth's integer, by the rule in [`Sample`]: scaled

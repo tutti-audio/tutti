@@ -483,7 +483,7 @@ fn cases() -> Vec<Case> {
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("a test width is one bus"),
-                    Db::new(v.unwrap_or(0.0)),
+                    Db::new(f64::from(v.unwrap_or(0.0))),
                 );
                 parts_of(n)
             },
@@ -502,7 +502,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    n.set_volume(Amplitude(v));
+                    n.set_volume(Amplitude(f64::from(v)));
                 }
                 parts_of(n)
             },

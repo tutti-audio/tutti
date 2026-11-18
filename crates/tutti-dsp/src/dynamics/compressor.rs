@@ -25,7 +25,7 @@ use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
+use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
 use crate::finite::finite_or;
 use crate::follower::Follower;
 use crate::{Glide, Steps};
@@ -38,7 +38,7 @@ pub struct CompressorControls {
     /// The width of the soft knee in dB, centred on the threshold; 0 is a hard knee.
     /// Below 0 reads as 0, and above 400 dB as 400: the curve's knee term is at most
     /// `knee / 2` dB, so a wider knee changes nothing a finite follower can use, and a knee
-    /// of 1e20 or 3e38 would overflow its square.
+    /// of 1e200 would overflow its square.
     pub knee: Db,
     /// dB in per dB out above the threshold. Below 1 reads as 1: a compressor does not
     /// expand.
@@ -80,7 +80,7 @@ impl Default for CompressorControls {
 
 /// The most makeup, in dB, a compressor applies: 10^(400/20) is 1e20, so the gain of a
 /// makeup and a reduction stays finite whatever either is.
-const MAX_MAKEUP_DB: f32 = 400.0;
+const MAX_MAKEUP: Db = Db(400.0);
 
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,13 +103,12 @@ impl CompressorMember {
         let d = CompressorControls::DEFAULT;
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
+            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             attack: c.attack,
             release: c.release,
-            makeup: Db(
-                finite_or(c.makeup.get(), d.makeup.get()).clamp(-MAX_MAKEUP_DB, MAX_MAKEUP_DB)
-            ),
+            makeup: Db(finite_or(c.makeup.get(), d.makeup.get())
+                .clamp(-MAX_MAKEUP.get(), MAX_MAKEUP.get())),
             key_cutoff: Hz(finite_or(c.key_cutoff.get(), d.key_cutoff.get())),
             key_q: Q(finite_or(c.key_q.get(), d.key_q.get())),
             rate,
@@ -125,7 +124,7 @@ struct Detector {
     knee: Db,
     ratio: CompressionRatio,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
-    ballistics: Follower<f32>,
+    ballistics: Follower<f64>,
 }
 
 impl Detector {
@@ -153,11 +152,11 @@ impl Detector {
     /// coefficient while it rises, the release while it falls) and the linear gain
     /// `-reduction + makeup`.
     #[inline]
-    fn frame(&self, reduction: &mut Db, level: f32, threshold: Db, makeup: Db) -> f32 {
-        let input_db = amplitude_to_db(Amplitude::new(level));
+    fn frame(&self, reduction: &mut Db, level: Amplitude, threshold: Db, makeup: Db) -> Amplitude {
+        let input_db = amplitude_to_db(level);
         let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
         *reduction = self.ballistics.follow(*reduction, target);
-        (-*reduction + makeup).to_amplitude().get()
+        (-*reduction + makeup).to_amplitude()
     }
 }
 
@@ -173,13 +172,13 @@ pub struct CompressorLanes<'a, S: Float = f32> {
 /// A feed-forward compressor of any width: one gain from the loudest key channel, applied
 /// to every channel, with the follower that smooths it and the makeup that glides.
 ///
-/// Built on the control side for one rate; the state is `f32`, and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `f64`, and a view's samples are
+/// converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct CompressorBank {
     detector: Detector,
     /// The makeup in dB, gliding over [`GAIN_GLIDE`].
-    makeup: Glide<f32>,
+    makeup: Glide<f64>,
     /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
@@ -288,7 +287,7 @@ impl CompressorBank {
         let d = self.detector;
         let blended = self.makeup.blended(frames);
         let taken = self.makeup.taken();
-        let mut gains = [0.0f32; CHUNK];
+        let mut gains = [Amplitude::SILENT; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -304,7 +303,7 @@ impl CompressorBank {
                 let threshold = lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| Db(x.convert_to::<f32>()))
+                    .map(|x| Db(x.convert_to::<f64>()))
                     .filter(|t| t.get().is_finite())
                     .unwrap_or(d.threshold);
                 let makeup = if i < blended {
@@ -321,7 +320,7 @@ impl CompressorBank {
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<f64>() * g.get()).convert_to::<S>();
                 }
             }
             start = end;

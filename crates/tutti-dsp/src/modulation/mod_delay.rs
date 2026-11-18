@@ -312,7 +312,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// whatever the chord between corners does.
     #[must_use]
     pub fn swept(&self, lfo: Gain, depth: SampleSpan) -> SamplePosition {
-        let at = self.base.get() + f64::from(lfo.get()) * depth.get();
+        let at = self.base.get() + lfo.get() * depth.get();
         SamplePosition(at.min(self.cap.get()))
     }
 

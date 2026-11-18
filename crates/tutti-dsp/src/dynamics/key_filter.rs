@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, MAX_CHANNELS};
-use tutti_units::{Hz, Q, SampleRate, Samples};
+use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples};
 
 use super::shared::{CHUNK, level};
 use crate::{COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
@@ -112,9 +112,9 @@ impl KeyStage {
         &mut self,
         key: &Planes<'_, S>,
         frames: Range<usize>,
-        out: &mut [f32],
+        out: &mut [Amplitude],
     ) {
-        out.fill(0.0);
+        out.fill(Amplitude::SILENT);
         let n = frames.len().min(CHUNK);
         let heard = key.slice(Samples(frames.start)..Samples(frames.start + n));
         let mut scratch = [[S::ZERO; CHUNK]; MAX_CHANNELS];
@@ -130,12 +130,12 @@ impl KeyStage {
         let mut non_finite = false;
         for (plane, raw) in filtered.iter().zip(heard.iter()) {
             for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {
-                let y = y.convert_to::<f32>();
+                let y = y.convert_to::<f64>();
                 let l = if y.is_finite() {
                     level(y)
                 } else {
                     non_finite = true;
-                    level(x.convert_to::<f32>())
+                    level(x.convert_to::<f64>())
                 };
                 *m = m.max(l);
             }

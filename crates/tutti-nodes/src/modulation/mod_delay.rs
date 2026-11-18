@@ -212,7 +212,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
         let depth_end = span(self.depth.at(self.depth.taken().saturating_add(SEGMENT)));
         self.clock.solve(&mut self.delays, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            F::from_f64(bank.swept(Gain(lfo), depth).get())
+            F::from_f64(bank.swept(Gain(f64::from(lfo)), depth).get())
         });
     }
 }

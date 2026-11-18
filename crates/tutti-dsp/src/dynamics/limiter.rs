@@ -39,12 +39,12 @@
 //! meets its first quiet frame).
 
 /// The envelope with no history: the next frame takes its target at once.
-const UNSET: f32 = f32::INFINITY;
+const UNSET: Amplitude = Amplitude(f64::INFINITY);
 
 /// The most a lane's level may say, in dB either way: past it a lane value reads as this.
 /// 300 dB is 1e15 as an amplitude, so a gain from a lane's ceiling and threshold, and from
-/// the peak (floored at -144 dB), stays finite in `f32`.
-const LANE_DB_LIMIT: f32 = 300.0;
+/// the peak (floored at -144 dB), stays finite.
+const LANE_DB_LIMIT: Db = Db(300.0);
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, MaxBlock};
@@ -216,7 +216,7 @@ struct Design {
     /// And the aimed ceiling.
     ceiling: Db,
     /// The one-pole coefficient the envelope releases at.
-    release: f32,
+    release: f64,
 }
 
 impl Design {
@@ -245,7 +245,7 @@ impl Design {
             threshold,
             ceiling,
             release: Seconds(release.get().max(LimiterControls::MIN_RELEASE.get()))
-                .one_pole_coeff(rate) as f32,
+                .one_pole_coeff(rate),
         }
     }
 }
@@ -270,8 +270,9 @@ pub struct LimiterLanes<'a, S: Float = f32> {
 /// channel, and the envelope and window minimum that decide the gain.
 ///
 /// Built on the control side for one rate, where it allocates the rings; a clone keeps
-/// their size, and [`reset`](Self::reset) empties them without allocating. The state is
-/// `f32`; a view of another sample format is converted at the edges.
+/// their size, and [`reset`](Self::reset) empties them without allocating. The gain state is
+/// `f64` and the delay lines and the true-peak detector are `f32`; a view of another sample
+/// format is converted at the edges.
 #[derive(Clone, Debug)]
 pub struct LimiterBank {
     design: Design,
@@ -282,7 +283,7 @@ pub struct LimiterBank {
     /// (after a reset): the first frame replaces it, through the attack branch, before any
     /// arithmetic reads it (a target is finite, so it is under `+inf`), and it never leaves
     /// the bank: the window minimum is pushed the replaced value.
-    envelope: f32,
+    envelope: Amplitude,
     ring: LookaheadRing,
     /// The true-peak detector; `None` reads the sample peak.
     detector: Option<Detector>,
@@ -295,7 +296,7 @@ struct Detector {
     states: Vec<Oversampler<f32>>,
     /// The linked sample peaks of the last frames, as many as the groups a frame's window
     /// starts after it: a frame's own sample joins the groups of its window.
-    lag: Vec<f32>,
+    lag: Vec<Amplitude>,
     /// Where `lag` is read and written next.
     at: usize,
 }
@@ -303,7 +304,7 @@ struct Detector {
 impl Detector {
     /// `peak` of the newest frame in, the peak of the frame `lag.len()` before it out.
     #[inline]
-    fn delayed(&mut self, peak: f32) -> f32 {
+    fn delayed(&mut self, peak: Amplitude) -> Amplitude {
         if self.lag.is_empty() {
             return peak;
         }
@@ -384,7 +385,7 @@ impl LimiterBank {
         let block = MaxBlock::of(Samples(CHUNK));
         let detector = Detector {
             states: (0..channels.max(1)).map(|_| plan.state(block)).collect(),
-            lag: vec![0.0; first],
+            lag: vec![Amplitude::SILENT; first],
             at: 0,
         };
         Ok(Self::build(
@@ -408,7 +409,7 @@ impl LimiterBank {
         self.ring.clear();
         if let Some(d) = &mut self.detector {
             d.states.iter_mut().for_each(Oversampler::reset);
-            d.lag.fill(0.0);
+            d.lag.fill(Amplitude::SILENT);
             d.at = 0;
         }
     }
@@ -420,9 +421,14 @@ impl LimiterBank {
 
     /// The target gain of frame `i`, whose linked peak is `peak`.
     #[inline]
-    fn target_gain<S: Float>(&self, lanes: &LimiterLanes<'_, S>, i: usize, peak: f32) -> f32 {
+    fn target_gain<S: Float>(
+        &self,
+        lanes: &LimiterLanes<'_, S>,
+        i: usize,
+        peak: Amplitude,
+    ) -> Amplitude {
         if lanes.threshold.is_none() && lanes.ceiling.is_none() {
-            return self.design.curve.gain(Amplitude::new(peak)).get();
+            return self.design.curve.gain(peak);
         }
         // A lane's finite value, held within `LANE_DB_LIMIT` either way; else the aimed
         // value, held only where it can overflow or cancel: a ceiling at most
@@ -430,18 +436,16 @@ impl LimiterBank {
         // threshold as it is (`-inf` leaves every signal over it, `+inf` none, a gain of 0).
         // A ceiling of `-inf` is a gain of 0 and stays one: only an infinity can make the
         // envelope NaN.
-        let lane_or = |lane: Option<Mono<'_, S>>, base: f32, held: fn(f32) -> f32| {
+        let lane_or = |lane: Option<Mono<'_, S>>, base: Db, held: fn(Db) -> Db| {
             lane.and_then(|l| l.samples().get(i))
-                .map(|x| x.convert_to::<f32>())
-                .filter(|x| x.is_finite())
+                .map(|x| Db(x.convert_to::<f64>()))
+                .filter(|x| x.get().is_finite())
                 .map_or_else(|| held(base), |x| x.clamp(-LANE_DB_LIMIT, LANE_DB_LIMIT))
         };
-        let peak_db = amplitude_to_db(Amplitude::new(peak));
-        let threshold = Db(lane_or(lanes.threshold, self.design.threshold.get(), |t| t));
-        let ceiling = Db(lane_or(lanes.ceiling, self.design.ceiling.get(), |c| {
-            c.min(LANE_DB_LIMIT)
-        }));
-        compute_limiter_gain(peak_db, threshold, ceiling).get()
+        let peak_db = amplitude_to_db(peak);
+        let threshold = lane_or(lanes.threshold, self.design.threshold, |t| t);
+        let ceiling = lane_or(lanes.ceiling, self.design.ceiling, |c| c.min(LANE_DB_LIMIT));
+        compute_limiter_gain(peak_db, threshold, ceiling)
     }
 
     /// Runs `input` into `output`, delayed by the lookahead and scaled by the linked gain.
@@ -461,7 +465,7 @@ impl LimiterBank {
             .width()
             .min(input.channels())
             .min(output.channels());
-        let mut gains = [0.0f32; CHUNK];
+        let mut gains = [Amplitude::SILENT; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -470,10 +474,10 @@ impl LimiterBank {
 
             // The linked peak: the loudest channel at each frame, taken a channel at a time
             // (`max` is exact, so the order does not matter).
-            gains.fill(0.0);
+            gains.fill(Amplitude::SILENT);
             for plane in input.iter() {
                 for (p, x) in gains.iter_mut().zip(&plane.samples()[start..end]) {
-                    *p = fold_peak(*p, x.convert_to::<f32>());
+                    *p = fold_peak(*p, x.convert_to::<f64>());
                 }
             }
             if let Some(detector) = &mut self.detector {
@@ -495,7 +499,11 @@ impl LimiterBank {
                 if target < self.envelope {
                     self.envelope = target;
                 } else {
-                    self.envelope = Smoother::toward(self.envelope, target, self.design.release);
+                    self.envelope = Amplitude(Smoother::toward(
+                        self.envelope.get(),
+                        target.get(),
+                        self.design.release,
+                    ));
                 }
                 *g = self.ring.push_gain(self.envelope);
             }
@@ -514,7 +522,7 @@ impl LimiterBank {
 }
 
 /// Folds into `peaks` the loudest of the four 4x points of each frame of `samples`.
-fn group_peaks<S: Float>(state: &mut Oversampler<f32>, samples: &[S], peaks: &mut [f32]) {
+fn group_peaks<S: Float>(state: &mut Oversampler<f32>, samples: &[S], peaks: &mut [Amplitude]) {
     let mut clean = [0.0f32; CHUNK];
     let clean = &mut clean[..samples.len()];
     for (c, x) in clean.iter_mut().zip(samples) {
@@ -529,7 +537,9 @@ fn group_peaks<S: Float>(state: &mut Oversampler<f32>, samples: &[S], peaks: &mu
     let (high, _) = state.high_rate();
     let (groups, _) = high.samples().as_chunks::<4>();
     for (p, group) in peaks.iter_mut().zip(groups) {
-        *p = group.iter().fold(*p, |peak, &x| peak.max(level(x)));
+        *p = group
+            .iter()
+            .fold(*p, |peak, &x| peak.max(level(f64::from(x))));
     }
 }
 

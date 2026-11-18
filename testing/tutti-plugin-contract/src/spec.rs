@@ -272,7 +272,7 @@ pub const RING_EXTRA: Samples = Samples(4096);
 /// in its default mode.
 pub const LATE: Samples = Samples(64);
 /// The peak of `RINGS_HISS`'s noise: 0.001, which is -60 dB.
-pub const HISS_DB: f32 = -60.0;
+pub const HISS_DB: f64 = -60.0;
 
 /// One edit a host must read from a plugin, as the spec states it: the figures
 /// are written here, not taken from the host's own type.

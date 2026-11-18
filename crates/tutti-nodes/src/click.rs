@@ -37,7 +37,7 @@ use tutti_graph::{
 use tutti_music::{Meter, MeterMap};
 use tutti_rt::{Loan, Reader, Setting, setting_word};
 use tutti_transport::{ProjectMeter, Transport};
-use tutti_types::AtomicF32;
+use tutti_types::AtomicF64;
 use tutti_types::BusTopology;
 use tutti_units::Tail;
 use tutti_units::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
@@ -103,7 +103,7 @@ pub struct VolumeOutOfRange(pub Amplitude);
 #[repr(align(64))]
 #[derive(Debug)]
 pub struct ClickSettings {
-    volume: AtomicF32,
+    volume: AtomicF64,
     /// The project meter, driving both the click rate and the downbeat accent.
     ///
     /// Published through a [`Publisher`](tutti_rt::Publisher) rather than a packed atomic because a
@@ -128,7 +128,7 @@ declare_params!([] ClickSettings, settings ClickConfig {
 impl From<ClickConfig> for ClickSettings {
     fn from(config: ClickConfig) -> Self {
         Self {
-            volume: AtomicF32::new(0.5),
+            volume: AtomicF64::new(0.5),
             meter: ProjectMeter::default(),
             mode: Setting::new(config.mode),
         }
@@ -368,15 +368,14 @@ impl ClickNode {
         } else {
             Amplitude(0.7)
         };
-        // The envelope is `f32` arithmetic over `f32` times.
-        let (attack, hold_end) = (ATTACK.to_f32(), HOLD_END.to_f32());
-        let release_len = CLICK_LEN.to_f32() - hold_end;
+        let (attack, hold_end) = (ATTACK.get(), HOLD_END.get());
+        let release_len = CLICK_LEN.get() - hold_end;
         let phase_inc = PhaseIncrement::per_sample(freq, sample_rate);
 
         let mut phase = Phase::START;
         (0..num_samples)
             .map(|i| {
-                let t = Samples(i).to_seconds(sample_rate).to_f32();
+                let t = Samples(i).to_seconds(sample_rate).get();
                 let env = if t < attack {
                     t / attack
                 } else if t < hold_end {
@@ -384,8 +383,8 @@ impl ClickNode {
                 } else {
                     1.0 - (t - hold_end) / release_len
                 };
-                // The click is stored as `f32`: each sine value narrows into it.
-                let sample = phase.sin() as f32 * env * accent_volume.get();
+                // The click is stored as `f32`: each sample narrows into it.
+                let sample = (phase.sin() * env * accent_volume.get()) as f32;
                 phase = phase.advance(phase_inc);
                 sample
             })
@@ -521,7 +520,7 @@ impl ClickNode {
         };
 
         if *click_pos < buffer.len() {
-            let sample = F::from_f32(buffer[*click_pos] * volume.get());
+            let sample = F::from_f64(f64::from(buffer[*click_pos]) * volume.get());
             *click_pos += 1;
             sample
         } else {
@@ -799,7 +798,7 @@ mod tests {
     fn a_volume_outside_the_unit_range_is_refused_and_changes_nothing() {
         let settings = ClickSettings::new();
         settings.set_volume(Amplitude::new(0.25)).unwrap();
-        for bad in [1.01, -0.01, f32::NAN, f32::INFINITY] {
+        for bad in [1.01, -0.01, f64::NAN, f64::INFINITY] {
             let err = settings.set_volume(Amplitude::new(bad)).unwrap_err();
             assert_eq!(err.0.get().is_nan(), bad.is_nan());
             assert_eq!(settings.volume(), Amplitude::new(0.25), "{bad}");

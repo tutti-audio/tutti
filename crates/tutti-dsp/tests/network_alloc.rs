@@ -74,7 +74,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
             modulation: Depth::of(k),
             rate: Hz(f64::from(0.1 + k)),
             width: StereoWidth(2.0 * k),
-            wet: Db(-12.0 * k),
+            wet: Db(-12.0 * f64::from(k)),
             freeze: block % 11 == 0,
         };
         let n = allocations(|| {
@@ -90,7 +90,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
     }
 }
 
-/// The FDN's `design_into` runs on a 96 KiB stack: a network is 67 KB, and building one on an
+/// The FDN's `design_into` runs on a 160 KiB stack: a network is 111 KB, and building one on an
 /// audio thread's callback must not copy it. An unoptimised build copies a network about
 /// three times, so building one needs well over that.
 #[test]
@@ -99,7 +99,7 @@ fn the_fdns_design_into_needs_no_network_sized_stack() {
     let rate = SampleRate::SR_44K1;
     let mut network = Box::new(tutti_dsp::Network::new(rate));
     let handle = std::thread::Builder::new()
-        .stack_size(96 * 1024)
+        .stack_size(160 * 1024)
         .spawn(move || {
             FdnLayout::default().design_into(&FdnControls::DEFAULT, rate, &mut network);
             network.stages.len()

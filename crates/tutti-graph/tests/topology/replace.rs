@@ -451,10 +451,12 @@ fn a_replace_during_a_fade_waits_for_it() {
         .map(|f| match f {
             0..100 => {
                 let (o, i) = FadeLaw::EqualAmplitude.gains(f, 100);
+                let (o, i) = (o.get() as f32, i.get() as f32);
                 2.0 * i + 1.0 * o
             }
             100..150 => {
                 let (o, i) = FadeLaw::EqualAmplitude.gains(f - 100, 50);
+                let (o, i) = (o.get() as f32, i.get() as f32);
                 8.0 * i + 2.0 * o
             }
             _ => 8.0,

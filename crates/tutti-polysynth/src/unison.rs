@@ -225,7 +225,7 @@ impl UnisonEngine {
     pub fn recompute_params(&mut self) {
         let count = usize::from(self.config.voice_count.get());
 
-        let amplitude = Amplitude(1.0 / (count as f32).sqrt());
+        let amplitude = Amplitude(1.0 / (count as f64).sqrt());
         // A converter, not a divide: the span's unit changes from cents to
         // semitones here.
         let detune_semitones = self.config.detune_cents.to_semitones();

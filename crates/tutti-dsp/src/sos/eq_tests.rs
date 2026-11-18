@@ -35,7 +35,7 @@ fn cookbook_bell(fc: f64, q: f64, db: f64) -> Biquad {
     }
 }
 
-fn bell(fc: f64, q: f32, db: f32) -> Biquad {
+fn bell(fc: f64, q: f32, db: f64) -> Biquad {
     MatchedBell::new(Q(q), Db(db))
         .design(Hz(fc), RATE)
         .unwrap()
@@ -48,7 +48,7 @@ fn to_db(m: f64) -> f64 {
 
 const CENTERS: [f64; 7] = [60.0, 250.0, 1000.0, 5000.0, 12000.0, 19200.0, 22000.0];
 const QS: [f32; 5] = [0.3, 0.707, 2.0, 8.0, 25.0];
-const GAINS: [f32; 6] = [-24.0, -12.0, -3.0, 3.0, 12.0, 24.0];
+const GAINS: [f64; 6] = [-24.0, -12.0, -3.0, 3.0, 12.0, 24.0];
 
 /// The squared analog tilt `(A^2 x^2 + 1) / (x^2 + A^2)` for `A = 10^(db / 40)`, at the
 /// frequency ratio `x`, as a magnitude.
@@ -62,7 +62,7 @@ fn warped(fc: f64, f: f64) -> f64 {
     (PI * f / RATE.get()).tan() / (PI * fc / RATE.get()).tan()
 }
 
-fn tilt(fc: f64, db: f32) -> Biquad {
+fn tilt(fc: f64, db: f64) -> Biquad {
     Tilt::new(Db(db)).design(Hz(fc), RATE).unwrap().sections()[0]
 }
 
@@ -75,7 +75,7 @@ fn the_matched_bell_equals_the_analog_magnitude_at_dc_the_center_and_nyquist() {
         for q in QS {
             for db in GAINS {
                 let b = bell(fc, q, db);
-                let (fc, q, db) = (fc, f64::from(q), f64::from(db));
+                let (fc, q, db) = (fc, f64::from(q), db);
                 let at = |f: f64| to_db(magnitude(&b, f)) - analog_bell_db(fc, q, db, f);
                 let tag = format!("fc {fc} q {q} gain {db}");
                 assert!(at(0.0).abs() < 1e-9, "{tag} DC: {}", at(0.0));
@@ -120,7 +120,7 @@ fn the_matched_bell_stays_within_a_stated_bound_of_the_analog_one_to_0_9_nyquist
     for (fc, bound) in BOUNDS {
         for q in QS {
             for db in GAINS {
-                let worst = worst_deviation(&bell(fc, q, db), fc, q.into(), db.into());
+                let worst = worst_deviation(&bell(fc, q, db), fc, q.into(), db);
                 assert!(
                     worst <= bound,
                     "fc {fc} q {q} gain {db}: {worst} dB > {bound}"
@@ -139,7 +139,7 @@ fn the_bilinear_bell_leaves_every_bound_the_matched_bell_holds() {
             .iter()
             .flat_map(|q| GAINS.iter().map(move |db| (*q, *db)))
             .map(|(q, db)| {
-                let (fc, q, db) = (fc, f64::from(q), f64::from(db));
+                let (fc, q, db) = (fc, f64::from(q), db);
                 worst_deviation(&cookbook_bell(fc, q, db), fc, q, db)
             })
             .fold(0.0, f64::max);
@@ -194,7 +194,7 @@ fn the_bell_poles_and_zeros_are_inside_the_unit_circle() {
 fn a_boost_and_the_cut_of_the_same_gain_cancel() {
     for fc in CENTERS {
         for q in QS {
-            for db in [3.0f32, 12.0, 24.0] {
+            for db in [3.0f64, 12.0, 24.0] {
                 let (up, down) = (bell(fc, q, db), bell(fc, q, -db));
                 for f in [200.0, 1500.0, 9000.0, 17000.0, 23500.0] {
                     let w = 2.0 * PI * f / RATE.get();
@@ -233,7 +233,7 @@ fn the_designs_refuse_what_the_rate_or_the_range_cannot_take() {
             "q {q}: {err:?}"
         );
     }
-    for gain in [121.0f32, -200.0, f32::NAN, f32::INFINITY] {
+    for gain in [121.0f64, -200.0, f64::NAN, f64::INFINITY] {
         let err = MatchedBell::new(Q(1.0), Db(gain)).design(Hz(1000.0), RATE);
         assert!(
             matches!(err, Err(SosError::GainOutOfRange { .. })),
@@ -262,9 +262,9 @@ fn the_designs_refuse_what_the_rate_or_the_range_cannot_take() {
 #[test]
 fn the_tilt_is_half_the_gain_down_at_dc_up_at_nyquist_and_unity_at_the_center() {
     for fc in [30.0f64, 500.0, 4000.0, 15000.0, 23000.0] {
-        for db in [-24.0f32, -6.0, 6.0, 24.0] {
+        for db in [-24.0f64, -6.0, 6.0, 24.0] {
             let b = tilt(fc, db);
-            let half = 10f64.powf(f64::from(db) / 40.0);
+            let half = 10f64.powf(db / 40.0);
             let at = |w: f64| b.response(w).norm();
             let tag = format!("fc {fc} gain {db}");
             assert!(
@@ -288,12 +288,12 @@ fn the_tilt_is_half_the_gain_down_at_dc_up_at_nyquist_and_unity_at_the_center() 
 #[test]
 fn the_tilt_is_the_bilinear_image_of_the_analog_shelf() {
     for fc in [100.0f64, 1000.0, 8000.0, 20000.0] {
-        for db in [-18.0f32, -6.0, 6.0, 18.0] {
+        for db in [-18.0f64, -6.0, 6.0, 18.0] {
             let b = tilt(fc, db);
             for f in [
                 20.0, 150.0, 700.0, 2000.0, 6000.0, 13000.0, 21000.0, 23900.0,
             ] {
-                let want = analog_tilt(f64::from(db), warped(fc, f));
+                let want = analog_tilt(db, warped(fc, f));
                 let got = magnitude(&b, f);
                 assert!(
                     (got - want).abs() < 1e-12 * want,
@@ -309,7 +309,7 @@ fn the_tilt_is_the_bilinear_image_of_the_analog_shelf() {
 #[test]
 fn the_tilt_is_one_stable_first_order_section_and_its_opposite_undoes_it() {
     for fc in [30.0f64, 1000.0, 23000.0] {
-        for db in [-18.0f32, 18.0] {
+        for db in [-18.0f64, 18.0] {
             let sos = Tilt::new(Db(db)).design(Hz(fc), RATE).unwrap();
             assert_eq!(sos.sections().len(), 1);
             let (b, inverse) = (sos.sections()[0], tilt(fc, -db));
@@ -358,7 +358,7 @@ fn tail_frame(h: &[f64], eps: f64) -> usize {
 }
 
 fn eps() -> f64 {
-    f64::from(crate::TAIL_FLOOR.to_amplitude().get())
+    crate::TAIL_FLOOR.to_amplitude().get()
 }
 
 fn frames(ring: Ring) -> usize {
@@ -376,7 +376,7 @@ fn the_bell_ring_out_brings_the_tail_sum_under_the_floor() {
     const LEN: usize = 1 << 21;
     for fc in [90.0f64, 700.0, 4_000.0, 15_000.0] {
         for q in [0.1f32, 0.7, 4.0, 30.0] {
-            for db in [-24.0f32, -6.0, 6.0, 24.0] {
+            for db in [-24.0f64, -6.0, 6.0, 24.0] {
                 let reported = frames(
                     MatchedBell::new(Q(q), Db(db))
                         .ring_out(Hz(fc), RATE, crate::TAIL_FLOOR)
@@ -395,7 +395,7 @@ fn the_bell_ring_out_brings_the_tail_sum_under_the_floor() {
 #[test]
 fn the_tilt_ring_out_is_the_first_frame_the_tail_sum_is_under_the_floor() {
     for fc in [30.0f64, 500.0, 4_000.0, 15_000.0, 23_000.0] {
-        for db in [-24.0f32, -6.0, 6.0, 24.0] {
+        for db in [-24.0f64, -6.0, 6.0, 24.0] {
             let reported = frames(
                 Tilt::new(Db(db))
                     .ring_out(Hz(fc), RATE, crate::TAIL_FLOOR)
@@ -421,7 +421,7 @@ fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
         .map(|k| 20.0 * 1.15f64.powi(k))
         .take_while(|f| *f < top.get())
     {
-        for db in (-12..=12).map(|k| 2.0 * k as f32) {
+        for db in (-12..=12).map(|k| 2.0 * k as f64) {
             let own = frames(
                 Tilt::new(Db(db))
                     .ring_out(Hz(fc), RATE, crate::TAIL_FLOOR)
@@ -438,7 +438,7 @@ fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
 /// `reported`.
 #[test]
 fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_tail() {
-    let (fc, q, db) = (20.0f64, 30.0f32, 24.0f32);
+    let (fc, q, db) = (20.0f64, 30.0f32, 24.0f64);
     let b = bell(fc, q, db);
     let reported = frames(
         MatchedBell::new(Q(q), Db(db))
@@ -466,7 +466,7 @@ fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_t
 /// the tilt, and `ring_out_over` takes the ends of the centers in either order.
 #[test]
 fn a_floor_that_is_not_a_number_is_unbounded_and_the_ends_of_the_centers_may_swap() {
-    for floor in [Db(f32::NAN), Db(f32::INFINITY), Db(f32::NEG_INFINITY)] {
+    for floor in [Db(f64::NAN), Db(f64::INFINITY), Db(f64::NEG_INFINITY)] {
         let bell = MatchedBell::new(Q(1.0), Db(6.0)).ring_out(Hz(1000.0), RATE, floor);
         let tilt = Tilt::new(Db(6.0)).ring_out(Hz(1000.0), RATE, floor);
         assert!(

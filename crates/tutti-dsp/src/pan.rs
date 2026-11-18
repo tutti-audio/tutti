@@ -38,20 +38,21 @@ pub enum PanLaw {
 #[inline]
 #[must_use]
 pub fn pan_gains(pan: Pan, law: PanLaw) -> (Amplitude, Amplitude) {
+    // `Pan` is an `f32` unit; the law runs in `f64`.
     let p = if pan.get().is_nan() {
         0.0
     } else {
-        pan.get().clamp(-1.0, 1.0)
+        f64::from(pan.get().clamp(-1.0, 1.0))
     };
     let (left, right) = match law {
-        PanLaw::SquareRoot => (libm::sqrtf((1.0 - p) * 0.5), libm::sqrtf((1.0 + p) * 0.5)),
+        PanLaw::SquareRoot => (libm::sqrt((1.0 - p) * 0.5), libm::sqrt((1.0 + p) * 0.5)),
         PanLaw::Rp036 => {
             if p <= -1.0 {
                 (1.0, 0.0)
             } else if p >= 1.0 {
                 (0.0, 1.0)
             } else {
-                let (sin, cos) = libm::sincosf(core::f32::consts::FRAC_PI_4 * (1.0 + p));
+                let (sin, cos) = libm::sincos(core::f64::consts::FRAC_PI_4 * (1.0 + p));
                 (cos, sin)
             }
         }

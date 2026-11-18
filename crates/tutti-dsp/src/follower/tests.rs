@@ -1,4 +1,4 @@
-use tutti_units::{Amplitude, Ballistics, SampleRate, Seconds};
+use tutti_units::{Amplitude, Ballistics, Bipolar, SampleRate, Seconds};
 
 use super::Follower;
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -19,14 +19,14 @@ fn follower<F: tutti_buffers::Float>() -> Follower<F> {
 }
 
 /// From 0 toward a target, one step is `attack * target` with the closed-form `f64` attack
-/// coefficient, to `1e-12` relative: an `f32` coefficient is off by about `1e-8`.
+/// coefficient, to `1e-12` relative.
 #[test]
 fn an_f64_attack_step_from_zero_is_the_coefficient_times_the_target() {
     let follower = follower::<f64>();
     let targets = wide_signal(64);
     let got: Vec<f64> = targets
         .iter()
-        .map(|&t| follower.follow(Seconds(0.0), Seconds(t)).get())
+        .map(|&t| follower.follow(Amplitude(0.0), Amplitude(t)).get())
         .collect();
     let want: Vec<f64> = targets.iter().map(|&t| closed(ATTACK) * t).collect();
     assert_close_f64(&got, &want, 1e-12);
@@ -40,7 +40,7 @@ fn an_f64_release_step_to_zero_keeps_one_minus_the_coefficient() {
     let states = wide_signal(64);
     let got: Vec<f64> = states
         .iter()
-        .map(|&s| follower.follow(Seconds(s), Seconds(0.0)).get())
+        .map(|&s| follower.follow(Amplitude(s), Amplitude(0.0)).get())
         .collect();
     let want: Vec<f64> = states
         .iter()
@@ -57,7 +57,7 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
         .iter()
         .map(|&s| {
             Follower::<f64>::NEUTRAL
-                .follow(Seconds(s), Seconds(0.0))
+                .follow(Amplitude(s), Amplitude(0.0))
                 .get()
         })
         .collect();
@@ -70,9 +70,9 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
 fn the_f32_follower_takes_the_same_one_step_values() {
     let follower = follower::<f32>();
     let (attack, release) = (closed(ATTACK) as f32, closed(RELEASE) as f32);
-    let up = follower.follow(Amplitude(0.0), Amplitude(0.5)).get();
+    let up = follower.follow(Bipolar::ZERO, Bipolar::of(0.5)).get();
     assert_eq!(up, attack * 0.5);
-    let down = follower.follow(Amplitude(0.5), Amplitude(0.0)).get();
+    let down = follower.follow(Bipolar::of(0.5), Bipolar::ZERO).get();
     assert!(
         (down - 0.5 * (1.0 - release)).abs() <= 0.5 * 2f32.powi(-24),
         "{down}"

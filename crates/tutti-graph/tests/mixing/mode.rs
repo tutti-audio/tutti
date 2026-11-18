@@ -63,8 +63,9 @@ fn direct(node: u64) -> Edge {
 
 /// `(g_in, g_out)` of frame `k` of a mode fade: the one function the doc names.
 fn gains(k: usize) -> (f32, f32) {
-    let (out, inn) = FadeLaw::EqualAmplitude.gains(k, FADE);
-    (inn, out)
+    // The law's two gains sum to one: the mode's pair is the incoming `f32` weight and its complement.
+    let inn = FadeLaw::EqualAmplitude.gains(k, FADE).1.get() as f32;
+    (inn, 1.0 - inn)
 }
 
 /// A `Pair` over `kinds` (keys `1..`), wired by `wire`, with `modes` set

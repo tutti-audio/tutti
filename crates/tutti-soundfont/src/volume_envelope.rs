@@ -172,8 +172,8 @@ mod tests {
         envelope
     }
 
-    fn db(level: f32) -> f32 {
-        tutti_units::Db::from_amplitude(tutti_units::Amplitude::new(level)).get()
+    fn db(level: f32) -> f64 {
+        tutti_units::Db::from_amplitude(tutti_units::Amplitude::new(f64::from(level))).get()
     }
 
     /// Release: from the level at key-off, `fraction` of the release time on is
@@ -184,7 +184,9 @@ mod tests {
         // Key-off from full level, and from the sustain at -6 dB: the fall is
         // the same 100 dB a release time, from wherever it starts.
         for (sustain_db, fractions) in [(0.0_f32, [0.1, 0.3, 0.5]), (6.0, [0.1, 0.3, 0.5])] {
-            let sustain = tutti_units::Db::new(-sustain_db).to_amplitude().get();
+            let sustain = tutti_units::Db::new(f64::from(-sustain_db))
+                .to_amplitude()
+                .get() as f32;
             let mut envelope = envelope(1.0, sustain, 2.0);
             envelope.process(RATE as usize / 2);
             let before = db(envelope.value());
@@ -196,7 +198,7 @@ mod tests {
                 elapsed = to;
                 let fell = before - db(envelope.value());
                 assert!(
-                    (fell - 100.0 * fraction).abs() < 0.2,
+                    (fell - f64::from(100.0 * fraction)).abs() < 0.2,
                     "{fraction} of the release is {fell} dB down, not {}",
                     100.0 * fraction
                 );
@@ -217,7 +219,7 @@ mod tests {
             again.process((fraction * 2.0 * RATE as f32) as usize);
             let fell = -db(again.value());
             assert!(
-                (fell - 100.0 * fraction).abs() < 0.2,
+                (fell - f64::from(100.0 * fraction)).abs() < 0.2,
                 "{fraction} of the decay is {fell} dB down"
             );
         }

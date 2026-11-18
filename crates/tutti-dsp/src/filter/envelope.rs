@@ -87,7 +87,7 @@ impl Default for EnvelopeFilterControls {
 pub struct EnvelopeFilterBank<F: Float + Lanes = f64> {
     ty: SvfType,
     rate: SampleRate,
-    follower: Follower<f32>,
+    follower: Follower<f64>,
     /// The envelope, in `[0, 1]`: 0 until a level is heard.
     env: Amplitude,
     bank: SvfBank<F>,
@@ -161,7 +161,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist.
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: Amplitude) -> Hz {
-        let ratio = (self.controls.depth * f64::from(env.get())).to_pitch_ratio();
+        let ratio = (self.controls.depth * env.get()).to_pitch_ratio();
         (self.controls.base * ratio).clamp(
             Hz(1.0),
             self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
@@ -190,7 +190,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// allocation.
     pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
         let frames = input.frames().get().min(output.frames().get());
-        let mut levels = [0.0f32; GRID.get()];
+        let mut levels = [Amplitude::SILENT; GRID.get()];
         let mut start = 0;
         while start < frames {
             if self.phase == Samples::ZERO {
@@ -202,7 +202,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = self.follower.follow(self.env, Amplitude::new(l.min(1.0)));
+                self.env = self.follower.follow(self.env, l.min(Amplitude::UNITY));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

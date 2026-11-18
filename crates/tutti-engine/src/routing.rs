@@ -320,7 +320,7 @@ impl OutputLevels {
             } else {
                 // Two finite gains, so the product is finite unless it
                 // overflows: kept at the largest finite gain.
-                (strip.gain * dim.get()).min(Amplitude(f32::MAX))
+                (strip.gain * dim.get()).min(Amplitude(f64::MAX))
             };
         }
         StageTargets(gains)
@@ -346,7 +346,7 @@ mod tests {
     use super::*;
     use tutti_types::Bed;
 
-    fn gains(levels: &OutputLevels) -> Vec<f32> {
+    fn gains(levels: &OutputLevels) -> Vec<f64> {
         let t = levels.targets();
         (0..4).map(|o| t.gain(o).get()).collect()
     }
@@ -402,7 +402,7 @@ mod tests {
     /// and for the dim, so none reaches the device; silence is a gain.
     #[test]
     fn a_gain_that_is_not_a_gain_is_refused() {
-        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
             let strip = OutputStrip {
                 gain: Amplitude(bad),
                 ..OutputStrip::default()
@@ -420,11 +420,11 @@ mod tests {
         // Two finite gains never make a non-finite target.
         let mut huge = OutputLevels::new();
         let big = OutputStrip {
-            gain: Amplitude(f32::MAX),
+            gain: Amplitude(f64::MAX),
             ..OutputStrip::default()
         };
         huge.set_strip(0, big).unwrap();
-        let t = huge.with_dim(Some(Amplitude(f32::MAX))).unwrap().targets();
+        let t = huge.with_dim(Some(Amplitude(f64::MAX))).unwrap().targets();
         assert!(t.gain(0).get().is_finite());
     }
 

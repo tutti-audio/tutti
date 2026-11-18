@@ -72,7 +72,7 @@ fn near(what: &str, got: f64, want: f64, tolerance: f64) {
 /// definition), and it is unity far from it.
 #[test]
 fn a_bell_has_its_gain_at_the_centre_and_unity_far_away() {
-    let bell = |gain: f32| {
+    let bell = |gain: f64| {
         SvfFilterNode::<f32>::with_controls(
             ChannelLayout::STEREO,
             SvfControls {
@@ -102,7 +102,7 @@ fn a_bell_has_its_gain_at_the_centre_and_unity_far_away() {
 #[test]
 fn a_high_shelf_is_unity_below_and_its_gain_above() {
     let shelf =
-        |gain: f32| EqBandNode::<f64>::new(SvfType::HighShelf, Hz(4_000.0), Q(0.8), Db(gain));
+        |gain: f64| EqBandNode::<f64>::new(SvfType::HighShelf, Hz(4_000.0), Q(0.8), Db(gain));
     near("below", gains_db(shelf(8.0), 100.0, 0.1)[0], 0.0, 0.1);
     near("above", gains_db(shelf(8.0), 18_000.0, 0.1)[0], 8.0, 0.6);
     near(

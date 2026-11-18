@@ -1,4 +1,4 @@
-use tutti_units::{Gain, SampleSpan};
+use tutti_units::{Amplitude, Gain, SampleSpan};
 
 use super::*;
 use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};
@@ -50,7 +50,7 @@ fn every_control_designs_a_stable_network() {
                 modulation: Depth::clamped(v),
                 rate: Hz(f64::from(v)),
                 width: StereoWidth(v),
-                wet: Db(v),
+                wet: Db(f64::from(v)),
                 freeze: v > 0.5,
             };
             let n = design_of(&d, &c);
@@ -74,15 +74,15 @@ fn diffusion_is_the_reflection_vector() {
         fdn_of(&design_of(&d, &with(|c| c.diffusion = Mix(1.0)))).matrix,
         Matrix::Householder
     );
-    let mut last_axis = f32::INFINITY;
+    let mut last_axis = f64::INFINITY;
     for diffusion in [0.1, 0.25, 0.5, 0.75, 0.9] {
         let n = design_of(&d, &with(|c| c.diffusion = Mix(diffusion)));
         let Matrix::Reflection(v) = &fdn_of(&n).matrix else {
             panic!("a reflection at {diffusion}")
         };
         assert_eq!(v.len(), 8);
-        let unit: f64 = v.iter().map(|&x| f64::from(x.get()).powi(2)).sum();
-        assert!((unit - 1.0).abs() < 1e-6, "{diffusion}: |v|^2 = {unit}");
+        let unit: f64 = v.iter().map(|&x| x.get().powi(2)).sum();
+        assert!((unit - 1.0).abs() < 1e-14, "{diffusion}: |v|^2 = {unit}");
         assert!(
             v[0].get() < last_axis,
             "the first line's share falls as the mix grows"
@@ -112,7 +112,7 @@ fn a_freeze_is_lossless_and_takes_no_input() {
     );
     for l in f.lines.iter() {
         for band in Band::ALL {
-            assert_eq!(l.absorption.gain(band).get().to_bits(), 1.0f32.to_bits());
+            assert_eq!(l.absorption.gain(band), Amplitude::UNITY);
         }
     }
     assert_eq!(design_of(&plain, &frozen), design_of(&plain, &base()));
@@ -148,11 +148,11 @@ fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
         let d = FdnLayout::new(n, MaxDecay::of(Seconds(2.0)), false).unwrap();
         let net = design_of(&d, &base());
         let f = fdn_of(&net);
-        let input = 1.0 / (n as f32).sqrt();
-        let ear = (2.0 / n as f32).sqrt();
+        let input = 1.0 / (n as f64).sqrt();
+        let ear = (2.0 / n as f64).sqrt();
         assert_eq!(f.lines.len(), n);
         assert!(
-            f.input.iter().all(|&g| (g.get() - input).abs() < 1e-6),
+            f.input.iter().all(|&g| (g.get() - input).abs() < 1e-15),
             "{n}"
         );
         for j in 0..n {
@@ -163,7 +163,7 @@ fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
                 (right, left)
             };
             assert!(
-                (hot.get() - ear).abs() < 1e-6 && cold == Gain::SILENT,
+                (hot.get() - ear).abs() < 1e-15 && cold == Gain::SILENT,
                 "line {j} of {n}"
             );
         }
@@ -213,9 +213,9 @@ fn the_capacity_dominates_where_rounding_matters() {
 #[test]
 fn the_wet_gain_is_silent_at_minus_120_and_held_at_24() {
     let d = freezable();
-    let wet_of = |db: f32| design_of(&d, &with(|c| c.wet = Db(db))).wet;
-    assert_eq!(wet_of(-120.0), Db(f32::NEG_INFINITY));
-    assert_eq!(wet_of(-200.0), Db(f32::NEG_INFINITY));
+    let wet_of = |db: f64| design_of(&d, &with(|c| c.wet = Db(db))).wet;
+    assert_eq!(wet_of(-120.0), Db(f64::NEG_INFINITY));
+    assert_eq!(wet_of(-200.0), Db(f64::NEG_INFINITY));
     assert_eq!(wet_of(-119.0), Db(-119.0));
     assert_eq!(wet_of(6.0), Db(6.0));
     assert_eq!(wet_of(30.0), Db(24.0));

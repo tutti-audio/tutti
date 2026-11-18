@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use tutti_units::Amplitude;
+
 /// Sliding-window minimum via a monotonic deque. O(1) amortized per push.
 ///
 /// Used by the lookahead limiter to track the smallest gain (greatest
@@ -13,7 +15,7 @@ use std::collections::VecDeque;
 /// [`push`](Self::push) evicts the entry leaving the window *before* adding
 /// the new one. A clone keeps that allocation.
 pub(crate) struct MonotonicMinDeque {
-    entries: VecDeque<(u64, f32)>,
+    entries: VecDeque<(u64, Amplitude)>,
     window: usize,
 }
 
@@ -64,7 +66,7 @@ impl MonotonicMinDeque {
     /// the deque at `window` entries, so it never allocates and is safe on
     /// the audio thread.
     #[inline]
-    pub(crate) fn push(&mut self, index: u64, value: f32) {
+    pub(crate) fn push(&mut self, index: u64, value: Amplitude) {
         let oldest = index.saturating_sub(self.window as u64 - 1);
         while let Some(&(idx, _)) = self.entries.front() {
             if idx < oldest {
@@ -85,7 +87,7 @@ impl MonotonicMinDeque {
 
     /// Current window minimum. Returns `None` when the deque is empty.
     #[inline]
-    pub(crate) fn min(&self) -> Option<f32> {
+    pub(crate) fn min(&self) -> Option<Amplitude> {
         self.entries.front().map(|&(_, v)| v)
     }
 }

@@ -312,6 +312,7 @@ fn a_loop_wrap_plays_the_tone_a_loop_back_from_its_frame() {
         let head = tone_at(FPB + k);
         if k < fade {
             let (g_out, g_in) = FadeLaw::EqualPower.gains(k, fade);
+            let (g_out, g_in) = (g_out.get() as f32, g_in.get() as f32);
             let want = g_in * head + g_out * tone_at(end + k);
             let got = b[2 * f];
             assert!(

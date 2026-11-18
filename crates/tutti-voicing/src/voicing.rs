@@ -1514,7 +1514,7 @@ impl Voicing {
         let Steal::By(order) = self.rules.steal else {
             return None;
         };
-        let mut best: Option<(&Note, f32)> = None;
+        let mut best: Option<(&Note, f64)> = None;
         for n in &self.notes {
             let level = levels(n.id).map_or(0.0, Amplitude::get);
             if n.strike == self.strike {

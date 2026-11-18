@@ -3,15 +3,15 @@ use crate::fold_uneven;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::f64::consts::TAU;
-use tutti_units::SampleRate;
 use tutti_units::Samples;
+use tutti_units::{Amplitude, SampleRate};
 
 const RATE: f64 = 48_000.0;
 
 /// f32 transform and window error budget, in dB: a relative amplitude
 /// error of `1e-4` (about 100x `eps * log2(N)` for the sizes here) is
 /// `20 log10(1 + 1e-4)`.
-const FFT_TOL: f32 = 1e-3;
+const FFT_TOL: f64 = 1e-3;
 
 fn band(min: f64, max: f64) -> FrequencyBand {
     FrequencyBand::new(Hz(min), Hz(max)).unwrap()
@@ -59,10 +59,6 @@ fn run(cfg: &SpectrumConfig, signal: &[f32]) -> (SpectrumMeter, Vec<Vec<Db>>) {
     (state, frames)
 }
 
-fn db(v: f64) -> f32 {
-    v as f32
-}
-
 fn argmax(levels: &[Db]) -> usize {
     (0..levels.len())
         .max_by(|&a, &b| levels[a].get().total_cmp(&levels[b].get()))
@@ -78,7 +74,7 @@ fn a_bin_centred_sine_reads_its_amplitude() {
     let size = 1536; // 1 kHz is bin 32 at 48 kHz
     let cfg = config(size, size / 4);
     let (state, frames) = run(&cfg, &tone(size * 3, 1000.0, 0.5));
-    let want = db(20.0 * 0.5f64.log10());
+    let want = Db::from_amplitude(Amplitude(0.5)).get();
     for levels in &frames {
         assert_eq!(argmax(levels), 32);
         assert!(
@@ -110,7 +106,7 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
     let cfg = config(size, size);
     let loss = |d: f64| {
         let sinc = (std::f64::consts::PI * d).sin() / (std::f64::consts::PI * d);
-        20.0 * (sinc / (1.0 - d * d)).abs().log10()
+        Db::from_amplitude(Amplitude((sinc / (1.0 - d * d)).abs())).get()
     };
     assert!((loss(0.5) - -1.4236).abs() < 1e-3);
     for d in [0.1, 0.25, 0.4, 0.5] {
@@ -118,9 +114,9 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
         let (_, frames) = run(&cfg, &tone(size, freq, 0.5));
         let levels = &frames[0];
         let peak = levels[argmax(levels)].get();
-        let want = db(20.0 * 0.5f64.log10() + loss(d));
+        let want = Db::from_amplitude(Amplitude(0.5)).get() + loss(d);
         assert!((peak - want).abs() < FFT_TOL, "d {d}: {peak} vs {want}");
-        assert!(peak >= db(20.0 * 0.5f64.log10() - 1.4237) - FFT_TOL);
+        assert!(peak >= Db::from_amplitude(Amplitude(0.5)).get() - 1.4237 - FFT_TOL);
     }
 }
 
@@ -143,8 +139,8 @@ fn two_tones_resolve_to_two_peaks() {
             })
             .collect();
         assert_eq!(peaks, [32, 160]);
-        assert!((levels[32].get() - db(20.0 * 0.5f64.log10())).abs() < FFT_TOL);
-        assert!((levels[160].get() - db(20.0 * 0.1f64.log10())).abs() < FFT_TOL);
+        assert!((levels[32].get() - Db::from_amplitude(Amplitude(0.5)).get()).abs() < FFT_TOL);
+        assert!((levels[160].get() - Db::from_amplitude(Amplitude(0.1)).get()).abs() < FFT_TOL);
     }
 }
 
@@ -183,7 +179,7 @@ fn frames_land_on_the_hop_grid_for_every_size_and_hop() {
             let start = fed - size;
             let level = match impulse_at.checked_sub(start).filter(|&o| o < size) {
                 Some(o) if window[o] > 0.0 => {
-                    db(10.0 * (4.0 * f64::from(window[o]).powi(2) / (gain * gain)).log10())
+                    Db::from_power(4.0 * f64::from(window[o]).powi(2) / (gain * gain)).get()
                 }
                 _ => plan(&cfg).floor.get().get(),
             };
@@ -268,7 +264,7 @@ fn averaging_converges_to_the_mean_noise_power() {
         push_frames(&mut state, block);
         let mean = picked
             .iter()
-            .map(|&k| 10f64.powf(f64::from(state.levels()[k].get()) / 10.0))
+            .map(|&k| 10f64.powf(state.levels()[k].get() / 10.0))
             .sum::<f64>()
             / picked.len() as f64;
         stats.push(mean / want);
@@ -307,18 +303,19 @@ fn release_follows_the_analytic_exponential_and_attack_is_instant() {
     let (_, frames) = run(&cfg, &signal);
     let at = |k: usize| frames[k][32].get();
 
-    let want = db(20.0 * 0.5f64.log10());
+    let want = Db::from_amplitude(Amplitude(0.5)).get();
     let first_loud = quiet.div_ceil(hop);
     for k in first_loud..=(loud_end - size) / hop {
         assert!((at(k) - want).abs() < FFT_TOL, "frame {k}: {}", at(k));
     }
 
-    let step =
-        10.0 * std::f64::consts::E.log10() * plan(&cfg).geometry.frame_interval().get() / tau.get();
+    let step = Db::from_power(std::f64::consts::E).get()
+        * plan(&cfg).geometry.frame_interval().get()
+        / tau.get();
     let first_silent = loud_end.div_ceil(hop);
     let mut checked = 0;
     for k in first_silent..frames.len() - 1 {
-        let drop = f64::from(at(k) - at(k + 1));
+        let drop = at(k) - at(k + 1);
         assert!((drop - step).abs() < 1e-3, "frame {k}: {drop} vs {step}");
         checked += 1;
     }
@@ -360,7 +357,7 @@ fn peaks_hold_then_decay_at_the_configured_rate() {
         assert_eq!(series[anchor + j].1, top, "held frame {j}");
     }
     for m in 1..30 {
-        let want = top - decay.get() * dt as f32 * m as f32;
+        let want = top - decay.get() * dt * m as f64;
         let got = series[anchor + held + m].1;
         assert!(
             (got - want).abs() < 1e-3,
@@ -464,7 +461,7 @@ fn a_band_sums_the_power_of_its_bins() {
                 .count();
             total += n;
             assert!(n >= 1);
-            let want = db(10.0 * (n as f64 * 4.0 / (size as f64 / 2.0).powi(2)).log10());
+            let want = Db::from_power(n as f64 * 4.0 / (size as f64 / 2.0).powi(2)).get();
             assert!(
                 (level.get() - want).abs() < FFT_TOL,
                 "{banding:?} band {j} ({n} bins): {level:?} vs {want}"
@@ -517,7 +514,7 @@ fn an_empty_band_names_itself_and_the_window_that_holds_it() {
 fn dc_and_nyquist_read_their_amplitude() {
     let size = 1024;
     let cfg = config(size, size);
-    let want = db(20.0 * 0.25f64.log10());
+    let want = Db::from_amplitude(Amplitude(0.25)).get();
     let (_, dc) = run(&cfg, &vec![0.25f32; size]);
     assert!((dc[0][0].get() - want).abs() < FFT_TOL, "{:?}", dc[0][0]);
     let nyquist: Vec<f32> = (0..size)
@@ -542,7 +539,7 @@ fn a_sine_inside_a_band_reads_the_noise_bandwidth_excess() {
         band: band(700.0, 2800.0),
     });
     let (state, frames) = run(&cfg, &tone(size, 1000.0, 0.5));
-    let want = db(20.0 * 0.5f64.log10() + 10.0 * 1.5f64.log10());
+    let want = Db::from_amplitude(Amplitude(0.5)).get() + Db::from_power(1.5).get();
     let band = state
         .frequencies()
         .iter()
@@ -756,7 +753,9 @@ fn input_is_checked_and_state_stays_finite() {
             .chain(state.peaks())
             .all(|l| l.get().is_finite())
     );
-    assert!(state.levels().iter().all(|l| l.get() <= 200.0));
+    // The power is clamped to `MAX_POWER`, so no level passes its decibels.
+    let ceiling = Db::from_power(f64::from(MAX_POWER));
+    assert!(state.levels().iter().all(|&l| l <= ceiling));
     push_frames(&mut state, &vec![0.0f32; 600]);
     assert!(state.levels().iter().all(|l| l.get().is_finite()));
 

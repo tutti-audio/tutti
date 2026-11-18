@@ -51,13 +51,13 @@ impl RawMagnitudes {
 
     /// The largest magnitude anywhere in the grid.
     pub fn peak(&self) -> Amplitude {
-        Amplitude(
+        Amplitude(f64::from(
             self.0
                 .as_slice()
                 .iter()
                 .copied()
                 .fold(0.0f32, |a, b| a.max(b)),
-        )
+        ))
     }
 
     /// Scales to `0..1` against the peak, returning the display-only form.
@@ -68,7 +68,8 @@ impl RawMagnitudes {
     pub fn normalize(&self) -> NormalizedMagnitudes {
         let peak = self.peak();
         let values = if peak.get() > 0.0 {
-            let inv = 1.0 / peak.get();
+            // The grid is an `f32` table: the scale narrows once.
+            let inv = (1.0 / peak.get()) as f32;
             self.0.as_slice().iter().map(|m| m * inv).collect()
         } else {
             self.0.as_slice().to_vec()
@@ -175,7 +176,7 @@ impl Stft {
     /// discarded for this read only.
     #[inline]
     pub fn magnitude_at(&self, frame: FrameIndex, bin: BinIndex) -> Amplitude {
-        Amplitude(self.bins.at(frame, bin).norm())
+        Amplitude(f64::from(self.bins.at(frame, bin).norm()))
     }
 
     /// Converts to magnitude/phase. Lossless.

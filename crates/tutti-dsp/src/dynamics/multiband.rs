@@ -199,7 +199,7 @@ pub struct MultibandBank {
     /// Whether the first aim since the last reset has landed.
     landed: bool,
     /// Each band's deepest reduction since the last reading, in dB.
-    deepest: [f32; MAX_BANDS],
+    deepest: [Db; MAX_BANDS],
     scratch: Scratch,
 }
 
@@ -251,7 +251,7 @@ impl MultibandBank {
             audible: [Glide::landed(1.0); MAX_BANDS],
             steps,
             landed: false,
-            deepest: [0.0; MAX_BANDS],
+            deepest: [Db::UNITY; MAX_BANDS],
             scratch: Scratch::new(channels, bands),
         }
     }
@@ -295,7 +295,7 @@ impl MultibandBank {
         self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
         self.bypass = [Glide::landed(0.0); MAX_BANDS];
         self.audible = [Glide::landed(1.0); MAX_BANDS];
-        self.deepest = [0.0; MAX_BANDS];
+        self.deepest = [Db::UNITY; MAX_BANDS];
         self.landed = false;
     }
 
@@ -330,7 +330,7 @@ impl MultibandBank {
     /// allocation.
     pub fn take_reading(&mut self) -> BandReductions {
         BandReductions {
-            deepest: core::mem::take(&mut self.deepest).map(Db),
+            deepest: core::mem::replace(&mut self.deepest, [Db::UNITY; MAX_BANDS]),
             bands: self.bands,
         }
     }
@@ -422,7 +422,7 @@ impl MultibandBank {
                 );
             }
             // The meter counts a band unless the whole chunk is bypassed.
-            let deepest = self.compressors[b].take_deepest().get();
+            let deepest = self.compressors[b].take_deepest();
             let bypass = &self.bypass[b];
             if bypass.blended(n) != 0 || bypass.target() < 1.0 {
                 self.deepest[b] = self.deepest[b].max(deepest);

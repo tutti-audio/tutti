@@ -279,7 +279,7 @@ impl<F: Float> Editor<F> {
                     (Sink::Output(_), Edge::Feedback(_)) => false,
                 },
                 EdgeFade::In => {
-                    let plain = g.base.get().to_bits() == 1.0f32.to_bits()
+                    let plain = g.base == Amplitude::UNITY
                         && g.source.is_none()
                         && g.range == EdgeGain::DEFAULT_RANGE;
                     if plain {

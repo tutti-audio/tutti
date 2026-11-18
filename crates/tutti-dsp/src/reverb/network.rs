@@ -10,7 +10,7 @@
 //! capacity and allocation-free to build.
 //!
 //! **A `Network` is a control-side value.** It holds room for [`MAX_STAGES`]
-//! stages of about 8 KB each, some 67 KB in all, which is too large to build or
+//! stages of about 14 KB each, some 111 KB in all, which is too large to build or
 //! copy on an audio thread (whose stack may be 512 KB). It is allocation-free
 //! (no heap, so building one never waits on the allocator), not small.
 //!
@@ -39,10 +39,7 @@ use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seco
 
 /// The energy of a row of gains, `sum g^2`, in `f64`.
 pub(crate) fn energy(gains: &[Gain]) -> f64 {
-    gains
-        .iter()
-        .map(|g| f64::from(g.get()) * f64::from(g.get()))
-        .sum()
+    gains.iter().map(|g| g.get() * g.get()).sum()
 }
 
 /// The most delay lines one [`Fdn`] holds.
@@ -240,7 +237,7 @@ impl AllPass {
     /// there, since an unbounded delay is not a span.
     #[must_use]
     fn low_frequency_delay(&self) -> Option<SampleSpan> {
-        let g = f64::from(self.gain.get());
+        let g = self.gain.get();
         if self.form == AllPassForm::Lattice && g.abs() < 1.0 {
             self.delay.scaled((1.0 + g) / (1.0 - g))
         } else {
@@ -416,7 +413,7 @@ impl Absorption {
             Absorption::Gain(g) => g,
             Absorption::OnePole { gain, damp } => {
                 if !(damp.is_finite() && damp.abs() < 1.0) {
-                    return Amplitude(f32::INFINITY);
+                    return Amplitude(f64::INFINITY);
                 }
                 let d = f64::from(damp);
                 let response = match band {
@@ -424,7 +421,7 @@ impl Absorption {
                     Band::Mid => (1.0 - d).abs() / libm::sqrt(1.0 + d * d),
                     Band::High => (1.0 - d).abs() / (1.0 + d).abs(),
                 };
-                Amplitude((f64::from(gain.get()) * response) as f32)
+                Amplitude(gain.get() * response)
             }
             Absorption::Bands { low, mid, high, .. } => match band {
                 Band::Low => low,

@@ -93,7 +93,7 @@ impl EnvShape {
         // to sustain. A sustain above 1.0 would make "decay" a rise, and a
         // retrigger from a held level above 1.0 would drop the note to the
         // attack peak — a click. Level above unity is the voice gain's job.
-        let sustain = env.sustain.get().clamp(0.0, 1.0);
+        let sustain = env.sustain.get().clamp(0.0, 1.0) as f32;
         Self {
             attack_step: 1.0 / frames(env.attack),
             decay_step: (sustain - 1.0) / frames(env.decay),
@@ -458,8 +458,9 @@ impl VoiceBank {
     /// Set the lane's left and right output gains.
     pub(crate) fn set_gains(&mut self, lane: usize, left: Amplitude, right: Amplitude) {
         let (g, k) = split(lane);
-        self.gain_target[g][0].as_mut_array()[k] = left.get();
-        self.gain_target[g][1].as_mut_array()[k] = right.get();
+        // The lanes are `f32`: the gains narrow once per control step.
+        self.gain_target[g][0].as_mut_array()[k] = left.get() as f32;
+        self.gain_target[g][1].as_mut_array()[k] = right.get() as f32;
     }
 
     /// Jump the lane's pitch and filter straight to their targets, so a new
@@ -561,7 +562,7 @@ impl VoiceBank {
     /// The lane's envelope level, `0.0..=1.0`.
     pub(crate) fn envelope(&self, lane: usize) -> Amplitude {
         let (g, k) = split(lane);
-        Amplitude(self.env[g].as_array()[k])
+        Amplitude(f64::from(self.env[g].as_array()[k]))
     }
 
     /// The lane's oscillator phase. Observability for tests.

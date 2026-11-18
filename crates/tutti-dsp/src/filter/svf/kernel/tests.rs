@@ -82,7 +82,7 @@ fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) ->
         ty,
         Hz(fc),
         Q(q as f32),
-        Db(gain_db as f32),
+        Db(gain_db),
         SampleRate::of(rate),
     ));
     let mut st = [0.0f64; 2];
@@ -131,7 +131,7 @@ fn bell_and_shelves_match_the_rbj_cookbook() {
 #[test]
 fn an_absurd_gain_solves_finite_and_saturates() {
     for ty in [SvfType::Bell, SvfType::LowShelf, SvfType::HighShelf] {
-        for db in [f32::NAN, -1e30, 1e30, f32::NEG_INFINITY, f32::INFINITY] {
+        for db in [f64::NAN, -1e30, 1e30, f64::NEG_INFINITY, f64::INFINITY] {
             let c = SvfCoeffs::new(
                 ty,
                 Hz::new(1000.0),
@@ -147,7 +147,7 @@ fn an_absurd_gain_solves_finite_and_saturates() {
             ty,
             Hz::new(1000.0),
             Q::new(1.0),
-            Db::new(SvfCoeffs::MAX_GAIN_DB),
+            SvfCoeffs::MAX_GAIN,
             SampleRate::SR_48K,
         );
         let past = SvfCoeffs::new(
@@ -163,7 +163,7 @@ fn an_absurd_gain_solves_finite_and_saturates() {
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
-        Db::new(f32::NAN),
+        Db::new(f64::NAN),
         SampleRate::SR_48K,
     );
     let flat = SvfCoeffs::new(

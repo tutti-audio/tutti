@@ -124,7 +124,10 @@ fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
                 max_code(&path) <= full,
                 "{pcm:?} {dither:?}: past the top code"
             );
-            let want = (20.0 * (1.0 - lsbs / f64::from(1u32 << (bits - 1))).log10()) as f32;
+            let want = tutti_units::Db::from_amplitude(tutti_units::Amplitude(
+                1.0 - lsbs / f64::from(1u32 << (bits - 1)),
+            ))
+            .get();
             // The effective target is where the measured peak lands under the
             // reported gain: `gain` is `target - measured.true_peak` exactly.
             let gain = written.gain.expect("a normalizing export reports");

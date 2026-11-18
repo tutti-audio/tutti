@@ -28,17 +28,18 @@ use tutti_dsp::StftGeometry;
 use tutti_units::ranged;
 
 ranged! {
-    /// The multiplier on the adaptive threshold: finite and not negative.
-    /// Higher rejects more.
+    /// The multiplier on the adaptive threshold: not negative and at most `f32::MAX`, the width
+    /// of the novelty curve it scales. Higher rejects more.
     OnsetThreshold(Amplitude), OnsetThresholdError, "an onset threshold of zero or more",
-    |raw| raw.get() >= 0.0 && raw.get() <= f32::MAX
+    |raw| raw.get() >= 0.0 && raw.get() <= f32::MAX as f64
 }
 
 ranged! {
-    /// The gain applied to the detection function before thresholding: finite
-    /// and above zero, since a gain of zero detects nothing.
+    /// The gain applied to the detection function before thresholding: above zero, since a
+    /// gain of zero detects nothing, and at most `f32::MAX`, the width of the novelty curve it
+    /// scales.
     OnsetSensitivity(Amplitude), OnsetSensitivityError, "an onset sensitivity above zero",
-    |raw| raw.get() > 0.0 && raw.get() <= f32::MAX
+    |raw| raw.get() > 0.0 && raw.get() <= f32::MAX as f64
 }
 
 ranged! {
@@ -199,8 +200,9 @@ impl OnsetConfig {
         Ok(OnsetPlan {
             geometry: self.framing.geometry(rate)?,
             function: self.function,
-            threshold: self.threshold.get(),
-            sensitivity: self.sensitivity.get(),
+            // The detection curve is an `f32` measurement: the gains narrow once into the plan.
+            threshold: self.threshold.get().get() as f32,
+            sensitivity: self.sensitivity.get().get() as f32,
             min_gap: self.min_gap.get().to_samples(rate),
         })
     }
@@ -226,8 +228,8 @@ impl<S: Sample> Measure<S> for OnsetConfig {
 pub(crate) struct OnsetPlan {
     geometry: StftGeometry,
     function: DetectionFunction,
-    threshold: Amplitude,
-    sensitivity: Amplitude,
+    threshold: f32,
+    sensitivity: f32,
     min_gap: Samples,
 }
 
@@ -380,7 +382,7 @@ impl<S: Sample> OnsetMeter<S> {
             let position = Samples(index * plan.geometry.hop().get());
             let item = Novelty {
                 frame: position,
-                value: value * plan.sensitivity.get(),
+                value: value * plan.sensitivity,
             };
             novelty.push(item);
             each(item);
@@ -506,7 +508,7 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
         });
     let mean = sum / len;
     let std_dev = (sum_sq / len - mean * mean).max(0.0).sqrt();
-    let threshold = mean + std_dev * cfg.threshold.get() * 3.0;
+    let threshold = mean + std_dev * cfg.threshold * 3.0;
 
     (1..novelty.len() - 1)
         .filter_map(|i| {
@@ -518,11 +520,11 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
             let falling = value > novelty[i + 1].value;
             (rising && falling && value > threshold).then(|| Onset {
                 position,
-                strength: Amplitude(if max > 0.0 {
+                strength: Amplitude(f64::from(if max > 0.0 {
                     (value / max).min(1.0)
                 } else {
                     0.0
-                }),
+                })),
             })
         })
         .collect()

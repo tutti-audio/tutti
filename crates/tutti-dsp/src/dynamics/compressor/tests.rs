@@ -13,12 +13,12 @@ const RATES: [SampleRate; 3] = [SampleRate::SR_44K1, SampleRate::SR_48K, SampleR
 const CHUNK: usize = 256;
 
 fn controls(
-    threshold: f32,
-    knee: f32,
+    threshold: f64,
+    knee: f64,
     ratio: f32,
     attack: f64,
     release: f64,
-    makeup: f32,
+    makeup: f64,
 ) -> CompressorControls {
     CompressorControls {
         threshold: Db(threshold),
@@ -76,17 +76,17 @@ fn hostile() -> Vec<CompressorControls> {
             ..base
         },
     ];
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(CompressorControls {
             threshold: Db(bad),
             knee: Db(bad),
-            ratio: CompressionRatio(bad),
+            ratio: CompressionRatio(bad as f32),
             makeup: Db(bad),
             ..base
         });
         all.push(CompressorControls {
-            attack: Seconds(f64::from(bad)),
-            release: Seconds(f64::from(bad)),
+            attack: Seconds(bad),
+            release: Seconds(bad),
             ..base
         });
     }
@@ -179,25 +179,21 @@ fn reduction_db(m: &CompressorMember, level: Db) -> Db {
 fn the_member_reduction_is_the_static_curve() {
     for c in reachable() {
         let m = CompressorMember::designed(&c, RATE);
-        let (t, w, r) = (
-            f64::from(m.threshold.get()),
-            f64::from(m.knee.get()),
-            f64::from(m.ratio.get()),
-        );
+        let (t, w, r) = (m.threshold.get(), m.knee.get(), f64::from(m.ratio.get()));
         for step in -80..=40 {
             let level = f64::from(step) * 1.5 - 20.0;
             let want = curve(level, t, w, r);
-            let got = f64::from(reduction_db(&m, Db(level as f32)).get());
+            let got = reduction_db(&m, Db(level)).get();
             assert!(
-                (got - want).abs() < 2e-3,
+                (got - want).abs() < 1e-12,
                 "{c:?} at {level}: {got} vs {want}"
             );
         }
         // Continuity at both edges: the two pieces meeting there give the same value.
         for edge in [t - w / 2.0, t + w / 2.0] {
             let (below, above) = (
-                f64::from(reduction_db(&m, Db((edge - 1e-3) as f32)).get()),
-                f64::from(reduction_db(&m, Db((edge + 1e-3) as f32)).get()),
+                reduction_db(&m, Db(edge - 1e-3)).get(),
+                reduction_db(&m, Db(edge + 1e-3)).get(),
             );
             assert!(
                 (above - below).abs() < 1e-2,
@@ -214,10 +210,10 @@ fn the_curve_has_its_three_regions() {
     // Under -25 dB: nothing. Over -15 dB: three quarters of the excess.
     assert_eq!(reduction_db(&m, Db(-40.0)), Db::UNITY);
     assert_eq!(reduction_db(&m, Db(-25.0)), Db::UNITY);
-    assert!((reduction_db(&m, Db(-10.0)).get() - 7.5).abs() < 1e-5);
-    assert!((reduction_db(&m, Db::UNITY).get() - 15.0).abs() < 1e-5);
+    assert_eq!(reduction_db(&m, Db(-10.0)), Db(7.5));
+    assert_eq!(reduction_db(&m, Db::UNITY), Db(15.0));
     // At the threshold the quadratic has run a half of the knee: (3/4)(5)^2/(2*10).
-    assert!((reduction_db(&m, Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-5);
+    assert!((reduction_db(&m, Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-14);
 }
 
 /// The member holds the controls made runnable: a knee under 0 reads as 0, a ratio under
@@ -245,10 +241,10 @@ fn the_member_floors_what_cannot_be_run() {
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(
         &CompressorControls {
-            threshold: Db(f32::NAN),
-            knee: Db(f32::INFINITY),
+            threshold: Db(f64::NAN),
+            knee: Db(f64::INFINITY),
             ratio: CompressionRatio(f32::NAN),
-            makeup: Db(f32::NEG_INFINITY),
+            makeup: Db(f64::NEG_INFINITY),
             ..base
         },
         RATE,
@@ -279,10 +275,10 @@ fn a_steady_key_settles_on_the_static_curve() {
             let out = run(&mut k, &[&ones, &ones], &[&key, &key], None);
             let want_db = -curve(
                 level,
-                f64::from(c.threshold.get()),
-                f64::from(c.knee.get()),
+                c.threshold.get(),
+                c.knee.get(),
                 f64::from(c.ratio.get()),
-            ) + f64::from(c.makeup.get());
+            ) + c.makeup.get();
             let got_db = 20.0 * f64::from(out[0][n - 1]).log10();
             assert!(
                 (got_db - want_db).abs() < 2e-3,
@@ -410,7 +406,7 @@ fn an_own_key_detects_the_signal_itself() {
 #[test]
 fn a_threshold_lane_is_read_per_frame() {
     let n = 600;
-    let base = -40.0f32;
+    let base = -40.0f64;
     let c = controls(base, 0.0, 4.0, 0.0, 0.0, 0.0);
     let level = -6.0;
     let lane: Vec<f32> = (0..n)
@@ -427,11 +423,7 @@ fn a_threshold_lane_is_read_per_frame() {
     let key = vec![amplitude(level); n];
     let out = run(&mut k, &[&ones, &ones], &[&key, &key], Some(&lane));
     for (i, &t) in lane.iter().enumerate() {
-        let threshold = if t.is_finite() {
-            f64::from(t)
-        } else {
-            f64::from(base)
-        };
+        let threshold = if t.is_finite() { f64::from(t) } else { base };
         let want = -curve(level, threshold, 0.0, 4.0);
         let got = 20.0 * f64::from(out[0][i]).log10();
         assert!(
@@ -668,43 +660,28 @@ fn a_keyed_follower_keeps_tracking_while_the_main_signal_is_silent() {
     );
 }
 
-/// A render over `f64` views is the `f32` render converted: the state is `f32`, the views are
-/// converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
-/// last bit (a tolerance of 0), with a threshold lane and a makeup glide in flight.
+/// A view of `f64` is processed at its own width: a steady key at -6 dB over a -20 dB threshold
+/// at 4:1 with an instant follower and a 3 dB makeup leaves every unit sample at the
+/// closed-form gain `10^((makeup - reduction) / 20)` to `1e-12`.
 #[test]
-fn an_f64_render_is_the_f32_render_converted() {
+fn an_f64_view_is_processed_at_its_width() {
     let n = 2_000;
-    let audio = noise(51, n, 0.9);
-    let key = noise(52, n, 0.9);
-    let lane: Vec<f32> = (0..n).map(|i| -30.0 + (i % 400) as f32 * 0.05).collect();
-    let (c, to) = (
-        controls(-20.0, 6.0, 4.0, 0.002, 0.05, 0.0),
-        controls(-20.0, 6.0, 4.0, 0.002, 0.05, 6.0),
-    );
+    let level = -6.0;
+    let c = controls(-20.0, 0.0, 4.0, 0.0, 0.0, 3.0);
     let mut k = runner(&c);
-    k.aim(&to);
-    let want = run(&mut k, &[&audio], &[&key], Some(&lane)).remove(0);
-
-    let to64 = |x: &[f32]| x.iter().map(|&v| f64::from(v)).collect::<Vec<f64>>();
-    let (audio64, key64, lane64) = (to64(&audio), to64(&key), to64(&lane));
-    let mut k = runner(&c);
-    k.aim(&to);
+    k.settle();
+    let key = vec![Db(level).to_amplitude().get(); n];
+    let ones = vec![1.0f64; n];
     let mut got = vec![0.0f64; n];
-    let mut at = 0;
-    while at < n {
-        let end = (at + CHUNK).min(n);
-        k.process(
-            CompressorLanes {
-                threshold: Some(Mono::new(&lane64[at..end])),
-            },
-            Planes::new(&[&key64[at..end]]).unwrap(),
-            Planes::new(&[&audio64[at..end]]).unwrap(),
-            PlanesMut::new(&mut [&mut got[at..end]]).unwrap(),
-        );
-        at = end;
-    }
-    for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
-        assert_eq!(g, f64::from(w), "frame {i}");
+    k.process(
+        CompressorLanes::default(),
+        Planes::new(&[&key[..]]).unwrap(),
+        Planes::new(&[&ones[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut got[..]]).unwrap(),
+    );
+    let want = Db(3.0 - curve(level, -20.0, 0.0, 4.0)).to_amplitude().get();
+    for (i, &g) in got.iter().enumerate() {
+        assert!((g - want).abs() < 1e-12, "frame {i}: {g} vs {want}");
     }
 }
 
@@ -718,25 +695,24 @@ fn the_deepest_reduction_is_read_once_and_cleared_by_a_reset() {
     let level = -6.0;
     let x = vec![amplitude(level); 4_800];
     run(&mut bank, &[&x], &[&x], None);
-    let got = f64::from(bank.take_deepest().get());
+    let got = bank.take_deepest().get();
     let want = curve(level, -20.0, 0.0, 4.0);
     assert!((got - want).abs() < 1e-3, "{got} vs {want}");
     assert_eq!(bank.take_deepest(), Db::UNITY, "a read starts again");
     // The held follower reads the same depth again at once; a reset forgets it.
     let quiet = vec![0.0f32; 64];
     run(&mut bank, &[&quiet], &[&quiet], None);
-    assert!(f64::from(bank.take_deepest().get()) > want - 1e-3);
+    assert!(bank.take_deepest().get() > want - 1e-3);
     run(&mut bank, &[&quiet], &[&quiet], None);
     bank.reset();
     assert_eq!(bank.take_deepest(), Db::UNITY);
 }
 
-/// A knee past 400 dB is held there: a knee of 1e20 (whose square overflows) or 3e38 (whose
-/// double does) renders finite with the key inside it, and once the key has left (silence,
+/// A knee past 400 dB is held there: a knee of 1e20 or 1e200 (whose square overflows) renders finite with the key inside it, and once the key has left (silence,
 /// then a steady -30 dB) the gain is back on the static curve of the 400 dB knee.
 #[test]
 fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
-    for knee in [1.0e20f32, 3.0e38] {
+    for knee in [1.0e20f64, 1.0e200] {
         let mut bank = runner(&controls(-20.0, knee, 4.0, 0.001, 0.001, 0.0));
         let inside = vec![amplitude(-6.0); 4_800];
         let out = run(&mut bank, &[&inside], &[&inside], None);

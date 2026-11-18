@@ -774,7 +774,7 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
 
 /// True peak, in dBTP, of a stereo WAV on disk (float or integer), measured
 /// with the same R128 meter the export normalizes by.
-fn file_true_peak(path: &std::path::Path) -> f32 {
+fn file_true_peak(path: &std::path::Path) -> f64 {
     use tutti_buffers::Interleaved;
     use tutti_measure::{LoudnessConfig, measure_loudness};
 

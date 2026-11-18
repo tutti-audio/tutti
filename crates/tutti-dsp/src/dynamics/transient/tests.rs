@@ -13,8 +13,8 @@ const LEVEL: f64 = 0.5;
 fn shaper(attack: f64, sustain: f64) -> TransientBank {
     let mut bank = TransientBank::new(RATE, FAST, SLOW);
     bank.aim(&TransientControls {
-        attack: Db(attack as f32),
-        sustain: Db(sustain as f32),
+        attack: Db(attack),
+        sustain: Db(sustain),
     });
     bank.settle();
     bank
@@ -219,7 +219,7 @@ fn an_aimed_amount_glides_along_the_linear_ramp() {
     let x = vec![LEVEL as f32; 1_200];
     let mut y = run(&mut bank, &[&x[..cut]], 64).remove(0);
     bank.aim(&TransientControls {
-        attack: Db(a1 as f32),
+        attack: Db(a1),
         sustain: Db::UNITY,
     });
     y.extend(run(&mut bank, &[&x[cut..]], 64).remove(0));

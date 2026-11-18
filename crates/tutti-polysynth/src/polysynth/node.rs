@@ -103,14 +103,15 @@ impl Node for PolySynth {
             .last_frame()
             .map_or_else(
                 || {
-                    let cell = self.master_volume.load().get();
-                    if cell.is_finite() {
+                    let cell = self.master_volume.load();
+                    if cell.get().is_finite() {
                         self.last_volume = cell;
                     }
                     self.last_volume
                 },
-                Self::clamp_volume,
+                |lane| Amplitude(f64::from(lane)),
             );
+        let volume = Self::clamp_volume(volume);
         let (_, mut outputs) = io.split();
         let mut channels = outputs.iter_mut();
         let (Some(left), right) = (channels.next(), channels.next()) else {

@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn an_f64_kernel_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
         let x0 = wide_signal(1)[0];
-        let g = f64::from(FreeverbBank::<f64>::FIXED_GAIN.get());
+        let g = FreeverbBank::<f64>::FIXED_GAIN.get();
         let len = 1_300;
         let mut x = vec![0.0f64; len];
         x[0] = x0;

@@ -4,7 +4,11 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_units::{Ballistics, Seconds};
+use tutti_units::{Amplitude, Ballistics, Db, Seconds};
+
+/// The largest finite sample of the `f32` format the limiter's delay lines hold: a level never
+/// exceeds it.
+pub(super) const SAMPLE_MAX: f64 = f32::MAX as f64; // the f32 delay-line format's bound
 
 /// The frames a pass over a block takes at a time: the levels of a stretch become its gains
 /// in a stack array.
@@ -17,26 +21,30 @@ pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 /// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as the largest
 /// finite level, so a detector never sees a value its dB conversion turns into an infinity.
 #[inline]
-pub(super) fn level(x: f32) -> f32 {
+pub(super) fn level(x: f64) -> Amplitude {
     let a = x.abs();
-    if a.is_nan() { 0.0 } else { a.min(f32::MAX) }
+    Amplitude(if a.is_nan() { 0.0 } else { a.min(SAMPLE_MAX) })
 }
 
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
 /// (as long as `frames`).
 #[inline]
-pub(crate) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, out: &mut [f32]) {
-    out.fill(0.0);
+pub(crate) fn key_levels<S: Float>(
+    key: &Planes<'_, S>,
+    frames: Range<usize>,
+    out: &mut [Amplitude],
+) {
+    out.fill(Amplitude::SILENT);
     for plane in key.iter() {
         for (m, x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {
-            *m = m.max(level(x.convert_to::<f32>()));
+            *m = m.max(level(x.convert_to::<f64>()));
         }
     }
 }
 
 /// The widest knee, in dB, a detector's curve runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
 /// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
-pub(super) const MAX_KNEE_DB: f32 = 400.0;
+pub(super) const MAX_KNEE: Db = Db(400.0);
 
 /// The attack and release a control pair names, as a valid [`Ballistics`]: a time under 0 or
 /// NaN reads as 0 (instant) and an infinite one holds (coefficient 0), as

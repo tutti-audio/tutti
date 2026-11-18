@@ -300,7 +300,7 @@ mod tests {
 
     /// The controls of a gate the tests name four of: the closed floor is -80 dB (the
     /// node's range before it was a control), not `GateControls::DEFAULT`'s 0 dB.
-    fn four(threshold: f32, attack: f64, hold: f64, release: f64) -> GateControls {
+    fn four(threshold: f64, attack: f64, hold: f64, release: f64) -> GateControls {
         GateControls {
             threshold: Db::new(threshold),
             attack: Seconds::new(attack),
@@ -311,14 +311,14 @@ mod tests {
         }
     }
 
-    fn with_range(c: GateControls, range: f32) -> GateControls {
+    fn with_range(c: GateControls, range: f64) -> GateControls {
         GateControls {
             range: Db(range),
             ..c
         }
     }
 
-    fn gate(threshold: f32, attack: f64, hold: f64, release: f64) -> GateNode {
+    fn gate(threshold: f64, attack: f64, hold: f64, release: f64) -> GateNode {
         GateNode::new(
             BusTopology::MONO,
             KeySource::Sidechain,

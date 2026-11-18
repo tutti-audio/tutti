@@ -24,7 +24,7 @@ fn offline() -> Session {
     Session::builder().build().expect("builds")
 }
 
-fn amp(x: f32) -> Amplitude {
+fn amp(x: f64) -> Amplitude {
     Amplitude::new(x)
 }
 
@@ -134,11 +134,11 @@ fn a_gain_on_a_missing_edge_or_a_bad_number_is_refused() {
     );
     let real = r.edge_from(r.a);
     assert_eq!(
-        real.set_gain(r.s.graph(), amp(f32::NAN)),
+        real.set_gain(r.s.graph(), amp(f64::NAN)),
         Err(EdgeGainError::NotFinite)
     );
     assert_eq!(
-        real.set_gain(r.s.graph(), amp(f32::INFINITY)),
+        real.set_gain(r.s.graph(), amp(f64::INFINITY)),
         Err(EdgeGainError::NotFinite)
     );
     assert_eq!(real.gain(r.s.graph_ref()), None);
@@ -194,7 +194,7 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
             .connect(node(c.erase()), InPort::new(sink, 0))
             .unwrap()
             .hard()
-            .gain(amp(f32::NAN))
+            .gain(amp(f64::NAN))
             .err(),
         Some(EdgeGainError::NotFinite)
     );

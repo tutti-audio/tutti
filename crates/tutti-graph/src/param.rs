@@ -40,6 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::NodeKey;
+use crate::fade::Fade;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
 use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
@@ -1082,7 +1083,7 @@ impl ParamState {
                 if j >= d {
                     break;
                 }
-                let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
+                let (out, inn) = Fade::lane_gains(FadeLaw::EqualAmplitude, j, d);
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.

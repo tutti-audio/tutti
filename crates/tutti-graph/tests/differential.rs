@@ -2240,7 +2240,7 @@ fn the_fade_generator_covers_what_the_suite_claims() {
 /// The weights the generator picks from: unity (the plain add), zero (never
 /// skipped by value), negative (polarity), and fractions that do not round
 /// exactly.
-const WEIGHTS: [f32; 9] = [1.0, 0.5, -0.75, 0.0, 1.5, 0.3, 0.1, -1.0, 2.0];
+const WEIGHTS: [f64; 9] = [1.0, 0.5, -0.75, 0.0, 1.5, 0.3, 0.1, -1.0, 2.0];
 
 /// Whether `id` names an edge of `t`.
 fn has_edge(t: &Topology, id: EdgeId) -> bool {

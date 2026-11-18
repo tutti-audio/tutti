@@ -47,7 +47,7 @@ use core::marker::PhantomData;
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
 use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_units::{Db, Direction, SampleRate, Samples};
+use tutti_units::{Amplitude, Db, Direction, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
 use crate::{Error, Measure, Meter, Result};
@@ -282,9 +282,9 @@ impl<S: Sample> Meter for LoudnessMeter<S> {
             .fold(0.0f64, f64::max);
 
         Loudness {
-            lufs: Db(lufs as f32),
+            lufs: Db(lufs),
             true_peak: true_peak_db(peak_linear),
-            range: Db(range as f32),
+            range: Db(range),
         }
     }
 }
@@ -410,22 +410,18 @@ pub fn measure_true_peak<S: Sample>(
     Ok(meter.finish())
 }
 
-/// An `f64` true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
+/// A true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
 ///
 /// [`Db::from_amplitude`] leaves silence at `-inf` because the floor belongs to
 /// the consumer; this is that consumer. An infinite peak would reach
 /// [`Loudness::gain_to`], which subtracts it into a `NaN` — the same hazard the
 /// `-70` LUFS gate guards against.
-///
-/// Not routed through [`tutti_units::Amplitude`], which is `f32`: converting first narrows
-/// the input before the `log10`, defeating the reason this path is `f64`. The
-/// arithmetic is [`Db::from_amplitude_f64`]'s, narrowed once at this boundary.
 #[inline]
 fn true_peak_db(peak_linear: f64) -> Db {
     if peak_linear <= 0.0 {
         Db::FLOOR
     } else {
-        Db(Db::from_amplitude_f64(peak_linear) as f32)
+        Db::from_amplitude(Amplitude(peak_linear))
     }
 }
 
@@ -668,7 +664,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
 fn windowed_db(frames: u64, needed: u64, lufs: Option<f64>) -> Db {
     match lufs {
         Some(lufs) if frames >= needed && lufs.is_finite() => {
-            Db((lufs as f32).max(WindowedReading::LOUDNESS_FLOOR.get()))
+            Db(lufs.max(WindowedReading::LOUDNESS_FLOOR.get()))
         }
         _ => WindowedReading::LOUDNESS_FLOOR,
     }

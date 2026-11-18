@@ -49,12 +49,12 @@ impl SoundFontMath {
     }
 
     pub(crate) fn decibels_to_linear(x: f32) -> f32 {
-        Db(x).to_amplitude().get()
+        Db(f64::from(x)).to_amplitude().get() as f32
     }
 
     /// `20 log10 x`: minus infinity for silence, as [`Db::from_amplitude`].
     pub(crate) fn linear_to_decibels(x: f32) -> f32 {
-        Db::from_amplitude(Amplitude(x)).get()
+        Db::from_amplitude(Amplitude(f64::from(x))).get() as f32
     }
 
     pub(crate) fn key_number_to_multiplying_factor(cents: i32, key: i32) -> f32 {

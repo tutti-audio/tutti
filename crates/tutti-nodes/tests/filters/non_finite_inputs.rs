@@ -12,8 +12,8 @@ use tutti_nodes::{
     BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
     LimiterNode, MaxDelay, SvfType,
 };
-use tutti_types::{AtomicF32, ParamCell};
-use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
+use tutti_types::ParamCell;
+use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BAD: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
@@ -88,25 +88,26 @@ fn a_delay_with_a_nan_initial_time_starts_at_zero() {
 /// The balance case pins that a NaN or infinite balance is already finite without a guard.
 #[test]
 fn the_strip_holds_off_non_finite_volume_and_balance() {
-    type Cell = fn(&BusStripNode) -> std::sync::Arc<AtomicF32>;
-    let cells: [(&str, Cell); 2] = [
-        ("volume", |n| n.volume().as_atomic()),
-        ("balance", |n| {
-            n.balance().expect("a stereo strip balances").as_atomic()
+    type Write = fn(&BusStripNode, f32);
+    let cells: [(&str, Write); 2] = [
+        ("volume", |n, v| n.volume().store(Amplitude(f64::from(v)))),
+        ("balance", |n, v| {
+            n.balance()
+                .expect("a stereo strip balances")
+                .store(Balance(v));
         }),
     ];
-    for (name, cell) in cells {
+    for (name, write) in cells {
         for bad in BAD {
             let mut node = BusStripNode::stereo();
             node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
             assert!(renders_finite(&mut node, 2));
-            let atomic = cell(&node);
-            atomic.store(bad, Ordering::Release);
+            write(&node, bad);
             assert!(
                 renders_finite(&mut node, 4),
                 "{name} = {bad} reached the output"
             );
-            atomic.store(0.5, Ordering::Release);
+            write(&node, 0.5);
             assert!(
                 renders_finite(&mut node, 4),
                 "{name} = {bad} left the strip non-finite"

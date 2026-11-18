@@ -91,7 +91,7 @@ impl MatchedBell {
     /// As [`design`](Self::design).
     pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
         let b = self.section(center, rate)?;
-        let eps = f64::from(floor.to_amplitude().get());
+        let eps = floor.to_amplitude().get();
         Ok(match ring_frames(&b, eps) {
             Some(frames) if eps.is_finite() && eps > 0.0 && frames <= MAX_TAIL_FRAMES as f64 => {
                 Ring::Finite(Seconds::new(frames / rate.get()))
@@ -105,8 +105,12 @@ impl MatchedBell {
         let fc = check_cutoff(center, rate)?;
         let q = self.checked_q()?;
         let db = check_gain(self.gain)?;
-        let boost = matched(fc, q, db.abs(), rate.get());
-        Ok(if db < 0.0 { inverse(boost) } else { boost })
+        let boost = matched(fc, q, Db(db.get().abs()), rate.get());
+        Ok(if db.get() < 0.0 {
+            inverse(boost)
+        } else {
+            boost
+        })
     }
 
     /// The quality factor as a number above 0.
@@ -196,7 +200,7 @@ fn inverse(b: Biquad) -> Biquad {
 /// `A^4`. Then `c0 + c2` is half the sum of `sqrt(C0)` and `sqrt(C1)`, `c1` is half their
 /// difference and `c0 c2 = -C2 / 4`; `c0` is the larger root, which puts the zeros inside
 /// the circle.
-fn matched(fc: f64, q: f64, db: f64, fs: f64) -> Biquad {
+fn matched(fc: f64, q: f64, db: Db, fs: f64) -> Biquad {
     let a = gain_root(db);
     let w0 = TAU * fc / fs;
     let zeta = 1.0 / (2.0 * a * q);

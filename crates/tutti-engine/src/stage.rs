@@ -4,14 +4,15 @@
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
 use tutti_types::MAX_CHANNELS;
+use tutti_units::Amplitude;
 
 /// One output's ramp: from the gain it left off at to the target, `done` of
 /// `frames` frames along.
 #[derive(Clone, Copy)]
 struct Ramp {
-    from: f32,
-    to: f32,
-    now: f32,
+    from: Amplitude,
+    to: Amplitude,
+    now: Amplitude,
     done: usize,
     /// The length this ramp was started with: a ramp keeps its own, so a
     /// declick length that changes (a re-prepare at another rate) neither
@@ -21,9 +22,9 @@ struct Ramp {
 
 impl Ramp {
     const STEADY: Self = Self {
-        from: 1.0,
-        to: 1.0,
-        now: 1.0,
+        from: Amplitude::UNITY,
+        to: Amplitude::UNITY,
+        now: Amplitude::UNITY,
         done: 0,
         frames: 0,
     };
@@ -54,8 +55,8 @@ impl OutputStage {
         frames: usize,
     ) {
         for (c, ramp) in self.ramps.iter_mut().enumerate().take(out_ch) {
-            let to = targets.gain(c).get();
-            if to.to_bits() != ramp.to.to_bits() {
+            let to = targets.gain(c);
+            if to != ramp.to {
                 *ramp = Ramp {
                     from: ramp.now,
                     to,
@@ -65,12 +66,12 @@ impl OutputStage {
                 };
             }
             if ramp.done >= ramp.frames {
-                if ramp.now != 1.0 {
+                if ramp.now != Amplitude::UNITY {
                     block
                         .iter_mut()
                         .skip(c)
                         .step_by(out_ch)
-                        .for_each(|s| *s *= F::from_f32(ramp.now));
+                        .for_each(|s| *s *= F::from_f64(ramp.now.get()));
                 }
                 continue;
             }
@@ -78,13 +79,16 @@ impl OutputStage {
                 ramp.now = if ramp.done + 1 >= ramp.frames {
                     ramp.to
                 } else {
-                    ramp.from
-                        + (ramp.to - ramp.from) * ((ramp.done + 1) as f32 / ramp.frames as f32)
+                    Amplitude(
+                        ramp.from.get()
+                            + (ramp.to.get() - ramp.from.get())
+                                * ((ramp.done + 1) as f64 / ramp.frames as f64),
+                    )
                 };
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
-                *s *= F::from_f32(ramp.now);
+                *s *= F::from_f64(ramp.now.get());
             }
         }
     }
@@ -95,7 +99,7 @@ mod tests {
     use super::*;
     use tutti_units::Amplitude;
 
-    fn targets(first: f32) -> StageTargets {
+    fn targets(first: f64) -> StageTargets {
         let mut t = StageTargets::UNITY;
         t.0[0] = Amplitude(first);
         t

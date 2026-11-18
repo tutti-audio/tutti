@@ -3,8 +3,9 @@
 
 use tutti_buffers::{Float, Sample};
 
+use super::shared::SAMPLE_MAX;
 use super::window::MonotonicMinDeque;
-use tutti_units::Samples;
+use tutti_units::{Amplitude, Samples};
 
 use crate::DelayLine;
 
@@ -60,7 +61,7 @@ impl LookaheadRing {
     /// gain that scales a sample is never later than its own target's: the
     /// push drops the gain leaving the window before adding this one.
     #[inline]
-    pub(crate) fn push_gain(&mut self, gain: f32) -> f32 {
+    pub(crate) fn push_gain(&mut self, gain: Amplitude) -> Amplitude {
         self.min_deque.push(self.sample_counter, gain);
         self.sample_counter = self.sample_counter.wrapping_add(1);
         self.min_deque.min().unwrap_or(gain)
@@ -75,13 +76,13 @@ impl LookaheadRing {
         &mut self,
         c: usize,
         input: &[S],
-        gains: &[f32],
+        gains: &[Amplitude],
         out: &mut [S],
     ) {
         let line = &mut self.lines[c];
         for ((o, x), &g) in out.iter_mut().zip(input).zip(gains) {
             line.push_sample(x.convert_to::<f32>());
-            let d = line.read_whole(self.lookahead);
+            let d = f64::from(line.read_whole(self.lookahead));
             // A NaN in both operands: x86 returns the first one's and which
             // is first is up to the compiler, so pick the delayed sample's
             // (as the per-frame product did) to keep the sign bit. An infinite sample
@@ -91,7 +92,7 @@ impl LookaheadRing {
             *o = (if d.is_nan() {
                 d + d
             } else {
-                d.clamp(-f32::MAX, f32::MAX) * g
+                d.clamp(-SAMPLE_MAX, SAMPLE_MAX) * g.get()
             })
             .convert_to::<S>();
         }
@@ -101,7 +102,7 @@ impl LookaheadRing {
 /// The linked-peak fold: a NaN sample never reaches the peak (it reads as quiet) and an
 /// infinity reads as the largest finite level, so the peak's dB is finite.
 #[inline]
-pub(crate) fn fold_peak(peak: f32, x: f32) -> f32 {
+pub(crate) fn fold_peak(peak: Amplitude, x: f64) -> Amplitude {
     peak.max(super::shared::level(x))
 }
 

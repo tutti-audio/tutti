@@ -665,15 +665,7 @@ impl<F: Float> Fold<F> {
         levels: FoldLevels,
     ) -> Result<Self, FoldError> {
         levels.check()?;
-        // The default -3 dB is the float's own, so a `Fold<f64>` keeps the
-        // double-precision figure and not the single's widened.
-        let level = |a: tutti_units::Amplitude| {
-            if a.get().to_bits() == f32::MINUS_3_DB.to_bits() {
-                F::MINUS_3_DB
-            } else {
-                F::from_f32(a.get())
-            }
-        };
+        let level = |a: tutti_units::Amplitude| F::from_f64(a.get());
         let gains = Gains {
             centre: level(levels.centre),
             surround: level(levels.surround),

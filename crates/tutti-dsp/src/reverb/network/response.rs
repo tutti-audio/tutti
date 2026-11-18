@@ -38,13 +38,13 @@ impl Absorption {
     /// `w`. NaN for a one-pole that does not settle.
     fn response(&self, w: f64, rate: SampleRate) -> Complex64 {
         match *self {
-            Absorption::Gain(g) => Complex64::new(f64::from(g.get()), 0.0),
+            Absorption::Gain(g) => Complex64::new(g.get(), 0.0),
             Absorption::OnePole { gain, damp } => {
                 let d = f64::from(damp);
                 if !(d.is_finite() && d.abs() < 1.0) {
                     return Complex64::new(f64::NAN, f64::NAN);
                 }
-                f64::from(gain.get()) * (1.0 - d) / (ONE - delay(w, 1.0) * d)
+                gain.get() * (1.0 - d) / (ONE - delay(w, 1.0) * d)
             }
             Absorption::Bands {
                 low,
@@ -52,11 +52,7 @@ impl Absorption {
                 high,
                 crossover,
             } => {
-                let (low, mid, high) = (
-                    f64::from(low.get()),
-                    f64::from(mid.get()),
-                    f64::from(high.get()),
-                );
+                let (low, mid, high) = (low.get(), mid.get(), high.get());
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
                 // one-poles; `L1` at the lower crossover, `L2` at the upper.
                 let l = |fc: Hz| {
@@ -101,11 +97,7 @@ impl Absorption {
             return self.majorant(1.0, rate);
         };
         const POINTS: usize = 4096;
-        let (low, mid, high) = (
-            f64::from(low.get()),
-            f64::from(mid.get()),
-            f64::from(high.get()),
-        );
+        let (low, mid, high) = (low.get(), mid.get(), high.get());
         let pole = |fc: Hz| cutoff_pole(fc, rate);
         let (p1, p2) = (pole(crossover[0]), pole(crossover[1]));
         if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
@@ -132,10 +124,10 @@ impl Absorption {
     /// a pole is not inside the circle, and for a gain that is not a loop gain.
     fn majorant(&self, r: f64, rate: SampleRate) -> f64 {
         match *self {
-            Absorption::Gain(g) => nonnegative(f64::from(g.get())),
+            Absorption::Gain(g) => nonnegative(g.get()),
             Absorption::OnePole { gain, damp } => {
                 let d = f64::from(damp);
-                let g = f64::from(gain.get());
+                let g = gain.get();
                 if !(d.is_finite() && g.is_finite() && g >= 0.0 && d.abs() < r) {
                     return f64::INFINITY;
                 }
@@ -148,11 +140,7 @@ impl Absorption {
                 high,
                 crossover,
             } => {
-                let (low, mid, high) = (
-                    f64::from(low.get()),
-                    f64::from(mid.get()),
-                    f64::from(high.get()),
-                );
+                let (low, mid, high) = (low.get(), mid.get(), high.get());
                 if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0) {
                     return f64::INFINITY;
                 }
@@ -189,7 +177,7 @@ impl AllPass {
     /// `H(e^jw)`: the lattice `(z^-D - g) / (1 - g z^-D)` or Freeverb's
     /// `((1 + g) z^-D - 1) / (1 - g z^-D)`.
     fn response(&self, w: f64) -> Complex64 {
-        let (g, zd) = (f64::from(self.gain.get()), delay(w, self.delay.get()));
+        let (g, zd) = (self.gain.get(), delay(w, self.delay.get()));
         let den = ONE - zd * g;
         match self.form {
             AllPassForm::Lattice => (zd - g) / den,
@@ -202,7 +190,7 @@ impl AllPass {
     /// Freeverb's has `-1` at 0 and `(1 + g) g^(k-1) - g^k = g^(k-1)` at `kD`.
     /// `1 + 2|g|` and `1 + 1/(1 - |g|)` at `r = 1`. Infinity when `|g| r^-D >= 1`.
     fn majorant(&self, r: f64) -> f64 {
-        let g = f64::from(self.gain.magnitude().get());
+        let g = self.gain.magnitude().get();
         let d = self.delay.get();
         if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
@@ -221,7 +209,7 @@ impl AllPass {
     /// The largest `|H(e^jw)|`: 1 for the lattice, and for Freeverb's the larger
     /// of its two extremes (`z^-D = 1` and `-1`; `|H|` is monotone in `cos(wD)`).
     fn peak(&self) -> f64 {
-        let g = f64::from(self.gain.get());
+        let g = self.gain.get();
         if !(g.is_finite() && g.abs() < 1.0) {
             return f64::INFINITY;
         }
@@ -233,7 +221,7 @@ impl AllPass {
 
     /// The pole radius `|g|^(1/D)`: an all-pass of no delay is memoryless.
     fn radius(&self) -> f64 {
-        let g = f64::from(self.gain.magnitude().get());
+        let g = self.gain.magnitude().get();
         let d = self.delay.get();
         if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
@@ -268,7 +256,7 @@ impl Matrix {
                 if v.len() != n {
                     return None;
                 }
-                f64::from(u8::from(i == j)) - 2.0 * f64::from(v[i].get()) * f64::from(v[j].get())
+                f64::from(u8::from(i == j)) - 2.0 * v[i].get() * v[j].get()
             }
             Matrix::Hadamard => {
                 if !n.is_power_of_two() {
@@ -285,13 +273,13 @@ impl Matrix {
                 if c.len() != n {
                     return None;
                 }
-                f64::from(c[(j + n - i) % n].get())
+                c[(j + n - i) % n].get()
             }
             Matrix::Dense(a) => {
                 if a.len() != n * n {
                     return None;
                 }
-                f64::from(a[i * n + j].get())
+                a[i * n + j].get()
             }
         })
     }
@@ -344,7 +332,7 @@ impl Fdn {
             return None;
         }
         for (si, b) in s.iter_mut().zip(self.input.iter()) {
-            *si = Complex64::new(f64::from(b.get()), 0.0);
+            *si = Complex64::new(b.get(), 0.0);
         }
         // `A = I - 2 u u^T` for a unit `u` (a rank one change of the identity):
         // `I - A T = (I - T) + 2 u (T u)^T`, solved by Sherman and Morrison in O(n).
@@ -373,7 +361,7 @@ impl Fdn {
                 let u = 1.0 / libm::sqrt(n as f64);
                 rank_one(&|_| u, s);
             }
-            Matrix::Reflection(v) => rank_one(&|i| f64::from(v[i].get()), s),
+            Matrix::Reflection(v) => rank_one(&|i| v[i].get(), s),
             other => {
                 let mut m = vec![ZERO; n * n];
                 for i in 0..n {
@@ -433,7 +421,7 @@ impl Network {
                     let mut next = 1;
                     for tap in t.taps.iter() {
                         let c = usize::from(tap.channel).min(MAX_CHANNELS - 1);
-                        out[c] += x * f64::from(tap.gain.get()) * delay(w, tap.delay.get());
+                        out[c] += x * tap.gain.get() * delay(w, tap.delay.get());
                         next = next.max(c + 1);
                     }
                     width = next;
@@ -474,7 +462,7 @@ impl Network {
                             out[r] = x * row
                                 .iter()
                                 .zip(&d)
-                                .map(|(c, d)| *d * f64::from(c.get()))
+                                .map(|(c, d)| *d * c.get())
                                 .sum::<Complex64>();
                         }
                     }
@@ -485,7 +473,7 @@ impl Network {
             v = out;
         }
         // Width and wet, as the kernel's mid and side: `(M + wS, M - wS) * wet`.
-        let wet = f64::from(self.wet.to_amplitude().get());
+        let wet = self.wet.to_amplitude().get();
         if width >= 2 {
             let (m, s) = ((v[0] + v[1]) * 0.5, (v[0] - v[1]) * 0.5);
             let k = f64::from(self.width.get());
@@ -510,7 +498,7 @@ impl Network {
                 Stage::Taps(t) => {
                     let mut per = [0.0f64; MAX_CHANNELS];
                     for tap in t.taps.iter() {
-                        let (g, d) = (f64::from(tap.gain.magnitude().get()), tap.delay.get());
+                        let (g, d) = (tap.gain.magnitude().get(), tap.delay.get());
                         if !(g.is_finite() && d.is_finite() && d >= 0.0) {
                             return f64::INFINITY;
                         }
@@ -532,7 +520,7 @@ impl Network {
                 Stage::Fir(_) => f64::INFINITY,
             };
         }
-        let wet = f64::from(self.wet.to_amplitude().get());
+        let wet = self.wet.to_amplitude().get();
         let width = if self.width_after() >= 2 {
             f64::from(self.width.get()).abs().max(1.0)
         } else {
@@ -657,7 +645,7 @@ impl Fdn {
                         .zip(self.input.iter())
                         .zip(&a)
                         .map(|((c, b), a)| {
-                            let w = f64::from(c.magnitude().get()) * f64::from(b.magnitude().get());
+                            let w = c.magnitude().get() * b.magnitude().get();
                             if w == 0.0 { 0.0 } else { w / (1.0 - a) }
                         })
                         .map(|x| if x < 0.0 { f64::INFINITY } else { x })
@@ -688,7 +676,7 @@ impl Fdn {
             let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
                 return f64::INFINITY;
             };
-            worst = worst.max(Db::to_amplitude_f64(db_rho + db_sigma));
+            worst = worst.max(Db(db_rho + db_sigma).to_amplitude().get());
         }
         worst
     }

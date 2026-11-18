@@ -57,7 +57,7 @@ pub struct OscillatorNode {
     /// The last finite frequency read from the cell or the port.
     good_frequency: LastGood<f64>,
     /// The last finite level read from the cell or the port.
-    good_level: LastGood,
+    good_level: LastGood<f64>,
 }
 
 // The params an [`OscillatorNode`] lets the graph modulate, in port order.
@@ -180,8 +180,11 @@ impl Node for OscillatorNode {
             let f = self
                 .good_frequency
                 .read(frequency.map_or(frequency_cell, |l| f64::from(l[i])));
-            let g = self.good_level.read(level.map_or(level_cell, |l| l[i]));
-            *o = self.wave.step(Hz(f), rate) * g;
+            let g = self
+                .good_level
+                .read(level.map_or(level_cell, |l| f64::from(l[i])));
+            // The output is an `f32` lane: the product narrows into it.
+            *o = (f64::from(self.wave.step(Hz(f), rate)) * g) as f32;
         }
         Status::Modified
     }

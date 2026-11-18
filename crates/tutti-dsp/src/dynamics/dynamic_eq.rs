@@ -41,7 +41,7 @@ use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, S
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction, compute_upward_gain_lift};
 use super::key_filter::KeyStage;
-use super::shared::{MAX_KNEE_DB, floored};
+use super::shared::{MAX_KNEE, floored};
 use crate::finite::finite_or;
 use crate::follower::Follower;
 use crate::{
@@ -59,7 +59,7 @@ const DETECTOR_MAX: Seconds = Seconds(0.025);
 const MAX_THRESHOLD: Db = Db(1.0e30);
 
 /// The loudest key sample the detector squares: 1e15 (300 dB), whose square is finite.
-const MAX_KEY: f32 = 1.0e15;
+const MAX_KEY: f64 = 1.0e15;
 
 /// Which way a dynamic band moves from flat.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -97,7 +97,7 @@ pub struct DynamicEqControls {
     /// How fast the gain change falls back toward flat. Read as `attack` is.
     pub release: Seconds,
     /// The most the band's gain moves from flat, in dB and not below 0: the cut of a
-    /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN_DB`.
+    /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN`.
     pub range: Db,
 }
 
@@ -130,11 +130,11 @@ struct Design {
     knee: Db,
     ratio: CompressionRatio,
     range: Db,
-    ballistics: Follower<f32>,
+    ballistics: Follower<f64>,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
-    key_scale: f32,
+    key_scale: f64,
     /// The one-pole coefficient of the detector's mean square.
-    mean: f32,
+    mean: f64,
 }
 
 impl Design {
@@ -158,12 +158,13 @@ impl Design {
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get()))
                 .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
+            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB)),
+            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
-            key_scale: 1.0 / q.get(),
-            mean: tau.one_pole_coeff(rate) as f32,
+            // `Q` is an `f32` unit; the detector is `f64`.
+            key_scale: 1.0 / f64::from(q.get()),
+            mean: tau.one_pole_coeff(rate),
         }
     }
 }
@@ -173,8 +174,9 @@ const PERIOD: Samples = Samples(COEFF_INTERVAL);
 
 /// One EQ band of any width whose bell gain follows the level of its key in the band.
 ///
-/// Built on the control side for one rate; the state is `f32` in the detector and `f64` in
-/// the bell, and a view of another sample format is converted at the edges. Nothing it holds
+/// Built on the control side for one rate; the state is `f64` in the detector and the
+/// bell and `f32` in the key's filter, and a view of another sample format is converted at the
+/// edges. Nothing it holds
 /// grows.
 #[derive(Clone, Debug)]
 pub struct DynamicEqBank {
@@ -187,7 +189,7 @@ pub struct DynamicEqBank {
     /// The detector's band-pass on the key.
     key: KeyStage,
     /// The mean square of the key, in the detector's one-pole.
-    mean_square: f32,
+    mean_square: f64,
     /// The smoothed gain change's size in dB, not below 0; its sign is the mode's.
     moved: Db,
     bell: SvfBank<f64>,
@@ -301,9 +303,9 @@ impl DynamicEqBank {
     /// One frame of the detector: the key's `level` (an amplitude, the band-pass's peak gain
     /// not yet divided out) through the mean square, the static curve and the follower.
     #[inline]
-    fn frame(&mut self, level: f32) {
+    fn frame(&mut self, level: Amplitude) {
         let d = &self.design;
-        let x = (level * d.key_scale).min(MAX_KEY);
+        let x = (level.get() * d.key_scale).min(MAX_KEY);
         self.mean_square += d.mean * (x * x - self.mean_square);
         let amplitude = (2.0 * self.mean_square).sqrt();
         let level_db = amplitude_to_db(Amplitude::new(amplitude));
@@ -337,7 +339,7 @@ impl DynamicEqBank {
             .get()
             .min(output.frames().get())
             .min(key.frames().get());
-        let mut levels = [0.0f32; PERIOD.get()];
+        let mut levels = [Amplitude::SILENT; PERIOD.get()];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(PERIOD.get() - self.phase.get());

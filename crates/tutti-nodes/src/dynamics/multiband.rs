@@ -140,7 +140,7 @@ struct Band {
     /// Last finite threshold, knee, ratio, makeup, attack and release. Every one of
     /// them reaches the envelope follower, a recursive state that a single NaN or ±∞
     /// leaves NaN for good, so a non-finite write reads as unchanged (see [`LastGood`]).
-    good: [LastGood; PER_BAND],
+    good: [LastGood<f64>; PER_BAND],
 }
 
 impl Band {
@@ -158,9 +158,12 @@ impl Band {
             good: [
                 LastGood::new(DEFAULT_THRESHOLD.get(), 0.0),
                 LastGood::fixed(0.0),
-                LastGood::new(DEFAULT_RATIO.get(), CompressionRatio::UNITY.get()),
-                LastGood::new(DEFAULT_ATTACK.to_f32(), 0.0),
-                LastGood::new(DEFAULT_RELEASE.to_f32(), 0.0),
+                LastGood::new(
+                    f64::from(DEFAULT_RATIO.get()),
+                    f64::from(CompressionRatio::UNITY.get()),
+                ),
+                LastGood::new(DEFAULT_ATTACK.get(), 0.0),
+                LastGood::new(DEFAULT_RELEASE.get(), 0.0),
                 LastGood::fixed(0.0),
             ],
         }
@@ -188,12 +191,13 @@ impl Band {
     /// bank, so its cell is the base it falls back to). A non-finite value reads as
     /// the last finite one.
     fn read(&mut self, lanes: &[Option<&[f32]>; PER_BAND], at: usize) -> BandSettings {
-        let driven = |k: usize| lanes[k].map(|lane| lane[at]);
-        let mut take = |k: usize, cell: f32| self.good[k].read(driven(k).unwrap_or(cell));
+        let driven = |k: usize| lanes[k].map(|lane| f64::from(lane[at]));
+        let mut take = |k: usize, cell: f64| self.good[k].read(driven(k).unwrap_or(cell));
         let knee = take(KNEE, self.knee.load().get());
-        let ratio = take(RATIO, self.ratio.load().get());
-        let attack = take(ATTACK, self.attack.load().to_f32());
-        let release = take(RELEASE, self.release.load().to_f32());
+        // `CompressionRatio` is an `f32` unit.
+        let ratio = take(RATIO, f64::from(self.ratio.load().get()));
+        let attack = take(ATTACK, self.attack.load().get());
+        let release = take(RELEASE, self.release.load().get());
         let makeup = take(MAKEUP, self.makeup.load().get());
         // The threshold's lane is the bank's own; only the base is read here.
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
@@ -201,9 +205,9 @@ impl Band {
             compressor: CompressorControls {
                 threshold: Db(threshold),
                 knee: Db(knee),
-                ratio: CompressionRatio(ratio),
-                attack: Seconds::from_f32(attack),
-                release: Seconds::from_f32(release),
+                ratio: CompressionRatio(ratio as f32),
+                attack: Seconds(attack),
+                release: Seconds(release),
                 makeup: Db(makeup),
                 // The multiband compressor has no key filter: its bands read the split signal.
                 ..CompressorControls::DEFAULT
@@ -673,7 +677,7 @@ mod tests {
     use crate::test_support::{RATE, amplitude_at, mean, prepared, render_chunked, sine};
     use core::f64::consts::PI;
     use tutti_graph::contract::drive;
-    use tutti_units::UnitAddr;
+    use tutti_units::{Amplitude, UnitAddr};
 
     const FS: f64 = 48_000.0;
     /// Whole periods of every 5 Hz-grid tone, and of 3 kHz (16 samples).
@@ -811,10 +815,8 @@ mod tests {
     /// a ripple. With a -20 dB threshold at 4:1 the reduction is
     /// `(-6.02 + 20) * 0.75` dB, and a 2 dB makeup rides on it.
     ///
-    /// The follower is an `f32` one-pole, which stalls once its step falls
-    /// under half an ulp of the 10.5 dB reduction: within `ulp / (2 * coeff)`
-    /// of the curve, `coeff = 0.021` at 1 ms and 48 kHz, so 2.3e-5 dB or
-    /// 2.7e-6 of the level: the tolerance is 5e-6.
+    /// The output is `f32`, and the crossover's ripple and the rounding of the samples bound
+    /// the settled level: the tolerance is 5e-6 of it.
     ///
     /// The tone is 0.01 (-40 dB), under every band's -18 dB threshold. Band
     /// 0 carries `1 / (1 + 25^4) = 2.6e-6` of it, so it is unchanged to far
@@ -835,9 +837,9 @@ mod tests {
         let out = render_chunked(&mut n, &[dc_and_tone(0.5, 0.01)], 512);
         let y = &out[0][SETTLE..];
 
-        let level_db = 20.0 * libm::log10(0.5);
+        let level_db = Db::from_amplitude(Amplitude(0.5)).get();
         let reduction = (level_db + 20.0) * (1.0 - 1.0 / 4.0);
-        let expected = 0.5 * libm::pow(10.0, (2.0 - reduction) / 20.0);
+        let expected = 0.5 * Db(2.0 - reduction).to_amplitude().get();
         let dc = mean(y);
         assert!(
             (dc - expected).abs() < 5e-6 * expected,
@@ -847,7 +849,7 @@ mod tests {
         assert!((tone - 0.01).abs() < 2e-7, "the quiet tone is {tone}");
 
         // The meter reads the reduction the curve gives, and only on band 0.
-        let meter = f64::from(n.gain_reduction_db(0).get());
+        let meter = n.gain_reduction_db(0).get();
         assert!(
             (meter - reduction).abs() < 1e-3,
             "meter {meter} dB vs {reduction}"
@@ -916,7 +918,7 @@ mod tests {
         let want = 0.5 * libm::pow(10.0, (6.0 - reduction) / 20.0);
         let dc = mean(&out[0][SETTLE..]);
         assert!((dc - want).abs() < 5e-6 * want, "{dc} vs {want}");
-        let meter = f64::from(n.gain_reduction_db(0).get());
+        let meter = n.gain_reduction_db(0).get();
         assert!((meter - reduction).abs() < 1e-3, "{meter} vs {reduction}");
     }
 
@@ -1335,7 +1337,7 @@ mod tests {
         ));
         render_chunked(parts.node.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
-        let m = f64::from(parts.controls.gain_reduction_db(0).get());
+        let m = parts.controls.gain_reduction_db(0).get();
         assert!((m - reduction).abs() < 1e-3, "{m} vs {reduction}");
         assert!(parts.controls.gain_reduction_db(1) < Db(1e-3));
         assert_eq!(parts.controls.gain_reduction_db(2), Db::UNITY);
@@ -1614,7 +1616,7 @@ mod tests {
             n.gain_reduction_db(0)
         };
         let reduction = (20.0 * libm::log10(0.5) + 30.0) * 0.75;
-        let driven = f64::from(meter_driving(0).get());
+        let driven = meter_driving(0).get();
         assert!((driven - reduction).abs() < 0.01, "{driven} vs {reduction}");
         let other = meter_driving(PER_BAND);
         assert!(other < Db(1e-3), "band 1's port reduced band 0: {other:?}");

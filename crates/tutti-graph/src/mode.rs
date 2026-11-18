@@ -113,6 +113,7 @@ use tutti_units::{Mix, UnitAddr, UnitParam};
 use crate::NodeKey;
 use crate::arena::Arena;
 use crate::event::Event;
+use crate::fade::Fade;
 use crate::held::Held;
 use crate::kernels::AudioRing;
 use crate::node::Shape;
@@ -586,7 +587,7 @@ impl Segments {
 
 /// The incoming gain of frame `k` of the `declick`-frame fade.
 fn gain(k: usize, declick: usize) -> f32 {
-    FadeLaw::EqualAmplitude.gains(k, declick).1
+    Fade::lane_gains(FadeLaw::EqualAmplitude, k, declick).1
 }
 
 /// The aligned-input path of a latent node: one ring of its declared latency

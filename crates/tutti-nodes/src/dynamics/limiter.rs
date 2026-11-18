@@ -249,7 +249,7 @@ impl LimiterSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
+    use crate::test_support::{RATE_44K, prepared_at, sample_gain, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode, Prepare};
     use tutti_types::{ChannelLayout, MaxBlock};
@@ -274,8 +274,9 @@ mod tests {
         })
     }
 
-    fn amplitude_to_db(a: f32) -> f32 {
-        tutti_dsp::amplitude_to_db(Amplitude::new(a)).get()
+    /// The level of an `f32` sample, in dB.
+    fn amplitude_to_db(a: f32) -> f64 {
+        tutti_dsp::amplitude_to_db(Amplitude::new(f64::from(a))).get()
     }
 
     /// A fork starts from the values last set through the node's
@@ -446,11 +447,11 @@ mod tests {
         for _ in 0..2_000 {
             tick(&mut lim, &[1.0, 1.0], &mut out);
         }
-        let old = Db(-0.3).to_amplitude().get();
+        let old = sample_gain(Db(-0.3));
         assert!(out[0] > 0.9 * old, "limited at the old ceiling: {}", out[0]);
 
         assert!(lim.param_set().set(UnitParam::Ceiling, -20.0));
-        let new = Db(-20.0).to_amplitude().get();
+        let new = sample_gain(Db(-20.0));
         // What is fed from now on, after the solve, leaves a lookahead later.
         for i in 0..16 + latency + 64 {
             tick(&mut lim, &[1.0, 1.0], &mut out);
@@ -474,7 +475,7 @@ mod tests {
         );
         let latency = lim.shape().latency.samples().get();
         let lane = |i: usize| if i.is_multiple_of(2) { 0.0f32 } else { -20.0 };
-        let low = Db(-20.0).to_amplitude().get();
+        let low = sample_gain(Db(-20.0));
         let mut out = [0.0f32; 2];
         let mut outputs = Vec::new();
         for i in 0..4_000 {
@@ -483,7 +484,7 @@ mod tests {
         }
         let mut reached = false;
         for (i, &y) in outputs.iter().enumerate().skip(latency) {
-            let bound = Db(lane(i - latency)).to_amplitude().get() * (1.0 + 1e-6);
+            let bound = sample_gain(Db(f64::from(lane(i - latency)))) * (1.0 + 1e-6);
             assert!(y.abs() <= bound, "frame {i}: {y} over {bound}");
             reached |= i > 2_000 && (i - latency) % 2 == 1 && y.abs() > 0.9 * low;
         }
@@ -574,7 +575,7 @@ mod tests {
     #[test]
     fn loud_noise_stays_at_the_ceiling() {
         let ceiling = Db(-6.0);
-        let limit = ceiling.to_amplitude().get();
+        let limit = sample_gain(ceiling);
         let mut lim = prepared_at(limiter(ceiling, ceiling), RATE_44K);
         let latency = lim.shape().latency.samples().get();
         let mut seed = 7;
@@ -598,7 +599,7 @@ mod tests {
     #[test]
     fn a_steady_signal_passes_under_and_settles_at_ceiling_over_peak() {
         let ceiling = Db(-6.0);
-        let limit = ceiling.to_amplitude().get();
+        let limit = sample_gain(ceiling);
         for (level, want) in [(0.25f32, 1.0f32), (1.0, limit), (3.0, limit / 3.0)] {
             let mut lim = prepared_at(limiter_releasing(ceiling, ceiling, 0.001), RATE_44K);
             let x = vec![level; 1024];
@@ -622,7 +623,7 @@ mod tests {
     #[test]
     fn a_ceiling_under_the_threshold_scales_by_the_gap_under_it() {
         let (threshold, ceiling) = (Db(-3.0), Db(-9.0));
-        let (t, c) = (threshold.to_amplitude().get(), ceiling.to_amplitude().get());
+        let (t, c) = (sample_gain(threshold), sample_gain(ceiling));
         for (level, gain) in [(0.1f32, c / t), (2.0, c / 2.0)] {
             let mut lim = prepared_at(limiter_releasing(threshold, ceiling, 0.001), RATE_44K);
             let x = vec![level; 1024];
@@ -640,15 +641,15 @@ mod tests {
     }
 
     /// The steady-state output level in dB of a constant input at `in_db`.
-    fn steady_out_db(threshold: Db, ceiling: Db, in_db: f32) -> f32 {
+    fn steady_out_db(threshold: Db, ceiling: Db, in_db: f64) -> f64 {
         let mut lim = prepared_at(limiter_releasing(threshold, ceiling, 0.001), RATE_44K);
-        let level = Db(in_db).to_amplitude().get();
+        let level = sample_gain(Db(in_db));
         let x = vec![level; 1024];
         let mut out = Vec::new();
         for _ in 0..16 {
             out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
         }
-        let ceiling_lin = ceiling.to_amplitude().get();
+        let ceiling_lin = sample_gain(ceiling);
         // The output never exceeds the ceiling (to a rounding step), in
         // every frame, including the release that rises from zero.
         assert!(
@@ -659,7 +660,7 @@ mod tests {
     }
 
     /// Threshold, ceiling pairs covering a boost, a cut, and no drive.
-    const CURVES: [(f32, f32); 5] = [
+    const CURVES: [(f64, f64); 5] = [
         (-6.0, -0.3),
         (-12.0, -1.0),
         (-3.0, -9.0),
@@ -675,7 +676,7 @@ mod tests {
     fn the_threshold_drives_the_input_and_loud_signals_settle_at_the_ceiling() {
         for (t, c) in CURVES {
             let (threshold, ceiling) = (Db(t), Db(c));
-            let mut in_db = -80.0f32;
+            let mut in_db = -80.0f64;
             while in_db <= 12.0 {
                 let out_db = steady_out_db(threshold, ceiling, in_db);
                 let want = if in_db <= t { in_db + (c - t) } else { c };
@@ -694,8 +695,8 @@ mod tests {
     #[test]
     fn the_transfer_curve_is_monotonic_and_continuous() {
         for (t, c) in CURVES {
-            let mut prev: Option<f32> = None;
-            let mut in_db = -80.0f32;
+            let mut prev: Option<f64> = None;
+            let mut in_db = -80.0f64;
             while in_db <= 12.0 {
                 let out_db = steady_out_db(Db(t), Db(c), in_db);
                 if let Some(prev) = prev {
@@ -720,7 +721,7 @@ mod tests {
     #[test]
     fn a_nan_input_does_not_poison_the_gain() {
         let ceiling = Db(-6.0);
-        let limit = ceiling.to_amplitude().get();
+        let limit = sample_gain(ceiling);
         let mut lim = prepared_at(limiter_releasing(ceiling, ceiling, 0.001), RATE_44K);
         let latency = lim.shape().latency.samples().get();
         let mut x = vec![1.0f32; 1024];
@@ -752,7 +753,7 @@ mod tests {
         let set = lim.param_set();
         assert!(set.set(UnitParam::Ceiling, f32::NAN));
         assert!(set.set(UnitParam::Threshold, f32::NAN));
-        let limit = Db(-6.0).to_amplitude().get();
+        let limit = sample_gain(Db(-6.0));
         let mut out = [0.0f32; 2];
         // 5 ms is 220 frames: 6 000 is 27 time constants, the envelope has settled.
         for _ in 0..6_000 {
@@ -766,7 +767,7 @@ mod tests {
     /// `LimiterCurve::new`: `0 * inf` would put a NaN on every silent sample.
     #[test]
     fn a_very_low_threshold_never_produces_a_nan() {
-        for threshold in [f32::NEG_INFINITY, -800.0, -150.0] {
+        for threshold in [f64::NEG_INFINITY, -800.0, -150.0] {
             let mut lim = prepared_at(limiter_releasing(Db(threshold), Db(-6.0), 0.001), RATE_44K);
             let mut x = vec![0.0f32; 1024];
             x[300..400].fill(2.0);
@@ -790,7 +791,7 @@ mod tests {
     #[test]
     fn a_true_peak_node_declares_the_lookahead_and_limits_between_samples() {
         let ceiling = Db::new(-6.0);
-        let limit = ceiling.to_amplitude().get();
+        let limit = sample_gain(ceiling);
         let x: Vec<f32> = (0..4_000)
             .map(|n| {
                 (std::f64::consts::FRAC_PI_2 * n as f64 + std::f64::consts::FRAC_PI_4).sin() as f32

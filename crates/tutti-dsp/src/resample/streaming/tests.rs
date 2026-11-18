@@ -283,7 +283,7 @@ fn level_at(x: &[f32], rate: f64, f_hz: f64, from: usize, to: usize) -> f64 {
 fn tone(hz: f64, rate: f64, n: usize, amp: f32) -> Vec<f32> {
     sine(
         Hz::new(hz),
-        Amplitude::new(amp),
+        Amplitude::new(f64::from(amp)),
         SampleRate::of(rate),
         Samples(n),
     )

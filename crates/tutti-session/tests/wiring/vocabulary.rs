@@ -143,7 +143,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
             .connect(other.out(0), Root::output(1))
             .unwrap()
             .hard()
-            .gain(Amplitude::new(f32::NAN))
+            .gain(Amplitude::new(f64::NAN))
             .err(),
         Some(EdgeGainError::NotFinite)
     );

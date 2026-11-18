@@ -19,23 +19,21 @@ fn equal_amplitude_is_the_smootherstep_at_every_frame() {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
             assert!(
-                (0.0..=1.0).contains(&out) && (0.0..=1.0).contains(&inn),
-                "{k}/{len}: ({out}, {inn})"
+                (0.0..=1.0).contains(&out.get()) && (0.0..=1.0).contains(&inn.get()),
+                "{k}/{len}: ({out:?}, {inn:?})"
             );
-            // `f32` position rounding and the Horner form's ~19 ulp near 1
-            // stay within about 1.2e-6, under the 5e-6 bound.
             let want = smootherstep((k + 1) as f64 / (len + 1) as f64);
-            assert!((f64::from(inn) - want).abs() < 5e-6, "{k}/{len}: {inn}");
+            assert!((inn.get() - want).abs() < 5e-6, "{k}/{len}: {inn:?}");
             assert!(
-                (f64::from(out) - (1.0 - want)).abs() < 5e-6,
-                "{k}/{len}: {out}"
+                (out.get() - (1.0 - want)).abs() < 5e-6,
+                "{k}/{len}: {out:?}"
             );
         }
     }
 }
 
 /// At a position that is a dyadic fraction every step of the polynomial is
-/// exact in `f32`: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
+/// exact in the `f32` law: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
 /// 0.103515625`.
 #[test]
 fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
@@ -47,8 +45,8 @@ fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
         (5, 7, 0.896_484_375),
     ] {
         let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
-        assert_eq!(f64::from(inn), want, "{k}/{len}");
-        assert_eq!(f64::from(out), 1.0 - want, "{k}/{len}: the complement");
+        assert_eq!(inn.get(), want, "{k}/{len}");
+        assert_eq!(out.get(), 1.0 - want, "{k}/{len}: the complement");
     }
 }
 
@@ -59,12 +57,11 @@ fn equal_amplitude_sums_to_one_and_mirrors() {
     for len in LENGTHS {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
-            assert!((out + inn - 1.0).abs() <= f32::EPSILON, "{k}/{len}");
-            // The smootherstep's Horner form is monotone to about 19 ulp
-            // near 1, which bounds how exactly the two ends mirror.
+            assert!((out.get() + inn.get() - 1.0).abs() <= 1e-14, "{k}/{len}");
+            // The `f32` law's smootherstep mirrors to its rounding.
             let (mirror_out, mirror_in) = FadeLaw::EqualAmplitude.gains(len - 1 - k, len);
-            assert!((out - mirror_in).abs() <= 5e-6, "{k}/{len}");
-            assert!((inn - mirror_out).abs() <= 5e-6, "{k}/{len}");
+            assert!((out.get() - mirror_in.get()).abs() <= 5e-6, "{k}/{len}");
+            assert!((inn.get() - mirror_out.get()).abs() <= 5e-6, "{k}/{len}");
         }
     }
 }
@@ -76,25 +73,21 @@ fn equal_power_is_the_cosine_sine_pair_of_the_smootherstep() {
     for len in LENGTHS {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualPower.gains(k, len);
-            assert!((out * out + inn * inn - 1.0).abs() < 1e-6, "{k}/{len}");
+            assert!(
+                (out.get() * out.get() + inn.get() * inn.get() - 1.0).abs() < 1e-14,
+                "{k}/{len}"
+            );
             let angle =
                 smootherstep((k + 1) as f64 / (len + 1) as f64) * std::f64::consts::FRAC_PI_2;
-            assert!(
-                (f64::from(out) - angle.cos()).abs() < 5e-6,
-                "{k}/{len}: {out}"
-            );
-            assert!(
-                (f64::from(inn) - angle.sin()).abs() < 5e-6,
-                "{k}/{len}: {inn}"
-            );
+            assert!((out.get() - angle.cos()).abs() < 5e-6, "{k}/{len}: {out:?}");
+            assert!((inn.get() - angle.sin()).abs() < 5e-6, "{k}/{len}: {inn:?}");
         }
     }
 }
 
 /// A fade's position is strictly inside `(0, 1)`: the first frame already
 /// hears some of the incoming signal and the last still some of the outgoing,
-/// for both laws, at the lengths a 5 ms fade has at 44.1, 48 and 96 kHz. (The
-/// first outgoing gain and the last incoming one are within an `f32` of 1.)
+/// for both laws, at the lengths a 5 ms fade has at 44.1, 48 and 96 kHz.
 #[test]
 fn no_frame_of_a_fade_is_wholly_old_or_wholly_new() {
     for rate in [44_100.0, 48_000.0, 96_000.0] {
@@ -102,9 +95,12 @@ fn no_frame_of_a_fade_is_wholly_old_or_wholly_new() {
         for law in [FadeLaw::EqualAmplitude, FadeLaw::EqualPower] {
             let (out0, in0) = law.gains(0, n);
             let (out_last, in_last) = law.gains(n - 1, n);
-            assert!(in0 > 0.0 && out0 <= 1.0, "{law:?} first frame at {rate}");
             assert!(
-                out_last > 0.0 && in_last <= 1.0,
+                in0 > Amplitude::SILENT && out0 <= Amplitude::UNITY,
+                "{law:?} first frame at {rate}"
+            );
+            assert!(
+                out_last > Amplitude::SILENT && in_last <= Amplitude::UNITY,
                 "{law:?} last frame at {rate}"
             );
         }
@@ -137,11 +133,15 @@ fn between_moves_from_one_value_to_the_other() {
     for len in [1usize, 5, 240] {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
-            let want = 3.0 * out + (-2.0) * inn;
-            assert_eq!(FadeLaw::EqualAmplitude.between(3.0, -2.0, k, len), want);
+            let want = Amplitude(3.0 * out.get() + (-2.0) * inn.get());
+            assert_eq!(
+                FadeLaw::EqualAmplitude.between(Amplitude(3.0), Amplitude(-2.0), k, len),
+                want
+            );
         }
-        assert_eq!(FadeLaw::EqualPower.between(3.0, -2.0, len, len), -2.0);
-        assert_eq!(FadeLaw::EqualPower.between(3.0, -2.0, len + 9, len), -2.0);
+        let (from, to) = (Amplitude(3.0), Amplitude(-2.0));
+        assert_eq!(FadeLaw::EqualPower.between(from, to, len, len), to);
+        assert_eq!(FadeLaw::EqualPower.between(from, to, len + 9, len), to);
     }
 }
 

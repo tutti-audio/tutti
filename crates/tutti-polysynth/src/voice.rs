@@ -94,7 +94,7 @@ pub(crate) struct VoiceSlot {
     note: NoteNumber,
     channel: MidiChannel,
     velocity: f32,
-    envelope_level: f32,
+    envelope_level: Amplitude,
     state: VoiceState,
 }
 
@@ -106,7 +106,7 @@ impl Default for VoiceSlot {
             note: NoteNumber::default(),
             channel: MidiChannel::FIRST,
             velocity: 0.0,
-            envelope_level: 0.0,
+            envelope_level: Amplitude::SILENT,
             state: VoiceState::Idle,
         }
     }
@@ -139,7 +139,7 @@ impl VoiceSlot {
     }
 
     #[inline]
-    pub(crate) fn envelope_level(&self) -> f32 {
+    pub(crate) fn envelope_level(&self) -> Amplitude {
         self.envelope_level
     }
 
@@ -174,7 +174,7 @@ impl VoiceSlot {
         self.note = note;
         self.channel = channel;
         self.velocity = velocity;
-        self.envelope_level = 0.0;
+        self.envelope_level = Amplitude::SILENT;
         self.state = VoiceState::Active;
     }
 
@@ -186,7 +186,7 @@ impl VoiceSlot {
         self.state = VoiceState::Idle;
     }
 
-    pub(crate) fn set_envelope_level(&mut self, level: f32) {
+    pub(crate) fn set_envelope_level(&mut self, level: Amplitude) {
         self.envelope_level = level;
     }
 
@@ -365,7 +365,7 @@ impl VoiceAllocator {
             slots
                 .iter()
                 .find(|s| !s.is_idle() && s.voice_id() == id)
-                .map(|s| Amplitude(s.envelope_level()))
+                .map(|s| s.envelope_level())
         });
         self.commands.clear();
         self.commands.extend_from_slice(cmds);
@@ -616,7 +616,7 @@ impl VoiceAllocator {
         self.control(channel, tutti_ump::CCNumber::ALL_SOUND_OFF, false);
     }
 
-    pub fn update_envelope_level(&mut self, slot_index: usize, level: f32) {
+    pub fn update_envelope_level(&mut self, slot_index: usize, level: Amplitude) {
         if slot_index < self.slots.len() {
             self.slots[slot_index].set_envelope_level(level);
         }

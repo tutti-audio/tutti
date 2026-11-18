@@ -268,7 +268,7 @@ impl<F: Float + Lerp> PlateBank<F> {
                     half: k.half,
                     point: k.point,
                     at: F::from_f64(scaled(k.offset, rate)),
-                    sign: F::from_f32(k.sign.get()),
+                    sign: F::from_f64(k.sign.get()),
                 })
             }),
             ceiling: tail_of(
@@ -280,8 +280,7 @@ impl<F: Float + Lerp> PlateBank<F> {
                 },
                 rate,
             ),
-            // `OUTPUT_GAIN` and a tap's sign are `f32` units: they narrow through them, once.
-            output_gain: F::from_f32(OUTPUT_GAIN.get()),
+            output_gain: F::from_f64(OUTPUT_GAIN.get()),
             input_len: shape.input.map(|n| F::from_f64(n.get() as f64)),
             half_len: shape.halves.map(|h| h.map(|n| F::from_f64(n.get() as f64))),
             into: Samples::ZERO,
@@ -573,18 +572,18 @@ fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
     let mut input = [F::ZERO; 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
         if let Stage::AllPass(d) = stage {
-            *slot = F::from_f32(d[0].gain.get());
+            *slot = F::from_f64(d[0].gain.get());
         }
     }
     let Absorption::OnePole { gain, damp } = a.absorption else {
         return None;
     };
     Some(Coeffs {
-        // The network's gains and pole are `f32` figures: they narrow through them.
-        decay: F::from_f32(gain.get()),
+        // The network's pole is an `f32` figure: it narrows through it.
+        decay: F::from_f64(gain.get()),
         damping: F::from_f32(damp),
-        lattice2: F::from_f32(b.diffuser?.gain.get()),
-        lattice1: F::from_f32(a.diffuser?.gain.get()),
+        lattice2: F::from_f64(b.diffuser?.gain.get()),
+        lattice1: F::from_f64(a.diffuser?.gain.get()),
         input,
         depth: F::from_f64(a.diffuser?.modulation.depth.get()),
         pre: F::from_f64(network.pre_delay.get() as f64),

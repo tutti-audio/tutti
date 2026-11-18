@@ -381,7 +381,8 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
         });
         (paths, gains, levels)
     };
-    let amp = |db: Db| db.to_amplitude().get();
+    // The stems are `f32`: the gain narrows once.
+    let amp = |db: Db| db.to_amplitude().get() as f32;
 
     let (paths, gains, [master, loud_level, quiet_level]) =
         run(&mut session, "shared", StemGain::Shared);

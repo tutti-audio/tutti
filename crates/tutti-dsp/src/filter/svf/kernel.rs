@@ -80,7 +80,7 @@ impl SvfCoeffs {
     /// The largest gain, in dB either way, [`new`](Self::new) solves for. A
     /// gain further out is this one: 200 dB is a factor of 10^10 in
     /// amplitude, past anything audible, and keeps every coefficient finite.
-    pub const MAX_GAIN_DB: f32 = 200.0;
+    pub const MAX_GAIN: Db = Db(200.0);
 
     /// Computes SVF filter coefficients from parameters (pure function, no state).
     ///
@@ -96,7 +96,7 @@ impl SvfCoeffs {
         gain_db: impl Into<Db>,
         sample_rate: impl Into<SampleRate>,
     ) -> SvfCoeffs {
-        let (freq, q, gain_db) = (freq.into().get(), q.into().get(), gain_db.into().get());
+        let (freq, q, gain_db) = (freq.into().get(), q.into().get(), gain_db.into());
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
         let fc = freq.clamp(
@@ -107,18 +107,17 @@ impl SvfCoeffs {
         );
         let g0 = libm::tan(core::f64::consts::PI * fc / sample_rate.get());
         let q = (q as f64).max(0.01);
-        // A gain past `MAX_GAIN_DB` either way is that gain: `10^(dB / 40)`
+        // A gain past `MAX_GAIN` either way is that gain: `10^(dB / 40)`
         // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
         // set NaN), and overflows to infinity the other way. A NaN gain is
         // unity (0 dB).
-        let gain_db = if gain_db.is_nan() {
-            0.0
+        let gain_db = if gain_db.get().is_nan() {
+            Db::UNITY
         } else {
-            gain_db.clamp(-Self::MAX_GAIN_DB, Self::MAX_GAIN_DB)
+            gain_db.clamp(-Self::MAX_GAIN, Self::MAX_GAIN)
         };
-        // `Db` is `f32` and the design is `f64` to 1e-9 (the closed-form tests), so the
-        // half-gain amplitude `10^(dB / 40)` is half the decibels, widened once.
-        let a = Db::to_amplitude_f64(0.5 * f64::from(gain_db));
+        // The half-gain amplitude `10^(dB / 40)` is half the decibels.
+        let a = Db(0.5 * gain_db.get()).to_amplitude().get();
 
         // RBJ cookbook shapes: a bell's damping is `1/(Q*A)`, and a shelf's
         // midpoint (half the dB gain) sits at `fc`, so its prototype is tuned

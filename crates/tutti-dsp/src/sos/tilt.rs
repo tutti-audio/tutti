@@ -93,7 +93,7 @@ impl Tilt {
         let fc = check_cutoff(center, rate)?;
         let a = gain_root(check_gain(self.gain)?);
         let g = libm::tan(core::f64::consts::PI * fc / rate.get());
-        let eps = f64::from(floor.to_amplitude().get());
+        let eps = floor.to_amplitude().get();
         Ok(finite(tail_frames(a, g, eps), eps, rate))
     }
 
@@ -125,7 +125,7 @@ impl Tilt {
         let (lo, hi) = (lo.min(hi), lo.max(hi));
         let a_max = gain_root(check_gain(Db(largest.get().abs()))?);
         let g = |fc: f64| libm::tan(core::f64::consts::PI * fc / rate.get());
-        let eps = f64::from(floor.to_amplitude().get());
+        let eps = floor.to_amplitude().get();
         let nepers = |x: f64| libm::log((x + 1.0) / (x - 1.0).abs());
         let least = nepers(g(lo) / a_max).min(nepers(a_max * g(hi)));
         let frames = 1.0 + libm::ceil(libm::log(a_max / eps).max(0.0) / least);

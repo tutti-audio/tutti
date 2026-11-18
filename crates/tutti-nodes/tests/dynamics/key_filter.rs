@@ -99,7 +99,7 @@ const RATIO: f64 = 4.0;
 
 fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
     CompressorControls {
-        threshold: Db::new(THRESHOLD as f32),
+        threshold: Db::new(THRESHOLD),
         ratio: CompressionRatio::new(RATIO as f32),
         key_cutoff: Hz(cutoff),
         key_q: Q(q as f32),
@@ -292,7 +292,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
 
 fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
     GateControls {
-        threshold: Db::new(threshold as f32),
+        threshold: Db::new(threshold),
         range: Db(-80.0),
         key_cutoff: Hz(cutoff),
         key_q: Q(q as f32),

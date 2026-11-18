@@ -67,7 +67,7 @@ fn a_channels_pan_is_rp_036_scaled_to_unity_at_the_centre_with_exact_dead_sides(
         let (l, r) = unity_centre_pan(Pan(p));
         (l.get(), r.get())
     };
-    let root = std::f32::consts::SQRT_2;
+    let root = std::f64::consts::SQRT_2;
     assert_eq!(pair(0.0), (1.0, 1.0));
     assert_eq!(pair(-1.0), (root, 0.0));
     assert_eq!(pair(1.0), (0.0, root));
@@ -75,5 +75,5 @@ fn a_channels_pan_is_rp_036_scaled_to_unity_at_the_centre_with_exact_dead_sides(
     assert_eq!(pair(f32::NAN), (1.0, 1.0));
     let (l, r) = pair(0.25);
     let want = (std::f64::consts::FRAC_PI_4 * 1.25).tan();
-    assert!((f64::from(r / l) - want).abs() < 1e-5, "{}", r / l);
+    assert!(((r / l) - want).abs() < 1e-5, "{}", r / l);
 }

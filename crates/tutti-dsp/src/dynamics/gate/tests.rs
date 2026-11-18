@@ -12,7 +12,7 @@ const RATES: [SampleRate; 3] = [SampleRate::SR_44K1, SampleRate::SR_48K, SampleR
 /// The longest block `run` hands the bank.
 const CHUNK: usize = 256;
 
-fn controls(threshold: f32, attack: f64, hold: f64, release: f64, range: f32) -> GateControls {
+fn controls(threshold: f64, attack: f64, hold: f64, release: f64, range: f64) -> GateControls {
     GateControls {
         threshold: Db(threshold),
         attack: Seconds(attack),
@@ -63,16 +63,16 @@ fn hostile() -> Vec<GateControls> {
             ..base
         },
     ];
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(GateControls {
             threshold: Db(bad),
             range: Db(bad),
             ..base
         });
         all.push(GateControls {
-            attack: Seconds(f64::from(bad)),
-            hold: Seconds(f64::from(bad)),
-            release: Seconds(f64::from(bad)),
+            attack: Seconds(bad),
+            hold: Seconds(bad),
+            release: Seconds(bad),
             ..base
         });
     }
@@ -155,8 +155,8 @@ fn the_design_holds_the_figures_of_its_definition() {
     // One step from 0 toward 1 lands on the attack coefficient, and one from 1 toward 0 on
     // 1 less the release coefficient.
     let (attack, release) = (
-        Seconds(0.001).one_pole_coeff(RATE) as f32,
-        Seconds(0.1).one_pole_coeff(RATE) as f32,
+        Seconds(0.001).one_pole_coeff(RATE),
+        Seconds(0.1).one_pole_coeff(RATE),
     );
     assert_eq!(
         m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),
@@ -193,8 +193,8 @@ fn the_design_holds_the_figures_of_its_definition() {
 
     let m = Design::of(
         &GateControls {
-            threshold: Db(f32::NAN),
-            range: Db(f32::INFINITY),
+            threshold: Db(f64::NAN),
+            range: Db(f64::INFINITY),
             ..GateControls::DEFAULT
         },
         RATE,
@@ -208,8 +208,8 @@ fn the_design_holds_the_figures_of_its_definition() {
 /// threshold under and over 0 dB.
 #[test]
 fn a_level_either_side_of_the_threshold_opens_or_closes() {
-    for threshold in [-20.0f32, 6.0] {
-        let edge = f64::from(amplitude(f64::from(threshold)));
+    for threshold in [-20.0f64, 6.0] {
+        let edge = f64::from(amplitude(threshold));
         let c = controls(threshold, 0.0, 0.0, 0.0, -30.0);
         for (level, opens) in [(edge * 1.001, true), (edge * 0.999, false)] {
             let mut k = runner(&c);
@@ -228,7 +228,7 @@ fn a_level_either_side_of_the_threshold_opens_or_closes() {
 /// The settled gain is 1 open and the range closed: a long loud key, then a long quiet one.
 #[test]
 fn the_settled_gain_is_one_open_and_the_range_closed() {
-    for range in [-80.0f32, -24.0, -6.0] {
+    for range in [-80.0f64, -24.0, -6.0] {
         for rate in RATES {
             let c = controls(-30.0, 0.002, 0.01, 0.02, range);
             let mut k = runner_at(&c, rate);
@@ -237,14 +237,9 @@ fn the_settled_gain_is_one_open_and_the_range_closed() {
             let n = (rate.get() * 0.8333) as usize;
             let ones = vec![1.0f32; n];
             let out = run_mono(&mut k, &ones, &vec![amplitude(-10.0); n], None);
-            // An f32 one-pole stalls within `ulp / c` of its target (about 6e-6 here).
-            assert!(
-                (out[n - 1] - 1.0).abs() < 2e-5,
-                "{rate:?} open: {}",
-                out[n - 1]
-            );
+            assert_eq!(out[n - 1], 1.0, "{rate:?} open");
             let out = run_mono(&mut k, &ones, &vec![amplitude(-60.0); n], None);
-            let want = amplitude(f64::from(range));
+            let want = amplitude(range);
             assert!(
                 (out[n - 1] / want - 1.0).abs() < 1e-5,
                 "{rate:?} closed at {range} dB: {} vs {want}",
@@ -288,8 +283,8 @@ fn the_hold_keeps_the_gate_open_for_its_whole_length() {
 fn the_follower_takes_one_time_constant_to_the_one_over_e_point() {
     // 480 and 960 frames at each rate: the time constants are whole frames.
     let (attack, release) = (480usize, 960usize);
-    let range = -40.0f32;
-    let r = f64::from(amplitude(f64::from(range)));
+    let range = -40.0f64;
+    let r = f64::from(amplitude(range));
     let fraction = |gain: f32| (f64::from(gain) - r) / (1.0 - r);
     let e = std::f64::consts::E;
 
@@ -410,7 +405,7 @@ fn an_own_key_detects_the_signal_itself() {
 #[test]
 fn a_threshold_lane_is_read_per_frame() {
     let n = 600;
-    let base = -30.0f32;
+    let base = -30.0f64;
     let c = controls(base, 0.0, 0.0, 0.0, -40.0);
     let level = -20.0f32;
     let lane: Vec<f32> = (0..n)
@@ -432,8 +427,8 @@ fn a_threshold_lane_is_read_per_frame() {
         Some(&lane),
     );
     for (i, &t) in lane.iter().enumerate() {
-        let threshold = if t.is_finite() { t } else { base };
-        let want = if level >= threshold {
+        let threshold = if t.is_finite() { f64::from(t) } else { base };
+        let want = if f64::from(level) >= threshold {
             1.0
         } else {
             amplitude(-40.0)
@@ -451,7 +446,7 @@ fn a_threshold_lane_is_read_per_frame() {
 /// and a level over a floor-pinned threshold still decides on its own.
 #[test]
 fn silence_opens_a_threshold_at_or_under_the_floor() {
-    for (threshold, opens) in [(-200.0f32, true), (Db::FLOOR.get(), true), (-143.0, false)] {
+    for (threshold, opens) in [(-200.0f64, true), (Db::FLOOR.get(), true), (-143.0, false)] {
         let c = controls(threshold, 0.0, 0.0, 0.0, -40.0);
         let m = Design::of(&c, RATE);
         assert_eq!(m.silence_opens, opens, "threshold {threshold}");
@@ -682,7 +677,7 @@ fn every_reachable_gate_scales_between_its_floor_and_unity() {
     let audio = noise(21, n, 1.0);
     let key = noise(22, n, 0.3);
     for c in reachable() {
-        let floor = Db(c.range.get().min(0.0)).to_amplitude().get() * (1.0 - 1e-5);
+        let floor = (Db(c.range.get().min(0.0)).to_amplitude().get() * (1.0 - 1e-5)) as f32;
         let mut k = runner(&c);
         let out = run(&mut k, &[&audio], &[&key], None).remove(0);
         for (i, (&y, &x)) in out.iter().zip(&audio).enumerate() {
@@ -713,42 +708,36 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
     );
 }
 
-/// A render over `f64` views is the `f32` render converted: the state is `f32`, the views are
-/// converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
-/// last bit (a tolerance of 0), with a threshold lane and a range glide in flight.
+/// A view of `f64` is processed at its own width: an instant gate over a loud key passes a unit
+/// sample exactly and over a quiet one leaves it at the closed-form range `10^(range / 20)` to
+/// `1e-12`.
 #[test]
-fn an_f64_render_is_the_f32_render_converted() {
+fn an_f64_view_is_processed_at_its_width() {
     let n = 2_000;
-    let audio = noise(61, n, 0.9);
-    let key = noise(62, n, 0.3);
-    let lane: Vec<f32> = (0..n).map(|i| -40.0 + (i % 400) as f32 * 0.05).collect();
-    let (c, to) = (
-        controls(-20.0, 0.002, 0.01, 0.05, -40.0),
-        controls(-20.0, 0.002, 0.01, 0.05, -6.0),
-    );
-    let mut k = runner(&c);
-    k.aim(&to);
-    let want = run(&mut k, &[&audio], &[&key], Some(&lane)).remove(0);
-
-    let to64 = |x: &[f32]| x.iter().map(|&v| f64::from(v)).collect::<Vec<f64>>();
-    let (audio64, key64, lane64) = (to64(&audio), to64(&key), to64(&lane));
-    let mut k = runner(&c);
-    k.aim(&to);
+    let mut k = runner(&controls(-20.0, 0.0, 0.0, 0.0, -40.0));
+    k.settle();
+    let ones = vec![1.0f64; n];
     let mut got = vec![0.0f64; n];
-    let mut at = 0;
-    while at < n {
-        let end = (at + CHUNK).min(n);
+    for (key, want) in [
+        (Db(-6.0).to_amplitude().get(), 1.0),
+        (
+            Db(-60.0).to_amplitude().get(),
+            Db(-40.0).to_amplitude().get(),
+        ),
+    ] {
+        let key = vec![key; n];
         k.process(
-            GateLanes {
-                threshold: Some(Mono::new(&lane64[at..end])),
-            },
-            Planes::new(&[&key64[at..end]]).unwrap(),
-            Planes::new(&[&audio64[at..end]]).unwrap(),
-            PlanesMut::new(&mut [&mut got[at..end]]).unwrap(),
+            GateLanes::default(),
+            Planes::new(&[&key[..]]).unwrap(),
+            Planes::new(&[&ones[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut got[..]]).unwrap(),
         );
-        at = end;
-    }
-    for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
-        assert_eq!(g, f64::from(w), "frame {i}");
+        for (i, &g) in got.iter().enumerate() {
+            assert!(
+                (g - want).abs() < 1e-12,
+                "key {}: frame {i}: {g} vs {want}",
+                key[0]
+            );
+        }
     }
 }

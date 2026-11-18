@@ -110,7 +110,7 @@ fn a_normalized_output_spills_past_the_budget_and_writes_what_it_would_in_memory
             for c in 0..2 {
                 assert_eq!(
                     frame[c],
-                    planes[c][i] * scale,
+                    planes[c][i] * scale as f32,
                     "budget {budget}: frame {i} channel {c}"
                 );
             }

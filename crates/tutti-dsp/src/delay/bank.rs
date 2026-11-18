@@ -344,7 +344,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 for j in 0..width {
                     let w = self.routing.weight(c, j);
                     if w != Gain::SILENT {
-                        acc += F::from_f64(f64::from(w.get())) * cf * self.taps[j];
+                        acc += F::from_f64(w.get()) * cf * self.taps[j];
                     }
                 }
                 line.push_sample(acc);

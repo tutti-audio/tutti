@@ -40,7 +40,7 @@ fn render(workers: Workers, lanes: usize) -> Vec<f64> {
     }
     let _ = s.update();
     for (lane, gain) in gains.iter().enumerate() {
-        let value = 0.125 * (lane + 1) as f32;
+        let value = 0.125 * (lane + 1) as f64;
         s.set(gain.volume().to(Amplitude::new(value))).unwrap();
     }
     let mut block = vec![f64::NAN; BLOCK];

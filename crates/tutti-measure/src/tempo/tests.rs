@@ -555,8 +555,9 @@ fn a_wide_window_still_places_beats_within_a_hop() {
 /// at -100 dBFS is refused, at -80 dBFS it reads.
 #[test]
 fn near_silence_has_no_tempo() {
-    let quiet = |db: f32| -> Vec<f32> {
-        let gain = Db(db).to_amplitude().get();
+    let quiet = |db: f64| -> Vec<f32> {
+        // The click train is `f32`: the gain narrows once.
+        let gain = Db(db).to_amplitude().get() as f32;
         clicks(120.0, 0.3, 20.0).iter().map(|s| s * gain).collect()
     };
     let cfg = TempoConfig::new();

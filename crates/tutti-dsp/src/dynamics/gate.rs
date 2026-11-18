@@ -91,7 +91,7 @@ struct Design {
     silence_opens: bool,
     /// The one-pole coefficients: the attack while the gate opens, the release while it
     /// closes.
-    ballistics: Follower<f32>,
+    ballistics: Follower<f64>,
     /// `floor(hold * rate)`.
     hold_samples: usize,
     /// The closed gain's level in dB, at most 0.
@@ -123,8 +123,8 @@ impl Design {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens(level: f32, threshold: Amplitude, silence_opens: bool) -> bool {
-    level >= threshold.get() || (level <= 0.0 && silence_opens)
+fn opens(level: Amplitude, threshold: Amplitude, silence_opens: bool) -> bool {
+    level >= threshold || (level <= Amplitude::SILENT && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -140,13 +140,13 @@ pub struct GateLanes<'a, S: Float = f32> {
 /// gain applied to every channel, with the follower and the hold that smooth it and the
 /// range that glides.
 ///
-/// Built on the control side for one rate; the state is `f32`, and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `f64`, and a view's samples are
+/// converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct GateBank {
     design: Design,
     /// The closed gain in dB, gliding over [`GAIN_GLIDE`].
-    range: Glide<f32>,
+    range: Glide<f64>,
     /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
@@ -252,7 +252,7 @@ impl GateBank {
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
         let held = Db(self.range.target()).to_amplitude();
-        let mut gains = [0.0f32; CHUNK];
+        let mut gains = [Amplitude::SILENT; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -269,10 +269,10 @@ impl GateBank {
                 let open = match lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| Db(x.convert_to::<f32>()))
+                    .map(|x| Db(x.convert_to::<f64>()))
                     .filter(|t| t.get().is_finite())
                 {
-                    Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
+                    Some(t) => amplitude_to_db(level) >= t,
                     None => opens(level, d.threshold, d.silence_opens),
                 };
                 if open {
@@ -291,14 +291,14 @@ impl GateBank {
                 } else {
                     held
                 };
-                *g = gate_gain_at(self.follower.get(), range).get();
+                *g = gate_gain_at(self.follower, range);
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<f64>() * g.get()).convert_to::<S>();
                 }
             }
             start = end;

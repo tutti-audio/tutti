@@ -88,7 +88,7 @@ fn test_equal_power_amplitude() {
         let unison = UnisonEngine::new(config);
 
         // Sum of squared amplitudes should equal 1.0 (equal power)
-        let sum_sq: f32 = unison
+        let sum_sq: f64 = unison
             .all_params()
             .iter()
             .map(|p| p.amplitude.get() * p.amplitude.get())

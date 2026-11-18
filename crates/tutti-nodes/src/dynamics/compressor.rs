@@ -300,7 +300,7 @@ mod tests {
     use tutti_units::UnitParam;
 
     /// The controls of a compressor the tests name four of, the others at the default's.
-    fn four(threshold: f32, ratio: f32, attack: f64, release: f64) -> CompressorControls {
+    fn four(threshold: f64, ratio: f32, attack: f64, release: f64) -> CompressorControls {
         CompressorControls {
             threshold: Db::new(threshold),
             ratio: CompressionRatio::new(ratio),
@@ -310,7 +310,7 @@ mod tests {
         }
     }
 
-    fn comp(threshold: f32, ratio: f32, attack: f64, release: f64) -> CompressorNode {
+    fn comp(threshold: f64, ratio: f32, attack: f64, release: f64) -> CompressorNode {
         CompressorNode::new(
             BusTopology::MONO,
             KeySource::Sidechain,

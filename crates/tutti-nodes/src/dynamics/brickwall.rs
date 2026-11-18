@@ -72,7 +72,7 @@ pub struct BrickwallSet;
 
 /// The ceiling's linear step under which a write is not a new design: what the node has
 /// always held (it re-derived its clamp only for a move past this).
-const DEAD_BAND: f32 = 0.0001;
+const DEAD_BAND: f64 = 0.0001;
 
 control_set! {
     BrickwallSet(_s): BrickwallControls = BrickwallControls::DEFAULT;
@@ -156,7 +156,7 @@ impl BrickwallSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE_44K, prepared, prepared_at, tick, tick_fed};
+    use crate::test_support::{RATE_44K, prepared, prepared_at, sample_gain, tick, tick_fed};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
@@ -192,7 +192,7 @@ mod tests {
         assert!(set.set(UnitParam::Ceiling, -6.0));
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[1.0, -1.0], &mut out);
-        let ceiling = Db::new(-6.0).to_amplitude().get();
+        let ceiling = sample_gain(Db::new(-6.0));
         assert!((out[0] - ceiling).abs() < 1e-4, "clipped at {}", out[0]);
     }
 
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_brickwall_adjustable_ceiling() {
         let mut bw = prepared(BrickwallLimiterNode::new(Db::new(-6.0)));
-        let ceiling_lin = Db::new(-6.0).to_amplitude().get();
+        let ceiling_lin = sample_gain(Db::new(-6.0));
 
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[1.0, -1.0], &mut out);
@@ -264,12 +264,12 @@ mod tests {
     #[test]
     fn brickwall_a_fed_nan_ceiling_clamps_at_the_cell() {
         let mut bw = prepared_at(BrickwallLimiterNode::new(Db::new(-6.0)), RATE_44K);
-        let cell = Db::new(-6.0).to_amplitude().get();
+        let cell = sample_gain(Db::new(-6.0));
         let mut out = [0.0f32; 2];
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(f32::NAN)], &mut out);
         assert_eq!(out, [cell, -cell]);
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(-12.0)], &mut out);
-        let fed = Db::new(-12.0).to_amplitude().get();
+        let fed = sample_gain(Db::new(-12.0));
         assert_eq!(out, [fed, -fed]);
     }
 
@@ -283,17 +283,17 @@ mod tests {
         let mut out = [0.0f32; 2];
         assert!(set.set(UnitParam::Ceiling, f32::NAN));
         tick(&mut bw, &[1.0, -1.0], &mut out);
-        let held = Db::new(-6.0).to_amplitude().get();
+        let held = sample_gain(Db::new(-6.0));
         assert_eq!(out, [held, -held]);
         assert!(set.set(UnitParam::Ceiling, -12.0));
         // The move lands on the next grid point, 16 frames from the last reset.
         for _ in 0..16 {
             tick(&mut bw, &[1.0, -1.0], &mut out);
         }
-        let next = Db::new(-12.0).to_amplitude().get();
+        let next = sample_gain(Db::new(-12.0));
         assert!((out[0] - next).abs() < 1e-6, "{}", out[0]);
 
-        let mut born_nan = prepared_at(BrickwallLimiterNode::new(Db::new(f32::NAN)), RATE_44K);
+        let mut born_nan = prepared_at(BrickwallLimiterNode::new(Db::new(f64::NAN)), RATE_44K);
         tick(&mut born_nan, &[2.0, -2.0], &mut out);
         assert_eq!(out, [1.0, -1.0], "a NaN-built brickwall clamps at 0 dB");
         assert!(born_nan.param_set().set(UnitParam::Ceiling, f32::NAN));
@@ -330,7 +330,7 @@ mod tests {
         let out = drive(&mut bw, RATE, Planes::new(&refs).unwrap(), &[Some(&fed)]);
         for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
             for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
-                let ceiling = Db(fed[i]).to_amplitude().get();
+                let ceiling = sample_gain(Db(f64::from(fed[i])));
                 let want = if x.abs() > ceiling {
                     ceiling.copysign(x)
                 } else {

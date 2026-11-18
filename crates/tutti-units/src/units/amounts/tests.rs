@@ -195,7 +195,7 @@ fn pan_saturates_and_orders() {
     assert_eq!(-Pan::LEFT, Pan::RIGHT);
 }
 
-fn balance_at(b: f32) -> (f32, f32) {
+fn balance_at(b: f32) -> (f64, f64) {
     let (l, r) = Balance(b).gains();
     (l.get(), r.get())
 }
