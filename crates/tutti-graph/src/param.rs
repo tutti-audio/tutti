@@ -48,7 +48,7 @@ use tutti_units::{
 };
 
 use crate::lane::{arc_in, control_in, fade_gains, ramp_in, wrap_in};
-use crate::param_event::{ParamEvent, ParamKind, arrival, segment_progress};
+use crate::param_event::{ParamEvent, ParamKind, Timing, arrival, segment_progress};
 use crate::spec::EventOut;
 use tutti_curve::{FadeLaw, Law, Piece};
 
@@ -575,10 +575,8 @@ impl<'a> Corners<'a> {
 /// [`ParamSegment`](crate::ParamSegment)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Curve {
-    /// Its position along itself at its event's frame, in frames.
-    pub(crate) position: u32,
-    /// Its length, in frames.
-    pub(crate) length: u32,
+    /// Its place along itself at its event's frame, and its length.
+    pub(crate) timing: Timing,
 }
 
 /// One event source's ramp: its value, and the move it is on — a
@@ -623,7 +621,7 @@ impl Ramp {
         {
             return false;
         }
-        let arrive = arrival(curve.position, curve.length);
+        let arrive = arrival(curve.timing);
         if self.active {
             self.arrive.checked_sub(self.done) == Some(arrive)
         } else {
@@ -658,7 +656,7 @@ impl Ramp {
         self.active = true;
         self.curve = Some(curve);
         self.started = true;
-        self.arrive = arrival(curve.position, curve.length);
+        self.arrive = arrival(curve.timing);
     }
 
     /// The move's value at progress `t`: along the short arc for a circular
@@ -678,7 +676,7 @@ impl Ramp {
             if let Some(c) = self.curve {
                 // `segment_value`'s arithmetic, stepped: arrived, it holds
                 // the target as a finished ramp does.
-                match segment_progress(c.position, c.length, self.done) {
+                match segment_progress(c.timing, self.done) {
                     Some(t) => {
                         self.value = self.at(t);
                     }
@@ -744,8 +742,7 @@ pub(crate) fn render_ramps<F: Float>(
                     if !ramp.started {
                         ramp.value = base(i).into();
                     }
-                    let (position, length) = s.timing();
-                    let curve = Curve { position, length };
+                    let curve = Curve { timing: s.timing() };
                     // A re-send of the piece in flight is no corner; the
                     // port still takes it, as it always has.
                     let continues = ramp.continues(s.piece(), curve);

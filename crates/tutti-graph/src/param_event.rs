@@ -7,7 +7,9 @@
 //! event never pays for it.
 
 use tutti_curve::{Law, Piece};
-use tutti_units::{Normalized, ParamAddr, ParamId, ParamKey, Samples, UnitAddr, UnitParam};
+use tutti_units::{
+    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam,
+};
 
 use crate::declare::Scalar;
 use crate::time::Offset;
@@ -169,7 +171,9 @@ impl ParamRamp {
 /// anyway), so a segment's progress is exact however far along it is: a
 /// ten-minute segment (2.88e7 frames at 48 kHz) advances one frame per frame
 /// at its end. A segment longer than `u32::MAX` frames (6.2 hours at 192 kHz)
-/// is not one a producer can state: it sends the span as shorter ones.
+/// is not one a producer can state: it sends the span as shorter ones. A piece
+/// that starts or ends between frames ([`resumed_exactly`](Self::resumed_exactly))
+/// keeps the fraction as a phase, so the law is read at each frame's exact place.
 ///
 /// [`new`](Self::new) builds the ramp convention (`position = 1`: the
 /// event's frame is one step in, `to` lands on frame `duration - 1`);
@@ -209,9 +213,11 @@ pub struct ParamSegment {
     addr: ParamAddr,
     from: f64,
     to: f64,
-    // Frames along itself at the event's frame, and its whole length.
+    // Whole frames along itself at the event's frame, the fraction of a frame
+    // past them (`lead`, in `[0, 1)`), and its exact length in frames.
     position: u32,
-    length: u32,
+    lead: f64,
+    span: f64,
     shape: Law,
 }
 
@@ -252,7 +258,8 @@ impl ParamSegment {
             from,
             to,
             position: 1,
-            length: saturate(duration),
+            lead: 0.0,
+            span: f64::from(saturate(duration)),
             shape,
         }
     }
@@ -265,7 +272,23 @@ impl ParamSegment {
     #[must_use]
     pub fn resumed(mut self, position: Samples, length: Samples) -> Self {
         self.position = saturate(position);
-        self.length = saturate(length);
+        self.lead = 0.0;
+        self.span = f64::from(saturate(length));
+        self
+    }
+
+    /// This segment, `since` frames along a `span`-frame piece at the event's
+    /// frame, both fractional: for a producer whose piece starts and ends
+    /// between frames. Only the whole frames of `since` are a count (a `u32`);
+    /// the fraction is a phase, so every frame reads the law at its exact
+    /// place on the piece: `t = (since + j) / span` at frame `j`. A negative
+    /// `since` is 0, and a `span` past `u32::MAX` frames saturates.
+    #[must_use]
+    pub fn resumed_exactly(mut self, since: SamplePosition, span: SamplePosition) -> Self {
+        let whole = since.to_samples_floor();
+        self.position = saturate(whole);
+        self.lead = (since.get() - whole.get() as f64).max(0.0);
+        self.span = span.get().clamp(0.0, f64::from(u32::MAX));
         self
     }
 
@@ -315,7 +338,7 @@ impl ParamSegment {
 
     /// Its length, in frames.
     pub fn length(&self) -> Samples {
-        Samples(self.length as usize)
+        SamplePosition(self.span).to_samples_ceil()
     }
 
     /// The raw value `j` frames after the event's frame (`Samples(0)`: its
@@ -324,13 +347,7 @@ impl ParamSegment {
     /// parameter) or a test. Past `u32::MAX` frames it reads the value
     /// there.
     pub fn raw_value_after(&self, j: Samples) -> f64 {
-        segment_value(
-            self.unit_param(),
-            self.piece(),
-            self.position,
-            self.length,
-            saturate(j),
-        )
+        segment_value(self.unit_param(), self.piece(), self.timing(), saturate(j))
     }
 
     /// How many frames after the event's frame the segment arrives: the
@@ -338,7 +355,7 @@ impl ParamSegment {
     /// end value (`Samples(0)` for a step). For a node that takes point values
     /// and must land the end value on its frame.
     pub fn arrives_after(&self) -> Samples {
-        Samples(arrival(self.position, self.length) as usize)
+        Samples(arrival(self.timing()) as usize)
     }
 
     /// The pure part of the segment: its endpoints and its law, as a
@@ -358,9 +375,22 @@ impl ParamSegment {
 
     /// The raw position and length, for the graph's own param port, which is
     /// erased over the unit as the port it drives is.
-    pub(crate) fn timing(&self) -> (u32, u32) {
-        (self.position, self.length)
+    pub(crate) fn timing(&self) -> Timing {
+        Timing {
+            position: self.position,
+            lead: self.lead,
+            span: self.span,
+        }
     }
+}
+
+/// A segment's place on itself at its event's frame: whole frames and a
+/// fraction of one along, and its exact length in frames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Timing {
+    pub(crate) position: u32,
+    pub(crate) lead: f64,
+    pub(crate) span: f64,
 }
 
 /// A segment's value `j` frames after its event: `to` exactly once it
@@ -369,37 +399,33 @@ impl ParamSegment {
 /// interpreter and [`ParamSegment::raw_value_after`] share, as they share a
 /// shaping LUT.
 #[inline]
-pub(crate) fn segment_value(
-    param: Option<UnitParam>,
-    piece: Piece,
-    position: u32,
-    length: u32,
-    j: u32,
-) -> f64 {
-    match segment_progress(position, length, j) {
+pub(crate) fn segment_value(param: Option<UnitParam>, piece: Piece, timing: Timing, j: u32) -> f64 {
+    match segment_progress(timing, j) {
         Some(t) => piece.value(param, t),
         None => piece.to,
     }
 }
 
-/// How many frames after its event a segment of `position` and `length`
-/// arrives: the first `j` at which [`segment_progress`] is `None` (0 for a
-/// step). The one count the port's corners, the reference interpreter's and
-/// [`ParamSegment::arrives_after`] share.
-pub(crate) fn arrival(position: u32, length: u32) -> u32 {
-    length.saturating_sub(position)
+/// How many frames after its event a segment arrives: the first `j` at which
+/// [`segment_progress`] is `None` (0 for a step). The one count the port's
+/// corners, the reference interpreter's and [`ParamSegment::arrives_after`]
+/// share.
+pub(crate) fn arrival(t: Timing) -> u32 {
+    let left = t.span - (f64::from(t.position) + t.lead);
+    if left <= 0.0 {
+        return 0;
+    }
+    // At most `u32::MAX`: a span is.
+    let j = SamplePosition(left).to_samples_ceil().get();
+    u32::try_from(j).unwrap_or(u32::MAX)
 }
 
 /// A segment's progress `j` frames after its event, `None` once it has
-/// arrived: at 1 or past, or a zero length (a step).
+/// arrived: at 1 or past, or a zero span (a step).
 #[inline]
-pub(crate) fn segment_progress(position: u32, length: u32, j: u32) -> Option<Normalized> {
-    let done = u64::from(position) + u64::from(j);
-    (done < u64::from(length)).then(|| {
-        // `done < length`, both exact in `f64`: progress is the exact
-        // quotient, rounded once.
-        Normalized::clamped(done as f64 / f64::from(length))
-    })
+pub(crate) fn segment_progress(t: Timing, j: u32) -> Option<Normalized> {
+    let done = f64::from(t.position) + f64::from(j) + t.lead;
+    (done < t.span).then(|| Normalized::clamped(done / t.span))
 }
 
 /// What a [`ParamEvent`] says.
@@ -551,6 +577,30 @@ mod tests {
         }
         assert_eq!(s.raw_value_after(Samples(FRAMES)), FRAMES as f64);
         assert_eq!(s.arrives_after(), Samples(FRAMES));
+    }
+
+    /// **A piece that starts between frames evaluates its law at each frame's
+    /// exact place.** An exponential piece entered 0.6 of a frame along, 10.4
+    /// frames long: frame `j` reads the law at `(0.6 + j) / 11`, which a phase
+    /// dropped (entered at frame 0 of a span of 11) does not.
+    #[test]
+    fn a_fractional_start_reads_the_law_at_the_exact_place() {
+        let law = Law::Exp(Curvature::of(4.0));
+        let key = ParamKey::<Hz>::CUTOFF;
+        let base = ParamSegment::new(key, Hz(0.0), Hz(8.0), Samples(11), law);
+        let exact = base.resumed_exactly(SamplePosition(0.6), SamplePosition(11.0));
+        let flat = base.resumed(Samples(0), Samples(11));
+        let mut apart = 0.0f64;
+        for j in 0..10 {
+            let t = (0.6 + j as f64) / 11.0;
+            let want = 8.0 * law.eval(Normalized::of(t)).get();
+            let got = exact.raw_value_after(Samples(j));
+            assert!((got - want).abs() < 1e-12, "frame {j}: {got} vs {want}");
+            apart = apart.max((flat.raw_value_after(Samples(j)) - want).abs());
+        }
+        assert!(apart > 1e-2, "the phase matters here: {apart}");
+        // It arrives on the first frame at or past its end, 10.4 on.
+        assert_eq!(exact.arrives_after(), Samples(11));
     }
 
     /// The endpoints are held as `f64`: a value `f32` cannot hold reads back

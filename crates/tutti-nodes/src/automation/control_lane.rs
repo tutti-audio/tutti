@@ -503,19 +503,14 @@ fn continues(expected: &TransportPosition, got: &TransportPosition) -> bool {
         && (a - b).abs() <= 1e-9 * a.abs().max(1.0)
 }
 
-/// The `(position, length)` of a curve piece on whole frames, for a point on
-/// a frame: the piece started `since` frames before it (fractional) and ends
-/// `until` frames after it. Its start and end round to the nearest frame, so
-/// the same piece is the same two frames whichever block sends it. `None`
+/// A curve piece's `(since, span)` for a point on a frame: the piece started
+/// `since` frames before it and is `since + until` long, both fractional, so a
+/// segment evaluates its law at each frame's exact place on the piece. `None`
 /// when the piece is longer than a segment can count (`u32::MAX` frames): a
 /// producer sends it as shorter pieces.
-fn exact_span(since: f64, until: f64) -> Option<(Samples, Samples)> {
-    // The start `at - since` rounds half up, `at` being whole: the frames
-    // elapsed are `ceil(since - 1/2)`; the end, `floor(until + 1/2)` frames on.
-    let position = SamplePosition(since - 0.5).to_samples_ceil();
-    let remaining = SamplePosition(until + 0.5).to_samples_floor();
-    let length = Samples(position.get().checked_add(remaining.get())?);
-    (length.get() <= u32::MAX as usize).then_some((position, length))
+fn exact_span(since: f64, until: f64) -> Option<(SamplePosition, SamplePosition)> {
+    let span = since + until;
+    (span <= f64::from(u32::MAX)).then_some((SamplePosition(since), SamplePosition(span)))
 }
 
 /// A segment's value `j` frames (fractional) after its event, `to` once it
@@ -716,8 +711,8 @@ impl Block<'_> {
                         // the nearest frame, so a piece sent in any block is
                         // the same piece. One past what a segment can count is
                         // not exact: the grid takes it.
-                        exact_span((beat - s) * f, (e - beat) * f).map(|(position, length)| {
-                            let seg = make(from, to, shape).resumed(position, length);
+                        exact_span((beat - s) * f, (e - beat) * f).map(|(since, span)| {
+                            let seg = make(from, to, shape).resumed_exactly(since, span);
                             (seg, from, to, Some((e - beat) * f))
                         })
                     }
@@ -1188,18 +1183,18 @@ mod tests {
         Arc::new(ControlProgram::default())
     }
 
-    /// A curve piece is placed on whole frames: its start and its end each
-    /// round to the nearest, and the same two frames come out of any point
-    /// within it (`position + along = frames since the start`).
+    /// A piece keeps its fractional start and length: any point within it
+    /// names the same two ends.
     #[test]
-    fn a_piece_starts_and_ends_on_the_nearest_frames() {
-        // Started 0.4 before, ends 10.4 after: frames 0 and 10 from the start.
-        assert_eq!(exact_span(0.4, 10.4), Some((Samples(0), Samples(10))));
-        // 0.6 before and 10.6 after: starts a frame back, ends 11 on.
-        assert_eq!(exact_span(0.6, 10.6), Some((Samples(1), Samples(12))));
-        // From a later point of the same piece (7 frames on): the same ends.
-        assert_eq!(exact_span(7.4, 3.4), Some((Samples(7), Samples(10))));
-        assert_eq!(exact_span(7.6, 3.6), Some((Samples(8), Samples(12))));
+    fn a_piece_keeps_its_fractional_span() {
+        assert_eq!(
+            exact_span(0.6, 10.4),
+            Some((SamplePosition(0.6), SamplePosition(11.0)))
+        );
+        assert_eq!(
+            exact_span(7.6, 3.4),
+            Some((SamplePosition(7.6), SamplePosition(11.0)))
+        );
     }
 
     /// A piece longer than a segment can count (`u32::MAX` frames) has no
@@ -1207,10 +1202,7 @@ mod tests {
     #[test]
     fn a_piece_past_u32_max_frames_is_not_exact() {
         let max = f64::from(u32::MAX);
-        assert_eq!(
-            exact_span(0.0, max - 10.0),
-            Some((Samples(0), Samples(u32::MAX as usize - 10)))
-        );
+        assert!(exact_span(0.0, max - 10.0).is_some());
         assert_eq!(exact_span(0.0, max + 10.0), None);
         // Counted from where it started, not from the point.
         assert_eq!(exact_span(max / 2.0 + 10.0, max / 2.0 + 10.0), None);

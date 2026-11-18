@@ -177,7 +177,7 @@ struct RefRamp {
     shape: tutti_curve::Law,
     /// A curve segment's `(position, length)`; `None`: a ramp. Its law is
     /// `shape`.
-    curve: Option<(u32, u32)>,
+    curve: Option<crate::param_event::Timing>,
     /// Its value on the last frame evaluated.
     value: f64,
     /// Whether the source has sent an event yet: until it has, the port
@@ -2065,7 +2065,7 @@ fn ref_port<F: Float>(
                 }
                 ParamKind::Segment(s) if s.addr() == want => {
                     let piece = s.piece();
-                    let (position, length) = s.timing();
+                    let timing = s.timing();
                     // What a ramp replacing it on this frame starts
                     // from: the held value, or (a first event) the
                     // base at this frame, as for a first ramp.
@@ -2074,8 +2074,7 @@ fn ref_port<F: Float>(
                     } else {
                         base(i).into()
                     };
-                    let arrives =
-                        Some(now + u64::from(crate::param_event::arrival(position, length)));
+                    let arrives = Some(now + u64::from(crate::param_event::arrival(timing)));
                     // The piece in flight, sent again: the same values and
                     // law, bit for bit, arriving on the same frame, or both
                     // already at rest on their end. No corner.
@@ -2096,7 +2095,7 @@ fn ref_port<F: Float>(
                         at: now,
                         len: 0,
                         shape: piece.law,
-                        curve: Some((position, length)),
+                        curve: Some(timing),
                         value: cur,
                         started: true,
                         arrives,
@@ -2115,10 +2114,10 @@ fn ref_port<F: Float>(
             base(i).into()
         } else if now < r.at {
             r.value
-        } else if let Some((position, length)) = r.curve {
+        } else if let Some(timing) = r.curve {
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
-            match crate::param_event::segment_progress(position, length, j) {
+            match crate::param_event::segment_progress(timing, j) {
                 Some(t) => ref_line(param.param, r.from, r.target, r.shape, t),
                 None => r.target,
             }

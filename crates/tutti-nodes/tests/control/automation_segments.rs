@@ -47,7 +47,7 @@ fn automation(curve: impl Curve + 'static) -> ControlLaneNode {
     )
 }
 /// A tempo whose beat is not a whole number of frames, so breakpoints fall
-/// between frames (and are placed on the nearest).
+/// between frames.
 const TEMPO: Bpm = Bpm::of(113.0);
 const TOL: f64 = 2e-5;
 const MAX: usize = 128;
@@ -147,25 +147,10 @@ fn check_rolling(
         let out = block(&mut ed, &mut exec, &t, &TransportChanges::NONE, n);
         for (i, &v) in out.iter().enumerate() {
             let beat = clock.beat();
-            // A segment starts and ends on a whole frame, so a breakpoint
-            // between frames is placed on the nearest, each end by up to half
-            // a frame: a frame reads what the curve has within a frame of it.
-            let value = |b: f64| curve.value_at(Beat(b)).expect("a value").get();
-            let frame = TEMPO.get() / (60.0 * RATE);
-            let (from, to) = (beat.get() - frame, beat.get() + frame);
-            // The window's ends and every breakpoint inside it (a peak is not
-            // at either end).
-            let inside = curve
-                .breakpoints()
-                .iter()
-                .map(|p| p.time.get())
-                .filter(|t| (from..=to).contains(t));
-            let values: Vec<f64> = [from, to].into_iter().chain(inside).map(value).collect();
-            let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
-            let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let want = curve.value_at(beat).expect("a value").get();
             assert!(
-                (lo - TOL..=hi + TOL).contains(&f64::from(v)),
-                "frame {} (block of {n}, frame {i}), beat {}: {v} outside the curve's {lo}..{hi}",
+                (f64::from(v) - want).abs() <= TOL,
+                "frame {} (block of {n}, frame {i}), beat {}: {v} vs the curve's {want}",
                 all.len() + i,
                 beat.get()
             );
