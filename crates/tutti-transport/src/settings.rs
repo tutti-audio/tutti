@@ -9,6 +9,7 @@
 //! lock-free cell shared between the UI thread and the audio thread, and a
 //! forwarding method would only rename it.
 
+use super::ProjectMeter;
 use super::TempoReader;
 use super::state::AtomicBpm;
 use std::sync::Arc;
@@ -96,6 +97,11 @@ pub struct TransportSettings {
     /// hysteresis. Written by the clock; what a beat must be resolved with
     /// to agree with it.
     pub(crate) tempo_in_force: Arc<AtomicBpm>,
+    /// The project's meter: what the metronome and every hosted plugin read
+    /// once per block. Owned here, beside the tempo map, so the transport is
+    /// the one place the project's tempo and meter are held
+    /// ([`project_meter`](Self::project_meter)).
+    pub(crate) meter: ProjectMeter,
 }
 
 impl TransportSettings {
@@ -112,7 +118,16 @@ impl TransportSettings {
             paused: Arc::new(AtomicBool::new(true)),
             steady_time: Arc::new(AtomicI64::new(0)),
             tempo_in_force: Arc::new(AtomicBpm::new(Bpm::default())),
+            meter: ProjectMeter::default(),
         }
+    }
+
+    /// The project's meter, 4/4 from bar 0 until one is published. A handle:
+    /// a clone is the same meter, so the metronome's node, each hosted
+    /// plugin's slot and the control side all follow what it publishes.
+    #[must_use]
+    pub fn project_meter(&self) -> &ProjectMeter {
+        &self.meter
     }
 
     /// The tempo the clock is actually running at (see the field).

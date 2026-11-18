@@ -48,6 +48,20 @@ impl TransportHandle {
         self.clock = Some(clock);
     }
 
+    /// The project's tempo, a target of [`Session::set`](crate::Session::set)
+    /// and [`Session::get`](crate::Session::get).
+    #[must_use]
+    pub const fn tempo(&self) -> crate::TempoTarget {
+        crate::TempoTarget::new()
+    }
+
+    /// The project's meter, a target of [`Session::set`](crate::Session::set)
+    /// and [`Session::get`](crate::Session::get).
+    #[must_use]
+    pub const fn meter(&self) -> crate::MeterTarget {
+        crate::MeterTarget::new()
+    }
+
     /// The playhead as the engine's last block wrote it; the default while no
     /// engine renders.
     pub(crate) fn playhead(&self) -> Playhead {

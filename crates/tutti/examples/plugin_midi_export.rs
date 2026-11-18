@@ -134,7 +134,7 @@ fn play<M: Master>(
     let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(metrical.end()));
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
-    s.set_tempo_map(tempo_map.clone())?;
+    s.set(s.transport_handle().tempo().to(tempo_map.clone()))?;
     // Its messages on the file's one timeline, as the
     // packets they are: the clip translates them when it is loaded.
     s.midi().play_file(synth, Beat(0.0), metrical)?;

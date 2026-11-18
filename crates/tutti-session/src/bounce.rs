@@ -2443,7 +2443,14 @@ mod tests {
     #[test]
     fn the_default_clock_starts_at_the_ranges_first_beat_on_the_projects_tempo() {
         let mut session = session();
-        session.set_tempo(Bpm::of(90.0)).expect("not following");
+        session
+            .set(
+                session
+                    .transport_handle()
+                    .tempo()
+                    .to(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).unwrap()),
+            )
+            .expect("not following");
         let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session

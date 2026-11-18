@@ -232,8 +232,6 @@ tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::
 tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_knob
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_mode
-tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_meter
-tutti-nodes  setter  crates/tutti-nodes/src/click.rs::ClickSettings::set_volume
 tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_level
@@ -486,8 +484,6 @@ tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_pla
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
 tutti-session  setter  crates/tutti-session/src/session.rs::Session::set_loop
-tutti-session  setter  crates/tutti-session/src/session.rs::Session::set_tempo
-tutti-session  setter  crates/tutti-session/src/session.rs::Session::set_tempo_map
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
