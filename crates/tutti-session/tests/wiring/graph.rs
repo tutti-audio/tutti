@@ -814,8 +814,8 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
 /// to reclaim.)
 #[test]
 fn an_update_frees_what_a_block_held_across_a_replacement() {
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
     use tutti_transport::MeterSlot;
-    use tutti_types::{MeterChange, MeterMap, TimeSignature};
     use tutti_units::Beat;
 
     let mut s = detached(1);

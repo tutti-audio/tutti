@@ -30,8 +30,8 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_modulation::{
     Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
+use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Law, Trajectory};
-use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_units::{Depth, ParamId, PhaseIncrement};

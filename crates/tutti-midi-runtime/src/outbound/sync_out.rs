@@ -45,8 +45,8 @@ use tutti_graph::{
     Offset, Prepare, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
+use tutti_music::MeterMap;
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, RtVec, Setting, counter};
-use tutti_types::MeterMap;
 use tutti_ump::{MidiGroup, Sysex7Packets};
 use tutti_units::{Beat, SampleRate};
 

@@ -17,7 +17,7 @@
 
 use arrayvec::ArrayVec;
 use tutti_graph::MAX_TRANSPORT_CHANGES;
-use tutti_types::{LoopRange, TimeSignature};
+use tutti_music::{LoopRange, TimeSignature};
 use tutti_ump::System;
 use tutti_units::{BarNumber, Beat, Bpm, SampleRate, Seconds};
 

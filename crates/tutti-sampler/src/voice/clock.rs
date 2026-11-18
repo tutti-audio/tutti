@@ -66,8 +66,8 @@
 use std::ops::Range;
 
 use tutti_graph::{Env, TransportPosition, declick_frames};
+use tutti_music::{FrameClock, LoopRange, first_frame_at_or_after};
 use tutti_tempo::TempoMap;
-use tutti_types::{FrameClock, LoopRange, first_frame_at_or_after};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 /// How far from where the playhead would have been, in frames, a run may
@@ -184,7 +184,7 @@ impl Run {
     /// Frames per beat at the block's rate (`None` when it does not roll).
     #[inline]
     pub(crate) fn frames_per_beat(&self) -> Option<f64> {
-        tutti_types::frames_per_beat(self.tempo(), self.sample_rate()).filter(|_| self.rolling)
+        tutti_music::frames_per_beat(self.tempo(), self.sample_rate()).filter(|_| self.rolling)
     }
 
     /// This run cut to `range`: `None` when they do not meet. A run cut

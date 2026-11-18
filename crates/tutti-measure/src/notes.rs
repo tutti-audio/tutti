@@ -69,7 +69,7 @@
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{FrameCount, rms};
-use tutti_types::Note;
+use tutti_music::Note;
 use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;

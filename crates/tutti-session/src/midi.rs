@@ -26,8 +26,9 @@ use tutti_midi_runtime::{
     MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule,
     SendAt, TimedMidiEvent, compile_routes,
 };
+use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
-use tutti_types::{MeterMap, Mint};
+use tutti_types::Mint;
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
 use tutti_units::{Beat, BeatDuration, Frame, Samples};
 

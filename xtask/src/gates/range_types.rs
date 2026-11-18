@@ -141,12 +141,12 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: each field is its own checked type, so every combination is a format",
     ),
     (
-        "crates/tutti-types/src/meter.rs",
+        "crates/tutti-music/src/meter.rs",
         "TimeSignature",
         "permanent: each half is its own checked type, so every pair is a signature",
     ),
     (
-        "crates/tutti-types/src/value/note.rs",
+        "crates/tutti-music/src/note.rs",
         "Note",
         "permanent: every class and octave is a note; only the MIDI conversion refuses",
     ),

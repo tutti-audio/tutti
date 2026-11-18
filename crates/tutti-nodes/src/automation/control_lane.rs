@@ -447,7 +447,7 @@ impl ControlLaneNode {
 /// The transport one frame on from `t`, as the executor's own history rolls
 /// it (`FrameClock` advanced, loop wrapped).
 fn roll_one(t: TransportPosition, rate: tutti_units::SampleRate) -> TransportPosition {
-    if !t.playing || tutti_types::frames_per_beat(t.tempo, rate).is_none() {
+    if !t.playing || tutti_music::frames_per_beat(t.tempo, rate).is_none() {
         return t;
     }
     let mut clock = t.clock(rate);
@@ -604,7 +604,7 @@ impl Block<'_> {
         let t = self.cx.transport_at(off);
         let play = self.cx.play_at(off);
         let rate = env.sample_rate;
-        let fpb = tutti_types::frames_per_beat(t.tempo, rate).filter(|_| t.playing);
+        let fpb = tutti_music::frames_per_beat(t.tempo, rate).filter(|_| t.playing);
         let abs = self.base() + Samples(p);
         let beat = t.beat().get();
         let time = ProgramTime {

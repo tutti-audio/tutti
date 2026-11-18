@@ -1311,7 +1311,7 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
 /// wrap's Song Position and the tick on the loop's start.
 #[test]
 fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     // The loop starts at beat 1, a quarter note: 4 MIDI beats (sixteenths).
     const LOOP_START: u16 = 4;
     let (_ed, mut exec, _clock, seen) = rig(
@@ -1370,8 +1370,8 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
 #[test]
 fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
     use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
-    use tutti_types::FrameClock;
-    use tutti_types::LoopRange;
+    use tutti_music::FrameClock;
+    use tutti_music::LoopRange;
     const TOTAL: usize = 16_384;
     let end = 47.3 / 24_000.0;
 
@@ -1386,7 +1386,7 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
             TOTAL,
         );
         let looping = Some(LoopRange::new(Beat(0.0), Beat(end)).expect("a loop"));
-        let region = tutti_types::LoopRange::new(Beat::new(0.0), Beat::new(end));
+        let region = tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(end));
         let mut host = FrameClock::new(Beat(0.0), Bpm::of(120.0), SampleRate::of(RATE));
         for _ in 0..TOTAL / len {
             let rolling = TransportPosition::new(true, Bpm::of(120.0), host.beat(), looping);

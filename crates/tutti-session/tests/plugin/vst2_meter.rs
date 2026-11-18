@@ -10,9 +10,9 @@ use std::sync::Arc;
 use tutti_session::Root;
 use tutti_types::ChannelLayout;
 
+use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::Session;
-use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_units::{Beat, Bpm, SampleRate};
 use tutti_vst2_test_plugin::ProcessCapture;
 

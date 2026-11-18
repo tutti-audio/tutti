@@ -27,9 +27,9 @@
 //! for an offline render).
 
 use tutti_graph::{Continuity, Cx, Offset, TransportPosition};
+use tutti_music::{LoopRange, SegmentOrigin, first_frame_at_or_after};
+use tutti_music::{Meter, MeterMap};
 use tutti_tempo::TempoView;
-use tutti_types::{LoopRange, SegmentOrigin, first_frame_at_or_after};
-use tutti_types::{Meter, MeterMap};
 use tutti_units::Samples;
 use tutti_units::{Beat, Bpm, SampleRate};
 
@@ -656,9 +656,9 @@ mod tests {
     use super::*;
     use std::time::Instant;
     use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
+    use tutti_music::FrameClock;
+    use tutti_music::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
     use tutti_tempo::TempoMap;
-    use tutti_types::FrameClock;
-    use tutti_types::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
     use tutti_units::BarNumber;
     use tutti_units::Latency;
     use tutti_units::{Frame, Samples};
@@ -1467,7 +1467,7 @@ mod tests {
 
     /// **A tempo-map change between two frames reads as continuous playback**:
     /// the engine seats the change on the first frame at or after its time
-    /// ([`first_frame_at_or_after`](tutti_types::first_frame_at_or_after)) at
+    /// ([`first_frame_at_or_after`](tutti_music::first_frame_at_or_after)) at
     /// the map's beat there, so two reads a block apart over it are exactly
     /// the block's frames apart, whatever the fraction of a frame the change
     /// fell at. Each change here is at `x.fraction` frames into a 64-frame

@@ -17,7 +17,8 @@ use tutti_types::MaxBlock;
 
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
-use tutti_types::{ChannelLayout, FrameClock, LoopRange};
+use tutti_music::{FrameClock, LoopRange};
+use tutti_types::ChannelLayout;
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples};
 
 use super::memory_source::MemorySource;

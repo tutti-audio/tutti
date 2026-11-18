@@ -23,12 +23,12 @@ use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
+use tutti_music::{FrameClock, LoopRange};
 use tutti_sampler::testing::settle;
 use tutti_sampler::{
     ByHand, DiskStreamer, DiskVoice, Loop, Placement, Playback, Stream, StreamReader, Voice,
     VoiceNode, VoiceSource,
 };
-use tutti_types::{FrameClock, LoopRange};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

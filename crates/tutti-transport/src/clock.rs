@@ -10,8 +10,8 @@ use super::loop_region::LoopRegion;
 use super::state::ClockLinks;
 use super::walk::{TempoAhead, TempoWalk};
 use std::sync::atomic::Ordering;
+use tutti_music::FrameClock;
 use tutti_tempo::TempoMap;
-use tutti_types::FrameClock;
 use tutti_units::{Beat, Bpm, Samples};
 
 /// How far the tempo must move before the clock takes it (and starts a new
@@ -481,7 +481,7 @@ mod tests {
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     use tutti_units::SampleRate;
 
     fn create_test_atomics() -> (Bpm, Arc<AtomicBool>) {
@@ -774,7 +774,7 @@ mod tests {
         assert_eq!(in_force.load(Ordering::Acquire), Bpm::of(120.0));
         assert_eq!(
             clock.current_beat(),
-            Beat(0.0) + tutti_types::beats_per_sample(Bpm::of(120.0), SampleRate::SR_48K),
+            Beat(0.0) + tutti_music::beats_per_sample(Bpm::of(120.0), SampleRate::SR_48K),
         );
     }
 

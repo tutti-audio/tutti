@@ -101,8 +101,10 @@ crates/             everything shipped, directory name = package name
   tutti-units       # The unit newtypes (`Hz`, `Seconds`, `Beat`, ...), `Samples`,
                     #   `Latency`, `Tail`. `no_std`, no alloc, no atomics; no
                     #   workspace dependency; forbids `unsafe`.
-  tutti-types       # Channel layouts, meter, notes, `Param<U>`, ids. Names only
-                    #   tutti-units; forbids `unsafe`.
+  tutti-types       # Channel layouts, `Param<U>`, ids. Names only tutti-units;
+                    #   forbids `unsafe`.
+  tutti-music       # Notes, meter, loop ranges, the frame clock, `Adsr`. `no_std`
+                    #   + alloc; names only tutti-units; forbids `unsafe`.
   tutti-rt          # Real-time-safe shared-memory primitives: the lock-free and
                     #   `unsafe` runtime structure, every loom model, `Publisher`.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),

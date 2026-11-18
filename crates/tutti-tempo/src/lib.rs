@@ -18,7 +18,7 @@
 //!
 //! The first point sits at beat 0. Before it the map holds the first tempo, so
 //! a count-in has a time. Time signature is not here: it is
-//! `tutti_types::MeterMap`.
+//! `tutti_music::MeterMap`.
 //!
 //! # Ramps as constant-tempo cells
 //!

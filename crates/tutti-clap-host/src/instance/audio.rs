@@ -566,8 +566,8 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_music::LoopRange;
     use tutti_plugin_types::LoopRegion;
-    use tutti_types::LoopRange;
     use tutti_units::{Beat, Bpm, SampleRate};
 
     fn base() -> TransportInfo {

@@ -9,9 +9,9 @@ use std::time::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
+use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_session::{FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{MeterChange, MeterMap, TimeSignature};
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
 

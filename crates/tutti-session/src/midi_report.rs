@@ -90,7 +90,7 @@ pub enum MidiReport {
     /// was at.
     MeterFollowed {
         /// The time signature.
-        signature: tutti_types::TimeSignature,
+        signature: tutti_music::TimeSignature,
         /// The bar line it takes effect on.
         beat: tutti_units::Beat,
     },

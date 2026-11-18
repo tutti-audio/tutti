@@ -34,12 +34,13 @@ use tutti_graph::{
     Cx, Editor, Env, Executor, IntoNode, Io, Node, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
     Transport, TransportCommand, render_graph,
 };
-use tutti_types::{ChannelLayout, LoopRange};
+use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
@@ -546,7 +547,7 @@ fn the_offline_env_walk_starts_each_block_on_the_timeline() {
         let last = beat(log[at + n - 1]);
         let expect = start.get()
             + (n - 1) as f64
-                * tutti_types::beats_per_sample(Bpm::of(128.0), SampleRate::of(SR)).get();
+                * tutti_music::beats_per_sample(Bpm::of(128.0), SampleRate::of(SR)).get();
         assert!((last - expect).abs() < 1e-6, "frame {}", at + n - 1);
         at += n;
     }
