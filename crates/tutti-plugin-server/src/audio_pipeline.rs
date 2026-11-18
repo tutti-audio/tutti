@@ -217,7 +217,8 @@ impl BlockFault {
     /// The format hosts' Processors fail a block with [`PluginError::Block`]
     /// alone, which owns nothing. A variant that owns heap memory is a
     /// Processor breaking that contract; it is not dropped here (this thread
-    /// frees nothing), and leaks instead.
+    /// frees nothing), and leaks instead, once per failed block and without a
+    /// cap for as long as the Processor keeps breaking it.
     #[allow(
         clippy::mem_forget,
         reason = "a free is not allowed on the render thread"
