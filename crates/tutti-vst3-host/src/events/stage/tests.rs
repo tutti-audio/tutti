@@ -665,3 +665,35 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     // 20 payload bytes, six to a packet (M2-104 section 7.7): 4 packets.
     assert_eq!(out.len(), 4);
 }
+
+/// **The MIDI room the Processor declares is held whatever the other sources
+/// hold**: `MIDI_EVENT_ROOM` note-ons and a full expression room stage in one
+/// block with nothing dropped, and the room is the list's capacity less the
+/// expression room and the four harmony rooms.
+#[test]
+fn the_declared_midi_room_is_held_beside_a_full_expression_room() {
+    use tutti_vst3_ffi::{MIDI_EVENT_ROOM, NOTE_EXPRESSION_ROOM};
+
+    assert_eq!(
+        MIDI_EVENT_ROOM,
+        EVENT_CAPACITY - NOTE_EXPRESSION_ROOM - 4 * tutti_plugin_types::HARMONY_CAPACITY
+    );
+    let list = EventList::input();
+    let mut stager = Stager::default();
+    let notes: Vec<UmpAt> = (0..MIDI_EVENT_ROOM)
+        .map(|_| (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)))
+        .collect();
+    let expressions: Vec<NoteExpressionValue> = (0..NOTE_EXPRESSION_ROOM)
+        .map(|k| expr(0, k as i32))
+        .collect();
+    assert!(stager.stage(
+        &list,
+        &InputEvents {
+            midi: &notes,
+            note_expressions: &expressions,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(list.dropped(), 0);
+    assert_eq!(len(&list), MIDI_EVENT_ROOM + NOTE_EXPRESSION_ROOM);
+}

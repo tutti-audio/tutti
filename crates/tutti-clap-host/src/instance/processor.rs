@@ -351,6 +351,10 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
 }
 
 impl Processor for ClapProcessor {
+    fn event_input(&self) -> Option<std::num::NonZeroU32> {
+        self.scratch.input_events.event_input()
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)

@@ -236,6 +236,9 @@ struct Shared {
     /// The size the plugin asked its window to take, packed `width << 32 | height`,
     /// until the host polls it; `0` when it has not asked.
     resize_request: AtomicU64,
+    /// The events per block the fake's input storage takes
+    /// (`FakePlugin::hold_events`); `0` for no bound of its own.
+    event_input: AtomicU32,
     /// How the fake takes a render mode (`FakePlugin::take_render_mode`):
     /// `0` at activation, `1` live, `2` not at all.
     render_mode_support: AtomicU8,
@@ -317,6 +320,7 @@ impl FakePlugin {
             editor: AtomicBool::new(false),
             takes_scale: AtomicBool::new(false),
             resize_request: AtomicU64::new(0),
+            event_input: AtomicU32::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
             dropped_edits: AtomicU64::new(0),
@@ -417,6 +421,12 @@ impl FakePlugin {
     /// that lies about being asleep.
     pub fn sleep_over_sound(&self, lie: bool) {
         self.0.sleeps_over_sound.store(lie, Ordering::Relaxed);
+    }
+
+    /// The fake's Processor takes `per_block` events a block on its event
+    /// input from now on (`Processor::event_input`); none by default.
+    pub fn hold_events(&self, per_block: u32) {
+        self.0.event_input.store(per_block, Ordering::Relaxed);
     }
 
     /// How the fake takes a change of render mode from now on. The default is
@@ -900,6 +910,10 @@ impl Controller for FakeController {
 }
 
 impl Processor for FakeProcessor {
+    fn event_input(&self) -> Option<std::num::NonZeroU32> {
+        std::num::NonZeroU32::new(self.shared.event_input.load(Ordering::Relaxed))
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let log = &self.shared.log;
         self.drain.drain(|edit| {

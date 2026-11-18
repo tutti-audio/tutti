@@ -549,6 +549,11 @@ impl<F: Loaded> InProcClient<F> {
             let instance = inner.lock();
             (instance.lost_flag(), instance.event_input())
         };
+        // The activation's bound, held to what the Processor's storage takes.
+        let event_input = rt
+            .poll(Processor::stop)
+            .and_then(|processor| processor.event_input())
+            .map_or(event_input, |held| event_input.min(held));
         let failed = tally();
         Self {
             inner,
@@ -700,6 +705,20 @@ impl<F: Loaded> InProcClient<F> {
         self.rate_refused = false;
         self.inner.lock().retuned(rate);
         true
+    }
+
+    /// The events per block the node declares for `p`'s block:
+    /// [`EVENT_INPUT_DENSITY`](tutti_plugin_types::EVENT_INPUT_DENSITY) of it,
+    /// at most what the Processor's input storage takes. The bound from before
+    /// when the Processor is on offer to the realtime end.
+    pub(super) fn bound_for(&mut self, p: &tutti_graph::Prepare) -> std::num::NonZeroU32 {
+        let wanted = tutti_plugin_types::EVENT_INPUT_DENSITY.capacity(p);
+        match self.rt.held() {
+            Some(processor) => processor
+                .event_input()
+                .map_or(wanted, |held| wanted.min(held)),
+            None => self.event_input,
+        }
     }
 
     /// Tells the plugin the render mode `p` carries when it is not the mode

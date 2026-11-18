@@ -371,6 +371,22 @@ mod tests {
     /// The declared event-input bound the tests size rooms from.
     const EVENT_INPUT: NonZeroU32 = NonZeroU32::new(512).unwrap();
 
+    /// **The input list built for a declared bound reports that bound as what
+    /// it holds**: the Processor's `event_input`, which the node declares, is
+    /// the list's MIDI room over `Narrower::MAX_MESSAGES`, at any block.
+    #[test]
+    fn the_input_list_reports_the_bound_it_was_built_from() {
+        let table = RangeTable {
+            ranges: Vec::new(),
+            claims: true,
+        };
+        for frames in [64usize, 4096] {
+            let rooms = input_rooms(&table, frames, EVENT_INPUT);
+            let list = crate::InputEventList::new(rooms);
+            assert_eq!(list.event_input(), Some(EVENT_INPUT), "{frames} frames");
+        }
+    }
+
     /// **Activation reserves the pool budget, not parameters × room**: for
     /// 2 000 and 16 384 parameters at 512- and 4096-frame blocks, the input
     /// event list's parameter room is `ParameterChanges::point_budget` of

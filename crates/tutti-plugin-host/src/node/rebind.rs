@@ -376,6 +376,28 @@ mod tests {
         assert_eq!(bound(&node).map(|n| n.get()), Some(8_192));
     }
 
+    /// **The node never declares more than its Processor's input storage
+    /// takes**, whatever the graph's block: a Processor holding 100 events a
+    /// block (as a served one's chunk holds its MIDI) bounds the node at 100
+    /// at a block whose density gives 2048, and the density's figure under it.
+    #[test]
+    fn the_node_declares_no_more_than_its_processor_takes() {
+        let (fake, _rebinder, node, _inner) = rig();
+        fake.hold_events(100);
+        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
+        let node = contract::prepared(node, SR, 2048);
+        assert_eq!(bound(&node).map(|n| n.get()), Some(100));
+        let node = contract::prepared(node, SR, 64);
+        assert_eq!(
+            bound(&node).map(|n| n.get()),
+            Some(100),
+            "the density's floor of 256 is cut to what the Processor takes"
+        );
+        fake.hold_events(4096);
+        let node = contract::prepared(node, SR, 2048);
+        assert_eq!(bound(&node).map(|n| n.get()), Some(2048));
+    }
+
     /// A node over the plugin's ports now, committed at once: the caller's
     /// swap that cannot fail.
     fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {

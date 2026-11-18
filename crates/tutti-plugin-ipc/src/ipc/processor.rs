@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Planes};
-use tutti_plugin_types::BlockStatus;
+use tutti_plugin_types::{BlockStatus, MIDI_STACK_CAPACITY};
 use tutti_plugin_types::{
     ChordValue, ParameterChanges, PluginAudio, PluginIo, PluginResult, ProcessContext,
     ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo, WireMidi,
@@ -118,6 +118,12 @@ impl Processor for IpcProcessor {
         self.params.clear();
         // A refused reset is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.reset_rt();
+    }
+
+    /// A chunk's MIDI is an inline `MidiEventVec`: [`MIDI_STACK_CAPACITY`]
+    /// events, taken from every block the chunk spans.
+    fn event_input(&self) -> Option<std::num::NonZeroU32> {
+        std::num::NonZeroU32::new(MIDI_STACK_CAPACITY as u32)
     }
 
     /// The pipeline's chunk: the frames every submission carries.

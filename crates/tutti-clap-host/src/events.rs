@@ -881,8 +881,10 @@ impl InputRooms {
     /// never sends more, a note-off included, so no room is held past it. The
     /// cost is `event_input * MAX_MESSAGES` events of 112 bytes
     /// (`size_of::<ClapEvent>()`), plus the sort's scratch: at a 512-frame
-    /// block, 512 events and 2560 messages, about 287 KB per activation (the
-    /// largest block the bound is sized for, 8192 frames, costs about 4.6 MB).
+    /// block, 512 events and 2560 messages, about 287 KB per activation; at
+    /// the loader's 4096-frame activation, 4096 events and 20480 messages,
+    /// about 2.3 MB (the largest block the bound is sized for, 8192 frames,
+    /// costs about 4.6 MB).
     #[must_use]
     pub const fn for_port(event_input: NonZeroU32) -> Self {
         Self::new((event_input.get() as usize).saturating_mul(Narrower::MAX_MESSAGES))
@@ -1093,6 +1095,14 @@ impl InputEventList {
     /// How many more MIDI events the block can stage: the MIDI room less
     /// what is staged. The other sources' events are added after the MIDI, and
     /// each has a room of its own.
+    /// The events one block's MIDI room holds: its messages over
+    /// [`Narrower::MAX_MESSAGES`], the bound [`InputRooms::for_port`] was
+    /// built from. `None` for a list with no MIDI room.
+    #[must_use]
+    pub fn event_input(&self) -> Option<NonZeroU32> {
+        NonZeroU32::new(u32::try_from(self.midi_room / Narrower::MAX_MESSAGES).unwrap_or(u32::MAX))
+    }
+
     fn midi_room(&self) -> usize {
         self.midi_room.saturating_sub(self.midi_pushed)
     }

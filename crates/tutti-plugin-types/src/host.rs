@@ -22,7 +22,7 @@
 //! implementation's `unsafe` states, per format, why the two halves may reach
 //! one plugin instance at once.
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Instant;
 
 use dpi::Size;
@@ -455,6 +455,16 @@ pub trait Processor: Send {
     /// Read each block, on the realtime thread: it must not change while the
     /// Processor renders.
     fn chunk(&self) -> Option<NonZeroUsize> {
+        None
+    }
+
+    /// The most events per block the input storage this Processor was built
+    /// with takes from the node's event input, or `None` for one that holds
+    /// no bound of its own (it stages into the plugin's own storage). The node
+    /// declares at most this as its `Shape::event_input_capacity`, so the
+    /// graph's cut is the only cut: the Processor is never sent what it
+    /// would refuse. Read from the node's `prepare`.
+    fn event_input(&self) -> Option<NonZeroU32> {
         None
     }
 

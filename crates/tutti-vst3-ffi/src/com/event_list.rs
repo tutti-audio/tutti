@@ -46,6 +46,10 @@ pub const NOTE_EXPRESSION_ROOM: usize = MIDI_STACK_CAPACITY;
 /// of the four harmony kinds. A plugin's output list is held to the same room.
 pub const EVENT_CAPACITY: usize = MIDI_STACK_CAPACITY + NOTE_EXPRESSION_ROOM + 4 * HARMONY_CAPACITY;
 
+/// The MIDI events one input block can stage whatever the other sources hold:
+/// [`EVENT_CAPACITY`] less the expression and harmony rooms.
+pub const MIDI_EVENT_ROOM: usize = EVENT_CAPACITY - NOTE_EXPRESSION_ROOM - 4 * HARMONY_CAPACITY;
+
 /// Bytes of SysEx a plugin's output list holds per block: what the host's
 /// MIDI pool can carry out ([`RT_MIDI_CAPACITY`] packets of at most six
 /// payload bytes), delimiters included. A longer message is refused whole.

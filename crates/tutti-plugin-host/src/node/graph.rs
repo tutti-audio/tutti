@@ -36,7 +36,7 @@ use tutti_types::{Latency, Samples, Tail};
 
 use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
-use tutti_plugin_types::{BlockStatus, EVENT_INPUT_DENSITY, ProcessOutput, Processing};
+use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
     ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded,
     Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
@@ -97,9 +97,11 @@ where
     /// over); what was delivered to the plugin is kept.
     fn prepare(&mut self, p: &Prepare) {
         let this = &mut self.client;
-        // What the graph sends the event input in a block: the bound the
-        // host's input storage is sized from (`Prepare::event_input`).
-        this.event_input = EVENT_INPUT_DENSITY.capacity(p);
+        // What the graph sends the event input in a block: the density's
+        // bound for the graph's block, never more than the Processor's input
+        // storage takes (`Processor::event_input`), so the graph's cut is the
+        // only cut. A Processor on offer keeps the last bound.
+        this.event_input = this.bound_for(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.

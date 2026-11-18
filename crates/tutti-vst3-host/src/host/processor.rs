@@ -22,7 +22,8 @@ use crate::types::{
     Vst3Sample, to_process_context,
 };
 use tutti_vst3_ffi::{
-    AudioSide, BusBuffers, Busy, EventList, FlushIo, ParameterChangesImpl, ProcessIo,
+    AudioSide, BusBuffers, Busy, EventList, FlushIo, MIDI_EVENT_ROOM, ParameterChangesImpl,
+    ProcessIo,
 };
 
 use super::midi_learn::MidiLearnProducer;
@@ -909,6 +910,12 @@ impl ProcessorAny {
 }
 
 impl Processor for ProcessorAny {
+    /// The input list's MIDI room ([`MIDI_EVENT_ROOM`]): what it takes
+    /// however full the other sources are.
+    fn event_input(&self) -> Option<std::num::NonZeroU32> {
+        std::num::NonZeroU32::new(MIDI_EVENT_ROOM as u32)
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)
