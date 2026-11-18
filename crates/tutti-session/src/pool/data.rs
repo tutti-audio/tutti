@@ -162,8 +162,13 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
             }
             Tier::Auto { above } => {
                 let facts = probe(&path)?;
+                // A decoded wave's size in bytes, saturating: a count past
+                // `u64` is past any threshold.
+                let wide = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
                 let bytes = facts.frames.map_or(0, |frames| {
-                    frames.get() as u64 * u64::from(facts.layout.count()) * size_of::<S>() as u64
+                    wide(frames.get())
+                        .saturating_mul(u64::from(facts.layout.count()))
+                        .saturating_mul(wide(size_of::<S>()))
                 });
                 if facts.streamable && bytes > above {
                     Ok(streamed(path, facts))
