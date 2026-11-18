@@ -347,6 +347,7 @@ impl<F: FftFloat> Chain<F> {
             self.staging.resize(block.samples().len(), F::SILENCE);
             convert(block, InterleavedMut::new(&mut self.staging, self.layout)?)?;
             if let Some(gain) = gain {
+                // A gain is an `Amplitude`, an `f32` level.
                 let gain = <F as Float>::from_f32(gain.get());
                 for s in &mut self.staging {
                     *s *= gain;
@@ -396,6 +397,7 @@ fn emit_planes<F: Float>(
 ) -> Result<()> {
     crate::planar::join(out, staging, layout)?;
     if let Some(gain) = gain {
+        // A gain is an `Amplitude`, an `f32` level.
         let gain = <F as Float>::from_f32(gain.get());
         for s in staging.iter_mut() {
             *s *= gain;

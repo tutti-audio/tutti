@@ -162,7 +162,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
             )
             .with_times(ChannelTimes::each(&[Seconds::new(0.013)]).unwrap())
             .unwrap();
-            DelayNode::from_layout(
+            DelayNode::<f32>::from_layout(
                 layout,
                 DelayControls {
                     time: Seconds::new(0.01),
@@ -193,7 +193,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     );
     survives_node(
         "chorus",
-        || ModDelayNode::chorus(BusTopology::STEREO),
+        || ModDelayNode::<f32>::chorus(BusTopology::STEREO),
         |n| {
             vec![
                 ("rate", n.param_set().cell(UnitParam::Rate).unwrap(), 3.0),
@@ -212,7 +212,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     );
     survives_node(
         "phaser",
-        || PhaserNode::stereo(Stages::of(6), PhaserControls::DEFAULT),
+        || PhaserNode::<f32>::stereo(Stages::of(6), PhaserControls::DEFAULT),
         |n| {
             vec![
                 ("rate", n.param_set().cell(UnitParam::Rate).unwrap(), 2.0),
@@ -228,7 +228,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "compressor",
         || {
-            CompressorNode::new(
+            CompressorNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {
@@ -271,7 +271,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "gate",
         || {
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 GateControls {

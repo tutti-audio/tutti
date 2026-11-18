@@ -8,8 +8,8 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, GAIN_GLIDE, Glide, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain, PhaserControls,
-    Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
+    COEFF_INTERVAL, GAIN_GLIDE, Glide, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain,
+    PhaserControls, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
@@ -71,9 +71,11 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// prepares it at the device rate before its first block, and **a re-prepare restarts the
 /// sweep**. Its tail is [`Tail::Unknown`] (the feedback
 /// recirculates), so it is never skipped.
-pub type PhaserNode = KernelNode<PhaserKernel>;
+///
+/// `F` is the state precision of the chain and the glides, `f64` by default.
+pub type PhaserNode<F = f64> = KernelNode<PhaserKernel<F>>;
 
-impl PhaserNode {
+impl<F: Float + Lerp> PhaserNode<F> {
     /// A phaser on the bus `input`, as wide as it, with `stages` all-passes per channel
     /// sweeping `range`, its channels' sweeps offset by `stagger` and running at
     /// `controls`.
@@ -161,9 +163,9 @@ control_set! {
 /// The chain has **no latency**. Its tail is [`Tail::Unknown`]: the closed loop's ring-out has
 /// no closed form a tail could be cut at.
 #[derive(Clone, Debug)]
-pub struct PhaserKernel {
+pub struct PhaserKernel<F: Float> {
     input: BusTopology,
-    chain: PhaserChain,
+    chain: PhaserChain<F>,
     range: SweepRange,
     /// The sweep's bottom and top in [`Hz`]: the top is the authored one, held at 0.90 of
     /// Nyquist at the prepared rate.
@@ -173,14 +175,14 @@ pub struct PhaserKernel {
     /// The glide length of the depth and the feedback: [`GAIN_GLIDE`] at the prepared rate.
     steps: u32,
     /// The coefficient of each channel across the segment in flight, from its start corner.
-    coefficients: Box<[Glide<f32>]>,
-    depth: Glide<f32>,
-    feedback: Glide<f32>,
+    coefficients: Box<[Glide<F>]>,
+    depth: Glide<F>,
+    feedback: Glide<F>,
     /// The LFO and the segments.
     clock: SweepClock,
 }
 
-impl PhaserKernel {
+impl<F: Float + Lerp> PhaserKernel<F> {
     /// A phaser on the bus `input`, `stages` all-passes per channel sweeping `range`, its
     /// channels' sweeps offset by `stagger`. Allocates the chain.
     ///
@@ -213,9 +215,9 @@ impl PhaserKernel {
             max: range.max(),
             rate: SampleRate::SR_48K,
             steps: 0,
-            coefficients: vec![Glide::landed(0.0); width].into_boxed_slice(),
-            depth: Glide::landed(d.depth.get()),
-            feedback: Glide::landed(d.feedback.get()),
+            coefficients: vec![Glide::landed(F::ZERO); width].into_boxed_slice(),
+            depth: Glide::landed(F::from_f64(f64::from(d.depth.get()))),
+            feedback: Glide::landed(F::from_f64(f64::from(d.feedback.get()))),
             clock: SweepClock::new(offsets),
         })
     }
@@ -229,13 +231,14 @@ impl PhaserKernel {
         let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.coefficients, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth));
+            // The sweep depth is f32-quantised: `Depth` stores f32.
+            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.to_f32()));
             allpass_coeff(sweep, rate)
         });
     }
 }
 
-impl Kernel for PhaserKernel {
+impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     type Set = PhaserSet;
 
     /// The corners solve on the stream's grid of 16 frames, like the filters and the chorus:
@@ -291,8 +294,10 @@ impl Kernel for PhaserKernel {
         ));
         let feedback = Feedback::new_clamped(controls.feedback.get()).get();
         let steps = Steps::Fixed(self.steps);
-        self.depth.aim_by(controls.depth.get(), steps);
-        self.feedback.aim_by(feedback, steps);
+        self.depth
+            .aim_by(F::from_f64(f64::from(controls.depth.get())), steps);
+        self.feedback
+            .aim_by(F::from_f64(f64::from(feedback)), steps);
         if self.clock.lands() {
             self.depth.settle();
             self.feedback.settle();
@@ -343,7 +348,7 @@ mod tests {
     /// cell with it, and the set has the three controls in the kernel's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let node = PhaserNode::stereo(Stages::of(4), PhaserControls::DEFAULT);
+        let node = PhaserNode::<f32>::stereo(Stages::of(4), PhaserControls::DEFAULT);
         assert_eq!(
             node.param_set().params().collect::<Vec<_>>(),
             [UnitParam::Rate, UnitParam::Depth, UnitParam::Feedback]
@@ -357,7 +362,7 @@ mod tests {
     #[test]
     fn the_shape_declares_the_three_controls_no_latency_and_an_unknown_tail() {
         let node = prepared(
-            PhaserNode::new(
+            PhaserNode::<f32>::new(
                 bus(3),
                 Stages::of(5),
                 SweepRange::DEFAULT,
@@ -392,7 +397,7 @@ mod tests {
     fn a_stagger_of_the_wrong_length_is_refused_at_construction() {
         let two = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(0.5)]).unwrap();
         let new = |w| {
-            PhaserNode::new(
+            PhaserNode::<f32>::new(
                 bus(w),
                 Stages::of(4),
                 SweepRange::DEFAULT,
@@ -408,7 +413,7 @@ mod tests {
         // A step, and no stagger, fit any width.
         for width in [1, 2, 6, 16] {
             for any in [Stagger::of_step(PhaseIncrement(0.25)), Stagger::NONE] {
-                let node = PhaserNode::new(
+                let node = PhaserNode::<f32>::new(
                     bus(width),
                     Stages::of(4),
                     SweepRange::DEFAULT,
@@ -458,7 +463,7 @@ mod tests {
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
         let render = |cell: Option<f32>, lane: Option<f32>| {
-            let node = PhaserNode::mono(Stages::of(4), controls);
+            let node = PhaserNode::<f32>::mono(Stages::of(4), controls);
             if let Some(v) = cell {
                 assert!(node.param_set().set(UnitParam::Rate, v));
             }
@@ -499,7 +504,7 @@ mod tests {
             feedback: Feedback::NONE,
             ..PhaserControls::DEFAULT
         };
-        let mut node = prepared(PhaserNode::mono(Stages::of(4), controls), RATE, 64);
+        let mut node = prepared(PhaserNode::<f32>::mono(Stages::of(4), controls), RATE, 64);
         let x: Vec<f32> = (0..n + 64)
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
@@ -531,7 +536,7 @@ mod tests {
             .collect();
         let render = |block: usize, driven: bool| -> Vec<f32> {
             let mut node = prepared(
-                PhaserNode::mono(Stages::of(6), PhaserControls::DEFAULT),
+                PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT),
                 RATE,
                 1_024,
             );
@@ -565,7 +570,7 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |block: usize, moved: bool| -> Vec<f32> {
-            let node = PhaserNode::mono(Stages::of(6), PhaserControls::DEFAULT);
+            let node = PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT);
             let set = node.param_set();
             let mut node = prepared(node, RATE, 1_024);
             let mut out = Vec::new();
@@ -593,7 +598,7 @@ mod tests {
     #[test]
     fn feedback_keeps_the_chain_ringing() {
         let ring = |fb: f32| {
-            let node = PhaserNode::mono(
+            let node = PhaserNode::<f32>::mono(
                 Stages::of(6),
                 PhaserControls {
                     feedback: Feedback(fb),
@@ -627,8 +632,8 @@ mod tests {
     }
 
     /// A kernel on `width` channels, prepared at [`RATE`].
-    fn kernel(width: u16, stages: usize, range: SweepRange, stagger: Stagger) -> PhaserKernel {
-        let mut k = PhaserKernel::new(bus(width), Stages::of(stages), range, stagger)
+    fn kernel(width: u16, stages: usize, range: SweepRange, stagger: Stagger) -> PhaserKernel<f32> {
+        let mut k = PhaserKernel::<f32>::new(bus(width), Stages::of(stages), range, stagger)
             .expect("a stagger that fits");
         k.prepare(RATE, MaxBlock::of(Samples(64)));
         k
@@ -894,17 +899,17 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let c = controls(7.0, 0.8, 0.6);
-        let blocks = |node: &mut PhaserNode, from: usize| -> Vec<f32> {
+        let blocks = |node: &mut PhaserNode<f32>, from: usize| -> Vec<f32> {
             let mut out = Vec::new();
             for chunk in x[from..].chunks(37) {
                 out.extend(drive(node, RATE, Planes::new(&[chunk, chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
-        let mut used = prepared(PhaserNode::stereo(Stages::of(4), c), RATE, 64);
+        let mut used = prepared(PhaserNode::<f32>::stereo(Stages::of(4), c), RATE, 64);
         blocks(&mut used, 100);
         used.reset();
-        let mut fresh = prepared(PhaserNode::stereo(Stages::of(4), c), RATE, 64);
+        let mut fresh = prepared(PhaserNode::<f32>::stereo(Stages::of(4), c), RATE, 64);
         assert_eq!(blocks(&mut used, 0), blocks(&mut fresh, 0));
     }
 
@@ -919,7 +924,7 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |at: usize| -> Vec<f32> {
-            let node = PhaserNode::mono(Stages::of(6), PhaserControls::DEFAULT);
+            let node = PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT);
             let set = node.param_set();
             let mut node = prepared(node, RATE, 2_048);
             let mut out = Vec::new();
@@ -946,27 +951,72 @@ mod tests {
         let x: Vec<f32> = (0..1_000)
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
-        let moved = |node: &PhaserNode| {
+        let moved = |node: &PhaserNode<f32>| {
             let set = node.param_set();
             assert!(set.set(UnitParam::Depth, 0.9));
             assert!(set.set(UnitParam::Feedback, 0.8));
         };
-        let blocks = |node: &mut PhaserNode| -> Vec<f32> {
+        let blocks = |node: &mut PhaserNode<f32>| -> Vec<f32> {
             x.chunks(64)
                 .flat_map(|c| drive(node, RATE, Planes::new(&[c]).unwrap(), &[]).remove(0))
                 .collect()
         };
         let mut used = prepared(
-            PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT),
+            PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
             RATE,
             64,
         );
         blocks(&mut used);
         moved(&used);
         used.reset();
-        let fresh = PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT);
+        let fresh = PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT);
         moved(&fresh);
         let mut fresh = prepared(fresh, RATE, 64);
         assert_eq!(blocks(&mut used), blocks(&mut fresh));
+    }
+
+    /// An `f64` block through a `PhaserKernel::<f64>` at depth 0 (the sweep parked at the
+    /// range's bottom, so the coefficient `a` is the one design for 200 Hz) is, per frame, the
+    /// stage difference equation `s[n] = a u[n] + u[n - 1] - a s[n - 1]` twice in cascade on
+    /// `u[n] = x[n] + g y[n - 1]`, computed in `f64`, to 2^-45.
+    #[test]
+    fn an_f64_kernel_at_no_depth_is_the_all_pass_difference_equation_in_f64() {
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let (stages, len, g) = (2usize, 300usize, 0.5f64);
+        let a: f64 = allpass_coeff(SweepRange::DEFAULT.min(), RATE);
+        assert_ne!(
+            a,
+            f64::from(a as f32),
+            "the coefficient needs more than f32 holds"
+        );
+        let x = wide_signal(len);
+        let mut want = vec![0.0f64; len];
+        let mut state = vec![(0.0f64, 0.0f64); stages];
+        let mut last = 0.0;
+        for n in 0..len {
+            let mut u = x[n] + g * last;
+            for (x1, y1) in &mut state {
+                let s = a * u + *x1 - a * *y1;
+                (*x1, *y1) = (u, s);
+                u = s;
+            }
+            last = u;
+            want[n] = u;
+        }
+        let controls = PhaserControls {
+            depth: Depth::of(0.0),
+            feedback: Feedback(0.5),
+            ..PhaserControls::DEFAULT
+        };
+        let mut k = PhaserKernel::<f64>::new(
+            BusTopology::MONO,
+            Stages::of(stages),
+            SweepRange::DEFAULT,
+            Stagger::NONE,
+        )
+        .unwrap();
+        k.prepare(RATE, MaxBlock::of(Samples(len)));
+        let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
+        assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }
 }

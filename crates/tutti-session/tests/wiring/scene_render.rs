@@ -22,6 +22,7 @@
 //!   law, and ends on the new filter as if it had run from the fade's start:
 //!   a hand-wired graph whose filter hears silence until then.
 
+use tutti_buffers::PlanesMut;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, FadeLaw, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable,
@@ -47,8 +48,8 @@ fn low_pass(cutoff: f64) -> SvfFilterNode<f64> {
 fn shaper(drive: f32) -> DistortionNode {
     DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
 }
-fn limiter() -> LimiterNode {
-    LimiterNode::mono(LimiterControls {
+fn limiter() -> LimiterNode<f32> {
+    LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-12.0),
         ceiling: Db(-1.0),
         ..LimiterControls::DEFAULT
@@ -114,8 +115,8 @@ fn scene_driven(with_limiter: bool, drive: f32) -> Scene {
 
 /// `frames` stereo frames from `side`, in `block`-frame device blocks.
 fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![Vec::new(); 2];
-    side.render(frames, block, &mut out);
+    let mut out = vec![vec![0.0; frames]; 2];
+    side.render(block, PlanesMut::from_vecs(&mut out).unwrap());
     out
 }
 

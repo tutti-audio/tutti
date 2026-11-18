@@ -4,14 +4,14 @@
 //! the graph rendered for it and is read back twice (measured, then written)
 //! without rendering again. The audio is held in memory while the spills
 //! together stay inside a budget, and past it a spill moves to a temporary
-//! file of interleaved little-endian `f32` beside its target, which is
+//! file of interleaved samples in the render's float format beside its target, which is
 //! removed when the spill is dropped.
 
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use tutti_buffers::InterleavedMut;
+use tutti_buffers::{Float, InterleavedMut};
 use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
@@ -38,8 +38,8 @@ impl SpillBudget {
     }
 }
 
-enum Store {
-    Memory(Vec<f32>),
+enum Store<F: Float> {
+    Memory(Vec<F>),
     File {
         path: PathBuf,
         writer: Option<BufWriter<File>>,
@@ -48,15 +48,15 @@ enum Store {
 
 /// The interleaved audio of one output, at the render's rate and the output's
 /// width, kept until it has been read back.
-pub(crate) struct Spill {
+pub(crate) struct Spill<F: Float> {
     layout: ChannelLayout,
     /// Where a spill to a file goes: a name beside the target.
     beside: PathBuf,
-    store: Store,
+    store: Store<F>,
     frames: usize,
 }
 
-impl Spill {
+impl<F: Float> Spill<F> {
     /// An empty spill for `layout`, which moves to a file beside `target`
     /// when the budget runs out.
     pub(crate) fn new(layout: ChannelLayout, target: &Path) -> Self {
@@ -84,7 +84,7 @@ impl Spill {
     /// # Errors
     ///
     /// The file's I/O error, when the spill is (or has to move) there.
-    pub(crate) fn push(&mut self, block: &[f32], budget: &mut SpillBudget) -> io::Result<()> {
+    pub(crate) fn push(&mut self, block: &[F], budget: &mut SpillBudget) -> io::Result<()> {
         debug_assert_eq!(block.len() % usize::from(self.layout.count()), 0);
         let bytes = std::mem::size_of_val(block);
         if let Store::Memory(held) = &mut self.store {
@@ -100,7 +100,7 @@ impl Spill {
             unreachable!("moved to a file above");
         };
         let writer = writer.as_mut().expect("a spill is read only once finished");
-        write_f32(writer, block)?;
+        write_samples(writer, block)?;
         self.frames += block.len() / usize::from(self.layout.count());
         Ok(())
     }
@@ -118,7 +118,7 @@ impl Spill {
         let held = std::mem::take(held);
         budget.held = budget.held.saturating_sub(std::mem::size_of_val(&held[..]));
         self.store = Store::File { path, writer: None };
-        write_f32(&mut writer, &held)?;
+        write_samples(&mut writer, &held)?;
         if let Store::File { writer: w, .. } = &mut self.store {
             *w = Some(writer);
         }
@@ -148,18 +148,17 @@ impl Spill {
     /// # Errors
     ///
     /// The file's I/O error (it could not be opened).
-    pub(crate) fn replay(&self) -> io::Result<SpillReplay<'_>> {
+    pub(crate) fn replay(&self) -> io::Result<SpillReplay<'_, F>> {
         Ok(match &self.store {
             Store::Memory(held) => SpillReplay::Memory { held, at: 0 },
             Store::File { path, .. } => SpillReplay::File {
                 reader: BufReader::new(File::open(path)?),
-                bytes: Vec::new(),
             },
         })
     }
 }
 
-impl Drop for Spill {
+impl<F: Float> Drop for Spill<F> {
     fn drop(&mut self) {
         if let Store::File { path, writer } = &mut self.store {
             // Closed before it is removed (Windows will not remove an open file).
@@ -189,30 +188,23 @@ fn unique_beside(target: &Path) -> PathBuf {
     ))
 }
 
-fn write_f32(writer: &mut impl Write, samples: &[f32]) -> io::Result<()> {
-    let mut bytes = Vec::with_capacity(samples.len().min(1 << 16) * 4);
+/// The samples as the bytes they are in memory: a spill is read back by the
+/// process that wrote it.
+fn write_samples<F: Float>(writer: &mut impl Write, samples: &[F]) -> io::Result<()> {
     for chunk in samples.chunks(1 << 16) {
-        bytes.clear();
-        bytes.extend(chunk.iter().flat_map(|s| s.to_le_bytes()));
-        writer.write_all(&bytes)?;
+        writer.write_all(bytemuck::cast_slice(chunk))?;
     }
     Ok(())
 }
 
 /// A spill read from its start, a block at a time.
-pub(crate) enum SpillReplay<'a> {
-    Memory {
-        held: &'a [f32],
-        at: usize,
-    },
-    File {
-        reader: BufReader<File>,
-        bytes: Vec<u8>,
-    },
+pub(crate) enum SpillReplay<'a, F: Float> {
+    Memory { held: &'a [F], at: usize },
+    File { reader: BufReader<File> },
 }
 
-impl Replay for SpillReplay<'_> {
-    fn fill(&mut self, mut out: InterleavedMut<'_>) -> crate::Result<usize> {
+impl<F: Float> Replay<F> for SpillReplay<'_, F> {
+    fn fill(&mut self, mut out: InterleavedMut<'_, F>) -> crate::Result<usize> {
         let layout = out.layout();
         match self {
             Self::Memory { held, at } => {
@@ -223,9 +215,9 @@ impl Replay for SpillReplay<'_> {
                 *at += n;
                 Ok(frames.get())
             }
-            Self::File { reader, bytes } => {
+            Self::File { reader } => {
                 let want = layout.interleaved_len(out.frames());
-                bytes.resize(want * 4, 0);
+                let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut out.samples_mut()[..want]);
                 let mut got = 0;
                 while got < bytes.len() {
                     match reader.read(&mut bytes[got..])? {
@@ -233,14 +225,7 @@ impl Replay for SpillReplay<'_> {
                         n => got += n,
                     }
                 }
-                let frames = layout.from_interleaved_len(got / 4);
-                let samples = layout.interleaved_len(frames);
-                for (dst, b) in out.samples_mut()[..samples]
-                    .iter_mut()
-                    .zip(bytes.as_chunks::<4>().0)
-                {
-                    *dst = f32::from_le_bytes(*b);
-                }
+                let frames = layout.from_interleaved_len(got / std::mem::size_of::<F>());
                 Ok(frames.get())
             }
         }

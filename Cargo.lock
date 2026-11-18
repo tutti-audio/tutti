@@ -2729,6 +2729,7 @@ dependencies = [
 name = "tutti-export"
 version = "0.0.1"
 dependencies = [
+ "bytemuck",
  "criterion",
  "hound",
  "symphonia",
@@ -3212,7 +3213,6 @@ dependencies = [
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-vst3-host",

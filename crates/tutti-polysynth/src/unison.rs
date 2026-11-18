@@ -213,8 +213,7 @@ impl UnisonEngine {
             |lane| CentsSpan::clamped(f64::from(lane)),
         );
         let spread = Spread::new_clamped(spread.unwrap_or_else(|| self.spread.load().get()));
-        let changed = (detune.get() - self.config.detune_cents.get()).abs()
-            > f64::from(f32::EPSILON)
+        let changed = detune != self.config.detune_cents
             || (spread.get() - self.config.stereo_spread.get()).abs() > f32::EPSILON;
         if changed {
             self.config.detune_cents = detune;
@@ -255,8 +254,8 @@ impl UnisonEngine {
             };
         }
 
-        for i in count..MAX_UNISON_VOICES {
-            self.voices[i] = UnisonVoiceParams::default();
+        for voice in &mut self.voices[count..MAX_UNISON_VOICES] {
+            *voice = UnisonVoiceParams::default();
         }
     }
 

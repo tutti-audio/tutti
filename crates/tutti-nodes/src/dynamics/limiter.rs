@@ -73,9 +73,13 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, a fork of it starts from
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block, which sizes the delay.
-pub type LimiterNode = KernelNode<LimiterKernel>;
+///
+/// `F` is the state precision of the delay, the envelope and the peak detector, `f64` by
+/// default: an `f64` graph runs them in `f64`, and a view of the other sample format is
+/// converted at the edges.
+pub type LimiterNode<F = f64> = KernelNode<LimiterKernel<F>>;
 
-impl LimiterNode {
+impl<F: Float> LimiterNode<F> {
     /// A limiter on the bus `input`, as wide as it, delaying by `lookahead` (at least one
     /// frame) and running at `controls`.
     ///
@@ -148,15 +152,15 @@ control_set! {
 /// The lookahead is its latency, and what the delay holds comes out within it: it declares
 /// no tail and never parks, so its release keeps running across a gap of silence.
 #[derive(Clone, Debug)]
-pub struct LimiterKernel {
+pub struct LimiterKernel<F: Float> {
     input: BusTopology,
     lookahead: Lookahead,
     detection: PeakDetection,
     /// `None` until [`prepare`](Kernel::prepare).
-    bank: Option<LimiterBank>,
+    bank: Option<LimiterBank<F>>,
 }
 
-impl LimiterKernel {
+impl<F: Float> LimiterKernel<F> {
     /// A limiter on `input` looking `lookahead` ahead.
     fn new(input: BusTopology, lookahead: Lookahead) -> Self {
         Self {
@@ -168,7 +172,7 @@ impl LimiterKernel {
     }
 }
 
-impl Kernel for LimiterKernel {
+impl<F: Float> Kernel for LimiterKernel<F> {
     type Set = LimiterSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -230,7 +234,7 @@ impl Kernel for LimiterKernel {
     fn latency(&self) -> Samples {
         self.bank
             .as_ref()
-            .map_or(Samples::ZERO, LimiterBank::latency)
+            .map_or(Samples::ZERO, LimiterBank::<F>::latency)
     }
 
     /// No ring-out past the latency.
@@ -249,16 +253,20 @@ impl LimiterSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode, Prepare};
     use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Amplitude, Latency, Samples, Tail, UnitParam};
 
+    // The nodes under test are `f32` (the session's audio format), so their tolerances are
+    // `f32`'s; each node has an `f64` kernel test below.
+
     /// The usual mastering limiter at the default lookahead, as the node's own tests make
     /// it: stereo, at `threshold` and `ceiling`, with the default release.
-    fn limiter(threshold: Db, ceiling: Db) -> LimiterNode {
-        LimiterNode::stereo(LimiterControls {
+    fn limiter(threshold: Db, ceiling: Db) -> LimiterNode<f32> {
+        LimiterNode::<f32>::stereo(LimiterControls {
             threshold,
             ceiling,
             ..LimiterControls::DEFAULT
@@ -266,8 +274,8 @@ mod tests {
     }
 
     /// `limiter` with a release of `release` seconds.
-    fn limiter_releasing(threshold: Db, ceiling: Db, release: f64) -> LimiterNode {
-        LimiterNode::stereo(LimiterControls {
+    fn limiter_releasing(threshold: Db, ceiling: Db, release: f64) -> LimiterNode<f32> {
+        LimiterNode::<f32>::stereo(LimiterControls {
             threshold,
             ceiling,
             release: Seconds(release),
@@ -290,16 +298,20 @@ mod tests {
     #[test]
     fn each_constructor_declares_its_ports() {
         let c = LimiterControls::DEFAULT;
-        let ports = |n: LimiterNode| {
+        let ports = |n: LimiterNode<f32>| {
             let shape = n.shape();
             (shape.audio_in().count(), shape.audio_out().count())
         };
-        assert_eq!(ports(LimiterNode::mono(c)), (1, 1));
-        assert_eq!(ports(LimiterNode::stereo(c)), (2, 2));
+        assert_eq!(ports(LimiterNode::<f32>::mono(c)), (1, 1));
+        assert_eq!(ports(LimiterNode::<f32>::stereo(c)), (2, 2));
         let wide =
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
         assert_eq!(
-            ports(LimiterNode::new(wide, Lookahead::of(Seconds(0.002)), c)),
+            ports(LimiterNode::<f32>::new(
+                wide,
+                Lookahead::of(Seconds(0.002)),
+                c
+            )),
             (6, 6)
         );
     }
@@ -315,7 +327,7 @@ mod tests {
             release: Seconds(0.25),
         };
         let lim = prepared_at(
-            LimiterNode::new(BusTopology::STEREO, Lookahead::of(Seconds(0.002)), c),
+            LimiterNode::<f32>::new(BusTopology::STEREO, Lookahead::of(Seconds(0.002)), c),
             RATE_44K,
         );
         let shape = lim.shape();
@@ -330,7 +342,7 @@ mod tests {
         assert_eq!(lim.param_base(1), Some(-2.0), "the ceiling's base");
         assert_eq!(lim.param_base(2), Some(0.25), "the release's base");
         // A shorthand's lookahead is the default's: 5 ms is 220.5 frames, rounded up.
-        let mono = prepared_at(LimiterNode::mono(c), RATE_44K);
+        let mono = prepared_at(LimiterNode::<f32>::mono(c), RATE_44K);
         assert_eq!(mono.shape().latency, Latency::new(Samples(221)));
     }
 
@@ -341,7 +353,7 @@ mod tests {
     fn lookahead_frames_are_the_ceil_of_the_exact_product() {
         let device = SampleRate::SR_48K;
         let lim = prepared_at(
-            LimiterNode::new(
+            LimiterNode::<f32>::new(
                 BusTopology::STEREO,
                 Lookahead::of(Seconds(0.1)),
                 LimiterControls::DEFAULT,
@@ -366,7 +378,7 @@ mod tests {
         let (low, high) = (SampleRate::SR_44K1, SampleRate::SR_96K);
         let mut lim = limiter(Db::new(-6.0), Db::new(-0.3));
 
-        let frames = |lim: &LimiterNode| lim.shape().latency.samples().get();
+        let frames = |lim: &LimiterNode<f32>| lim.shape().latency.samples().get();
         assert_eq!(frames(&lim), 0, "no rate, no latency");
 
         lim.prepare(&Prepare::new(low, MaxBlock::of(Samples(64))));
@@ -533,7 +545,7 @@ mod tests {
         let wide =
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
         let mut lim = prepared_at(
-            LimiterNode::new(wide, Lookahead::DEFAULT, LimiterControls::DEFAULT),
+            LimiterNode::<f32>::new(wide, Lookahead::DEFAULT, LimiterControls::DEFAULT),
             RATE_44K,
         );
         let mut out = [0.0f32; 6];
@@ -827,17 +839,17 @@ mod tests {
         let c = LimiterControls::DEFAULT;
         let short = Lookahead::of(Seconds(0.0002));
         let sample = prepared_at(
-            LimiterNode::new(BusTopology::MONO, short, c),
+            LimiterNode::<f32>::new(BusTopology::MONO, short, c),
             SampleRate::SR_48K,
         );
         assert_eq!(sample.shape().latency, Latency::new(Samples(10)));
         let tp = prepared_at(
-            LimiterNode::new(BusTopology::MONO, short, c).detection(PeakDetection::TruePeak),
+            LimiterNode::<f32>::new(BusTopology::MONO, short, c).detection(PeakDetection::TruePeak),
             SampleRate::SR_48K,
         );
         let frames = tp.shape().latency.samples().get();
         assert!(frames > 10, "{frames}");
-        let bank = LimiterBank::detecting(
+        let bank = LimiterBank::<f32>::detecting(
             ChannelLayout::MONO,
             short,
             SampleRate::SR_48K,
@@ -848,5 +860,29 @@ mod tests {
             panic!("not a lookahead refusal");
         };
         assert!(frames >= needed.get());
+    }
+
+    /// An `f64` kernel keeps its gain and its delay in `f64`: under a threshold at the ceiling
+    /// the gain is 1, so a signal of more than 24 bits comes out exactly `latency` frames late
+    /// (an `f32` delay line rounds it by 1e-8).
+    #[test]
+    fn an_f64_kernel_delays_a_wide_signal_by_exactly_its_latency() {
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let lookahead = Lookahead::of(Seconds(0.005));
+        let mut k = LimiterKernel::<f64>::new(BusTopology::MONO, lookahead);
+        k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples(1_024)));
+        let latency = k.latency().get();
+        assert_eq!(latency, 240);
+        let x = wide_signal(3 * latency);
+        let controls = LimiterControls {
+            threshold: Db::new(0.0),
+            ceiling: Db::new(0.0),
+            ..LimiterControls::DEFAULT
+        };
+        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
+        let want: Vec<f64> = (0..x.len())
+            .map(|n| n.checked_sub(latency).map_or(0.0, |m| x[m]))
+            .collect();
+        assert_close_f64(&y[0], &want, 0.0);
     }
 }

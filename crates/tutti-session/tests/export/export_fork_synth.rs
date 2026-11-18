@@ -7,6 +7,7 @@
 //! 96 kHz), placed to the frame since clips place on integer frames.
 
 use std::sync::Arc;
+use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
 
 use tutti_export::Produced;
@@ -222,7 +223,7 @@ fn assert_live_untouched(session: &mut DetachedSession) {
             None,
         );
         let mut frame = [0.0f32; 2];
-        session.render_frame_at(&t, &mut frame);
+        session.render_frame_at(&t, InterleavedMut::one_frame(&mut frame).unwrap());
         heard |= frame[0] != 0.0;
     }
     assert!(heard, "the live synth plays its clip on the live transport");

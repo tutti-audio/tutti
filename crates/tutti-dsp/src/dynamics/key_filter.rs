@@ -7,7 +7,9 @@ use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Hz, Q, SampleRate, Samples};
 
 use super::shared::{CHUNK, level};
-use crate::{COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
+use crate::{
+    COEFF_INTERVAL, Glide, Lanes, Lerp, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
+};
 
 /// The filter a compressor's or a gate's detector hears its key through: a type of the
 /// node, so a graph's controls and its sound say the same thing.
@@ -50,14 +52,14 @@ impl KeyFilter {
 /// A detector's key filter at a rate: an [`SvfBank`] over the key's channels and the
 /// coefficients it glides to, one grid period ([`COEFF_INTERVAL`]) a design.
 #[derive(Clone, Debug)]
-pub(super) struct KeyStage {
+pub(super) struct KeyStage<F: Float + Lanes> {
     ty: SvfType,
-    bank: SvfBank<f32>,
-    coefficients: Glide<SvfCoefficients<f32>>,
+    bank: SvfBank<F>,
+    coefficients: Glide<SvfCoefficients<F>>,
     rate: SampleRate,
 }
 
-impl KeyStage {
+impl<F: Float + Lanes + Lerp> KeyStage<F> {
     /// A stage of response `ty` over `width` key channels, at the default cutoff and Q.
     /// Allocates: build it on the control side.
     pub(super) fn new(ty: SvfType, width: ChannelLayout, rate: SampleRate) -> Self {
@@ -75,7 +77,7 @@ impl KeyStage {
         }
     }
 
-    fn design(ty: SvfType, cutoff: Hz, q: Q, rate: SampleRate) -> SvfCoefficients<f32> {
+    fn design(ty: SvfType, cutoff: Hz, q: Q, rate: SampleRate) -> SvfCoefficients<F> {
         let controls = SvfControls {
             ty,
             freq: cutoff,
@@ -112,11 +114,13 @@ impl KeyStage {
         &mut self,
         key: &Planes<'_, S>,
         frames: Range<usize>,
-        out: &mut [f32],
+        out: &mut [F],
     ) {
-        out.fill(0.0);
+        out.fill(F::ZERO);
         let n = frames.len().min(CHUNK);
         let heard = key.slice(Samples(frames.start)..Samples(frames.start + n));
+        // The filter's output is a stream like its input, so it leaves in the stream's sample
+        // format `S`; its state is `F`.
         let mut scratch = [[S::ZERO; CHUNK]; MAX_CHANNELS];
         let mut views: [&mut [S]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         let width = heard.channels().min(MAX_CHANNELS);
@@ -130,12 +134,12 @@ impl KeyStage {
         let mut non_finite = false;
         for (plane, raw) in filtered.iter().zip(heard.iter()) {
             for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {
-                let y = y.convert_to::<f32>();
+                let y = y.convert_to::<F>();
                 let l = if y.is_finite() {
                     level(y)
                 } else {
                     non_finite = true;
-                    level(x.convert_to::<f32>())
+                    level(x.convert_to::<F>())
                 };
                 *m = m.max(l);
             }

@@ -744,7 +744,7 @@ mod tests {
     fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
-            DelayNode::mono(
+            DelayNode::<f32>::mono(
                 MaxDelay::of(Seconds(0.01)),
                 DelayControls {
                     feedback: tutti_units::Feedback(0.5),

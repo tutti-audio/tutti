@@ -400,8 +400,8 @@ impl ChannelState {
     /// points below and interpolated in log, so the end points are the figure's
     /// own. The default time, 0, is the fastest.
     #[must_use]
-    pub(crate) fn glide_rate(&self) -> f32 {
-        let at = (f32::from(self.portamento_time.get()) / 128.0).min(127.0);
+    pub(crate) fn glide_rate(&self) -> f64 {
+        let at = (f64::from(self.portamento_time.get()) / 128.0).min(127.0);
         let i = PORTAMENTO_RATE
             .iter()
             .rposition(|&(v, _)| v <= at)
@@ -409,15 +409,15 @@ impl ChannelState {
             .min(PORTAMENTO_RATE.len() - 2);
         let ((v0, r0), (v1, r1)) = (PORTAMENTO_RATE[i], PORTAMENTO_RATE[i + 1]);
         let along = ((at - v0) / (v1 - v0)).clamp(0.0, 1.0);
-        libm::expf(libm::logf(r0) + (libm::logf(r1) - libm::logf(r0)) * along)
+        r0 * libm::pow(r1 / r0, along)
     }
 
     /// How long a glide from key `from` to key `to` takes at the channel's
     /// portamento rate: the interval in cents (100 to the key) over
     /// [`glide_rate`](Self::glide_rate).
     pub(crate) fn glide_time(&self, from: NoteNumber, to: NoteNumber) -> Seconds {
-        let cents = 100.0 * f32::from(from.get().abs_diff(to.get()));
-        Seconds(f64::from(cents / self.glide_rate()) / 1000.0)
+        let interval = Cents::from(Semitones(f64::from(from.get().abs_diff(to.get()))));
+        Seconds(interval.get() / (self.glide_rate() * 1000.0))
     }
 }
 
@@ -425,7 +425,7 @@ impl ChannelState {
 /// Time, cents a millisecond), read off the figure. The first and last are the
 /// figure's axis ends, 1,000 and 0.01; the points between are where the curve
 /// crosses the gridlines.
-const PORTAMENTO_RATE: [(f32, f32); 7] = [
+const PORTAMENTO_RATE: [(f64, f64); 7] = [
     (0.0, 1000.0),
     (8.0, 30.0),
     (32.0, 8.0),
@@ -477,14 +477,15 @@ mod tests {
         // CC 5 = 20 is halfway from the curve's (8, 30) to its (32, 8) cent/msec.
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(20));
         let expected = (30.0f64 * 8.0).sqrt();
-        assert!((f64::from(c.glide_rate()) - expected).abs() < 1e-4 * expected);
+        // `pow` rounds: a few ulps from the exact mean.
+        assert!((c.glide_rate() - expected).abs() < 1e-12 * expected);
         let time = c.glide_time(NoteNumber::of(60), NoteNumber::of(72));
-        assert!((time.0 - 1200.0 / expected / 1000.0).abs() < 1e-6);
+        assert!((time.0 - 1200.0 / expected / 1000.0).abs() < 1e-12 * time.0);
         // The curve's own end points: CC 5 = 0 and 127.
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(0));
-        assert!((c.glide_rate() - 1000.0).abs() < 1e-3);
+        assert_eq!(c.glide_rate(), 1000.0);
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(127));
-        assert!((c.glide_rate() - 0.01).abs() < 1e-6);
+        assert!((c.glide_rate() - 0.01).abs() < 1e-12 * 0.01);
     }
 
     /// M1 p.12: a receiver sets its concept of the LSB to zero when an MSB is
@@ -507,12 +508,12 @@ mod tests {
         let mut c = ChannelState::new(Semitones(2.0));
         assert_eq!(c.modulation_range(), Cents(50.0));
         c.set_modulation_range(8u32 << 18);
-        assert!((c.modulation_range().get() - 6.25).abs() < 1e-4);
+        assert_eq!(c.modulation_range(), Cents(6.25));
         c.set_modulation_range(1 << 25);
         assert_eq!(c.modulation_range(), Cents(100.0));
         c.control(CCNumber::MOD_WHEEL, U7::of(127));
         c.control(MOD_WHEEL_LSB, U7::of(127));
-        assert!((c.modulation_depth().get() - 100.0).abs() < 1e-3);
+        assert_eq!(c.modulation_depth(), Cents(100.0));
     }
 
     /// GM2 section 3.3.3's figure: the rate falls from 1,000 cent/msec at 0 to
@@ -524,8 +525,8 @@ mod tests {
             c.control(CCNumber::PORTAMENTO_TIME, U7::of(time));
             c.glide_rate()
         };
-        assert!((rate(0) - 1000.0).abs() < 1e-2);
-        assert!((rate(127) - 0.01).abs() < 1e-4);
+        assert_eq!(rate(0), 1000.0);
+        assert!((rate(127) - 0.01).abs() < 1e-12 * 0.01);
         for t in 1..=127u8 {
             assert!(rate(t) < rate(t - 1), "time {t}");
         }

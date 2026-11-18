@@ -250,6 +250,50 @@ impl fmt::Debug for Jobs {
     }
 }
 
+/// What a hosted plugin's job ended with: the landing a plugin-hosting (`f32`)
+/// session applies and any other has no plugin to apply it to.
+#[cfg(feature = "plugin")]
+pub(crate) enum Landing<'a> {
+    /// A reload ended with its plugin.
+    Reload {
+        node: tutti_graph::NodeKey,
+        token: &'a Arc<()>,
+        snapshot_age: Option<Duration>,
+        loaded: Box<crate::plugin::PluginLoaded>,
+    },
+    /// A reload ended without one.
+    ReloadFailed {
+        node: tutti_graph::NodeKey,
+        token: &'a Arc<()>,
+        failed: WorkerError,
+    },
+    /// A parameter read ended with its values.
+    Params {
+        node: tutti_graph::NodeKey,
+        token: &'a Arc<()>,
+        values: crate::plugin::ParamValues,
+    },
+    /// A state snapshot ended with its state.
+    Snapshot {
+        node: tutti_graph::NodeKey,
+        token: &'a Arc<()>,
+        asked: Instant,
+        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
+    },
+}
+
+/// [`Landing`], named by the sealed format trait that routes it.
+#[cfg(feature = "plugin")]
+#[doc(hidden)]
+pub struct PluginLanding<'a>(pub(crate) Landing<'a>);
+
+#[cfg(feature = "plugin")]
+impl fmt::Debug for PluginLanding<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginLanding").finish_non_exhaustive()
+    }
+}
+
 /// What a job's lander may do to the session, whichever clock it is on: a
 /// lander is typed to nothing of the clock, so the jobs in flight at a clock
 /// switch land on the converted session.
@@ -265,45 +309,9 @@ pub(crate) trait JobSession {
     /// A pool refresh's check ended: the entries whose file changed reload.
     fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport;
 
-    /// A hosted plugin's reload ended with its plugin.
+    /// What a hosted plugin's job ended with.
     #[cfg(feature = "plugin")]
-    fn land_plugin_reload(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        snapshot_age: Option<std::time::Duration>,
-        loaded: crate::plugin::PluginLoaded,
-        out: &mut Vec<SessionEvent>,
-    );
-
-    /// A hosted plugin's reload ended without one.
-    #[cfg(feature = "plugin")]
-    fn fail_plugin_reload(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        failed: WorkerError,
-        out: &mut Vec<SessionEvent>,
-    );
-
-    /// A plugin's parameter read ended with its values.
-    #[cfg(feature = "plugin")]
-    fn land_plugin_params(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        values: crate::plugin::ParamValues,
-    );
-
-    /// A plugin's state snapshot ended with its state.
-    #[cfg(feature = "plugin")]
-    fn land_plugin_snapshot(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        asked: std::time::Instant,
-        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
-    );
+    fn land_plugin(&mut self, landing: Landing<'_>, out: &mut Vec<SessionEvent>);
 }
 
 impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
@@ -330,47 +338,8 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
     }
 
     #[cfg(feature = "plugin")]
-    fn land_plugin_reload(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        snapshot_age: Option<std::time::Duration>,
-        loaded: crate::plugin::PluginLoaded,
-        out: &mut Vec<SessionEvent>,
-    ) {
-        self.land_reload(node, token, snapshot_age, loaded, out);
-    }
-
-    #[cfg(feature = "plugin")]
-    fn fail_plugin_reload(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        failed: WorkerError,
-        out: &mut Vec<SessionEvent>,
-    ) {
-        self.reload_job_failed(node, token, failed, out);
-    }
-
-    #[cfg(feature = "plugin")]
-    fn land_plugin_params(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        values: crate::plugin::ParamValues,
-    ) {
-        self.land_params(node, token, values);
-    }
-
-    #[cfg(feature = "plugin")]
-    fn land_plugin_snapshot(
-        &mut self,
-        node: tutti_graph::NodeKey,
-        token: &Arc<()>,
-        asked: std::time::Instant,
-        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
-    ) {
-        self.land_snapshot(node, token, asked, state);
+    fn land_plugin(&mut self, landing: Landing<'_>, out: &mut Vec<SessionEvent>) {
+        <C::Float as crate::format::Sealed>::land_plugin(self, PluginLanding(landing), out);
     }
 }
 

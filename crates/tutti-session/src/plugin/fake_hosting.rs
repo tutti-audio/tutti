@@ -22,7 +22,7 @@ mod plugin_params;
 
 /// `handle` (the plugin `plugin`) hosted at `node`, which a test added to the
 /// graph and which hosts nothing yet.
-pub(super) fn host<K: crate::AppKey, C: Clock>(
+pub(super) fn host<K: crate::AppKey, C: Clock<Float = f32>>(
     session: &mut Session<K, C>,
     node: impl Into<NodeKey>,
     handle: PluginHandle,
@@ -41,7 +41,7 @@ pub(super) fn host<K: crate::AppKey, C: Clock>(
 
 /// [`host`] for a plugin served from a plugin server: its record drops where it
 /// is retired.
-pub(super) fn host_served<K: crate::AppKey, C: Clock>(
+pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     session: &mut Session<K, C>,
     node: impl Into<NodeKey>,
     handle: PluginHandle,

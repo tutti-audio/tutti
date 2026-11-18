@@ -1,52 +1,44 @@
 //! The Windows backend of the main loop: a named pipe has no `poll`, so the wait
 //! is `PeekNamedPipe` with a back-off. A native loop
 //! (`MsgWaitForMultipleObjectsEx` over overlapped pipe I/O, which also pumps the
-//! Win32 message queue a floating editor needs) replaces the wait and the pump
-//! together, without touching the loop's logic.
+//! Win32 message queue a floating editor needs) replaces the wait, without
+//! touching the loop's logic.
 
-use crate::bell::Bell;
-use crate::transport::Transport;
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
+use tutti_plugin_types::{BridgeResult, Wakeups};
+
+#[path = "windows_bell.rs"]
+mod bell;
+
+pub(crate) use bell::Bell;
 
 pub(crate) type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;
 
-/// The reactor's window-system half. Nothing to pump here.
+/// The reactor. A named pipe has no descriptor to add the plugin's to, so it
+/// holds nothing.
 #[derive(Debug, Default)]
 pub(crate) struct Native(());
 
 impl Native {
-    /// Waits until `transport`'s socket is readable (`Ok(true)`), the `bell`
-    /// rings or `timeout` passes (`Ok(false)`), then pumps the window system's
-    /// events.
-    ///
-    /// The socket's wait is the transport's ([`wait_readable`] for a real
-    /// socket), so a test's scripted transport drives the same loop. A plugin's
-    /// descriptors are not waited on here: they are POSIX's (CLAP) and Linux's
-    /// (VST3's run loop), so no plugin registers one on this platform, and
-    /// `ready` stays empty. Its timers bound `timeout` in the loop.
+    /// [`wait_readable`] on `stream`. A plugin's descriptors are not waited on
+    /// here: they are POSIX's (CLAP) and Linux's (VST3's run loop), so no
+    /// plugin registers one on this platform, and `ready` stays empty. Its
+    /// timers bound `timeout` in the loop.
     ///
     /// # Errors
     ///
-    /// The transport's wait fails.
-    pub(crate) fn wait(
+    /// Never on this backend.
+    pub(super) fn wait_on(
         &mut self,
-        transport: &mut dyn Transport,
-        main: MainThreadMarker,
-        timeout: std::time::Duration,
+        stream: &Stream,
         _wakeups: &Wakeups,
+        timeout: std::time::Duration,
         bell: &Bell,
-        ready: &mut Vec<Ready>,
+        _ready: &mut Vec<Ready>,
     ) -> BridgeResult<bool> {
-        ready.clear();
-        let readable = transport.wait_readable(Some(timeout), bell)?;
-        self.pump(main);
-        Ok(readable)
+        wait_readable(stream, Some(timeout), bell)
     }
-
-    /// Pumps the window system's events: none yet.
-    fn pump(&mut self, _main: MainThreadMarker) {}
 }
 
 /// Waits up to `timeout` (`None`: for ever) for `stream` to hold bytes:

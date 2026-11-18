@@ -68,8 +68,10 @@ fn an_open_lands_opened_with_the_calls_id() {
     let mut opened: Vec<SamplerLoad> = landed(&mut s, 2)
         .into_iter()
         .map(|event| match event {
-            SamplerEvent::Opened { id, stream, reader } => {
+            SamplerEvent::Opened { id } => {
+                let (stream, reader) = s.take_stream(id).expect("the landed stream");
                 assert_eq!(stream.id(), reader.id(), "the two halves of one stream");
+                assert!(s.take_stream(id).is_none(), "a stream is taken once");
                 id
             }
             other => panic!("expected an open, got {other:?}"),
@@ -136,7 +138,8 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip {
             s.open_stream(info.path(), Placement::HEAD)
                 .expect("a streamer");
             match landed(&mut s, 1).pop() {
-                Some(SamplerEvent::Opened { stream, reader, .. }) => {
+                Some(SamplerEvent::Opened { id }) => {
+                    let (stream, reader) = s.take_stream(id).expect("the landed stream");
                     tutti_sampler::Clip::streaming(reader, stream)
                 }
                 other => panic!("expected the open, got {other:?}"),

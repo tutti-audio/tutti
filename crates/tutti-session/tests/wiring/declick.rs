@@ -9,6 +9,7 @@
 //! `j` (240 frames, `DECLICK` at 48 kHz), one frame per render call, so the
 //! position of every sample is exact.
 
+use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
 use tutti_session::{DetachedSession, OutPort, Root, Session};
@@ -36,7 +37,7 @@ fn frames(s: &mut DetachedSession, n: usize) -> Vec<f32> {
     (0..n)
         .map(|_| {
             let mut frame = [f32::NAN; 2];
-            s.render_frame(&mut frame);
+            s.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
             frame[0]
         })
         .collect()

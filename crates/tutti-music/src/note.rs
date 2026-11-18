@@ -237,7 +237,9 @@ impl Note {
     #[inline]
     #[must_use]
     pub fn interval_to(self, other: Note) -> Semitones {
-        Semitones((other.semitones_from_c0() - self.semitones_from_c0()) as f64)
+        Semitones(f64::from(
+            other.semitones_from_c0() - self.semitones_from_c0(),
+        ))
     }
 
     /// Returns the note a whole number of semitones away. Fractional input is
@@ -257,7 +259,7 @@ impl Note {
     #[inline]
     #[must_use]
     pub fn frequency(self) -> Hz {
-        let steps = (self.semitones_from_c0() - Self::A4.semitones_from_c0()) as f64;
+        let steps = f64::from(self.semitones_from_c0() - Self::A4.semitones_from_c0());
         Self::A4_HZ * Semitones(steps).to_pitch_ratio()
     }
 

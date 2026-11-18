@@ -106,7 +106,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
-    let (lim, _) = s.graph().add(LimiterNode::mono(LimiterControls {
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(0.0),
         ceiling: Db(0.0),
         ..LimiterControls::DEFAULT

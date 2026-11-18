@@ -8,6 +8,7 @@
 //! limiter takes the channel it fed to silence, and with nothing
 //! latency-bearing left the published latency is nothing at all.
 
+use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
@@ -23,7 +24,7 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         .expect("builds");
     let (dry, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (lim, _) = s.graph().add(LimiterNode::mono(LimiterControls {
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT
@@ -55,7 +56,7 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
     // and the figure with it.
     for _ in 0..6 {
         for _ in 0..64 {
-            s.render_frame(&mut [0.0; 2]);
+            s.render_frame(InterleavedMut::one_frame(&mut [0.0; 2]).unwrap());
         }
         let _ = s.update();
     }

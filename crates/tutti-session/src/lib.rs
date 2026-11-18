@@ -75,6 +75,7 @@ mod editor;
 mod error;
 #[cfg(feature = "export")]
 mod fork;
+mod format;
 #[cfg(feature = "soundfont")]
 mod general_midi;
 mod graph;
@@ -150,7 +151,9 @@ pub use bounce::{
 pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
-pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+pub use clock::{
+    Clock, Offline, OfflineSession, RealTime, SessionFloat, SystemClock, SystemSession,
+};
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]
@@ -227,9 +230,10 @@ pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
-    PoolState, RefreshPool, RefreshReport, RetryError, WhenLoadedError, stranded_loads,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, Parking, PoolConfig,
+    PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport,
+    PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing, WhenLoadedError,
+    stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};

@@ -1543,7 +1543,7 @@ fn a_mode_set_through_the_transforms_controls_is_adopted_once() {
 /// a second event with no reset between goes alone.
 #[test]
 fn a_reset_transform_sends_the_zones_ranges_again() {
-    use tutti_graph::{Event, Node as _, Offset, contract::Direct};
+    use tutti_graph::{Event, Offset, contract::Direct};
     let pedal = Event::midi(
         Offset::ZERO,
         midi::cc(MidiChannel::FIRST, CCNumber::SUSTAIN, 0),
@@ -1566,6 +1566,6 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
     };
     assert_eq!(ranges(&mut d), 7, "the first event");
     assert_eq!(ranges(&mut d), 0, "told once");
-    d.node.reset();
+    tutti_graph::Node::<f32>::reset(&mut *d.node);
     assert_eq!(ranges(&mut d), 7, "after the reset");
 }

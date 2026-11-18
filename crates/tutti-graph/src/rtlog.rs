@@ -597,7 +597,7 @@ impl RtLogReaders {
     ///
     /// Control thread; allocates.
     #[must_use]
-    pub fn new(exec: &mut crate::Executor) -> Self {
+    pub fn new<F: tutti_buffers::Float>(exec: &mut crate::Executor<F>) -> Self {
         let registry = Self(Arc::new(Mutex::new(Registry {
             gate: exec.log_gate(),
             readers: Vec::new(),
@@ -621,7 +621,7 @@ impl RtLogReaders {
     /// when the executor was not resized.
     ///
     /// Control thread, with the executor not rendering; allocates.
-    pub fn adopt(&self, exec: &mut crate::Executor) {
+    pub fn adopt<F: tutti_buffers::Float>(&self, exec: &mut crate::Executor<F>) {
         let fresh = exec.take_log_readers();
         if fresh.is_empty() {
             return;

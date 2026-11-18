@@ -9,6 +9,7 @@
 //! and a restart's republication by `device.rs`'s
 //! `a_rerate_keeps_the_published_compensation_in_step_with_the_plan`.
 
+use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
@@ -26,8 +27,8 @@ fn detached() -> DetachedSession {
 }
 
 /// A limiter's lookahead is the latency; the one the engine ships.
-fn limiter() -> LimiterNode {
-    LimiterNode::mono(LimiterControls {
+fn limiter() -> LimiterNode<f32> {
+    LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT
@@ -208,11 +209,11 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
     let _ = s.update();
     assert_eq!(s.latency(), at_44k);
     let mut out = [0.0f32; 2];
-    side.tick(&[], &mut out);
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
 
     s.graph().set_sample_rate(SampleRate::SR_48K);
     for _ in 0..3 {
-        side.tick(&[], &mut out);
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
         let _ = s.update();
     }
     let at_48k = s.graph_ref().node_latency(eff).unwrap();

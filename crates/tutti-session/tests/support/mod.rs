@@ -5,8 +5,8 @@
 //! The plugin is a dev-dependency, so cargo builds its cdylib alongside the
 //! test. The server is not (it would be a dependency cycle through
 //! `tutti-plugin`), so it must be built first: `cargo build -p
-//! tutti-plugin-server`. Both are looked up beside the running binary
-//! (`<profile>/deps/` for a test, `<profile>/examples/` for an example).
+//! tutti-plugin-server`. Both are looked up under the running binary's profile
+//! directory (`tutti_fixtures::profile_dir`).
 
 use std::path::PathBuf;
 

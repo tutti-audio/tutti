@@ -42,7 +42,7 @@ use tutti_units::{
 #[test]
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
-        CompressorNode::new(
+        CompressorNode::<f32>::new(
             BusTopology::STEREO,
             KeySource::Sidechain,
             CompressorControls {
@@ -80,7 +80,7 @@ fn compressor() {
 #[test]
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
-        GateNode::new(
+        GateNode::<f32>::new(
             BusTopology::STEREO,
             KeySource::Sidechain,
             GateControls {
@@ -114,7 +114,7 @@ fn gate() {
 #[test]
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::stereo(LimiterControls {
+        LimiterNode::<f32>::stereo(LimiterControls {
             threshold: Db(-6.0),
             ceiling: Db(-3.0),
             ..LimiterControls::DEFAULT
@@ -135,7 +135,7 @@ fn limiter() {
 #[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
-        BrickwallLimiterNode::new(Db(-3.0))
+        BrickwallLimiterNode::<f32>::new(Db(-3.0))
     })
     .control("ceiling", |l| {
         assert!(l.param_set().set(UnitParam::Ceiling, -9.0));
@@ -153,7 +153,7 @@ fn delay_line() {
         )
         .with_times(ChannelTimes::each(&[Seconds(0.07)]).unwrap())
         .unwrap();
-        DelayNode::from_layout(
+        DelayNode::<f32>::from_layout(
             layout,
             DelayControls {
                 time: Seconds(0.05),
@@ -375,7 +375,7 @@ fn lfo() {
 #[test]
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::chorus(BusTopology::STEREO)
+        ModDelayNode::<f32>::chorus(BusTopology::STEREO)
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -390,7 +390,7 @@ fn chorus() {
 #[test]
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
-        PhaserNode::stereo(
+        PhaserNode::<f32>::stereo(
             Stages::of(4),
             PhaserControls {
                 feedback: Feedback::new(0.3_f32),
@@ -411,7 +411,7 @@ fn phaser() {
 #[test]
 fn plate_reverb() {
     IsolateRow::new("PlateReverbNode", || {
-        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(1.0)))
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds(1.0)))
     })
     .control("decay", |p| {
         assert!(p.param_set().set(UnitParam::Decay, 6.0))

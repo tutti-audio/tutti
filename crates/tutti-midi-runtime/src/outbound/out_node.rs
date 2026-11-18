@@ -55,7 +55,7 @@ impl Default for MidiOutNode {
     }
 }
 
-impl Node for MidiOutNode {
+impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     /// No audio; one event input and one event output of
     /// [`MIDI_OUT_EVENT_CAPACITY`] events.
     fn shape(&self) -> Shape {
@@ -68,7 +68,7 @@ impl Node for MidiOutNode {
 
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let mut kept = 0;
         let mut lost = 0;
         for event in io.events(0) {

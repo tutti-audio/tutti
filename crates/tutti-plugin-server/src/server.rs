@@ -8,7 +8,8 @@
 use crate::render::{RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{Transport, TransportListener};
-use tutti_plugin_ipc::{BridgeConfig, BridgeMessage, PROTOCOL_VERSION};
+use std::path::PathBuf;
+use tutti_plugin_ipc::{BridgeMessage, PROTOCOL_VERSION};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_rt::StopToken;
@@ -23,9 +24,7 @@ use tutti_rt::StopToken;
 /// audio callback's thread at an elevated priority themselves (cpal's ALSA
 /// backend does not: its callback thread is an ordinary one). A plugin subprocess
 /// gets no such treatment — it is an ordinary `Command::spawn` at default
-/// priority — yet it must answer within the same block period. Measured with
-/// eight real plugins at 64/48k, that asymmetry swung the number of on-time
-/// replies between 29 and 492 out of 500 across identical runs.
+/// priority — yet it must answer within the same block period.
 ///
 /// This is a *quality* knob, not a correctness one: a late reply yields silence,
 /// never wrong audio, because the host reads a slot only when the slab's
@@ -50,7 +49,8 @@ pub(crate) fn request_audio_priority(what: &str) {
 /// asks for shutdown. Dropping it closes any open editor window and unlinks the
 /// socket.
 pub struct PluginServer {
-    config: BridgeConfig,
+    /// The socket the host connects to, unlinked on drop.
+    socket: PathBuf,
     session: Session,
     /// What renders the blocks, until the audio connection is there to hand it
     /// to a thread.
@@ -66,13 +66,13 @@ pub struct PluginServer {
 impl std::fmt::Debug for PluginServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginServer")
-            .field("config", &self.config)
+            .field("socket", &self.socket)
             .finish_non_exhaustive()
     }
 }
 
 impl PluginServer {
-    /// Creates a server for `config`, and starts the watch on the spawning host:
+    /// Creates a server that listens at `socket`, and starts the watch on the spawning host:
     /// a host that ends is told to the main loop, which shuts down as it does
     /// when the control connection ends. A server that has not done so within
     /// two seconds (blocked in an accept, a plugin's modal dialog, a
@@ -85,20 +85,20 @@ impl PluginServer {
     ///
     /// The thread is not the process's main thread, or the OS refused the
     /// session's bells.
-    pub fn new(config: BridgeConfig) -> BridgeResult<Self> {
+    pub fn new(socket: PathBuf) -> BridgeResult<Self> {
         let main = MainThreadMarker::new().ok_or(BridgeError::ProtocolError(
             "the plugin server must be built on the process's main thread",
         ))?;
         let (session, render) = Session::new()?;
         let served = StopToken::new();
         watch_host(
-            config.socket_path.clone(),
+            socket.clone(),
             session.ties().host_gone.clone(),
             session.ties().bell.clone(),
             served.clone(),
         );
         Ok(Self {
-            config,
+            socket,
             session,
             render: Some(render),
             main,
@@ -146,7 +146,7 @@ impl PluginServer {
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
     fn serve(&mut self) -> BridgeResult<()> {
-        let listener = TransportListener::bind(&self.config.socket_path)?;
+        let listener = TransportListener::bind(&self.socket)?;
 
         // First connection: handshake.
         let mut handshake = listener.accept()?;
@@ -265,7 +265,7 @@ impl PluginServer {
 
 impl Drop for PluginServer {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.config.socket_path);
+        let _ = std::fs::remove_file(&self.socket);
     }
 }
 
@@ -302,7 +302,7 @@ fn host_pid_given(stated: Option<&str>, parent: Option<u32>) -> Option<u32> {
 fn watch_host(
     socket_path: std::path::PathBuf,
     host_gone: StopToken,
-    bell: crate::bell::Bell,
+    bell: crate::main_loop::Bell,
     served: StopToken,
 ) {
     let Some(host) = host_pid() else {

@@ -1,0 +1,175 @@
+//! An `f64` session serves the pool and the spawner: an `audio_file` entry
+//! loads its resident wave in `f64`, and a disk stream opens, lands and its
+//! clip renders into `f64` frames beside a figure `f32` cannot hold.
+
+use std::time::Duration;
+
+use tutti_buffers::InterleavedMut;
+use tutti_fixtures::wait_until;
+use tutti_graph::ForkByClone;
+use tutti_sampler::Placement;
+use tutti_session::{
+    AudioEntry, Offline, OutPort, PoolState, Root, SamplerEvent, SessionBuilder, SessionEvent,
+    audio_file,
+};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, SampleRate};
+
+#[path = "../support/f64_nodes.rs"]
+mod f64_nodes;
+use f64_nodes::{Dc, FINE};
+
+const RATE: f64 = 48_000.0;
+const LEN: usize = 4_800;
+const BLOCK: usize = 512;
+
+/// Frame `i` of the ramp file: exact in `f32`.
+fn value(i: usize) -> f32 {
+    (i as f32 + 1.0) * 1e-5
+}
+
+fn session() -> tutti_session::OfflineSession<&'static str, f64> {
+    SessionBuilder::<Offline<f64>>::default()
+        .sample_rate(SampleRate::of(RATE))
+        .build()
+        .expect("an f64 session builds")
+}
+
+fn write_ramp(path: &std::path::Path) {
+    let samples: Vec<f32> = (0..LEN).map(value).collect();
+    tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
+}
+
+/// Updates `s` until `done` finds what it waits for in what the update landed.
+fn until<T>(
+    s: &mut tutti_session::OfflineSession<&'static str, f64>,
+    what: &str,
+    mut done: impl FnMut(
+        &mut tutti_session::OfflineSession<&'static str, f64>,
+        Vec<SessionEvent>,
+    ) -> Option<T>,
+) -> T {
+    let mut found = None;
+    wait_until(what, Duration::from_secs(20), || {
+        let events = s.update();
+        found = done(s, events);
+        found.is_some()
+    });
+    found.expect("the wait ended on it")
+}
+
+/// Frame `i` of the `f64` ramp file: `FINE` scaled, so no frame is an `f32`.
+fn fine_value(i: usize) -> f64 {
+    FINE * (i as f64 + 1.0) * 1e-5
+}
+
+/// A mono Float64 WAV of `LEN` frames of [`fine_value`].
+fn write_f64_ramp(path: &std::path::Path) {
+    let data: Vec<u8> = (0..LEN).flat_map(|i| fine_value(i).to_le_bytes()).collect();
+    let mut file = Vec::new();
+    file.extend(b"RIFF");
+    file.extend((36 + data.len() as u32).to_le_bytes());
+    file.extend(b"WAVEfmt ");
+    file.extend(16u32.to_le_bytes());
+    file.extend(3u16.to_le_bytes()); // IEEE float
+    file.extend(1u16.to_le_bytes());
+    file.extend((RATE as u32).to_le_bytes());
+    file.extend((RATE as u32 * 8).to_le_bytes());
+    file.extend(8u16.to_le_bytes());
+    file.extend(64u16.to_le_bytes());
+    file.extend(b"data");
+    file.extend((data.len() as u32).to_le_bytes());
+    file.extend(data);
+    std::fs::write(path, file).expect("the file writes");
+}
+
+/// **A pool `audio_file` entry of a Float64 file holds its frames as `f64` on
+/// an `f64` session, and a `Clip<f64>` over the pooled wave plays them
+/// exactly.** No frame survives a trip through `f32`.
+#[test]
+fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
+    assert_ne!(f64::from(fine_value(7) as f32), fine_value(7));
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp64.wav");
+    write_f64_ramp(&path);
+    let mut s = session();
+    s.pool(audio_file("ramp", &path)).expect("a declaration");
+    until(&mut s, "the entry", |s, _| {
+        matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)).then_some(())
+    });
+    let AudioEntry::Resident(wave) = s.audio(&"ramp").expect("loaded") else {
+        panic!("a resident entry");
+    };
+    assert_eq!(wave.len().get(), LEN);
+    assert_eq!(wave.at(0, 7), fine_value(7));
+
+    let clip = tutti_sampler::Clip::<f64>::new(wave).expect("a placeable wave");
+    let (key, _handle) = s.graph().add(clip.at(Beat(0.0)));
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(key, 0)])
+        .expect("the clip into the root");
+    let _ = s.update();
+    s.play().expect("room");
+    let mut heard = Vec::new();
+    let mut block = vec![0.0f64; BLOCK * 2];
+    while heard.len() < 3_000 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        heard.extend(block.chunks(2).map(|frame| frame[0]));
+    }
+    let first = heard.iter().position(|&x| x != 0.0).expect("sound");
+    for k in 1_100..2_000 {
+        assert_eq!(heard[first + k], fine_value(k), "file frame {k}");
+    }
+}
+
+/// **A disk stream opened on an `f64` session lands as `Opened`, is taken in `f64`, and its
+/// clip renders `FINE + value(k)` at the file's frame `k` in `f64`.**
+#[test]
+fn an_f64_session_streams_a_file_into_f64_frames() {
+    assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let mut s = session();
+    s.open_stream(&path, Placement::HEAD).expect("a streamer");
+    let id = until(&mut s, "the open", |_, events| {
+        events.into_iter().find_map(|event| match event {
+            SessionEvent::Sampler(SamplerEvent::Opened { id }) => Some(id),
+            _ => None,
+        })
+    });
+    let (stream, reader) = s.take_stream(id).expect("the landed stream");
+    let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
+    let (key, handle) = s
+        .graph()
+        .add(tutti_sampler::Clip::<f64>::streaming(reader, stream).at(Beat(0.0)));
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(dc, 0), OutPort::new(key, 0)])
+        .expect("both into the root");
+    let _ = s.update();
+    wait_until("the stream to prime", Duration::from_secs(10), || {
+        handle
+            .status()
+            .is_none_or(|status| status.phase != tutti_sampler::StreamPhase::Opening)
+    });
+    s.play().expect("room");
+    let mut heard = Vec::new();
+    let mut block = vec![0.0f64; BLOCK * 2];
+    while heard.len() < 3_000 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        heard.extend(block.chunks(2).map(|frame| frame[0]));
+    }
+    // The first frame that is neither silent nor the dc alone is the file's
+    // frame 0 under the start fade; the fade is long over by frame 1100.
+    let first = heard
+        .iter()
+        .position(|&x| x != FINE && x != 0.0)
+        .expect("something beside the dc");
+    for k in 1_100..2_000 {
+        assert_eq!(
+            heard[first + k],
+            FINE + f64::from(value(k)),
+            "file frame {k}"
+        );
+    }
+}

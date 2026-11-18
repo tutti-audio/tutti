@@ -4,13 +4,15 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::{Float, InterleavedMut, PlanesMut};
+
 use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition};
 
 use super::{Graph, render};
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// What a test reads of the graph's plumbing: [`Testing`].
-    pub fn testing(&self) -> Testing<'_> {
+    pub fn testing(&self) -> Testing<'_, F> {
         Testing { graph: self }
     }
 
@@ -21,7 +23,7 @@ impl Graph {
     ///
     /// If the audio side was already taken, by an earlier call or by the
     /// engine the session builder built over it.
-    pub fn take_audio_side(&mut self) -> AudioSide {
+    pub fn take_audio_side(&mut self) -> AudioSide<F> {
         AudioSide::live(self.take_executor())
     }
 }
@@ -29,11 +31,11 @@ impl Graph {
 /// The graph's plumbing as a test reads it: what the session drives and no
 /// host calls. Made by [`Graph::testing`].
 #[derive(Debug, Clone, Copy)]
-pub struct Testing<'g> {
-    graph: &'g Graph,
+pub struct Testing<'g, F: Float = f32> {
+    graph: &'g Graph<F>,
 }
 
-impl Testing<'_> {
+impl<F: Float> Testing<'_, F> {
     /// What every node is prepared for: the rate, the largest block, and the
     /// device's callback size when the session knows it.
     pub fn prepared(&self) -> Prepare {
@@ -141,7 +143,7 @@ impl Testing<'_> {
     /// # Errors
     ///
     /// When a node cannot be forked.
-    pub fn fork_live(&self) -> Result<AudioSide, tutti_graph::ForkError> {
+    pub fn fork_live(&self) -> Result<AudioSide<F>, tutti_graph::ForkError> {
         let (editor, exec) = self.graph.editor.fork(
             tutti_graph::ForkTarget::Master,
             tutti_graph::ForkMode::Live,
@@ -154,17 +156,17 @@ impl Testing<'_> {
 /// The audio thread's half of a graph, for a test that renders what a device
 /// would hear: every commit lands on it, and rendering it plays the graph.
 /// Taken with [`Graph::take_audio_side`] or [`Testing::fork_live`].
-pub struct AudioSide {
-    exec: Executor,
+pub struct AudioSide<F: Float = f32> {
+    exec: Executor<F>,
     transport: TransportPosition,
-    scratch: Vec<Vec<f32>>,
+    scratch: Vec<Vec<F>>,
     /// A fork's own editor, kept for as long as its executor runs: the
     /// executor sends its boxes back to it. `None` for the live graph's
     /// audio side, whose editor stays in the graph.
-    _editor: Option<Editor>,
+    _editor: Option<Editor<F>>,
 }
 
-impl std::fmt::Debug for AudioSide {
+impl<F: Float> std::fmt::Debug for AudioSide<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioSide")
             .field("exec", &self.exec)
@@ -174,8 +176,8 @@ impl std::fmt::Debug for AudioSide {
     }
 }
 
-impl AudioSide {
-    pub(super) fn live(exec: Executor) -> Self {
+impl<F: Float> AudioSide<F> {
+    pub(super) fn live(exec: Executor<F>) -> Self {
         Self {
             exec,
             transport: TransportPosition::default(),
@@ -185,7 +187,7 @@ impl AudioSide {
     }
 
     /// A fork's pair, rendered as an audio side.
-    pub(super) fn forked(editor: Editor, exec: Executor) -> Self {
+    pub(super) fn forked(editor: Editor<F>, exec: Executor<F>) -> Self {
         Self {
             exec,
             transport: TransportPosition::default(),
@@ -194,16 +196,11 @@ impl AudioSide {
         }
     }
 
-    /// Renders one frame: `input` one sample per global input, `output` one
-    /// per global output. Commits sent since the last call land first.
-    pub fn tick(&mut self, input: &[f32], output: &mut [f32]) {
-        render(
-            &mut self.exec,
-            &mut self.scratch,
-            &self.transport,
-            input,
-            output,
-        );
+    /// Renders one frame, with silence on every global input, into `output`:
+    /// one value per global output. Commits sent since the last call land
+    /// first.
+    pub fn tick(&mut self, output: InterleavedMut<'_, F>) {
+        render(&mut self.exec, &mut self.scratch, &self.transport, output);
     }
 
     /// The transport every block from here on renders under, as a device's
@@ -214,19 +211,20 @@ impl AudioSide {
         self.transport = transport;
     }
 
-    /// Renders `frames` frames with no global input into `output`, planar,
-    /// one slice per global output, in the blocks a device would hand over:
+    /// Renders `output`'s frames with no global input into it, planar, one
+    /// plane per global output, in the blocks a device would hand over:
     /// executor blocks of up to `block` frames, each under the transport
-    /// last [set](Self::set_transport) (stopped at beat zero until one is).
+    /// last [set](Self::set_transport) (stopped at beat zero until one is). A
+    /// plane the graph has no output for stays silent.
     ///
     /// # Panics
     ///
     /// If `block` is zero, or past the graph's prepared maximum.
-    pub fn render(&mut self, frames: usize, block: usize, output: &mut [Vec<f32>]) {
+    pub fn render(&mut self, block: usize, mut output: PlanesMut<'_, '_, F>) {
         assert!(block > 0, "a zero-frame block");
-        for o in output.iter_mut() {
-            o.clear();
-            o.resize(frames, 0.0);
+        let frames = output.frames().get();
+        for c in 0..output.channels() {
+            output.plane_mut(c).samples_mut().fill(F::ZERO);
         }
         let exec = &mut self.exec;
         let mut done = 0;
@@ -240,18 +238,19 @@ impl AudioSide {
                     p.global_outputs(),
                 )
             });
-            let zeros = vec![0.0f32; len];
-            let inputs: Vec<&[f32]> = (0..ins).map(|_| &zeros[..]).collect();
-            let mut planes: Vec<Vec<f32>> = vec![vec![0.0; len]; outs];
-            let mut slices: Vec<&mut [f32]> = planes.iter_mut().map(|p| &mut p[..]).collect();
+            let zeros = vec![F::ZERO; len];
+            let inputs: Vec<&[F]> = (0..ins).map(|_| &zeros[..]).collect();
+            let mut planes: Vec<Vec<F>> = vec![vec![F::ZERO; len]; outs];
+            let mut slices: Vec<&mut [F]> = planes.iter_mut().map(|p| &mut p[..]).collect();
             let fade = exec.root_fade();
             if exec.plan().is_some() {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }
-            for (c, o) in output.iter_mut().enumerate() {
+            for c in 0..output.channels() {
                 let Some(new) = planes.get(c).filter(|_| c < root) else {
                     continue;
                 };
+                let o = output.plane_mut(c).into_samples_mut();
                 o[done..done + len].copy_from_slice(new);
                 // A root change crossfades by index, the old root's channels
                 // after the new root's.
@@ -260,14 +259,15 @@ impl AudioSide {
                         let was = if c < f.width {
                             planes[root + c][i]
                         } else {
-                            0.0
+                            F::ZERO
                         };
                         let (go, gn) = if f.done.get() + i < f.fade.duration.get() {
                             f.fade.law.gains(f.done.get() + i, f.fade.duration.get())
                         } else {
                             (0.0, 1.0)
                         };
-                        *x = was * go + *x * gn;
+                        // A fade law's gains are `f32` levels.
+                        *x = was * F::from_f32(go) + *x * F::from_f32(gn);
                     }
                 }
             }

@@ -15,8 +15,8 @@ use tutti_units::{Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
-fn node(c: PlateReverbConfig) -> PlateReverbNode {
-    prepared(PlateReverbNode::from(c), SR, BLOCK)
+fn node(c: PlateReverbConfig) -> PlateReverbNode<f32> {
+    prepared(PlateReverbNode::<f32>::from(c), SR, BLOCK)
 }
 
 fn impulse() -> Vec<f32> {
@@ -32,7 +32,7 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 
 /// A node and the stream frame its next block starts at: the graph's view of it.
 struct Rig {
-    node: PlateReverbNode,
+    node: PlateReverbNode<f32>,
     frame: u64,
 }
 
@@ -92,7 +92,7 @@ fn the_ports_the_latency_and_the_declared_ceiling() {
         "the longest decay rings that long"
     );
     let Tail::Finite(at_192k) = prepared(
-        PlateReverbNode::from(PlateReverbConfig::new()),
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
         SampleRate::SR_192K,
         BLOCK,
     )
@@ -214,7 +214,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
 fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
     let x = noise(11, 4_096);
     let render = |block: usize, moved: bool| -> Vec<Vec<f32>> {
-        let n = PlateReverbNode::from(PlateReverbConfig::new());
+        let n = PlateReverbNode::<f32>::from(PlateReverbConfig::new());
         let set = n.param_set();
         let mut n = prepared(n, SR, 1_024);
         let mut out = vec![Vec::new(), Vec::new()];

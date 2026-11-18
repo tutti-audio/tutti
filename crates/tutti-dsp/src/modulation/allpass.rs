@@ -1,6 +1,7 @@
 //! The pure pieces of the phaser's swept first-order all-pass chain: the centre frequency
 //! for a sweep position and the coefficient that tunes a stage to it.
 
+use tutti_buffers::Float;
 use tutti_units::{Depth, Hz, SampleRate};
 
 /// The all-pass centre frequency for one LFO value: the sweep range's `min`
@@ -25,7 +26,8 @@ const SWEEP_FLOOR: Hz = Hz(1.0);
 /// The share of Nyquist an all-pass stage is tuned up to (see [`allpass_coeff`]).
 const SWEEP_CEILING: f64 = 0.98;
 
-/// One first-order all-pass coefficient for a sweep position.
+/// One first-order all-pass coefficient for a sweep position, designed in `f64` and narrowed
+/// once to the chain's float `F`.
 ///
 /// `tan` of the normalised centre, folded into the all-pass form. A phaser solves it
 /// only at the corners of a segment (every 16 frames of the stream) and glides between,
@@ -40,15 +42,14 @@ const SWEEP_CEILING: f64 = 0.98;
 /// there.
 #[inline]
 #[must_use]
-pub fn allpass_coeff(sweep: Hz, rate: SampleRate) -> f32 {
+pub fn allpass_coeff<F: Float>(sweep: Hz, rate: SampleRate) -> F {
     let sweep_hz = sweep
         .max(SWEEP_FLOOR)
         .min(rate.nyquist_scaled(SWEEP_CEILING))
         .get();
     let w = core::f64::consts::PI * sweep_hz / rate.get();
     let t = libm::tan(w);
-    // The coefficient narrows once to the stage's `f32`.
-    ((t - 1.0) / (t + 1.0)) as f32
+    F::from_f64((t - 1.0) / (t + 1.0))
 }
 
 #[cfg(test)]

@@ -73,8 +73,8 @@ impl<S: Float> From<&std::path::Path> for Audio<S> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl From<crate::AudioEntry> for Audio<f32> {
-    fn from(entry: crate::AudioEntry) -> Self {
+impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
+    fn from(entry: crate::AudioEntry<S>) -> Self {
         match entry {
             crate::AudioEntry::Resident(wave) => Self::Wave(wave),
             crate::AudioEntry::Streamed(info) => Self::File(info.path().to_path_buf()),

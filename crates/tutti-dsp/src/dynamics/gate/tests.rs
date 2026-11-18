@@ -6,6 +6,9 @@ use tutti_units::{Amplitude, Db, SampleRate, Seconds};
 use super::*;
 use crate::testing::noise;
 
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The rates the static and time-constant tests run at.
 const RATES: [SampleRate; 3] = [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K];
@@ -80,7 +83,7 @@ fn hostile() -> Vec<GateControls> {
 }
 
 /// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
-fn runner_at(c: &GateControls, rate: SampleRate) -> GateBank {
+fn runner_at(c: &GateControls, rate: SampleRate) -> GateBank<f32> {
     let mut bank = GateBank::new(rate);
     bank.aim(c);
     bank.settle();
@@ -88,14 +91,14 @@ fn runner_at(c: &GateControls, rate: SampleRate) -> GateBank {
 }
 
 /// [`runner_at`] at 48 kHz.
-fn runner(c: &GateControls) -> GateBank {
+fn runner(c: &GateControls) -> GateBank<f32> {
     runner_at(c, RATE)
 }
 
 /// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
 /// threshold lane when given, in calls of at most `block` frames.
 fn run_in(
-    bank: &mut GateBank,
+    bank: &mut GateBank<f32>,
     audio: &[&[f32]],
     key: &[&[f32]],
     lane: Option<&[f32]>,
@@ -125,7 +128,7 @@ fn run_in(
 
 /// [`run_in`] in calls of [`CHUNK`] frames.
 fn run(
-    bank: &mut GateBank,
+    bank: &mut GateBank<f32>,
     audio: &[&[f32]],
     key: &[&[f32]],
     lane: Option<&[f32]>,
@@ -134,7 +137,12 @@ fn run(
 }
 
 /// One channel of `audio` and of the key, as the stereo pair the tests run.
-fn run_mono(bank: &mut GateBank, audio: &[f32], key: &[f32], lane: Option<&[f32]>) -> Vec<f32> {
+fn run_mono(
+    bank: &mut GateBank<f32>,
+    audio: &[f32],
+    key: &[f32],
+    lane: Option<&[f32]>,
+) -> Vec<f32> {
     run(bank, &[audio, audio], &[key, key], lane).remove(0)
 }
 
@@ -148,7 +156,7 @@ fn amplitude(db: f64) -> f32 {
 /// is capped at 0 dB, and a non-finite control is the default's.
 #[test]
 fn the_design_holds_the_figures_of_its_definition() {
-    let m = Design::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
+    let m = Design::<f32>::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
     // 0.0102 s at 48 kHz is 489.6 frames, floored.
     assert_eq!(m.hold_samples, 489);
     assert_eq!(m.threshold, Db(-20.0).to_amplitude());
@@ -168,7 +176,7 @@ fn the_design_holds_the_figures_of_its_definition() {
     );
     assert_eq!(m.range, Db(-12.0));
 
-    let m = Design::of(
+    let m = Design::<f32>::of(
         &GateControls {
             attack: Seconds(-1.0),
             hold: Seconds(-1.0),
@@ -191,7 +199,7 @@ fn the_design_holds_the_figures_of_its_definition() {
     assert_eq!(m.hold_samples, 0);
     assert_eq!(m.range, Db::UNITY, "a range over 0 dB reads as 0");
 
-    let m = Design::of(
+    let m = Design::<f32>::of(
         &GateControls {
             threshold: Db(f32::NAN),
             range: Db(f32::INFINITY),
@@ -453,7 +461,7 @@ fn a_threshold_lane_is_read_per_frame() {
 fn silence_opens_a_threshold_at_or_under_the_floor() {
     for (threshold, opens) in [(-200.0f32, true), (Db::FLOOR.get(), true), (-143.0, false)] {
         let c = controls(threshold, 0.0, 0.0, 0.0, -40.0);
-        let m = Design::of(&c, RATE);
+        let m = Design::<f32>::of(&c, RATE);
         assert_eq!(m.silence_opens, opens, "threshold {threshold}");
         let mut k = runner(&c);
         let out = run_mono(&mut k, &vec![1.0; 64], &vec![0.0; 64], None);
@@ -713,8 +721,8 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
     );
 }
 
-/// A render over `f64` views is the `f32` render converted: the state is `f32`, the views are
-/// converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
+/// A render of an `f32` bank over `f64` views is its render of the `f32` views converted: the
+/// views are converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
 /// last bit (a tolerance of 0), with a threshold lane and a range glide in flight.
 #[test]
 fn an_f64_render_is_the_f32_render_converted() {
@@ -751,4 +759,53 @@ fn an_f64_render_is_the_f32_render_converted() {
     for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
         assert_eq!(g, f64::from(w), "frame {i}");
     }
+}
+
+/// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
+/// `key`.
+fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
+    let mut bank = GateBank::<f64>::new(RATE);
+    bank.aim(c);
+    bank.settle();
+    let mut out = vec![0.0f64; audio.len()];
+    bank.process(
+        GateLanes::default(),
+        Planes::new(&[key]).unwrap(),
+        Planes::new(&[audio]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    out
+}
+
+/// An open gate (a key over the threshold, an instant attack) has gain `range + 1 (1 -
+/// range)`, which is 1 to 2^-50 whatever the range: an `f64` signal of more than 24 bits
+/// comes out as it went in.
+#[test]
+fn an_f64_open_gate_is_the_identity() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(300);
+    let c = controls(-40.0, 0.0, 0.0, 0.0, -80.0);
+    assert_close_f64(&run_f64(&c, &x, &x), &x, 2.0f64.powi(-50));
+}
+
+/// An opening gate's follower is the one-pole `f[n] = f[n-1] + c (1 - f[n-1])`, `c = 1 -
+/// exp(-1 / (tau rate))`, from closed, and the gain is `r + f[n] (1 - r)` with `r =
+/// 10^(range / 20)`: the closed form in `f64`, to 1e-12.
+#[test]
+fn an_f64_gate_opens_along_the_one_pole_closed_form_in_f64() {
+    use tutti_fixtures::signal::assert_close_f64;
+    let (tau, range) = (0.002, -60.0);
+    let key: Vec<f64> = vec![tutti_fixtures::signal::wide_signal(1)[0]; 2_000];
+    let c = controls(-40.0, tau, 0.0, 0.1, range as f32);
+    let coeff = 1.0 - (-1.0 / (tau * RATE.get())).exp();
+    let r = 10f64.powf(range / 20.0);
+    let mut open = 0.0f64;
+    let want: Vec<f64> = key
+        .iter()
+        .map(|&x| {
+            open += coeff * (1.0 - open);
+            x * (r + open * (1.0 - r))
+        })
+        .collect();
+    assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
 }

@@ -185,7 +185,7 @@ pub struct DynamicEqBank {
     q: Q,
     rate: SampleRate,
     /// The detector's band-pass on the key.
-    key: KeyStage,
+    key: KeyStage<f32>,
     /// The mean square of the key, in the detector's one-pole.
     mean_square: f32,
     /// The smoothed gain change's size in dB, not below 0; its sign is the mode's.

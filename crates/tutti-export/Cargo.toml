@@ -15,6 +15,8 @@ workspace = true
 
 [dependencies]
 thiserror = { workspace = true, features = ["std"] }
+# The spill file holds samples as the bytes they are in memory.
+bytemuck = { version = "1.16", default-features = false }
 # A spill file that cannot be removed is logged, not an error: the render's
 # outcome is already decided.
 tracing.workspace = true

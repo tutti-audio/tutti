@@ -9,6 +9,7 @@
 //! added the same way, and, unlike the audio inlet, there is no rate to refuse
 //! and an export fork is accepted.
 
+use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
@@ -33,7 +34,7 @@ fn note(n: u8) -> Ump {
 fn frames(n: usize, s: &mut DetachedSession) {
     let mut out = [0.0f32];
     for _ in 0..n {
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 
@@ -124,9 +125,9 @@ fn an_export_fork_is_accepted_and_silent() {
     let mut out = [0.0f32];
     let mut live = 0.0f32;
     for _ in 0..64 {
-        fork.tick(&[], &mut out);
+        fork.tick(InterleavedMut::one_frame(&mut out).unwrap());
         assert_eq!(out[0], 0.0, "the fork hears nothing");
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
         live += out[0];
     }
     assert!(live > 0.0, "the live graph hears the push");
@@ -153,7 +154,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
 
     writer.push(Stamp::NextBlock, note(1)).unwrap();
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 1.0, "wired: the push is heard");
 
     assert!(
@@ -169,7 +170,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
     let cut = s.graph().testing().commits_sent();
     // Past the span an audio edge would fade over.
     for _ in 0..(2 * tutti_graph::declick_frames(SampleRate::SR_48K).get()) {
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     }
     let _ = s.update();
     assert_eq!(
@@ -181,7 +182,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
     writer.push(Stamp::NextBlock, note(2)).unwrap();
     let mut heard = 0.0;
     for _ in 0..64 {
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
         heard += out[0];
     }
     assert_eq!(heard, 0.0, "cut: the push reaches nothing");

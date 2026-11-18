@@ -323,7 +323,7 @@ fn an_offline_render_feeds_the_master_meter() {
         .set_sources_hard(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
     let mut frame = [0.0f32];
-    detached.render_frame(&mut frame);
+    detached.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
     assert_eq!(meter.read()[0].peak.get(), 0.5);
     assert!(
         detached.take_master_meter().is_none(),
@@ -657,7 +657,7 @@ fn a_detached_render_feeds_a_tap() {
         .expect("the sources exist");
     let mut frame = [0.0f32];
     for _ in 0..3 {
-        s.render_frame(&mut frame);
+        s.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
     }
     let mut got = [f32::NAN; 3];
     assert_eq!(
@@ -873,7 +873,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     let mut fork = s.graph_ref().testing().fork_live().expect("forks");
     let mut out = [0.0f32; 2];
     for _ in 0..64 {
-        fork.tick(&[], &mut out);
+        fork.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(tap.available(), Samples(64), "the fork wrote nothing");
     assert_eq!(out, [0.5, 0.5]);

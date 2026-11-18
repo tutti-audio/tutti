@@ -147,7 +147,7 @@ fn limited() -> GraphBuilder {
             .with_amplitude(Amplitude(0.9))
             .with_layout(ChannelLayout::STEREO),
     );
-    let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::stereo(
+    let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::<f32>::stereo(
         tutti_nodes::LimiterControls {
             threshold: Db(-6.0),
             ceiling: Db(-1.0),

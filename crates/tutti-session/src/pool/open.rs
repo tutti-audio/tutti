@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+#[cfg(not(feature = "midi"))]
+use std::marker::PhantomData;
+
+use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
 use crate::{Clock, Session};
@@ -17,17 +21,21 @@ use crate::{Clock, Session};
 /// ([`LoadError::Job`](crate::LoadError::Job)), but it unwinds through the
 /// session's own state: a panic inside a call on `midi` can leave
 /// the MIDI state half changed.
-pub struct OpenCx<'a> {
+pub struct OpenCx<'a, S: Float = f32> {
     rate: SampleRate,
     ids: &'a mut crate::peer::ResourceIds,
     #[cfg(feature = "midi")]
-    midi: crate::Midi<'a>,
+    midi: crate::Midi<'a, S>,
+    #[cfg(not(feature = "midi"))]
+    _float: PhantomData<fn() -> S>,
 }
 
-impl<'a> OpenCx<'a> {
+impl<'a, S: Float> OpenCx<'a, S> {
     /// What an open needs of `session`, of whatever clock: its rate and, with
     /// `midi`, its MIDI view. Nothing else of the session is reachable.
-    pub(crate) fn new<K: crate::AppKey, C: Clock>(session: &'a mut Session<K, C>) -> Self {
+    pub(crate) fn new<K: crate::AppKey, C: Clock<Float = S>>(
+        session: &'a mut Session<K, C>,
+    ) -> Self {
         let rate = session.transport.sample_rate();
         #[cfg(feature = "midi")]
         let (midi, ids) = session.midi_and_ids();
@@ -38,6 +46,8 @@ impl<'a> OpenCx<'a> {
             ids,
             #[cfg(feature = "midi")]
             midi,
+            #[cfg(not(feature = "midi"))]
+            _float: PhantomData,
         }
     }
 
@@ -75,12 +85,12 @@ impl<'a> OpenCx<'a> {
 
     /// The session's MIDI: its devices, inputs and outputs.
     #[cfg(feature = "midi")]
-    pub fn midi(&mut self) -> crate::Midi<'_> {
+    pub fn midi(&mut self) -> crate::Midi<'_, S> {
         self.midi.reborrow()
     }
 }
 
-impl fmt::Debug for OpenCx<'_> {
+impl<S: Float> fmt::Debug for OpenCx<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenCx").finish_non_exhaustive()
     }

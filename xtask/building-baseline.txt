@@ -33,7 +33,9 @@ tutti-buffers  ctor-result  crates/tutti-buffers/src/fold.rs::Fold::by_index
 tutti-buffers  ctor-result  crates/tutti-buffers/src/fold.rs::Fold::select
 tutti-buffers  ctor-result  crates/tutti-buffers/src/fold/compose.rs::Fold::route
 tutti-buffers  ctor-result  crates/tutti-buffers/src/interleaved.rs::Interleaved::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/interleaved.rs::Interleaved::one_frame
 tutti-buffers  ctor-result  crates/tutti-buffers/src/interleaved.rs::InterleavedMut::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/interleaved.rs::InterleavedMut::one_frame
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::Planes::from_vecs
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::Planes::new
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::PlanesMut::from_vecs

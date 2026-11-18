@@ -5,7 +5,7 @@
 //! them.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout};
+use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
@@ -32,9 +32,13 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// The declared tail is the ceiling: the layout's longest decay, or unbounded if it can
 /// freeze. The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
-pub type FdnNode = KernelNode<FdnKernel>;
+///
+/// `F` is the state precision of the lines, the pre-delay and the glides, `f64` by default; the
+/// lines are the layout's worst case (its most lines at the longest length the size and the
+/// modulation reach), so `FdnNode::<f32>` halves the memory.
+pub type FdnNode<F = f64> = KernelNode<FdnKernel<F>>;
 
-impl FdnNode {
+impl<F: Float + Lerp> FdnNode<F> {
     /// A network of `layout`, its cells at `controls`. It has no rate until the graph's
     /// `prepare` gives it one: it declares no latency and an unknown tail before, and
     /// renders silence. Allocates: build it before the node goes live.
@@ -80,28 +84,27 @@ control_set! {
 
 /// A [`FdnBank`] and its glides, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running {
+struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
-    bank: FdnBank,
-    glides: FdnGlides,
+    bank: FdnBank<F>,
+    glides: FdnGlides<F>,
 }
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
 /// the glides its design is aimed through.
 ///
-/// The bank's state is `f32`; the graph's blocks are too, and another sample format is
-/// converted at the edges.
+/// The bank's state is `F`; a block of another sample format is converted at the edges.
 #[derive(Clone, Debug)]
-pub struct FdnKernel {
+pub struct FdnKernel<F: Float> {
     layout: FdnLayout,
     /// `None` until [`prepare`](Kernel::prepare).
-    running: Option<Running>,
+    running: Option<Running<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl FdnKernel {
+impl<F: Float + Lerp> FdnKernel<F> {
     /// A network of `layout`. It has no lines until `prepare` gives it a rate.
     fn new(layout: FdnLayout) -> Self {
         Self {
@@ -112,11 +115,11 @@ impl FdnKernel {
     }
 }
 
-impl Kernel for FdnKernel {
+impl<F: Float + Lerp> Kernel for FdnKernel<F> {
     type Set = FdnSet;
 
     /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
-    const GRID: usize = FdnBank::CHUNK;
+    const GRID: usize = FdnBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
         let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
@@ -181,5 +184,53 @@ impl Kernel for FdnKernel {
         self.running
             .as_mut()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.glides, controls))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::drive_kernel;
+    use tutti_dsp::MaxDecay;
+    use tutti_fixtures::signal::wide_signal;
+    use tutti_units::Samples;
+
+    /// An `f64` block through a `FdnKernel::<f64>` with modulation off is linear: `R(a x + b y)
+    /// = a R(x) + b R(y)` to 2^-40 of the peak, with `a`, `b` and two wide signals that an `f32`
+    /// state cannot carry (it is off by 2^-24).
+    #[test]
+    fn an_f64_kernel_is_linear() {
+        let len = 6_000;
+        let x = wide_signal(len);
+        let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+        let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
+        let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+        let moves = [(
+            0,
+            FdnControls {
+                modulation: Depth::of(0.0),
+                ..FdnControls::DEFAULT
+            },
+        )];
+        // Two identical input channels: the bank averages them, and the block has the stereo
+        // width of the output the harness reads back.
+        let render = |input: &[f64]| {
+            let mut k = FdnKernel::<f64>::new(FdnLayout::new(8, MaxDecay::DEFAULT, false).unwrap());
+            k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples(len)));
+            drive_kernel(&mut k, &moves, &[input.to_vec(), input.to_vec()])
+        };
+        let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
+        for c in 0..2 {
+            let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+            assert!(peak > 1e-4, "the reverb sounds");
+            for n in 0..len {
+                let want = a * rx[c][n] + b * ry[c][n];
+                assert!(
+                    (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                    "channel {c}, frame {n}: {} against {want}",
+                    rm[c][n]
+                );
+            }
+        }
     }
 }

@@ -109,7 +109,7 @@ fn ladder(c: &mut Criterion) {
 
 fn delay(c: &mut Criterion) {
     for w in [2usize, 6] {
-        let node = DelayNode::new(
+        let node = DelayNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             MaxDelay::of(Seconds::new(1.0)),
@@ -130,7 +130,7 @@ fn mod_delay(c: &mut Criterion) {
             c,
             "chorus",
             w,
-            ModDelayNode::chorus(
+            ModDelayNode::<f32>::chorus(
                 BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                     .expect("a test width is one bus"),
             ),
@@ -145,7 +145,7 @@ fn phaser(c: &mut Criterion) {
             c,
             "phaser",
             w,
-            PhaserNode::new(
+            PhaserNode::<f32>::new(
                 BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                     .expect("a test width is one bus"),
                 Stages::of(6),

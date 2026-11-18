@@ -66,8 +66,8 @@ fn bursts(seed: u32) -> Vec<f32> {
 }
 
 /// A delay `w` channels wide: 10 ms of line, a 0.3 ms time and half feedback.
-fn delay_of(w: usize) -> DelayNode {
-    DelayNode::new(
+fn delay_of(w: usize) -> DelayNode<f32> {
+    DelayNode::<f32>::new(
         BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
             .expect("at most one bus wide"),
         MaxDelay::of(Seconds::new(0.01)),
@@ -208,8 +208,8 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
 }
 
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
-fn phaser_of_width(w: usize) -> PhaserNode {
-    PhaserNode::new(
+fn phaser_of_width(w: usize) -> PhaserNode<f32> {
+    PhaserNode::<f32>::new(
         BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
             .expect("at most one bus wide"),
         Stages::of(4),
@@ -260,11 +260,11 @@ fn cases() -> Vec<Case> {
             Resonance::new(0.3),
         )
     }
-    fn delay(w: usize) -> DelayNode {
+    fn delay(w: usize) -> DelayNode<f32> {
         delay_of(w)
     }
-    fn comp(w: usize) -> CompressorNode {
-        CompressorNode::new(
+    fn comp(w: usize) -> CompressorNode<f32> {
+        CompressorNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             KeySource::Sidechain,
@@ -277,8 +277,8 @@ fn cases() -> Vec<Case> {
             },
         )
     }
-    fn gate(w: usize) -> GateNode {
-        GateNode::new(
+    fn gate(w: usize) -> GateNode<f32> {
+        GateNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             KeySource::Sidechain,
@@ -292,8 +292,8 @@ fn cases() -> Vec<Case> {
             },
         )
     }
-    fn lim(w: usize) -> LimiterNode {
-        LimiterNode::new(
+    fn lim(w: usize) -> LimiterNode<f32> {
+        LimiterNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             Lookahead::DEFAULT,
@@ -478,7 +478,7 @@ fn cases() -> Vec<Case> {
             name: "brickwall ceiling",
             param: UnitParam::Ceiling,
             make: |w, v| {
-                let n = BrickwallLimiterNode::with_bus(
+                let n = BrickwallLimiterNode::<f32>::with_bus(
                     BusTopology::unassigned(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
@@ -537,8 +537,8 @@ fn cases() -> Vec<Case> {
 /// Every param a node reads once per block, as a port read the same way
 /// (its last frame per block).
 fn block_rate_cases() -> Vec<Case> {
-    fn comp(w: usize) -> CompressorNode {
-        CompressorNode::new(
+    fn comp(w: usize) -> CompressorNode<f32> {
+        CompressorNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             KeySource::Sidechain,
@@ -553,8 +553,8 @@ fn block_rate_cases() -> Vec<Case> {
     }
     // Near the noise's peak, no hold: the gate opens and shuts all the
     // time, so its times are heard.
-    fn gate(w: usize) -> GateNode {
-        GateNode::new(
+    fn gate(w: usize) -> GateNode<f32> {
+        GateNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             KeySource::Sidechain,
@@ -568,13 +568,13 @@ fn block_rate_cases() -> Vec<Case> {
             },
         )
     }
-    fn chorus(w: usize) -> ModDelayNode {
-        ModDelayNode::chorus(
+    fn chorus(w: usize) -> ModDelayNode<f32> {
+        ModDelayNode::<f32>::chorus(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
         )
     }
-    fn phaser(w: usize) -> PhaserNode {
+    fn phaser(w: usize) -> PhaserNode<f32> {
         phaser_of_width(w)
     }
     #[allow(unused_mut)]
@@ -688,7 +688,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 // Bursts over a quiet bed, the threshold between them: the
                 // limiter lets go between bursts, so its release is heard.
-                let n = LimiterNode::new(
+                let n = LimiterNode::<f32>::new(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
@@ -755,7 +755,7 @@ fn block_rate_cases() -> Vec<Case> {
             name: "flanger depth",
             param: UnitParam::Depth,
             make: |w, v| {
-                let n = ModDelayNode::flanger(
+                let n = ModDelayNode::<f32>::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
@@ -899,7 +899,7 @@ fn mix_cases() -> Vec<MixCase> {
         MixCase {
             name: "chorus mix",
             make: |w| {
-                parts_of(ModDelayNode::chorus(
+                parts_of(ModDelayNode::<f32>::chorus(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
@@ -910,7 +910,7 @@ fn mix_cases() -> Vec<MixCase> {
         MixCase {
             name: "flanger mix",
             make: |w| {
-                parts_of(ModDelayNode::flanger(
+                parts_of(ModDelayNode::<f32>::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )

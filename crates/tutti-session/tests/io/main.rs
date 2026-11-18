@@ -12,6 +12,8 @@ mod device;
 mod device_input;
 #[cfg(feature = "device")]
 mod device_listing;
+#[cfg(feature = "device")]
+mod f64_device;
 // A restart onto another rate, width or block, and the MIDI clock's re-rate.
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_clock;

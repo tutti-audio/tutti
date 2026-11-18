@@ -95,8 +95,8 @@ fn beat_synced_lfo_process_is_allocation_free() {
 
 /// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
 /// two seconds.
-fn delay(width: u16, time: f64, feedback: f32, cross: f32) -> DelayNode {
-    DelayNode::new(
+fn delay(width: u16, time: f64, feedback: f32, cross: f32) -> DelayNode<f32> {
+    DelayNode::<f32>::new(
         BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
         MaxDelay::of(Seconds::new(2.0)),
         InterpolationMode::Linear,
@@ -135,7 +135,7 @@ fn bus(width: u16) -> BusTopology {
 #[test]
 fn chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::chorus(BusTopology::STEREO),
+        ModDelayNode::<f32>::chorus(BusTopology::STEREO),
         0.4,
         2_000,
         |_| {},
@@ -145,7 +145,7 @@ fn chorus_node_process_is_allocation_free() {
 #[test]
 fn flanger_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::flanger(BusTopology::STEREO),
+        ModDelayNode::<f32>::flanger(BusTopology::STEREO),
         0.4,
         2_000,
         |_| {},
@@ -155,7 +155,7 @@ fn flanger_node_process_is_allocation_free() {
 #[test]
 fn general_midi_chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::general_midi_chorus(BusTopology::STEREO),
+        ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO),
         0.4,
         2_000,
         |_| {},
@@ -166,7 +166,7 @@ fn general_midi_chorus_node_process_is_allocation_free() {
 fn phaser_node_process_is_allocation_free() {
     // 4-stage phaser. `prepare` sizes the chain, but `process` must reuse it.
     gate(
-        PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT),
+        PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
         0.4,
         2_000,
         |_| {},
@@ -192,7 +192,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
     // feedback glides are in flight on every one, the rate lands whole at the grid.
-    let chorus = ModDelayNode::chorus(bus(6));
+    let chorus = ModDelayNode::<f32>::chorus(bus(6));
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
@@ -202,7 +202,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
     // block, the glides in flight on every one.
-    let phaser = PhaserNode::new(
+    let phaser = PhaserNode::<f32>::new(
         bus(6),
         Stages::of(8),
         SweepRange::DEFAULT,
@@ -268,7 +268,11 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
 #[test]
 fn a_chorus_with_its_lanes_fed_is_allocation_free() {
     for width in [2u16, 6] {
-        let mut rig = Direct::new(ModDelayNode::chorus(bus(width)), SampleRate::SR_48K, 64);
+        let mut rig = Direct::new(
+            ModDelayNode::<f32>::chorus(bus(width)),
+            SampleRate::SR_48K,
+            64,
+        );
         for c in rig.inputs_mut().iter_mut() {
             let c = c.into_samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
@@ -310,7 +314,7 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
 #[test]
 fn a_phaser_with_its_lanes_fed_is_allocation_free() {
     for width in [2u16, 6] {
-        let phaser = PhaserNode::new(
+        let phaser = PhaserNode::<f32>::new(
             bus(width),
             Stages::of(6),
             SweepRange::DEFAULT,
@@ -1564,7 +1568,8 @@ fn the_delay_corners_are_allocation_free() {
             InterpolationMode::Linear,
             InterpolationMode::CubicHermite,
         ] {
-            let node = DelayNode::new(bus(width), max, interpolation, DelayControls::DEFAULT);
+            let node =
+                DelayNode::<f32>::new(bus(width), max, interpolation, DelayControls::DEFAULT);
             let write = |cells: &ParamSet, i: usize| {
                 assert!(cells.set(UnitParam::DelayTime, if i & 1 == 1 { 1e9 } else { 0.0 }));
                 assert!(cells.set(UnitParam::Feedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
@@ -1588,7 +1593,7 @@ fn the_delay_corners_are_allocation_free() {
         .with_times(ChannelTimes::each(&[Seconds::new(10.0); 15]).expect("fifteen times"))
         .expect("one time for each channel past the first");
     corner(
-        DelayNode::from_layout(layout, DelayControls::DEFAULT),
+        DelayNode::<f32>::from_layout(layout, DelayControls::DEFAULT),
         SampleRate::SR_48K,
         &[Some(&time[..]), Some(&feedback[..]), Some(&cross[..])],
         loop_bound(),
@@ -1625,7 +1630,7 @@ fn the_phaser_corners_are_allocation_free() {
         ),
         (2, 12, SweepRange::DEFAULT, 0.25, 192_000.0),
     ] {
-        let node = PhaserNode::new(
+        let node = PhaserNode::<f32>::new(
             bus(width),
             Stages::of(stages),
             range,

@@ -29,6 +29,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_buffers::Float;
 use tutti_graph::{
     Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     Shape, Status, declare_params,
@@ -367,7 +368,7 @@ impl ClickNode {
         } else {
             Amplitude(0.7)
         };
-        // The envelope is `f32` arithmetic over `f32` times.
+        // The stored click table is `f32`: its envelope is `f32` arithmetic over `f32` times.
         let (attack, hold_end) = (ATTACK.to_f32(), HOLD_END.to_f32());
         let release_len = CLICK_LEN.to_f32() - hold_end;
         let phase_inc = PhaseIncrement::per_sample(freq, sample_rate);
@@ -506,13 +507,13 @@ impl ClickNode {
     /// [`advance_to`](Self::advance_to) gives: the block loop holds the meter
     /// lease borrowed from `self.meter` while it calls this.
     #[inline]
-    fn next_sample(
+    fn next_sample<F: Float>(
         click_normal: &[f32],
         click_accent: &[f32],
         click_pos: &mut usize,
         is_accent: bool,
         volume: Amplitude,
-    ) -> f32 {
+    ) -> F {
         let buffer = if is_accent {
             click_accent
         } else {
@@ -520,11 +521,12 @@ impl ClickNode {
         };
 
         if *click_pos < buffer.len() {
-            let sample = buffer[*click_pos] * volume.get();
+            // The table and the volume are `f32`; the sample widens once here.
+            let sample = F::from_f32(buffer[*click_pos] * volume.get());
             *click_pos += 1;
             sample
         } else {
-            0.0
+            F::ZERO
         }
     }
 
@@ -536,7 +538,7 @@ impl ClickNode {
     /// The beat is per frame, and the play and record state per piece of the
     /// block ([`Env::segments`]): a stop inside the block silences the click
     /// from its frame, and a start sounds the beat it lands on, on its frame.
-    fn render(&mut self, env: &Env, left: &mut [f32], right: &mut [f32]) {
+    fn render<F: Float>(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
         let mode = self.settings.mode().get();
         let in_preroll = self.preroll.load(Ordering::Acquire);
         let volume = self.settings.volume();
@@ -545,8 +547,8 @@ impl ClickNode {
             if !Self::should_play(mode, &piece.transport, in_preroll) {
                 self.go_silent();
                 let range = start.index()..start.index() + piece.block_len.get();
-                left[range.clone()].fill(0.0);
-                right[range].fill(0.0);
+                left[range.clone()].fill(F::ZERO);
+                right[range].fill(F::ZERO);
                 continue;
             }
             // One lease for the piece — `Reader::lend` is never per frame.
@@ -578,7 +580,7 @@ impl ClickNode {
     }
 }
 
-impl Node for ClickNode {
+impl<F: Float> Node<F> for ClickNode {
     /// No inputs, the click in stereo. Its sound depends on the transport
     /// rather than an input, so a render's end ends it: [`Tail::None`].
     fn shape(&self) -> Shape {
@@ -606,7 +608,7 @@ impl Node for ClickNode {
         self.go_silent();
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let (_, mut outputs) = io.split();
         let mut channels = outputs.iter_mut();
         let (Some(left), Some(right)) = (channels.next(), channels.next()) else {
@@ -652,18 +654,18 @@ impl ClickFork {
     }
 }
 
-impl ForkSource for ClickFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for ClickFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.node())))
     }
 }
 
 /// Inserted with its [`ClickSettings`] as its controls and a fork that
 /// renders the metronome as it was set at the fork (see [`ClickNode`]).
-impl IntoNode for ClickNode {
+impl<F: Float> IntoNode<F> for ClickNode {
     type Controls = Arc<ClickSettings>;
 
-    fn into_parts(self) -> NodeParts<Arc<ClickSettings>> {
+    fn into_parts(self) -> NodeParts<Arc<ClickSettings>, F> {
         let controls = Arc::clone(&self.settings);
         let fork = ClickFork::of(&self);
         NodeParts {
@@ -862,7 +864,7 @@ mod tests {
         settings.mode().set(MetronomeMode::Always);
 
         let accents_at = |node: &mut ClickNode, beat: f64| {
-            Node::reset(node);
+            Node::<f32>::reset(node);
             let _ = frame(node, ROLLING, beat);
             node.is_accent
         };
@@ -1226,7 +1228,7 @@ mod tests {
 
         // Enable preroll - should play
         transport.settings().set_in_preroll(true);
-        Node::reset(&mut node);
+        Node::<f32>::reset(&mut node);
         assert!(
             sounds_within(&mut node, ROLLING, 0.0, 100),
             "Click should play during preroll"
@@ -1248,7 +1250,7 @@ mod tests {
         assert_eq!(output[0], 0.0);
 
         // Enable recording - should play
-        Node::reset(&mut node);
+        Node::<f32>::reset(&mut node);
         assert!(
             sounds_within(&mut node, recording, 0.0, 100),
             "Click should play during recording"
@@ -1256,7 +1258,7 @@ mod tests {
 
         // In preroll while recording - should NOT play
         transport.settings().set_in_preroll(true);
-        Node::reset(&mut node);
+        Node::<f32>::reset(&mut node);
         let output = frame(&mut node, recording, 0.0);
         assert_eq!(
             output[0], 0.0,

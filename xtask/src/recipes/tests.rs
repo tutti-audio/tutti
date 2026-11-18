@@ -289,7 +289,7 @@ fn profile_bench_keeps_its_defaults_and_its_glob() {
     );
     assert_eq!(
         s[1],
-        "samply record target/profiling/deps/engine_render-* --bench --profile-time 10"
+        "samply record target/profiling/build/tutti-nodes/*/out/engine_render-* --bench --profile-time 10"
     );
 }
 

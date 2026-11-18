@@ -6,6 +6,7 @@
 //! render with another render.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use tutti_buffers::PlanesMut;
 use tutti_session::Stamp;
 
 use tutti_units::{Amplitude, At, Frame, Tail};
@@ -598,8 +599,8 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         .testing()
         .fork_live()
         .expect("the instrument forks");
-    let mut out = vec![Vec::new(), Vec::new()];
-    fork.render(2_048, BLOCK, &mut out);
+    let mut out = vec![vec![0.0; 2_048]; 2];
+    fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
     let p = out.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
     assert_eq!(p, 0.0, "the fork sounds {p}");
 
@@ -614,7 +615,7 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
             tutti_units::Beat(beat),
             None,
         ));
-        fork.render(BLOCK, BLOCK, &mut out);
+        fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         peak = out.iter().flatten().fold(peak, |a, v| a.max(v.abs()));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

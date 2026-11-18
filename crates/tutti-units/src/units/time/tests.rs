@@ -93,21 +93,6 @@ fn seconds_to_samples_computes_wide_enough_for_a_long_render() {
 }
 
 #[test]
-fn sample_rate_carries_rates_f32_would_round() {
-    // The reason the unit is f64-backed. 192 kHz is exact in f32, so the
-    // integer value is not the hazard — the reciprocal is: a per-sample
-    // step computed in f32 carries ~6e-8 of relative error, which a phase
-    // accumulator integrates into audible drift over a long render.
-    let sr = SampleRate::SR_192K;
-    let step_f64 = 1.0_f64 / sr.get();
-    let step_f32 = (1.0_f32 / sr.get() as f32) as f64;
-    assert!(
-        (step_f64 - step_f32).abs() > 0.0,
-        "if f32 were exact here the f64 backing would be unmotivated"
-    );
-}
-
-#[test]
 fn sample_rate_accepts_every_shape_a_caller_holds() {
     // File headers and device configs hand out u32; the engine's own
     // arithmetic is f64. Both widen exactly, which is what lets the

@@ -147,19 +147,27 @@ macro_rules! changes_container {
 
 changes_container!(
     /// Per-block chord events.
-    ChordChanges, ChordValue, changes
+    ChordChanges,
+    ChordValue,
+    changes
 );
 changes_container!(
     /// Per-block scale events.
-    ScaleChanges, ScaleValue, changes
+    ScaleChanges,
+    ScaleValue,
+    changes
 );
 changes_container!(
     /// Per-block per-note text events.
-    NoteExpressionTextChanges, NoteExpressionTextValue, changes
+    NoteExpressionTextChanges,
+    NoteExpressionTextValue,
+    changes
 );
 changes_container!(
     /// Per-block integer per-note expression events.
-    NoteExpressionIntChanges, NoteExpressionIntValue, changes
+    NoteExpressionIntChanges,
+    NoteExpressionIntValue,
+    changes
 );
 
 /// Decodes a sequence into at most `N` items, keeping the first `N` and

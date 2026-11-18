@@ -21,7 +21,7 @@ fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Hands what the diff started to the stage it begins with.
-    pub(crate) fn pool_start(&mut self, starts: Vec<Start>) {
+    pub(crate) fn pool_start(&mut self, starts: Vec<Start<C::Float>>) {
         for Start { flight, load } in starts {
             match load.step {
                 Step::Ready(value) => self.pool.land(flight, Ok(value)),
@@ -118,7 +118,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         // Before the waits settle: a swap the graph refuses fails the entry the
         // wait would otherwise report as loaded.
         #[cfg(feature = "plugin")]
-        self.swap_pooled_plugins();
+        <C::Float as crate::format::Sealed>::swap_pooled_plugins(self);
         self.pool.poll_waiters();
         // One at a time, each over the pool as the run before it left it. A run
         // asked during these waits for the next update; one that panics leaves
