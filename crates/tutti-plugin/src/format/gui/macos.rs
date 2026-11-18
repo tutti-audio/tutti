@@ -13,7 +13,15 @@ pub(super) fn audio_unit(
     path: &Path,
     load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
-    super::editor::<tutti_au_host::AuLoaded>(main, work, path, load, "AU")
+    let editor = <tutti_au_host::AuLoaded as tutti_plugin_types::OutOfProcess>::load_editor(
+        main, work, path, load,
+    )
+    .map_err(|e| BridgeError::LoadFailed {
+        path: Some(path.to_path_buf()),
+        stage: LoadStage::Opening,
+        reason: format!("AU GUI-only load failed: {e}"),
+    })?;
+    Ok(Box::new(editor))
 }
 
 /// Without the `au` feature the Audio Unit host is not built.

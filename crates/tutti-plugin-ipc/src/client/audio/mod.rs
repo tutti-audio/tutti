@@ -390,8 +390,8 @@ impl AudioBridge {
     }
 
     /// The render mode the host last queued for the plugin
-    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): realtime until it
-    /// queues another.
+    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): what the host asked
+    /// for, not what the plugin accepted. Realtime until it queues another.
     pub fn render_mode(&self) -> crate::protocol::RenderMode {
         self.lifecycle.render_mode()
     }

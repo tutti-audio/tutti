@@ -62,7 +62,7 @@ pub(crate) fn load_gui_instance(
 }
 
 /// `F`'s editor-only instance, boxed.
-#[cfg(any(feature = "vst3", feature = "clap", feature = "au"))]
+#[cfg(any(feature = "vst3", feature = "clap"))]
 fn editor<F: tutti_plugin_types::OutOfProcess>(
     main: MainThreadMarker,
     work: &MainWorkHandle,

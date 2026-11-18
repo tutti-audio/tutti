@@ -18,8 +18,8 @@
 //! 1. **Ask the live instance for its state** — its current preset (when it
 //!    lists any), its saved state and the render mode it runs in, over the
 //!    control channel `PluginHandle::save_state` already uses. Nothing else
-//!    of the live instance is touched: no reset, no rate change, no block. It is not free, though: the save runs on the live
-//!    bridge thread, which queues the live instance's blocks behind it for
+//!    of the live instance is touched: no reset, no rate change, no block. It is not free, though: the
+//!    save runs on the live bridge thread, which queues the live instance's blocks behind it for
 //!    as long as the plugin takes to serialise — the same stall a project
 //!    save causes. (Blocks it misses meanwhile read as silence, as for any
 //!    late reply.)
@@ -52,8 +52,8 @@
 //!    rate, which reaches the new server as a rate change.
 //! 3. **Check it is the same plugin** (its id). The state went in with the
 //!    launch, and a current preset goes in over it, then the state again
-//!    (`ForkState::restore`, the in-process fork's too). Parameters come with it: the state is the format's own
-//!    save/load (CLAP `clap.state`, VST3 `getState`/`setState`, AU class
+//!    (`ForkState::restore`, the in-process fork's too). Parameters come
+//!    with it: the state is the format's own save/load (CLAP `clap.state`, VST3 `getState`/`setState`, AU class
 //!    info), which is what a project save restores parameters from.
 //! 4. **Give it the live node's meter and a reader of its tempo map**
 //!    (a clone, registered at the gather: the tempo the plugin is told is
@@ -307,9 +307,10 @@ impl Capture {
     /// launch and a state load), free to run off the control thread.
     fn build(self) -> Result<PluginClient<Bound>, PluginForkError> {
         let path = self.origin.path.clone();
-        // The state goes in with the launch, **before the fork's plugin is
-        // activated** (`IpcOrigin::reopen`): a plugin may take its mode from
-        // the state at activation.
+        // The state goes in with the launch: the server restores it and then
+        // activates the plugin, so a plugin may take its mode from the state
+        // at activation. A command sent after the launch arrives after that
+        // activation.
         let Launched { mut ipc, restored } = self
             .origin
             .reopen(self.sample_rate, Some(self.snapshot.state()))
@@ -328,8 +329,9 @@ impl Capture {
             return Err(PluginForkError::LoadState(StateError::Rejected(reason)));
         }
         // A current preset goes in over it, in `ForkState::restore`'s order
-        // (the preset, then the state, which is the live plugin's now), still
-        // before activation.
+        // (the preset, then the state, which is the live plugin's now). The
+        // wire's load request carries no preset, so this runs after the
+        // server's activation.
         if self.snapshot.has_preset() {
             self.snapshot
                 .restore(

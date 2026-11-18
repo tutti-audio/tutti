@@ -613,7 +613,7 @@ impl Ipc {
     /// main thread: the served control is thread-agnostic. A fork restores
     /// with this, then [`load_state`](Self::load_state), before activation.
     pub fn load_preset(&self, id: &PresetId) -> bool {
-        !self.link.bridge.is_crashed() && self.link.bridge.load_preset(id.clone())
+        self.link.bridge.load_preset(id.clone())
     }
 
     /// Loads `state` into this plugin, into its audio instance alone (an

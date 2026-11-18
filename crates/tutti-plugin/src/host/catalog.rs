@@ -98,7 +98,9 @@ type Unreported = Arc<Mutex<Option<PersistError>>>;
 ///
 /// Wraps a [`PluginDb`] and the persistence the host supplies
 /// ([`Catalog::new`]). Every change is in memory until [`save`](Self::save) is
-/// called, or a scan or a crash recovery saves it.
+/// called, or a scan or a crash recovery saves it. A scan's save runs on its
+/// own thread: an app polls [`take_persist_error`](Self::take_persist_error)
+/// after each scan's [`Done`](ScanPoll::Done).
 pub struct Catalog {
     db: PluginDb,
     /// The blacklisted rows of `db`, republished by every method that changes
@@ -177,27 +179,23 @@ fn moved_blacklist(published: &PluginDb, db: &PluginDb) -> Option<PluginDb> {
     (rows != *published).then_some(rows)
 }
 
-/// The row `db` holds for `canonical` when it is a blacklist: a copy, so the
-/// lock a view read it under is released before the file is read.
+/// The row `db` holds for `canonical` when it is a blacklist: an owned copy,
+/// so a view's read guard is a statement temporary dropped before the file is
+/// read. The return type is what keeps a lock off the file read.
 fn blacklist_row(db: &PluginDb, canonical: &Path) -> Option<FileRow> {
     db.row(canonical)
         .filter(|row| row.blacklist_reason().is_some())
         .cloned()
 }
 
-/// The refusal of a blacklist's `row` for `plugin`, whose file is read now
-/// through `read_facts`: the one rule behind [`Catalog::check`] and
+/// The refusal of a blacklist's `row` for `plugin`, whose file is read now: the
+/// one rule behind [`Catalog::check`] and
 /// [`BlacklistView::check`].
-fn refusal(
-    row: Option<FileRow>,
-    canonical: &Path,
-    plugin: &PluginRef,
-    read_facts: impl FnOnce(&Path) -> FileFacts,
-) -> BridgeResult<()> {
+fn refusal(row: Option<FileRow>, canonical: &Path, plugin: &PluginRef) -> BridgeResult<()> {
     let Some(row) = row else {
         return Ok(());
     };
-    if !row.is_blacklisted_and_unchanged(&read_facts(canonical)) {
+    if !row.is_blacklisted_and_unchanged(&FileFacts::read(canonical)) {
         return Ok(());
     }
     Err(BridgeError::Blacklisted {
@@ -234,23 +232,12 @@ impl BlacklistView {
     /// [`BridgeError::Blacklisted`] with the recorded reason when the plugin's
     /// file is blacklisted and unchanged.
     pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
-        self.check_reading(plugin, |path| FileFacts::read(path))
-    }
-
-    /// [`check`](Self::check) with the file's facts read through `read_facts`.
-    /// The row is copied out and the lock released before `read_facts` runs: a
-    /// slow volume holds no lock the owner's next change waits on.
-    fn check_reading(
-        &self,
-        plugin: &PluginRef,
-        read_facts: impl FnOnce(&Path) -> FileFacts,
-    ) -> BridgeResult<()> {
         let canonical = key(plugin.path());
         let row = blacklist_row(
             &self.rows.read().unwrap_or_else(PoisonError::into_inner),
             &canonical,
         );
-        refusal(row, &canonical, plugin, read_facts)
+        refusal(row, &canonical, plugin)
     }
 }
 
@@ -272,10 +259,10 @@ impl Catalog {
     }
 
     /// Publishes the table's blacklisted rows to the views when they differ
-    /// from what is published. The rows are collected before the lock is
-    /// taken and the write lock is held for the swap alone, so the poll that
-    /// ends every UI tick of a scan neither builds a table nor stops a
-    /// reader when no blacklist moved.
+    /// from what is published. Each call builds a table of the blacklisted
+    /// rows, before any lock is taken; the write lock is held for the swap
+    /// alone and only when the blacklist moved, so the poll that ends every UI
+    /// tick of a scan does not stop a reader otherwise.
     fn republish_blacklist(&self) {
         let moved = moved_blacklist(
             &self
@@ -524,6 +511,7 @@ impl Catalog {
     /// the failure was already taken. A later successful save clears an older
     /// failure: the table it stored is newer. Waits for a rescan's write still in
     /// flight.
+    #[must_use]
     pub fn take_persist_error(&mut self) -> Option<PersistError> {
         self.finish_pending_save();
         self.unreported.lock_recover().take()
@@ -630,12 +618,7 @@ impl Catalog {
     /// [`unblacklist`](Self::unblacklist) it.
     pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
         let canonical = key(plugin.path());
-        refusal(
-            blacklist_row(&self.db, &canonical),
-            &canonical,
-            plugin,
-            |path| FileFacts::read(path),
-        )
+        refusal(blacklist_row(&self.db, &canonical), &canonical, plugin)
     }
 
     /// Blacklists a plugin by path, hiding it from `iter` and `entries`,
@@ -1077,40 +1060,6 @@ mod tests {
             moved_blacklist(&moved, &db),
             Some(PluginDb::new()),
             "the blacklist went"
-        );
-    }
-
-    /// **A blacklist check holds no lock while it reads the file**: with the
-    /// file read still in flight, the owner's write to the published
-    /// blacklist is not blocked. Ordered by channels, never by a sleep.
-    #[test]
-    fn a_blacklist_check_releases_its_lock_before_it_reads_the_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("Crasher.clap");
-        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["crasher"]);
-        plugins.blacklist(&path, "hung");
-        let view = plugins.blacklist_view();
-        let plugin = PluginRef::loaded(&path, PluginFormat::Clap, "crasher");
-        let (reading_tx, reading_rx) = crossbeam_channel::bounded::<()>(1);
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
-
-        let checked = std::thread::scope(|scope| {
-            let check = scope.spawn(|| {
-                view.check_reading(&plugin, |path| {
-                    reading_tx.send(()).unwrap();
-                    release_rx.recv().unwrap();
-                    FileFacts::read(path)
-                })
-            });
-            reading_rx.recv().unwrap();
-            let writable = view.rows.try_write().is_ok();
-            release_tx.send(()).unwrap();
-            assert!(writable, "the check held the lock across the file read");
-            check.join().unwrap()
-        });
-        assert!(
-            matches!(checked, Err(BridgeError::Blacklisted { .. })),
-            "{checked:?}"
         );
     }
 

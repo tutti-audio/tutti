@@ -1340,6 +1340,55 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
     );
 }
 
+/// **A fork's restore loads the live preset, then the live state, into a fresh
+/// served instance**: `ForkState::restore` over a launched `Ipc`, against the
+/// real server. The plugin's preset file is accepted (a refused preset is a
+/// `Rejected` restore), and the state, which goes in after it, is what the
+/// instance holds: the live gain, not the preset's.
+#[test]
+fn a_served_restore_loads_the_preset_then_the_state() {
+    use tutti_plugin_host::ForkState;
+    use tutti_plugin_ipc::{Ipc, unique_socket_path};
+    use tutti_plugin_types::{Load, PluginFormat, PresetId, RenderMode, StateUse};
+
+    let _lock = machine_lock();
+    let _env = env().preset_load();
+    let probe = load_probe(SAMPLE_RATE);
+    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    let state = probe
+        .handle
+        .save_state(StateUse::Duplicate)
+        .expect("the probe saves");
+    let dir = tempfile::TempDir::new().expect("a directory");
+    let preset = dir.path().join("a.tutti-preset");
+    std::fs::write(&preset, b"x").expect("a preset file");
+
+    let launched = Ipc::launch(
+        BridgeConfig::at(unique_socket_path().expect("a socket path")),
+        tutti_fixtures::clap_probe().to_path_buf(),
+        PluginFormat::Clap,
+        Load::new(),
+        SampleRate::of(SAMPLE_RATE),
+        None,
+        StateUse::Duplicate,
+        None,
+    )
+    .expect("a fresh probe launches");
+    let ipc = launched.ipc;
+    ForkState::new(
+        Some(PresetId::Location(preset)),
+        state,
+        RenderMode::Realtime,
+    )
+    .restore(
+        &mut (),
+        |(), id| ipc.load_preset(id),
+        |(), bytes| ipc.load_state(bytes, StateUse::Duplicate),
+    )
+    .expect("the preset and the state load");
+    assert_eq!(ipc.bridge().parameter(GAIN), Some(gain_at(-6.0)));
+}
+
 /// **An export renders a graph of plugins the same on a worker pool as
 /// alone** (doc 013, "The parallel executor"): two out-of-process probes side by side, each
 /// at its own gain, forked offline twice — once rendered on the export's
