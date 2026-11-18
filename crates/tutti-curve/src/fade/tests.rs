@@ -17,15 +17,15 @@ fn smootherstep(x: f64) -> f64 {
 fn equal_amplitude_is_the_smootherstep_at_every_frame() {
     for len in LENGTHS {
         for k in 0..len {
-            let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
+            let (out, inn) = FadeLaw::EqualAmplitude.gains(Samples(k), Samples(len));
             assert!(
                 (0.0..=1.0).contains(&out.get()) && (0.0..=1.0).contains(&inn.get()),
                 "{k}/{len}: ({out:?}, {inn:?})"
             );
             let want = smootherstep((k + 1) as f64 / (len + 1) as f64);
-            assert!((inn.get() - want).abs() < 5e-6, "{k}/{len}: {inn:?}");
+            assert!((inn.get() - want).abs() < 1e-14, "{k}/{len}: {inn:?}");
             assert!(
-                (out.get() - (1.0 - want)).abs() < 5e-6,
+                (out.get() - (1.0 - want)).abs() < 1e-14,
                 "{k}/{len}: {out:?}"
             );
         }
@@ -33,7 +33,7 @@ fn equal_amplitude_is_the_smootherstep_at_every_frame() {
 }
 
 /// At a position that is a dyadic fraction every step of the polynomial is
-/// exact in the `f32` law: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
+/// exact in binary: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
 /// 0.103515625`.
 #[test]
 fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
@@ -44,7 +44,7 @@ fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
         (0, 7, 0.016_052_246_093_75),
         (5, 7, 0.896_484_375),
     ] {
-        let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
+        let (out, inn) = FadeLaw::EqualAmplitude.gains(Samples(k), Samples(len));
         assert_eq!(inn.get(), want, "{k}/{len}");
         assert_eq!(out.get(), 1.0 - want, "{k}/{len}: the complement");
     }
@@ -56,12 +56,13 @@ fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
 fn equal_amplitude_sums_to_one_and_mirrors() {
     for len in LENGTHS {
         for k in 0..len {
-            let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
+            let (out, inn) = FadeLaw::EqualAmplitude.gains(Samples(k), Samples(len));
             assert!((out.get() + inn.get() - 1.0).abs() <= 1e-14, "{k}/{len}");
-            // The `f32` law's smootherstep mirrors to its rounding.
-            let (mirror_out, mirror_in) = FadeLaw::EqualAmplitude.gains(len - 1 - k, len);
-            assert!((out.get() - mirror_in.get()).abs() <= 5e-6, "{k}/{len}");
-            assert!((inn.get() - mirror_out.get()).abs() <= 5e-6, "{k}/{len}");
+            // The smootherstep mirrors to its rounding.
+            let (mirror_out, mirror_in) =
+                FadeLaw::EqualAmplitude.gains(Samples(len - 1 - k), Samples(len));
+            assert!((out.get() - mirror_in.get()).abs() <= 1e-14, "{k}/{len}");
+            assert!((inn.get() - mirror_out.get()).abs() <= 1e-14, "{k}/{len}");
         }
     }
 }
@@ -72,15 +73,21 @@ fn equal_amplitude_sums_to_one_and_mirrors() {
 fn equal_power_is_the_cosine_sine_pair_of_the_smootherstep() {
     for len in LENGTHS {
         for k in 0..len {
-            let (out, inn) = FadeLaw::EqualPower.gains(k, len);
+            let (out, inn) = FadeLaw::EqualPower.gains(Samples(k), Samples(len));
             assert!(
                 (out.get() * out.get() + inn.get() * inn.get() - 1.0).abs() < 1e-14,
                 "{k}/{len}"
             );
             let angle =
                 smootherstep((k + 1) as f64 / (len + 1) as f64) * std::f64::consts::FRAC_PI_2;
-            assert!((out.get() - angle.cos()).abs() < 5e-6, "{k}/{len}: {out:?}");
-            assert!((inn.get() - angle.sin()).abs() < 5e-6, "{k}/{len}: {inn:?}");
+            assert!(
+                (out.get() - angle.cos()).abs() < 1e-14,
+                "{k}/{len}: {out:?}"
+            );
+            assert!(
+                (inn.get() - angle.sin()).abs() < 1e-14,
+                "{k}/{len}: {inn:?}"
+            );
         }
     }
 }
@@ -93,8 +100,8 @@ fn no_frame_of_a_fade_is_wholly_old_or_wholly_new() {
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         let n = declick_frames(SampleRate::of(rate)).get();
         for law in [FadeLaw::EqualAmplitude, FadeLaw::EqualPower] {
-            let (out0, in0) = law.gains(0, n);
-            let (out_last, in_last) = law.gains(n - 1, n);
+            let (out0, in0) = law.gains(Samples(0), Samples(n));
+            let (out_last, in_last) = law.gains(Samples(n - 1), Samples(n));
             assert!(
                 in0 > Amplitude::SILENT && out0 <= Amplitude::UNITY,
                 "{law:?} first frame at {rate}"
@@ -132,16 +139,27 @@ fn declick_is_five_milliseconds_in_frames_at_least_one() {
 fn between_moves_from_one_value_to_the_other() {
     for len in [1usize, 5, 240] {
         for k in 0..len {
-            let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
+            let (out, inn) = FadeLaw::EqualAmplitude.gains(Samples(k), Samples(len));
             let want = Amplitude(3.0 * out.get() + (-2.0) * inn.get());
             assert_eq!(
-                FadeLaw::EqualAmplitude.between(Amplitude(3.0), Amplitude(-2.0), k, len),
+                FadeLaw::EqualAmplitude.between(
+                    Amplitude(3.0),
+                    Amplitude(-2.0),
+                    Samples(k),
+                    Samples(len)
+                ),
                 want
             );
         }
         let (from, to) = (Amplitude(3.0), Amplitude(-2.0));
-        assert_eq!(FadeLaw::EqualPower.between(from, to, len, len), to);
-        assert_eq!(FadeLaw::EqualPower.between(from, to, len + 9, len), to);
+        assert_eq!(
+            FadeLaw::EqualPower.between(from, to, Samples(len), Samples(len)),
+            to
+        );
+        assert_eq!(
+            FadeLaw::EqualPower.between(from, to, Samples(len + 9), Samples(len)),
+            to
+        );
     }
 }
 
@@ -150,11 +168,19 @@ fn between_moves_from_one_value_to_the_other() {
 #[test]
 fn a_ramp_lands_on_its_target_at_the_last_frame() {
     for n in [1usize, 2, 3, 7, 64, 240, 4800] {
-        assert_eq!(Piece::ramp_at(None, 0.3, -0.7, n - 1, n), -0.7, "n = {n}");
-        assert_eq!(Piece::ramp_at(None, 0.3, 0.3, n - 1, n), 0.3, "n = {n}");
+        assert_eq!(
+            Piece::ramp_at(None, 0.3, -0.7, Samples(n - 1), Samples(n)),
+            -0.7,
+            "n = {n}"
+        );
+        assert_eq!(
+            Piece::ramp_at(None, 0.3, 0.3, Samples(n - 1), Samples(n)),
+            0.3,
+            "n = {n}"
+        );
     }
-    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 0, 4), 2.0);
-    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 1, 4), 4.0);
-    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 2, 4), 6.0);
-    assert_eq!(Piece::ramp_at(None, 8.0, 0.0, 0, 4), 6.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, Samples(0), Samples(4)), 2.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, Samples(1), Samples(4)), 4.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, Samples(2), Samples(4)), 6.0);
+    assert_eq!(Piece::ramp_at(None, 8.0, 0.0, Samples(0), Samples(4)), 6.0);
 }

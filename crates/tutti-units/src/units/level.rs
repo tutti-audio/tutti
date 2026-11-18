@@ -109,12 +109,12 @@ impl From<Db> for Amplitude {
 }
 
 impl Amplitude {
-    /// The straight line from `self` to `to` at `t`, with `t` in `0..=1`:
-    /// `self` at 0, `to` at 1. A gain ramp is linear in amplitude.
+    /// The straight line from `self` to `to` at `t`: `self` at 0, `to` at 1.
+    /// A gain ramp is linear in amplitude.
     #[inline]
     #[must_use]
-    pub fn lerp(self, to: Amplitude, t: f64) -> Amplitude {
-        Amplitude(self.0 + (to.0 - self.0) * t)
+    pub fn lerp(self, to: Amplitude, t: crate::Normalized) -> Amplitude {
+        Amplitude(self.0 + (to.0 - self.0) * t.get())
     }
 }
 

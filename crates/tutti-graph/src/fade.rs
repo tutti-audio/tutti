@@ -76,7 +76,7 @@ impl Fade {
     /// The `(out, in)` gains of frame `k` of an `n`-frame fade on an `f32` param lane or
     /// weight: the law's `f64` gains narrowed once.
     #[inline]
-    pub(crate) fn lane_gains(law: FadeLaw, k: usize, n: usize) -> (f32, f32) {
+    pub(crate) fn lane_gains(law: FadeLaw, k: Samples, n: Samples) -> (f32, f32) {
         let (out, inn) = law.gains(k, n);
         (out.get() as f32, inn.get() as f32)
     }

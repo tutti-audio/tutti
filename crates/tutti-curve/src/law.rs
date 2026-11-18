@@ -1,3 +1,5 @@
+use tutti_units::Normalized;
+
 use crate::{Curvature, Exponent};
 
 /// How a piece moves from its start value to its end value: a function `g` of
@@ -15,16 +17,18 @@ use crate::{Curvature, Exponent};
 /// **Platform figures.** `Linear`, `Hold`, `Smootherstep` and the power laws
 /// at exponents 0.5 and 1–5 evaluate with IEEE-exact operations
 /// (multiplication, `sqrt`). Other exponents and [`Exp`](Self::Exp) use
-/// `libm`'s pure-Rust `powf` and `expm1f`, not the platform's C math library,
+/// `libm`'s pure-Rust `pow` and `expm1`, not the platform's C math library,
 /// so every law gives the same bits on every target.
 ///
 /// ```
 /// use tutti_curve::Law;
-/// assert_eq!(Law::Linear.eval(0.25), 0.25);
 /// use tutti_curve::Exponent;
-/// assert_eq!(Law::PowerIn(Exponent::of(2.0)).eval(0.5), 0.25);
-/// assert_eq!(Law::PowerOut(Exponent::of(2.0)).eval(0.5), 0.75);
-/// assert_eq!(Law::Hold.eval(0.99), 0.0);
+/// use tutti_units::Normalized;
+/// let at = |t| Normalized::of(t);
+/// assert_eq!(Law::Linear.eval(at(0.25)), at(0.25));
+/// assert_eq!(Law::PowerIn(Exponent::of(2.0)).eval(at(0.5)), at(0.25));
+/// assert_eq!(Law::PowerOut(Exponent::of(2.0)).eval(at(0.5)), at(0.75));
+/// assert_eq!(Law::Hold.eval(at(0.99)), at(0.0));
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Law {
@@ -55,19 +59,23 @@ pub enum Law {
     /// is the third-order `3t² - 2t³`, and this is its successor.) It is
     /// the amplitude law of the graph's equal-amplitude crossfade.
     ///
-    /// Evaluated in `f32` in a Horner form and clamped to `[0, 1]`; the form
-    /// is monotone to within about 19 ulp (`2.3e-6`) near 1.
+    /// Evaluated in a Horner form and pinned to `[0, 1]`.
     Smootherstep,
 }
 
 impl Law {
-    /// `g(t)`, `t` clamped to `[0, 1]` (a NaN `t` is 0). Allocation-free: what
-    /// a param port calls once per frame.
+    /// `g(t)`. Allocation-free: what a param port calls once per frame.
+    ///
+    /// The progress and the result are [`Normalized`]: a progress is a
+    /// position on `0..=1`, so an out-of-range or NaN progress is pinned where
+    /// it is built (`Normalized::clamped`), never inside the law. The result
+    /// is pinned onto `0..=1` once more, which trims the rounding overshoot of
+    /// the polynomial and exponential forms.
     #[inline]
     #[must_use]
-    pub fn eval(self, t: f32) -> f32 {
-        let t = if t >= 0.0 { t.min(1.0) } else { 0.0 };
-        match self {
+    pub fn eval(self, t: Normalized) -> Normalized {
+        let t = t.get();
+        let g = match self {
             Self::Linear => t,
             Self::Hold => {
                 if t < 1.0 {
@@ -88,25 +96,25 @@ impl Law {
                     1.0 - pow(2.0 - 2.0 * t, p) / 2.0
                 }
             }
-            // `t` is in `[0, 1]` here (the prelude clamps it, a NaN is 0). The
-            // clamp trims the Horner form's rounding overshoot of 1.
-            Self::Smootherstep => (t * t * t * (t * (t * 6.0 - 15.0) + 10.0)).clamp(0.0, 1.0),
+            Self::Smootherstep => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
             Self::Exp(k) => {
                 let k = k.get();
-                if k.abs() < 1e-4 {
+                // `expm1` is accurate down to the smallest `k`; only 0 is `0 / 0`.
+                if k == 0.0 {
                     t
                 } else {
-                    libm::expm1f(k * t) / libm::expm1f(k)
+                    libm::expm1(k * t) / libm::expm1(k)
                 }
             }
-        }
+        };
+        Normalized::clamped(g)
     }
 }
 
 /// `x^p` for `x` in `[0, 1]`: the integer exponents up to 5 and the square
-/// root by IEEE-exact operations, anything else through `libm::powf`.
+/// root by IEEE-exact operations, anything else through `libm::pow`.
 #[inline]
-fn pow(x: f32, p: f32) -> f32 {
+fn pow(x: f64, p: f64) -> f64 {
     if p == 1.0 {
         x
     } else if p == 2.0 {
@@ -120,9 +128,9 @@ fn pow(x: f32, p: f32) -> f32 {
         let x2 = x * x;
         x2 * x2 * x
     } else if p == 0.5 {
-        libm::sqrtf(x)
+        libm::sqrt(x)
     } else {
-        libm::powf(x, p)
+        libm::pow(x, p)
     }
 }
 
