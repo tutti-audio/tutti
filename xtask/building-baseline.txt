@@ -456,7 +456,7 @@ tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::w
 # tutti-session
 tutti-session  with-prefix  crates/tutti-session/src/pool/config.rs::PoolConfig::with_live_holds
 tutti-session  with-prefix  crates/tutti-session/src/pool/config.rs::PoolConfig::with_parallel_loads
-tutti-session  with-prefix  crates/tutti-session/src/session.rs::PhaseCx::with_mods
+tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx::with_mods
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::try_map
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::try_map
 tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
@@ -482,13 +482,13 @@ tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_pol
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
-tutti-session  setter  crates/tutti-session/src/session.rs::Session::set_loop
+tutti-session  setter  crates/tutti-session/src/session/transport.rs::Session::set_loop
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
-tutti-session  ctor-result  crates/tutti-session/src/session.rs::Session::new
+tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
 tutti-session  option-arg  crates/tutti-session/src/bounce.rs::Bounce::root_topology
 tutti-session  option-arg  crates/tutti-session/src/builder.rs::SessionBuilder::plugin_recovery
 

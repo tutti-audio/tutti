@@ -1,0 +1,265 @@
+//! [`SessionEvent`], what an [`update`](crate::Session::update) found for the host, and
+//! [`CrossfadeControls`], the incoming node's controls a landed crossfade carries.
+
+use std::any::Any;
+use std::fmt::{self, Formatter};
+
+use tutti_engine::StreamFault;
+use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
+use tutti_types::ChannelTopology;
+use tutti_units::SampleRate;
+
+use crate::graph::CrossfadeId;
+use crate::{
+    BusSink, CrossfadeRefused, Edge, EventEdge, Landed, PoolEvent, PoolKey, Problem, ResourceFact,
+    ResourceId, RootReader,
+};
+
+/// The controls a landed crossfade hands the app: the incoming node's
+/// `IntoNode::Controls`, boxed (`()` for a plugin), its params already addressed.
+pub struct CrossfadeControls(Box<dyn Any + Send>);
+
+impl CrossfadeControls {
+    pub(crate) fn new(controls: Box<dyn Any + Send>) -> Self {
+        Self(controls)
+    }
+
+    /// The controls as `T`, or `None` when they are another type.
+    #[must_use]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+
+    /// The boxed controls.
+    #[must_use]
+    pub fn into_inner(self) -> Box<dyn Any + Send> {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for CrossfadeControls {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("CrossfadeControls(..)")
+    }
+}
+
+/// Something an [`update`](Session::update) found for the host.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum SessionEvent {
+    /// A [`Job`](crate::Job) finished: take its result with
+    /// [`Landed::take`](crate::Landed::take). Reported once, in the update
+    /// that found it, unless a [`Job::wait`](crate::Job::wait) took it.
+    Landed(Landed),
+    /// The graph's edits could not be committed: the plan sent last keeps
+    /// playing. Each update tries again; a refusal is reported once, until a
+    /// commit is sent or it fails another way.
+    CommitRefused(CommitError),
+    /// A crossfade that waited out a re-prepare
+    /// ([`Crossfade::Waiting`](crate::Crossfade::Waiting)) swapped its node
+    /// in: `controls` are the incoming node's `IntoNode::Controls`, boxed
+    /// (`()` for a plugin), its params already addressed.
+    CrossfadeLanded {
+        /// The node it swapped behind.
+        node: NodeKey,
+        /// The id [`Graph::crossfade`] returned.
+        id: CrossfadeId,
+        /// The incoming node's controls.
+        controls: CrossfadeControls,
+    },
+    /// A crossfade that waited out a re-prepare was refused when it was
+    /// retried (the graph is poisoned, or the node went): the incoming node
+    /// was dropped.
+    CrossfadeFailed {
+        /// The node it was to swap behind.
+        node: NodeKey,
+        /// The id [`Graph::crossfade`] returned.
+        id: CrossfadeId,
+        /// Why.
+        refused: CrossfadeRefused,
+    },
+    /// A node re-inserted with a narrower shape (a plugin whose ports changed,
+    /// a node re-declared at a new width) lost wiring to the ports it no
+    /// longer has. Reported once, by the update that commits the re-insert,
+    /// per node: the audio edges, the event edges and the bus edges (root feeds
+    /// included) that were dropped, by the ports the app named them with.
+    /// Edges to the ports the node still has are kept, gains included. A
+    /// refused commit reports nothing: the record waits for the update whose
+    /// commit lands.
+    ///
+    /// A feedback edge is listed as the pair of ports it joined (its delay
+    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// dropped edge, or a param or edge-gain lane the node's lost event
+    /// outputs drove, is not listed: the route stays declared and reads
+    /// unresolved (`Problem::Unresolved`) until its target
+    /// is wired again.
+    Unwired {
+        /// The node whose re-insert dropped the wiring.
+        node: NodeKey,
+        /// The audio edges dropped, into or out of the node (a feedback edge
+        /// as the pair of ports it joined).
+        edges: Vec<Edge>,
+        /// The event edges dropped, into or out of the node.
+        event_edges: Vec<EventEdge>,
+        /// The bus edges dropped, into or out of the node, as the app wired
+        /// them: the source bus and the sink, a node's input bus or the
+        /// root.
+        bus_edges: Vec<(BusSource, BusSink)>,
+    },
+    /// A node with a bus besides its main one (an aux or sidechain bus, a
+    /// plugin's) had its audio wiring changed: a port gained its first source or
+    /// consumer, or lost its last (an edge, a global output, a tap or a
+    /// meter). Reported once per node by the update that sends the commit
+    /// (or the next update, for a commit the host made itself), carrying the
+    /// node's first `was` and last `now` of the commits since the last
+    /// report; a node whose wiring is as it was reports nothing. It is the
+    /// control-side notice a plugin needs to activate or deactivate an aux
+    /// bus; the block that applies the commit reads the same answer through
+    /// [`Io::wired_inputs`](tutti_graph::Io::wired_inputs). A node with only
+    /// a main bus is never reported; it reads its per-block masks.
+    Rewired {
+        /// The node.
+        node: NodeKey,
+        /// Its wired ports before.
+        was: Wired,
+        /// Its wired ports now.
+        now: Wired,
+    },
+    /// A node's event output port lost events since the last update: they
+    /// were past its capacity (a note-off only past the room set aside for
+    /// note-offs), a PDC or feedback delay it feeds was full, or the node
+    /// left out an event because the one it pairs with was refused (a clip's
+    /// note-off of a note-on the port refused). One per port per update, the
+    /// sum over the blocks of the update. A note-off refused and sent again
+    /// later counts as refused.
+    ///
+    /// `port` is `None` for a loss no output port owns. The graph's total is
+    /// [`LoadReading::dropped_events`](tutti_metering::LoadReading::dropped_events), exact
+    /// where this is per port: a block that loses at more than 64 places, or
+    /// a host that does not run `Collect` for long enough to fill a ring of
+    /// 256 entries, leaves some out here and not there.
+    EventsDropped {
+        /// The node.
+        node: NodeKey,
+        /// Its event output port, `None` for a loss the node had that no
+        /// output port owns: events a plugin took in and did not deliver, a
+        /// scheduled command that did not fit.
+        port: Option<u16>,
+        /// How many events were refused or withheld.
+        count: u64,
+        /// How many of them a node says it then wrote (a note-off it sent
+        /// again): `count - recovered` never arrived, summed over updates.
+        recovered: u64,
+    },
+    /// Events the graph lost that no [`EventsDropped`](Self::EventsDropped)
+    /// names: a merge's, and those a block that lost at more than 64 places
+    /// or a full report ring left out. The count since the last update.
+    EventsDroppedElsewhere(u64),
+    /// The engine rendered silence for blocks it could not render: an
+    /// **audible dropout** (the listener hears a gap, and a heard tap or
+    /// recording takes the silence too). The count is the blocks silenced
+    /// since the last update that reported, one event per update that saw
+    /// any; it is derived on the control side from
+    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced), so
+    /// the audio thread does nothing more than count.
+    ///
+    /// A block is silenced when the graph was held by the control side as
+    /// the callback came (an edit applying while the device asked for
+    /// audio), when the output buffer's width is one the engine has no fold
+    /// for ([`Engine::support_output`](tutti_engine::Engine::support_output)),
+    /// when the graph has no output channels, or when the graph's root width
+    /// cannot be placed on the device's. Blocks that merely ran past their
+    /// budget are not silenced and have no event: that is the polled
+    /// [`LoadReading::over_budget`](tutti_metering::LoadReading::over_budget).
+    /// A [`LoadMeter::reset`](tutti_metering::LoadMeter::reset) between
+    /// updates restarts the count without an event.
+    BlocksSilenced(u64),
+    /// The session's rate changed with its clock: a switch onto a sound card
+    /// that runs at another rate, or the card's rate carried to the timer. A
+    /// capture a host holds itself (not one the session added) is at the old
+    /// rate and is the host's to reopen.
+    RateChanged {
+        /// The rate the graph ran at.
+        from: SampleRate,
+        /// The rate it runs at now.
+        to: SampleRate,
+    },
+    /// The stream of a real-time clock reported a fault: a device unplugged
+    /// mid-session, a callback that panicked, a timer that fell behind. The
+    /// most recent one since the last poll, as
+    /// [`Session::faults`] counts them.
+    Fault(StreamFault),
+    /// The sound card or its devices: a device that came or went, a
+    /// restart wanted, done or failed ([`DeviceEvent`](crate::DeviceEvent)).
+    #[cfg(feature = "device")]
+    Device(crate::DeviceEvent),
+    /// A take of the session's: its first frame arrived, it ended, or it
+    /// failed ([`TakeEvent`](crate::TakeEvent)).
+    #[cfg(feature = "capture")]
+    Take(crate::TakeEvent),
+    /// A modulation problem (design 015 §4.7), the one type
+    /// [`ModState::problems`](crate::ModState::problems) lists. Reported
+    /// once: a refusal when it starts or changes (the problems list holds it
+    /// while it lasts), a target that has stayed unresolved for the session's
+    /// warning time ([`SessionBuilder::unresolved_warning`](crate::SessionBuilder::unresolved_warning),
+    /// 4 s by default) of [`PhaseCx::now`], likely a key no node is ever bound to,
+    /// once per stretch it stays unresolved.
+    Modulation(Problem),
+    /// A MIDI event of the session's, by area (design 030, convention 1):
+    /// a device came or went, a held input or the output was lost, a
+    /// negotiation settled, the device watch ended, or events were dropped.
+    /// See [`MidiReport`](crate::MidiReport).
+    #[cfg(feature = "midi")]
+    Midi(crate::MidiReport),
+    /// A stream an [`open_stream`](Session::open_stream) started opened or
+    /// failed to. See [`SamplerEvent`](crate::SamplerEvent).
+    #[cfg(feature = "sampler")]
+    Sampler(crate::SamplerEvent),
+    /// A hosted plugin's event, by area: what the plugin reported (its own edit of a parameter, a
+    /// new tail) and every transition of its life (died, reloading, recovered,
+    /// gave up). See [`PluginEvent`](crate::PluginEvent).
+    #[cfg(feature = "plugin")]
+    Plugin(crate::PluginEvent),
+    /// A reading of one peer changed: read `fact` again on the token whose
+    /// [`Resource::id`](crate::Resource::id) is `id`. The notice carries no
+    /// value.
+    ResourceChanged {
+        /// The peer's token.
+        id: ResourceId,
+        /// Which of its readings changed.
+        fact: ResourceFact,
+    },
+    /// A reader of the root was opened again, because the root's width is no
+    /// longer the one the reader has: a tap from
+    /// [`Taps::open_output`](crate::Taps::open_output), or the master meter
+    /// once a host took it ([`Session::take_master_meter`]). `id` names the new
+    /// reader, which the session holds until
+    /// [`Session::take_reopened`] claims it (an event left unread loses
+    /// nothing); `topology` is the root's now. The old reader reads closed, so
+    /// no reader takes twelve channels for two: a tap's reads what its rings
+    /// held when the commit that changed the root was applied and then ends
+    /// ([`Pull::Ended`](tutti_buffers::Pull::Ended)), a meter's reads
+    /// [`is_closed`](tutti_graph::MeterReader::is_closed). A second reopen
+    /// before the claim replaces the held reader, and the earlier one ends.
+    ///
+    /// The new tap is fed from the first block of the plan that carries the
+    /// change, and what the old one holds ends on the block before it: a root
+    /// crossfade fades the engine's output, never what a tap reads, so the
+    /// tap switches to the new root at the commit and never reads the old
+    /// root's channels. The event comes in the update that sends the commit.
+    RootReaderReopened {
+        /// The reader to claim.
+        id: RootReader,
+        /// The root's topology the reader was opened for.
+        topology: ChannelTopology,
+    },
+    /// A pool entry's change: its load landed or failed, a reload landed, or it
+    /// was released. See [`PoolEvent`](PoolEvent); `key` is the key the
+    /// app declared it under ([`PoolKey::get`](PoolKey::get)).
+    Pool {
+        /// The entry's key.
+        key: PoolKey,
+        /// What changed.
+        event: PoolEvent,
+    },
+}
