@@ -317,8 +317,10 @@ fn a_volume_write_moves_the_master_volume() {
         ..Default::default()
     });
     assert!(set(&synth, UnitParam::Volume, 0.6), "volume is addressable");
-    assert!(
-        (synth.volume().get() - 0.6).abs() < 1e-4,
+    // The param word is `f32`: the write widens exactly.
+    assert_eq!(
+        synth.volume(),
+        tutti_units::Amplitude(f64::from(0.6_f32)),
         "the synth's master volume reflects the write"
     );
     // (A foreign `ParamAddr::Id` is not expressible: a `ParamSet` is
@@ -2968,7 +2970,7 @@ fn channel_pan_follows_rp_036() {
     );
     for hard_left in [0, 1] {
         let (l, r) = level(Some(hard_left));
-        assert!(r < 1e-4 * l, "{hard_left}: {l} {r}");
+        assert_eq!(r, 0.0, "{hard_left}: the dead side is silent, the live one {l}");
         // RP-036's left gain is 1 at hard left against cos(Pi/4) at centre.
         assert!(
             (l / default_l - std::f32::consts::SQRT_2).abs() < 0.01,
@@ -2976,7 +2978,7 @@ fn channel_pan_follows_rp_036() {
         );
     }
     let (l, r) = level(Some(127));
-    assert!(l < 1e-4 * r, "{l} {r}");
+    assert_eq!(l, 0.0, "the dead side is silent, the live one {r}");
     // CC 32: tan (Pi/2 * 31/126) is the right over the left.
     let (l, r) = level(Some(32));
     let expected = (std::f32::consts::FRAC_PI_2 * 31.0 / 126.0).tan();
