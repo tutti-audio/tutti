@@ -19,7 +19,7 @@ fn session() -> Session {
 #[test]
 fn a_write_reaches_the_decay_it_names() {
     let mut s = session();
-    let (node, cells) = s.graph().add::<FdnNode>(FdnNode::live(
+    let (node, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnControls::DEFAULT,
     ));
@@ -31,9 +31,10 @@ fn a_write_reaches_the_decay_it_names() {
     assert_eq!(cells.get(at(2)), Some(1.2), "high untouched");
     assert_eq!(cells.get(UnitParam::Freeze), Some(1.0));
 
-    let (plain, cells) = s
-        .graph()
-        .add::<FdnNode>(FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT));
+    let (plain, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
+        FdnLayout::default(),
+        FdnControls::DEFAULT,
+    ));
     assert_eq!(
         s.set(plain.freeze().to(true)).unwrap_err().kind,
         ValueErrorKind::NoSuchTarget
@@ -46,10 +47,11 @@ fn a_write_reaches_the_decay_it_names() {
 #[test]
 fn the_graph_sees_each_reverbs_ceiling() {
     let mut s = session();
-    let (plain, _) = s
-        .graph()
-        .add::<FdnNode>(FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT));
-    let (frozen, _) = s.graph().add::<FdnNode>(FdnNode::live(
+    let (plain, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
+        FdnLayout::default(),
+        FdnControls::DEFAULT,
+    ));
+    let (frozen, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnControls::DEFAULT,
     ));
@@ -69,7 +71,7 @@ fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
     let mut s = session();
     let (node, cells) = s
         .graph()
-        .add::<PlateReverbNode>(PlateReverbNode::from(PlateReverbConfig::new()));
+        .add::<PlateReverbNode<f32>>(PlateReverbNode::<f32>::from(PlateReverbConfig::new()));
     s.set(node.decay().to(Seconds(5.0))).unwrap();
     s.set(node.diffusion().to(Mix(0.25))).unwrap();
     assert_eq!(cells.get(UnitParam::Decay), Some(5.0));

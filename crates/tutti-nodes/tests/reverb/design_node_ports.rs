@@ -33,7 +33,7 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     assert!(filter.param_set().get(UnitParam::Wet).is_none());
 
     let live = prepared(
-        FreeverbNode::live(FreeverbControls::GENERAL_MIDI),
+        FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
         SR,
         BLOCK,
     );
@@ -50,7 +50,7 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     );
     assert!(live.param_set().get(UnitParam::Wet).is_none());
 
-    let fixed = prepared(FreeverbNode::default(), SR, BLOCK);
+    let fixed = prepared(FreeverbNode::<f32>::default(), SR, BLOCK);
     assert!(fixed.shape().params.as_slice().is_empty());
     assert_eq!(fixed.param_base(0), None);
 }

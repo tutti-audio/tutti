@@ -28,15 +28,16 @@
 //! its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
 //! exactly (a size or a damping that jumped would click).
 //!
-//! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
+//! **Format.** The state is the bank's float `F`; a view of another [`Float`] is converted at
+//! the edges. The damping is designed in `f64` and narrowed to `F` once.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
 use crate::delay::{DelayRing, ring_seconds, trips};
 use crate::reverb::{CHUNK, ramp};
-use crate::{Glide, Steps, TAIL_FLOOR};
+use crate::{Glide, Lerp, Steps, TAIL_FLOOR};
 
 /// The all-pass feedback.
 const ALLPASS_FEEDBACK: Gain = Gain::new(0.5);
@@ -63,16 +64,17 @@ const START: FreeverbControls = FreeverbControls::GENERAL_MIDI;
 /// What a Freeverb reads while it runs: the comb feedback and the damping, each aimed by
 /// [`FreeverbBank::aim`] and stepped once a chunk by [`FreeverbBank::process`].
 ///
-/// A glide steps before its chunk runs: the first chunk after an aim reads step 1.
+/// A glide steps before its chunk runs: the first chunk after an aim reads step 1. Held in the
+/// bank's float `F`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FreeverbGlides {
-    feedback: Glide<f32>,
-    damp: Glide<f32>,
+pub struct FreeverbGlides<F: Float> {
+    feedback: Glide<F>,
+    damp: Glide<F>,
     /// The steps of the 20 ms glide, at the rate prepared for.
     ramp: Steps,
 }
 
-impl FreeverbGlides {
+impl<F: Float + Lerp> FreeverbGlides<F> {
     /// Lands on the targets now.
     pub fn settle(&mut self) {
         self.feedback.settle();
@@ -86,22 +88,22 @@ impl FreeverbGlides {
     }
 }
 
-/// Freeverb at one rate: mono in, stereo out.
+/// Freeverb at one rate: mono in, stereo out, all in the state float `F`.
 ///
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps their
 /// size, and [`reset`](Self::reset) zeroes them without allocating. Its comb and all-pass
 /// lengths are Freeverb's, tuned at 44.1 kHz and scaled to the rate rounded to whole hertz.
 #[derive(Clone, Debug)]
-pub struct FreeverbBank {
-    combs: [Vec<CombFilter>; 2],
-    all_passes: [Vec<AllPassFilter>; 2],
+pub struct FreeverbBank<F: Float> {
+    combs: [Vec<CombFilter<F>>; 2],
+    all_passes: [Vec<AllPassFilter<F>>; 2],
     /// The rate the lines were tuned for, in whole hertz.
     rate: SampleRate,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: usize,
 }
 
-impl FreeverbBank {
+impl<F: Float + Lerp> FreeverbBank<F> {
     /// The gain the input is scaled by.
     pub const FIXED_GAIN: Gain = Gain::new(0.015);
 
@@ -134,9 +136,13 @@ impl FreeverbBank {
             rate,
             into: 0,
         };
-        bank.set_combs(START.feedback().get(), START.damping());
+        // `Feedback` and `Gain` are `f32` units: the figure narrows through them.
+        bank.set_combs(
+            F::from_f32(START.feedback().get()),
+            F::from_f64(START.damping()),
+        );
         for apf in bank.all_passes.iter_mut().flatten() {
-            apf.feedback = ALLPASS_FEEDBACK.get();
+            apf.feedback = F::from_f32(ALLPASS_FEEDBACK.get());
         }
         bank
     }
@@ -144,10 +150,10 @@ impl FreeverbBank {
     /// The glides of this bank, landed on the General MIDI figures: its first
     /// [`aim`](Self::aim) is the caller's to land.
     #[must_use]
-    pub fn glides(&self) -> FreeverbGlides {
+    pub fn glides(&self) -> FreeverbGlides<F> {
         FreeverbGlides {
-            feedback: Glide::landed(START.feedback().get()),
-            damp: Glide::landed(START.damping()),
+            feedback: Glide::landed(F::from_f32(START.feedback().get())),
+            damp: Glide::landed(F::from_f64(START.damping())),
             ramp: ramp(self.rate),
         }
     }
@@ -165,19 +171,22 @@ impl FreeverbBank {
 
     /// Aims `glides` at the comb loop gain and damping of `controls`, each moving in 20 ms.
     /// No allocation.
-    pub fn aim(&self, glides: &mut FreeverbGlides, controls: &FreeverbControls) {
+    pub fn aim(&self, glides: &mut FreeverbGlides<F>, controls: &FreeverbControls) {
+        // The loop gain is an `f32` unit; the damping is designed in `f64`.
         glides
             .feedback
-            .aim_by(controls.feedback().get(), glides.ramp);
-        glides.damp.aim_by(controls.damping(), glides.ramp);
+            .aim_by(F::from_f32(controls.feedback().get()), glides.ramp);
+        glides
+            .damp
+            .aim_by(F::from_f64(controls.damping()), glides.ramp);
     }
 
     /// Sets every comb's loop gain and damping. The damping's complement is `1 - damp`.
-    fn set_combs(&mut self, feedback: f32, damp: f32) {
+    fn set_combs(&mut self, feedback: F, damp: F) {
         for cf in self.combs.iter_mut().flatten() {
             cf.feedback = feedback;
             cf.damp1 = damp;
-            cf.damp2 = 1_f32 - damp;
+            cf.damp2 = F::ONE - damp;
         }
     }
 
@@ -229,17 +238,17 @@ impl FreeverbBank {
     /// allocation.
     pub fn process<S: Float>(
         &mut self,
-        glides: &mut FreeverbGlides,
+        glides: &mut FreeverbGlides<F>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels();
-        let scale = 1.0 / width.max(1) as f32;
+        let scale = F::from_f64(1.0 / width.max(1) as f64);
         let mut planes = output.iter_mut();
         let mut left = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
         let mut right = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
-        let (mut x, mut l, mut r) = ([0.0f32; CHUNK], [0.0f32; CHUNK], [0.0f32; CHUNK]);
+        let (mut x, mut l, mut r) = ([F::ZERO; CHUNK], [F::ZERO; CHUNK], [F::ZERO; CHUNK]);
         let mut at = 0;
         while at < frames {
             if self.into == 0 {
@@ -247,11 +256,11 @@ impl FreeverbBank {
                 self.set_combs(glides.feedback.now(), glides.damp.now());
             }
             let run = (CHUNK - self.into).min(frames - at);
-            x[..run].fill(0.0);
+            x[..run].fill(F::ZERO);
             for c in 0..width {
                 let plane = &input.plane(c).samples()[at..at + run];
                 for (slot, v) in x.iter_mut().zip(plane) {
-                    *slot += v.convert_to::<f32>();
+                    *slot += F::from_f64(v.to_f64());
                 }
             }
             for slot in &mut x[..run] {
@@ -260,12 +269,12 @@ impl FreeverbBank {
             self.run(&x[..run], &mut l[..run], &mut r[..run]);
             if let Some(y) = left.as_deref_mut() {
                 for (y, &v) in y[at..at + run].iter_mut().zip(&l[..run]) {
-                    *y = v.convert_to::<S>();
+                    *y = S::from_f64(v.to_f64());
                 }
             }
             if let Some(y) = right.as_deref_mut() {
                 for (y, &v) in y[at..at + run].iter_mut().zip(&r[..run]) {
-                    *y = v.convert_to::<S>();
+                    *y = S::from_f64(v.to_f64());
                 }
             }
             self.into = (self.into + run) % CHUNK;
@@ -275,14 +284,14 @@ impl FreeverbBank {
 
     /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each channel's combs and
     /// all-passes into `left` and `right`, which are overwritten.
-    fn run(&mut self, input: &[f32], left: &mut [f32], right: &mut [f32]) {
+    fn run(&mut self, input: &[F], left: &mut [F], right: &mut [F]) {
         for (out, (combs, all_passes)) in [left, right]
             .into_iter()
             .zip(self.combs.iter_mut().zip(self.all_passes.iter_mut()))
         {
-            out.fill(0.0);
+            out.fill(F::ZERO);
             for cf in combs {
-                cf.process(input, Self::FIXED_GAIN.get(), out);
+                cf.process(input, F::from_f32(Self::FIXED_GAIN.get()), out);
             }
             for apf in all_passes {
                 apf.process(out);
@@ -292,32 +301,32 @@ impl FreeverbBank {
 }
 
 #[derive(Debug, Clone)]
-struct CombFilter {
-    buffer: DelayRing<f32>,
-    filter_store: f32,
+struct CombFilter<F> {
+    buffer: DelayRing<F>,
+    filter_store: F,
 
-    feedback: f32,
-    damp1: f32,
-    damp2: f32,
+    feedback: F,
+    damp1: F,
+    damp2: F,
 }
 
-impl CombFilter {
+impl<F: Float> CombFilter<F> {
     fn new(buffer_size: usize) -> Self {
         Self {
             buffer: DelayRing::new(buffer_size),
-            filter_store: 0_f32,
-            feedback: 0_f32,
-            damp1: 0_f32,
-            damp2: 0_f32,
+            filter_store: F::ZERO,
+            feedback: F::ZERO,
+            damp1: F::ZERO,
+            damp2: F::ZERO,
         }
     }
 
     fn mute(&mut self) {
         self.buffer.clear();
-        self.filter_store = 0_f32;
+        self.filter_store = F::ZERO;
     }
 
-    fn process(&mut self, input_block: &[f32], input_gain: f32, output_block: &mut [f32]) {
+    fn process(&mut self, input_block: &[F], input_gain: F, output_block: &mut [F]) {
         for (out, &x) in output_block.iter_mut().zip(input_block) {
             let input = x * input_gain;
             let output = self.buffer.oldest();
@@ -330,17 +339,17 @@ impl CombFilter {
 }
 
 #[derive(Debug, Clone)]
-struct AllPassFilter {
-    buffer: DelayRing<f32>,
+struct AllPassFilter<F> {
+    buffer: DelayRing<F>,
 
-    feedback: f32,
+    feedback: F,
 }
 
-impl AllPassFilter {
+impl<F: Float> AllPassFilter<F> {
     fn new(buffer_size: usize) -> Self {
         Self {
             buffer: DelayRing::new(buffer_size),
-            feedback: 0_f32,
+            feedback: F::ZERO,
         }
     }
 
@@ -348,7 +357,7 @@ impl AllPassFilter {
         self.buffer.clear();
     }
 
-    fn process(&mut self, block: &mut [f32]) {
+    fn process(&mut self, block: &mut [F]) {
         for sample in block {
             let input = *sample;
             let bufout = self.buffer.oldest();

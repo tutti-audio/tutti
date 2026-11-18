@@ -130,17 +130,23 @@ fn freeverb_corners_are_allocation_free_and_finite() {
     };
     for corners in [&CORNERS, &HELD] {
         sweep(
-            || FreeverbNode::live(FreeverbControls::GENERAL_MIDI),
+            || FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
             corners,
             1.5,
             None,
         );
     }
-    sweep(FreeverbNode::general_midi, &HELD, 1.5, None);
+    sweep(FreeverbNode::<f32>::general_midi, &HELD, 1.5, None);
     // The send has no cells to write: the sweep above drives nothing but its input.
-    assert_eq!(FreeverbNode::general_midi().param_set().params().count(), 0);
     assert_eq!(
-        FreeverbNode::live(FreeverbControls::GENERAL_MIDI)
+        FreeverbNode::<f32>::general_midi()
+            .param_set()
+            .params()
+            .count(),
+        0
+    );
+    assert_eq!(
+        FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI)
             .param_set()
             .params()
             .count(),
@@ -183,13 +189,13 @@ fn plate_corners_are_allocation_free_and_finite() {
     };
     for corners in [&CORNERS, &HELD] {
         sweep(
-            || PlateReverbNode::from(PlateReverbConfig::new()),
+            || PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
             corners,
             1.5,
             None,
         );
     }
     // Every control the sweep writes is a cell of the node: the swept ports are the plate's six.
-    let node = PlateReverbNode::from(PlateReverbConfig::new());
+    let node = PlateReverbNode::<f32>::from(PlateReverbConfig::new());
     assert_eq!(node.param_set().params().count(), 6);
 }

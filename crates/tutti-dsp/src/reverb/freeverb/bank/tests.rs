@@ -21,8 +21,8 @@ fn impulse(len: usize) -> Vec<f32> {
 
 /// `x` through `bank` in blocks of `block`, `glides` carried across them: `(left, right)`.
 fn run(
-    bank: &mut FreeverbBank,
-    glides: &mut FreeverbGlides,
+    bank: &mut FreeverbBank<f32>,
+    glides: &mut FreeverbGlides<f32>,
     x: &[f32],
     block: usize,
 ) -> (Vec<f32>, Vec<f32>) {
@@ -44,8 +44,8 @@ fn run(
 }
 
 /// A bank at `rate` with `c` aimed and landed.
-fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank, FreeverbGlides) {
-    let bank = FreeverbBank::new(rate);
+fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank<f32>, FreeverbGlides<f32>) {
+    let bank = FreeverbBank::<f32>::new(rate);
     let mut glides = bank.glides();
     bank.aim(&mut glides, c);
     glides.settle();
@@ -160,7 +160,7 @@ const ALL_PASSES: [usize; 4] = [556, 441, 341, 225];
 /// the rate rounded to whole hertz.
 #[test]
 fn the_tunings_and_the_stereo_spread_are_freeverbs() {
-    let bank = FreeverbBank::new(RATE);
+    let bank = FreeverbBank::<f32>::new(RATE);
     let lens = |side: usize| -> (Vec<usize>, Vec<usize>) {
         (
             bank.combs[side].iter().map(|c| c.buffer.len()).collect(),
@@ -180,7 +180,7 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
         )
     );
     for hz in [22_050.0f64, 44_100.4, 48_000.0, 96_000.0, 192_000.0] {
-        let bank = FreeverbBank::new(SampleRate::of(hz));
+        let bank = FreeverbBank::<f32>::new(SampleRate::of(hz));
         let whole = hz.round();
         let scale = |t: usize| (whole / 44_100.0 * t as f64).round() as usize;
         for (side, spread) in [(0, 0), (1, 23)] {
@@ -224,7 +224,7 @@ fn the_input_is_scaled_by_the_fixed_gain() {
     let (mut bank, mut glides) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
     let (l, _) = run(&mut bank, &mut glides, &impulse(1_200), 64);
     assert!((l[1116] - 0.015).abs() < 1e-6, "{}", l[1116]);
-    assert_eq!(FreeverbBank::FIXED_GAIN, Gain::new(0.015));
+    assert_eq!(FreeverbBank::<f32>::FIXED_GAIN, Gain::new(0.015));
 }
 
 /// The decay is Schroeder's: a comb of `L` frames at loop gain `g` falls by 60 dB after
@@ -325,16 +325,16 @@ fn a_moving_room_glides_its_combs_a_chunk_at_a_time() {
     let rate = SampleRate::SR_48K;
     let (from_c, to_c) = (controls(0.2, 0.1), controls(0.9, 0.9));
     let (mut bank, mut glides) = settled(rate, &from_c);
-    let x = vec![0.25f32; FreeverbBank::CHUNK];
-    let chunk = |bank: &mut FreeverbBank, glides: &mut FreeverbGlides| {
-        run(bank, glides, &x, FreeverbBank::CHUNK);
+    let x = vec![0.25f32; FreeverbBank::<f32>::CHUNK];
+    let chunk = |bank: &mut FreeverbBank<f32>, glides: &mut FreeverbGlides<f32>| {
+        run(bank, glides, &x, FreeverbBank::<f32>::CHUNK);
         let c = &bank.combs[0][0];
         (c.feedback, c.damp1)
     };
     let (from, from_damp) = chunk(&mut bank, &mut glides);
     assert_eq!(from, from_c.feedback().get());
     bank.aim(&mut glides, &to_c);
-    let (to, to_damp) = (to_c.feedback().get(), to_c.damping());
+    let (to, to_damp) = (to_c.feedback().get(), to_c.damping() as f32);
     let steps = 30;
     let mut last = from;
     for k in 1..=steps {
@@ -503,7 +503,7 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
         assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");
         assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");
     }
-    let bank = FreeverbBank::new(SampleRate::of(1.0e9));
+    let bank = FreeverbBank::<f32>::new(SampleRate::of(1.0e9));
     let longest = bank.combs.iter().flatten().map(|c| c.buffer.len()).max();
     assert_eq!(longest, Some(1 << 16));
 }
@@ -545,4 +545,124 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
         "{rt60} s outside {shortest}..{longest} s"
     );
     assert!(at(-90.0) > at(-50.0), "the decay runs on below -90 dB");
+}
+
+/// `x` through an `f64` bank in one call: `(left, right)`.
+fn run_f64(
+    bank: &mut FreeverbBank<f64>,
+    glides: &mut FreeverbGlides<f64>,
+    x: &[f64],
+) -> [Vec<f64>; 2] {
+    let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
+    bank.process(
+        glides,
+        Planes::new(&[x]).unwrap(),
+        PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+    );
+    [l, r]
+}
+
+/// An `f64` comb is its difference equation on the wide signal: `y[n] = v[n - L]`, `s[n] =
+/// d2 y[n] + d1 s[n - 1]`, `v[n] = x[n] g_in + g s[n]`, with coefficients `f32` cannot hold,
+/// to 2^-45; an `f32` state is off by 1e-8.
+#[test]
+fn an_f64_comb_is_its_difference_equation() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (l, len) = (7usize, 300usize);
+    let (g, d1, g_in) = (
+        0.123_456_789_012_345_f64,
+        0.234_567_890_123_456_f64,
+        0.987_654_321_f64,
+    );
+    let x = wide_signal(len);
+    let (mut v, mut y, mut s) = (vec![0.0f64; len], vec![0.0f64; len], 0.0f64);
+    for n in 0..len {
+        y[n] = n.checked_sub(l).map_or(0.0, |k| v[k]);
+        s = y[n] * (1.0 - d1) + s * d1;
+        v[n] = x[n] * g_in + s * g;
+    }
+    let mut comb = CombFilter::<f64>::new(l);
+    (comb.feedback, comb.damp1, comb.damp2) = (g, d1, 1.0 - d1);
+    let mut got = vec![0.0f64; len];
+    comb.process(&x, g_in, &mut got);
+    assert_close_f64(&got, &y, 2.0f64.powi(-45));
+}
+
+/// An `f64` Freeverb all-pass is its difference equation on the wide signal: `y[n] = b[n - D]
+/// - x[n]`, `b[n] = x[n] + a b[n - D]`, with an `a` `f32` cannot hold, to 2^-45.
+#[test]
+fn an_f64_all_pass_is_its_difference_equation() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (d, len) = (5usize, 300usize);
+    let a = 0.618_033_988_749_894_9_f64;
+    let x = wide_signal(len);
+    let (mut b, mut y) = (vec![0.0f64; len], vec![0.0f64; len]);
+    for n in 0..len {
+        let out = n.checked_sub(d).map_or(0.0, |k| b[k]);
+        y[n] = out - x[n];
+        b[n] = x[n] + a * out;
+    }
+    let mut ap = AllPassFilter::<f64>::new(d);
+    ap.feedback = a;
+    let mut got = x.clone();
+    ap.process(&mut got);
+    assert_close_f64(&got, &y, 2.0f64.powi(-45));
+}
+
+/// At 44.1 kHz a unit impulse of the wide signal's first value `x0` is silent until the
+/// shortest comb (1116 frames) has gone round, then each of the combs of 1116, 1188 and 1277
+/// frames returns `x0 · FIXED_GAIN` before any all-pass echo (the first, at `1116 + 225`) and
+/// before the next comb: each of the four all-passes passes a first sample as `-x`, so the
+/// four make `+x`. `FIXED_GAIN` is the `f32` unit widened; the product is exact in `f64`.
+#[test]
+fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x0 = wide_signal(1)[0];
+    let g = f64::from(FreeverbBank::<f64>::FIXED_GAIN.get());
+    let mut x = vec![0.0f64; 1_300];
+    x[0] = x0;
+    let bank = FreeverbBank::<f64>::new(SampleRate::SR_44K1);
+    let mut glides = bank.glides();
+    let mut bank = bank;
+    bank.aim(&mut glides, &controls(0.5, 0.5));
+    glides.settle();
+    let [left, _] = run_f64(&mut bank, &mut glides, &x);
+    let mut want = vec![0.0f64; 1_300];
+    for at in [1_116, 1_188, 1_277] {
+        want[at] = x0 * g;
+    }
+    assert_close_f64(&left, &want, 0.0);
+}
+
+/// An `f64` Freeverb is linear: `R(a x + b y) = a R(x) + b R(y)` to 2^-40 of the peak, with
+/// `a` and `b` and two wide signals that an `f32` state cannot carry (it is off by 2^-24).
+#[test]
+fn an_f64_freeverb_is_linear() {
+    use tutti_fixtures::signal::wide_signal;
+    let len = 6_000;
+    let x = wide_signal(len);
+    let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+    let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
+    let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+    let render = |input: &[f64]| {
+        let bank = FreeverbBank::<f64>::new(SampleRate::SR_44K1);
+        let mut glides = bank.glides();
+        let mut bank = bank;
+        bank.aim(&mut glides, &controls(0.7, 0.3));
+        glides.settle();
+        run_f64(&mut bank, &mut glides, input)
+    };
+    let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
+    for c in 0..2 {
+        let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+        assert!(peak > 1e-4, "the reverb sounds");
+        for n in 0..len {
+            let want = a * rx[c][n] + b * ry[c][n];
+            assert!(
+                (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                "channel {c}, frame {n}: {} against {want}",
+                rm[c][n]
+            );
+        }
+    }
 }

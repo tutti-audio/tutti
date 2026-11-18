@@ -5,7 +5,7 @@
 //! them.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{PlateBank, PlateControls, PlateGlides};
+use tutti_dsp::{Lerp, PlateBank, PlateControls, PlateGlides};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
@@ -100,9 +100,12 @@ impl Default for PlateReverbConfig {
 /// The declared tail is the ceiling: the longest decay and pre-delay. The node narrows it
 /// each block to what the controls in force ring, and once the input has been silent for that
 /// long it cuts the room off and parks ([`KernelNode`]).
-pub type PlateReverbNode = KernelNode<PlateKernel>;
+///
+/// `F` is the state precision of the lattices and delays, `f64` by default; the lines are the
+/// paper's lengths scaled to the rate, so `PlateReverbNode::<f32>` halves the memory.
+pub type PlateReverbNode<F = f64> = KernelNode<PlateKernel<F>>;
 
-impl From<PlateReverbConfig> for PlateReverbNode {
+impl<F: Float + Lerp> From<PlateReverbConfig> for PlateReverbNode<F> {
     fn from(config: PlateReverbConfig) -> Self {
         Self::with_kernel(PlateKernel::new(), PlateSet, config.controls)
     }
@@ -131,27 +134,26 @@ control_set! {
 
 /// A [`PlateBank`] and its glides, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running {
+struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
-    bank: PlateBank,
-    glides: PlateGlides,
+    bank: PlateBank<F>,
+    glides: PlateGlides<F>,
 }
 
 /// The plate as a [`Kernel`]: a [`PlateBank`] sized at the prepared rate and the glides its
 /// design is aimed through.
 ///
-/// The bank's state is `f32`; the graph's blocks are too, and another sample format is
-/// converted at the edges.
+/// The bank's state is `F`; a block of another sample format is converted at the edges.
 #[derive(Clone, Debug)]
-pub struct PlateKernel {
+pub struct PlateKernel<F: Float> {
     /// `None` until [`prepare`](Kernel::prepare).
-    running: Option<Running>,
+    running: Option<Running<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl PlateKernel {
+impl<F: Float + Lerp> PlateKernel<F> {
     /// A plate with no lines until `prepare` gives it a rate.
     fn new() -> Self {
         Self {
@@ -161,11 +163,11 @@ impl PlateKernel {
     }
 }
 
-impl Kernel for PlateKernel {
+impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     type Set = PlateSet;
 
     /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
-    const GRID: usize = PlateBank::CHUNK;
+    const GRID: usize = PlateBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
         let stereo = |role| Bus::banded(BusTopology::STEREO, role, 1).expect("one band is a bus");
@@ -228,5 +230,53 @@ impl Kernel for PlateKernel {
         self.running
             .as_mut()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.glides, controls))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::drive_kernel;
+    use tutti_fixtures::signal::wide_signal;
+    use tutti_units::Samples;
+
+    /// An `f64` block through a `PlateKernel::<f64>` with modulation off is linear: `R(a x + b y)
+    /// = a R(x) + b R(y)` to 2^-40 of the peak, with `a`, `b` and two wide signals that an `f32`
+    /// state cannot carry (it is off by 2^-24).
+    #[test]
+    fn an_f64_kernel_is_linear() {
+        let len = 6_000;
+        let x = wide_signal(len);
+        let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+        let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
+        let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+        let moves = [(
+            0,
+            PlateControls {
+                modulation: Depth::of(0.0),
+                damping: Mix(0.3),
+                ..PlateControls::DEFAULT
+            },
+        )];
+        // Two identical input channels: the bank averages them, and the block has the stereo
+        // width of the output the harness reads back.
+        let render = |input: &[f64]| {
+            let mut k = PlateKernel::<f64>::new();
+            k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples(len)));
+            drive_kernel(&mut k, &moves, &[input.to_vec(), input.to_vec()])
+        };
+        let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
+        for c in 0..2 {
+            let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+            assert!(peak > 1e-4, "the reverb sounds");
+            for n in 0..len {
+                let want = a * rx[c][n] + b * ry[c][n];
+                assert!(
+                    (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                    "channel {c}, frame {n}: {} against {want}",
+                    rm[c][n]
+                );
+            }
+        }
     }
 }

@@ -16,8 +16,8 @@ fn still(decay: f64) -> PlateControls {
 }
 
 /// A bank at `rate`, landed on `c`.
-fn landed(rate: SampleRate, c: &PlateControls) -> (PlateBank, PlateGlides) {
-    let mut bank = PlateBank::new(rate);
+fn landed(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateGlides<f32>) {
+    let mut bank = PlateBank::<f32>::new(rate);
     let mut glides = bank.glides();
     bank.aim(&mut glides, c);
     glides.settle();
@@ -32,7 +32,12 @@ fn impulse(frames: usize) -> Vec<f32> {
 }
 
 /// `x` through the bank in calls of `block` frames; the two output channels.
-fn run(bank: &mut PlateBank, glides: &mut PlateGlides, x: &[f32], block: usize) -> [Vec<f32>; 2] {
+fn run(
+    bank: &mut PlateBank<f32>,
+    glides: &mut PlateGlides<f32>,
+    x: &[f32],
+    block: usize,
+) -> [Vec<f32>; 2] {
     let (mut l, mut r) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
     let mut at = 0;
     for piece in x.chunks(block) {
@@ -306,8 +311,82 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
 /// A bank that was never aimed renders silence.
 #[test]
 fn an_unaimed_bank_renders_silence() {
-    let mut bank = PlateBank::new(SampleRate::SR_48K);
+    let mut bank = PlateBank::<f32>::new(SampleRate::SR_48K);
     let mut glides = bank.glides();
     let out = run(&mut bank, &mut glides, &impulse(2_000), 256);
     assert!(out.iter().flatten().all(|&x| x == 0.0));
+}
+
+/// `x` through an `f64` bank in one call: the two output channels.
+fn run_f64(bank: &mut PlateBank<f64>, glides: &mut PlateGlides<f64>, x: &[f64]) -> [Vec<f64>; 2] {
+    let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
+    bank.process(
+        glides,
+        Planes::new(&[x]).unwrap(),
+        PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+    );
+    [l, r]
+}
+
+/// An `f64` lattice of integer delay `D` and coefficient `g` is the all-pass equation `v[n] =
+/// x[n] + g v[n - D]`, `y[n] = v[n - D] - g v[n]` on the wide signal, with a `g` `f32` cannot
+/// hold, to 2^-45; an `f32` state is off by 1e-8.
+#[test]
+fn an_f64_lattice_is_the_all_pass_equation() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (d, len) = (11usize, 300usize);
+    let g = 0.618_033_988_749_894_9_f64;
+    let x = wide_signal(len);
+    let (mut v, mut want) = (vec![0.0f64; len], vec![0.0f64; len]);
+    for n in 0..len {
+        let z = n.checked_sub(d).map_or(0.0, |k| v[k]);
+        v[n] = x[n] + g * z;
+        want[n] = z - g * v[n];
+    }
+    let mut ring = DelayRing::<f64>::new(d + SLACK);
+    let got: Vec<f64> = x
+        .iter()
+        .map(|&x| {
+            let y = lattice(&mut ring, x, g, d as f64);
+            ring.advance();
+            y
+        })
+        .collect();
+    assert_close_f64(&got, &want, 2.0f64.powi(-45));
+}
+
+/// An `f64` plate with modulation off is linear: `R(a x + b y) = a R(x) + b R(y)` to 2^-40
+/// of the peak, with `a`, `b` and two wide signals that an `f32` state cannot carry.
+#[test]
+fn an_f64_plate_is_linear() {
+    use tutti_fixtures::signal::wide_signal;
+    let len = 6_000;
+    let x = wide_signal(len);
+    let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+    let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
+    let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+    let controls = PlateControls {
+        damping: Mix(0.3),
+        ..still(1.5)
+    };
+    let render = |input: &[f64]| {
+        let mut bank = PlateBank::<f64>::new(SampleRate::SR_48K);
+        let mut glides = bank.glides();
+        bank.aim(&mut glides, &controls);
+        glides.settle();
+        run_f64(&mut bank, &mut glides, input)
+    };
+    let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
+    for c in 0..2 {
+        let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+        assert!(peak > 1e-4, "the plate sounds");
+        for n in 0..len {
+            let want = a * rx[c][n] + b * ry[c][n];
+            assert!(
+                (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                "channel {c}, frame {n}: {} against {want}",
+                rm[c][n]
+            );
+        }
+    }
 }
