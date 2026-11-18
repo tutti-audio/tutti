@@ -501,9 +501,10 @@ impl SynthVoice {
         {
             // `advance` rather than `% 1.0`: the remainder operator keeps the
             // dividend's sign, so it is not a wrap for a negative phase.
-            let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f32;
+            let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f64;
             self.lfo_phase = self.lfo_phase.advance(step);
-            let lfo_val = self.lfo_phase.sin();
+            // The cutoff is `f32`: the sine narrows once per block.
+            let lfo_val = self.lfo_phase.sin() as f32;
             cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
         }
 

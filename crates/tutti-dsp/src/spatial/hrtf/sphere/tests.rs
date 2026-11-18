@@ -144,7 +144,7 @@ const LEN: usize = 4;
 
 /// The six directions of the octahedron: front, left, back, right, up, down.
 fn octahedron() -> Vec<Direction> {
-    let level = |az: f32| Direction::new(Azimuth(az), Elevation::LEVEL);
+    let level = |az: f64| Direction::new(Azimuth(az), Elevation::LEVEL);
     vec![
         level(0.0),
         level(90.0),
@@ -242,7 +242,7 @@ fn a_measurement_set_that_cannot_enclose_the_listener_is_refused() {
         build(few, &responses(3)),
         Err(HrtfBinauralError::NotEnclosing)
     ));
-    let level = |az: f32| Direction::new(Azimuth(az), Elevation::LEVEL);
+    let level = |az: f64| Direction::new(Azimuth(az), Elevation::LEVEL);
     let ring = [
         level(0.0),
         level(90.0),

@@ -68,8 +68,8 @@ pub struct HrtfBinauralNode {
 /// The last finite value each control cell held.
 #[derive(Clone, Copy, Debug)]
 struct Held {
-    azimuth: LastGood,
-    elevation: LastGood,
+    azimuth: LastGood<f64>,
+    elevation: LastGood<f64>,
     blend: LastGood,
 }
 
@@ -133,14 +133,16 @@ impl HrtfBinauralNode {
     /// the last finite one, the bearing wrapped and the height clamped.
     #[inline]
     fn placement(&mut self, [azimuth, elevation]: [Option<f32>; 2]) -> Direction {
+        // A driven value is the graph's `f32` lane; the angles are `f64`, so
+        // it widens here, once per block.
         let azimuth = self
             .good
             .azimuth
-            .read(azimuth.unwrap_or_else(|| self.azimuth.load().get()));
+            .read(azimuth.map_or_else(|| self.azimuth.load().get(), f64::from));
         let elevation = self
             .good
             .elevation
-            .read(elevation.unwrap_or_else(|| self.elevation.load().get()));
+            .read(elevation.map_or_else(|| self.elevation.load().get(), f64::from));
         Direction::new(Azimuth(azimuth).wrap(), Elevation::new_clamped(elevation))
     }
 }

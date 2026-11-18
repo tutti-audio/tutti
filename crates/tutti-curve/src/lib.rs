@@ -39,10 +39,12 @@ mod fade;
 mod law;
 mod parameter;
 mod piece;
+mod raw;
 mod trajectory;
 
 pub use fade::{DECLICK, FadeLaw, declick_frames};
 pub use law::Law;
 pub use parameter::{Curvature, CurvatureError, Exponent, ExponentError};
 pub use piece::Piece;
+pub use raw::CurveRaw;
 pub use trajectory::{Breakpoint, Trajectory};

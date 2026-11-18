@@ -411,12 +411,10 @@ impl VoiceBank {
 
     /// Aim the lane's oscillator at `freq`.
     pub(crate) fn set_pitch(&mut self, lane: usize, freq: Hz) {
-        let inc = PhaseIncrement::per_sample(freq, self.sample_rate).get();
-        set(
-            &mut self.inc_target,
-            lane,
-            inc.clamp(0.0, kernel::MAX_INCREMENT),
-        );
+        let inc = PhaseIncrement::per_sample(freq, self.sample_rate)
+            .clamp(PhaseIncrement(0.0), kernel::MAX_INCREMENT);
+        // The lane's increment is `f32` state: it narrows once per pitch write.
+        set(&mut self.inc_target, lane, inc.get() as f32);
     }
 
     /// Aim the filters of `lanes` consecutive lanes from `first` — one voice's
@@ -498,7 +496,8 @@ impl VoiceBank {
     /// skips this and keeps running.
     pub(crate) fn start(&mut self, lane: usize, phase: Phase) {
         let (g, k) = split(lane);
-        self.phase[g].as_mut_array()[k] = phase.get();
+        // The lane's phase is `f32` state: it narrows once per note start.
+        self.phase[g].as_mut_array()[k] = phase.get() as f32;
         for i in 0..4 {
             self.z[g][i].as_mut_array()[k] = 0.0;
         }

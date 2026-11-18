@@ -73,15 +73,16 @@ struct Row {
     speaker: Speaker,
     /// The BS.2051 loudspeaker label, `M+110`; the LFE's is `LFE1`.
     label: &'static str,
-    /// The nominal azimuth and elevation in degrees, `None` for the LFE.
-    degrees: Option<(f32, f32)>,
+    /// The nominal direction, `None` for the LFE.
+    direction: Option<Direction>,
 }
 
-const fn at(speaker: Speaker, label: &'static str, azimuth: f32, elevation: f32) -> Row {
+/// A row at the azimuth and elevation, in degrees, BS.2051 Table 1 gives it.
+const fn at(speaker: Speaker, label: &'static str, azimuth: f64, elevation: f64) -> Row {
     Row {
         speaker,
         label,
-        degrees: Some((azimuth, elevation)),
+        direction: Some(Direction::new(Azimuth(azimuth), Elevation(elevation))),
     }
 }
 
@@ -94,7 +95,7 @@ const C: Row = at(FrontCenter, "M+000", 0.0, 0.0);
 const LFE: Row = Row {
     speaker: LowFrequency,
     label: "LFE1",
-    degrees: None,
+    direction: None,
 };
 const L30: Row = at(FrontLeft, "M+030", 30.0, 0.0);
 const R30: Row = at(FrontRight, "M-030", -30.0, 0.0);
@@ -189,8 +190,7 @@ impl Bed {
     /// bed's list matches it first with [`from_topology`](Self::from_topology).
     #[must_use]
     pub fn direction(self, speaker: Speaker) -> Option<Direction> {
-        let (azimuth, elevation) = self.row(speaker)?.degrees?;
-        Some(Direction::new(Azimuth(azimuth), Elevation(elevation)))
+        self.row(speaker)?.direction
     }
 
     /// The BS.2051 label of `speaker` in this bed (`M+110`, `U-045`; `LFE1` for
@@ -253,21 +253,21 @@ mod tests {
     /// A BS.2051 loudspeaker label's nominal position, from Table 1: the layer
     /// letter gives the elevation (`M` 0, `U` +30, `B` -30) and the signed
     /// number the azimuth in degrees.
-    fn table_1(label: &str) -> (f32, f32) {
+    fn table_1(label: &str) -> Direction {
         let layer = label.as_bytes()[0];
         let sign = match label.as_bytes()[1] {
             b'+' => 1.0,
             b'-' => -1.0,
             other => panic!("label {label} has sign {other}"),
         };
-        let azimuth: f32 = label[2..].parse().expect("an azimuth in degrees");
+        let azimuth: f64 = label[2..].parse().expect("an azimuth in degrees");
         let elevation = match layer {
             b'M' => 0.0,
             b'U' => 30.0,
             b'B' => -30.0,
             other => panic!("label {label} has layer {other}"),
         };
-        (sign * azimuth, elevation)
+        Direction::new(Azimuth(sign * azimuth), Elevation(elevation))
     }
 
     /// Every row of every bed is at the nominal figure of its own label.
@@ -275,7 +275,7 @@ mod tests {
     fn every_row_is_at_its_labels_table_1_figure() {
         for bed in Bed::ALL {
             for row in bed.rows() {
-                match row.degrees {
+                match row.direction {
                     Some(figure) => assert_eq!(
                         figure,
                         table_1(row.label),

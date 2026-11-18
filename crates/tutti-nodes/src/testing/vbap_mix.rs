@@ -24,7 +24,8 @@ pub fn vbap_mix(
     for &(source, azimuth) in sources {
         let panner = VbapPannerNode::new(bed)?;
         let (pan, params) = g.add_with_controls(panner);
-        params.set(UnitParam::Azimuth, azimuth.get());
+        // A `ParamSet` is addressed in the host's `f32`: the bearing narrows here.
+        params.set(UnitParam::Azimuth, azimuth.get() as f32);
         g.connect(source, 0, pan, 0).connect(source, 1, pan, 1);
         for c in 0..bed.width().count() as usize {
             g.connect_output(pan, c, c);

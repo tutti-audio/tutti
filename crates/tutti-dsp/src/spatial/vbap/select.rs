@@ -32,14 +32,16 @@
 //! the directions below it, and `SpeakerLayout::gains_into` retreats a source there
 //! to the horizon.
 
-use super::math::{Vec3, cross, direction, dot, sub, wrapped_deg};
+use tutti_units::{ArcDegrees, Azimuth, Direction};
+
+use super::math::{Vec3, cross, direction, dot, sub};
 
 /// A pair closer than this (degrees of bearing) is one point to the ear.
-const MIN_PAIR_GAP: f64 = 5.0;
+const MIN_PAIR_GAP: ArcDegrees = ArcDegrees(5.0);
 
 /// A pair this far apart (degrees of bearing) or more leaves the listener on
 /// or beside its chord.
-const MAX_PAIR_GAP: f64 = 175.0;
+const MAX_PAIR_GAP: ArcDegrees = ArcDegrees(175.0);
 
 /// A triple whose direction matrix has a determinant below this spans no
 /// volume.
@@ -57,19 +59,24 @@ const COINCIDENT: f64 = 1e-12;
 /// equal lengths tie whatever the last bit of the dot product.
 const SHORTNESS_QUANTUM: f64 = 1e9;
 
-/// The pairs of a horizontal layout, as indices into `azimuths` (degrees),
-/// ordered from the lowest bearing.
-pub(super) fn pairs(azimuths: &[f64]) -> Vec<[u16; 2]> {
+/// A whole turn, the gap of a pair that closes the circle.
+const FULL_TURN: ArcDegrees = ArcDegrees(360.0);
+
+/// The pairs of a horizontal layout, as indices into `azimuths`, ordered from
+/// the lowest bearing.
+pub(super) fn pairs(azimuths: &[Azimuth]) -> Vec<[u16; 2]> {
     let n = azimuths.len();
-    let bearing = |i: usize| wrapped_deg(azimuths[i]);
+    let bearing = |i: usize| azimuths[i].wrap();
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| bearing(a).total_cmp(&bearing(b)));
+    order.sort_by(|&a, &b| bearing(a).get().total_cmp(&bearing(b).get()));
     let mut out = Vec::with_capacity(n);
     for at in 0..n {
         let (a, b) = (order[at], order[(at + 1) % n]);
-        let mut gap = bearing(b) - bearing(a);
+        // The counter-clockwise gap from `a` to `b`: not the short arc, which
+        // is the other way round for a gap past half a turn.
+        let mut gap = ArcDegrees(bearing(b).get() - bearing(a).get());
         if at + 1 == n {
-            gap += 360.0;
+            gap += FULL_TURN;
         }
         if (MIN_PAIR_GAP..MAX_PAIR_GAP).contains(&gap) {
             out.push([a as u16, b as u16]);
@@ -79,11 +86,8 @@ pub(super) fn pairs(azimuths: &[f64]) -> Vec<[u16; 2]> {
 }
 
 /// The triplets of a layout with height, as sorted index triples.
-pub(super) fn triplets(positions: &[(f64, f64)]) -> Vec<[u16; 3]> {
-    let dirs: Vec<Vec3> = positions
-        .iter()
-        .map(|&(azimuth, elevation)| direction(azimuth, elevation))
-        .collect();
+pub(super) fn triplets(positions: &[Direction]) -> Vec<[u16; 3]> {
+    let dirs: Vec<Vec3> = positions.iter().map(|&aim| direction(aim)).collect();
     let facets = facets(&dirs);
     let kept = accepted_edges(&dirs, &facets);
     facets

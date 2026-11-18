@@ -19,7 +19,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// in the bed's channel order with the LFE left out: the middle layer at
 /// elevation 0, the upper at +30. Written out here, bed by bed, from the
 /// systems' loudspeaker lists (positive azimuth to the left).
-fn nominal(bed: Bed) -> Vec<(f32, f32)> {
+fn nominal(bed: Bed) -> Vec<(f64, f64)> {
     let front = [(30.0, 0.0), (-30.0, 0.0)];
     let centre = [(0.0, 0.0)];
     let side_110 = [(110.0, 0.0), (-110.0, 0.0)];
@@ -29,7 +29,7 @@ fn nominal(bed: Bed) -> Vec<(f32, f32)> {
     let top_front_45 = [(45.0, 30.0), (-45.0, 30.0)];
     let top_back_110 = [(110.0, 30.0), (-110.0, 30.0)];
     let top_back_135 = [(135.0, 30.0), (-135.0, 30.0)];
-    let list: Vec<&[(f32, f32)]> = match bed {
+    let list: Vec<&[(f64, f64)]> = match bed {
         Bed::Mono => vec![&centre],
         Bed::Stereo => vec![&front],
         Bed::Quad => vec![&[(45.0, 0.0), (-45.0, 0.0)], &back_135],
@@ -70,7 +70,7 @@ fn channel_of_speaker(bed: Bed) -> Vec<usize> {
 
 /// The panner over `bed` with its width at zero (one gain vector), aimed and
 /// seated, rendering a block of DC: the gains, one per channel.
-fn gains(bed: Bed, azimuth: f32, elevation: f32, spread: f32) -> Vec<f32> {
+fn gains(bed: Bed, azimuth: f64, elevation: f64, spread: f32) -> Vec<f32> {
     let mut node = prepared(VbapPannerNode::new(bed).unwrap(), RATE, 16);
     let params = node.param_set();
     params.set(UnitParam::StereoWidth, 0.0);
@@ -116,10 +116,10 @@ fn the_gains_are_non_negative_and_unit_power_and_never_feed_the_lfe() {
             continue;
         }
         for spread in [0.0f32, 0.4, 1.0] {
-            for elevation in [-60.0f32, -20.0, 0.0, 15.0, 30.0, 55.0, 90.0] {
+            for elevation in [-60.0f64, -20.0, 0.0, 15.0, 30.0, 55.0, 90.0] {
                 for azimuth in (-180..180).step_by(11) {
                     let at = format!("{bed:?} at ({azimuth}, {elevation}), spread {spread}");
-                    let g = gains(bed, azimuth as f32 + 0.5, elevation, spread);
+                    let g = gains(bed, f64::from(azimuth) + 0.5, elevation, spread);
                     assert!(g.iter().all(|&x| x >= -1e-6), "{at}: {g:?}");
                     let power: f32 = g.iter().map(|x| x * x).sum();
                     assert!((power - 1.0).abs() < 1e-4, "{at}: power {power}");

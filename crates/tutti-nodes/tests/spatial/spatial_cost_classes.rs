@@ -50,7 +50,7 @@ fn panner(k: u64) -> VbapPannerNode {
     let node = VbapPannerNode::stereo();
     aim(
         &node.param_set(),
-        Azimuth(-30.0 + 4.0 * k as f32),
+        Azimuth(-30.0 + 4.0 * k as f64),
         Elevation(0.0),
     );
     node

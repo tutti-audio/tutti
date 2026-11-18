@@ -12,7 +12,7 @@ use super::*;
 ///   not. Same for `Elevation + ArcDegrees` vs `tilt_by`, which clamps.
 /// - `Azimuth - Azimuth` — `shortest_arc_to`; a plain subtraction takes the
 ///   long way around the seam.
-/// - `Phase + Phase`, `Phase * f32`, `Phase.clamp(..)` — a cycle position.
+/// - `Phase + Phase`, `Phase * f64`, `Phase.clamp(..)` — a cycle position.
 ///   Clamping pins it at 0.999 where it belongs at the next cycle's start.
 /// - `Phase % Phase` — `%` is one of the two sign-preserving wraps this
 ///   type was introduced to eliminate. `wrapped` is the only wrap.
@@ -99,8 +99,8 @@ fn elevation_lerp_needs_no_seam_handling() {
 fn phase_wrap_lands_a_negative_phase_in_range() {
     // `%` and `fract` keep the sign of the input, so a negative phase would
     // stay negative and index off the front of a shape table.
-    assert_eq!(-0.25_f32 % 1.0, -0.25);
-    assert_eq!((-0.25_f32).fract(), -0.25);
+    assert_eq!(-0.25_f64 % 1.0, -0.25);
+    assert_eq!((-0.25_f64).fract(), -0.25);
     // `rem_euclid` — the only wrap `Phase` performs.
     assert_eq!(Phase::wrapped(-0.25), Phase(0.75));
 
@@ -118,22 +118,22 @@ fn phase_wrap_lands_a_negative_phase_in_range() {
 #[test]
 fn the_wrap_shortcuts_are_rem_euclid_exactly() {
     let mut probes = vec![
-        0.0f32,
+        0.0f64,
         -0.0,
         1.0,
         2.0,
         -1.0,
-        f32::MIN_POSITIVE,
-        1.0 - f32::EPSILON / 2.0,
-        1.0 + f32::EPSILON,
-        2.0 - f32::EPSILON,
-        f32::NAN,
-        f32::INFINITY,
+        f64::MIN_POSITIVE,
+        1.0 - f64::EPSILON / 2.0,
+        1.0 + f64::EPSILON,
+        2.0 - f64::EPSILON,
+        f64::NAN,
+        f64::INFINITY,
     ];
     let mut state = 0x1234_5678_u32;
     for _ in 0..20_000 {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        probes.push((state >> 8) as f32 / (1u32 << 24) as f32 * 6.0 - 2.0);
+        probes.push((state >> 8) as f64 / (1u32 << 24) as f64 * 6.0 - 2.0);
     }
     for v in probes {
         let want = v.rem_euclid(1.0);
@@ -176,17 +176,17 @@ fn phase_increment_derives_from_frequency_and_rate() {
 }
 
 /// `wrapped_signed` holds `[-pi, pi)` exactly for every finite input, with
-/// `pi` the `f32` constant, and is the identity inside it.
+/// `pi` the `f64` constant, and is the identity inside it.
 ///
 /// The figures are `x mod 2pi` taken from a 80-digit evaluation, not from
-/// the code under test. Up to `2^24` the result is within one `f32` ulp of
+/// the code under test. Up to `2^24` the result is within one `f64` ulp of
 /// it; beyond that only the range is asserted, since the `f64` `2pi` no
 /// longer holds the turn count.
 #[test]
 fn wrapped_signed_holds_its_range_exactly() {
-    use core::f32::consts::PI;
-    let in_range = |w: f32| (-PI..PI).contains(&w);
-    let near = |w: f32, want: f64| (f64::from(w) - want).abs() < 3.0e-7;
+    use core::f64::consts::PI;
+    let in_range = |w: f64| (-PI..PI).contains(&w);
+    let near = |w: f64, want: f64| (w - want).abs() < 3.0e-7;
 
     // Identity inside, bits and all: both ends of the closed side, the
     // largest value under `pi`, the zeros and the subnormals.
@@ -197,11 +197,11 @@ fn wrapped_signed_holds_its_range_exactly() {
         -0.0,
         1.0,
         -1.0,
-        f32::MIN_POSITIVE,
-        -f32::MIN_POSITIVE,
-        f32::from_bits(1),
-        -f32::from_bits(1),
-        f32::from_bits(0x007f_ffff),
+        f64::MIN_POSITIVE,
+        -f64::MIN_POSITIVE,
+        f64::from_bits(1),
+        -f64::from_bits(1),
+        f64::from_bits(0x007f_ffff),
     ] {
         assert_eq!(Radians(x).wrapped_signed().get().to_bits(), x.to_bits());
     }
@@ -223,16 +223,16 @@ fn wrapped_signed_holds_its_range_exactly() {
     // The value just under `pi` that rounds to `pi` is the excluded end.
     assert_eq!(Radians(-3.0 * PI).wrapped_signed(), Radians(-PI));
 
-    // Every magnitude, up to the largest finite `f32` and down to the
+    // Every magnitude, up to the largest finite `f64` and down to the
     // subnormals, in both signs.
-    for bits in (1..0x7f80_0000_u32).step_by(4099) {
-        let x = f32::from_bits(bits);
+    for bits in (1..0x7ff0_0000_0000_0000_u64).step_by(0x0003_1000_0000_1003) {
+        let x = f64::from_bits(bits);
         for v in [x, -x, x.next_up(), x.next_down()] {
             let w = Radians(v).wrapped_signed().get();
             assert!(in_range(w), "{v:e} -> {w:e}");
         }
     }
-    for v in [f32::MAX, -f32::MAX, f32::MAX.next_down(), f32::MIN] {
+    for v in [f64::MAX, -f64::MAX, f64::MAX.next_down(), f64::MIN] {
         let w = Radians(v).wrapped_signed().get();
         assert!(in_range(w), "{v:e} -> {w:e}");
     }
@@ -241,7 +241,7 @@ fn wrapped_signed_holds_its_range_exactly() {
 /// `Radians` wraps through `wrapped_signed`, never a saturating clamp.
 #[test]
 fn radians_wrap_signed_rather_than_saturating() {
-    let pi = core::f32::consts::PI;
+    let pi = core::f64::consts::PI;
 
     // A deviation of +3pi/2 is really -pi/2. Keeping the larger number
     // moves a partial the wrong way round the circle.
@@ -264,10 +264,10 @@ fn radians_wrap_signed_rather_than_saturating() {
 
 #[test]
 fn turns_and_radians_convert_both_ways() {
-    assert_eq!(Phase(0.5).to_radians(), Radians(core::f32::consts::PI));
+    assert_eq!(Phase(0.5).to_radians(), Radians(core::f64::consts::PI));
     assert_eq!(Phase::START.to_radians(), Radians(0.0));
     assert_eq!(Radians::TAU.to_phase(), Phase::START);
-    assert_eq!(Radians(core::f32::consts::PI).to_phase(), Phase(0.5));
+    assert_eq!(Radians(core::f64::consts::PI).to_phase(), Phase(0.5));
 
     // A quarter turn is the sine peak — the check that the units line up
     // rather than being off by tau somewhere.
@@ -276,7 +276,7 @@ fn turns_and_radians_convert_both_ways() {
 
     // Degrees reach radians too, so a panner converts once instead of
     // hand-multiplying by pi/180 at each trig call.
-    assert!((Radians::from(Azimuth(180.0)).0 - core::f32::consts::PI).abs() < 1e-6);
+    assert!((Radians::from(Azimuth(180.0)).0 - core::f64::consts::PI).abs() < 1e-6);
     assert_eq!(Radians::from(Elevation::LEVEL), Radians(0.0));
 }
 
@@ -297,13 +297,90 @@ fn phase_sin_is_sine_of_a_turn() {
     assert!((Phase(1.0 / 12.0).sin() - 0.5).abs() < 1e-7);
 }
 
-/// The f64 sine of a phase and the f32 sine of its radians are one function
-/// to within f32 precision, over a whole turn.
+/// The f64 sine of a phase and the f64 sine of its radians are one function
+/// to within f64 precision, over a whole turn.
 #[test]
 fn phase_sin_and_radians_sin_agree_within_a_millionth() {
     for i in 0..=1024u16 {
-        let p = Phase(f32::from(i) / 1024.0);
+        let p = Phase(f64::from(i) / 1024.0);
         let (a, b) = (p.sin(), p.to_radians().sin());
         assert!((a - b).abs() < 1e-6, "{p:?}: {a} vs {b}");
     }
+}
+
+/// Whether `got` narrowed to `f32` is within `ulps` units in the last place of
+/// the `f32` closed form `want`.
+fn narrows_to(got: f64, want: f32, ulps: u32) -> bool {
+    let narrowed = got as f32;
+    let (a, b) = (narrowed.to_bits() as i64, want.to_bits() as i64);
+    (a - b).unsigned_abs() <= u64::from(ulps)
+}
+
+/// An `f32` signal path narrows an angle converter's `f64` result once; that
+/// value is the `f32` closed form to within 2 ulp: the sine of a twelfth of a
+/// turn is 1/2, of a quarter of the circle 1, and the cosine of a third of a
+/// turn is -1/2.
+#[test]
+fn the_trig_converters_narrow_to_the_f32_closed_forms() {
+    assert!(narrows_to(Phase(1.0 / 12.0).sin(), 0.5, 2));
+    assert!(narrows_to(
+        Phase(0.125).sin(),
+        core::f32::consts::FRAC_1_SQRT_2,
+        2
+    ));
+    assert!(narrows_to(
+        Radians(core::f64::consts::FRAC_PI_6).sin(),
+        0.5,
+        2
+    ));
+    assert!(narrows_to(
+        Radians(core::f64::consts::FRAC_PI_3).cos(),
+        0.5,
+        2
+    ));
+    assert!(narrows_to(
+        Radians(2.0 * core::f64::consts::FRAC_PI_3).cos(),
+        -0.5,
+        2
+    ));
+}
+
+/// Degrees reach radians as the `f32` constants `pi/2`, `pi` and `pi/6`, to
+/// within 1 ulp once narrowed.
+#[test]
+fn degrees_narrow_to_the_f32_radian_constants() {
+    use core::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI};
+    assert!(narrows_to(Radians::from(Azimuth(90.0)).get(), FRAC_PI_2, 1));
+    assert!(narrows_to(Radians::from(Azimuth(180.0)).get(), PI, 1));
+    assert!(narrows_to(
+        Radians::from(Elevation(30.0)).get(),
+        FRAC_PI_6,
+        1
+    ));
+}
+
+/// The wraps and the phase step narrow to the `f32` figures: 190 degrees is
+/// -170, a quarter-turn offset from a half turn is 0.75, and 1 kHz at 48 kHz steps
+/// `1/48` of a turn.
+#[test]
+fn the_wraps_and_the_phase_step_narrow_to_the_f32_figures() {
+    assert!(narrows_to(Azimuth(190.0).wrap().get(), -170.0, 0));
+    assert!(narrows_to(
+        Azimuth(170.0).shortest_arc_to(Azimuth(-170.0)).get(),
+        20.0,
+        0
+    ));
+    assert!(narrows_to(
+        Phase(0.5).offset_by(PhaseIncrement(0.25)).get(),
+        0.75,
+        0
+    ));
+    // 7 - 2pi = 0.716_814_692_8 (from a 20-digit evaluation).
+    assert!(narrows_to(
+        Radians(7.0).wrapped_signed().get(),
+        0.716_814_7,
+        1
+    ));
+    let step = PhaseIncrement::per_sample(Hz(1000.0), SampleRate::SR_48K);
+    assert!(narrows_to(step.get(), 1.0 / 48.0, 1));
 }

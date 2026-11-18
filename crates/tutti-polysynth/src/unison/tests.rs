@@ -115,7 +115,7 @@ fn test_phase_randomization() {
     unison.randomize_phases();
 
     // Phases should be different
-    let phases: Vec<f32> = unison
+    let phases: Vec<f64> = unison
         .all_params()
         .iter()
         .map(|p| p.phase_offset.get())
@@ -203,13 +203,13 @@ fn recompute_keeps_the_drawn_phases() {
         phase_randomize: true,
         ..Default::default()
     });
-    let drawn: Vec<f32> = unison
+    let drawn: Vec<f64> = unison
         .randomize_phases()
         .iter()
         .map(|p| p.phase_offset.get())
         .collect();
     unison.sync_from_atomics([Some(25.0), None]);
-    let kept: Vec<f32> = unison
+    let kept: Vec<f64> = unison
         .all_params()
         .iter()
         .map(|p| p.phase_offset.get())
