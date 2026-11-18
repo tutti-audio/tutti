@@ -14,7 +14,7 @@ use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
-use tutti_types::{SampleRate, Seconds, UnitAddr, UnitParam};
+use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
 /// A bound a stable loop stays far under, wet gain at +24 dB and the longest decay included:
 /// an unstable one passes it in a few blocks.

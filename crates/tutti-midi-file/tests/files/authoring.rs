@@ -11,14 +11,14 @@ use std::sync::Arc;
 
 use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
-    Tick, TimelineDrop, Track, TrackPart, TracksError,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, TextKind, Tick,
+    TimelineDrop, Track, TrackPart, TracksError,
 };
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus,
     TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
 };
+use tutti_units::{Beat, Bpm};
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -36,12 +36,10 @@ fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
 }
 
 fn file(tracks: Vec<Track>) -> MidiFile {
-    let format = if tracks.len() == 1 {
-        SmfFormat::SingleTrack
-    } else {
-        SmfFormat::Parallel
+    let [track] = tracks.as_slice() else {
+        return crate::common::format1(SMF_DIVISION, tracks).unwrap();
     };
-    MidiFile::smf(format, SMF_DIVISION, tracks).unwrap()
+    crate::common::format0(SMF_DIVISION, track.clone()).unwrap()
 }
 
 // ---- Tick ------------------------------------------------------------------
@@ -130,7 +128,7 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
     assert_eq!(ticks, [0, 0, 480, 480, 960, 960]);
     assert_eq!(track.end(), Tick(960));
     // And a file takes it as it is.
-    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track]).unwrap();
+    crate::common::format0(SMF_DIVISION, track).unwrap();
 }
 
 /// `meta(tick, Meta::tempo(bpm))` is the one way to place a Set Tempo, and
@@ -409,7 +407,7 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
         NoteNumber::of(60),
         U7::of(100),
     );
-    let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
+    let f = crate::common::format2(SMF_DIVISION, vec![a, Track::new()]).unwrap();
     assert!(f.timebase().metrical().is_none());
     let beats: Vec<Beat> = f.tracks()[0]
         .timeline(sequences(&f).ticks_per_quarter())
@@ -511,16 +509,8 @@ fn the_tempo_map_is_one_shared_value() {
 fn a_refused_track_list_names_the_rule_and_where() {
     let config = |r: Result<MidiFile, TracksError>| r.expect_err("the list is refused");
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![])),
+        config(crate::common::format2(SMF_DIVISION, vec![])),
         TracksError::NoTracks
-    );
-    assert_eq!(
-        config(MidiFile::smf(
-            SmfFormat::SingleTrack,
-            SMF_DIVISION,
-            vec![Track::new(), Track::new()]
-        )),
-        TracksError::SingleTrack { tracks: 2 }
     );
     // An SMF holds the first Group only.
     let g2 = Message::midi1(
@@ -529,7 +519,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
     );
     let t = Track::new().push(Tick(0), g2).unwrap();
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![t])),
+        config(crate::common::format0(SMF_DIVISION, t)),
         TracksError::Refused {
             track: 0,
             part: TrackPart::Events,
@@ -578,12 +568,7 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(60.0)))),
         ]
     );
-    let file = MidiFile::smf(
-        SmfFormat::SingleTrack,
-        SmfDivision::per_quarter(480),
-        vec![track],
-    )
-    .unwrap();
+    let file = crate::common::format0(SmfDivision::per_quarter(480), track).unwrap();
     assert_eq!(
         metrical(&file).tempo_map().tempo_at(Beat(0.0)),
         Bpm::of(60.0)

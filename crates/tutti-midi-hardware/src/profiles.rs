@@ -32,7 +32,7 @@ use tutti_ump::{MidiChannel, MidiGroup, MpeChannels, MpeOverlap, MpeZoneSet, Mpe
 
 use crate::ci::PeerId;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
     /// Manager and its Members, at least 1 and at most 14 bits (M2-101 §7.8).
     #[derive(Eq, PartialOrd, Ord, Hash)]

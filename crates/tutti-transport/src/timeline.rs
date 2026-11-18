@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use tutti_tempo::TempoMap;
-use tutti_types::Beat;
+use tutti_units::Beat;
 
 /// A musical timeline: the position, the tempo map, whether it is moving, and
 /// which stretch of straight-line time the position is on.

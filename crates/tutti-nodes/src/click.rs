@@ -36,9 +36,10 @@ use tutti_graph::{
 use tutti_rt::{Loan, Reader, Setting, setting_word};
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF32;
-use tutti_types::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
-use tutti_types::{BusTopology, Tail};
+use tutti_types::BusTopology;
 use tutti_types::{Meter, MeterMap};
+use tutti_units::Tail;
+use tutti_units::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
 
 /// How far two beat onsets must differ to count as different beats.
 ///
@@ -243,7 +244,7 @@ pub struct ClickNode {
     preroll: Arc<AtomicBool>,
     /// The rate `click_normal` and `click_accent` were rendered at; `None`
     /// until the node is first prepared.
-    sample_rate: Option<tutti_types::SampleRate>,
+    sample_rate: Option<tutti_units::SampleRate>,
     click_normal: Vec<f32>,
     click_accent: Vec<f32>,
     click_pos: usize,
@@ -348,7 +349,7 @@ impl ClickNode {
     /// relationship between them (attack, then hold, then a release that ends
     /// exactly at `CLICK_LEN`) is stated in one unit rather than five bare
     /// floats that happen to line up.
-    fn generate_click(sample_rate: tutti_types::SampleRate, is_accent: bool) -> Vec<f32> {
+    fn generate_click(sample_rate: tutti_units::SampleRate, is_accent: bool) -> Vec<f32> {
         /// Total click length.
         const CLICK_LEN: Seconds = Seconds(0.03);
         /// Fade-in, then full level until `HOLD_END`, then fade to zero.
@@ -678,10 +679,11 @@ mod tests {
     use tutti_buffers::Planes;
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Offset, TransportChanges};
-    use tutti_types::Frame;
-    use tutti_types::SampleRate;
+    use tutti_types::FrameClock;
     use tutti_types::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
-    use tutti_types::{Bpm, FrameClock};
+    use tutti_units::Bpm;
+    use tutti_units::Frame;
+    use tutti_units::SampleRate;
 
     /// A project saves a mode by name and reads it back; a name that is not a
     /// mode is refused, never read as `Off`.
@@ -749,7 +751,7 @@ mod tests {
     fn env(rate: f64, len: usize, transport: tutti_graph::TransportPosition) -> Env {
         Env {
             frame: Frame::new(0),
-            sample_rate: tutti_types::SampleRate::of(rate),
+            sample_rate: tutti_units::SampleRate::of(rate),
             block_len: Samples(len),
             transport,
             changes: TransportChanges::NONE,
@@ -775,7 +777,7 @@ mod tests {
         let settings = Arc::new(ClickSettings::new());
         let node = prepared(
             ClickNode::new(&transport, Arc::clone(&settings)),
-            tutti_types::SampleRate::of(SR),
+            tutti_units::SampleRate::of(SR),
             64,
         );
         (transport, settings, node)
@@ -1073,7 +1075,7 @@ mod tests {
         let mut host = FrameClock::new(
             Beat(2.0 - 20.0 / 22_050.0),
             Bpm::of(120.0),
-            tutti_types::SampleRate::of(SR),
+            tutti_units::SampleRate::of(SR),
         );
         let counted = |host: &FrameClock| {
             tutti_graph::TransportPosition::counted(true, host.tempo(), host.origin(), None)
@@ -1126,7 +1128,7 @@ mod tests {
             settings.set_volume(Amplitude::new(1.0)).unwrap();
             let mut node = prepared(
                 ClickNode::new(&transport, settings),
-                tutti_types::SampleRate::of(RATE),
+                tutti_units::SampleRate::of(RATE),
                 len,
             );
             // The click's first frame is exactly zero (`sin(0)` under a zero
@@ -1148,7 +1150,7 @@ mod tests {
             );
 
             let mut host =
-                FrameClock::new(Beat(START), Bpm::of(BPM), tutti_types::SampleRate::of(RATE));
+                FrameClock::new(Beat(START), Bpm::of(BPM), tutti_units::SampleRate::of(RATE));
             let mut left = Vec::new();
             while left.len() < expected + 2 * len {
                 let t = tutti_graph::TransportPosition::counted(
@@ -1292,9 +1294,9 @@ mod tests {
         // 10 240 frames rolling (and recording) from beat 0 at 20 beats a
         // second: four clicks, past beat 3 (a downbeat in 3/4, not in 4/4).
         let render = |node: ClickNode| {
-            let mut node = prepared(node, tutti_types::SampleRate::SR_48K, 64);
+            let mut node = prepared(node, tutti_units::SampleRate::SR_48K, 64);
             let mut host =
-                FrameClock::new(Beat(0.0), Bpm::of(1_200.0), tutti_types::SampleRate::SR_48K);
+                FrameClock::new(Beat(0.0), Bpm::of(1_200.0), tutti_units::SampleRate::SR_48K);
             let mut left = Vec::new();
             for _ in 0..160 {
                 let t = tutti_graph::TransportPosition::counted(

@@ -8,7 +8,7 @@
 //! the trait.
 
 use tutti_curve::{Law, Trajectory};
-use tutti_types::{Beat, Unit};
+use tutti_units::{Beat, Unit};
 
 /// The piece of a [`Curve`] a beat falls in, between two breakpoints: what a
 /// producer of curve-segment events ([`Curve::segment_at`]) sends once per

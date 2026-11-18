@@ -23,8 +23,8 @@ use tutti_plugin_types::{
     PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
-use tutti_types::ParamId;
 use tutti_ump::SysexAssembler;
+use tutti_units::ParamId;
 
 use crate::automation::SharedStage;
 use crate::error::{AuError, Result};
@@ -833,7 +833,7 @@ mod tests {
     use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_plugin_types::{Loaded, MaxBlock, ParameterChanges, Prepare, SampleRate};
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     fn delay() -> (AuProcessor, crate::controller::AuController) {
         let desc = AudioComponentDescription {
@@ -851,7 +851,7 @@ mod tests {
             &tutti_fixtures::detached_work(),
         )
         .unwrap();
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_types::Samples(512)));
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(512)));
         au.activate(tutti_fixtures::main_thread(), prepare)
             .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
     }

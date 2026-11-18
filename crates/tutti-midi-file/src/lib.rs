@@ -9,7 +9,7 @@
 //! track is `(Tick, FileEvent)` in order and where it ends. Ticks are integers,
 //! so a write is exact; [`MidiFile::timebase`] says what a tick counts, and the
 //! metrical view's [`MetricalView::events`] gives the merged timeline as
-//! [`Beat`](tutti_types::Beat)s, [`MetricalView::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
+//! [`Beat`](tutti_units::Beat)s, [`MetricalView::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
 //! Offs.
 //!
 //! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
@@ -17,22 +17,25 @@
 //!   length, or a `Meta` (text, channel prefix, tempo, time and key signature,
 //!   sequencer-specific, the rest as bytes). The four metas that open a track
 //!   (Sequence Number, Track Name, SMPTE Offset, copyright notice) are the
-//!   fields of its [`Track`] ([`Lead`]).
+//!   fields of its track ([`Lead`]).
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
 //! - **Lossless in its events.** A read, a write and a read give the same file:
 //!   SysEx and meta included, but for what a read normalizes (below). Running status and a Delta Clockstamp's spelling
 //!   may differ. A Clip File read leaves out what is no event: its Null messages
 //!   (a write puts them back where a long gap needs them), JR Clock and JR
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
-//! - **A track's opening metas are its fields, a reader normalizes.** A [`Track`]
-//!   holds its Sequence Number, Track Name, SMPTE Offset and copyright notice
-//!   ([`Track::numbered`], [`Track::named`], [`Track::smpte_start`],
-//!   [`Track::copyright`]) and the writer puts them first at tick 0, so a
-//!   late one is unwritable; a whole SysEx message is [`SysEx::Complete`], whose
-//!   `F7` the writer adds. [`MidiFile::smf`] refuses what no type prevents
-//!   ([`TracksError`]): a divided SysEx message left open or interrupted, a
-//!   Sequence Number, SMPTE Offset or tempo map outside the first track where
-//!   the format wants it there, a copyright notice outside the first track.
+//! - **A track's opening metas are fields, a reader normalizes.** A [`Track`]
+//!   holds its Track Name ([`Track::named`]) and nothing of the file's other
+//!   opening metas, so a track cloned out of a file carries none. The Sequence
+//!   Number, SMPTE Offset and copyright notice are those of the [`LeadTrack`]
+//!   of a format 0 or 1 file or of a format 2 [`Pattern`] and its [`Layout`]
+//!   ([`MidiFile::copyright`], [`MidiFile::sequence_number`],
+//!   [`MidiFile::smpte_offset`]). The writer puts them first at tick 0, so a
+//!   late or misplaced one is unwritable; a whole SysEx message is
+//!   [`SysEx::Complete`], whose `F7` the writer adds. [`MidiFile::smf`]
+//!   refuses what no type prevents ([`TracksError`]): a divided SysEx message
+//!   left open or interrupted, a tempo map outside the first track of a
+//!   format 1 file.
 //!   A read accepts a file that has such an event out of place, makes it
 //!   writable (a late or duplicate one dropped, one at tick 0 but not first
 //!   moved into the field, a SysEx message closed) and lists each change in
@@ -89,8 +92,8 @@
 //! Build a file, write it, read it back; the tempo map answers in seconds:
 //!
 //! ```rust
-//! use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
-//! use tutti_types::{Bpm, Seconds};
+//! use tutti_midi_file::{LeadTrack, Layout, Meta, MidiFile, SmfDivision, Tick, Track};
+//! use tutti_units::{Bpm, Seconds};
 //! use tutti_ump::{MidiChannel, NoteNumber, U7};
 //!
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.
@@ -99,7 +102,7 @@
 //!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
 //!     .note(Tick(0), Tick(1_440), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
 //!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
-//! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::per_quarter(480), vec![track])?;
+//! let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes())?;
 //! assert_eq!(read, file);
@@ -153,13 +156,13 @@ pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
 pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, Lead, LyricChange, MalformedMeta, Meta,
-    MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
+    Altered, Converted, DropReason, Dropped, FileEvent, Layout, Lead, LeadTrack, LyricChange,
+    MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
     MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
-    OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Placement,
-    SmfFormat, SmfPart, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset,
-    SmpteSequence, SmpteSequences, SmpteView, SysEx, TextKind, Tick, Timebase, Timeline,
-    TimelineDrop, ToClipError, Track,
+    OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern,
+    Placement, SmfFormat, SmfPart, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange,
+    SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx, TextKind, Tick, Timebase,
+    Timeline, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{

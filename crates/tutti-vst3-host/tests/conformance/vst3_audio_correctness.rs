@@ -45,9 +45,9 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
-use tutti_types::ParamId;
-use tutti_types::Samples;
 use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_units::ParamId;
+use tutti_units::Samples;
 use tutti_vst3_host::{
     InputEvents, LoadOptions, NoteExpressionType, NoteExpressionValue, ParameterChanges,
     TransportInfo, Vst3Loaded,

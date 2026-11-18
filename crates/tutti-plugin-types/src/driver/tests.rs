@@ -14,7 +14,7 @@ use crate::{
     Samples, Stage, taken,
 };
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// The test process's main thread: nextest runs each test in its own process,
 /// so the claim always succeeds.

@@ -21,8 +21,8 @@
 //! 2.1.2, Appendix B.1), and the spec's cable is what goes quiet: Group 2's
 //! silence is not Group 1's. A Group that never sent an FE is never watched.
 
-use tutti_types::{Frame, SampleRate, Samples, Seconds};
 use tutti_ump::MidiGroup;
+use tutti_units::{Frame, SampleRate, Samples, Seconds};
 
 /// How long a receiver waits for any message once it has seen an Active
 /// Sensing before it judges the cable gone: over 330 ms (p. 32), the spec's 300 ms

@@ -17,8 +17,8 @@ use crate::common::blocks;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
 use tutti_session::{BlockDates, Session, midi_input};
-use tutti_types::{Resyncs, SampleRate, Seconds};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::{Resyncs, SampleRate, Seconds};
 
 const KEYS: u32 = 1;
 

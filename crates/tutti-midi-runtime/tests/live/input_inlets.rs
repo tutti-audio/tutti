@@ -12,8 +12,8 @@ use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{Losses, NodeKey};
 use tutti_midi_runtime::{DeviceInput, InputInlets, InputWriters};
 use tutti_rt::{Counter, Gauge};
-use tutti_types::{Frame, Resyncs, SampleRate, Seconds};
 use tutti_ump::{MidiChannel, Ump};
+use tutti_units::{Frame, Resyncs, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;

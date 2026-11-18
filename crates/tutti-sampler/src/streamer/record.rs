@@ -30,7 +30,7 @@ use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
 use tutti_rt::RingFloat;
-use tutti_types::{SampleRate, Samples, SrcRatio};
+use tutti_units::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
 /// no `Closing`: the step that closes it removes the record.

@@ -10,7 +10,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, Lanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Db, Hz, MaxBlock, Q, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Db, Hz, Q, SampleRate, Tail};
 
 use super::filter_bus;
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -29,10 +30,10 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// ```
 /// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{Hz, Q, UnitParam};
+/// use tutti_units::{Hz, Q, UnitParam};
 /// use tutti_graph::{Prepare, Solo};
 /// use tutti_nodes::{SvfFilterNode, SvfType};
-/// use tutti_types::{SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
 ///
 /// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(0.707));
 /// let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -74,7 +75,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// # In a graph
 ///
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, its controls are
-/// a [`ParamSet`](tutti_graph::ParamSet) over cutoff, Q and gain by [`UnitParam`](tutti_types::UnitParam),
+/// a [`ParamSet`](tutti_graph::ParamSet) over cutoff, Q and gain by [`UnitParam`](tutti_units::UnitParam),
 /// and a fork of it starts from the values last set through that set. Its tail is
 /// [`Tail::Unknown`]: a resonant filter rings on after
 /// its input stops, for as long as its Q says, so the graph's tail fold must not
@@ -251,8 +252,8 @@ mod tests {
     use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
-    use tutti_types::{SampleRate, Tail};
+    use tutti_units::UnitParam;
+    use tutti_units::{SampleRate, Tail};
 
     /// `node`, prepared at 44.1 kHz, over a mono `input` in one block.
     fn render(node: SvfFilterNode, input: &[f32]) -> Vec<f32> {

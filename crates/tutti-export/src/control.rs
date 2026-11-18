@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// A request to stop a render, shared between the thread that asks and the one
 /// that renders. Cheap to clone; every clone is the same token.

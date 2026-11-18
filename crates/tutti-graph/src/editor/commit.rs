@@ -18,7 +18,7 @@ use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
 use crate::{Edge, EdgeId, Sink, Source};
 use crate::{Fade, NodeKey, RootBank};
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 /// A node whose audio wiring changed in a commit: a port gained its first
 /// source or consumer, or lost its last.

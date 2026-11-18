@@ -333,7 +333,7 @@ impl Chunks for Piece<'_, '_> {
 mod tests {
     use super::*;
     use tutti_plugin_types::MIDI_STACK_CAPACITY;
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     /// **A piece carries input when it holds an event, a parameter change or a non-silent frame,
     /// and only then**: it is what keeps a collected *sleep* from idling the

@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::Db;
+use tutti_units::Db;
 
 const RATE: f64 = 44100.0;
 

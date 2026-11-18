@@ -26,7 +26,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
 use tutti_types::ChannelLayout;
-use tutti_types::{Amplitude, Bed, ChannelTopology, Db, Hz, SampleRate, Samples};
+use tutti_types::{Bed, ChannelTopology};
+use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -216,7 +217,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
     use std::sync::Arc;
     use tutti_tempo::TempoMap;
     use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-    use tutti_types::{Beat, Bpm};
+    use tutti_units::{Beat, Bpm};
 
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.flac"));

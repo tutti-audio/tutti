@@ -20,7 +20,8 @@
 //! whatever the follower is doing).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Amplitude, ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};

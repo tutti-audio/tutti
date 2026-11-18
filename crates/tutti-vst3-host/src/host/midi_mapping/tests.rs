@@ -3,8 +3,8 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{widen_bend, widen_value};
-use tutti_types::Samples;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteKeyEvent, Sysex7Packets, System, U7, U14};
+use tutti_units::Samples;
 
 /// A packet from its words, zero-padded to four, at offset 0.
 fn raw(words: &[u32]) -> UmpAt {

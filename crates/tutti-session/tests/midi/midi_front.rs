@@ -12,10 +12,11 @@ use tutti_graph::{
 };
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_session::{MidiError, Session, SessionNode, TakePlacement};
-use tutti_types::{Beat, ChannelLayout, Frame, SampleRate, Samples};
+use tutti_types::ChannelLayout;
 #[cfg(feature = "serde")]
 use tutti_ump::MidiGroup;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::{Beat, Frame, SampleRate, Samples};
 
 /// Plays as an instrument (five outputs and an event input).
 struct Probe(ForkByClone<Five>);
@@ -54,7 +55,7 @@ struct Latent;
 impl Node for Latent {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_latency(tutti_types::Latency::new(Samples(256)))
+            .with_latency(tutti_units::Latency::new(Samples(256)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

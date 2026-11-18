@@ -10,7 +10,8 @@ use tutti_fixtures::{machine_lock, main_thread};
 use tutti_clap_host::ClapLoaded;
 use tutti_graph::{Node, Prepare};
 use tutti_plugin_types::Load;
-use tutti_types::{MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{SampleRate, Samples};
 
 /// The node's declared bound after a `prepare` at a graph block of `frames`.
 fn declared_at(node: &mut impl Node, frames: usize) -> Option<u32> {
@@ -33,7 +34,7 @@ fn the_declared_bound_is_what_the_list_holds_and_the_intake_takes() {
     )
     .expect("the reference plugin loads in process");
     let mut node = client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     );
     // The activation's list holds 256 events (the intake's size), whatever
     // the block the graph is prepared for.

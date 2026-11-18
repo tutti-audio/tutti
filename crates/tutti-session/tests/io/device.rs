@@ -15,7 +15,8 @@ use tutti_session::{
     Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession, OutPort,
     Phase, PhaseCx, RestartOutcome, Root, Session, SessionEvent, Workers,
 };
-use tutti_types::{ChannelLayout, Db, Hz, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(

@@ -79,7 +79,7 @@ pub enum Error {
         /// The channel layout of the audio.
         channels: ChannelLayout,
         /// Its sample rate.
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
         /// Why the reading is not usable.
         reason: Unmeasured,
     },
@@ -130,7 +130,7 @@ pub enum Error {
     #[error("Cannot hold the render in memory: {frames:?} frames of {channels:?} channels")]
     RenderTooLarge {
         /// Frames per plane the render needed.
-        frames: tutti_types::Samples,
+        frames: tutti_units::Samples,
         /// The planes it needed them for.
         channels: ChannelLayout,
     },
@@ -159,7 +159,7 @@ pub enum Error {
         /// The output's index.
         output: usize,
         /// The frames lost.
-        lost: tutti_types::Samples,
+        lost: tutti_units::Samples,
     },
 
     /// A tap had fewer frames than the block rendered: it was never committed
@@ -226,7 +226,7 @@ pub enum Unmeasured {
     /// judged in; any gain chosen from that reading would be made up.
     BelowGate,
     /// [`Normalize::Peak`](crate::Normalize::Peak): the true peak is at the
-    /// floor ([`Db::FLOOR`](tutti_types::Db::FLOOR)), which is silence.
+    /// floor ([`Db::FLOOR`](tutti_units::Db::FLOOR)), which is silence.
     Silent,
 }
 

@@ -97,7 +97,7 @@
 //! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
-//! [`StereoSmoother`] (of a [`Ballistics`](tutti_types::Ballistics)) is not a [`Meter`]: it is a display
+//! [`StereoSmoother`] (of a [`Ballistics`](tutti_units::Ballistics)) is not a [`Meter`]: it is a display
 //! filter over stereo level readings, with no stream behind it. It allocates
 //! nothing and costs a few flops, so it is fit for the audio thread.
 //!
@@ -119,7 +119,8 @@
 //!     OnsetConfig, PeakConfig, YinConfig,
 //! };
 //! use tutti_dsp::FftScratch;
-//! use tutti_types::{ChannelLayout, SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::ChannelLayout;
 //! use tutti_buffers::{Interleaved, Mono, StereoPlanes};
 //!
 //! let sample_rate = SampleRate::SR_44K1;
@@ -167,7 +168,8 @@
 //! use tutti_measure::correlate;
 //! use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+//! use tutti_types::ChannelLayout;
+//! use tutti_units::{Beat, Bpm, SampleRate, Samples};
 //! use tutti_buffers::{PlanesMut, StereoPlanes};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{TapAlign, TapId};

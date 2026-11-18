@@ -5,7 +5,8 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
 use tutti_session::{InletError, OutPort, Root, Session};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

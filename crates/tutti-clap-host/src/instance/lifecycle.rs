@@ -26,7 +26,8 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
-use tutti_types::{MaxBlock, ParamId};
+use tutti_types::MaxBlock;
+use tutti_units::ParamId;
 
 /// The events the plugin's output list holds besides parameter values, in one
 /// block: notes, MIDI, note expressions, SysEx and gestures. A push past it is

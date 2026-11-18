@@ -18,12 +18,12 @@ use tutti_session::{
     EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
     midi_input, midi_output,
 };
-use tutti_types::SampleRate;
-use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
     StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
 };
+use tutti_units::SampleRate;
+use tutti_units::{Beat, BeatDuration};
 
 const RAW: u64 = 7;
 const PEER: Muid = Muid::of(0x0012_3456);

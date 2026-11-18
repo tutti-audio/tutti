@@ -35,7 +35,7 @@ pub use capacity::NetworkCapacity;
 pub use gain::{loop_gain, rt60_from_gain};
 pub use inline::{Full, Inline};
 
-use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
+use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
 
 /// The energy of a row of gains, `sum g^2`, in `f64`.
 pub(crate) fn energy(gains: &[Gain]) -> f64 {

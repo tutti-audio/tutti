@@ -13,8 +13,8 @@ use tutti_graph::{OutPort, Source};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_types::MaxBlock;
-use tutti_types::{Beat, Bpm, SampleRate, Samples, Seconds};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;

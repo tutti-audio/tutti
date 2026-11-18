@@ -10,7 +10,8 @@ use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     Edge, ModTarget, OutPort, Problem, Root, RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_types::{Amplitude, ChannelLayout, Depth, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Depth, Seconds};
 
 use common::probe::Pulse;
 

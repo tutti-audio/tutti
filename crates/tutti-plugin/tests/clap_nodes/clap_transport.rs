@@ -24,7 +24,8 @@ use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{Env, ForkMode, Offset, TransportChanges, TransportPosition};
-use tutti_types::{Beat, Bpm, Frame, Latency, LoopRange, SampleRate, Samples};
+use tutti_types::LoopRange;
+use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 /// The pipeline's chunk: what the node ships per submission.

@@ -27,8 +27,9 @@ use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
 };
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, Depth, Hz, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{Depth, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The plugin's pipeline chunk in a detached session: its `MaxBlock`
@@ -559,7 +560,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
 
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-    use tutti_types::{Beat, Bpm, ChannelLayout};
+    use tutti_types::ChannelLayout;
+    use tutti_units::{Beat, Bpm};
 
     const BLOCK: usize = 1_024;
     const BLOCKS: usize = 24;

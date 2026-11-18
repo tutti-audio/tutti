@@ -17,7 +17,8 @@ use tutti_engine::{
 };
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 fn engine_and_state() -> (OutputStream, Arc<AudioCallbackState>) {
     let (_transport, state) = rolling_state(2);
@@ -291,7 +292,7 @@ fn a_restart_runs_its_hook_between_the_stop_and_the_start() {
 
     let (d2, s2) = ManualStreamDriver::new();
     let new = OutputSpec::new(
-        tutti_types::SampleRate::SR_96K,
+        tutti_units::SampleRate::SR_96K,
         tutti_types::ChannelLayout::from(6u16),
         SampleFormat::F32,
     );

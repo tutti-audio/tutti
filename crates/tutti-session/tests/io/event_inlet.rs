@@ -15,8 +15,8 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
 use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
 use tutti_types::ChannelLayout;
-use tutti_types::{Frame, SampleRate};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::{Frame, SampleRate};
 
 fn session() -> DetachedSession {
     Session::builder()

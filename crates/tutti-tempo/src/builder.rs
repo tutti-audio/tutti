@@ -3,7 +3,7 @@ use crate::map::TempoMap;
 use crate::point::{TempoPoint, Transition};
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 /// A tempo map written left to right, where a trailing ramp cannot be written.
 ///
@@ -14,7 +14,7 @@ use tutti_types::{Beat, Bpm};
 ///
 /// ```
 /// use tutti_tempo::{TempoMap, Transition};
-/// use tutti_types::{Beat, Bpm};
+/// use tutti_units::{Beat, Bpm};
 ///
 /// let map = TempoMap::builder(Bpm::of(120.0))
 ///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
@@ -29,7 +29,7 @@ use tutti_types::{Beat, Bpm};
 ///
 /// ```compile_fail,E0599
 /// use tutti_tempo::TempoMap;
-/// use tutti_types::{Beat, Bpm};
+/// use tutti_units::{Beat, Bpm};
 ///
 /// let _ = TempoMap::builder(Bpm::of(120.0)).ramp_time(Beat(4.0));
 /// ```
@@ -84,7 +84,7 @@ impl TempoMapBuilder {
     ///
     /// ```
     /// use tutti_tempo::TempoMap;
-    /// use tutti_types::{Beat, Bpm, Seconds};
+    /// use tutti_units::{Beat, Bpm, Seconds};
     ///
     /// // 120 to 180 BPM over four beats lasts 1.6 s; the tempo is 90 from there.
     /// let map = TempoMap::builder(Bpm::of(120.0))

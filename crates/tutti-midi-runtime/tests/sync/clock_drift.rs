@@ -11,8 +11,8 @@
 use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, MidiClockDecoder,
 };
-use tutti_types::{Beat, Seconds};
 use tutti_ump::{Message, MidiGroup, System, U14, Ump};
+use tutti_units::{Beat, Seconds};
 
 fn at(seconds: f64) -> Seconds {
     Seconds::new(seconds)

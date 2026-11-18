@@ -15,7 +15,7 @@ use tutti_session::{
     Session,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{Db, Frame, SampleRate, Samples};
+use tutti_units::{Db, Frame, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCKS: usize = 20;
@@ -32,7 +32,7 @@ struct CancelAt {
 
 impl Node for CancelAt {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(tutti_types::Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

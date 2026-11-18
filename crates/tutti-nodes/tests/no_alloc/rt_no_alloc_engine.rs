@@ -24,8 +24,9 @@ use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{BusStripNode, EqBandNode, LimiterControls, LimiterNode, SvfType};
 use tutti_transport::{MotionEvent, Transport};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, Db, Hz, Q, SampleRate, Samples};
+use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,
 /// with the transport rolling so its advancement runs through the same

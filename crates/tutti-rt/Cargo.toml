@@ -47,6 +47,7 @@ thiserror = { workspace = true, features = ["std"] }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
 # `ranged!`, which writes `RequestBit`.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 [target.'cfg(unix)'.dependencies]

@@ -10,7 +10,8 @@ use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
 use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::Samples;
 
 /// The plugin a state names.
 fn plugin_of(state: &PeerState) -> &PluginRef {

@@ -46,7 +46,8 @@ use core::marker::PhantomData;
 
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Db, Direction, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
 use crate::{Error, Measure, Meter, Result};
@@ -416,7 +417,7 @@ pub fn measure_true_peak<S: Sample>(
 /// [`Loudness::gain_to`], which subtracts it into a `NaN` — the same hazard the
 /// `-70` LUFS gate guards against.
 ///
-/// Not routed through [`tutti_types::Amplitude`], which is `f32`: converting first narrows
+/// Not routed through [`tutti_units::Amplitude`], which is `f32`: converting first narrows
 /// the input before the `log10`, defeating the reason this path is `f64`. The
 /// arithmetic is [`Db::from_amplitude_f64`]'s, narrowed once at this boundary.
 #[inline]

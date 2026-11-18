@@ -6,7 +6,8 @@ use tutti_buffers::{
     Frames, FramesMut, Interleaved, InterleavedMut, Mono, MonoMut, PlaneIter, PlaneIterMut, Planes,
     PlanesMut, StereoPlanes,
 };
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 const THREE: ChannelLayout = ChannelLayout::from_count(3);
 

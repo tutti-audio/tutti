@@ -29,7 +29,7 @@
 //! cell and never frees it, even when every reader went first.
 //!
 //! The cell knows no reading: `U` is whatever the owner of the measurement
-//! defines. A gauge's `U` is a [`Reading`], which every `tutti_types` unit over a
+//! defines. A gauge's `U` is a [`Reading`], which every `tutti_units` unit over a
 //! float is (`Db`, `SamplePosition`, ...); an owner's own type (a
 //! lock state) implements it. A counter's is a [`Count`].
 //!
@@ -48,7 +48,7 @@ mod tally;
 pub use tally::{Tally, TallyWriter, tally};
 
 use sync::{Arc, AtomicBool, AtomicU64, Ordering};
-use tutti_types::Unit;
+use tutti_units::Unit;
 
 use crate::ControlDrop;
 
@@ -105,7 +105,7 @@ impl RawBits for f64 {
 
 /// A value a [`Gauge`] holds: one that converts to and from one 64-bit word.
 ///
-/// `from_bits(to_bits(v))` is `v`. Every `tutti_types` unit whose raw number
+/// `from_bits(to_bits(v))` is `v`. Every `tutti_units` unit whose raw number
 /// is `f32` or `f64` is a `Reading`; the owner of any other
 /// measurement implements it for its own type. Do not implement it for a bare
 /// number: a quantity has a unit.
@@ -248,7 +248,7 @@ impl Count for u64 {
 }
 
 /// Frames, as a [`Counter`] counts them.
-impl Count for tutti_types::Samples {
+impl Count for tutti_units::Samples {
     type Words = [u64; 1];
     #[inline]
     fn to_words(self) -> [u64; 1] {
@@ -261,7 +261,7 @@ impl Count for tutti_types::Samples {
 }
 
 /// Re-anchors, as a [`Counter`] counts them.
-impl Count for tutti_types::Resyncs {
+impl Count for tutti_units::Resyncs {
     type Words = [u64; 1];
     #[inline]
     fn to_words(self) -> [u64; 1] {
@@ -330,7 +330,7 @@ impl Shared {
 ///
 /// ```
 /// use tutti_rt::gauge;
-/// use tutti_types::Db;
+/// use tutti_units::Db;
 ///
 /// let (mut writer, reduction) = gauge(Db(0.0));
 /// writer.set(Db(-6.0));
@@ -379,7 +379,7 @@ impl<U: Reading> Gauge<U> {
     ///
     /// ```
     /// use tutti_rt::gauge;
-    /// use tutti_types::Db;
+    /// use tutti_units::Db;
     ///
     /// let (mut writer, level) = gauge(Db(0.0));
     /// writer.set(Db(-6.0));

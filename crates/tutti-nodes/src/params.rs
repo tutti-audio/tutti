@@ -17,7 +17,8 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
-use tutti_types::{AtomicF32, SampleRate, UnitAddr};
+use tutti_types::AtomicF32;
+use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_LANES;
 use crate::ramp::LastGood;
@@ -214,8 +215,8 @@ macro_rules! control_set {
             type Controls = $controls;
 
             #[allow(unused_variables)]
-            fn addrs(&self) -> &'static [tutti_types::UnitAddr] {
-                const ALL: &[tutti_types::UnitAddr] = &[$(
+            fn addrs(&self) -> &'static [tutti_units::UnitAddr] {
+                const ALL: &[tutti_units::UnitAddr] = &[$(
                     control_set!(@addr $kind $([$ix])?)
                 ),+];
                 let $s = self;
@@ -257,22 +258,22 @@ macro_rules! control_set {
         }
         $( control_set!(@has $set; $kind $([$ix])? => $unit); )+
     };
-    (@addr $kind:ident) => { tutti_types::UnitAddr::first(tutti_types::UnitParam::$kind) };
+    (@addr $kind:ident) => { tutti_units::UnitAddr::first(tutti_units::UnitParam::$kind) };
     (@addr $kind:ident [$ix:tt]) => {
-        tutti_types::UnitAddr::new(tutti_types::UnitParam::$kind, $ix)
+        tutti_units::UnitAddr::new(tutti_units::UnitParam::$kind, $ix)
     };
     (@live $all:ident, all) => { $all.len() };
     (@live $all:ident, $($live:tt)+) => { $($live)+ };
     (@has $set:ident; $kind:ident => $unit:ty) => {
-        impl $crate::params::HasControl<{ tutti_types::UnitParam::$kind as u16 }> for $set {
+        impl $crate::params::HasControl<{ tutti_units::UnitParam::$kind as u16 }> for $set {
             type Unit = $unit;
         }
     };
     (@has $set:ident; $kind:ident [0] => $unit:ty) => {
-        impl $crate::params::HasControl<{ tutti_types::UnitParam::$kind as u16 }> for $set {
+        impl $crate::params::HasControl<{ tutti_units::UnitParam::$kind as u16 }> for $set {
             type Unit = $unit;
         }
-        impl $crate::params::HasControls<{ tutti_types::UnitParam::$kind as u16 }> for $set {}
+        impl $crate::params::HasControls<{ tutti_units::UnitParam::$kind as u16 }> for $set {}
     };
     (@has $set:ident; $kind:ident [$ix:tt] => $unit:ty) => {};
 }
@@ -642,7 +643,7 @@ mod tests {
     impl ControlSet for One {
         type Controls = f32;
         fn addrs(&self) -> &'static [UnitAddr] {
-            const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_types::UnitParam::Cutoff)];
+            const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_units::UnitParam::Cutoff)];
             &ADDRS
         }
         fn defaults(&self) -> f32 {

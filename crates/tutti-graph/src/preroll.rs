@@ -5,7 +5,7 @@
 use std::sync::Mutex;
 
 use tutti_rt::LockExt;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// The per-channel compensation of the plan sent last, indexed by output
 /// channel: how much the compiler delays that output to align it with the
@@ -26,7 +26,7 @@ use tutti_types::Samples;
 ///
 /// ```
 /// use tutti_graph::PrerollTable;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let table = PrerollTable::default();
 /// assert_eq!(table.preroll(0), None, "empty until the first plan");

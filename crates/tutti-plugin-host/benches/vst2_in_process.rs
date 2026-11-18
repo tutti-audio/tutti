@@ -34,7 +34,7 @@ use tutti_vst2_host::Vst2Loaded;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::contract::Direct;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 const SR: f64 = 48_000.0;
 /// The block every case renders (the figures `engine_render`'s header
@@ -51,7 +51,7 @@ fn unit() -> Direct<PluginNode<Vst2Loaded>> {
     )
     .expect("the reference VST2 plugin must be built — see tutti-fixtures");
     let tempo =
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo");
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
     Direct::new(unit.bind(tempo), SampleRate::of(SR), BLOCK)
 }
 

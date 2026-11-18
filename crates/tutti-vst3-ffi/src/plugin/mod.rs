@@ -35,7 +35,7 @@ use tutti_plugin_types::{
     read_utf16_str, write_c_chars, write_utf16_str,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::audio::{Arrangement, AudioSide, Setup, Shared};
 use crate::com::{BStream, ComponentHandler, HostApplication, HostPlugFrame};

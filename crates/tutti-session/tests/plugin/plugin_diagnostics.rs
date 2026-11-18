@@ -11,7 +11,8 @@ use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::{Root, Session};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -173,7 +174,7 @@ mod clap {
         assert_eq!(diag.latency(), Samples(own + BLOCK));
         assert_eq!(
             diag.tail(),
-            tutti_types::Tail::Finite(Samples(8191)),
+            tutti_units::Tail::Finite(Samples(8191)),
             "the tail the probe's `clap.tail` reports, as the graph holds it"
         );
     }
@@ -223,7 +224,7 @@ mod vst2 {
         assert!(diag().follows_project_meter());
         assert_eq!(
             diag().tail(),
-            tutti_types::Tail::None,
+            tutti_units::Tail::None,
             "the VST2 probe reports no tail"
         );
 

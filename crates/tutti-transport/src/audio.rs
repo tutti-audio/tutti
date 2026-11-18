@@ -17,7 +17,7 @@ use super::timed::{ScheduleAudio, Scheduled, TransportCommand};
 use super::walk::TempoAhead;
 use std::sync::atomic::Ordering;
 use tutti_tempo::TempoMap;
-use tutti_types::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
 /// [`Transport::audio`] refused: another [`TransportAudio`] over this
 /// transport (or a clone of it) is alive. Drop it (the engine that holds it)
@@ -281,7 +281,7 @@ impl TransportAudio {
     /// generation moves on first.
     ///
     /// ```
-    /// use tutti_types::{Beat, SampleRate};
+    /// use tutti_units::{Beat, SampleRate};
     /// use tutti_transport::{Timeline, Transport};
     /// let transport = Transport::new(SampleRate::SR_48K);
     /// let mut audio = transport.audio(SampleRate::SR_48K).expect("the only audio side");
@@ -312,7 +312,7 @@ impl TransportAudio {
 mod tests {
     use super::*;
     use crate::{MotionEvent, Timeline};
-    use tutti_types::{At, Frame};
+    use tutti_units::{At, Frame};
 
     fn constant(bpm: f64) -> std::sync::Arc<TempoMap> {
         std::sync::Arc::new(TempoMap::constant(Bpm::of(bpm)).expect("a tempo"))
@@ -336,7 +336,7 @@ mod tests {
     fn a_waiting_command_outlives_its_audio_side() {
         let t = Transport::new(SampleRate::SR_48K);
         t.motion
-            .schedule(At::Beat(tutti_types::Beat(1000.0)), MotionEvent::Play)
+            .schedule(At::Beat(tutti_units::Beat(1000.0)), MotionEvent::Play)
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
         first.gather();

@@ -1,7 +1,8 @@
 use core::f64::consts::PI;
 
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::*;
 use crate::dynamics::curves::compute_upward_gain_lift;

@@ -1,67 +1,34 @@
-//! Value vocabulary — what a parameter *is* and how it's carried.
+//! Value vocabulary: what a parameter is and how it is carried, over the unit
+//! newtypes of `tutti_units`.
 //!
-//! - [`units`] — the [`Unit`] marker trait + the measurement-unit newtypes
-//!   (`Bpm`, `Hz`, `Db`, `Semitones`, …). "What kind of value this is."
-//! - [`param`] — [`Param`], a lock-free atomic cell holding a `Unit` value,
+//! - [`param`]: [`Param`], a lock-free atomic cell holding a `Unit` value,
 //!   shareable with the audio thread (load / store / handle), and
 //!   [`Param64`], its `f64` neighbour.
-//! - [`frame`] — [`Frame`], an absolute frame position (a count's affine
-//!   partner), and [`At`], when a scheduled command takes effect.
-//! - [`frame_clock`] — [`FrameClock`], the playhead as a frame count, and
+//! - [`atomic_rate`]: [`AtomicSampleRate`] and [`ParkedSampleRate`], a
+//!   `SampleRate` shared with another thread as one atomic word.
+//! - [`frame_clock`]: [`FrameClock`], the playhead as a frame count, and
 //!   the [`LoopRange`] it wraps at.
-//! - [`timeline`] — [`TimelineSegment`], the one frame↔beat conversion, and
+//! - [`timeline`]: [`TimelineSegment`], the one frame↔beat conversion, and
 //!   [`first_frame_at_or_after`], the one rule for the frame a beat lands on.
-//! - [`play`] — [`PlayReading`], the graph's play clock at one frame.
-//! - [`resyncs`] — [`Resyncs`], a count of clock-map re-anchors: a count unit
-//!   of its own beside `Samples`.
-//! - [`samples`] — [`Samples`], an integer frame count. An unassigned quantity,
-//!   deliberately *not* a `Unit` (it is compared and added, not interpolated
-//!   or automated).
-
-// `#[macro_use]` propagates `unit!` up to the crate root, so sibling modules
-// (`meter`, `samples`, `frame`) define their quantities with it instead of
-// hand-writing the type. Declared first for the same textual-scoping reason.
-#[macro_use]
-pub mod units;
+//! - [`note`], [`adsr`]: [`Note`] and [`Adsr`], the pitch and envelope
+//!   vocabulary.
+//! - [`max_block`]: [`MaxBlock`], the largest block a node is asked to render.
 
 pub mod adsr;
-pub mod note;
-
-pub mod frame;
+pub mod atomic_rate;
 pub mod frame_clock;
-pub mod latency;
 pub mod max_block;
+pub mod note;
 pub mod param;
-pub mod play;
-pub mod resyncs;
-pub mod samples;
-pub mod tail;
 pub mod timeline;
-pub mod unit_param;
 
 pub use adsr::Adsr;
-pub use frame::{At, Frame, Moment};
+pub use atomic_rate::{AtomicSampleRate, ParkedSampleRate};
 pub use frame_clock::{FrameClock, LoopRange, LoopRangeError, Pass, PassEnd, SegmentOrigin};
-pub use latency::Latency;
 pub use max_block::{InvalidMaxBlock, MaxBlock};
 pub use note::{NotOnMidiScale, Note, NoteNumberOutOfRange, PitchClass};
 pub use param::{Param, Param64, ParamCell, ParamRaw};
-pub use play::PlayReading;
-pub use resyncs::Resyncs;
-pub use samples::Samples;
-pub use tail::Tail;
 pub use timeline::{
     FRAME_TOLERANCE, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
     snap_to_whole_frame,
-};
-pub use unit_param::{ParamAddr, ParamId, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
-pub use units::{
-    Amplitude, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Ballistics, Beat, BeatDuration,
-    BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm,
-    BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
-    Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain,
-    HoldFactor, Hz, Mix, Pan, ParkedSampleRate, Phase, PhaseIncrement, PlaybackRate, Q, Radians,
-    ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
-    SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio, StereoBalance, StereoWidth,
-    StretchFactor, Unit, Velocity,
 };

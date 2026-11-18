@@ -2,7 +2,7 @@
 
 This crate measures audio you already hold as samples: loudness (EBU R128), pitch, onsets, stereo correlation, spectra, tempo, key, chords and silent regions.
 
-It reads audio and returns numbers; it does not change the sound. It is handy for drawing waveforms or analysing a recording. It needs only `tutti-types`, `tutti-buffers` and `tutti-dsp`, so you can use it without the rest of tutti.
+It reads audio and returns numbers; it does not change the sound. It is handy for drawing waveforms or analysing a recording. It needs only `tutti-units`, `tutti-types`, `tutti-buffers` and `tutti-dsp`, so you can use it without the rest of tutti.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

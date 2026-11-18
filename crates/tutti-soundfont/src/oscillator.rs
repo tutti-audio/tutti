@@ -4,7 +4,7 @@
 
 use crate::render::Render;
 use tutti_sf2::{LoopMode, Pcm24, SamplePool};
-use tutti_types::{SampleRate, Semitones};
+use tutti_units::{SampleRate, Semitones};
 
 // In this class, fixed-point numbers are used for speed-up.
 // A fixed-point number is expressed by Int64, whose lower 24 bits represent the fraction part,

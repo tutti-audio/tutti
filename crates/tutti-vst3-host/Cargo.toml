@@ -48,6 +48,7 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 # The block views and the sample width (`Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

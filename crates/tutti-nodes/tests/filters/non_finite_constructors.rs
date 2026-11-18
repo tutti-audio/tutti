@@ -9,7 +9,8 @@ use tutti_types::MaxBlock;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, Prepare};
 use tutti_nodes::*;
-use tutti_types::{BusTopology, ChannelLayout, Db, Feedback, Hz, Q, SampleRate, Samples, Seconds};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{Db, Feedback, Hz, Q, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 // A huge finite value (1e30) is left out on purpose: it is a valid number that
@@ -20,7 +21,7 @@ const BAD: [f32; 5] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, -1e30];
 fn compressor_at_twelve() -> CompressorControls {
     CompressorControls {
         threshold: Db(-12.0),
-        ratio: tutti_types::CompressionRatio::new_clamped(4.0),
+        ratio: tutti_units::CompressionRatio::new_clamped(4.0),
         attack: Seconds::from_f32(0.01),
         release: Seconds::from_f32(0.1),
         ..CompressorControls::DEFAULT
@@ -77,7 +78,7 @@ fn sweep() {
                     KeySource::Sidechain,
                     CompressorControls {
                         threshold: d(v(0, -12.0)),
-                        ratio: tutti_types::CompressionRatio::new_clamped(if pos == 1 {
+                        ratio: tutti_units::CompressionRatio::new_clamped(if pos == 1 {
                             b
                         } else {
                             4.0

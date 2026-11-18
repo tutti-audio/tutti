@@ -87,7 +87,7 @@ impl AuRef {
     }
 
     /// Instantiate this unit at `rate`/`block`, already initialized.
-    pub fn open(&self, rate: tutti_types::SampleRate, block: u32) -> Au {
+    pub fn open(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
         let info = self.require();
         let mut au = Au::new(info.component, rate, block)
             .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", self.label));
@@ -97,7 +97,7 @@ impl AuRef {
     }
 
     /// Instantiate without initializing, for tests that drive the transition.
-    pub fn open_uninitialized(&self, rate: tutti_types::SampleRate, block: u32) -> Au {
+    pub fn open_uninitialized(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
         let info = self.require();
         Au::new(info.component, rate, block)
             .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", self.label))
@@ -975,7 +975,7 @@ pub fn direction(is_output: bool) -> BusDirection {
 /// probe by way of `Au`, so an instrument is not handed a phantom input.
 pub fn open_at_output_width(
     unit: &AuRef,
-    rate: tutti_types::SampleRate,
+    rate: tutti_units::SampleRate,
     block: u32,
     width: u16,
 ) -> (Au, u16) {

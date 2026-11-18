@@ -11,7 +11,7 @@
 //! normalized `[0, 1]` controller value is a velocity, a pressure, a
 //! controller position or a plugin's normalized parameter, depending on who
 //! reads it, and a bend in `[-1, 1]` is a position on a range the receiver
-//! owns (`PitchBendSensitivity` is that range). No `tutti_types` unit covers
+//! owns (`PitchBendSensitivity` is that range). No `tutti_units` unit covers
 //! these ranges without lending a meaning that is not the packet's (`Mix` is a
 //! position among a node's own settings, `Depth` a modulation amount,
 //! `Amplitude` a gain), so each caller wraps the value in the unit it means at

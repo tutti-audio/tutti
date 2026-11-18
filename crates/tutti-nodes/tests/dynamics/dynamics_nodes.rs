@@ -11,9 +11,9 @@ use tutti_nodes::{
     BrickwallLimiterNode, CompressorNode, DynamicEqConfig, DynamicEqNode, GateNode, KeySource,
     LimiterNode, Lookahead,
 };
-use tutti_types::{
-    BusTopology, ChannelLayout, CompressionRatio, Db, Frame, Hz, Latency, Q, SampleRate, Samples,
-    Seconds, Tail, UnitParam,
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{
+    CompressionRatio, Db, Frame, Hz, Latency, Q, SampleRate, Samples, Seconds, Tail, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;

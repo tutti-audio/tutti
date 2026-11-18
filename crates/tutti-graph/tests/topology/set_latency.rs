@@ -15,7 +15,8 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, Latency, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Latency, SampleRate, Samples};
 
 /// The delay the plugin actually runs.
 const TRUE_LATENCY: usize = 16;

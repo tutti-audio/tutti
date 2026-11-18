@@ -2,7 +2,7 @@ use super::*;
 use crate::CrossoverModel;
 use crate::testing::{amplitude_at, lock_in};
 use tutti_fixtures::signal::sine;
-use tutti_types::{Amplitude, Hz, SampleRate, Samples};
+use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
 /// One sample through `state` at `c`, in `f32`.
 fn tick(state: &mut CrossoverState, c: &CrossoverCoefficients, x: f32) -> [f32; MAX_BANDS] {

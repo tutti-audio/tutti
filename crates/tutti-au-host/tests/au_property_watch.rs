@@ -50,7 +50,7 @@ use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{Latency, ParameterList, TailTime};
 
 use tutti_au_host::{AuEvent, AuParameterListener, EventAddress};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 mod support;
 use support::probe_au::{
@@ -59,7 +59,7 @@ use support::probe_au::{
 };
 
 const BLOCK: u32 = 64;
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 
 /// The guard on waiting for a notification: it only fails one that never
 /// comes. `au_api_surface.rs` measured first arrival at 202–216 ms against Apple

@@ -21,7 +21,7 @@ use super::{
 };
 use dpi::Size;
 use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// Wire-deserialization fallback for [`HostMessage::LoadPlugin::block_size`]
 /// when a message arrives without the field. The operative value at runtime

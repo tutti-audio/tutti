@@ -64,7 +64,7 @@ use core::marker::PhantomData;
 use core::ops::RangeInclusive;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
@@ -76,7 +76,7 @@ use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
 use tutti_dsp::Smoother;
 use tutti_dsp::StftGeometry;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
 const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 16);

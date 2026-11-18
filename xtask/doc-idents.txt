@@ -100,7 +100,7 @@
 1 crates/tutti-sf2/src/sample_header.rs
 1 crates/tutti-types/src/value/note.rs
 1 crates/tutti-types/src/value/param.rs
-4 crates/tutti-types/src/value/unit_param.rs
+4 crates/tutti-units/src/unit_param.rs
 1 crates/tutti-vst2-ffi/CHANGELOG.md
 3 crates/tutti-vst2-ffi/src/api.rs
 2 crates/tutti-vst2-ffi/src/editor.rs

@@ -7,7 +7,8 @@ use tutti_buffers::Interleaved;
 
 use tutti_buffers::InterleavedMut;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
 
@@ -46,7 +47,7 @@ fn run(s: &Session, frames: usize, block: usize) -> Vec<f32> {
 fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
-    use tutti_types::{Beat, Bpm};
+    use tutti_units::{Beat, Bpm};
 
     let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize * 2 {

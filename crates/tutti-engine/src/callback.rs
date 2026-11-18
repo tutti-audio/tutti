@@ -27,7 +27,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::with_no_denormals;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 use crate::Engine;
 use crate::faults::StreamFaults;

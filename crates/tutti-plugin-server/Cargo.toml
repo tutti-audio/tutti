@@ -66,6 +66,7 @@ tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true 
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 # `ParamId`, and an unchecked `SampleRate` (`Unit::from_raw`) in the tests.
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 
 [dev-dependencies]

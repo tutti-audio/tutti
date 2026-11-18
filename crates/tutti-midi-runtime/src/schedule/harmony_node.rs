@@ -32,7 +32,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::{Publisher, Reader};
-use tutti_types::Beat;
+use tutti_units::Beat;
 
 use super::walk::{Beated, Visit, Walk, lands_on_first_frame};
 
@@ -114,7 +114,7 @@ impl Shared {
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{Beat, SampleRate, Samples};
+/// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Harmony, Prepare};
 /// use tutti_midi_runtime::{HarmonyNode, TimedHarmony};

@@ -8,7 +8,8 @@
 
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{ConnectError, DetachedSession, EventInPort, EventOutPort, Session};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 /// A node with `IN` event inputs and `OUT` event outputs and nothing else.
 #[derive(Clone)]

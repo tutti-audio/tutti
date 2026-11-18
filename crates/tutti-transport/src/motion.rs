@@ -32,8 +32,8 @@ use super::settings::TransportSettings;
 use super::state::SeekSlot;
 use super::timed::{Schedule, TimedError, TransportCommand};
 use std::sync::atomic::AtomicU8;
-use tutti_types::At;
-use tutti_types::Beat;
+use tutti_units::At;
+use tutti_units::Beat;
 
 pub use super::fsm::MotionState;
 
@@ -300,10 +300,10 @@ impl MotionFsm {
     /// # Examples
     ///
     /// ```
-    /// use tutti_types::{At, Beat, Frame};
+    /// use tutti_units::{At, Beat, Frame};
     /// use tutti_transport::{MotionEvent, Transport};
     ///
-    /// let transport = Transport::new(tutti_types::SampleRate::SR_48K);
+    /// let transport = Transport::new(tutti_units::SampleRate::SR_48K);
     /// // Start rolling one second into the stream, stop at beat 16.
     /// transport.motion().schedule(At::Frame(Frame::new(48_000)), MotionEvent::Play)?;
     /// transport.motion().schedule(At::Beat(Beat(16.0)), MotionEvent::stop())?;
@@ -629,7 +629,7 @@ mod tests {
     use super::harness::Audio;
     use super::*;
     use crate::timed::{IMMEDIATE_RESERVE, SCHEDULE_CAPACITY};
-    use tutti_types::Beat;
+    use tutti_units::Beat;
 
     /// The control handle and the audio half the engine would own.
     fn fsm() -> (MotionFsm, Audio) {

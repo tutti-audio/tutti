@@ -22,7 +22,8 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{SampleRate, Samples};
 
 /// What a header says about a file, and what this sampler can do with it.
 ///
@@ -45,7 +46,7 @@ pub struct SampleFacts {
     /// The file's own rate, which need not be the engine's.
     ///
     /// A voice reading this file converts through it, not through the session
-    /// rate; the ratio between the two is the [`SrcRatio`](tutti_types::SrcRatio)
+    /// rate; the ratio between the two is the [`SrcRatio`](tutti_units::SrcRatio)
     /// the streaming path carries.
     pub sample_rate: SampleRate,
     /// The file's channel count. Multiply by [`frames`](Self::frames) to size an

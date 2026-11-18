@@ -14,7 +14,7 @@ use super::header::{PeHeader, PeHeaderError, PeSubscription};
 use crate::Muid;
 use crate::TimeoutWait;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The most messages received at once from all peers: 1 to 128, the Request IDs
     /// there are (M2-103 §5.3). A message past it is refused.
     #[derive(Eq, Hash, PartialOrd, Ord)]
@@ -28,7 +28,7 @@ impl StreamLimit {
     pub const MAX: u8 = 128;
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The most bytes buffered across all the messages being received, Header Data
     /// and Property Data together.
     #[derive(Eq, Hash, PartialOrd, Ord)]

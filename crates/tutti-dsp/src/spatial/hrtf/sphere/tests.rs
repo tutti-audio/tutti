@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::{Azimuth, Elevation};
+use tutti_units::{Azimuth, Elevation};
 
 /// The resampler reads a response's first and last samples. One vertex
 /// whose left response is a unit delta on its first sample and right a

@@ -12,7 +12,8 @@ use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
     SessionEvent, audio_file,
 };
-use tutti_types::{Beat, ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
 /// File frames.

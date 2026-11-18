@@ -45,7 +45,8 @@
 
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
 use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 use crate::clock::SystemEngine;
 use crate::device::DeviceHandle;
@@ -455,7 +456,8 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
 #[cfg(all(test, feature = "testing"))]
 mod tests {
     use tutti_engine::{ManualStreamDriver, OutputBlock, RunningStream, StreamFaults, TimerError};
-    use tutti_types::{MaxBlock, Samples};
+    use tutti_types::MaxBlock;
+    use tutti_units::Samples;
 
     use super::*;
 

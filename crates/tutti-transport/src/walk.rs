@@ -21,7 +21,8 @@
 
 use tutti_graph::{Offset, TransportChanges, TransportPosition};
 use tutti_tempo::{CellGrid, TempoMap, TempoView};
-use tutti_types::{Beat, Frame, FrameClock, LoopRange, Samples};
+use tutti_types::{FrameClock, LoopRange};
+use tutti_units::{Beat, Frame, Samples};
 
 /// The one cell grid: a cell is at most this many frames, whatever the block
 /// length (one engine constant, never per block).

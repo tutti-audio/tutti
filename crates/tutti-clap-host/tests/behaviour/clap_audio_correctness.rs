@@ -38,8 +38,8 @@ use tutti_clap_host::{AudioPortFlags, ClapLoaded, ClapProcessContext, LoadOption
 use tutti_clap_test_plugin::{PREFERRED_DIALECT_DEFAULT, REPORTED_LATENCY_SAMPLES, probe_tag};
 use tutti_graph::Offset;
 use tutti_plugin_types::PluginAudio;
-use tutti_types::Samples;
 use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
+use tutti_units::Samples;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 512;

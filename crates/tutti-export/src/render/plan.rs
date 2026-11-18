@@ -4,7 +4,7 @@
 //! produce and how many leading frames the sink drops.
 
 use crate::Job;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// Fixed scheduling parameters for one render.
 ///

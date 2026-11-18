@@ -141,7 +141,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock_recover()
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// The guard on waiting for a property notification: it only fails one that
@@ -818,14 +818,14 @@ fn the_mixer_strip_arity_differs_between_input_and_output_scope() {
 fn is_recording_and_is_cycling_read_their_own_flags() {
     for (recording, cycling) in [(false, false), (true, false), (false, true), (true, true)] {
         let state = TransportState::new();
-        let mut info = TransportInfo::new(tutti_types::SampleRate::SR_48K)
+        let mut info = TransportInfo::new(tutti_units::SampleRate::SR_48K)
             .with_playing(true)
             .with_recording(recording);
         // A cycle is the loop being present; its bounds are a valid non-empty
         // region so the state is not rejected on some other ground.
         if cycling {
             info = info.with_loop(tutti_plugin_types::LoopRegion::new(
-                tutti_types::LoopRange::new(tutti_types::Beat(4.0), tutti_types::Beat(20.0))
+                tutti_types::LoopRange::new(tutti_units::Beat(4.0), tutti_units::Beat(20.0))
                     .expect("a loop"),
             ));
         }

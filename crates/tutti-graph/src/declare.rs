@@ -11,10 +11,11 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_types::{
-    Amplitude, AtomicF32, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth,
-    Drive, Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Param, ParamCell, ParamRaw, Q,
-    Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
+use tutti_types::{AtomicF32, Param, ParamCell, ParamRaw};
+use tutti_units::{
+    Amplitude, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Q, Resonance, SampleSpan, Seconds,
+    Semitones, Spread, StereoWidth, Unit, UnitAddr,
 };
 
 use crate::controls::{ParamSet, Params};
@@ -234,7 +235,7 @@ pub fn row<U: ParamUnit, C: Cells<U>>(
 /// ports, in the order declared.
 #[doc(hidden)]
 pub fn ports(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamPorts {
-    let mut addrs = [UnitAddr::first(tutti_types::UnitParam::Cutoff); MAX_PARAM_PORTS];
+    let mut addrs = [UnitAddr::first(tutti_units::UnitParam::Cutoff); MAX_PARAM_PORTS];
     let mut n = 0;
     walk(&mut |row| {
         if row.port {
@@ -314,7 +315,8 @@ pub fn input<'a, F: Float>(
 ///
 /// ```
 /// use tutti_graph::declare_params;
-/// use tutti_types::{Hz, Param, Q};
+/// use tutti_units::{Hz, Q};
+/// use tutti_types::Param;
 ///
 /// struct Filter {
 ///     cutoff: Param<Hz>,
@@ -329,7 +331,7 @@ pub fn input<'a, F: Float>(
 /// let filter = Filter { cutoff: Param::new(Hz(1_000.0)), q: Param::new(Q(0.7)) };
 /// // The shape's ports, the node's `ParamSet` and the base of port 1:
 /// assert_eq!(filter.declared_ports().as_slice().len(), 2);
-/// assert!(filter.declared_set().set(tutti_types::UnitParam::Cutoff, 2_000.0));
+/// assert!(filter.declared_set().set(tutti_units::UnitParam::Cutoff, 2_000.0));
 /// assert_eq!(filter.declared_base(0), Some(2_000.0));
 /// ```
 ///
@@ -338,7 +340,8 @@ pub fn input<'a, F: Float>(
 ///
 /// ```compile_fail
 /// use tutti_graph::declare_params;
-/// use tutti_types::{Db, Hz, Param};
+/// use tutti_units::{Db, Hz};
+/// use tutti_types::Param;
 ///
 /// struct Filter {
 ///     cutoff: Param<Db>,
@@ -354,7 +357,7 @@ pub fn input<'a, F: Float>(
 ///
 /// `declare_params!([generics] Type, n { rows })`, where `n` names the node in
 /// the rows' cell expressions. Each row is `Kind => Unit = cell`, a
-/// [`UnitParam`](tutti_types::UnitParam) kind, the unit its value is in, and
+/// [`UnitParam`](tutti_units::UnitParam) kind, the unit its value is in, and
 /// the cell: a `&Param<Unit>`, a `&Arc<AtomicF32>` for a `bool` switch, or an
 /// `Option` of either for a param the node has only sometimes. The rows are
 /// the node's ports in this order, and its set in this order.
@@ -458,7 +461,8 @@ pub fn input<'a, F: Float>(
 ///
 /// ```
 /// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
-/// use tutti_types::{Amplitude, ChannelLayout, Hz, Param, UnitParam};
+/// use tutti_units::{Amplitude, Hz, UnitParam};
+/// use tutti_types::{ChannelLayout, Param};
 ///
 /// struct Tone {
 ///     level: Param<Amplitude>,

@@ -89,7 +89,7 @@
 //!
 //! ```rust
 //! use tutti_transport::FrozenClock;
-//! use tutti_types::{Hz, SampleRate, Samples, Seconds};
+//! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup};
 //! use tutti_types::ChannelLayout;
 //! use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
@@ -228,7 +228,8 @@ use std::path::PathBuf;
 use tutti_buffers::Float;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, Db, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Samples};
 
 /// A file an export wrote, from a file [`Output`] of [`render()`]
 /// ([`Produced::File`]) or [`write_buffers`].

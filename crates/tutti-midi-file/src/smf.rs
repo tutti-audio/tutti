@@ -32,9 +32,9 @@ use tutti_midi_protocol::MtcRate;
 use tutti_ump::TicksPerQuarterNote;
 
 use crate::SmfParseError;
-use crate::file::{Normalized, SmfFormat, Track};
+use crate::file::{Normalized, Opening, SmfFormat, Track};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A metrical division in ticks per quarter note, `1..=0x7FFF`: the
     /// header's division word has 15 bits for it, and its top bit says SMPTE
     /// timing (SMF 1.0 section 2.1). Zero is no division.
@@ -42,7 +42,7 @@ tutti_types::ranged! {
     SmfTicksPerQuarter(u16), SmfTicksPerQuarterOutOfRange, "within 1..=32767", |raw| raw >= 1 && raw <= 0x7FFF
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// An SMPTE division's resolution within a frame, `1..=255`: the low byte
     /// of the division word (SMF 1.0 section 2.1). Zero is no resolution.
     #[derive(Eq, Hash)]
@@ -157,6 +157,10 @@ pub(crate) struct SmfParts {
     pub(crate) format: SmfFormat,
     pub(crate) division: SmfDivision,
     pub(crate) tracks: Vec<Track>,
+    /// Each track's Sequence Number and SMPTE Offset.
+    pub(crate) openings: Vec<Opening>,
+    /// The notice of the first track.
+    pub(crate) copyright: Option<Box<[u8]>>,
     /// What the read changed to make the tracks writable.
     pub(crate) normalized: Vec<Normalized>,
 }

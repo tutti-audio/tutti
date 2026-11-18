@@ -12,7 +12,7 @@ use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use tutti_graph::{ForkCause, ForkMode, Node, RenderMode};
 use tutti_rt::RingFloat;
-use tutti_types::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor, Tail};
+use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor, Tail};
 
 /// Whether anything can still steer a voice node: the live node, which a
 /// handle reaches, or its fork, which nothing does.

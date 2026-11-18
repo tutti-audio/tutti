@@ -25,7 +25,7 @@
 use std::collections::VecDeque;
 
 use tutti_buffers::Float;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::event::Event;
 use crate::held::Held;

@@ -13,7 +13,8 @@ use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::machine_lock;
 use tutti_graph::Exponent;
-use tutti_types::{Hz, MaxBlock, ParamId};
+use tutti_types::MaxBlock;
+use tutti_units::{Hz, ParamId};
 
 use std::sync::Arc;
 
@@ -26,8 +27,8 @@ use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_types::{At, Frame};
-use tutti_types::{Beat, SampleRate, Samples};
+use tutti_units::{At, Frame};
+use tutti_units::{Beat, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -49,7 +50,7 @@ impl Curve for Constant {
 /// normalized `v` sets.
 fn gained(v: f64) -> f32 {
     let db = GAIN_DB.0 + v * (GAIN_DB.1 - GAIN_DB.0);
-    tutti_types::Db::new(db as f32).to_amplitude().get()
+    tutti_units::Db::new(db as f32).to_amplitude().get()
 }
 
 /// **Automation reaches the plugin.** The probe renders its tag (1.0 on
@@ -79,7 +80,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     live.spec_mut().connect_events(
@@ -144,7 +145,7 @@ fn render_gain(
         PLUGIN,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     if let Some(lane) = feeder {

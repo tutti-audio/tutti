@@ -128,7 +128,7 @@ pub(super) struct Fork<F: InProcess> {
     /// The live node's rate when this source was taken: what the second
     /// instance is loaded at. The fork's own `prepare` then tells it the
     /// fork's rate.
-    sample_rate: tutti_types::SampleRate,
+    sample_rate: tutti_units::SampleRate,
     /// What the live handle reports the plugin can do: whether it has presets
     /// to carry across.
     features: Features,

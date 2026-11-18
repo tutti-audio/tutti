@@ -3,8 +3,8 @@ use crate::fold_uneven;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::f64::consts::TAU;
-use tutti_types::SampleRate;
-use tutti_types::Samples;
+use tutti_units::SampleRate;
+use tutti_units::Samples;
 
 const RATE: f64 = 48_000.0;
 

@@ -9,7 +9,7 @@ use tutti_ump::{Bank, U7};
 use super::super::limits::{NotValid, PropertyName, text_type};
 use super::super::tree::{PeJson, PeObject};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A MIDI Channel of a Function Block: 1 to 256, counted from the first
     /// Channel of the first Group of the block and on across its Groups
     /// (M2-105 Table 10, M2-117 Table 5).
@@ -20,7 +20,7 @@ tutti_types::ranged! {
     |raw| raw >= 1 && raw <= 256
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The priority of a controller: 1, the most important, to 5, hidden
     /// (M2-117 §2.1.1.1).
     #[derive(Eq, Hash, PartialOrd, Ord)]
@@ -29,7 +29,7 @@ tutti_types::ranged! {
     Priority(u8), NotAPriority, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The significant bits of a 32-bit controller value: 1 to 32 (M2-117
     /// Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
@@ -39,7 +39,7 @@ tutti_types::ranged! {
     |raw| raw >= 1 && raw <= 32
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The number of steps of a stepped controller (M2-117 Table 5): at least 1.
     #[derive(Eq, Hash, PartialOrd, Ord)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

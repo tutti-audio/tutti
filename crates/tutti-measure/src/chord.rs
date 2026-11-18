@@ -55,9 +55,10 @@
 //!
 //! Where no chord is detected there is no span.
 
-use tutti_types::{PitchClass, Samples};
+use tutti_types::PitchClass;
+use tutti_units::Samples;
 
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 use crate::chroma::{CLASSES, Chroma};
 use crate::framing::{Framing, check_frame_count};

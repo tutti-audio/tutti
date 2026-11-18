@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use tutti_buffers::Float;
 
-use tutti_types::{Latency, Tail};
+use tutti_units::{Latency, Tail};
 
 use super::outlets::Closed;
 use super::{CommitError, Editor, Placed, Unwired};

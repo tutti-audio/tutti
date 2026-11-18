@@ -19,7 +19,7 @@
 //! per second for a time ramp, per beat for a beat ramp).
 
 use crate::point::Transition;
-use tutti_types::{Beat, BeatDuration, Bpm, Seconds};
+use tutti_units::{Beat, BeatDuration, Bpm, Seconds};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Seg {

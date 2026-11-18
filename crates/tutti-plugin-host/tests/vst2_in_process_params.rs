@@ -40,8 +40,9 @@ use param_reads::ParamReads as _;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::Normalized;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_types::ParamId;
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;

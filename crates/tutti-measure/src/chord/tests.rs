@@ -1,7 +1,7 @@
 use super::*;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_dsp::{BinCount, FrameCount};
-use tutti_types::Cents;
+use tutti_units::Cents;
 
 fn framing(window: usize, hop: usize) -> Framing {
     Framing::new(Samples(window), Samples(hop))

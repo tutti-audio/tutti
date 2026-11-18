@@ -4,7 +4,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -38,8 +39,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// [`key_filter`](Self::key_filter) puts a [`KeyFilter`] on the key: the detector hears the
 /// key through a high-pass or a band-pass, and the signal the gate is applied to is never
 /// filtered. It is off by default. A node built with one has two more controls after the
-/// range, the cutoff ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff), [`Hz`], 100 Hz) and
-/// the Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`], Butterworth); a node with
+/// range, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
+/// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
 /// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
 /// The filter's coefficients glide to a new cutoff over one grid period.
 ///
@@ -295,7 +296,7 @@ mod tests {
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     /// The controls of a gate the tests name four of: the closed floor is -80 dB (the
     /// node's range before it was a control), not `GateControls::DEFAULT`'s 0 dB.
@@ -574,8 +575,8 @@ mod tests {
             ][..]
         );
         assert_eq!(shape.audio_in().count(), 2);
-        assert_eq!(shape.latency, tutti_types::Latency::ZERO);
-        assert_eq!(shape.tail, tutti_types::Tail::None);
+        assert_eq!(shape.latency, tutti_units::Latency::ZERO);
+        assert_eq!(shape.tail, tutti_units::Tail::None);
         for (k, base) in [-20.0, 0.0001, 0.01, 0.1, -30.0].into_iter().enumerate() {
             assert_eq!(m.param_base(k), Some(base), "control {k}'s base");
         }

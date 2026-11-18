@@ -35,7 +35,7 @@ use tutti_plugin_types::{
     BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
     StateUse,
 };
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// VST3 sequencer-context inputs for one process block, bundled to keep
 /// `AudioBridge::submit`'s signature manageable. All default to empty.

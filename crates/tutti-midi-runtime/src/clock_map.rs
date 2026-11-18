@@ -52,7 +52,7 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_types::{Frame, Moment, SampleRate, Seconds};
+use tutti_units::{Frame, Moment, SampleRate, Seconds};
 
 /// How far the anchor moves toward a reading, as `1 / GAIN`.
 pub const GAIN: u32 = 8;

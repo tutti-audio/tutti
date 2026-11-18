@@ -16,8 +16,9 @@
 //! decoder in `tutti-ump` refuses it) and is ignored here too.
 
 use tutti_midi_protocol::{flex_tempo, flex_time_signature};
-use tutti_types::{Bpm, TimeSignature};
+use tutti_types::TimeSignature;
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
+use tutti_units::Bpm;
 
 /// Where a followed tempo comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +44,7 @@ pub enum Followed {
 ///
 /// ```
 /// use tutti_midi_runtime::{Followed, TempoFollower, TempoSource};
-/// use tutti_types::Bpm;
+/// use tutti_units::Bpm;
 /// use tutti_ump::{Flex, Message, MidiGroup, Ump};
 ///
 /// let follower = TempoFollower::new(TempoSource::Flex(MidiGroup::FIRST), false);

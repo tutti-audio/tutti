@@ -9,8 +9,8 @@ use tutti_midi_protocol::{MmcSegmentError, MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{
     MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode, SegmentFault,
 };
-use tutti_types::{Frame, SampleRate, Seconds};
 use tutti_ump::{MidiGroup, Sysex7Packets};
+use tutti_units::{Frame, SampleRate, Seconds};
 
 const OURS: SysexDeviceId = SysexDeviceId::of(5);
 

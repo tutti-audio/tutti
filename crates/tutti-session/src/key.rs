@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use tutti_graph::{BusRef, BusSource, NodeKey};
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 use crate::{ConnectError, EdgeGainError, Graph};
 

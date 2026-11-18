@@ -13,9 +13,9 @@
 //! Existing MIDI code keeps its `u8` — the wire format is honest there. Cross
 //! into `Note` where you want a frequency, a name, or transposition.
 
-use super::units::{Cents, Hz, Semitones};
 use alloc::format;
 use alloc::string::String;
+use tutti_units::{Cents, Hz, Semitones};
 
 /// One of the twelve pitch classes.
 ///
@@ -143,7 +143,8 @@ impl PitchClass {
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Hz, Note, PitchClass, Semitones};
+/// use tutti_units::{Hz, Semitones};
+/// use tutti_types::{Note, PitchClass};
 ///
 /// let a4 = Note::try_from(69u8).unwrap();
 /// assert_eq!(a4, Note::A4);
@@ -416,7 +417,7 @@ mod tests {
 
         assert_eq!(c4.interval_to(g4), Semitones(7.0));
         assert_eq!(g4.interval_to(c4), Semitones(-7.0));
-        assert_eq!(c4.interval_to(c4), Semitones(0.0));
+        assert_eq!(c4.interval_to(c4), Semitones::UNISON);
     }
 
     // ── MIDI encoding ───────────────────────────────────────────────────

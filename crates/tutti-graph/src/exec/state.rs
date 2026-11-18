@@ -2,7 +2,7 @@
 //! injections, and the state a plan's ops run against.
 
 use tutti_buffers::Float;
-use tutti_types::Tail;
+use tutti_units::Tail;
 
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};

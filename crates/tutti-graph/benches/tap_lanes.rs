@@ -17,7 +17,7 @@ use tutti_buffers::{Interleaved, InterleavedMut};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::TapReader;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 const FRAMES: usize = 512;
 const WIDTH: usize = 2;

@@ -51,9 +51,9 @@ use tutti_buffers::{Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
-use tutti_types::Samples;
 use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_types::{SampleRate, Seconds};
+use tutti_units::Samples;
+use tutti_units::{SampleRate, Seconds};
 
 use crate::driver_seam::device_rate;
 use crate::edge;

@@ -9,12 +9,12 @@ use crate::common::{self, metrical, note, sequences, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Lead, Meta, MidiFile, Normalized, Placement, SmfDivision, SmfFormat,
-    SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
+    FileEvent, Layout, Lead, LeadTrack, Meta, MidiFile, Normalized, Pattern, Placement,
+    SmfDivision, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{ManufacturerId, MidiChannel, NoteNumber, U7};
+use tutti_units::{Beat, Bpm};
 
 const TPQ: u16 = 480;
 const BEAT: u32 = TPQ as u32;
@@ -30,12 +30,29 @@ fn read(format: u16, tracks: &[Vec<RawEvent>]) -> MidiFile {
     MidiFile::from_bytes(&build_smf(format, Division::Metrical(TPQ), tracks)).unwrap()
 }
 
-fn smf(format: SmfFormat, tracks: Vec<Track>) -> Result<MidiFile, TracksError> {
-    MidiFile::smf(format, DIVISION, tracks)
+/// The three formats a file can be authored in.
+#[derive(Clone, Copy)]
+enum Format {
+    Zero,
+    One,
+    Two,
+}
+
+fn smf(format: Format, mut tracks: Vec<Track>) -> Result<MidiFile, TracksError> {
+    match format {
+        Format::Zero => crate::common::format0(DIVISION, tracks.remove(0)),
+        Format::One => crate::common::format1(DIVISION, tracks),
+        Format::Two => crate::common::format2(DIVISION, tracks),
+    }
+}
+
+/// A format 0 file whose only track is `lead`.
+fn lead(lead: LeadTrack) -> MidiFile {
+    MidiFile::smf(DIVISION, Layout::Format0(lead)).unwrap()
 }
 
 fn one(events: Vec<(u64, FileEvent)>) -> Result<MidiFile, TracksError> {
-    smf(SmfFormat::SingleTrack, vec![track(events)])
+    smf(Format::Zero, vec![track(events)])
 }
 
 fn ev(meta: Meta) -> FileEvent {
@@ -106,7 +123,7 @@ fn offset(h: u8, m: u8, s: u8, f: u8, rate: SmpteFrameRate, ff: u8) -> SmpteOffs
 #[test]
 fn a_sequence_number_is_two_bytes_most_significant_first() {
     let file = read(0, &[vec![meta(0, 0x00, &[0x01, 0x02])]]);
-    assert_eq!(file.tracks()[0].sequence_number(), Some(0x0102));
+    assert_eq!(file.sequence_number(0), Some(0x0102));
     assert_eq!(
         body(&file),
         [0x00, 0xFF, 0x00, 0x02, 0x01, 0x02, 0x00, 0xFF, 0x2F, 0x00]
@@ -119,9 +136,9 @@ fn a_sequence_number_is_two_bytes_most_significant_first() {
 /// Spec: smf/sequence-number#1, smf/meta-events#10
 #[test]
 fn a_sequence_number_and_a_track_name_are_written_first_at_time_0() {
-    let track = played().named("n").numbered(9);
+    let track = LeadTrack::new(played().named("n")).numbered(9);
     assert_eq!(
-        body(&smf(SmfFormat::SingleTrack, vec![track]).unwrap()),
+        body(&lead(track)),
         [
             0x00, 0xFF, 0x00, 0x02, 0x00, 0x09, // the Sequence Number
             0x00, 0xFF, 0x03, 0x01, b'n', // the Track Name
@@ -137,9 +154,16 @@ fn a_sequence_number_and_a_track_name_are_written_first_at_time_0() {
 /// Spec: smf/sequence-number#2, smf/sequence-number#3
 #[test]
 fn a_format_2_pattern_is_its_number_or_its_place() {
-    let file = smf(
-        SmfFormat::Sequential,
-        vec![played().numbered(7), played(), played().numbered(0xFFFF)],
+    let file = MidiFile::smf(
+        DIVISION,
+        Layout::Format2 {
+            copyright: None,
+            patterns: vec![
+                Pattern::new(played()).numbered(7),
+                Pattern::new(played()),
+                Pattern::new(played()).numbered(0xFFFF),
+            ],
+        },
     )
     .unwrap();
     let numbers = |f: &MidiFile| {
@@ -153,23 +177,32 @@ fn a_format_2_pattern_is_its_number_or_its_place() {
     assert_eq!(numbers(&back), [7, 1, 0xFFFF]);
 }
 
-/// A format 0 or 1 file holds one sequence, whose number is in its first track.
-/// A writer refuses a number in another track; a reader drops it and says so.
+/// A format 0 or 1 file holds one sequence, whose number is in its first track:
+/// the writer puts the lead's number there and no other track has one, and a
+/// reader drops a number in another track and says so.
 /// Spec: smf/sequence-number#4
 #[test]
 fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
-    let later = |format| smf(format, vec![played(), played().numbered(1)]).map(drop);
+    let written = MidiFile::smf(
+        DIVISION,
+        Layout::Format1 {
+            lead: LeadTrack::new(played()).numbered(5),
+            tracks: vec![played()],
+        },
+    )
+    .unwrap();
+    assert_eq!(body(&written)[..6], [0x00, 0xFF, 0x00, 0x02, 0x00, 0x05]);
+    let back = MidiFile::from_bytes(&written.to_bytes()).unwrap();
     assert_eq!(
-        later(SmfFormat::Parallel),
-        Err(TracksError::SequenceNumberNotInFirstTrack { track: 1 })
+        (back.sequence_number(0), back.sequence_number(1)),
+        (Some(5), None)
     );
-    assert_eq!(later(SmfFormat::Sequential), Ok(()));
     let tracks = [
         vec![RawEvent::note_on(0, 0, 60, 100)],
         vec![meta(0, 0x00, &[0, 3])],
     ];
     let dropped = read(1, &tracks);
-    assert_eq!(dropped.tracks()[1].sequence_number(), None);
+    assert_eq!(dropped.sequence_number(1), None);
     assert_eq!(
         dropped.normalized(),
         [changed(
@@ -180,7 +213,7 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
         )]
     );
     let kept = read(2, &tracks);
-    assert_eq!(kept.tracks()[1].sequence_number(), Some(3));
+    assert_eq!(kept.sequence_number(1), Some(3));
     assert_eq!(kept.normalized(), []);
 }
 
@@ -325,11 +358,7 @@ fn an_smpte_offset_out_of_range_is_kept_as_read() {
 fn an_smpte_offset_is_at_the_start_of_the_track() {
     let at = offset(1, 0, 0, 0, SmpteFrameRate::Fps25, 0);
     let wire = [1 << 5 | 1, 0, 0, 0, 0];
-    let written = smf(
-        SmfFormat::SingleTrack,
-        vec![played().smpte_start(at).copyright("(C)")],
-    )
-    .unwrap();
+    let written = lead(LeadTrack::new(played()).smpte_start(at).copyright("(C)"));
     assert_eq!(
         body(&written),
         [
@@ -358,19 +387,28 @@ fn an_smpte_offset_is_at_the_start_of_the_track() {
 }
 
 /// In a format 1 file the offset is stored in the first track and means
-/// nothing in the others: a writer refuses it there, and a reader drops it and
-/// says so.
+/// nothing in the others: the writer puts the lead's there and no other track
+/// has one, and a reader drops it from another track and says so.
 /// Spec: smf/smpte-offset#4
 #[test]
 fn a_format_1_smpte_offset_is_the_first_tracks() {
     let at = offset(1, 2, 3, 4, SmpteFrameRate::Fps25, 5);
+    let written = MidiFile::smf(
+        DIVISION,
+        Layout::Format1 {
+            lead: LeadTrack::new(played()).smpte_start(at),
+            tracks: vec![played()],
+        },
+    )
+    .unwrap();
     assert_eq!(
-        smf(
-            SmfFormat::Parallel,
-            vec![played(), played().smpte_start(at)]
-        )
-        .map(drop),
-        Err(TracksError::SmpteOffsetNotInFirstTrack { track: 1 })
+        body(&written)[..9],
+        [0x00, 0xFF, 0x54, 0x05, 1 << 5 | 1, 2, 3, 4, 5]
+    );
+    let back = MidiFile::from_bytes(&written.to_bytes()).unwrap();
+    assert_eq!(
+        (back.smpte_offset(0), back.smpte_offset(1)),
+        (Some(at), None)
     );
     let tracks = [(); 2].map(|()| vec![meta(0, 0x54, &[1 << 5 | 1, 2, 3, 4, 5])]);
     let first = read(1, &tracks);
@@ -464,12 +502,12 @@ fn the_ascii_view_of_a_text_event_leaves_out_non_ascii_bytes() {
 #[test]
 fn a_track_opens_with_copyright_number_name_and_smpte_offset() {
     let at = offset(1, 0, 0, 0, SmpteFrameRate::Fps25, 0);
-    let t = Track::new()
-        .smpte_start(at)
-        .named("N")
-        .numbered(1)
-        .copyright("C");
-    let file = smf(SmfFormat::SingleTrack, vec![t]).unwrap();
+    let file = lead(
+        LeadTrack::new(Track::new().named("N"))
+            .smpte_start(at)
+            .numbered(1)
+            .copyright("C"),
+    );
     assert_eq!(
         body(&file),
         [
@@ -509,14 +547,17 @@ fn a_track_opens_with_copyright_number_name_and_smpte_offset() {
 
 /// All of a file's copyright notices go together in one event, the first event
 /// of the first track at time 0: the track holds one, a second joins it on a new
-/// line, and it is written before the events however early they were added. A
-/// writer refuses a notice in another track.
+/// line, and it is written before the events however early they were added. In
+/// a file of several tracks it is the first track's alone, and in a format 2
+/// file the first pattern's.
 /// Spec: smf/copyright-notice#3, smf/copyright-notice#4, smf/meta-events#9
 #[test]
 fn all_copyright_notices_are_one_event_first_in_the_first_track() {
-    let t = played().copyright("(C) A").copyright("(C) B");
-    assert_eq!(t.copyright_bytes(), Some(&b"(C) A\n(C) B"[..]));
-    let file = smf(SmfFormat::SingleTrack, vec![t]).unwrap();
+    let t = LeadTrack::new(played())
+        .copyright("(C) A")
+        .copyright("(C) B");
+    let file = lead(t);
+    assert_eq!(file.copyright(), Some(&b"(C) A\n(C) B"[..]));
     assert_eq!(
         body(&file)[..14],
         [
@@ -524,13 +565,96 @@ fn all_copyright_notices_are_one_event_first_in_the_first_track() {
         ]
     );
     assert_eq!(body(&file)[14..19], [b'B', 0x00, 0x90, 60, 100]);
-    let other = |format| smf(format, vec![played(), played().copyright("(C)")]).map(drop);
-    for format in [SmfFormat::Parallel, SmfFormat::Sequential] {
-        assert_eq!(
-            other(format),
-            Err(TracksError::CopyrightNotInFirstTrack { track: 1 })
-        );
+    let layouts = [
+        Layout::Format1 {
+            lead: LeadTrack::new(played()).copyright("(C)"),
+            tracks: vec![played()],
+        },
+        Layout::Format2 {
+            copyright: Some("(C)".into()),
+            patterns: vec![Pattern::new(played()), Pattern::new(played())],
+        },
+    ];
+    for layout in layouts {
+        let file = MidiFile::smf(DIVISION, layout).unwrap();
+        assert_eq!(body(&file)[..7], [0, 0xFF, 0x02, 0x03, b'(', b'C', b')']);
+        let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+        assert_eq!(back.copyright(), Some(&b"(C)"[..]));
+        assert_eq!(back.to_bytes(), file.to_bytes());
     }
+}
+
+/// A track a file hands out carries no opening metas, so cloning the tracks of
+/// a read format 2 file into a format 1 file puts no Sequence Number, SMPTE
+/// Offset or copyright notice anywhere in what is written.
+/// Spec: smf/sequence-number#4, smf/smpte-offset#4, smf/copyright-notice#3
+#[test]
+fn a_cloned_read_track_carries_no_opening_metas() {
+    let opening = || {
+        vec![
+            meta(0, 0x02, b"(C)"),
+            meta(0, 0x00, &[0, 3]),
+            meta(0, 0x54, &[1 << 5 | 1, 2, 3, 4, 5]),
+            RawEvent::note_on(0, 0, 60, 100),
+        ]
+    };
+    let read_file = read(2, &[opening(), opening()]);
+    assert_eq!(read_file.copyright(), Some(&b"(C)"[..]));
+    assert_eq!(read_file.sequence_number(1), Some(3));
+    assert!(read_file.smpte_offset(1).is_some());
+    let mut cloned = read_file.tracks().to_vec();
+    let lead = LeadTrack::new(cloned.remove(0));
+    let file = MidiFile::smf(
+        DIVISION,
+        Layout::Format1 {
+            lead,
+            tracks: cloned,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        (
+            file.copyright(),
+            file.sequence_number(0),
+            file.smpte_offset(0)
+        ),
+        (None, None, None)
+    );
+    let bytes = file.to_bytes();
+    for wire in [[0xFF, 0x02], [0xFF, 0x00], [0xFF, 0x54]] {
+        assert!(!bytes.windows(2).any(|w| w == wire), "{wire:02X?}");
+    }
+    let back = MidiFile::from_bytes(&bytes).unwrap();
+    assert_eq!(back.normalized(), []);
+}
+
+/// Each pattern of a format 2 file has its own SMPTE Offset, written in its own
+/// chunk (SMF 1.0 section 3.3: the time at which the track chunk starts).
+/// Spec: smf/smpte-offset#1
+#[test]
+fn a_format_2_pattern_writes_its_own_smpte_offset() {
+    let (a, b) = (
+        offset(1, 0, 0, 0, SmpteFrameRate::Fps25, 0),
+        offset(2, 0, 0, 0, SmpteFrameRate::Fps25, 0),
+    );
+    let file = MidiFile::smf(
+        DIVISION,
+        Layout::Format2 {
+            copyright: None,
+            patterns: vec![
+                Pattern::new(played()).smpte_start(a),
+                Pattern::new(played()),
+                Pattern::new(played()).smpte_start(b),
+            ],
+        },
+    )
+    .unwrap();
+    assert_eq!(body(&file)[..4], [0x00, 0xFF, 0x54, 0x05]);
+    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    assert_eq!(
+        [0, 1, 2].map(|i| back.smpte_offset(i)),
+        [Some(a), None, Some(b)]
+    );
 }
 
 // ---- track chunks -----------------------------------------------------------
@@ -549,7 +673,7 @@ fn a_track_carries_16_channels() {
             U7::of(100),
         );
     }
-    let file = smf(SmfFormat::SingleTrack, vec![t]).unwrap();
+    let file = smf(Format::Zero, vec![t]).unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     let channels: Vec<u8> = back.tracks()[0]
         .notes()
@@ -565,7 +689,7 @@ fn a_track_carries_16_channels() {
 /// Spec: smf/track-chunks#2
 #[test]
 fn a_track_chunk_always_has_an_event() {
-    let written = smf(SmfFormat::SingleTrack, vec![Track::new()]).unwrap();
+    let written = smf(Format::Zero, vec![Track::new()]).unwrap();
     assert_eq!(body(&written), [0x00, 0xFF, 0x2F, 0x00]);
     let mut bytes = build_smf(0, Division::Metrical(TPQ), &[vec![]]);
     bytes.truncate(bytes.len() - 4);
@@ -655,7 +779,7 @@ fn a_late_opening_meta_is_dropped_and_listed() {
     );
     let t = &file.tracks()[0];
     assert_eq!(
-        (t.sequence_number(), t.name(), t.copyright_bytes()),
+        (file.sequence_number(0), t.name(), file.copyright()),
         (None, None, None)
     );
     assert_eq!(file.smpte_offset(0), None);
@@ -699,7 +823,7 @@ fn an_opening_meta_at_time_0_after_an_event_is_moved() {
     );
     let t = &moved.tracks()[0];
     assert_eq!(
-        (t.name(), t.copyright_bytes()),
+        (t.name(), moved.copyright()),
         (Some("n"), Some(&b"(C)"[..]))
     );
     assert_eq!(t.events().len(), 1);
@@ -749,7 +873,7 @@ fn a_second_opening_meta_is_a_listed_duplicate() {
     );
     let t = &file.tracks()[0];
     assert_eq!(
-        (t.sequence_number(), t.name(), t.copyright_bytes()),
+        (file.sequence_number(0), t.name(), file.copyright()),
         (Some(1), Some("a"), Some(&b"(C) 1"[..]))
     );
     assert_eq!(
@@ -786,7 +910,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
             meta(0, 0x54, &[1 << 5 | 1, 2, 3, 4, 5, 0xCC]),
         ]],
     );
-    assert_eq!(file.tracks()[0].sequence_number(), Some(7));
+    assert_eq!(file.sequence_number(0), Some(7));
     assert_eq!(file.smpte_offset(0), Some(at));
     let truncated = |lead, extra: &[u8]| changed(0, 0, lead, Placement::Truncated(extra.into()));
     assert_eq!(
@@ -901,13 +1025,7 @@ fn a_copyright_notice_outside_the_first_track_is_dropped_and_listed() {
     let tracks = [vec![meta(0, 0x02, b"(C)")], vec![meta(0, 0x02, b"(C)")]];
     for format in [1, 2] {
         let file = read(format, &tracks);
-        assert_eq!(
-            (
-                file.tracks()[0].copyright_bytes(),
-                file.tracks()[1].copyright_bytes()
-            ),
-            (Some(&b"(C)"[..]), None)
-        );
+        assert_eq!(file.copyright(), Some(&b"(C)"[..]));
         assert_eq!(
             file.normalized(),
             [changed(
@@ -983,16 +1101,16 @@ fn a_format_1_tempo_map_is_the_first_track() {
     let tracks = |event: FileEvent| vec![played(), track(vec![(480, event)])];
     for event in [tempo(90.0), time] {
         assert_eq!(
-            smf(SmfFormat::Parallel, tracks(event.clone())).map(drop),
+            smf(Format::One, tracks(event.clone())).map(drop),
             Err(TracksError::TempoMapNotInFirstTrack {
                 track: 1,
                 at: Tick(480)
             })
         );
-        assert!(smf(SmfFormat::Sequential, tracks(event)).is_ok());
+        assert!(smf(Format::Two, tracks(event)).is_ok());
     }
     let first = vec![track(vec![(0, tempo(90.0))]), played()];
-    assert!(smf(SmfFormat::Parallel, first).is_ok());
+    assert!(smf(Format::One, first).is_ok());
     let kept = read(
         1,
         &[
@@ -1050,21 +1168,19 @@ fn a_file_is_made_to_specify_tempo_and_time_signature() {
     };
     let defaults = vec![tempo(120.0), signature.clone()];
     let specify = |f: MidiFile| f.with_default_tempo_and_meter().unwrap();
-    let format_0 = specify(smf(SmfFormat::SingleTrack, vec![played()]).unwrap());
+    let format_0 = specify(smf(Format::Zero, vec![played()]).unwrap());
     assert_eq!(head(&format_0, 0), defaults);
-    let format_1 = specify(smf(SmfFormat::Parallel, vec![played(), played()]).unwrap());
+    let format_1 = specify(smf(Format::One, vec![played(), played()]).unwrap());
     assert_eq!(head(&format_1, 0), defaults);
     assert_eq!(format_1.tracks()[1], played());
-    let format_2 = specify(smf(SmfFormat::Sequential, vec![played(), played()]).unwrap());
+    let format_2 = specify(smf(Format::Two, vec![played(), played()]).unwrap());
     assert_eq!(
         (head(&format_2, 0), head(&format_2, 1)),
         (defaults.clone(), defaults)
     );
     // A copyright notice and a tempo already there stay; the signature joins.
-    let has = Track::new()
-        .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
-        .copyright("c");
-    let kept = specify(smf(SmfFormat::SingleTrack, vec![has]).unwrap());
-    assert_eq!(kept.tracks()[0].copyright_bytes(), Some(&b"c"[..]));
+    let has = LeadTrack::new(Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)))).copyright("c");
+    let kept = specify(lead(has));
+    assert_eq!(kept.copyright(), Some(&b"c"[..]));
     assert_eq!(head(&kept, 0), [tempo(90.0), signature]);
 }

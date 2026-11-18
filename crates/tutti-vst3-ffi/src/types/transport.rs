@@ -222,7 +222,8 @@ mod tests {
     use super::ProcessContextRequirements as need;
     use super::*;
     use tutti_plugin_types::{BeatsPerBar, LoopRegion, NoteValue, TimeSignature};
-    use tutti_types::{Beat, Bpm, LoopRange, SampleRate};
+    use tutti_types::LoopRange;
+    use tutti_units::{Beat, Bpm, SampleRate};
     use vst3::Steinberg::Vst::ProcessContext_::StatesAndFlags_;
 
     /// A TransportInfo with every field set to a recognisable non-zero value,

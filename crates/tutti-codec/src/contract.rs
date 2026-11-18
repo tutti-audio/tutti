@@ -5,7 +5,8 @@ use crate::test_sink::{Flaky, Full};
 use crate::{Format, FormatWriter, Result, Spec};
 use std::io::{BufWriter, Cursor, Seek, Write};
 use tutti_buffers::Interleaved;
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 fn spec(format: Format) -> Spec {
     Spec::of_width(format, ChannelLayout::STEREO, SampleRate::SR_44K1)

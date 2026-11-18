@@ -5,7 +5,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_sampler::Clip;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::{Amplitude, Beat, ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
 

@@ -1,7 +1,7 @@
 //! The pure pieces of the phaser's swept first-order all-pass chain: the centre frequency
 //! for a sweep position and the coefficient that tunes a stage to it.
 
-use tutti_types::{Depth, Hz, SampleRate};
+use tutti_units::{Depth, Hz, SampleRate};
 
 /// The all-pass centre frequency for one LFO value: the sweep range's `min`
 /// at the LFO's trough, its `max` at the peak, scaled toward `min` by `depth`.

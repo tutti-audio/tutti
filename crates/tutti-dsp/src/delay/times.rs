@@ -1,6 +1,6 @@
 //! [`ChannelTimes`]: the delay times of the channels past the first.
 
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use super::routing::MAX_WIDTH;
 

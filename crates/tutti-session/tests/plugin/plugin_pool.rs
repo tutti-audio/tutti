@@ -19,8 +19,9 @@ use tutti_session::{
     OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
     RecoveryPolicy, Resource, RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
 };
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;
 

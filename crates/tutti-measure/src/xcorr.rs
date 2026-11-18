@@ -6,7 +6,7 @@
 //! (phase transform) reshapes the cross-spectrum through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, MonoMut, Sample};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::convert::to_f32;
 use tutti_dsp::Complex32;

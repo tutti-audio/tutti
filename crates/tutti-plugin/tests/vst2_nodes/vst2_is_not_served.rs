@@ -29,7 +29,7 @@ fn a_vst2_path_is_refused_with_a_typed_error_before_a_server_starts() {
             &tutti_plugin::catalog::Loadable::uncatalogued(
                 tutti_plugin::catalog::PluginRef::file(path.clone()).expect("a plugin file"),
             ),
-            tutti_types::SampleRate::SR_48K,
+            tutti_units::SampleRate::SR_48K,
         ) {
             Err(BridgeError::NotOutOfProcess {
                 path: refused,

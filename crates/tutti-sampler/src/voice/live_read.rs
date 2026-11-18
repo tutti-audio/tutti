@@ -56,7 +56,8 @@
 use tutti_buffers::Float;
 use tutti_graph::FadeLaw;
 use tutti_rt::RingFloat;
-use tutti_types::{Amplitude, MAX_CHANNELS, ReadRate, SamplePosition, Samples};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Amplitude, ReadRate, SamplePosition, Samples};
 
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader, straight};
 

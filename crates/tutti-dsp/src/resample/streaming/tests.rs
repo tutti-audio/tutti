@@ -1,6 +1,6 @@
 use super::*;
 use tutti_fixtures::signal::{impulse_at, sine};
-use tutti_types::{Amplitude, Hz, Samples};
+use tutti_units::{Amplitude, Hz, Samples};
 
 /// Push `planes` through a [`StreamingResampler`] in blocks of `block` frames
 /// (`None` is the whole signal at once, the two-pass path), then finish.

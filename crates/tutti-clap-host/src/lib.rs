@@ -85,7 +85,7 @@
 //! )
 //! .expect("equal lengths");
 //!
-//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_units::Bpm::of(120.0)).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 //! processor.process(&mut PluginAudio::F32(buffer), &ClapProcessContext {
 //!     midi: &midi,
@@ -108,7 +108,7 @@
 //! ```rust,no_run
 //! # use tutti_clap_host::{ClapLoaded, LoadOptions, StateContext};
 //! use tutti_plugin_types::{Control, Normalized, StateUse};
-//! use tutti_types::ParamId;
+//! use tutti_units::ParamId;
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");
 //! # let (_collector, work) = tutti_plugin_types::MainWork::new();

@@ -1,5 +1,6 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Feedback, Hz, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Feedback, Hz, SampleRate};
 
 use super::*;
 use crate::{Complex64, allpass_coeff};

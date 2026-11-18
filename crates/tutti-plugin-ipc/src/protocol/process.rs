@@ -76,8 +76,8 @@ impl ProcessAudioData {
 mod tests {
     use super::*;
     use tutti_plugin_types::{TransportChange, WireMidi};
-    use tutti_types::Bpm;
     use tutti_ump::Ump;
+    use tutti_units::Bpm;
 
     fn info() -> TransportInfo {
         TransportInfo::new(SampleRate::SR_48K)
@@ -232,7 +232,7 @@ mod tests {
                 tutti_plugin_types::Seconds(4.5),
             )),
             ..tutti_plugin_types::LoopRegion::new(
-                tutti_types::LoopRange::new(tutti_types::Beat(2.0), tutti_types::Beat(8.0))
+                tutti_types::LoopRange::new(tutti_units::Beat(2.0), tutti_units::Beat(8.0))
                     .expect("a loop"),
             )
         };
@@ -270,7 +270,7 @@ mod tests {
 mod change_tests {
     use super::*;
     use tutti_plugin_types::TransportChange;
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     fn info() -> TransportInfo {
         TransportInfo::new(SampleRate::SR_48K)

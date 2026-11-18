@@ -13,7 +13,8 @@
 //! `a_reused_detector_matches_fresh_ones` pins it.
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
+use tutti_types::Note;
+use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
@@ -23,7 +24,7 @@ use crate::pitch::PitchDetector;
 use crate::sequence::median_of_sorted;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 ranged! {
     /// YIN's absolute threshold on the cumulative mean difference: within

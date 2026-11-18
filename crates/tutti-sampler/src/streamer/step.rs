@@ -193,7 +193,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     use super::super::bell::Bell;
     use super::super::cache::LruCache;
@@ -273,7 +273,7 @@ mod tests {
             // A block in progress across the publish.
             let _held = control.lend();
             ring.publish_map(RingMap::plain(
-                Arrangement::plain(tutti_types::Samples::new(64)),
+                Arrangement::plain(tutti_units::Samples::new(64)),
                 1,
             ));
         }

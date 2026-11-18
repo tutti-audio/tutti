@@ -17,9 +17,8 @@ use tutti_types::MaxBlock;
 
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
-use tutti_types::{
-    Beat, BeatDuration, Bpm, ChannelLayout, Frame, FrameClock, LoopRange, SampleRate, Samples,
-};
+use tutti_types::{ChannelLayout, FrameClock, LoopRange};
+use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples};
 
 use super::memory_source::MemorySource;
 use super::node::VoiceNode;
@@ -504,7 +503,7 @@ fn a_non_finite_gain_renders_silence(host: Host) {
         let w = wave(1, 4 * FPB, tone);
         let mut rig = Rig::new(host, Some(region(LOOP_START_BEATS, LOOP_BEATS)), 1000);
         let play = Playback {
-            gain: tutti_types::Amplitude(gain),
+            gain: tutti_units::Amplitude(gain),
             ..Playback::default()
         };
         rig.place_with(1, &w, 100.0 / FPB as f64, None, play);

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
 use tutti_rt::LockExt;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// An offline fork's wait for the server: the per-block budget, and the
 /// latches the batcher sets when the wait fails (a missed budget, a plugin that

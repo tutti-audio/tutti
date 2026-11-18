@@ -1029,7 +1029,7 @@ mod tests {
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
     use tutti_plugin_types::{MidiEventVec, Normalized, NoteExpressionChanges, ParameterChanges};
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     fn assert_none(r: Reaction) {
         assert!(matches!(r, Reaction::None), "got {r:?}");

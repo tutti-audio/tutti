@@ -60,7 +60,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use tutti_buffers::Float;
-use tutti_types::{SamplePosition, Samples};
+use tutti_units::{SamplePosition, Samples};
 
 /// A loop over whole file frames `[start, end)`, with a crossfade into it: the
 /// one value every tier takes (a memory voice, a disk voice, a stream, a pool
@@ -87,7 +87,7 @@ use tutti_types::{SamplePosition, Samples};
 ///
 /// ```
 /// # use tutti_sampler::Loop;
-/// # use tutti_types::Samples;
+/// # use tutti_units::Samples;
 /// let looped = Loop::new(Samples::new(100)..Samples::new(400))?
 ///     .with_crossfade(Samples::new(32))?;
 /// assert_eq!(looped.len(), Samples::new(300));

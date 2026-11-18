@@ -5,7 +5,7 @@
 use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
 use tutti_session::{Session, ValueErrorKind};
 use tutti_types::MaxBlock;
-use tutti_types::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
+use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
 fn session() -> Session {
     Session::builder()

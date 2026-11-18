@@ -2,7 +2,7 @@ use core::f64::consts::PI;
 
 use super::*;
 use crate::{Complex64, Ring};
-use tutti_types::Q;
+use tutti_units::Q;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

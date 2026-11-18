@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use super::table::HoldKind;
 use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
@@ -808,7 +808,7 @@ mod audio {
         assert_eq!(info.path(), path);
         assert_eq!(info.facts().frames.map(|frames| frames.0), Some(480));
         assert_eq!(info.facts().layout.count(), 2);
-        assert_eq!(info.facts().sample_rate, tutti_types::SampleRate::SR_48K);
+        assert_eq!(info.facts().sample_rate, tutti_units::SampleRate::SR_48K);
     }
 
     #[test]

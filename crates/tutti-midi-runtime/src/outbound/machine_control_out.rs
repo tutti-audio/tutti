@@ -20,7 +20,7 @@
 //! change on frame `N` of a block is a message on frame `N`.
 
 use tutti_midi_protocol::{MmcCommands, MmcPayload, MmcPosition, MtcRate, Recipient};
-use tutti_types::{Frame, SampleRate, Seconds};
+use tutti_units::{Frame, SampleRate, Seconds};
 
 /// Why a look at the transport could not be sent as Machine Control: the
 /// transport moved to a time no time code names (before zero, NaN, or a day
@@ -43,7 +43,7 @@ struct Seen {
 /// ```
 /// use tutti_midi_protocol::{MtcRate, Recipient};
 /// use tutti_midi_runtime::MachineControlSender;
-/// use tutti_types::{Frame, SampleRate, Seconds};
+/// use tutti_units::{Frame, SampleRate, Seconds};
 ///
 /// let mut sender = MachineControlSender::new(Recipient::AllCall, MtcRate::Fps30);
 /// let rate = SampleRate::SR_48K;

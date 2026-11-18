@@ -6,7 +6,7 @@ use super::*;
 use std::sync::atomic::AtomicBool;
 use tutti_buffers::Interleaved;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// A WAV sink `channels` wide at 48 kHz.
 fn sink(path: &std::path::Path, channels: u16, pcm: Pcm) -> FileOut {

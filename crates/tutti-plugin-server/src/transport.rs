@@ -311,7 +311,7 @@ mod audio_frame_tests {
     use super::*;
     use tutti_plugin_ipc::ProcessAudioData;
     use tutti_plugin_types::{ParameterChanges, ParameterQueue, SampleRate};
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     /// **The audio connection accepts the largest request the host may send.**
     /// A block of 65536 frames with 256 queues each at the whole chunk room (the

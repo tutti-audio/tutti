@@ -23,12 +23,13 @@ use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
 use tutti_midi_protocol::{channel_voice, narrow_value};
 use tutti_midi_protocol::{value_to_unit_f32, velocity_to_unit_f32};
-use tutti_types::{Amplitude, Hz, Param, SampleRate, Semitones, Tail};
+use tutti_types::Param;
 use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, RegisteredPerNoteController, Ump, Voice2,
 };
+use tutti_units::{Amplitude, Hz, SampleRate, Semitones, Tail};
 use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 
 /// A polyphonic subtractive synthesizer: a MIDI-driven voice allocator over a
@@ -57,7 +58,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// ```
 /// use std::num::NonZeroUsize;
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{Hz, Resonance, SampleRate, Samples};
+/// use tutti_units::{Hz, Resonance, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 ///
@@ -90,7 +91,7 @@ pub struct PolySynth {
     unison: Option<UnisonEngine>,
     /// Where each channel's pitch stands, as the note logic last said: what
     /// its wheel times its sensitivity comes to.
-    bends: [tutti_types::Semitones; 16],
+    bends: [tutti_units::Semitones; 16],
     /// The per-note sensitivity a reset returns to: the construction value.
     master_volume: Param<Amplitude>,
     /// The last finite master volume the node read: a cell a host wrote a NaN
@@ -466,7 +467,7 @@ impl PolySynth {
     /// Sets `voice`'s pitch to what its factors make of it: the note's own (its
     /// key's, or the one a per-note controller told it), the glide it is on and
     /// its channel's bend.
-    fn sound(voice: &mut SynthVoice, bends: &[tutti_types::Semitones; 16]) {
+    fn sound(voice: &mut SynthVoice, bends: &[tutti_units::Semitones; 16]) {
         let base_freq = voice
             .tuned()
             .unwrap_or_else(|| key_freq(f32::from(voice.note().get()), voice.tune()));

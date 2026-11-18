@@ -1,5 +1,6 @@
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_types::{BusTopology, Feedback, SampleRate, Seconds};
+use tutti_types::BusTopology;
+use tutti_units::{Feedback, SampleRate, Seconds};
 
 use super::*;
 use crate::{ChannelTimes, GAIN_GLIDE, MaxDelay, Routing};

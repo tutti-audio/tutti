@@ -49,7 +49,8 @@
 
 use tutti_graph::{Cx, MAX_TRANSPORT_CHANGES, Offset};
 use tutti_tempo::TempoView;
-use tutti_types::{Beat, LoopRange, Samples, Seconds};
+use tutti_types::LoopRange;
+use tutti_units::{Beat, Samples, Seconds};
 
 use crate::transport_source::{ProjectTime, Snapshot, SteadyTime, slope, transport_info};
 use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};

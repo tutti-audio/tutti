@@ -6,7 +6,8 @@ use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, RingModConfig, RingModNode, TremoloConfig, TremoloNode,
 };
-use tutti_types::{ChannelLayout, SampleRate, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, UnitParam};
 
 /// `node` alone through `BlockRig`: a signal on every channel, 16 warm-up blocks, then 2 000
 /// blocks under `assert_no_alloc`, `between` run before each.

@@ -13,7 +13,7 @@ use tutti_rt::LockExt;
 
 use tutti_graph::{EventInletNode, Losses};
 use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
-use tutti_types::Resyncs;
+use tutti_units::Resyncs;
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;

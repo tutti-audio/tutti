@@ -58,7 +58,8 @@
 use loom::thread;
 use tutti_buffers::Interleaved;
 use tutti_rt::{PosReader, PosRing, PosWriter, RingSample};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 const STRIDE: usize = 2;
 const LAYOUT: ChannelLayout = ChannelLayout::STEREO;

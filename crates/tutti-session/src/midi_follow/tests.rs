@@ -1,7 +1,8 @@
 use super::*;
 use crate::{MidiReport, SessionEvent};
 use tutti_midi_runtime::ClockOffset;
-use tutti_types::{MeterMap, SampleRate, Samples};
+use tutti_types::MeterMap;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::of(48_000.0);
 /// `round(48 000 * 0.005)`: the declick in frames.

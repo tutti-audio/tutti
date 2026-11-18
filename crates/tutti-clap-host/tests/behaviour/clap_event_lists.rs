@@ -8,7 +8,7 @@
 
 use std::ptr;
 use tutti_graph::UmpAt;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::support::midi_events;
 use clap_sys::events::{
@@ -30,8 +30,8 @@ use tutti_graph::Offset;
 use tutti_plugin_types::{
     ParameterChanges, ParameterQueue, RtMidiEvents, WireMidi, sysex_assembler,
 };
-use tutti_types::Samples;
 use tutti_ump::{SysexStep, Ump};
+use tutti_units::Samples;
 
 /// The packet of `words`, zero-padded to four, `k` frames into a 100-frame block.
 fn packet(k: usize, words: &[u32]) -> UmpAt {

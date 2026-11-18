@@ -27,8 +27,8 @@ use tutti_au_ffi::{AuEditor, Element, HostCallbacks, Scope, TransportState, Unit
 use tutti_plugin_types::{
     ChannelLayout, MainThreadMarker, MainWorkHandle, PluginDescriptor, RequestWord, TransportInfo,
 };
-use tutti_types::Seconds;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::Seconds;
+use tutti_units::{SampleRate, Samples};
 
 use crate::bus::{self, AuChannelConfig, BusDirection};
 use crate::channel_layout::{self, AuLayoutTag};

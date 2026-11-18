@@ -22,8 +22,8 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
 use tutti_midi_protocol::widen_velocity;
-use tutti_types::{ParamId, SampleRate, Samples};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::{ParamId, SampleRate, Samples};
 
 static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
@@ -71,7 +71,8 @@ fn process_steady_state_does_not_allocate() {
 #[test]
 fn process_with_a_meter_does_not_allocate() {
     use tutti_transport::ProjectMeter;
-    use tutti_types::{Beat, BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
+    use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
+    use tutti_units::Beat;
 
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(

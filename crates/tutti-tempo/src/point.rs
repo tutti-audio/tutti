@@ -1,4 +1,4 @@
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 /// How the tempo gets from a point to the next one.
 ///

@@ -15,13 +15,13 @@
 use core::ops::Range;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Amplitude, Db, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 use core::marker::PhantomData;
 
 use crate::convert::for_blocks;
 use crate::{Measure, Meter, Result};
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 ranged! {
     /// A level in dBFS that is a finite number of decibels: a silence gate's

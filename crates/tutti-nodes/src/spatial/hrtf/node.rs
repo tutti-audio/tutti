@@ -6,11 +6,10 @@
 use tutti_buffers::{MonoMut, StereoPlanes};
 use tutti_dsp::{HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Latency;
-use tutti_types::UnitParam;
-use tutti_types::{
-    Azimuth, BusTopology, Direction, Elevation, Mix, Param, SampleRate, Samples, Tail,
-};
+use tutti_types::{BusTopology, Param};
+use tutti_units::Latency;
+use tutti_units::UnitParam;
+use tutti_units::{Azimuth, Direction, Elevation, Mix, SampleRate, Samples, Tail};
 
 use crate::ramp::LastGood;
 use crate::spatial::target::AngleSmoother;
@@ -31,7 +30,7 @@ tutti_graph::declare_params!([] HrtfBinauralNode, n {
 /// 1.0, the default, is full HRTF, 0.0 the dry mono).
 /// It is a graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it
 /// hands back its [`ParamSet`] ([`UnitParam::Azimuth`],
-/// [`Elevation`](tutti_types::UnitParam::Elevation) and [`Wet`](tutti_types::UnitParam::Wet)), which
+/// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
 /// move the source lock-free while it renders, and a graph's control lanes
 /// may drive all three .
 /// Position changes are de-zippered over 50 ms, and each step of the glide
@@ -57,7 +56,7 @@ pub struct HrtfBinauralNode {
     elevation: Param<Elevation>,
     /// The blend between the HRTF-rendered signal and the dry mono centre,
     /// `0..1`. Not the VBAP panner's width, a mid/side
-    /// [`StereoWidth`](tutti_types::StereoWidth).
+    /// [`StereoWidth`](tutti_units::StereoWidth).
     blend: Param<Mix>,
     sample_rate: SampleRate,
     /// The last finite azimuth and elevation the cells held. The de-zipper

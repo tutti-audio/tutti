@@ -44,7 +44,7 @@ fn a_track_with_no_sample_rate_is_refused() {
     params.with_sample_rate(48_000);
     assert_eq!(
         sample_rate_of(&params).expect("stated"),
-        tutti_types::SampleRate::SR_48K
+        tutti_units::SampleRate::SR_48K
     );
 }
 

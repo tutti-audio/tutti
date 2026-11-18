@@ -28,9 +28,10 @@
 
 use tutti_graph::{Continuity, Cx, Offset, TransportPosition};
 use tutti_tempo::TempoView;
-use tutti_types::Samples;
-use tutti_types::{Beat, Bpm, LoopRange, SampleRate, SegmentOrigin, first_frame_at_or_after};
+use tutti_types::{LoopRange, SegmentOrigin, first_frame_at_or_after};
 use tutti_types::{Meter, MeterMap};
+use tutti_units::Samples;
+use tutti_units::{Beat, Bpm, SampleRate};
 
 use std::sync::Arc;
 
@@ -58,7 +59,7 @@ pub struct Snapshot {
     /// The loop's bounds in seconds from song start, read from the tempo map
     /// ([`settle`](Snapshot::settle)); `None` until a map has been read or
     /// when not looping.
-    pub(crate) loop_seconds: Option<(tutti_types::Seconds, tutti_types::Seconds)>,
+    pub(crate) loop_seconds: Option<(tutti_units::Seconds, tutti_units::Seconds)>,
     /// The free-running sample counter: frames rendered, not musical time, so
     /// it keeps counting while the transport is stopped and never jumps on a
     /// seek or a wrap. An `i64` because that is what every ABI carries.
@@ -376,14 +377,14 @@ pub(crate) fn slope(
     }
     let t0 = view.seconds_at(beat).get();
     if let Some(end) = loop_end {
-        let last = tutti_types::Seconds(t0 + (frames - 1) as f64 / rate);
+        let last = tutti_units::Seconds(t0 + (frames - 1) as f64 / rate);
         if view.beat_at_seconds(last).get() > end.get() {
             return 0.0;
         }
     }
-    let t1 = tutti_types::Seconds(t0 + frames as f64 / rate);
+    let t1 = tutti_units::Seconds(t0 + frames as f64 / rate);
     // `.get()`: the slope is a raw `f64` BPM per sample, for the C ABI.
-    view.tempo_slope(tutti_types::Seconds(t0), t1) / rate
+    view.tempo_slope(tutti_units::Seconds(t0), t1) / rate
 }
 
 impl Snapshot {
@@ -506,7 +507,7 @@ pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
     // free-running counter; project time in samples is `ProjectTime`'s,
     // rounded (an `as` cast saturates, and an `i64` of frames is three
     // million years).
-    let seconds = tutti_types::Seconds(
+    let seconds = tutti_units::Seconds(
         s.project_frames
             .map_or(0.0, |frames| frames / s.sample_rate.get()),
     );
@@ -656,9 +657,11 @@ mod tests {
     use std::time::Instant;
     use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
     use tutti_tempo::TempoMap;
-    use tutti_types::Latency;
-    use tutti_types::{BarNumber, BeatsPerBar, MeterChange, NoteValue, TimeSignature};
-    use tutti_types::{Frame, FrameClock, Samples};
+    use tutti_types::FrameClock;
+    use tutti_types::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
+    use tutti_units::BarNumber;
+    use tutti_units::Latency;
+    use tutti_units::{Frame, Samples};
 
     const SR: SampleRate = SampleRate::SR_48K;
 

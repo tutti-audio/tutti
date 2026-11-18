@@ -61,7 +61,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock_recover()
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// What a notify records, as scalars an audio-thread callback may safely touch.

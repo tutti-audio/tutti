@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{Node, Offset, Prepare, TransportChanges};
-use tutti_types::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
 use crate::testing::{MockTransport, block};
@@ -1089,28 +1089,28 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let (mut stream_a, mut a) = open(&mut streamer);
     let (_stream_b, mut b) = open(&mut streamer);
 
-    a.set_gain(tutti_types::Amplitude::new(0.5));
+    a.set_gain(tutti_units::Amplitude::new(0.5));
     a.set_speed(PlaybackRate::new(2.0));
-    a.set_stretch_rate(tutti_types::ReadRate::new(0.5));
+    a.set_stretch_rate(tutti_units::ReadRate::new(0.5));
     stream_a
         .set_direction(crate::Direction::Reverse)
         .expect("the streamer is alive");
     assert!(streamer.step_until_settled(1_000) < 1_000);
 
     // What was written, on the voice it was written to.
-    assert_eq!(a.gain(), tutti_types::Amplitude::new(0.5));
+    assert_eq!(a.gain(), tutti_units::Amplitude::new(0.5));
     assert_eq!(a.shared_state.speed(), PlaybackRate::new(2.0));
     assert_eq!(
         a.shared_state.stretch_rate(),
-        tutti_types::ReadRate::new(0.5)
+        tutti_units::ReadRate::new(0.5)
     );
     let direction = |voice: &mut DiskVoice| voice.inner.read.lent_control().map(|c| c.direction);
     assert_eq!(direction(&mut a), Some(crate::Direction::Reverse));
 
     // And nothing of it on the other.
-    assert_eq!(b.gain(), tutti_types::Amplitude::new(1.0));
+    assert_eq!(b.gain(), tutti_units::Amplitude::new(1.0));
     assert_eq!(b.shared_state.speed(), PlaybackRate::UNITY);
-    assert_eq!(b.shared_state.stretch_rate(), tutti_types::ReadRate::UNITY);
+    assert_eq!(b.shared_state.stretch_rate(), tutti_units::ReadRate::UNITY);
     assert_eq!(direction(&mut b), Some(crate::Direction::Forward));
     assert!(
         !Arc::ptr_eq(&a.shared_state, &b.shared_state),

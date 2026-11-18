@@ -45,7 +45,7 @@
 use crate::latency::LatencyGraph;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use tutti_types::{SampleRate, Samples, Seconds, Tail};
+use tutti_units::{SampleRate, Samples, Seconds, Tail};
 
 /// The upper bound on any single node's reported tail: sixty seconds.
 ///
@@ -66,7 +66,7 @@ use tutti_types::{SampleRate, Samples, Seconds, Tail};
 ///
 /// Like its sibling this is a duration, so the bound follows the graph's
 /// rate: [`graph_tail`] takes the rate and converts it with
-/// [`Seconds::to_samples_ceil`](tutti_types::Seconds::to_samples_ceil)
+/// [`Seconds::to_samples_ceil`](tutti_units::Seconds::to_samples_ceil)
 /// (2 880 000 frames at 48 kHz, 5 760 000 at 96 kHz), and
 /// [`Editor::set_tail`](crate::Editor::set_tail) converts it at the editor's
 /// prepared rate. A plugin host converts it at the plugin's own rate.
@@ -187,7 +187,8 @@ impl GraphTail {
     ///
     /// ```
     /// use tutti_graph::{NodeSpec, OutPort, Source};
-    /// use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
+    /// use tutti_units::{SampleRate, Samples, Tail};
+    /// use tutti_types::ChannelLayout;
     /// use tutti_graph::{graph_tail, NodeKey, Topology};
     ///
     /// let verb = NodeKey(1);

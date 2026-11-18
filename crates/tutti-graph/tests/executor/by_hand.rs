@@ -11,8 +11,9 @@ use tutti_graph::{
     Cx, Env, Event, EventKind, Io, Node, Offset, Prepare, Shape, Status, TransportChanges,
     TransportPosition,
 };
-use tutti_types::{Beat, Bpm, ChannelLayout, Frame, SampleRate, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// A MIDI 2.0 Note On, key 60, velocity 0xC800, group 0, channel 0.

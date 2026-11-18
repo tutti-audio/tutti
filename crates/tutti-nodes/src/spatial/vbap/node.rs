@@ -2,11 +2,9 @@ use super::error::Result;
 use tutti_buffers::{Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::UnitParam;
-use tutti_types::{
-    Azimuth, Bed, ChannelLayout, ChannelTopology, Elevation, Param, SampleRate, Seconds, Spread,
-    StereoWidth, Tail,
-};
+use tutti_types::{Bed, ChannelLayout, ChannelTopology, Param};
+use tutti_units::UnitParam;
+use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 
 use crate::buses::main_bus;
 use crate::ramp::LastGood;
@@ -58,8 +56,8 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// [`surround_5_1`](Self::surround_5_1), [`surround_7_1`](Self::surround_7_1),
 /// [`atmos_7_1_4`](Self::atmos_7_1_4)), which is `new` over one bed. It is a
 /// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
-/// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_types::UnitParam::Elevation),
-/// [`Spread`](tutti_types::UnitParam::Spread) and [`StereoWidth`](tutti_types::UnitParam::StereoWidth)),
+/// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
+/// [`Spread`](tutti_units::UnitParam::Spread) and [`StereoWidth`](tutti_units::UnitParam::StereoWidth)),
 /// which move the source lock-free while it renders, and a graph's control
 /// lanes may drive all four. A mono source presents the same sample on both
 /// inputs. Rendering allocates nothing and reports no latency.
@@ -69,7 +67,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// ```
 /// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{SampleRate, Samples, UnitParam};
+/// use tutti_units::{SampleRate, Samples, UnitParam};
 /// use tutti_graph::{ParamNode, Prepare, Solo};
 /// use tutti_nodes::VbapPannerNode;
 ///

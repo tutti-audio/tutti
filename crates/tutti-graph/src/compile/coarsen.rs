@@ -29,7 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::cost::{GRAIN, TASK_DISPATCH, Work};
 use crate::plan::{Csr, Span};

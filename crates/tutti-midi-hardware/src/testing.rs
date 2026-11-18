@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{EventInletNode, NodeKey};
 use tutti_midi_runtime::InputInlets;
-use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{Frame, SampleRate};
 
 use crate::HardwareMidiInputs;
 

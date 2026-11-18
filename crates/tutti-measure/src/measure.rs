@@ -9,7 +9,7 @@ use crate::Result;
 ///
 /// The config describes the analysis and nothing about the audio; the
 /// [`Context`](Self::Context) is what binding it to one stream takes (a
-/// [`SampleRate`](tutti_types::SampleRate), a
+/// [`SampleRate`](tutti_units::SampleRate), a
 /// [`ChannelLayout`](tutti_types::ChannelLayout), a pair of them, or `()`), and
 /// the call checks what depends on the config and the context together.
 ///

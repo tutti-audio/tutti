@@ -10,7 +10,8 @@
 //! `|1 - e^(-j omega)| / |1 - R e^(-j omega)|`, which is `1/sqrt(2)` close to the corner.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Hz, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::COEFF_INTERVAL;
 use crate::finite::finite_or;

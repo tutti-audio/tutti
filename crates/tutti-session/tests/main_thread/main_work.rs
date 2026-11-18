@@ -14,7 +14,8 @@ use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
 use tutti_session::{DetachedSession, Session};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

@@ -3,7 +3,7 @@
 
 use core::f64::consts::TAU;
 
-use tutti_types::{Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{Db, Hz, Q, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain, gain_root};

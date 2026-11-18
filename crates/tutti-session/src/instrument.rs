@@ -10,12 +10,12 @@
 //!
 //! # What a frame is
 //!
-//! A [`Frame`](tutti_types::Frame) stamp is a position on the engine's frame clock, which counts frames
+//! A [`Frame`](tutti_units::Frame) stamp is a position on the engine's frame clock, which counts frames
 //! **at the current rate** and is moved to the same wall-clock time when the
 //! graph is re-prepared at another rate. It is not the number of frames
 //! rendered: a sender that counts those lands early or late after a rate change
 //! by the difference. Read the clock with [`EventInletWriter::clock`](tutti_graph::EventInletWriter::clock), a
-//! [`Moment`](tutti_types::Moment): a frame and the rate it was counted at. A message sent for a
+//! [`Moment`](tutti_units::Moment): a frame and the rate it was counted at. A message sent for a
 //! moment ([`Stamp::Moment`](tutti_graph::Stamp::Moment)) lands on that wall-clock instant whatever the
 //! rate has become since, including between the read and the send; a bare
 //! frame is counted at the rate the queue has when it takes the message.
@@ -38,8 +38,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{EventInletNode, Instrument, ParamSet};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::BusStripNode;
-use tutti_types::{Amplitude, UnitParam};
 use tutti_ump::MidiGroup;
+use tutti_units::{Amplitude, UnitParam};
 
 use crate::{Feeder, Graph, Key, OutPort, RemoveError, Root, Session, SessionNode};
 

@@ -59,8 +59,9 @@ use tutti_rt::{
     Counter, CounterWriter, Gauge, GaugeWriter, Publisher, PushError, Reader, Tally, counter,
     gauge, tally,
 };
-use tutti_types::{Moment, Param64, Resyncs, Seconds};
+use tutti_types::Param64;
 use tutti_ump::Ump;
+use tutti_units::{Moment, Resyncs, Seconds};
 
 use crate::clock_map::{ClockMap, ClockReading, Observed};
 

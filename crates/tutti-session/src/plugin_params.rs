@@ -19,7 +19,7 @@
 //! ```
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
-//! # use tutti_types::ParamId;
+//! # use tutti_units::ParamId;
 //! # fn rescan(session: &mut Session, node: NodeKey) {
 //! let id = ParamId::new(0);
 //! let before = session.plugin_view(node).unwrap().params().get(id).unwrap().normalized();
@@ -35,7 +35,7 @@
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
 //! # use tutti_plugin_types::{Normalized};
-//! # use tutti_types::ParamId;
+//! # use tutti_units::ParamId;
 //! # fn rescan(session: &mut Session, node: NodeKey) {
 //! let level = session.plugin_view(node).unwrap().params().get(ParamId::new(0)).unwrap();
 //! let _events = session.update();
@@ -76,7 +76,7 @@ use tutti_plugin_types::{
     AutomationMode, AutomationModeError, Normalized, ParamEdit, ParamUnit, ParameterInfo, PlainUnit,
 };
 use tutti_rt::LockExt;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 

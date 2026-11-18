@@ -13,7 +13,7 @@
 //! another render.
 
 use std::path::Path;
-use tutti_types::{Amplitude, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).

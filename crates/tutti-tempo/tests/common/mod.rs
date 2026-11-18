@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use tutti_tempo::{TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, SampleRate};
+use tutti_units::{Beat, Bpm, SampleRate};
 
 pub const R: SampleRate = SampleRate::SR_48K;
 

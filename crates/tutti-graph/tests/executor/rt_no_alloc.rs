@@ -32,8 +32,9 @@ use tutti_graph::{
     ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::{At, Beat, ChannelLayout, Frame, Latency, Samples, Tail};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
+use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
 /// Run `exec`'s blocks on a [`common::TestPool`] of `workers` participants
 /// whose every participant runs its share inside `assert_no_alloc` — the
@@ -206,7 +207,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     for k in 0..200u64 {
         let kind = if k % 3 == 0 {
             EventKind::Ramp(ParamRamp::foreign(
-                tutti_types::ParamId::new(1),
+                tutti_units::ParamId::new(1),
                 0.5,
                 Samples(16),
             ))
@@ -802,7 +803,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_types::UnitParam::Cutoff, tutti_types::UnitParam::Q])
+            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -841,8 +842,8 @@ impl Node for RampEvery {
                     0 => tutti_graph::Event::ramp(
                         o,
                         ParamRamp::new(
-                            tutti_types::ParamKey::<tutti_types::Hz>::CUTOFF,
-                            tutti_types::Hz((f % 5) as f32),
+                            tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
+                            tutti_units::Hz((f % 5) as f32),
                             Samples(20),
                         ),
                     ),
@@ -855,16 +856,16 @@ impl Node for RampEvery {
                             Law::Hold,
                         ][(f / 111) as usize % 4];
                         let seg = ParamSegment::new(
-                            tutti_types::ParamKey::<tutti_types::Hz>::CUTOFF,
-                            tutti_types::Hz((f % 3) as f32),
-                            tutti_types::Hz((f % 7) as f32),
+                            tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
+                            tutti_units::Hz((f % 3) as f32),
+                            tutti_units::Hz((f % 7) as f32),
                             Samples(50),
                             shape,
                         );
                         let seg = if k == 2 {
                             seg.resumed(
-                                tutti_types::SamplePosition(3.5),
-                                tutti_types::SamplePosition(41.25),
+                                tutti_units::SamplePosition(3.5),
+                                tutti_units::SamplePosition(41.25),
                             )
                         } else {
                             seg
@@ -911,11 +912,11 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     }
     let cut = ParamIn {
         node: NodeKey(1),
-        param: tutti_types::UnitParam::Cutoff.into(),
+        param: tutti_units::UnitParam::Cutoff.into(),
     };
     let q = ParamIn {
         node: NodeKey(1),
-        param: tutti_types::UnitParam::Q.into(),
+        param: tutti_units::UnitParam::Q.into(),
     };
     // The ramps are the early path: the sink sits behind the lag's PDC, so
     // the plan delays its event source.
@@ -1003,7 +1004,7 @@ struct AzimuthSink;
 impl Node for AzimuthSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_types::UnitParam::Azimuth])
+            .with_params(&[tutti_units::UnitParam::Azimuth])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1043,7 +1044,7 @@ impl Node for SeamEvery {
                 let shape = [Law::Linear, Law::PowerIn(Exponent::of(2.0)), Law::Hold]
                     [(f / 87) as usize % 3];
                 let seg = ParamSegment::unit(
-                    tutti_types::UnitParam::Azimuth,
+                    tutti_units::UnitParam::Azimuth,
                     from,
                     to,
                     Samples(40),
@@ -1063,7 +1064,7 @@ impl Node for SeamEvery {
 #[test]
 fn an_azimuth_param_port_is_allocation_free() {
     use tutti_graph::{ParamIn, ParamRange};
-    use tutti_types::{ArcDegrees, Azimuth};
+    use tutti_units::{ArcDegrees, Azimuth};
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
@@ -1075,7 +1076,7 @@ fn an_azimuth_param_port_is_allocation_free() {
         })]);
     let azimuth = ParamIn {
         node: NodeKey(1),
-        param: tutti_types::UnitParam::Azimuth.into(),
+        param: tutti_units::UnitParam::Azimuth.into(),
     };
     ed.spec_mut().connect_param(
         azimuth,
@@ -1118,7 +1119,7 @@ fn an_azimuth_param_port_is_allocation_free() {
 fn direct_driving_events_does_not_allocate() {
     use tutti_graph::contract::{Direct, Emitter, Pulse};
     use tutti_graph::{Event, Offset};
-    use tutti_types::{Bpm, SampleRate};
+    use tutti_units::{Bpm, SampleRate};
 
     let rate = SampleRate::SR_48K;
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
@@ -1316,7 +1317,7 @@ fn parallel_fan_in_is_allocation_free() {
 fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
     use common::Pulse;
     use tutti_graph::{EdgeGain, EdgeId, Sink};
-    use tutti_types::Amplitude;
+    use tutti_units::Amplitude;
     for n in [64u64, 100] {
         for at_port in [false, true] {
             let (mut ed, mut exec) = Editor::new(prepare(256));
@@ -1707,7 +1708,7 @@ fn parallel_own_bypass_toggling_is_allocation_free() {
 /// fade, a warm-up and a parked node. Blocks of four lengths.
 fn moving_mixes_are_allocation_free_on(workers: usize) {
     use tutti_graph::NodeMode;
-    use tutti_types::Mix;
+    use tutti_units::Mix;
     let (mut ed, mut exec) = mode_graph(workers);
     let input: Vec<f32> = (0..256).map(|i| ((i % 19) as f32 - 9.0) * 0.1).collect();
     let mut out = vec![0.0f32; 256];
@@ -1762,7 +1763,7 @@ fn parallel_moving_mixes_are_allocation_free() {
 /// disconnected halfway, its fade running out). Blocks of four lengths.
 fn driven_mixes_are_allocation_free_on(workers: usize) {
     use tutti_graph::{NodeMix, NodeMode, ParamIn, ParamRange};
-    use tutti_types::Mix;
+    use tutti_units::Mix;
     let (mut ed, mut exec) = mode_graph(workers);
     for (i, latency) in [0usize, 0, 40, 150].into_iter().enumerate() {
         ed.insert(
@@ -1881,7 +1882,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
     ];
     for k in 1..=8u64 {
         ed.spec_mut()
-            .set_edge_gain(edge(k), EdgeGain::new(tutti_types::Amplitude::new(0.5)));
+            .set_edge_gain(edge(k), EdgeGain::new(tutti_units::Amplitude::new(0.5)));
     }
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -1902,7 +1903,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         if block % 3 == 0 {
             for k in 1..=8u64 {
                 let w = 0.25 * ((block + k as usize) % 5) as f32;
-                ed.set_edge_gain(edge(k), tutti_types::Amplitude::new(w))
+                ed.set_edge_gain(edge(k), tutti_units::Amplitude::new(w))
                     .expect("edge");
             }
         }
@@ -2048,7 +2049,7 @@ fn parallel_swap_is_allocation_free() {
 #[test]
 fn edge_fades_are_allocation_free() {
     use tutti_graph::{EdgeFade, EdgeGain, EdgeId, Sink};
-    use tutti_types::Amplitude;
+    use tutti_units::Amplitude;
     const BLOCK: usize = 64;
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     for n in 1..=2u64 {
@@ -2269,7 +2270,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, Sink, TapAlign,
         TapId,
     };
-    use tutti_types::{Amplitude, MaxBlock, SampleRate};
+    use tutti_types::MaxBlock;
+    use tutti_units::{Amplitude, SampleRate};
 
     let (mut ed, mut exec) = Editor::new(prepare(64));
     use_pool(&mut exec, workers);

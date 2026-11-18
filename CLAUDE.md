@@ -188,10 +188,10 @@ touched.
 
 ### Unit types
 
-- Use a `tutti_types` unit, never a bare float, for any quantity one covers: fields,
+- Use a `tutti_units` unit, never a bare float, for any quantity one covers: fields,
   signatures, `Param<U>`, returns.
-- A unit's operators are its whole algebra. Read the omission ledgers in `value/units/`'s
-  tests before adding one, and ship a replacement with any omission.
+- A unit's operators are its whole algebra. Read the omission ledgers in `tutti-units`'
+  `units/` tests before adding one, and ship a replacement with any omission.
 - A number becomes a unit with `new` and leaves with `get`; there is no `From` between a
   unit and its raw. Convert between units with the named converters.
 - Measurements are not controls: `Confidence`, `Correlation` and `StereoBalance` are readings.
@@ -204,7 +204,7 @@ touched.
   agreeing with `new`, serde through `try_from`, and named `clamped`/`masked` only where a
   hot path or the wire needs them. No public field, no infallible `From<Raw>`. Test it with
   `tutti_fixtures::check_range_contract`.
-- Write a new range-checked type with `tutti_types::ranged!`, never by hand or with a
+- Write a new range-checked type with `tutti_units::ranged!`, never by hand or with a
   crate-local macro; a hand-written one moves to it when its file is touched.
 - Make a wrong value unwritable before adding a runtime check for it.
 
@@ -279,21 +279,22 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 **Layering.** Normal and build dependencies point strictly down this list
 (dev-dependencies may go anywhere); `cargo xtask check-layout` holds it:
 
-0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-ump`, `tutti-types`,
+0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-ump`, `tutti-units`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
-2. `tutti-rt`
-3. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
+1. `tutti-types`
+2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
+3. `tutti-rt`
+4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
-4. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
-5. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
+5. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
+6. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
-6. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
+7. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
    `tutti-midi-hardware`, `tutti-clap-host`, `tutti-vst3-host`, `tutti-au-host`,
    `tutti-vst2-host`, `tutti-plugin-host`
-7. `tutti-plugin`, `tutti-plugin-probe`
-8. `tutti-plugin-server`, `tutti-session`
-9. `tutti`
+8. `tutti-plugin`, `tutti-plugin-probe`
+9. `tutti-plugin-server`, `tutti-session`
+10. `tutti`
 
 - Nothing under `crates/` has a normal or build dependency on `testing/`.
 - Only `tutti` depends on `tutti-session`, and nothing depends on `tutti`.

@@ -20,7 +20,8 @@ use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionNode, ShapeKind};
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
 use tutti_types::AtomicF32;
-use tutti_types::{ChannelLayout, Depth, Drive, Seconds, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Depth, Drive, Seconds, UnitParam};
 
 use common::probe::ProbeUnit;
 

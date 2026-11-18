@@ -13,7 +13,7 @@ use tutti_graph::{Editor, OutPort, Prepare, Source};
 use tutti_nodes::testing::Const;
 use tutti_transport::Transport;
 use tutti_types::MaxBlock;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;
 

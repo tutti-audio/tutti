@@ -31,7 +31,7 @@
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Gain, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
 use crate::delay::{DelayRing, ring_seconds, trips};

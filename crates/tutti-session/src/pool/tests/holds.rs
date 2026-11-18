@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use super::{Spawned, events, state};
 use crate::pool::table::{Hold, HoldKind};

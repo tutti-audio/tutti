@@ -18,7 +18,7 @@ use crate::clap_probe::Rig;
 use crate::param_probe::{knobs, load_param_probe};
 use tutti_fixtures::machine_lock;
 use tutti_graph::{Prepare, TransportChanges, TransportPosition};
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 /// The graph's `MaxBlock`.
@@ -45,7 +45,7 @@ fn two_hundred_moving_parameters_do_not_allocate_on_the_audio_thread() {
         .with_quantum(MaxBlock::of(Samples(QUANTUM)));
     let mut rig = Rig::prepared_with(
         client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         prepare,
         lanes,

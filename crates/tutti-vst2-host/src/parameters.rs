@@ -17,7 +17,7 @@ use tutti_plugin_types::{
     ParameterInfo as SharedParameterInfo,
 };
 use tutti_rt::Tally;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::loaded::Vst2Loaded;
 use crate::param_properties::{IntegerRange, IntegerSteps};

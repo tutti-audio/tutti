@@ -109,7 +109,7 @@ use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
-use tutti_types::{Amplitude, At, Frame, Latency, Mix, Samples};
+use tutti_units::{Amplitude, At, Frame, Latency, Mix, Samples};
 
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
@@ -124,12 +124,12 @@ use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
 use crate::time::Offset;
-use tutti_types::PlayReading;
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump, Voice1,
     Voice2,
 };
+use tutti_units::PlayReading;
 
 /// One param port's state, as the reference keeps it.
 #[derive(Default)]
@@ -1857,7 +1857,7 @@ impl<F: Float> Reference<F> {
 
 /// What one param port (or edge gain lane) is given for a block.
 struct RefPortIn<'a> {
-    param: tutti_types::UnitAddr,
+    param: tutti_units::UnitAddr,
     /// The base at the end of the block.
     b1: f32,
     range: ParamRange,
@@ -1934,7 +1934,7 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
             continue;
         }
         let now = start + i as u64;
-        let want = tutti_types::ParamAddr::unit(param);
+        let want = tutti_units::ParamAddr::unit(param);
         while let Some(e) = evs.next_if(|e| e.offset.index() <= i) {
             match e.kind {
                 EventKind::Ramp(r) if r.addr() == want => {

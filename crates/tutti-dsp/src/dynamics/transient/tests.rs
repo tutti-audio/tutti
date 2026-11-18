@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
 use crate::testing::noise;

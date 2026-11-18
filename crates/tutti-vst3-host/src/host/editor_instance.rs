@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     InProcess, KeyEvent, KeyUse, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit,
     PluginError, PluginResult, WindowHandle,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::loaded::Vst3Loaded;
 

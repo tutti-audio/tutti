@@ -4,7 +4,8 @@
 use tutti_buffers::{Interleaved, Sink, SinkFailed, Source};
 use tutti_codec::FileIn;
 use tutti_session::{PumpLoop, PumpPass};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 struct Discard(ChannelLayout);
 

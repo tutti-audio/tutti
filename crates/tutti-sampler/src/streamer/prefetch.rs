@@ -50,7 +50,8 @@ use std::sync::Arc;
 
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
-use tutti_types::{ChannelLayout, ChannelTopology, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::Samples;
 
 #[cfg(codec)]
 use tutti_codec::FileIn;

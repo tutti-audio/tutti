@@ -92,7 +92,7 @@ impl OutputStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Amplitude;
+    use tutti_units::Amplitude;
 
     fn targets(first: f32) -> StageTargets {
         let mut t = StageTargets::UNITY;

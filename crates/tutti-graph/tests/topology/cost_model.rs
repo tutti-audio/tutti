@@ -12,7 +12,8 @@ use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Beat, Bpm, ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, Samples};
 
 const MAX_BLOCK: usize = 256;
 

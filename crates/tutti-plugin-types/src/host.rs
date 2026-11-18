@@ -40,7 +40,7 @@ use crate::{
     StateUse, TimerId, TrackInfo, Wakeups,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so

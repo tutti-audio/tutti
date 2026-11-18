@@ -2,7 +2,7 @@
 //! share: its coefficients, its response and its poles.
 
 use tutti_buffers::{Float, Mono, MonoMut};
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds};
 
 use crate::{Complex64, Ring};
 

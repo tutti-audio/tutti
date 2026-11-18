@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_rt::LockExt;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
@@ -35,7 +35,8 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// };
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_transport::Transport;
-/// use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
+/// use tutti_types::{ChannelLayout, MaxBlock};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let rate = SampleRate::SR_48K;

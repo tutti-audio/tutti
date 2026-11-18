@@ -8,9 +8,10 @@ use tutti_dsp::{
     MAX_SPLITS, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, Param, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock, Param};
+use tutti_units::{Hz, SampleRate, Tail};
 #[cfg(test)]
-use tutti_types::{UnitAddr, UnitParam};
+use tutti_units::{UnitAddr, UnitParam};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 use crate::ramp::LastGood;
@@ -265,7 +266,7 @@ mod tests {
     use crate::test_support::{amplitude_at, sine};
     use crate::test_support::{prepared, render_chunked};
     use tutti_graph::{Cost, Node, ParamNode};
-    use tutti_types::Tail;
+    use tutti_units::Tail;
 
     const RATE: f64 = 48_000.0;
     /// A whole number of periods of every tone on the 5 Hz grid.
@@ -293,7 +294,7 @@ mod tests {
             (shape.audio_in().count(), shape.audio_out().count()),
             (2, 4)
         );
-        assert_eq!(shape.latency, tutti_types::Latency::default());
+        assert_eq!(shape.latency, tutti_units::Latency::default());
         assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(shape.cost, Cost::Moderate);
         let left = sine(100.0, RATE, SETTLE + WINDOW);

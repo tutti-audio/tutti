@@ -8,8 +8,9 @@ use tutti_graph::{
 };
 use tutti_graph::{NodeKey, TapAlign, TapId};
 use tutti_graph::{OutPort, Source as Origin};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// A stereo source that plays `frames` in order, then silence: the graph the
 /// tap copies out of.

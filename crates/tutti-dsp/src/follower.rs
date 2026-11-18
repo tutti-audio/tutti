@@ -1,6 +1,6 @@
 //! [`Follower`]: a quantity that grows toward a target at one rate and falls back at another.
 
-use tutti_types::{Ballistics, SampleRate, Unit};
+use tutti_units::{Ballistics, SampleRate, Unit};
 
 use crate::smoother::Smoother;
 

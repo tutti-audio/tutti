@@ -23,7 +23,7 @@
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 /// Disk read throughput, the sole input varifill takes from measurement rather
 /// than from the ring's own fill level.

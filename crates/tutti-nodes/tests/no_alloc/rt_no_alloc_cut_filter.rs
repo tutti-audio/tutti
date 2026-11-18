@@ -3,7 +3,8 @@
 
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{ButterworthOrder, CutAlignment, CutFilterConfig, CutFilterNode, CutResponse};
-use tutti_types::{ChannelLayout, SampleRate, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the cutoff moved before each.
 #[test]

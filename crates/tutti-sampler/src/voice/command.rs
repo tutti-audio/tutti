@@ -24,10 +24,8 @@ use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
 use tutti_rt::RingFloat;
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
-use tutti_types::{
-    Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
-    StretchFactor,
-};
+use tutti_types::{AtomicSampleRate, ChannelLayout, Param};
+use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor};
 
 /// A node's sample rate, shared with its handle: the node stores it when it
 /// is prepared (control thread), the handle reads it to build a stretch
@@ -155,7 +153,7 @@ pub(crate) enum VoiceCommand<F: RingFloat = f32> {
     UpdateGain {
         /// The slot to set.
         id: SlotId,
-        /// Linear [`Amplitude`], not [`Db`](tutti_types::Db) — the conversion is
+        /// Linear [`Amplitude`], not [`Db`](tutti_units::Db) — the conversion is
         /// the host's.
         gain: Amplitude,
     },
@@ -391,7 +389,7 @@ impl SendError {
 /// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource};
 /// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_mono(tutti_types::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
+/// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
 /// # let voice = Voice {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),
@@ -407,13 +405,13 @@ impl SendError {
 /// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
 /// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_mono(tutti_types::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
+/// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
 /// # let voice = Voice {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),
 /// # };
 /// let (_node, handle) = VoiceNode::new(voice).with_handle();
-/// handle.set_window(VoiceWindow::from(tutti_types::Beat::new(1.0)));
+/// handle.set_window(VoiceWindow::from(tutti_units::Beat::new(1.0)));
 /// ```
 #[derive(Clone, Debug)]
 pub struct VoiceNodeHandle<F: RingFloat = f32> {
@@ -426,7 +424,7 @@ pub struct VoiceNodeHandle<F: RingFloat = f32> {
     latest: Arc<Mutex<Steering>>,
     /// The voice's gain: the cell the node reads once per block.
     pub(crate) gain: Param<Amplitude>,
-    /// The gain by address ([`UnitParam::Volume`](tutti_types::UnitParam)),
+    /// The gain by address ([`UnitParam::Volume`](tutti_units::UnitParam)),
     /// for a host that sets params by address.
     pub(crate) params: ParamSet,
     /// The stream that feeds a disk voice, with its loop set through it.
@@ -485,7 +483,7 @@ impl<F: RingFloat> VoiceNodeHandle<F> {
 
     /// Moves the voice's timeline window, from the node's next block on.
     ///
-    /// A window is a [`Beat`](tutti_types::Beat) (`f64`) plus an optional
+    /// A window is a [`Beat`](tutti_units::Beat) (`f64`) plus an optional
     /// duration: two values, and a precision the transport cannot afford to
     /// lose, so it is no scalar param (an `f32` beat position loses whole
     /// frames past ~2²⁴). It is published to a cell the node reads once per
@@ -567,7 +565,7 @@ impl<F: RingFloat> VoiceNodeHandle<F> {
     /// is silence. A write to a
     /// shared cell: never lost, never queued.
     pub fn set_gain(&self, gain: Amplitude) {
-        self.params.set(tutti_types::UnitParam::Volume, gain.get());
+        self.params.set(tutti_units::UnitParam::Volume, gain.get());
     }
 
     /// The voice's gain, as last set.
@@ -576,7 +574,7 @@ impl<F: RingFloat> VoiceNodeHandle<F> {
     }
 
     /// The node's params by address: its gain, as
-    /// [`UnitParam::Volume`](tutti_types::UnitParam::Volume).
+    /// [`UnitParam::Volume`](tutti_units::UnitParam::Volume).
     pub fn params(&self) -> &ParamSet {
         &self.params
     }

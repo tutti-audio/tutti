@@ -17,7 +17,8 @@
 //! than by agreeing to rounding.
 //!
 //! ```
-//! use tutti_types::{Beat, Bpm, FrameClock, SampleRate, Samples};
+//! use tutti_units::{Beat, Bpm, SampleRate, Samples};
+//! use tutti_types::FrameClock;
 //!
 //! let mut clock = FrameClock::new(Beat(0.0), Bpm::of(90.0), SampleRate::of(48_000.0));
 //! for _ in 0..1_500 {
@@ -27,10 +28,9 @@
 //! assert_eq!(clock.beat(), Beat(3.0));
 //! ```
 
-use super::frame::Frame;
-use super::samples::Samples;
 use super::timeline::TimelineSegment;
-use super::units::{Beat, BeatDuration, Bpm, SampleRate};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate};
+use tutti_units::{Frame, Samples};
 
 /// A loop region on the timeline: `start..end`, guaranteed finite, non-empty
 /// and correctly ordered.

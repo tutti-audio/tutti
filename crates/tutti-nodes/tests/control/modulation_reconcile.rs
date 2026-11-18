@@ -8,8 +8,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use tutti_types::{MaxBlock, ParamId};
+use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
+use tutti_units::ParamId;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -24,11 +25,12 @@ use tutti_modulation::{
 };
 use tutti_nodes::testing::Through;
 use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
-use tutti_types::{
-    Amplitude, At, AtomicF32, Beat, Bpm, ChannelLayout, Depth, Frame, FrameClock, Hz, ParamAddr,
-    PhaseIncrement, SampleRate, Samples, Seconds, UnitParam,
-};
+use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
 use tutti_ump::{Message, Voice1};
+use tutti_units::{
+    Amplitude, At, Beat, Bpm, Depth, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,
+    Seconds, UnitParam,
+};
 
 const RATE: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(120.0);

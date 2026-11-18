@@ -11,7 +11,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 const FADE: usize = 240;
 

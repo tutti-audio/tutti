@@ -19,8 +19,8 @@ use tutti_session::{
     midi_sink,
 };
 use tutti_transport::FadeOut;
-use tutti_types::{Beat, SampleRate};
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, Ump};
+use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const KEYS: u64 = 1;
@@ -301,7 +301,7 @@ fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
         .expect("follows the clock");
     follow(&mut s);
     assert!(matches!(
-        s.set_tempo(tutti_types::Bpm::of(100.0)),
+        s.set_tempo(tutti_units::Bpm::of(100.0)),
         Err(TempoError::Following)
     ));
     command(&fake, 5, &[0x02]);

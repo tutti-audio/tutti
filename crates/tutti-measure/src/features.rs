@@ -5,7 +5,7 @@
 //! magnitudes a caller already holds. A silent spectrum has no shape: every
 //! feature reads zero rather than a division by nothing.
 
-use tutti_types::Hz;
+use tutti_units::Hz;
 
 use crate::transform::StftMagnitude;
 use tutti_dsp::{BinIndex, FrameIndex};

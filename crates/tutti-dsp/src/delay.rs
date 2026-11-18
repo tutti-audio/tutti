@@ -17,7 +17,7 @@ pub use routing::{Routing, RoutingError};
 pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// How a fractional delay position is turned into a sample.
 ///
@@ -96,7 +96,7 @@ impl DelayLine {
     /// interpolating per `mode`.
     ///
     /// `delay_samples` is a **fractional frame count**, not seconds: the caller
-    /// converts ([`SampleSpan::from_seconds`](tutti_types::SampleSpan::from_seconds)),
+    /// converts ([`SampleSpan::from_seconds`](tutti_units::SampleSpan::from_seconds)),
     /// because keeping the fraction is the whole point of an interpolated read.
     /// `0.0` is the sample just pushed. It is a bare `f32` because this is the
     /// per-sample kernel read: a caller lowers its span to the raw once per block
@@ -157,8 +157,8 @@ impl DelayLine {
 /// read the output tap (the wet sample).
 ///
 /// The delay `d` and the feedback `fb` are the raw `f32` of a
-/// [`SampleSpan`](tutti_types::SampleSpan) of frames and a
-/// [`Feedback`](tutti_types::Feedback): this is the per-frame read, called once per sample
+/// [`SampleSpan`](tutti_units::SampleSpan) of frames and a
+/// [`Feedback`](tutti_units::Feedback): this is the per-frame read, called once per sample
 /// per channel, and its caller lowers its span to the position once per frame after the
 /// clamp that makes it a span (a delay glide's value is already an `f32` of frames).
 #[inline(always)]

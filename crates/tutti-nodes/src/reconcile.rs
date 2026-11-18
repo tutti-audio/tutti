@@ -25,7 +25,8 @@ use tutti_modulation::{
     compile,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{At, ParamAddr, ParamCell, ParamId};
+use tutti_types::ParamCell;
+use tutti_units::{At, ParamAddr, ParamId};
 
 use crate::automation::{ControlLaneNode, LaneControls};
 use crate::signal::{EnvelopeFollowerNode, NoteEnvelopeNode};
@@ -411,9 +412,8 @@ struct SourcePlan {
 /// };
 /// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterNode, SvfType, Target};
 /// use tutti_graph::NodeKey;
-/// use tutti_types::{
-///     Depth, Hz, ParamAddr, ParamCell, PhaseIncrement, SampleRate, Samples, UnitParam, Q,
-/// };
+/// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
+/// use tutti_types::ParamCell;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// let filter = NodeKey(1);

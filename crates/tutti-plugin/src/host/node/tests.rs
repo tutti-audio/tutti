@@ -25,8 +25,8 @@ use tutti_plugin_types::{
     PluginTail, Samples,
 };
 use tutti_plugin_types::{EditorPresence, PluginClass, SampleFormat};
-use tutti_types::ParamId;
-use tutti_types::SampleRate;
+use tutti_units::ParamId;
+use tutti_units::SampleRate;
 
 /// A handle over `bridge` as a served plugin's control serves it, with a guard
 /// that owns no subprocess.

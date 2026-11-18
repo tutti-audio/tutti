@@ -3,7 +3,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_session::{Session, TransportHandle};
 use tutti_transport::{FadeOut, MotionEvent, TimedError};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, MaxBlock, Samples};
+use tutti_types::{ChannelLayout, LoopRange, MaxBlock};
+use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {
     Session::builder()

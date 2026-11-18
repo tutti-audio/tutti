@@ -44,7 +44,7 @@ use std::sync::{Arc, Weak};
 
 use crate::MeterId;
 use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
-use tutti_types::{Amplitude, Samples};
+use tutti_units::{Amplitude, Samples};
 
 use crate::exec::SILENT;
 use crate::slots::{AudioSlots, SlotFlags, for_f32};

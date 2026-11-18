@@ -15,7 +15,8 @@ use tutti_session::{
     DeviceEvent, Error, InputConfig, InputOpener, LiveSession, OpenedInput, Phase, PhaseCx, Root,
     Session, SessionEvent,
 };
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(

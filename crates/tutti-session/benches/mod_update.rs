@@ -23,8 +23,8 @@ use tutti_types::MaxBlock;
 use tutti_modulation::{Follower, Lfo};
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::{InPort, Key, OutPort, Root, RouteSpec, Session};
-use tutti_types::Samples;
-use tutti_types::{BeatsPerCycle, Depth, Hz, Q};
+use tutti_units::Samples;
+use tutti_units::{BeatsPerCycle, Depth, Hz, Q};
 
 const UPDATES: usize = 2_000;
 

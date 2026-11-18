@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use tutti_graph::{NodeKey, ParamSet};
 use tutti_rt::LockExt;
-use tutti_types::{ParamCell, UnitAddr};
+use tutti_types::ParamCell;
+use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
 use super::error::{ValueError, ValueErrorKind};

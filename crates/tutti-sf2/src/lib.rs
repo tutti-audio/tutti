@@ -13,7 +13,7 @@
 //! A file with a compressed (SoundFont 3) `smpl` chunk is refused with
 //! `Error::UnsupportedSampleFormat`; the modulator chunks are skipped.
 //!
-//! Sample positions are `tutti_types::Samples`, a rate is a `SampleRate` and a
+//! Sample positions are `tutti_units::Samples`, a rate is a `SampleRate` and a
 //! pitch correction `Cents`. A preset's bank is a `Bank` (a MIDI bank 0 to 127, or
 //! percussion) and its program a `U7`; a preset whose file values are neither
 //! cannot be played but is kept, as the specification says (section 7.2), and

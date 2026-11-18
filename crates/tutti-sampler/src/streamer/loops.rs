@@ -33,7 +33,8 @@ use std::sync::Arc;
 use super::prefetch::RegionOut;
 use tutti_buffers::{Float, Interleaved, InterleavedMut};
 use tutti_rt::RingFloat;
-use tutti_types::{ChannelLayout, ReadRate, SamplePosition, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{ReadRate, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
 use crate::nonempty;
@@ -761,7 +762,7 @@ mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
     use tutti_buffers::Wave;
-    use tutti_types::Seconds;
+    use tutti_units::Seconds;
 
     /// A looped position the audio thread cannot place (`floor() as usize`
     /// saturates for infinity and anything from 2^64 up) makes taps near
@@ -1164,7 +1165,7 @@ mod tests {
         writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, view);
         assert_eq!(
             writer.push_interleaved(&held).expect("the ring's width"),
-            tutti_types::Samples(10_000)
+            tutti_units::Samples(10_000)
         );
         let _ = reader.claim(0, [(0, 64), (0, 0)]);
         assert_eq!(writer.in_flight_end(), 64);

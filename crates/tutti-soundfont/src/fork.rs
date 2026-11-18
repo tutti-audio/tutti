@@ -81,8 +81,8 @@ mod tests {
         Env, Event, ForkMode, ForkSource, Node, Offset, Prepare, TransportChanges,
         TransportPosition,
     };
-    use tutti_types::{SampleRate, Samples};
     use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, U7};
+    use tutti_units::{SampleRate, Samples};
 
     use crate::{Settings, SoundFont, SoundFontUnit};
 
@@ -125,7 +125,7 @@ mod tests {
         let mut frame = 0u64;
         while out.len() < frames {
             let env = Env {
-                frame: tutti_types::Frame::new(frame),
+                frame: tutti_units::Frame::new(frame),
                 sample_rate: rate,
                 block_len: Samples(64),
                 transport: TransportPosition::default(),
@@ -213,7 +213,7 @@ mod tests {
         let mut frame = 0u64;
         while out.len() < frames {
             let env = Env {
-                frame: tutti_types::Frame::new(frame),
+                frame: tutti_units::Frame::new(frame),
                 sample_rate: rate,
                 block_len: Samples(64),
                 transport: TransportPosition::default(),

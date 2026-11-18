@@ -5,7 +5,8 @@ use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::AddedInstrument;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::{Adsr, Amplitude, Seconds};
+use tutti_types::Adsr;
+use tutti_units::{Amplitude, Seconds};
 
 use super::cases::{Chunks, Gap, Subject};
 use super::rig::{RATE, Rig, offline_session};

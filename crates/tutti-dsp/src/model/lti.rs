@@ -1,6 +1,6 @@
 //! [`Lti`]: a linear time-invariant system.
 
-use tutti_types::Hz;
+use tutti_units::Hz;
 
 use super::System;
 use crate::Complex64;

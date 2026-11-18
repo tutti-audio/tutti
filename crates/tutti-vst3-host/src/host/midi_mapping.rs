@@ -34,7 +34,7 @@ use tutti_plugin_types::{
     MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource, Normalized,
 };
 use tutti_rt::{Reader, RtVec};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 use tutti_vst3_ffi::{EventList, Plugin};
 
 /// The MIDI a [`CcRoute`] passes on: a block's whole MIDI cap, so the route

@@ -13,7 +13,8 @@ use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{DetachedSession, InPort, OutPort, Root, Session};
-use tutti_types::{ChannelLayout, Db, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 

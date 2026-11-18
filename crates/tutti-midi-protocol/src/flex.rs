@@ -4,8 +4,9 @@
 //! holds the wire's integers and depends on no unit crate; this is the one
 //! reading of them.
 
-use tutti_types::{BeatsPerBar, Bpm, NoteValue};
+use tutti_types::{BeatsPerBar, NoteValue};
 use tutti_ump::FlexTimeSignature;
+use tutti_units::Bpm;
 
 /// 10-nanosecond units in one minute: 60 s is 6e9 of them, so a tempo of
 /// `bpm` is `6e9 / bpm` units per quarter note.
@@ -17,7 +18,7 @@ const TEN_NS_UNITS_PER_MINUTE: f64 = 6_000_000_000.0;
 ///
 /// ```
 /// use tutti_midi_protocol::flex_tempo;
-/// use tutti_types::Bpm;
+/// use tutti_units::Bpm;
 ///
 /// // 0.5 s per quarter note is 120 bpm.
 /// assert_eq!(flex_tempo(50_000_000), Bpm::new(120.0));
@@ -37,7 +38,7 @@ pub fn flex_tempo(field: u32) -> Option<Bpm> {
 ///
 /// ```
 /// use tutti_midi_protocol::{flex_tempo, flex_tempo_field};
-/// use tutti_types::Bpm;
+/// use tutti_units::Bpm;
 ///
 /// let bpm = Bpm::new(120.0).unwrap();
 /// assert_eq!(flex_tempo_field(bpm), 50_000_000);

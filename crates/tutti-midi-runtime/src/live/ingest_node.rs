@@ -82,8 +82,8 @@ use tutti_graph::{
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
 use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
-use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
+use tutti_units::{Frame, SampleRate, Samples};
 
 use super::mpe_ingest::MpeIngest;
 use super::order::{BLANK, in_offset_order, offset_of};
@@ -242,7 +242,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_midi_runtime::MidiIngestNode;

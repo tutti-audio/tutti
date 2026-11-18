@@ -19,9 +19,9 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::{
-    AtomicF32, ChannelLayout, Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail,
-    UnitAddr, UnitParam,
+use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_units::{
+    Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -85,7 +85,7 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 }
 
 fn impulse() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(tutti_types::Samples(BLOCK))
+    tutti_fixtures::signal::impulse(tutti_units::Samples(BLOCK))
 }
 
 fn finite(d: &Driven) -> usize {

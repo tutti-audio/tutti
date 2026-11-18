@@ -12,17 +12,17 @@ use crate::common::{self, metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, FileEvent, Lead, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
-    SmfDivision, SmfFormat, SmfPart, SmpteFractionalFrames, SmpteOffset, TextKind, Tick,
+    DropReason, FileEvent, Layout, Lead, LeadTrack, LyricChange, Meta, MicrosPerQuarter, MidiFile,
+    OtherMetaKind, SmfDivision, SmfPart, SmpteFractionalFrames, SmpteOffset, TextKind, Tick,
     ToClipError, Track,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
-use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
     ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats, Stream, SysexStatus,
     TextError, Utility, split_stream,
 };
+use tutti_units::{Beat, Seconds};
 
 const TPQ: u16 = 480;
 const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
@@ -40,11 +40,15 @@ fn flex(f: Flex) -> FileEvent {
 }
 
 fn format0(events: Vec<(u64, FileEvent)>) -> MidiFile {
-    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track(events)]).unwrap()
+    crate::common::format0(SMF_DIVISION, track(events)).unwrap()
 }
 
 fn format0_track(track: Track) -> MidiFile {
-    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track]).unwrap()
+    crate::common::format0(SMF_DIVISION, track).unwrap()
+}
+
+fn format0_lead(lead: LeadTrack) -> MidiFile {
+    MidiFile::smf(SMF_DIVISION, Layout::Format0(lead)).unwrap()
 }
 
 fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
@@ -213,7 +217,9 @@ fn flex_texts(file: &MidiFile) -> Vec<(FlexTextKind, Form, Vec<u8>)> {
 #[test]
 fn copyright_and_lyrics_are_flex_text_over_several_packets() {
     let notice = "(c) 2026 Someone Else"; // 21 bytes: 12 + 9
-    let smf = format0_track(track(vec![(10, text(TextKind::Lyric, "la"))]).copyright(notice));
+    let smf = format0_lead(
+        LeadTrack::new(track(vec![(10, text(TextKind::Lyric, "la"))])).copyright(notice),
+    );
     let clip = metrical(&smf).to_clip().unwrap().clip;
     let got = flex_texts(&clip);
     let mut padded = b"Someone Else".to_vec();
@@ -352,8 +358,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
     let a = (note(0, 60), note(0, 61)); // track 0, both at 100
     let b = note(1, 62); // track 1 at 100
     let c = note(1, 63); // track 1 at 50
-    let smf = MidiFile::smf(
-        SmfFormat::Parallel,
+    let smf = crate::common::format1(
         SMF_DIVISION,
         vec![
             track(vec![(100, a.0.clone()), (100, a.1.clone())]),
@@ -389,8 +394,7 @@ fn a_clip_is_not_converted_again() {
 /// Spec: m2-116/7.1.1#1, m2-116/7.1.2#1
 #[test]
 fn the_first_tempo_and_signature_lead_the_clip() {
-    let smf = MidiFile::smf(
-        SmfFormat::Parallel,
+    let smf = crate::common::format1(
         SMF_DIVISION,
         vec![
             track(vec![
@@ -489,8 +493,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
 
 #[test]
 fn the_division_and_the_end_carry_over() {
-    let smf = MidiFile::smf(
-        SmfFormat::Parallel,
+    let smf = crate::common::format1(
         SmfDivision::per_quarter(96),
         vec![
             Track::new()
@@ -572,7 +575,11 @@ fn what_has_no_successor_is_reported_with_its_tick() {
     ];
     // The Sequence Number and the SMPTE Offset (Appendix B names a successor
     // M2-104 lacks) are the track's fields, listed first: they are at tick 0.
-    let smf = format0_track(track(events.clone()).numbered(1).smpte_start(offset));
+    let smf = format0_lead(
+        LeadTrack::new(track(events.clone()))
+            .numbered(1)
+            .smpte_start(offset),
+    );
     let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<(u64, DropReason)> = converted
         .dropped
@@ -632,8 +639,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
 /// any other is a track's, which a clip has none of.
 #[test]
 fn the_first_track_names_the_sequence_and_the_others_are_reported() {
-    let smf = MidiFile::smf(
-        SmfFormat::Parallel,
+    let smf = crate::common::format1(
         SMF_DIVISION,
         vec![Track::new().named("Sonata"), Track::new().named("Violin")],
     )
@@ -664,8 +670,7 @@ fn the_first_track_names_the_sequence_and_the_others_are_reported() {
 #[test]
 fn a_dropped_field_sorts_among_the_dropped_events_by_tick_then_track() {
     let marker = || text(TextKind::Marker, "m");
-    let smf = MidiFile::smf(
-        SmfFormat::Parallel,
+    let smf = crate::common::format1(
         SMF_DIVISION,
         vec![
             track(vec![(0, marker())]),
@@ -697,8 +702,12 @@ fn text_that_flex_cannot_carry_is_reported() {
         kind: TextKind::Lyric,
         bytes: vec![b'c', b'a', b'f', 0xE9].into(),
     });
-    let smf = format0_track(
-        track(vec![(0, latin1), (0, text(TextKind::Text, "remark"))]).copyright("a\0b"),
+    let smf = format0_lead(
+        LeadTrack::new(track(vec![
+            (0, latin1),
+            (0, text(TextKind::Text, "remark")),
+        ]))
+        .copyright("a\0b"),
     );
     let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<_> = converted.dropped.iter().map(|d| d.reason).collect();
@@ -724,8 +733,9 @@ fn text_that_flex_cannot_carry_is_reported() {
 /// (`65 CC 81`) is written composed (`C3 A9`), and a leading BOM goes.
 #[test]
 fn text_is_composed_to_nfc_without_a_byte_order_mark() {
-    let smf = format0_track(
-        track(vec![(0, text(TextKind::Lyric, "cafe\u{301}"))]).copyright("\u{FEFF}me"),
+    let smf = format0_lead(
+        LeadTrack::new(track(vec![(0, text(TextKind::Lyric, "cafe\u{301}"))]))
+            .copyright("\u{FEFF}me"),
     );
     let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
@@ -787,10 +797,9 @@ fn property_exchange_and_empty_text_are_reported() {
 #[test]
 fn the_clip_round_trips_through_its_bytes() {
     let smf = MidiFile::smf(
-        SmfFormat::Parallel,
         SMF_DIVISION,
-        vec![
-            track(vec![
+        Layout::Format1 {
+            lead: LeadTrack::new(track(vec![
                 (
                     0,
                     meta(Meta::Tempo {
@@ -804,9 +813,9 @@ fn the_clip_round_trips_through_its_bytes() {
                     960,
                     FileEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6, 7])),
                 ),
-            ])
+            ]))
             .copyright("a rather long copyright notice"),
-            track(vec![
+            tracks: vec![track(vec![
                 (
                     0,
                     meta(Meta::KeySignature {
@@ -816,8 +825,8 @@ fn the_clip_round_trips_through_its_bytes() {
                     }),
                 ),
                 (480, note(1, 64)),
-            ]),
-        ],
+            ])],
+        },
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
@@ -884,10 +893,9 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
 /// Spec: m2-104/7.5.3#4
 #[test]
 fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
-    let smf = MidiFile::smf(
-        SmfFormat::SingleTrack,
+    let smf = crate::common::format0(
         SmfDivision::per_quarter(100),
-        vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
+        track(vec![(30, tempo_event(400_000)), (60, note(0, 60))]),
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
@@ -900,10 +908,9 @@ fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
 /// Spec: m2-104/7.5.3#4
 #[test]
 fn a_tempo_does_not_move_past_the_end_of_the_clip() {
-    let smf = MidiFile::smf(
-        SmfFormat::SingleTrack,
+    let smf = crate::common::format0(
         SmfDivision::per_quarter(96),
-        vec![Track::new().push(Tick(90), tempo_event(400_000)).unwrap()],
+        Track::new().push(Tick(90), tempo_event(400_000)).unwrap(),
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
@@ -956,12 +963,7 @@ fn events_on_their_grids_are_not_moved() {
 }
 
 fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
-    MidiFile::smf(
-        SmfFormat::SingleTrack,
-        SmfDivision::per_quarter(tpq),
-        vec![track(events)],
-    )
-    .unwrap()
+    crate::common::format0(SmfDivision::per_quarter(tpq), track(events)).unwrap()
 }
 
 fn flex_events(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<(u64, FileEvent)> {
@@ -1201,13 +1203,13 @@ fn a_karaoke_hyphen_ends_no_syllable_in_the_clip() {
 /// reported for what they are.
 #[test]
 fn a_lyric_that_cannot_be_a_message_is_reported() {
-    let smf = format0_track(
-        track(vec![
+    let smf = format0_lead(
+        LeadTrack::new(track(vec![
             (1, text(TextKind::Lyric, "-")),
             (2, text(TextKind::Lyric, "--")),
             (3, text(TextKind::Lyric, &"x".repeat(383))),
             (4, text(TextKind::Lyric, "a\0b")),
-        ])
+        ]))
         .copyright(&"x".repeat(385)),
     );
     let reasons: Vec<DropReason> = metrical(&smf)

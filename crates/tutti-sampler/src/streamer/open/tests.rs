@@ -3,7 +3,7 @@ use crate::testing::loop_frames;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_types::{Beat, Bpm, SamplePosition};
+use tutti_units::{Beat, Bpm, SamplePosition};
 
 use crate::streamer::StreamerPort;
 

@@ -15,7 +15,8 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ArcDegrees, Azimuth, ChannelLayout, MaxBlock, SampleRate, Samples, UnitParam};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{ArcDegrees, Azimuth, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const PROBE: u64 = 10;

@@ -2,7 +2,7 @@
 //! error, and what a `Job` reads back.
 
 use crate::{EventLossPolicy, Job, JobError, MAX_FRAMES};
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

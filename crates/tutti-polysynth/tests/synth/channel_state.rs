@@ -19,8 +19,8 @@ use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_polysynth::{
     Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
 };
-use tutti_types::{Amplitude, Seconds, Semitones};
 use tutti_ump::{CCNumber, MidiChannel, RegisteredData, Rpn, Ump};
+use tutti_units::{Amplitude, Seconds, Semitones};
 
 const SR: f64 = 48_000.0;
 /// The envelope's release, seconds.

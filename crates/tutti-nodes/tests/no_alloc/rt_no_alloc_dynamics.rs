@@ -20,7 +20,8 @@ use tutti_nodes::{
     BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeyFilter,
     KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode, PeakDetection,
 };
-use tutti_types::{BusTopology, ChannelLayout, CompressionRatio, Db, SampleRate, Seconds};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 /// `node` alone in a graph through `BlockRig`: every input an alternating
 /// ±`amplitude` (to keep the envelope follower active), `warm` warm-up
@@ -102,7 +103,7 @@ fn compressor_stereo_process_is_allocation_free() {
 fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     use tutti_graph::ParamNode;
     use tutti_graph::contract::Direct;
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let mut node = Direct::new(
         CompressorNode::new(
@@ -375,7 +376,7 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
     let ceiling: Vec<f32> = (0..64).map(|i| -12.0 + 0.1875 * i as f32).collect();
     node.feed(0, Some(&ceiling));
     node.block();
-    let first = tutti_types::Db(-12.0).to_amplitude().get();
+    let first = tutti_units::Db(-12.0).to_amplitude().get();
     assert!(
         (node.output().plane(5).samples()[0] - first).abs() < 1e-5,
         "the fed ceiling did not reach the clip: {}",
@@ -396,7 +397,7 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
 fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
     use tutti_graph::ParamNode;
     use tutti_graph::contract::Direct;
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let mut node = Direct::new(
         BrickwallLimiterNode::with_bus(
@@ -524,7 +525,7 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
 /// can drive, and the bound its output keeps.
 pub(crate) struct Corners {
     /// Each control and its two ends.
-    pub(crate) cells: &'static [(tutti_types::UnitAddr, f32, f32)],
+    pub(crate) cells: &'static [(tutti_units::UnitAddr, f32, f32)],
     /// The param ports that read a lane per frame.
     pub(crate) lanes: &'static [usize],
     /// The lane values: a lane cycles through them, so every frame is a corner or hostile.
@@ -552,7 +553,8 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
 ) {
     use tutti_graph::Prepare;
     use tutti_graph::contract::Direct;
-    use tutti_types::{MaxBlock, Samples};
+    use tutti_types::MaxBlock;
+    use tutti_units::Samples;
 
     let fill = |d: &mut Direct<N>, amplitude: f32| {
         for c in d.inputs_mut().iter_mut() {
@@ -653,8 +655,8 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
 }
 
 /// The address of param `kind` at `index` (0 for a node with one of each).
-pub(crate) const fn addr(kind: tutti_types::UnitParam, index: u8) -> tutti_types::UnitAddr {
-    tutti_types::UnitAddr::new(kind, index)
+pub(crate) const fn addr(kind: tutti_units::UnitParam, index: u8) -> tutti_units::UnitAddr {
+    tutti_units::UnitAddr::new(kind, index)
 }
 
 const HOSTILE_DB: &[f32] = &[
@@ -672,7 +674,7 @@ const HOSTILE_DB: &[f32] = &[
 /// and makeup (to a clamped 1e30 dB), with an infinite key sample now and then.
 #[test]
 fn the_compressor_corners_are_allocation_free_and_finite() {
-    use tutti_types::UnitParam::{Attack, GainDb, Knee, Ratio, Release, Threshold};
+    use tutti_units::UnitParam::{Attack, GainDb, Knee, Ratio, Release, Threshold};
     static CORNERS: Corners = Corners {
         cells: &[
             (addr(Threshold, 0), -200.0, 60.0),
@@ -736,7 +738,7 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
 /// with an infinite key sample now and then.
 #[test]
 fn the_gate_corners_are_allocation_free_and_finite() {
-    use tutti_types::UnitParam::{Attack, Hold, Range, Release, Threshold};
+    use tutti_units::UnitParam::{Attack, Hold, Range, Release, Threshold};
     static CORNERS: Corners = Corners {
         cells: &[
             (addr(Threshold, 0), -200.0, 20.0),
@@ -774,7 +776,7 @@ fn the_gate_corners_are_allocation_free_and_finite() {
 /// The output stays within the ceiling's top, 0 dB, to the ulps of the curve's roundings.
 #[test]
 fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
-    use tutti_types::UnitParam::{Ceiling, Release, Threshold};
+    use tutti_units::UnitParam::{Ceiling, Release, Threshold};
     const HOSTILE_DB_CEILING: &[f32] =
         &[-60.0, 0.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -6.0];
     // Four ulps: the ceiling's amplitude, the divide and the product each round (the
@@ -849,7 +851,7 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
 /// and stays finite.
 #[test]
 fn the_brickwall_corners_are_allocation_free_finite_and_under_the_ceiling() {
-    use tutti_types::UnitParam::Ceiling;
+    use tutti_units::UnitParam::Ceiling;
     static CORNERS: Corners = Corners {
         cells: &[(addr(Ceiling, 0), -60.0, -0.3)],
         lanes: &[0],
@@ -880,9 +882,9 @@ fn the_brickwall_corners_are_allocation_free_finite_and_under_the_ceiling() {
 /// A multiband's band cells and crossovers at their two ends: each of four bands' threshold,
 /// knee, ratio, times, makeup and both toggles, then three crossovers at the ends in
 /// `cutoffs`. A node of fewer bands answers to the first of them.
-const fn multiband_cells(cutoffs: [(f32, f32); 3]) -> [(tutti_types::UnitAddr, f32, f32); 35] {
-    use tutti_types::UnitAddr;
-    use tutti_types::UnitParam::{
+const fn multiband_cells(cutoffs: [(f32, f32); 3]) -> [(tutti_units::UnitAddr, f32, f32); 35] {
+    use tutti_units::UnitAddr;
+    use tutti_units::UnitParam::{
         Attack, Bypass, Cutoff, GainDb, Knee, Ratio, Release, Solo, Threshold,
     };
     let per_band = [
@@ -943,13 +945,13 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
     };
     static CLAMPED: Corners = Corners {
         cells: &[
-            (addr(tutti_types::UnitParam::GainDb, 0), -1.0e30, 1.0e30),
+            (addr(tutti_units::UnitParam::GainDb, 0), -1.0e30, 1.0e30),
             (
-                addr(tutti_types::UnitParam::GainDb, 1),
+                addr(tutti_units::UnitParam::GainDb, 1),
                 f32::NAN,
                 f32::INFINITY,
             ),
-            (addr(tutti_types::UnitParam::Ratio, 0), 1.0, 1.0),
+            (addr(tutti_units::UnitParam::Ratio, 0), 1.0, 1.0),
         ],
         lanes: &[0, 6],
         lane_values: &[HOSTILE_DB],
@@ -960,12 +962,12 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
     // A knee past 400 dB is held there, on every band.
     static HUGE_KNEE: Corners = Corners {
         cells: &[
-            (addr(tutti_types::UnitParam::Knee, 0), 1.0e20, 3.0e38),
-            (addr(tutti_types::UnitParam::Knee, 1), 3.0e38, 1.0e20),
-            (addr(tutti_types::UnitParam::Knee, 2), 1.0e20, 1.0e20),
-            (addr(tutti_types::UnitParam::Knee, 3), 3.0e38, 3.0e38),
-            (addr(tutti_types::UnitParam::Threshold, 0), -200.0, 60.0),
-            (addr(tutti_types::UnitParam::Ratio, 0), 1.0, 1000.0),
+            (addr(tutti_units::UnitParam::Knee, 0), 1.0e20, 3.0e38),
+            (addr(tutti_units::UnitParam::Knee, 1), 3.0e38, 1.0e20),
+            (addr(tutti_units::UnitParam::Knee, 2), 1.0e20, 1.0e20),
+            (addr(tutti_units::UnitParam::Knee, 3), 3.0e38, 3.0e38),
+            (addr(tutti_units::UnitParam::Threshold, 0), -200.0, 60.0),
+            (addr(tutti_units::UnitParam::Ratio, 0), 1.0, 1000.0),
         ],
         lanes: &[0, 6],
         lane_values: &[HOSTILE_DB],

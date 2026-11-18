@@ -1,7 +1,7 @@
 //! Unit tests for the CLAP host's event translation.
 
 use std::ffi::c_void;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END,
@@ -17,8 +17,8 @@ use tutti_clap_host::{
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
-use tutti_types::Samples;
 use tutti_ump::{CCNumber, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2};
+use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use.
 const BLOCK: usize = 1_000;

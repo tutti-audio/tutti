@@ -23,7 +23,8 @@ use std::sync::Arc;
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING, MicConfig, MicIn};
 use tutti_engine::StreamLatency;
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
-use tutti_types::{Mint, SampleRate, Samples, Seconds};
+use tutti_types::Mint;
+use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::graph::CrossfadeRefused;
 use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent};
@@ -83,7 +84,7 @@ impl Default for InputConfig {
 ///
 /// ```
 /// use tutti_session::Trim;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// assert_eq!(Trim::default(), Trim::NONE);
 /// assert_eq!(Trim::Earlier(Samples(64)).frames(), -64);

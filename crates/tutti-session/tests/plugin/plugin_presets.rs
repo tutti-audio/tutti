@@ -17,7 +17,8 @@ mod clap {
     use super::*;
     use crate::support::{clap_probe, plugin_server};
     use tutti_graph::NodeKey;
-    use tutti_types::{MaxBlock, Samples};
+    use tutti_types::MaxBlock;
+    use tutti_units::Samples;
 
     fn loaded() -> (Session, u64, NodeKey) {
         // The plugin's file is probed before its variables are set.
@@ -153,7 +154,8 @@ mod vst3 {
     use crate::support::plugin_server;
     use tutti_plugin_types::PresetId;
     use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
-    use tutti_types::{ChannelLayout, SampleRate};
+    use tutti_types::ChannelLayout;
+    use tutti_units::SampleRate;
 
     /// **A served plugin's list is read by the first update on the main
     /// thread.** The shared plugin's VST3 declares one program list, `Factory`,
@@ -245,7 +247,8 @@ mod vst2 {
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_types::PresetId;
     use tutti_session::DetachedSession;
-    use tutti_types::{ChannelLayout, SampleRate};
+    use tutti_types::ChannelLayout;
+    use tutti_units::SampleRate;
 
     fn probe_with(programs: &str) -> (DetachedSession, u64, ScopedEnv) {
         let mut env = ScopedEnv::new();

@@ -1,7 +1,7 @@
 use super::*;
 use crate::cross_correlate;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
-use tutti_types::Hz;
+use tutti_units::Hz;
 
 fn noise(len: usize, seed: u64) -> Vec<f32> {
     let mut rng = StdRng::seed_from_u64(seed);

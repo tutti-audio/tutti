@@ -13,8 +13,8 @@ use tutti_fixtures::midi;
 use tutti_graph::EventKind;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
-use tutti_types::Samples;
 use tutti_ump::MidiChannel;
+use tutti_units::Samples;
 
 fn synth_row() -> Row {
     let note = midi::note_on(MidiChannel::FIRST, 69, 0xFFFF);
@@ -24,7 +24,7 @@ fn synth_row() -> Row {
             Box::new(PolySynth::new(SynthConfig {
                 oscillator: OscillatorType::Square { pulse_width: 0.5 },
                 envelope: Adsr {
-                    attack: tutti_types::Seconds(0.0),
+                    attack: tutti_units::Seconds(0.0),
                     ..Default::default()
                 },
                 ..Default::default()

@@ -19,7 +19,7 @@ use crate::plan::Plan;
 use crate::spec::GraphSpec;
 use crate::{EdgeId, NodeKey};
 use tutti_buffers::Float;
-use tutti_types::{Amplitude, Mix};
+use tutti_units::{Amplitude, Mix};
 
 /// Every live cell, by kind. The kinds are separate fields so a commit can
 /// hand out cells of two kinds at once.

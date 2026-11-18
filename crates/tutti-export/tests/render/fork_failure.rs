@@ -9,7 +9,7 @@
 use crate::support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
@@ -25,7 +25,8 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_transport::FrozenClock;
-use tutti_types::{ChannelLayout, Db, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCKS: usize = 4;

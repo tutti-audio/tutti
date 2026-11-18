@@ -41,12 +41,12 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: every u32 is a valid RPN word",
     ),
     (
-        "crates/tutti-types/src/value/unit_param.rs",
+        "crates/tutti-units/src/unit_param.rs",
         "ParamId",
         "permanent: every u32 is a valid id",
     ),
     (
-        "crates/tutti-types/src/value/latency.rs",
+        "crates/tutti-units/src/latency.rs",
         "Latency",
         "permanent: every Samples is a valid latency, and new is infallible",
     ),

@@ -14,7 +14,7 @@
 use tutti_rt::{Overflow, PushError, RequestBit, RequestWord, RingReader, RingWriter, ring};
 
 use crate::{Normalized, ParamEdit, Request, RescanScope};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 const RESTART: RequestBit = RequestBit::of(0);
 const IO_CHANGED: RequestBit = RequestBit::of(1);

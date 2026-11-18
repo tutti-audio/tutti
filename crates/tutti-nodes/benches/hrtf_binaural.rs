@@ -23,7 +23,7 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, Elevation, SampleRate};
+use tutti_units::{Azimuth, Elevation, SampleRate};
 
 const BLOCK: usize = 64;
 const RATE: u32 = 48_000;

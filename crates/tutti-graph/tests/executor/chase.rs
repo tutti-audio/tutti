@@ -16,8 +16,9 @@ use tutti_graph::{
     FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, OutPort, Source};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
+use tutti_units::Samples;
 
 const BLOCK: usize = 64;
 

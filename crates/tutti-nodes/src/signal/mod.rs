@@ -24,7 +24,7 @@ pub use note_envelope::NoteEnvelopeNode;
 pub use sender::{SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts};
 
 use tutti_graph::{Cx, Offset, PlayReading};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// The play clock at each frame of a block, at a node's input time
 /// (`Cx::play_at`): read per frame only in a block with a play start

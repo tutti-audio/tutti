@@ -1,8 +1,8 @@
 //! [`MaxDecay`]: the longest decay a reverb is built to.
 
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The longest decay a reverb's control may ask for.
     ///
     /// A range-checked value: finite, at least [`MIN_DECAY`](crate::MIN_DECAY) and at most

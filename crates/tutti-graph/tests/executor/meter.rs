@@ -18,7 +18,8 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
-use tutti_types::{Beat, Bpm, ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
 struct Forkable(Kind);

@@ -57,8 +57,8 @@ use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, Voice1, parse_exact}
 use super::{SmfDivision, SmfParts};
 use crate::file::split_extra;
 use crate::file::{
-    FileEvent, Lead, MalformedMeta, Meta, MicrosPerQuarter, Normalized, OtherMetaKind, Placement,
-    SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
+    FileEvent, Lead, MalformedMeta, Meta, MicrosPerQuarter, Normalized, Opening, OtherMetaKind,
+    Placement, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
 };
 use crate::{ReadError, SmfParseError};
 
@@ -396,11 +396,21 @@ fn steps(body: &[u8]) -> impl Iterator<Item = Result<Step<'_>, Failure>> {
     .map_while(std::result::Result::transpose)
 }
 
+/// The opening metas a track's chunk held, before the file's format says which
+/// the file keeps.
+#[derive(Default)]
+struct Leads {
+    number: Option<u16>,
+    name: Option<Box<[u8]>>,
+    smpte_start: Option<SmpteOffset>,
+    copyright: Option<Box<[u8]>>,
+}
+
 /// Settles a track's `lead` at `tick` into its field, and answers what the file
 /// had wrong: the event with its [`Placement`] when it is not where SMF 1.0
 /// section 3.3 puts it. `leading` says the track has had only meta events at
 /// tick 0 so far.
-fn settle(track: &mut Track, lead: Lead, tick: Tick, leading: bool) -> Option<(Lead, Placement)> {
+fn settle(track: &mut Leads, lead: Lead, tick: Tick, leading: bool) -> Option<(Lead, Placement)> {
     // A Sequence Number and an SMPTE Offset are at the very start; a name and
     // a notice only at time 0.
     let at_start_only = matches!(lead, Lead::SequenceNumber(_) | Lead::SmpteOffset(_));
@@ -472,7 +482,7 @@ fn close_sysex(
 /// A track body: its events at absolute ticks, its end, and what was changed
 /// to make it writable (`index` is the track's). The last event, if it is an
 /// End of Track (`FF 2F 00`), is the track's end and not an event.
-fn track(index: usize, body: &[u8]) -> Result<(Track, Vec<Normalized>), Failure> {
+fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<Normalized>), Failure> {
     let items = steps(body)
         .scan(0u64, |tick, step| {
             Some(step.map(|s| {
@@ -486,7 +496,7 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Vec<Normalized>), Failure>
     // track's end: what follows it would be dropped, and the model is lossless.
     let count = items.len();
     let mut events = Vec::with_capacity(count);
-    let mut leads = Track::new();
+    let mut leads = Leads::default();
     let mut changes = Vec::new();
     let mut raw = Vec::new();
     // Only meta events, all at tick 0, so far.
@@ -547,9 +557,8 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Vec<Normalized>), Failure>
     close_sysex(index, &mut events, &raw, &mut changes);
     let end = end.unwrap_or(last);
     let mut track = Track::from_read(Vec::new(), Tick(0), events, end);
-    (track.number, track.name, track.smpte_start, track.copyright) =
-        (leads.number, leads.name, leads.smpte_start, leads.copyright);
-    Ok((track, changes))
+    track.name = leads.name.take();
+    Ok((track, leads, changes))
 }
 
 // ---- the edge --------------------------------------------------------------
@@ -597,18 +606,26 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
     if header.format == SmfFormat::SingleTrack && declared != 1 {
         return Err(smf_error(0, SmfParseError::FormatZeroTracks));
     }
-    let (mut tracks, mut normalized) = (Vec::new(), Vec::new());
+    let (mut tracks, mut found, mut normalized) = (Vec::new(), Vec::new(), Vec::new());
     for (index, &(at, body)) in chunks.iter().enumerate() {
         // The body starts after the chunk's type and length.
-        let (read, changes) =
+        let (read, leads, changes) =
             track(index, body).map_err(|f| refused(Some(index), at + 8 + f.at, &f.faults))?;
         tracks.push(read);
+        found.push(leads);
         normalized.extend(changes);
     }
     // SMF 1.0 section 3.3: a format 0 or 1 file's one sequence is numbered in
     // its first track, a format 1 file's SMPTE Offset is stored with its tempo
-    // map, and a copyright notice is in the first track.
-    for (index, track) in tracks.iter_mut().enumerate().skip(1) {
+    // map, and a copyright notice is in the first track. What the file keeps
+    // is the lead's and the patterns'; a meta event found elsewhere is dropped
+    // and listed.
+    let mut copyright = None;
+    let mut openings = Vec::new();
+    for (index, mut leads) in found.into_iter().enumerate() {
+        if index == 0 {
+            copyright = leads.copyright.take();
+        }
         let mut outside = |lead: Option<Lead>| {
             normalized.extend(lead.map(|lead| Normalized::Lead {
                 track: index,
@@ -617,18 +634,26 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
                 placement: Placement::NotInFirstTrack,
             }));
         };
-        if header.format.shares_timeline() {
-            outside(track.number.take().map(Lead::SequenceNumber));
+        if index > 0 {
+            if header.format.shares_timeline() {
+                outside(leads.number.take().map(Lead::SequenceNumber));
+            }
+            if header.format == SmfFormat::Parallel {
+                outside(leads.smpte_start.take().map(Lead::SmpteOffset));
+            }
+            outside(leads.copyright.take().map(Lead::Copyright));
         }
-        if header.format == SmfFormat::Parallel {
-            outside(track.smpte_start.take().map(Lead::SmpteOffset));
-        }
-        outside(track.copyright.take().map(Lead::Copyright));
+        openings.push(Opening {
+            number: leads.number,
+            smpte_start: leads.smpte_start,
+        });
     }
     Ok(SmfParts {
         format: header.format,
         division: header.division,
         tracks,
+        openings,
+        copyright,
         normalized,
     })
 }

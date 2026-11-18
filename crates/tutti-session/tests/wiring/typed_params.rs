@@ -9,9 +9,8 @@ use tutti_graph::{
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
 use tutti_session::{DetachedSession, Session, ValueErrorKind};
-use tutti_types::{
-    BusTopology, ChannelLayout, Db, Hz, Param, Q, SampleRate, Seconds, UnitAddr, UnitParam,
-};
+use tutti_types::{BusTopology, ChannelLayout, Param};
+use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {
     Session::builder()
@@ -62,7 +61,7 @@ fn a_write_reaches_the_cell_the_key_names() {
         KeySource::Sidechain,
         CompressorControls {
             threshold: Db(-20.0),
-            ratio: tutti_types::CompressionRatio(4.0),
+            ratio: tutti_units::CompressionRatio(4.0),
             attack: Seconds(0.01),
             release: Seconds(0.1),
             ..CompressorControls::DEFAULT

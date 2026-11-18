@@ -12,7 +12,7 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::drive;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, Elevation, SampleRate, UnitParam};
+use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 
 /// One block of one frame, written to `out`.
 ///

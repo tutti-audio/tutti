@@ -36,7 +36,7 @@ use tutti_plugin_types::PluginAudio;
 // host dlopens the cdylib, the test reads the capture through this type.
 use tutti_clap_test_plugin::ProcessCapture;
 use tutti_graph::Offset;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use. The test that sends
 /// 9,999 drives a shorter block on purpose: the host clamps what the caller
@@ -62,8 +62,8 @@ use tutti_fixtures::midi;
 /// un-denormalized (see `add_param_changes` in `events.rs`). An invented id
 /// would make these tests fail for a reason unrelated to what they assert.
 use tutti_plugin_types::Control;
-use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
+use tutti_units::ParamId;
 
 /// The probe's real `clap_id`. A `ParamId` because that is what a queue
 /// is keyed by — CLAP ids are opaque handles, never positional indices.
@@ -294,7 +294,7 @@ fn host_never_delivers_an_event_time_outside_the_block() {
 fn host_supplies_transport_when_present() {
     let mut inst = load_plugin();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_types::Bpm::of(140.0))
+        .with_tempo(tutti_units::Bpm::of(140.0))
         .with_playing(true);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
@@ -320,7 +320,7 @@ fn host_supplies_transport_when_present() {
 fn host_supplies_the_tempo_slope() {
     let mut inst = load_plugin();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_types::Bpm::of(140.0))
+        .with_tempo(tutti_units::Bpm::of(140.0))
         .with_tempo_inc(-0.001)
         .with_playing(true);
     let ctx = ClapProcessContext {
@@ -334,7 +334,7 @@ fn host_supplies_the_tempo_slope() {
 
     // A constant tempo is a zero slope.
     let flat = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_types::Bpm::of(140.0));
+        .with_tempo(tutti_units::Bpm::of(140.0));
     let ctx = ClapProcessContext {
         transport: Some(&flat),
         ..Default::default()

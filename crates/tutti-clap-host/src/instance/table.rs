@@ -6,7 +6,7 @@ use crate::events::ParamBounds;
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use tutti_clap_ffi::Plugin;
 use tutti_plugin_types::{MainThreadMarker, ParameterInfo};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// The plugin's parameters as declared: the table every read of them is
 /// answered from, so no read asks the plugin once per parameter.

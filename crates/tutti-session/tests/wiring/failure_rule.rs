@@ -9,7 +9,8 @@ use tutti_session::{
     ConnectError, Crossfade, CrossfadeRefused, DetachedSession, EventInPort, EventOutPort, InPort,
     OutPort, Root, Session,
 };
-use tutti_types::{ChannelLayout, SampleRate, Seconds, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
@@ -200,7 +201,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
 #[test]
 fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     use tutti_graph::{MissingSource, TapAlign};
-    use tutti_types::Samples;
+    use tutti_units::Samples;
     let mut s = detached();
     let (a, _) = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let far = OutPort::new(a.erase(), 70_000);

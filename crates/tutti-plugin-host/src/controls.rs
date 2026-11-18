@@ -33,8 +33,9 @@ use tutti_rt::LockExt;
 
 use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
 use tutti_transport::ProjectMeter;
-use tutti_types::Latency;
-use tutti_types::{AtomicSampleRate, SampleRate, Samples};
+use tutti_types::AtomicSampleRate;
+use tutti_units::Latency;
+use tutti_units::{SampleRate, Samples};
 
 use tutti_plugin_types::MAX_CHUNK;
 
@@ -393,7 +394,7 @@ impl PluginControls {
 
     /// What the node has delivered so far, per listed parameter: what a fork
     /// is seeded with. Control thread: allocates.
-    pub fn delivered(&self) -> Vec<(tutti_types::ParamId, f64)> {
+    pub fn delivered(&self) -> Vec<(tutti_units::ParamId, f64)> {
         self.node.delivery.delivered()
     }
 

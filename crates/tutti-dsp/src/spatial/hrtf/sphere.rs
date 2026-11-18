@@ -11,7 +11,7 @@
 
 use rustfft::FftNum;
 use tutti_buffers::{Float, Mono, Sample};
-use tutti_types::{Direction, SampleRate};
+use tutti_units::{Direction, SampleRate};
 
 use crate::convert::convert_equal;
 use crate::{Complex, CosineWindow, RealFft, WindowedSinc};

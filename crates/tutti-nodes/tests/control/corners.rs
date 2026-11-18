@@ -8,9 +8,8 @@ use tutti_graph::{
     Prepare, Shape, Status,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource};
-use tutti_types::{
-    BusTopology, CompressionRatio, Db, MaxBlock, SampleRate, Samples, Seconds, UnitParam,
-};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam};
 
 /// Sends each `(absolute frame, segment)` on its frame.
 #[derive(Clone)]
@@ -126,8 +125,8 @@ fn a_step_on_a_slow_control_lands_on_its_frame() {
     resent.push((
         70,
         step(4.0).resumed(
-            tutti_types::SamplePosition(0.0),
-            tutti_types::SamplePosition(0.0),
+            tutti_units::SamplePosition(0.0),
+            tutti_units::SamplePosition(0.0),
         ),
     ));
     let again = render(resent, 64);

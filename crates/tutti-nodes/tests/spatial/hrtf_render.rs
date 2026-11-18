@@ -23,7 +23,7 @@ use tutti_graph::{Node, Prepare};
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
 use tutti_types::MaxBlock;
-use tutti_types::{Azimuth, Direction, Elevation, SampleRate, Samples, Tail};
+use tutti_units::{Azimuth, Direction, Elevation, SampleRate, Samples, Tail};
 
 const RATE: u32 = 48_000;
 /// The convolution step (`tutti_dsp::HRTF_STEP`).

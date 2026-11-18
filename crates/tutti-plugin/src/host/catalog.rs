@@ -743,7 +743,7 @@ mod tests {
     use crate::host::loadable::BindError;
     use crate::host::plugin::Plugin;
     use tutti_plugin_db::{FileRow, ScanPoll, ScanResult};
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     /// Runs a scan to its end on the calling thread, applying as it goes.
     fn rescan(plugins: &mut Catalog) -> ScanResult {

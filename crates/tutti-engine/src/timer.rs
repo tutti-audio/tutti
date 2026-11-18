@@ -13,7 +13,8 @@ use std::time::Duration;
 use tutti_rt::{
     PriorityRequest, StopToken, ThreadHandle, monotonic_ns, sleep_until_ns, spawn_named,
 };
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::Samples;
 
 use crate::callback::{MAX_FRAMES, OutputBlock};
 use crate::faults::StreamFaults;

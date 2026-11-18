@@ -23,7 +23,7 @@ fn read(samples: &[f32]) -> Level {
 
 /// An amplitude-`a` sine, 64 frames per period.
 fn sine(a: f32, frames: usize) -> Vec<f32> {
-    use tutti_types::{Amplitude, Hz, SampleRate, Samples};
+    use tutti_units::{Amplitude, Hz, SampleRate, Samples};
     // One cycle per 64 frames: 1 Hz at a 64 Hz rate.
     tutti_fixtures::signal::sine(Hz(1.0), Amplitude(a), SampleRate::of(64.0), Samples(frames))
 }

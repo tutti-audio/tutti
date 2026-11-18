@@ -158,7 +158,7 @@ pub mod nodes {
     pub use tutti_nodes::{LfoNode, filters::{SvfFilterNode, SvfType}};
 }
 pub mod types {
-    pub use tutti_types::{Hz, Db};
+    pub use tutti_units::{Hz, Db};
 }
 ";
 
@@ -183,7 +183,7 @@ pub mod types {
             ("pub use local::*;", "*", 2),
             ("pub use tutti_graph::{self};", "tutti_graph", 2),
             ("pub use tutti_graph::{self as g};", "g", 2),
-            ("pub use {tutti_engine as e, tutti_types::Hz};", "e", 2),
+            ("pub use {tutti_engine as e, tutti_units::Hz};", "e", 2),
             (
                 "#[cfg(feature = \"x\")]\npub use tutti_x\n    as y;",
                 "y",

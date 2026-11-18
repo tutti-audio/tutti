@@ -28,7 +28,8 @@ use tutti_graph::{
 };
 use tutti_rt::{Overflow, RingFloat, RingReader, RingWriter, ring};
 use tutti_transport::TempoReader;
-use tutti_types::{ChannelLayout, SampleRate, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
 // Retirement — values the audio thread must not drop.

@@ -57,7 +57,7 @@
 //!
 //! ```rust
 //! use tutti_plugin_types::{ParamFlags, ParamSteps, ParameterInfo};
-//! use tutti_types::ParamId;
+//! use tutti_units::ParamId;
 //!
 //! // VST3/CLAP/AU: a plugin-chosen handle, often a hash of the name. Not an
 //! // index, not dense, not ordered.
@@ -120,8 +120,8 @@
 //!
 //! ## Where it sits
 //!
-//! Depends on `tutti-types` ([`Samples`], [`ChannelLayout`], [`ChannelTopology`], the
-//! meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt`, `tutti-ump` and
+//! Depends on `tutti-units` ([`Samples`]) and `tutti-types` ([`ChannelLayout`],
+//! [`ChannelTopology`], the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt`, `tutti-ump` and
 //! `tutti-midi-protocol`, re-exporting the parts format crates need so none of them takes its
 //! own dependency for the type names.
 //! All four format hosts and `tutti-plugin` depend on it.
@@ -142,7 +142,7 @@
 //! [`PluginDescriptor`]: crate::PluginDescriptor
 //! [`LoadedPlugin`]: crate::LoadedPlugin
 //! [`ParameterInfo`]: crate::ParameterInfo
-//! [`ParamId`]: tutti_types::ParamId
+//! [`ParamId`]: tutti_units::ParamId
 //! [`ParamRange`]: crate::ParamRange
 //! [`ParamFlags`]: crate::ParamFlags
 //! [`ParamSteps`]: crate::ParamSteps
@@ -241,18 +241,20 @@ mod wire_error;
 static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 pub use tutti_rt::{RequestBit, RequestBits, RequestWord};
+pub use tutti_types::MaxBlock;
 pub use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 /// Re-exported so every format crate spells a sample count the same way
-/// without each taking its own `tutti-types` dependency — `ChannelLayout`
+/// without each taking its own `tutti-units` dependency — `ChannelLayout`
 /// above is here for the same reason.
-pub use tutti_types::{MaxBlock, SampleRate, Samples};
+pub use tutti_units::{SampleRate, Samples};
 
 mod layout_support;
 pub use layout_support::LayoutSupport;
 // Musical vocabulary carried on `TransportInfo`. Re-exported for the same reason
 // as `ChannelLayout`: format hosts speak these at their ABI boundary and should
 // not need a `tutti-types` dependency of their own to name them.
-pub use tutti_types::{BarNumber, BeatsPerBar, NoteValue, Seconds, TimeSignature};
+pub use tutti_types::{BeatsPerBar, NoteValue, TimeSignature};
+pub use tutti_units::{BarNumber, Seconds};
 
 pub use any_thread::{AnyThread, Health};
 pub use audio::PluginAudio;

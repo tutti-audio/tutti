@@ -9,10 +9,11 @@ use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_transport::{MotionEvent, Timeline, Transport};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{Beat, BeatDuration, ChannelLayout};
-use tutti_types::{Hz, Q};
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{Beat, BeatDuration};
+use tutti_units::{Hz, Q};
+use tutti_units::{SampleRate, Samples};
 
 /// Build an engine + transport pair whose graph actually renders.
 ///
@@ -66,7 +67,7 @@ fn test_transport_advances_with_graph() {
     let sample_rate = 44100.0;
     let (transport, state) = build_callback_state(sample_rate);
 
-    transport.settings().set_tempo(tutti_types::Bpm::of(120.0));
+    transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
     let _ = transport.motion().try_send(MotionEvent::Play);
 
     let frames = 256;
@@ -89,11 +90,11 @@ fn test_transport_loop_wrapping() {
     let sample_rate = 44100.0;
     let (transport, state) = build_callback_state(sample_rate);
 
-    transport.settings().set_tempo(tutti_types::Bpm::of(120.0));
+    transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
     transport
         .motion()
         .schedule(
-            tutti_types::At::NextBlock,
+            tutti_units::At::NextBlock,
             tutti_transport::LoopEdit::over(
                 tutti_types::LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
             ),

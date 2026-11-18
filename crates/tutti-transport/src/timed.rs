@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crossbeam_queue::ArrayQueue;
-use tutti_types::At;
+use tutti_units::At;
 
 use super::loop_region::LoopEdit;
 use super::motion::MotionEvent;
@@ -361,7 +361,7 @@ impl ScheduleAudio {
             }
             if let At::Frame(_) = cmd.at {
                 cmd.pos *= ratio;
-                cmd.at = At::Frame(tutti_types::Frame::nearest(cmd.pos));
+                cmd.at = At::Frame(tutti_units::Frame::nearest(cmd.pos));
             }
         }
     }
@@ -382,7 +382,7 @@ impl Schedule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Frame;
+    use tutti_units::Frame;
 
     /// The credit is the back-pressure: with every one held the command is
     /// handed back, and applying one frees one.
@@ -410,7 +410,7 @@ mod tests {
         let s = Schedule::new();
         let play = TransportCommand::Motion(MotionEvent::Play);
         for i in 0..SCHEDULE_CAPACITY {
-            s.send(At::Beat(tutti_types::Beat(1000.0 + i as f64)), play)
+            s.send(At::Beat(tutti_units::Beat(1000.0 + i as f64)), play)
                 .expect("room");
         }
         assert!(s.send(At::Frame(Frame::new(0)), play).is_err());

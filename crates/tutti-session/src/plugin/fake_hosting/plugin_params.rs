@@ -19,8 +19,9 @@ use tutti_plugin_types::{
     ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_rt::LockExt;
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{Db, Hz, SampleRate};
 
 const CUTOFF: ParamId = ParamId::new(1);
 const LEVEL: ParamId = ParamId::new(2);
@@ -514,7 +515,7 @@ fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
 #[test]
 fn a_plugin_key_names_a_parameter_a_route_targets() {
     use crate::{ParamRef, RouteSpec};
-    use tutti_types::Depth;
+    use tutti_units::Depth;
 
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);

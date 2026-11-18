@@ -10,10 +10,10 @@
 //! ramp, a segment and an address the same way.
 
 use tutti_graph::{Cx, Event, EventKind, Offset, ParamSegment};
-use tutti_types::{ParamAddr, Samples};
+use tutti_units::{ParamAddr, Samples};
 
 use tutti_plugin_types::ParameterQueue;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::param_delivery::ParamDelivery;
 use super::segment_points::SegmentPoints;
@@ -167,8 +167,8 @@ mod tests {
         Env, Exponent, Law, ParamRamp, PlayClock, PlayReading, TransportChanges, TransportHistory,
         TransportPosition,
     };
-    use tutti_types::ParamId;
-    use tutti_types::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
+    use tutti_units::ParamId;
+    use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
     /// The block's `Env` at absolute frame 0, its play clock starting at
     /// `play`.

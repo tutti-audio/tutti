@@ -5,7 +5,8 @@
 use tutti_modulation::{Law, Lfo, Polarity, Source};
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::{ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session};
-use tutti_types::{Depth, Hz, MaxBlock, Q, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{Depth, Hz, Q, Samples};
 
 fn session() -> Session {
     Session::builder()
@@ -154,7 +155,7 @@ fn recording_where_nothing_is_automated_is_refused() {
     use std::sync::Arc;
     use tutti_nodes::automation::{RecordMode, Trajectory};
     use tutti_session::{AutomationTake, NoAutomation};
-    use tutti_types::Hz;
+    use tutti_units::Hz;
 
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(

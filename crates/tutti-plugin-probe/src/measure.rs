@@ -36,10 +36,10 @@ use tutti_plugin_types::{
     PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError, PluginIo, PluginTail, Prepare,
     ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict, Verdict,
 };
-use tutti_types::{Amplitude, Db, SampleRate, Samples, Seconds};
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
 };
+use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 /// The impulse an effect is given, on every input channel (0.1, not 1.0, for the nonlinear
 /// plugins). **The probe measures at this

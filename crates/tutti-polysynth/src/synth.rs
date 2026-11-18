@@ -8,8 +8,8 @@ use std::num::NonZeroUsize;
 use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_types::Adsr;
-use tutti_types::{Depth, Hz, Q, Resonance, Semitones};
 use tutti_ump::MidiGroup;
+use tutti_units::{Depth, Hz, Q, Resonance, Semitones};
 
 /// The waveform every sub-voice of every voice generates.
 ///

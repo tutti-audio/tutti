@@ -25,7 +25,8 @@ use tutti_nodes::{
     DelayControls, DelayNode, InterpolationMode, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{BusTopology, ChannelLayout, Feedback, Hz, Q, Resonance, SampleRate, Seconds};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
 
 const BLOCK: usize = 64;
 const SR: SampleRate = SampleRate::SR_48K;
