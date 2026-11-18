@@ -96,8 +96,10 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [target.'cfg(unix)'.dev-dependencies]
-# `orphan_watchdog`'s process control (`kill`, `waitpid`, `prctl`).
+# `orphan_watchdog`'s and `load_reply`'s process control (`kill`, `waitpid`, `prctl`).
 libc = "0.2"
+# `load_reply`: the log of a server whose host ends.
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # The AU loader's transport test pulls the host-callback procs through

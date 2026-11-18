@@ -55,6 +55,8 @@ required-features = ["server"]
 tutti-plugin = { path = "../../crates/tutti-plugin", features = ["clap", "vst2", "vst3"] }
 # `tests/probe.rs` copies the plugin under the file name its `init` reads.
 tempfile = "3"
+# `tests/probe.rs`: `HOST_PID_ENV`, and `watch_host` as the wait for a probe's end.
+tutti-plugin-ipc-ffi = { path = "../../crates/tutti-plugin-ipc-ffi" }
 # `tests/probe.rs`: a CLAP factory of two plugins and a VST2 shell of two, whose ids
 # and names the probe is held to. Dev-dependencies so cargo builds their cdylibs with
 # the test, and never named in code: a plugin's rlib carries its entry point, and two

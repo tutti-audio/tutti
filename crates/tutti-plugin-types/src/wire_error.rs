@@ -79,9 +79,18 @@ pub enum ResultError {
     /// The file is shorter than its own header or its declared payload.
     #[error("the probe result is truncated")]
     Truncated,
-    /// The file does not begin with a result's magic and version.
-    #[error("not a probe result (bad magic or version)")]
+    /// The file does not begin with a result's magic.
+    #[error("not a probe result (bad magic)")]
     BadMagic,
+    /// The file is a probe result of another format version: a probe and a host
+    /// of different builds.
+    #[error("probe result of format version {found}, this build reads {expected}")]
+    ProtocolMismatch {
+        /// The version this build reads.
+        expected: u8,
+        /// The version the file carries.
+        found: u8,
+    },
     /// The payload does not decode as a `ProbeOutcome`.
     #[error("malformed probe result: {0}")]
     Malformed(String),

@@ -11,6 +11,7 @@
 
 /// Labels the phase of plugin loading in which an error was produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum LoadStage {
     /// Resolving the plugin bundle / file on disk before opening it.

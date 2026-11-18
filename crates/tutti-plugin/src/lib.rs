@@ -423,7 +423,7 @@ pub use tutti_units::ParamId;
 ///     }
 /// };
 /// for failed in &result.failures {
-///     eprintln!("{}: {}", failed.path.display(), failed.failure.reason);
+///     eprintln!("{}: {}", failed.path.display(), failed.failure.reason());
 /// }
 /// # Ok(())
 /// # }
@@ -442,8 +442,8 @@ pub mod catalog {
     pub use crate::host::plugin::{BoundPlugin, Commit, Plugin, PluginRebinder, Rebuilt};
     pub use crate::host::plugin_ref::PluginRef;
     pub use tutti_plugin_db::{
-        FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,
-        ScanError, ScanPoll, ScanResult,
+        FileFailure, FilesError, PluginDb, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll,
+        ScanResult,
     };
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};

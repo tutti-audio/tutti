@@ -39,8 +39,8 @@ pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use mtime::{BeforeEpoch, Mtime};
 pub use scanner::{
-    FileFailure, FilesError, ProbeFailure, ProbeFailureKind, Scan, ScanBusy, ScanError, ScanPoll,
-    ScanProgress, ScanResult, Scanner, probe_plugin_fallback,
+    FileFailure, FilesError, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll, ScanProgress,
+    ScanResult, Scanner, probe_plugin_fallback,
 };
 pub use table::{BlacklistedFile, FileRow, FileState, PluginDb, PluginEntry, RowChange};
 #[cfg(feature = "serde")]

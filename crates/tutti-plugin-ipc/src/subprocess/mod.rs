@@ -5,7 +5,7 @@ mod launch;
 mod reaped;
 
 pub(crate) use launch::swap_slab;
-pub use launch::{HOST_PID_ENV, LaunchedServer, launch};
+pub use launch::{LaunchedServer, launch};
 pub use reaped::Reaped;
 
 // The `*_with` entry points are deliberately NOT re-exported. They exist so a
