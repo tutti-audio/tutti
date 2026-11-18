@@ -204,6 +204,8 @@ macro_rules! rounding_pins {
                 (-2.5, -3.0, -2.0),
                 (0.3, 0.0, 0.0),
                 (-0.3, -0.0, -0.0),
+                // The value just under a half rounds down: `floor(x + 0.5)` would carry it to 1.
+                (0.5 - <$t>::EPSILON / 4.0, 0.0, 0.0),
             ] {
                 assert_eq!(round(x).to_bits(), <$t>::to_bits(away), "round {x}");
                 assert_eq!(even(x).to_bits(), <$t>::to_bits(ties), "ties to even {x}");

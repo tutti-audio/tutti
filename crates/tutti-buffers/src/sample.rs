@@ -480,7 +480,8 @@ pub trait Float:
 macro_rules! float_impl {
     (
         $t:ident,
-        $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident, $sqrt:ident, $exp:ident, $exp2:ident,
+        $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident,
+        $sqrt:ident, $exp:ident, $exp2:ident,
         $ln:ident, $log10:ident, $pow:ident, $sin:ident, $cos:ident, $tan:ident,
         $tanh:ident, $atan2:ident, $fma:ident, $min:ident, $max:ident, $copysign:ident
     ) => {
