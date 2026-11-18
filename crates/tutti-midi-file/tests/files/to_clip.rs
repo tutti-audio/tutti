@@ -8,12 +8,12 @@
 //! tests in `clip_model.rs`, and here it checks that the Flex and SysEx7
 //! packets the conversion makes survive them.
 
-use crate::common::{metrical, note, track};
+use crate::common::{self, metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, FileEvent, Lead, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
-    SmfDivision, SmfFormat, SmfPart, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick,
+    SmfDivision, SmfFormat, SmfPart, SmpteFractionalFrames, SmpteOffset, TextKind, Tick,
     ToClipError, Track,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
@@ -293,7 +293,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
 fn a_complete_sysex_is_sysex7_packets() {
     let smf = format0(vec![(
         5,
-        FileEvent::SysEx(SysEx::Complete(vec![0x7E, 1, 2, 3, 4, 5, 6].into())),
+        FileEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6])),
     )]);
     let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
@@ -315,9 +315,10 @@ fn a_complete_sysex_is_sysex7_packets() {
 
 #[test]
 fn a_sysex_that_is_not_one_complete_message_is_reported() {
-    let divided = FileEvent::SysEx(SysEx::Start(vec![0x7E, 1, 2].into()));
+    let divided = FileEvent::SysEx(common::start(&[0x7E, 1, 2]));
     let rest = FileEvent::Escape(vec![3, 0xF7].into());
-    let eight_bit = FileEvent::SysEx(SysEx::Complete(vec![0x7E, 0x80].into()));
+    // An `F0` event with an 8-bit byte is read as the escape of the bytes it sends.
+    let eight_bit = FileEvent::Escape(vec![0xF0, 0x7E, 0x80, 0xF7].into());
     let smf = MidiFile::from_bytes(&build_smf(
         0,
         Division::Metrical(TPQ),
@@ -343,11 +344,7 @@ fn a_sysex_that_is_not_one_complete_message_is_reported() {
                 DropReason::SysexNotCompleteSevenBit
             ),
             (1, SmfPart::Event(rest), DropReason::NoSuccessor),
-            (
-                2,
-                SmfPart::Event(eight_bit),
-                DropReason::SysexNotCompleteSevenBit
-            ),
+            (2, SmfPart::Event(eight_bit), DropReason::NoSuccessor),
         ]
     );
 }
@@ -665,6 +662,37 @@ fn the_first_track_names_the_sequence_and_the_others_are_reported() {
     );
 }
 
+/// `Converted::dropped` is by tick, then track, then the track's own order: a
+/// track's dropped field (at tick 0) comes after the events of the tracks
+/// before it at tick 0 and before its own.
+#[test]
+fn a_dropped_field_sorts_among_the_dropped_events_by_tick_then_track() {
+    let marker = || text(TextKind::Marker, "m");
+    let smf = MidiFile::smf(
+        SmfFormat::Parallel,
+        SMF_DIVISION,
+        vec![
+            track(vec![(0, marker())]),
+            track(vec![(0, marker())]).named("Violin"),
+        ],
+    )
+    .unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
+    let order: Vec<_> = converted
+        .dropped
+        .iter()
+        .map(|d| (d.track, d.reason))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (0, DropReason::NoSuccessor),
+            (1, DropReason::TrackName),
+            (1, DropReason::NoSuccessor),
+        ]
+    );
+}
+
 /// Flex text is UTF-8 and zero-padded (M2-104 section 7.5.9); a generic text
 /// event is Unknown Metadata Text.
 #[test]
@@ -730,11 +758,7 @@ fn text_is_composed_to_nfc_without_a_byte_order_mark() {
 #[test]
 fn property_exchange_and_empty_text_are_reported() {
     // F0 7E 7F 0D <sub-ID#2> ... F7, the bytes after the F0.
-    let ci = |sub_id2: u8| {
-        FileEvent::SysEx(SysEx::Complete(
-            vec![0x7E, 0x7F, 0x0D, sub_id2, 0x02].into(),
-        ))
-    };
+    let ci = |sub_id2: u8| FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x0D, sub_id2, 0x02]));
     let smf = format0(vec![
         (0, ci(0x34)), // Inquiry: Get Property Data
         (1, ci(0x3F)), // Notify
@@ -782,7 +806,7 @@ fn the_clip_round_trips_through_its_bytes() {
                 (480, note(0, 62)),
                 (
                     960,
-                    FileEvent::SysEx(SysEx::Complete(vec![0x7E, 1, 2, 3, 4, 5, 6, 7].into())),
+                    FileEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6, 7])),
                 ),
             ])
             .copyright("a rather long copyright notice"),

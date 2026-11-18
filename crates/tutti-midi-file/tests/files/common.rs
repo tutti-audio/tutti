@@ -1,7 +1,7 @@
 //! What the file tests share: a track of events and a note.
 
 use tutti_midi_file::{
-    FileEvent, MetricalSequences, MetricalView, MidiFile, Tick, Timebase, Track,
+    FileEvent, MetricalSequences, MetricalView, MidiFile, SysEx, Tick, Timebase, Track,
 };
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
 
@@ -31,4 +31,14 @@ pub fn sequences(file: &MidiFile) -> MetricalSequences<'_> {
         panic!("a metrical file of independent sequences");
     };
     view
+}
+
+/// A whole SysEx message of the 7-bit `bytes`.
+pub fn complete(bytes: &[u8]) -> SysEx {
+    SysEx::complete(bytes).expect("7-bit data")
+}
+
+/// The first packet of a divided SysEx message, of the 7-bit `bytes`.
+pub fn start(bytes: &[u8]) -> SysEx {
+    SysEx::start(bytes).expect("7-bit data")
 }

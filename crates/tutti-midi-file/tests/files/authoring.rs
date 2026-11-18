@@ -5,14 +5,14 @@
 //! tick grid and the SysEx event, M2-104 section 7.7 for SysEx7 packets), not
 //! read back from the code under test.
 
-use crate::common::{metrical, sequences};
+use crate::common::{self, metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
 use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, SysEx,
-    TextKind, Tick, TimelineDrop, Track, TrackPart, TracksError,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
+    Tick, TimelineDrop, Track, TrackPart, TracksError,
 };
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{
@@ -269,13 +269,14 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
             (Beat(2.0), SysexStatus::End, vec![7, 8, 9, 10]),
         ]
     );
-    // The 8-bit message is dropped with its bytes.
+    // An `F0` event with an 8-bit byte is read as the escape of the bytes it
+    // sends, which no SysEx7 packet holds.
     assert_eq!(
         timeline.dropped,
         [(
             Beat(2.0),
-            FileEvent::SysEx(SysEx::Complete(vec![0x90].into())),
-            TimelineDrop::NotSevenBit
+            FileEvent::Escape(vec![0xF0, 0x90, 0xF7].into()),
+            TimelineDrop::BareEscape
         ),]
     );
 }
@@ -305,7 +306,7 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
     let track = Track::new()
         .push(
             Tick(0),
-            FileEvent::SysEx(SysEx::Start(vec![0x43, 0x12, 0x00].into())),
+            FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00])),
         )
         .unwrap()
         .push(
@@ -342,7 +343,7 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
 fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_intervene() {
     let part: Vec<u8> = (1..=8).collect();
     let track = Track::new()
-        .push(Tick(0), FileEvent::SysEx(SysEx::Start(part.clone().into())))
+        .push(Tick(0), FileEvent::SysEx(common::start(&part.clone())))
         .unwrap()
         .push(Tick(10), Meta::text(TextKind::Marker, "m"))
         .unwrap()
@@ -368,7 +369,7 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
 #[test]
 fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     let escape = FileEvent::Escape(vec![0xF3, 0x01].into());
-    let first = FileEvent::SysEx(SysEx::Start(vec![1, 2].into()));
+    let first = FileEvent::SysEx(common::start(&[1, 2]));
     let second = FileEvent::Escape(vec![3, 0xF7].into());
     let f = MidiFile::from_bytes(&build_smf(
         1,
@@ -424,8 +425,8 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
 /// listed as `UnknownPacket`.
 #[test]
 fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
-    let part = FileEvent::SysEx(SysEx::Start(vec![1, 0x90].into()));
-    let end = FileEvent::Escape(vec![2, 0xF7].into());
+    let part = FileEvent::SysEx(common::start(&[1]));
+    let end = FileEvent::Escape(vec![0x90, 0xF7].into());
     let track = Track::new()
         .push(Tick(0), part.clone())
         .unwrap()

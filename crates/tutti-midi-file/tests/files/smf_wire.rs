@@ -2,11 +2,11 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{metrical, note, track};
+use crate::common::{self, metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, SysEx, TextKind, Tick,
+    SmfParseError, TextKind, Tick,
 };
 use tutti_types::Seconds;
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
@@ -425,7 +425,7 @@ fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
         track_body(vec![
             (
                 0,
-                FileEvent::SysEx(SysEx::Complete(Box::new([0x7E, 0x7F, 0x09, 0x01])))
+                FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
             ),
             (0, FileEvent::Escape(Box::new([1, 2, 3]))),
         ]),
@@ -464,10 +464,7 @@ fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     ]
     .concat();
     assert_eq!(
-        track_body(vec![(
-            0,
-            FileEvent::SysEx(SysEx::Complete(data.into_boxed_slice()))
-        )]),
+        track_body(vec![(0, FileEvent::SysEx(common::complete(&data)))]),
         want
     );
 }
@@ -486,10 +483,7 @@ fn a_written_file_reads_back_equal() {
         ),
         (0, note(0, 60)),
         (5, note(0, 62)),
-        (
-            200,
-            FileEvent::SysEx(SysEx::Complete(Box::new([0x7E, 0x7F]))),
-        ),
+        (200, FileEvent::SysEx(common::complete(&[0x7E, 0x7F]))),
         (200, FileEvent::Escape(Box::new([1, 2]))),
         (300, note(0, 64)),
         (0x0FFF_FFFF, note(0, 65)),
@@ -669,7 +663,7 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
     let busy = track(vec![
         (0, note(0, 60)),
         (0, note(0, 62)),
-        (5, FileEvent::SysEx(SysEx::Complete(vec![0x7E; 129].into()))),
+        (5, FileEvent::SysEx(common::complete(&[0x7E; 129]))),
         (
             5,
             FileEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),
@@ -812,7 +806,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         read.tracks()[0].events(),
         [(
             Tick(0),
-            FileEvent::SysEx(SysEx::Complete(Box::new([0x43, 0x12, 0x00, 0x07])))
+            FileEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
         )]
     );
     assert_eq!(read.to_bytes(), whole);
@@ -829,7 +823,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         [
             (
                 Tick(0),
-                FileEvent::SysEx(SysEx::Start(Box::new([0x43, 0x12, 0x00])))
+                FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00]))
             ),
             (
                 Tick(200),

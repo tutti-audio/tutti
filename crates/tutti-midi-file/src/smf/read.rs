@@ -198,12 +198,14 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<SmfP
 }
 
 /// What an event of a track is: an event of the model, one of the meta events
-/// that open a track (a [`Lead`], which the model keeps as a field), or the End
-/// of Track that ends the track.
+/// that open a track (a [`Lead`], which the model keeps as a field, with the
+/// bytes past what it defines), an `F0` event with an 8-bit byte (its data), or
+/// the End of Track that ends the track.
 #[derive(Clone)]
 enum Item {
     Event(FileEvent),
-    Lead(Lead),
+    Lead(Lead, Box<[u8]>),
+    EightBitSysEx(Box<[u8]>),
     EndOfTrack,
 }
 
@@ -246,14 +248,19 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
             minor: minor == 1,
             extra: extra.into(),
         },
-        (0x02, _) => return Item::Lead(Lead::Copyright(data.into())),
-        (0x03, _) => return Item::Lead(Lead::TrackName(data.into())),
-        (0x00, &[a, b, ..]) => return Item::Lead(Lead::SequenceNumber(u16::from_be_bytes([a, b]))),
+        (0x02, _) => return Item::Lead(Lead::Copyright(data.into()), Box::default()),
+        (0x03, _) => return Item::Lead(Lead::TrackName(data.into()), Box::default()),
+        (0x00, &[a, b, ref extra @ ..]) => {
+            return Item::Lead(
+                Lead::SequenceNumber(u16::from_be_bytes([a, b])),
+                extra.into(),
+            );
+        }
         (0x54, _) => {
-            if let Some((wire, _)) = split_extra(data)
+            if let Some((wire, extra)) = split_extra(data)
                 && let Some(offset) = SmpteOffset::from_wire(wire)
             {
-                return Item::Lead(Lead::SmpteOffset(offset));
+                return Item::Lead(Lead::SmpteOffset(offset), extra);
             }
             Meta::Malformed(MalformedMeta::new(kind, data))
         }
@@ -307,11 +314,11 @@ fn meta(input: &mut &[u8]) -> Res<Item> {
 
 /// The `F0` event's data as the model's message: one that ends in `F7` is
 /// whole, whose `F7` the model leaves to the writer, and one that does not is
-/// the first packet of a divided message.
-fn sysex(data: &[u8]) -> SysEx {
+/// the first packet of a divided message. `None` for a byte of 128 or more.
+fn sysex(data: &[u8]) -> Option<SysEx> {
     match data.split_last() {
-        Some((0xF7, whole)) => SysEx::Complete(whole.into()),
-        _ => SysEx::Start(data.into()),
+        Some((0xF7, whole)) => SysEx::complete(whole),
+        _ => SysEx::start(data),
     }
 }
 
@@ -329,7 +336,13 @@ fn event<'a>(
     (vlq, status).flat_map(|(delta, status)| {
         dispatch! { move |_: &mut &'a [u8]| Ok::<u8, ContextError<SmfParseError>>(status);
             0xFF => meta.map(|e| (e, None)),
-            0xF0 => counted(vlq).map(|d| (Item::Event(FileEvent::SysEx(sysex(d))), None)),
+            0xF0 => counted(vlq).map(|d| {
+                let item = sysex(d).map_or_else(
+                    || Item::EightBitSysEx(d.into()),
+                    |sysex| Item::Event(FileEvent::SysEx(sysex)),
+                );
+                (item, None)
+            }),
             0xF7 => counted(vlq).map(|d| (Item::Event(FileEvent::Escape(d.into())), None)),
             0x80..=0xEF => channel(status).map(move |e| (Item::Event(e), Some(status))),
             _ => refuse(SmfParseError::SystemStatus),
@@ -416,7 +429,14 @@ fn settle(track: &mut Track, lead: Lead, tick: Tick, leading: bool) -> Option<(L
 /// Ends the divided System Exclusive messages of `events` that are interrupted
 /// by a channel message or another `F0` event, or never end in an `F7` packet
 /// (SMF 1.0 section 3): the first packet becomes a whole message.
-fn close_sysex(track: usize, events: &mut [(Tick, FileEvent)], changes: &mut Vec<Normalized>) {
+///
+/// `raw` are the events that are an `F0` event read as an escape.
+fn close_sysex(
+    track: usize,
+    events: &mut [(Tick, FileEvent)],
+    raw: &[usize],
+    changes: &mut Vec<Normalized>,
+) {
     let mut close = |events: &mut [(Tick, FileEvent)], index: usize| {
         let (at, event) = &mut events[index];
         if let FileEvent::SysEx(SysEx::Start(data)) = event {
@@ -433,6 +453,11 @@ fn close_sysex(track: usize, events: &mut [(Tick, FileEvent)], changes: &mut Vec
                 }
                 if matches!(events[index].1, FileEvent::SysEx(SysEx::Start(_))) {
                     open = Some(index);
+                }
+            }
+            FileEvent::Escape(_) if raw.contains(&index) => {
+                if let Some(first) = open.take() {
+                    close(events, first);
                 }
             }
             FileEvent::Escape(data) if data.last() == Some(&0xF7) => open = None,
@@ -463,16 +488,41 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Vec<Normalized>), Failure>
     let mut events = Vec::with_capacity(count);
     let mut leads = Track::new();
     let mut changes = Vec::new();
+    let mut raw = Vec::new();
     // Only meta events, all at tick 0, so far.
     let mut leading = true;
     let mut end = None;
+    // The last tick of any item, a dropped one included: a track with no End
+    // of Track ends there.
+    let mut last = Tick(0);
     for (position, (tick, item, at)) in items.into_iter().enumerate() {
+        if !matches!(item, Item::EndOfTrack) {
+            last = last.max(tick);
+        }
         match item {
             Item::Event(event) => {
                 leading &= tick == Tick(0) && matches!(event, FileEvent::Meta(_));
                 events.push((tick, event));
             }
-            Item::Lead(lead) => {
+            Item::EightBitSysEx(data) => {
+                leading = false;
+                raw.push(events.len());
+                let bytes = std::iter::once(0xF0).chain(data.iter().copied()).collect();
+                events.push((tick, FileEvent::Escape(bytes)));
+                changes.push(Normalized::SysExEscaped {
+                    track: index,
+                    at: tick,
+                });
+            }
+            Item::Lead(lead, extra) => {
+                if !extra.is_empty() {
+                    changes.push(Normalized::Lead {
+                        track: index,
+                        at: tick,
+                        lead: lead.clone(),
+                        placement: Placement::Truncated(extra),
+                    });
+                }
                 changes.extend(
                     settle(&mut leads, lead, tick, leading).map(|(lead, placement)| {
                         Normalized::Lead {
@@ -494,11 +544,8 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Vec<Normalized>), Failure>
             }
         }
     }
-    close_sysex(index, &mut events, &mut changes);
-    // A track with no End of Track ends at its last event.
-    let end = end
-        .or_else(|| events.last().map(|&(tick, _)| tick))
-        .unwrap_or(Tick(0));
+    close_sysex(index, &mut events, &raw, &mut changes);
+    let end = end.unwrap_or(last);
     let mut track = Track::from_read(Vec::new(), Tick(0), events, end);
     (track.number, track.name, track.smpte_start, track.copyright) =
         (leads.number, leads.name, leads.smpte_start, leads.copyright);

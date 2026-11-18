@@ -430,16 +430,48 @@ impl Meta {
 /// [`Escape`](FileEvent::Escape) events, the last ending in `F7`, with no
 /// channel message or other `F0` event between ([`TracksError::SysExInterrupted`],
 /// [`TracksError::SysExNotEnded`]).
+///
+/// The payload is 7-bit: `F0` and `F7` are not part of it, and a byte of 128 or
+/// more is a status byte, so none can be built ([`complete`](Self::complete),
+/// [`start`](Self::start)). A packet that ends in `F7` is a whole message on the
+/// wire, so a `Start` never does. A file whose `F0` event holds an 8-bit byte
+/// is read as an [`Escape`](FileEvent::Escape) of the bytes it transmits
+/// ([`Normalized::SysExEscaped`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SysEx {
     /// A whole message: the bytes between the `F0` and the `F7`, which is not
     /// part of them.
-    Complete(Box<[u8]>),
-    /// The first packet of a divided message: the bytes after the `F0`, which
-    /// do not end in `F7` (a packet that does is a [`Complete`](Self::Complete)
-    /// message on the wire).
-    Start(Box<[u8]>),
+    Complete(Box<[U7]>),
+    /// The first packet of a divided message: the bytes after the `F0`.
+    Start(Box<[U7]>),
+}
+
+impl SysEx {
+    /// A whole message of `bytes`, `None` if one is 128 or more.
+    #[must_use]
+    pub fn complete(bytes: &[u8]) -> Option<Self> {
+        seven_bit(bytes).map(Self::Complete)
+    }
+
+    /// The first packet of a divided message of `bytes`, `None` if one is 128
+    /// or more (the `F7` that ends the message is in its last packet).
+    #[must_use]
+    pub fn start(bytes: &[u8]) -> Option<Self> {
+        seven_bit(bytes).map(Self::Start)
+    }
+
+    /// The payload.
+    #[must_use]
+    pub fn data(&self) -> &[U7] {
+        let (Self::Complete(data) | Self::Start(data)) = self;
+        data
+    }
+}
+
+/// `bytes` as 7-bit data, `None` if any is 128 or more.
+fn seven_bit(bytes: &[u8]) -> Option<Box<[U7]>> {
+    bytes.iter().map(|&b| U7::new(b)).collect()
 }
 
 /// One event of a track.
@@ -528,9 +560,9 @@ impl Lead {
     }
 }
 
-/// What a read did to a [`Lead`] event that was not where SMF 1.0 section 3.3
-/// puts it ([`Normalized::Lead`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// What a read did to a [`Lead`] event that was not as SMF 1.0 section 3.3 has
+/// it ([`Normalized::Lead`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Placement {
     /// The event was at tick 0 but not at the start of its track (a Track
@@ -546,6 +578,11 @@ pub enum Placement {
     /// SMPTE Offset outside the first track of a format 1 file, or a copyright
     /// notice outside the first track: it is dropped.
     NotInFirstTrack,
+    /// A Sequence Number or SMPTE Offset longer than the bytes it defines (SMF
+    /// 1.0 section 3.3: a program ignores everything past what it knows): the
+    /// event is kept as the track's field, these bytes past its own are
+    /// dropped. Listed beside the event's own entry when it is also misplaced.
+    Truncated(Box<[u8]>),
 }
 
 /// One change a read made to the file so that it can be written
@@ -564,6 +601,15 @@ pub enum Normalized {
         lead: Lead,
         /// What was done.
         placement: Placement,
+    },
+    /// An `F0` event with a byte of 128 or more, which no [`SysEx`] holds: it
+    /// became the [`Escape`](FileEvent::Escape) of the bytes it transmits, the
+    /// `F0`, its data and the `F7` it ends with if it has one.
+    SysExEscaped {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
     },
     /// A divided System Exclusive message that was interrupted by a channel
     /// message or another `F0` event, or never ended in `F7`: its first packet
@@ -589,6 +635,9 @@ pub enum Normalized {
 /// every event, in tutti's order: copyright (section 3.3: "the first
 /// event in the first track chunk"), Sequence Number, Track Name, SMPTE
 /// Offset; the specification does not order the other three among themselves.
+/// They are written ahead of every other event at tick 0, so a track read with
+/// a Set Tempo and then a Track Name at tick 0 writes back with the Track Name
+/// first.
 /// So a track cannot hold one late, and one field holds the one notice a file
 /// has. A Clip File's track has none of them.
 ///
@@ -2148,18 +2197,21 @@ impl Timeline {
             .iter()
             .enumerate()
             .map(|(i, &(beat, event))| {
-                let data = match event {
-                    FileEvent::SysEx(SysEx::Complete(data) | SysEx::Start(data)) => &data[..],
+                let bytes: Option<Vec<U7>> = match event {
+                    FileEvent::SysEx(sysex) => Some(sysex.data().to_vec()),
                     // The last packet of a divided message ends in `F7`, which
                     // no SysEx7 packet holds.
-                    FileEvent::Escape(data) if i + 1 == parts.len() => &data[..data.len() - 1],
-                    FileEvent::Escape(data) => &data[..],
-                    _ => return Some((beat, Vec::new())),
+                    FileEvent::Escape(data) => {
+                        let data = if i + 1 == parts.len() {
+                            &data[..data.len() - 1]
+                        } else {
+                            &data[..]
+                        };
+                        data.iter().map(|&b| U7::new(b)).collect()
+                    }
+                    _ => Some(Vec::new()),
                 };
-                data.iter()
-                    .map(|&b| U7::new(b))
-                    .collect::<Option<Vec<U7>>>()
-                    .map(|bytes| (beat, bytes))
+                bytes.map(|bytes| (beat, bytes))
             })
             .collect();
         let Some(payloads) = payloads else {

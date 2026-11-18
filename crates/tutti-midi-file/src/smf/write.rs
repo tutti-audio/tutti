@@ -141,9 +141,16 @@ fn encode(event: &FileEvent) -> Option<Encoded> {
         }
         FileEvent::SysEx(SysEx::Complete(data)) => Some(Encoded::Other(counted(
             &[0xF0],
-            &[&data[..], &[0xF7]].concat(),
+            &data
+                .iter()
+                .map(|b| b.get())
+                .chain([0xF7])
+                .collect::<Vec<u8>>(),
         ))),
-        FileEvent::SysEx(SysEx::Start(data)) => Some(Encoded::Other(counted(&[0xF0], data))),
+        FileEvent::SysEx(SysEx::Start(data)) => Some(Encoded::Other(counted(
+            &[0xF0],
+            &data.iter().map(|b| b.get()).collect::<Vec<u8>>(),
+        ))),
         FileEvent::Escape(data) => Some(Encoded::Other(counted(&[0xF7], data))),
         FileEvent::Meta(meta) => {
             let (kind, data) = meta_parts(meta);
@@ -245,7 +252,11 @@ pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
                     // The `F7` the writer adds.
                     counted_len(1, data.len() + 1)?
                 }
-                FileEvent::SysEx(SysEx::Start(data)) | FileEvent::Escape(data) => {
+                FileEvent::SysEx(SysEx::Start(data)) => {
+                    running = None;
+                    counted_len(1, data.len())?
+                }
+                FileEvent::Escape(data) => {
                     running = None;
                     counted_len(1, data.len())?
                 }

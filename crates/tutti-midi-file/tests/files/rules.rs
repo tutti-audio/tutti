@@ -5,7 +5,7 @@
 //! in a file that breaks them, and the tempo and time signature a file
 //! specifies. Each figure is a byte or a value written from the specification.
 
-use crate::common::{metrical, note, sequences, track};
+use crate::common::{self, metrical, note, sequences, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
@@ -44,11 +44,11 @@ fn ev(meta: Meta) -> FileEvent {
 
 /// A whole SysEx message and the first packet of a divided one.
 fn complete(data: &[u8]) -> FileEvent {
-    FileEvent::SysEx(SysEx::Complete(data.into()))
+    FileEvent::SysEx(common::complete(data))
 }
 
 fn start(data: &[u8]) -> FileEvent {
-    FileEvent::SysEx(SysEx::Start(data.into()))
+    FileEvent::SysEx(common::start(data))
 }
 
 /// What a read changed: a `Lead` event of `track` at `at`, and what was done.
@@ -770,6 +770,128 @@ fn a_second_opening_meta_is_a_listed_duplicate() {
             ),
         ]
     );
+}
+
+/// A Sequence Number or SMPTE Offset with data past the bytes it defines keeps
+/// the event and drops the rest (SMF 1.0 section 3.3: a program ignores
+/// everything past what it knows); the read lists the bytes it dropped, also
+/// for an event it drops as late.
+#[test]
+fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
+    let at = offset(1, 2, 3, 4, SmpteFrameRate::Fps25, 5);
+    let file = read(
+        0,
+        &[vec![
+            meta(0, 0x00, &[0, 7, 0xAA, 0xBB]),
+            meta(0, 0x54, &[1 << 5 | 1, 2, 3, 4, 5, 0xCC]),
+        ]],
+    );
+    assert_eq!(file.tracks()[0].sequence_number(), Some(7));
+    assert_eq!(file.smpte_offset(0), Some(at));
+    let truncated = |lead, extra: &[u8]| changed(0, 0, lead, Placement::Truncated(extra.into()));
+    assert_eq!(
+        file.normalized(),
+        [
+            truncated(Lead::SequenceNumber(7), &[0xAA, 0xBB]),
+            truncated(Lead::SmpteOffset(at), &[0xCC]),
+        ]
+    );
+    assert_eq!(body(&file)[..6], [0, 0xFF, 0x00, 2, 0, 7]);
+    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
+    // Late as well: both changes are listed.
+    let late = read(
+        0,
+        &[vec![
+            RawEvent::note_on(0, 0, 60, 100),
+            meta(0, 0x00, &[0, 7, 0xAA]),
+        ]],
+    );
+    assert_eq!(
+        late.normalized(),
+        [
+            truncated(Lead::SequenceNumber(7), &[0xAA]),
+            changed(0, 0, Lead::SequenceNumber(7), Placement::Late),
+        ]
+    );
+}
+
+/// A track with no End of Track ends at its last item, a dropped late event
+/// included: dropping it does not move the end.
+#[test]
+fn a_dropped_late_event_does_not_move_the_end_of_a_track_with_no_end_of_track() {
+    let mut bytes = build_smf(
+        0,
+        Division::Metrical(TPQ),
+        &[vec![
+            RawEvent::note_on(0, 0, 60, 100),
+            RawEvent::note_off(50, 0, 60, 0),
+            meta(50, 0x03, b"late"),
+        ]],
+    );
+    // Cut the End of Track (`00 FF 2F 00`) and the chunk's length with it.
+    bytes.truncate(bytes.len() - 4);
+    let length = u32::from_be_bytes(bytes[18..22].try_into().unwrap()) - 4;
+    bytes[18..22].copy_from_slice(&length.to_be_bytes());
+    let file = MidiFile::from_bytes(&bytes).unwrap();
+    assert_eq!(file.tracks()[0].end(), Tick(100));
+    assert_eq!(file.tracks()[0].events().len(), 2);
+    assert_eq!(
+        file.normalized(),
+        [changed(
+            0,
+            100,
+            Lead::TrackName(b"late".as_slice().into()),
+            Placement::Late
+        )]
+    );
+}
+
+/// A SysEx payload is 7-bit: `F0` and `F7` are not part of it, and a byte of
+/// 128 or more is refused when it is built.
+#[test]
+fn a_sysex_payload_refuses_a_byte_of_128_or_more() {
+    for byte in [0x80, 0xF0, 0xF7, 0xFF] {
+        assert_eq!(SysEx::complete(&[1, byte]), None, "{byte:#x}");
+        assert_eq!(SysEx::start(&[byte]), None, "{byte:#x}");
+    }
+    assert!(SysEx::complete(&[0, 0x7F]).is_some());
+    assert!(SysEx::start(&[]).is_some());
+}
+
+/// An `F0` event with a byte of 128 or more is no SysEx message: it is read as
+/// the escape of the bytes it sends, and it interrupts a divided message before
+/// it.
+#[test]
+fn an_f0_event_with_an_8_bit_byte_is_read_as_an_escape() {
+    let file = read(
+        0,
+        &[vec![
+            RawEvent::new(0, [0xF0, 2, 1, 2]),
+            RawEvent::new(1, [0xF0, 3, 0x90, 5, 0xF7]),
+        ]],
+    );
+    let events: Vec<_> = file.tracks()[0].events().iter().map(|(_, e)| e).collect();
+    assert_eq!(events[0], &complete(&[1, 2]));
+    assert_eq!(
+        events[1],
+        &FileEvent::Escape(vec![0xF0, 0x90, 5, 0xF7].into())
+    );
+    assert_eq!(
+        file.normalized(),
+        [
+            Normalized::SysExEscaped {
+                track: 0,
+                at: Tick(1)
+            },
+            Normalized::SysExClosed {
+                track: 0,
+                at: Tick(0)
+            },
+        ]
+    );
+    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
 }
 
 /// A copyright notice is in the first track: one in another track is dropped

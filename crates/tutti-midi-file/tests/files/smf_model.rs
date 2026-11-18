@@ -7,7 +7,7 @@
 //! differ, so equality is on the model and on the independent decoder's
 //! reading of the bytes, never on the bytes.
 
-use crate::common::{metrical, sequences, track};
+use crate::common::{self, metrical, sequences, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
@@ -204,7 +204,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         );
         assert_eq!(
             at(21).1,
-            FileEvent::SysEx(SysEx::Complete(vec![0x7E, 0x7F, 0x09, 0x01].into()))
+            FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
         );
         // The `F7` ends it and the writer adds it, so the model holds 300 bytes.
         let FileEvent::SysEx(SysEx::Complete(long)) = &at(22).1 else {
@@ -963,10 +963,7 @@ fn an_event_longer_than_28_bits_is_too_large() {
         MidiFile::smf(
             SmfFormat::SingleTrack,
             SMF_DIVISION,
-            vec![track(vec![(
-                0,
-                FileEvent::SysEx(SysEx::Complete(data.into())),
-            )])],
+            vec![track(vec![(0, FileEvent::SysEx(common::complete(&data)))])],
         )
         .map(drop)
     };

@@ -77,9 +77,9 @@ pub enum DropReason {
     /// A Time Signature with a numerator of 0, a bar of no beats: the Flex
     /// field holds a value from 1 to 256 (M2-104 section 7.5.4).
     ZeroNumerator,
-    /// A System Exclusive event that is not one complete message of 7-bit
-    /// bytes from `F0` to `F7`: a divided message (its `F0` part has no `F7`)
-    /// or one with an 8-bit byte. SysEx7 carries only the complete one.
+    /// A System Exclusive event that is not one complete message from `F0` to
+    /// `F7`: the first packet of a divided message (its `F0` part has no `F7`).
+    /// SysEx7 carries only the complete one.
     SysexNotCompleteSevenBit,
     /// A MIDI-CI Property Exchange message (Universal System Exclusive
     /// `7E`, sub-ID#1 `0D`, sub-ID#2 `30` to `3F`, M2-101 section 8):
@@ -377,13 +377,11 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropRe
         // A divided message's first packet is not one complete message.
         FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotCompleteSevenBit),
         FileEvent::SysEx(SysEx::Complete(body)) => {
-            if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = **body {
+            let body: Vec<u8> = body.iter().map(|b| b.get()).collect();
+            if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = *body {
                 return Err(DropReason::PropertyExchange);
             }
-            let whole: Vec<u8> = std::iter::once(0xF0)
-                .chain(body.iter().copied())
-                .chain([0xF7])
-                .collect();
+            let whole: Vec<u8> = std::iter::once(0xF0).chain(body).chain([0xF7]).collect();
             let message = SysexMessage::from_framed(&whole)
                 .map_err(|_| DropReason::SysexNotCompleteSevenBit)?;
             other(message.packets(MidiGroup::FIRST).map(event).collect())
@@ -733,6 +731,9 @@ impl MetricalView<'_> {
                 }),
             }
         }
+        // The fields of a track are dropped before its events, so they sort
+        // into the documented order (by tick, then track, then the track's own).
+        dropped.sort_by_key(|d| (d.tick, d.track));
         // Stable: within a tick and rank, the merge order.
         placed.sort_by_key(|&(tick, rank, _)| (tick, rank));
 
