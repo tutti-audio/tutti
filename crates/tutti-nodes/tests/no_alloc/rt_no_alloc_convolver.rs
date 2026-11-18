@@ -29,7 +29,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
     let irs = |n: usize| -> Vec<Vec<f32>> { (0..n).map(|p| response(3 + p, len)).collect() };
     for width in [1usize, 2, 6, MAX_CHANNELS] {
         let irs = irs(width);
-        let refs: Vec<&[f32]> = irs.iter().map(Vec::as_slice).collect();
+        let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("per channel x{width}"),
             ConvolverNode::per_channel(&refs, 32).unwrap(),

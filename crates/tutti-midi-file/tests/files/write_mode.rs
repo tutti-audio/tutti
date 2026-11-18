@@ -17,7 +17,7 @@ fn a_written_file_has_the_umask_mode_not_the_private_temp_mode() {
     let path = dir.path().join("a.mid");
     MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(96),
+        SmfDivision::per_quarter(96),
         vec![track(vec![])],
     )
     .unwrap()

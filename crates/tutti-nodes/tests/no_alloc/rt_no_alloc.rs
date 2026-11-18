@@ -1,6 +1,7 @@
 //! Regression gate for RT-safety: built-in nodes must not allocate on the
 //! process path. The panner tests are `spatial_rt_no_alloc.rs`.
 
+use tutti_buffers::{Mono, MonoMut};
 use tutti_types::Drive;
 use tutti_types::{SampleRate, Seconds};
 
@@ -31,7 +32,7 @@ fn convolver_process_is_allocation_free() {
     use tutti_nodes::ConvolverNode;
 
     let ir = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
-    gate(ConvolverNode::new(&ir, 512));
+    gate(ConvolverNode::new(Mono::new(&ir), 512));
 }
 #[test]
 fn dual_mono_convolver_process_is_allocation_free() {
@@ -40,7 +41,7 @@ fn dual_mono_convolver_process_is_allocation_free() {
 
     let ir_l = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     let ir_r = decay_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
-    gate(ConvolverNode::per_channel(&[&ir_l, &ir_r], 512).unwrap());
+    gate(ConvolverNode::per_channel(&[Mono::new(&ir_l), Mono::new(&ir_r)], 512).unwrap());
 }
 
 /// The incremental accumulation runs in every block between two partition
@@ -53,7 +54,7 @@ fn convolver_mid_cycle_blocks_are_allocation_free() {
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     for block in [37usize, 100, 128, 1000] {
-        gate_at(ConvolverNode::new(&ir, 256), block);
+        gate_at(ConvolverNode::new(Mono::new(&ir), 256), block);
     }
 }
 
@@ -66,18 +67,18 @@ fn convolver_ragged_calls_are_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
-    let mut c = Convolver::new(&ir, 128);
+    let mut c = Convolver::new(Mono::new(&ir), 128);
     let x: Vec<f32> = (0..513).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 513];
     let lens = [1usize, 7, 33, 100, 127, 128, 129, 255, 513, 64];
     for k in 0..40 {
         let n = lens[k % lens.len()];
-        c.process_block(&x[..n], &mut y[..n]);
+        c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
     }
     assert_no_alloc::assert_no_alloc(|| {
         for k in 0..3_000 {
             let n = lens[k % lens.len()];
-            c.process_block(&x[..n], &mut y[..n]);
+            c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
         }
     });
 }
@@ -93,18 +94,18 @@ fn convolver_tail_levels_are_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
 
     let ir = decay_ir(240_000, Seconds::new(1.0), SampleRate::SR_48K);
-    let mut c = Convolver::new(&ir, 512);
+    let mut c = Convolver::new(Mono::new(&ir), 512);
     let x: Vec<f32> = (0..5000).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 5000];
     let lens = [1usize, 64, 64, 64, 333, 512, 700, 2049, 4999, 64, 127, 3];
     for k in 0..60 {
         let n = lens[k % lens.len()];
-        c.process_block(&x[..n], &mut y[..n]);
+        c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
     }
     assert_no_alloc::assert_no_alloc(|| {
         for k in 0..1_500 {
             let n = lens[k % lens.len()];
-            c.process_block(&x[..n], &mut y[..n]);
+            c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
         }
     });
 }
@@ -127,7 +128,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
             )
         })
         .collect();
-    let refs: Vec<&[f32]> = irs.iter().map(Vec::as_slice).collect();
+    let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
     gate(ConvolverNode::folded(&refs, 256).unwrap());
 }
 

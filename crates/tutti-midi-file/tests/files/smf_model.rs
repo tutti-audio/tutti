@@ -11,7 +11,7 @@ use crate::common::track;
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
+    FileEvent, FileTime, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
     ReadError, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick, Track, TracksError,
 };
 use tutti_types::{Beat, Bpm, Seconds};
@@ -22,7 +22,7 @@ use tutti_ump::{
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
-const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 const BEAT: u32 = TPQ as u32;
 
 fn smf(format: u16, tracks: &[Vec<RawEvent>]) -> Vec<u8> {
@@ -121,9 +121,9 @@ fn every_event_kind_survives_a_read_and_a_write() {
             MidiFileKind::detect(&bytes),
             Some(MidiFileKind::StandardMidiFile)
         );
-        assert_eq!(file.ticks_per_quarter(), DIVISION);
+        assert_eq!(file.ticks_per_quarter(), Some(DIVISION));
 
-        let events = &file.tracks()[0].events;
+        let events = &file.tracks()[0].events();
         let at = |i: usize| &events[i];
         assert_eq!(
             at(0).1,
@@ -225,9 +225,9 @@ fn the_end_of_a_track_is_kept() {
     bytes[18..22].copy_from_slice(&len.to_be_bytes());
 
     let file = read(&bytes);
-    assert_eq!(file.tracks()[0].end, Tick(4 * u64::from(BEAT)));
-    assert_eq!(file.end_beat(), Beat(4.0));
-    assert_eq!(read(&file.to_bytes()).tracks()[0].end, Tick(1920));
+    assert_eq!(file.tracks()[0].end(), Tick(4 * u64::from(BEAT)));
+    assert_eq!(file.beat_at(file.end()), Some(Beat(4.0)));
+    assert_eq!(read(&file.to_bytes()).tracks()[0].end(), Tick(1920));
 }
 
 /// A delta on a non-note event advances the clock: the note after a SysEx a
@@ -243,9 +243,9 @@ fn a_sysex_between_notes_does_not_shift_the_beat_grid() {
             RawEvent::note_on(BEAT, 0, 62, 100),
         ]],
     ));
-    let ticks: Vec<u64> = file.tracks()[0].events.iter().map(|(t, _)| t.0).collect();
+    let ticks: Vec<u64> = file.tracks()[0].events().iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 240, 480, 960]);
-    assert_eq!(file.beat_at(Tick(960)), Beat(2.0));
+    assert_eq!(file.beat_at(Tick(960)), Some(Beat(2.0)));
 }
 
 /// Format 2 keeps its sequences apart: there is no merged event list, and each
@@ -272,7 +272,10 @@ fn format_2_keeps_its_sequences_apart() {
     assert_eq!(tempo(0), Bpm::of(120.0));
     assert_eq!(tempo(1), Bpm::of(60.0));
     assert!(file.tempo_map_of(2).is_none());
-    assert_eq!(file.tempo_map().tempo_at(Beat(0.0)), Bpm::of(120.0));
+    assert_eq!(
+        file.tempo_map().unwrap().tempo_at(Beat(0.0)),
+        Bpm::of(120.0)
+    );
     // The same two tracks as format 1 share one map and one timeline.
     let parallel = read(&smf(
         1,
@@ -314,7 +317,14 @@ fn merged_events_are_in_time_order_ties_in_track_order() {
     ));
     assert_eq!(file.tracks()[0].name(), Some("Conductor"));
     assert_eq!(file.tracks()[1].name(), Some("Bass"));
-    let merged: Vec<(Beat, &FileEvent)> = file.events().unwrap().collect();
+    let merged: Vec<(Beat, &FileEvent)> = file
+        .events()
+        .unwrap()
+        .map(|(time, event)| match time {
+            FileTime::Beat(beat) => (beat, event),
+            FileTime::Seconds(_) => panic!("a metrical file is on beats"),
+        })
+        .collect();
     let beats: Vec<f64> = merged.iter().map(|(b, _)| b.get()).collect();
     assert!(beats.windows(2).all(|w| w[0] <= w[1]), "{beats:?}");
     // The two events at beat 4: track 0's off, then track 1's on.
@@ -343,18 +353,22 @@ fn the_tempo_map_follows_the_file() {
         ]],
     ));
     let close = |a: Seconds, b: f64| assert!((a.0 - b).abs() < 1e-12, "{a:?} vs {b}");
-    close(file.seconds_at(Beat(0.0)), 0.0);
-    close(file.seconds_at(Beat(1.0)), 0.5);
-    close(file.seconds_at(Beat(4.0)), 2.0);
-    close(file.seconds_at(Beat(5.5)), 3.5);
-    close(file.seconds_at(file.end_beat()), 6.0);
-    assert_eq!(file.tempo_map().tempo_at(Beat(3.99)), Bpm::of(120.0));
-    assert_eq!(file.tempo_map().tempo_at(Beat(4.0)), Bpm::of(60.0));
-    assert_eq!(file.beat_at(Tick(480)), Beat(1.0));
+    let beats = |beats: f64| Tick((beats * f64::from(BEAT)) as u64);
+    close(file.seconds_at(beats(0.0)), 0.0);
+    close(file.seconds_at(beats(1.0)), 0.5);
+    close(file.seconds_at(beats(4.0)), 2.0);
+    close(file.seconds_at(beats(5.5)), 3.5);
+    close(file.seconds_at(file.end()), 6.0);
+    assert_eq!(
+        file.tempo_map().unwrap().tempo_at(Beat(3.99)),
+        Bpm::of(120.0)
+    );
+    assert_eq!(file.tempo_map().unwrap().tempo_at(Beat(4.0)), Bpm::of(60.0));
+    assert_eq!(file.beat_at(Tick(480)), Some(Beat(1.0)));
     // And it comes back out: the tempo events are events of the track.
     assert_eq!(
-        read(&file.to_bytes()).seconds_at(Beat(8.0)),
-        file.seconds_at(Beat(8.0))
+        read(&file.to_bytes()).seconds_at(beats(8.0)),
+        file.seconds_at(beats(8.0))
     );
 }
 
@@ -375,7 +389,7 @@ fn the_tempo_map_pools_every_track() {
             ],
         ],
     ));
-    let points = file.tempo_map().points();
+    let points = file.tempo_map().unwrap().points();
     assert_eq!(points.len(), 2);
     assert_eq!(
         (points[0].beat, points[0].tempo),
@@ -392,12 +406,21 @@ fn the_tempo_map_pools_every_track() {
 #[test]
 fn a_file_with_no_tempo_plays_at_120() {
     let none = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 100)]]));
-    assert_eq!(none.tempo_map().constant_tempo(), Some(Bpm::of(120.0)));
-    assert_eq!(none.seconds_at(Beat(2.0)), Seconds(1.0));
+    assert_eq!(
+        none.tempo_map().unwrap().constant_tempo(),
+        Some(Bpm::of(120.0))
+    );
+    assert_eq!(none.seconds_at(Tick(2 * u64::from(BEAT))), Seconds(1.0));
 
     let later = read(&smf(0, &[vec![RawEvent::tempo(2 * BEAT, 1_000_000)]]));
-    assert_eq!(later.tempo_map().tempo_at(Beat(0.0)), Bpm::of(120.0));
-    assert_eq!(later.tempo_map().tempo_at(Beat(2.0)), Bpm::of(60.0));
+    assert_eq!(
+        later.tempo_map().unwrap().tempo_at(Beat(0.0)),
+        Bpm::of(120.0)
+    );
+    assert_eq!(
+        later.tempo_map().unwrap().tempo_at(Beat(2.0)),
+        Bpm::of(60.0)
+    );
 }
 
 /// Two tempos on one tick: the later in the file governs (applied in order).
@@ -410,8 +433,8 @@ fn the_later_of_two_tempos_on_one_tick_governs() {
             vec![RawEvent::tempo(0, 1_000_000)],
         ],
     ));
-    assert_eq!(file.tempo_map().points().len(), 1);
-    assert_eq!(file.tempo_map().tempo_at(Beat(0.0)), Bpm::of(60.0));
+    assert_eq!(file.tempo_map().unwrap().points().len(), 1);
+    assert_eq!(file.tempo_map().unwrap().tempo_at(Beat(0.0)), Bpm::of(60.0));
 }
 
 /// A zero microseconds-per-quarter is no valid tempo: kept as an event,
@@ -428,13 +451,13 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
         ]],
     ));
     assert_eq!(
-        file.tracks()[0].events[0].1,
+        file.tracks()[0].events()[0].1,
         FileEvent::Meta(Meta::Tempo {
             micros_per_quarter: MicrosPerQuarter::of(0),
             extra: Box::default(),
         })
     );
-    let points = file.tempo_map().points();
+    let points = file.tempo_map().unwrap().points();
     assert_eq!(points.len(), 3);
     assert_eq!(points[0].tempo, Bpm::of(120.0));
     assert_eq!(points[1].tempo, Bpm::of(60_000_000.0));
@@ -475,24 +498,6 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
             .unwrap()
             .differs_from(Bpm::of(174.0), Bpm::of(0.001))
     );
-}
-
-/// An SMPTE division has no beat grid and is refused with its own error,
-/// whichever way in.
-#[test]
-fn smpte_division_is_refused() {
-    let bytes = build_smf(
-        0,
-        Division::Smpte {
-            fps: -25,
-            ticks_per_frame: 40,
-        },
-        &[vec![RawEvent::note_on(0, 0, 60, 100)]],
-    );
-    assert!(matches!(
-        MidiFile::from_bytes(&bytes),
-        Err(ReadError::SmpteDivision)
-    ));
 }
 
 #[test]
@@ -720,7 +725,7 @@ fn a_velocity_zero_note_on_closes_the_note() {
 #[test]
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
-    assert_eq!(file.tracks()[0].events[0].1, on(0, 60, 0));
+    assert_eq!(file.tracks()[0].events()[0].1, on(0, 60, 0));
     assert_eq!(read(&file.to_bytes()), file);
 }
 
@@ -778,19 +783,6 @@ fn an_empty_track_list_is_refused() {
     ));
 }
 
-/// SMF 1.0 section 2.1: the division word's top bit says SMPTE, so 15 bits are
-/// ticks per quarter note, and zero is no division.
-#[test]
-fn an_smf_division_is_1_to_32767() {
-    check_range_contract(&RangeContract {
-        new: SmfDivision::new,
-        get: SmfDivision::get,
-        of: Some(SmfDivision::of),
-        valid: &[1, 96, 480, 0x7FFF],
-        invalid: &[0, 0x8000, 0xFFFF],
-    });
-}
-
 /// SMF 1.0 section 3.3: Set Tempo is `FF 51 03 tttttt`, 24 bits.
 #[test]
 fn microseconds_per_quarter_is_0_to_16777215() {
@@ -840,29 +832,6 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
     )
     .unwrap();
     assert_eq!(read(&file.to_bytes()), file);
-}
-
-#[test]
-fn events_out_of_order_are_refused() {
-    let out_of_order = Track {
-        events: vec![(Tick(10), on(0, 60, 1)), (Tick(5), off(0, 60, 1))],
-        end: Tick(10),
-        ..Track::default()
-    };
-    assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![out_of_order]),
-        Err(TracksError::OutOfOrder { .. })
-    ));
-    // An end before the last event.
-    let early_end = Track {
-        events: vec![(Tick(10), on(0, 60, 1))],
-        end: Tick(5),
-        ..Track::default()
-    };
-    assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![early_end]),
-        Err(TracksError::EndBeforeLast { .. })
-    ));
 }
 
 /// What an SMF cannot hold is refused rather than dropped on write: a packet,

@@ -237,13 +237,13 @@ pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
     Ok(())
 }
 
-/// Writes `tracks` as an SMF of `format` and division `ticks_per_quarter`.
+/// Writes `tracks` as an SMF of `format` and `division`.
 ///
 /// Each track ends with an End of Track at its `end`. A caller has checked the
 /// tracks with [`measure`] and the constructor's rules.
 pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Vec<u8> {
     let count = u16::try_from(tracks.len()).unwrap_or(u16::MAX);
-    let header: Vec<u8> = [format.word(), count, division.get()]
+    let header: Vec<u8> = [format.word(), count, division.word()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();

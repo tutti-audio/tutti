@@ -12,7 +12,7 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::Planes;
+use tutti_buffers::{Mono, Planes};
 use tutti_fixtures::signal::peak;
 use tutti_types::MaxBlock;
 
@@ -357,7 +357,7 @@ fn convolver_addresses_nothing() {
     // Room size is baked into the IR, the gain has no address and the mix is
     // the graph's (`NodeMix::ADDR`, not a node's param).
     // A minimal unit IR is fine — only the param surface is probed.
-    let node = tutti_nodes::ConvolverNode::shared_ir(2u16, &[1.0], 64).unwrap();
+    let node = tutti_nodes::ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), 64).unwrap();
     assert!(!addresses(&node, UnitParam::Wet));
     assert!(!addresses(&node, UnitParam::RoomSize));
     assert!(!addresses(&node, UnitParam::Cutoff));

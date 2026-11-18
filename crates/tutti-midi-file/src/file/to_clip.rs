@@ -17,7 +17,7 @@ use tutti_ump::{
 use unicode_normalization::UnicodeNormalization;
 
 use super::Container;
-use crate::{FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfFormat, TextKind, Tick, Track};
+use crate::{FileEvent, Meta, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
 
 use lyrics::Lyrics;
 
@@ -27,11 +27,17 @@ mod lyrics;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToClipError {
-    /// A format 2 file holds independent sequences, each on its own
-    /// timeline; a clip is one sequence (M2-116 section 7: one Start of Clip
-    /// and one End of Clip), so there is no one clip to make of them.
+    /// A format 2 file (or one of a format above 2) holds independent
+    /// sequences, each on its own timeline; a clip is one sequence (M2-116
+    /// section 7: one Start of Clip and one End of Clip), so there is no one
+    /// clip to make of them.
     #[error("a format 2 file holds independent sequences; a clip is one")]
     Sequential,
+    /// The file is in SMPTE time: a Clip File's clockstamps count ticks of a
+    /// quarter note (M2-116 section 3.2.1, the DCTPQ), and a file of seconds
+    /// has no quarter to count them in.
+    #[error("a file in SMPTE time has no ticks per quarter note: a clip needs metrical time")]
+    Smpte,
     /// The file is a Clip File already.
     #[error("the file is a Clip File already")]
     AlreadyClip,
@@ -350,7 +356,6 @@ fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>
 /// tick's they go, or the reason it has none.
 fn convert(
     track: usize,
-    format: SmfFormat,
     ev: &FileEvent,
 ) -> std::result::Result<(Rank, Vec<FileEvent>), DropReason> {
     let other = |events| Ok((Rank::Other, events));
@@ -407,9 +412,7 @@ fn convert(
                     // track of a format 1 file, the name is the sequence's,
                     // otherwise the track's. The sequence is the
                     // Composition (Song) Name of Appendix B.
-                    TextKind::TrackName if track == 0 && format != SmfFormat::Sequential => {
-                        PlainTextKind::CompositionName
-                    }
+                    TextKind::TrackName if track == 0 => PlainTextKind::CompositionName,
                     TextKind::TrackName => return Err(DropReason::TrackName),
                     TextKind::Copyright => PlainTextKind::Copyright,
                     // Any text is what the Unknown Metadata Text message is
@@ -526,16 +529,20 @@ impl MidiFile {
     /// # Errors
     ///
     /// [`ToClipError::Sequential`] for a format 2 file,
+    /// [`ToClipError::Smpte`] for a file in SMPTE time,
     /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::TooLarge`]
     /// if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
     pub fn to_clip(&self) -> Result<Converted, ToClipError> {
-        let format = match self.container {
-            Container::Smf(SmfFormat::Sequential, _) => {
+        match self.container {
+            Container::Smf(format, _) if !format.shares_timeline() => {
                 return Err(ToClipError::Sequential);
             }
-            Container::Smf(format, _) => format,
+            Container::Smf(..) => {}
             Container::Clip(_) => return Err(ToClipError::AlreadyClip),
+        }
+        let Some(tpq) = self.ticks_per_quarter() else {
+            return Err(ToClipError::Smpte);
         };
 
         // Track order, then the track's own: the stable sort by tick keeps it.
@@ -553,7 +560,6 @@ impl MidiFile {
             .map(|t| t.end)
             .max()
             .unwrap_or_default();
-        let tpq = self.ticks_per_quarter();
         let tempo_step = whole_tick_step(u64::from(tpq.get()), 24);
 
         // Where each event lands: tempos and time signatures on their grids,
@@ -670,7 +676,7 @@ impl MidiFile {
                 Err(DropReason::Superseded)
             } else {
                 match source {
-                    Source::Event => convert(track, format, event),
+                    Source::Event => convert(track, event),
                     Source::Lyric(events, made) => {
                         changes = made;
                         events.map(|events| (Rank::Other, events))
@@ -708,16 +714,15 @@ impl MidiFile {
         // Stable: within a tick and rank, the merge order.
         placed.sort_by_key(|&(tick, rank, _)| (tick, rank));
 
-        let sequence = Track {
-            header: Vec::new(),
-            header_end: Tick(0),
-            events: placed.into_iter().map(|(tick, _, e)| (tick, e)).collect(),
+        let sequence = Track::from_read(
+            Vec::new(),
+            Tick(0),
+            placed.into_iter().map(|(tick, _, e)| (tick, e)).collect(),
             end,
-        };
+        );
         // The sequence is ordered, holds packets only and has no header, so
         // the one rule it can break is the writer's size.
-        let clip = MidiFile::clip(self.ticks_per_quarter(), sequence)
-            .map_err(|_| ToClipError::TooLarge)?;
+        let clip = MidiFile::clip(tpq, sequence).map_err(|_| ToClipError::TooLarge)?;
         Ok(Converted {
             clip,
             dropped,

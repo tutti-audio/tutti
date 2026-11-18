@@ -38,9 +38,9 @@
 //! ([`SmfParseError::TracksCutOff`]); more tracks than declared, a format 0 file without
 //! exactly one track, a second header chunk, a data byte with its top bit set,
 //! a running status with none active, a variable-length quantity over four
-//! bytes, an event cut off inside its chunk, a zero division
-//! ([`SmfParseError`]); and an SMPTE division ([`Fault::Smpte`]). A track
-//! with no End of Track ends at its last event, and an End of Track that is
+//! bytes, an event cut off inside its chunk, a zero division, and an SMPTE
+//! division with a frame rate of none of the four or no resolution
+//! ([`SmfParseError`]). A track with no End of Track ends at its last event, and an End of Track that is
 //! not the track's last event is refused (SMF 1.0 section 3.3: it is the last
 //! event in the track).
 
@@ -61,29 +61,15 @@ use crate::file::{
 };
 use crate::{ReadError, SmfParseError};
 
-/// Why a parser refused, carried as winnow context and mapped to
-/// [`ReadError`] once, in [`refused`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Fault {
-    /// SMPTE division: no beat grid.
-    Smpte,
-    /// Not a well-formed SMF, or cut off, and what.
-    Malformed(SmfParseError),
-}
-
-type Res<T> = std::result::Result<T, ContextError<Fault>>;
+type Res<T> = std::result::Result<T, ContextError<SmfParseError>>;
 
 /// The running status: the last channel status byte, if no sysex or meta
 /// event has cancelled it.
 type Status = Option<u8>;
 
-fn malformed(what: SmfParseError) -> Fault {
-    Fault::Malformed(what)
-}
-
 /// A parser that always refuses, for `what`.
-fn refuse<'a, T>(what: SmfParseError) -> impl Parser<&'a [u8], T, ContextError<Fault>> {
-    fail.context(malformed(what))
+fn refuse<'a, T>(what: SmfParseError) -> impl Parser<&'a [u8], T, ContextError<SmfParseError>> {
+    fail.context(what)
 }
 
 // ---- primitives ------------------------------------------------------------
@@ -98,14 +84,14 @@ fn vlq(input: &mut &[u8]) -> Res<u32> {
         byte.verify(|b| b & 0x80 == 0),
     )
         .map(|(high, last)| high << 7 | u32::from(last))
-        .context(malformed(SmfParseError::VariableLengthQuantity))
+        .context(SmfParseError::VariableLengthQuantity)
         .parse_next(input)
 }
 
 /// A length (a `u32` or a vlq) and that many bytes.
 fn counted<'a>(
-    length: impl Parser<&'a [u8], u32, ContextError<Fault>>,
-) -> impl Parser<&'a [u8], &'a [u8], ContextError<Fault>> {
+    length: impl Parser<&'a [u8], u32, ContextError<SmfParseError>>,
+) -> impl Parser<&'a [u8], &'a [u8], ContextError<SmfParseError>> {
     length_take(length.map(|n| n as usize))
 }
 
@@ -119,17 +105,12 @@ struct Header {
 }
 
 /// The division word: ticks per quarter note, or (top bit set) an SMPTE
-/// frame rate and ticks per frame (SMF 1.0 section 2.1), which is refused.
+/// frame rate and ticks per frame (SMF 1.0 section 2.1).
 fn division(input: &mut &[u8]) -> Res<SmfDivision> {
-    let raw = be_u16.parse_next(input)?;
-    let [high, _] = raw.to_be_bytes();
-    // With the top bit set, the high byte is the negated frame rate as an i8.
-    // With the top bit clear, the only word out of range is 0.
-    match (SmfDivision::new(raw), i8::from_be_bytes([high])) {
-        (_, -24 | -25 | -29 | -30) => fail.context(Fault::Smpte).parse_next(input),
-        (_, ..0) => refuse(SmfParseError::InvalidFrameRate).parse_next(input),
-        (Some(division), _) => Ok(division),
-        (None, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
+    let word = be_u16.parse_next(input)?;
+    match SmfDivision::from_word(word) {
+        Ok(division) => Ok(division),
+        Err(cause) => refuse(cause).parse_next(input),
     }
 }
 
@@ -137,10 +118,7 @@ fn division(input: &mut &[u8]) -> Res<SmfDivision> {
 /// first six are ignored (section 2.1: a reader skips what a later revision
 /// adds).
 fn header_body(input: &mut &[u8]) -> Res<Header> {
-    let format = be_u16
-        .verify_map(SmfFormat::from_word)
-        .context(malformed(SmfParseError::UnknownSmfFormat))
-        .parse_next(input)?;
+    let format = be_u16.map(SmfFormat::from_word).parse_next(input)?;
     let tracks = be_u16.parse_next(input)?;
     let division = division.parse_next(input)?;
     Ok(Header {
@@ -153,13 +131,13 @@ fn header_body(input: &mut &[u8]) -> Res<Header> {
 /// The header chunk: `MThd`, a length of at least six, the body.
 fn header(input: &mut &[u8]) -> Res<Header> {
     literal(b"MThd")
-        .context(malformed(SmfParseError::MissingHeader))
+        .context(SmfParseError::MissingHeader)
         .parse_next(input)?;
     let mut body = counted(be_u32)
-        .context(malformed(SmfParseError::ChunkCutOff))
+        .context(SmfParseError::ChunkCutOff)
         .parse_next(input)?;
     header_body
-        .context(malformed(SmfParseError::ShortHeader))
+        .context(SmfParseError::ShortHeader)
         .parse_next(&mut body)
 }
 
@@ -172,7 +150,7 @@ enum Chunk<'a> {
 /// `type, length, body`, framed and not yet read.
 fn chunk<'a>(input: &mut &'a [u8]) -> Res<Chunk<'a>> {
     let (kind, body) = (take(4usize), counted(be_u32))
-        .context(malformed(SmfParseError::ChunkCutOff))
+        .context(SmfParseError::ChunkCutOff)
         .parse_next(input)?;
     match kind {
         b"MTrk" => Ok(Chunk::Track(body)),
@@ -204,7 +182,7 @@ fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), ReadError> {
 
 /// The data bytes of a channel status (how many is `Voice1::data_len`'s) as a
 /// message on the first Group. `parse_exact` owns the status bit layout.
-fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Fault>> {
+fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<SmfParseError>> {
     let count = Voice1::data_len(status).map_or(0, usize::from);
     take(count)
         .verify_map(move |data: &[u8]| {
@@ -215,7 +193,7 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Faul
             };
             parse_exact(MidiGroup::FIRST, &bytes).map(FileEvent::Message)
         })
-        .context(malformed(SmfParseError::ChannelData))
+        .context(SmfParseError::ChannelData)
 }
 
 /// What an event of a track is: an event of the model, or the End of Track
@@ -287,14 +265,16 @@ fn meta(input: &mut &[u8]) -> Res<Item> {
 /// One event after its delta, given the running status: the event and the
 /// status after it. A status byte is read when the next byte has its top bit
 /// set; otherwise the running one stands in and the byte is data.
-fn event<'a>(running: Status) -> impl Parser<&'a [u8], (u32, Item, Status), ContextError<Fault>> {
+fn event<'a>(
+    running: Status,
+) -> impl Parser<&'a [u8], (u32, Item, Status), ContextError<SmfParseError>> {
     let status = alt((
         byte.verify(|b| b & 0x80 != 0),
         peek(byte.verify(|b| b & 0x80 == 0)).verify_map(move |_| running),
     ))
-    .context(malformed(SmfParseError::NoRunningStatus));
+    .context(SmfParseError::NoRunningStatus);
     (vlq, status).flat_map(|(delta, status)| {
-        dispatch! { move |_: &mut &'a [u8]| Ok::<u8, ContextError<Fault>>(status);
+        dispatch! { move |_: &mut &'a [u8]| Ok::<u8, ContextError<SmfParseError>>(status);
             0xFF => meta.map(|e| (e, None)),
             0xF0 => counted(vlq).map(|d| (Item::Event(FileEvent::SysEx(d.into())), None)),
             0xF7 => counted(vlq).map(|d| (Item::Event(FileEvent::Escape(d.into())), None)),
@@ -319,7 +299,7 @@ struct Step<'a> {
 /// the faults that refused it.
 struct Failure {
     at: usize,
-    faults: Vec<Fault>,
+    faults: Vec<SmfParseError>,
 }
 
 fn step<'a>(body: &'a [u8], input: &'a [u8], running: Status) -> Result<Option<Step<'a>>, Failure> {
@@ -374,7 +354,7 @@ fn track(body: &[u8]) -> Result<Track, Failure> {
             Item::EndOfTrack => {
                 return Err(Failure {
                     at,
-                    faults: vec![malformed(SmfParseError::EndOfTrackNotLast)],
+                    faults: vec![SmfParseError::EndOfTrackNotLast],
                 });
             }
         }
@@ -383,39 +363,27 @@ fn track(body: &[u8]) -> Result<Track, Failure> {
     let end = end
         .or_else(|| events.last().map(|&(tick, _)| tick))
         .unwrap_or(Tick(0));
-    Ok(Track {
-        header: Vec::new(),
-        header_end: Tick(0),
-        events,
-        end,
-    })
+    Ok(Track::from_read(Vec::new(), Tick(0), events, end))
 }
 
 // ---- the edge --------------------------------------------------------------
 
 /// The faults a parser refused with, innermost first.
-fn faults(e: &ContextError<Fault>) -> Vec<Fault> {
+fn faults(e: &ContextError<SmfParseError>) -> Vec<SmfParseError> {
     e.context().copied().collect()
 }
 
 /// The one place winnow's error becomes ours: the error of the refusal
 /// `faults` at byte `offset`. A refusal that names no rule ran out of bytes
 /// inside an event.
-fn refused(track: Option<usize>, offset: usize, faults: &[Fault]) -> ReadError {
-    if faults.contains(&Fault::Smpte) {
-        return ReadError::SmpteDivision;
-    }
-    let cause = faults
-        .iter()
-        .find_map(|f| match f {
-            Fault::Malformed(what) => Some(*what),
-            Fault::Smpte => None,
-        })
-        .unwrap_or(SmfParseError::EventCutOff);
+fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> ReadError {
     ReadError::Smf {
         track,
         offset,
-        cause,
+        cause: faults
+            .first()
+            .copied()
+            .unwrap_or(SmfParseError::EventCutOff),
     }
 }
 
@@ -423,8 +391,7 @@ fn refused(track: Option<usize>, offset: usize, faults: &[Fault]) -> ReadError {
 ///
 /// # Errors
 ///
-/// - [`ReadError::SmpteDivision`] for an SMPTE division.
-/// - [`ReadError::Smf`] for anything else malformed or cut off, with where.
+/// - [`ReadError::Smf`] for anything malformed or cut off, with where.
 pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
     let (header, chunks) = smf(bytes)?;
     let declared = usize::from(header.tracks);

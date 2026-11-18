@@ -218,8 +218,7 @@ impl Engine {
 /// # The sample rate is not this node's to fix
 ///
 /// Unlike the other rate-dependent nodes in this crate, `prepare` fixes no
-/// coefficient here, and the node stores no rate. The IRs are taken as bare
-/// `&[f32]` with no rate attached, so the node cannot tell what rate they were
+/// coefficient here, and the node stores no rate. `Mono` views carry no rate, so the node cannot tell what rate they were
 /// measured at and has nothing to resample from or to.
 ///
 /// The consequence is the caller's to avoid: an IR captured at 44.1 kHz and
@@ -312,7 +311,7 @@ impl ConvolverNode {
         let engine = match &layout {
             IrLayout::PerChannel(_) => Engine::PerChannel(
                 irs.iter()
-                    .map(|ir| Convolver::from_samples(*ir, block_size))
+                    .map(|ir| Convolver::new(*ir, block_size))
                     .collect(),
             ),
             IrLayout::TrueStereo | IrLayout::Ambisonic { .. } => Engine::Matrix(Box::new(
@@ -398,7 +397,7 @@ impl ConvolverNode {
     /// The rate caveat on the type applies: `ir` carries no rate and nothing
     /// resamples it.
     #[must_use]
-    pub fn new(ir: &[f32], block_size: usize) -> Self {
+    pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
         Self::assemble(
             Engine::PerChannel(vec![Convolver::new(ir, block_size)]),
             IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
@@ -412,7 +411,7 @@ impl ConvolverNode {
     ///
     /// The rate caveat on the type applies unchanged.
     #[must_use]
-    pub fn with_ir(ir: &[f32]) -> Self {
+    pub fn with_ir<S: Sample>(ir: Mono<'_, S>) -> Self {
         Self::assemble(
             Engine::PerChannel(vec![Convolver::with_ir(ir)]),
             IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
@@ -432,9 +431,9 @@ impl ConvolverNode {
     ///
     /// [`ConvolverError::NoChannels`] for a layout of no channels and
     /// [`ConvolverError::TooWide`] past a bus's width.
-    pub fn shared_ir(
+    pub fn shared_ir<S: Sample>(
         channels: impl Into<ChannelLayout>,
-        ir: &[f32],
+        ir: Mono<'_, S>,
         block_size: usize,
     ) -> Result<Self, ConvolverError> {
         let n = usize::from(channels.into().count());
@@ -460,10 +459,12 @@ impl ConvolverNode {
     ///
     /// [`ConvolverError::NoChannels`] if `irs` is empty and
     /// [`ConvolverError::TooWide`] if it is wider than a bus.
-    pub fn per_channel(irs: &[&[f32]], block_size: usize) -> Result<Self, ConvolverError> {
+    pub fn per_channel<S: Sample>(
+        irs: &[Mono<'_, S>],
+        block_size: usize,
+    ) -> Result<Self, ConvolverError> {
         let (layout, ports) = Self::unassigned(irs.len())?;
-        let irs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-        Self::from_layout(layout, ports, ports, &irs, block_size)
+        Self::from_layout(layout, ports, ports, irs, block_size)
     }
 
     /// Every input folded to mono, then convolved with one IR per output; the width is
@@ -476,7 +477,10 @@ impl ConvolverNode {
     /// As [`per_channel`](Self::per_channel), and [`ConvolverError::NoFold`] for a
     /// width with no fold to mono: only 1, 2, 4, 6, 8 and 12 have an order
     /// ([`Fold::between`] places any other by index and refuses to narrow it).
-    pub fn folded(irs: &[&[f32]], block_size: usize) -> Result<Self, ConvolverError> {
+    pub fn folded<S: Sample>(
+        irs: &[Mono<'_, S>],
+        block_size: usize,
+    ) -> Result<Self, ConvolverError> {
         let mut node = Self::per_channel(irs, block_size)?;
         // Sized before `prepare` so an unprepared node renders in pieces rather than index
         // an empty scratch; `prepare` resizes it to the graph's block.
@@ -660,7 +664,10 @@ impl ConvolverNode {
             Engine::PerChannel(convolvers) => match &self.fold {
                 None => {
                     for (c, convolver) in convolvers.iter_mut().enumerate() {
-                        convolver.process_block(input(c), &mut outputs.get(c)[at..at + size]);
+                        convolver.process_block(
+                            Mono::new(input(c)),
+                            MonoMut::new(&mut outputs.get(c)[at..at + size]),
+                        );
                     }
                 }
                 Some(fold) => {
@@ -684,8 +691,10 @@ impl ConvolverNode {
                         self.mono[..size].fill(0.0);
                     }
                     for (c, convolver) in convolvers.iter_mut().enumerate() {
-                        convolver
-                            .process_block(&self.mono[..size], &mut outputs.get(c)[at..at + size]);
+                        convolver.process_block(
+                            Mono::new(&self.mono[..size]),
+                            MonoMut::new(&mut outputs.get(c)[at..at + size]),
+                        );
                     }
                 }
             },
@@ -906,15 +915,15 @@ mod tests {
     #[test]
     fn a_node_of_no_channels_is_refused() {
         assert_eq!(
-            ConvolverNode::per_channel(&[], 64).err(),
+            ConvolverNode::per_channel::<f32>(&[], 64).err(),
             Some(ConvolverError::NoChannels)
         );
         assert_eq!(
-            ConvolverNode::folded(&[], 64).err(),
+            ConvolverNode::folded::<f32>(&[], 64).err(),
             Some(ConvolverError::NoChannels)
         );
         assert_eq!(
-            ConvolverNode::shared_ir(ChannelLayout::EMPTY, &[1.0], 64).err(),
+            ConvolverNode::shared_ir(ChannelLayout::EMPTY, Mono::new(&[1.0]), 64).err(),
             Some(ConvolverError::NoChannels)
         );
     }
@@ -922,14 +931,14 @@ mod tests {
     /// More IRs than a `ChannelLayout` counts is refused, not truncated.
     #[test]
     fn more_channels_than_a_layout_counts_is_refused() {
-        let irs = vec![&[1.0_f32][..]; usize::from(u16::MAX) + 1];
+        let irs = vec![Mono::new(&[1.0_f32]); usize::from(u16::MAX) + 1];
         assert_eq!(
             ConvolverNode::per_channel(&irs, 64).err(),
             Some(ConvolverError::TooWide {
                 channels: irs.len()
             })
         );
-        let past_a_bus = vec![&[1.0_f32][..]; MAX_CHANNELS + 1];
+        let past_a_bus = vec![Mono::new(&[1.0_f32]); MAX_CHANNELS + 1];
         assert_eq!(
             ConvolverNode::per_channel(&past_a_bus, 64).err(),
             Some(ConvolverError::TooWide {
@@ -943,10 +952,10 @@ mod tests {
     fn a_folded_width_with_no_fold_to_mono_is_refused() {
         let ir = [1.0_f32];
         assert!(matches!(
-            ConvolverNode::folded(&[&ir, &ir, &ir], 64),
+            ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir), Mono::new(&ir)], 64),
             Err(ConvolverError::NoFold { width: 3, .. })
         ));
-        assert!(ConvolverNode::folded(&[&ir, &ir], 64).is_ok());
+        assert!(ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir)], 64).is_ok());
     }
 
     /// The "control changed between two blocks" experiment.
@@ -1028,7 +1037,8 @@ mod tests {
     /// follows no live write.
     #[test]
     fn a_fork_keeps_the_gain_and_shares_no_cell() {
-        let node = ConvolverNode::per_channel(&[&[1.0, 0.5], &[0.25]], 64).unwrap();
+        let node =
+            ConvolverNode::per_channel(&[Mono::new(&[1.0, 0.5]), Mono::new(&[0.25])], 64).unwrap();
         assert_eq!(node.param_set().params().count(), 1);
         assert!(node.param_set().set(UnitParam::Volume, 0.7));
         assert_eq!(node.gain().load(), Amplitude(0.7));
@@ -1043,7 +1053,7 @@ mod tests {
     /// each frame's driven value, and a negative frame is floored at 0.
     #[test]
     fn a_driven_gain_scales_each_frame_and_floors_at_zero() {
-        let mut node = prepared(ConvolverNode::new(&[1.0], 64));
+        let mut node = prepared(ConvolverNode::new(Mono::new(&[1.0]), 64));
         node.set_gain(Amplitude::new(5.0));
         let latency = node.latency_samples().get();
         let lane: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
@@ -1068,7 +1078,9 @@ mod tests {
     /// last value (0.5) on both channels of a stereo node.
     #[test]
     fn a_non_finite_driven_frame_holds_the_same_value_on_every_channel() {
-        let mut node = prepared(ConvolverNode::per_channel(&[&[1.0], &[1.0]], 64).unwrap());
+        let mut node = prepared(
+            ConvolverNode::per_channel(&[Mono::new(&[1.0]), Mono::new(&[1.0])], 64).unwrap(),
+        );
         let ones = [1.0; 256];
         drive(
             &mut node,
@@ -1093,7 +1105,7 @@ mod tests {
     #[test]
     fn the_spectra_are_stored_once_and_a_fork_shares_them() {
         let ir = decay_ir(4_096, Seconds::new(0.3), SampleRate::SR_48K);
-        let node = ConvolverNode::shared_ir(6u16, &ir, 256).unwrap();
+        let node = ConvolverNode::shared_ir(6u16, Mono::new(&ir), 256).unwrap();
         let spectra = |n: &ConvolverNode| match &n.engine {
             Engine::PerChannel(cs) => cs
                 .iter()
@@ -1157,7 +1169,7 @@ mod tests {
             .map(|v| v * 0.1)
             .collect();
         let x = crate::test_support::noise(2, 2500);
-        let node = ConvolverNode::new(&ir, 32);
+        let node = ConvolverNode::new(Mono::new(&ir), 32);
         let lat = node.latency_samples().0;
         assert_eq!(lat, 32);
         let mut want = vec![0.0f64; x.len() + lat];
@@ -1170,7 +1182,7 @@ mod tests {
         }
         let mut renders = Vec::new();
         for lens in [&[1usize][..], &[7, 61, 64, 127], &[1000, 3]] {
-            let mut node = prepared(ConvolverNode::new(&ir, 32));
+            let mut node = prepared(ConvolverNode::new(Mono::new(&ir), 32));
             let (mut at, mut k) = (0, 0);
             let mut out = Vec::new();
             while at < x.len() {
@@ -1201,7 +1213,7 @@ mod tests {
     /// invert the wet path's polarity.
     #[test]
     fn the_gain_is_floored_at_zero() {
-        let node = ConvolverNode::new(&[1.0; 64], 64);
+        let node = ConvolverNode::new(Mono::new(&[1.0; 64]), 64);
         node.set_gain(Amplitude::new(1.5));
         assert_eq!(node.gain().load(), Amplitude::new(1.5));
         node.set_gain(Amplitude::new(-0.5));
@@ -1285,22 +1297,22 @@ mod direct_sum {
         let cases: Vec<(&str, ConvolverNode, Vec<(&[f32], usize)>)> = vec![
             (
                 "width1",
-                ConvolverNode::new(&ir_a, 64),
+                ConvolverNode::new(Mono::new(&ir_a), 64),
                 vec![(&ir_a[..], 0)],
             ),
             (
                 "shared_ir",
-                ConvolverNode::shared_ir(2u16, &ir_a, 32).unwrap(),
+                ConvolverNode::shared_ir(2u16, Mono::new(&ir_a), 32).unwrap(),
                 vec![(&ir_a[..], 0), (&ir_a[..], 1)],
             ),
             (
                 "per_channel",
-                ConvolverNode::per_channel(&[&ir_a, &ir_b], 128).unwrap(),
+                ConvolverNode::per_channel(&[Mono::new(&ir_a), Mono::new(&ir_b)], 128).unwrap(),
                 vec![(&ir_a[..], 0), (&ir_b[..], 1)],
             ),
             (
                 "folded",
-                ConvolverNode::folded(&[&ir_a, &ir_b], 16).unwrap(),
+                ConvolverNode::folded(&[Mono::new(&ir_a), Mono::new(&ir_b)], 16).unwrap(),
                 vec![(&ir_a[..], FOLDED), (&ir_b[..], FOLDED)],
             ),
         ];
@@ -1358,7 +1370,7 @@ mod direct_sum {
                 )
             })
             .collect();
-        let refs: Vec<&[f32]> = irs.iter().map(Vec::as_slice).collect();
+        let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         let wide = ConvolverNode::per_channel(&refs, 64).unwrap();
         let shape = wide.shape();
         assert_eq!(
@@ -1369,7 +1381,7 @@ mod direct_sum {
         let x = signal(6, 900);
         let got = render(wide, &x);
         for c in 0..6 {
-            let solo = ConvolverNode::new(&irs[c], 64);
+            let solo = ConvolverNode::new(Mono::new(&irs[c]), 64);
             let want = render(solo, &x[c..=c]);
             for (i, (g, w)) in got[c].iter().zip(&want[0]).enumerate() {
                 assert_eq!(g.to_bits(), w.to_bits(), "ch{c} frame {i}: {g} vs {w}");
@@ -1382,7 +1394,7 @@ mod direct_sum {
     /// `node_mix.rs`'s).
     #[test]
     fn a_six_channel_shared_ir_keeps_each_channel_to_itself_and_aligned() {
-        let node = ConvolverNode::shared_ir(6u16, &[1.0], 64).unwrap();
+        let node = ConvolverNode::shared_ir(6u16, Mono::new(&[1.0]), 64).unwrap();
         let latency = node.latency_samples().0;
         assert_eq!(node.shape().latency, Latency::new(Samples(latency)));
         let mut x = vec![vec![0.0f32; 4 * latency]; 6];
@@ -1406,7 +1418,7 @@ mod direct_sum {
         let irs: Vec<Vec<f32>> = (0..6)
             .map(|c| decay_ir(150 + 40 * c, Seconds::new(0.3), SampleRate::SR_48K))
             .collect();
-        let refs: Vec<&[f32]> = irs.iter().map(Vec::as_slice).collect();
+        let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         let node = ConvolverNode::folded(&refs, 32).unwrap();
         let x = signal(6, 700);
         let got = render(node, &x);
@@ -1424,7 +1436,7 @@ mod direct_sum {
             })
             .collect();
         for c in 0..6 {
-            let solo = ConvolverNode::new(&irs[c], 32);
+            let solo = ConvolverNode::new(Mono::new(&irs[c]), 32);
             let want = render(solo, std::slice::from_ref(&mono));
             for (i, (g, w)) in got[c].iter().zip(&want[0]).enumerate() {
                 assert_eq!(g.to_bits(), w.to_bits(), "ch{c} frame {i}: {g} vs {w}");
@@ -1443,7 +1455,7 @@ mod direct_sum {
         let ir = decay_ir(256, Seconds::new(0.2), SampleRate::SR_48K);
         let x = noise(21, 64 * 8);
         let (hist, block) = (&x[..64 * 7], &x[64 * 7..]);
-        let make = || ConvolverNode::shared_ir(ChannelLayout::STEREO, &ir, 64).unwrap();
+        let make = || ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), 64).unwrap();
         let run = change_between_node_blocks(
             make,
             |n| n.set_gain(Amplitude::new(4.0)),
@@ -1832,7 +1844,7 @@ mod layouts {
             ),
             (
                 "per channel",
-                ConvolverNode::per_channel(&[&two[0], &two[1]], 32).unwrap(),
+                ConvolverNode::per_channel(&[Mono::new(&two[0]), Mono::new(&two[1])], 32).unwrap(),
             ),
         ]
     }
@@ -1915,7 +1927,7 @@ mod layouts {
     /// latency and nowhere before it.
     #[test]
     fn an_unprepared_folded_node_does_not_panic() {
-        let mut node = ConvolverNode::folded(&[&[1.0], &[1.0]], 32).unwrap();
+        let mut node = ConvolverNode::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], 32).unwrap();
         let lat = node.latency_samples().get();
         let out = drive(
             &mut node,
