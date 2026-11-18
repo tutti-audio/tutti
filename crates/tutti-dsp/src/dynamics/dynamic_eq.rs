@@ -163,7 +163,7 @@ impl Design {
             range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB)),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: 1.0 / q.get(),
-            mean: tau.one_pole_coeff(rate),
+            mean: tau.one_pole_coeff(rate) as f32,
         }
     }
 }

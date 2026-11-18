@@ -5,35 +5,38 @@ use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 
 const RATE: f64 = 48_000.0;
 
-fn follower<F: tutti_buffers::Float>() -> (Follower<F>, f32, f32) {
-    let ballistics = Ballistics::new(Seconds(0.01), Seconds(0.1)).expect("a valid pair");
-    let (attack, release) = ballistics.coeffs(SampleRate::of(RATE));
-    (
-        Follower::of(ballistics, SampleRate::of(RATE)),
-        attack,
-        release,
-    )
+const ATTACK: f64 = 0.01;
+const RELEASE: f64 = 0.1;
+
+/// The one-pole coefficient `1 - exp(-1 / (tau * rate))` in `f64`.
+fn closed(tau: f64) -> f64 {
+    1.0 - (-1.0 / (tau * RATE)).exp()
 }
 
-/// From 0 toward a target, one step is `attack * target`: in `f64` the 29-bit target
-/// scaled by the `f32` attack coefficient widened exactly, with no narrowing of the state.
+fn follower<F: tutti_buffers::Float>() -> Follower<F> {
+    let ballistics = Ballistics::new(Seconds(ATTACK), Seconds(RELEASE)).expect("a valid pair");
+    Follower::of(ballistics, SampleRate::of(RATE))
+}
+
+/// From 0 toward a target, one step is `attack * target` with the closed-form `f64` attack
+/// coefficient, to `1e-12` relative: an `f32` coefficient is off by about `1e-8`.
 #[test]
 fn an_f64_attack_step_from_zero_is_the_coefficient_times_the_target() {
-    let (follower, attack, _) = follower::<f64>();
+    let follower = follower::<f64>();
     let targets = wide_signal(64);
     let got: Vec<f64> = targets
         .iter()
         .map(|&t| follower.follow(Seconds(0.0), Seconds(t)).get())
         .collect();
-    let want: Vec<f64> = targets.iter().map(|&t| f64::from(attack) * t).collect();
-    assert_close_f64(&got, &want, 0.0);
+    let want: Vec<f64> = targets.iter().map(|&t| closed(ATTACK) * t).collect();
+    assert_close_f64(&got, &want, 1e-12);
 }
 
-/// From a target down to 0, one step keeps `1 - release` of the state: `t * (1 - release)`
-/// to the rounding of one `f64` subtraction, far below the `f32` ulp.
+/// From a target down to 0, one step keeps `1 - release` of the state, with the closed-form
+/// `f64` coefficient, to `1e-12`.
 #[test]
 fn an_f64_release_step_to_zero_keeps_one_minus_the_coefficient() {
-    let (follower, _, release) = follower::<f64>();
+    let follower = follower::<f64>();
     let states = wide_signal(64);
     let got: Vec<f64> = states
         .iter()
@@ -41,9 +44,9 @@ fn an_f64_release_step_to_zero_keeps_one_minus_the_coefficient() {
         .collect();
     let want: Vec<f64> = states
         .iter()
-        .map(|&s| s * (1.0 - f64::from(release)))
+        .map(|&s| s * (1.0 - closed(RELEASE)))
         .collect();
-    assert_close_f64(&got, &want, 2f64.powi(-50));
+    assert_close_f64(&got, &want, 1e-12);
 }
 
 /// The neutral follower closes none of the gap, so a wide state stays exactly where it is.
@@ -65,7 +68,8 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
 /// rounding (`1 - release` rounds before the product).
 #[test]
 fn the_f32_follower_takes_the_same_one_step_values() {
-    let (follower, attack, release) = follower::<f32>();
+    let follower = follower::<f32>();
+    let (attack, release) = (closed(ATTACK) as f32, closed(RELEASE) as f32);
     let up = follower.follow(Amplitude(0.0), Amplitude(0.5)).get();
     assert_eq!(up, attack * 0.5);
     let down = follower.follow(Amplitude(0.5), Amplitude(0.0)).get();

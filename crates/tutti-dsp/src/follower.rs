@@ -26,8 +26,8 @@ impl<F: Float> Follower<F> {
     pub(crate) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {
         let (attack, release) = ballistics.coeffs(rate);
         Self {
-            attack: F::from_f32(attack),
-            release: F::from_f32(release),
+            attack: F::from_f64(attack),
+            release: F::from_f64(release),
         }
     }
 

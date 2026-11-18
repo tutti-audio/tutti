@@ -74,7 +74,8 @@ impl ControlSource for LevelFollower {
     const GRID: Option<PlayGrid> = Some(CONTROL_GRID);
 
     fn prepare(&mut self, rate: SampleRate) {
-        (self.attack_coeff, self.release_coeff) = self.ballistics.coeffs(rate);
+        let (attack, release) = self.ballistics.coeffs(rate);
+        (self.attack_coeff, self.release_coeff) = (attack as f32, release as f32);
     }
 
     /// The envelope at 0. It sends nothing of its own here: play frame 0 is a

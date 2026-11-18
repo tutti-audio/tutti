@@ -284,7 +284,7 @@ impl VoiceBank {
             filter,
             env_config: *envelope,
             shape: EnvShape::new(envelope, sample_rate),
-            gain_coeff: GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate),
+            gain_coeff: GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate) as f32,
             sample_rate,
             stride: usize::from(stride.get()),
             voices,
@@ -371,7 +371,7 @@ impl VoiceBank {
     pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
         self.shape = EnvShape::new(&self.env_config, sample_rate);
-        self.gain_coeff = GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate);
+        self.gain_coeff = GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate) as f32;
         // The SVF's output mix depends on the tap and `Q`, not the rate, so
         // only the per-lane coefficients need recomputing.
         self.cutoff_seen.fill(f32::NAN);

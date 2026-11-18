@@ -65,11 +65,11 @@ impl Ballistics {
     /// `rate`: [`Seconds::one_pole_coeff`] of each time, `1 - exp(-1 / (t * rate))`, 1 for a
     /// time of 0.
     ///
-    /// The coefficients are bare `f32`: a coefficient is a fraction of the gap closed per
-    /// step, which no unit covers.
+    /// The coefficients are bare `f64`, which no unit covers (a fraction of the gap closed
+    /// per step). Design coefficients, in `f64`; a bank narrows them once.
     #[inline]
     #[must_use]
-    pub fn coeffs(self, rate: SampleRate) -> (f32, f32) {
+    pub fn coeffs(self, rate: SampleRate) -> (f64, f64) {
         (
             self.attack.one_pole_coeff(rate),
             self.release.one_pole_coeff(rate),
@@ -79,10 +79,11 @@ impl Ballistics {
     /// The coefficient of the attack (`rising`) or the release, for a smoother stepped once
     /// per `dt` of audio time: [`Seconds::one_pole_coeff_over`]. For a smoother stepped once
     /// per block or per display frame. A time of 0 is 1, and a `dt` that is not above zero
-    /// with a positive time moves nothing: 0.
+    /// with a positive time moves nothing: 0. A design coefficient, in `f64`; a bank narrows it
+    /// once.
     #[inline]
     #[must_use]
-    pub fn coeff_over(self, rising: bool, dt: Seconds) -> f32 {
+    pub fn coeff_over(self, rising: bool, dt: Seconds) -> f64 {
         let time = if rising { self.attack } else { self.release };
         time.one_pole_coeff_over(dt)
     }
