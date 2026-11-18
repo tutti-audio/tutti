@@ -665,8 +665,8 @@ impl MetricalView<'_> {
         let mut moved = Vec::new();
         let mut altered = Vec::new();
         // The fields that open each track are at tick 0, ahead of its events.
-        for (track, body) in file.tracks().iter().enumerate() {
-            for lead in body.leads() {
+        for (track, track_leads) in file.leads().into_iter().enumerate() {
+            for lead in track_leads {
                 match convert_lead(track, &lead) {
                     Ok(events) => {
                         placed.extend(events.into_iter().map(|e| (Tick(0), Rank::Other, e)))

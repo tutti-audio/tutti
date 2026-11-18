@@ -188,7 +188,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 #[test]
 fn a_file_plays_at_the_beat_it_is_given_and_smpte_time_has_no_view_to_play() {
     use tutti_midi_file::SmfDivision;
-    use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
+    use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(480),
@@ -198,9 +198,8 @@ fn a_file_plays_at_the_beat_it_is_given_and_smpte_time_has_no_view_to_play() {
         U7::of(100),
     );
     let file = MidiFile::smf(
-        SmfFormat::SingleTrack,
         SmfDivision::per_quarter(480),
-        vec![track.clone()],
+        Layout::Format0(LeadTrack::new(track.clone())),
     )
     .unwrap();
     let mut s = offline();

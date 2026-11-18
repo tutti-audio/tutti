@@ -84,16 +84,15 @@ fn a_quantity_reads_to_its_value() {
 #[test]
 fn a_quantity_writes_to_its_bytes() {
     for (value, bytes) in QUANTITIES {
-        let written = MidiFile::smf(
-            SmfFormat::SingleTrack,
+        let written = crate::common::format0(
             SMF_DIVISION,
-            vec![track(vec![(
+            track(vec![(
                 u64::from(value),
                 FileEvent::Meta(Meta::Text {
                     kind: TextKind::Text,
                     bytes: Box::default(),
                 }),
-            )])],
+            )]),
         )
         .unwrap()
         .to_bytes();
@@ -379,7 +378,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
 
 fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let track = track(events);
-    let bytes = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])
+    let bytes = crate::common::format0(SMF_DIVISION, track)
         .unwrap()
         .to_bytes();
     bytes.get(22..).unwrap().to_vec()
@@ -489,8 +488,7 @@ fn a_written_file_reads_back_equal() {
         (0x0FFF_FFFF, note(0, 65)),
     ];
     let track = track(events);
-    let file = MidiFile::smf(
-        SmfFormat::Parallel,
+    let file = crate::common::format1(
         SMF_DIVISION,
         vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
@@ -628,7 +626,7 @@ fn every_text_meta_type_reads_and_writes_back() {
         let track = &read.tracks()[0];
         assert_eq!(track.events(), [], "{meta_type:#x}");
         let field = if meta_type == 0x02 {
-            track.copyright_bytes()
+            read.copyright()
         } else {
             track.name_bytes()
         };
@@ -671,7 +669,7 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
         (0x0FFF_FFFF, note(0, 64)),
     ]);
     let plain = track(vec![(0, note(1, 60))]);
-    let bytes = MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![busy, plain])
+    let bytes = crate::common::format1(SMF_DIVISION, vec![busy, plain])
         .unwrap()
         .to_bytes();
     // The header chunk is 14 bytes; each track chunk is a type, a length, a body.

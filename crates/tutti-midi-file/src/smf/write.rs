@@ -13,7 +13,7 @@ use tutti_ump::{Message, Midi1Bytes};
 use super::SmfDivision;
 use crate::TracksError;
 use crate::file::with_extra;
-use crate::file::{FileEvent, Meta, SmfFormat, SysEx, Tick, Track};
+use crate::file::{FileEvent, Lead, Meta, SmfFormat, SysEx, Tick, Track};
 
 /// The widest value a variable-length quantity holds: 28 bits.
 const VLQ_MAX: u64 = 0x0FFF_FFFF;
@@ -190,10 +190,9 @@ fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Fo
 }
 
 /// A track's body: its events, then End of Track at its `end`.
-fn body(track: &Track) -> Vec<u8> {
+fn body(track: &Track, leads: &[Lead]) -> Vec<u8> {
     // Each lead is a meta event at tick 0, so no running status survives it.
-    let opening = track
-        .leads()
+    let opening = leads
         .iter()
         .flat_map(|lead| {
             let (kind, data) = lead.wire();
@@ -228,11 +227,11 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
 /// caller has checked the rest ([`MidiFile`](crate::MidiFile)'s constructor):
 /// events in order, a delta that fits the wire's 28 bits, only group-0 MIDI
 /// 1.0 messages, at most 65535 tracks.
-pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
-    for track in tracks {
+pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), TracksError> {
+    for (track, track_leads) in tracks.iter().zip(leads) {
         let (mut at, mut running) = (Tick(0), None);
         let mut total = 0u64;
-        for lead in track.leads() {
+        for lead in track_leads {
             // The delta of 0, `FF`, the type, the length, the data.
             total += 1 + counted_len(2, lead.wire().1.len())? as u64;
         }
@@ -281,14 +280,24 @@ pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
 ///
 /// Each track ends with an End of Track at its `end`. A caller has checked the
 /// tracks with [`measure`] and the constructor's rules.
-pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Vec<u8> {
+pub(crate) fn write(
+    format: SmfFormat,
+    division: SmfDivision,
+    tracks: &[Track],
+    leads: &[Vec<Lead>],
+) -> Vec<u8> {
     let count = u16::try_from(tracks.len()).unwrap_or(u16::MAX);
     let header: Vec<u8> = [format.word(), count, division.word()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();
     std::iter::once(chunk(b"MThd", &header))
-        .chain(tracks.iter().map(|t| chunk(b"MTrk", &body(t))))
+        .chain(
+            tracks
+                .iter()
+                .zip(leads)
+                .map(|(t, l)| chunk(b"MTrk", &body(t, l))),
+        )
         .collect::<Vec<_>>()
         .concat()
 }
