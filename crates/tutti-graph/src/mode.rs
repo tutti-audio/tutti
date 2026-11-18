@@ -112,12 +112,12 @@ use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
 use crate::arena::Arena;
-use crate::event::Event;
 use crate::held::Held;
 use crate::kernels::AudioRing;
 use crate::lane::{fade_gains, ramp_in};
 use crate::node::Shape;
 use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
+use crate::param_event::ParamEvent;
 use crate::pass::Pass;
 use crate::spec::EventOut;
 use tutti_buffers::Float;
@@ -744,7 +744,7 @@ impl<F: Float> ModeState<F> {
     /// the next block ramps from the last of them; otherwise the base, the
     /// cell's snapshot, ramps as it does undriven.
     #[inline]
-    pub(crate) fn drive_step(&mut self, frames: usize, source: Option<(EventOut, &[Event])>) {
+    pub(crate) fn drive_step(&mut self, frames: usize, source: Option<(EventOut, &[ParamEvent])>) {
         let Some(drive) = &mut self.drive else {
             return;
         };

@@ -206,11 +206,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     };
     for k in 0..200u64 {
         let kind = if k % 3 == 0 {
-            EventKind::Ramp(ParamRamp::foreign(
-                tutti_units::ParamId::new(1),
-                0.5,
-                Samples(16),
-            ))
+            EventKind::Harmony(tutti_graph::Harmony::chord(60, 60, 0x91))
         } else {
             EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)))
         };
@@ -828,6 +824,7 @@ impl Node for RampEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -839,7 +836,7 @@ impl Node for RampEvery {
                 let o = io.offset(i).expect("inside");
                 let event = match (f / 37) % 3 {
                     // A linear ramp, from wherever the source is.
-                    0 => tutti_graph::Event::ramp(
+                    0 => tutti_graph::ParamEvent::ramp(
                         o,
                         ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
@@ -863,17 +860,14 @@ impl Node for RampEvery {
                             shape,
                         );
                         let seg = if k == 2 {
-                            seg.resumed(
-                                tutti_units::SamplePosition(3.5),
-                                tutti_units::SamplePosition(41.25),
-                            )
+                            seg.resumed(Samples(3), Samples(41))
                         } else {
                             seg
                         };
-                        tutti_graph::Event::segment(o, seg)
+                        tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push(event);
+                let _ = io.event_out(0).push_param(event);
             }
         }
         Status::Silent
@@ -1027,6 +1021,7 @@ impl Node for SeamEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -1050,7 +1045,9 @@ impl Node for SeamEvery {
                     Samples(40),
                     shape,
                 );
-                let _ = io.event_out(0).push(tutti_graph::Event::segment(o, seg));
+                let _ = io
+                    .event_out(0)
+                    .push_param(tutti_graph::ParamEvent::segment(o, seg));
             }
         }
         Status::Silent

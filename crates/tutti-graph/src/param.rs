@@ -44,11 +44,11 @@ use crate::mode::NodeMix;
 use tutti_buffers::Float;
 use tutti_rt::{Publisher, Reader, RtScope};
 use tutti_units::{
-    ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Real, Samples, UnitAddr, UnitParam,
+    ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Samples, UnitAddr, UnitParam,
 };
 
-use crate::event::{Event, EventKind, segment_progress};
-use crate::lane::{arc_in, fade_gains, piece_in, ramp_in, wrap_in};
+use crate::lane::{arc_in, control_in, fade_gains, ramp_in, wrap_in};
+use crate::param_event::{ParamEvent, ParamKind, arrival, segment_progress};
 use crate::spec::EventOut;
 use tutti_curve::{FadeLaw, Law, Piece};
 
@@ -246,14 +246,6 @@ pub struct ParamIn {
 /// inside this crate only.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CellValue(pub(crate) f64);
-
-/// The boundary to the `f32` word a param segment carries: a control value
-/// narrows here, saturating. Not API: B3 widens that word and deletes it.
-#[doc(hidden)]
-#[must_use]
-pub fn control_word(v: f64) -> f32 {
-    f32::from_unit(CellValue(v))
-}
 
 impl Quantity for CellValue {
     fn value(self) -> f64 {
@@ -579,24 +571,26 @@ impl<'a> Corners<'a> {
     }
 }
 
-/// A curve segment's timing and shape, as a source's running state keeps it
-/// (see [`ParamSegment`](crate::ParamSegment)).
+/// A curve segment's timing, as a source's running state keeps it (see
+/// [`ParamSegment`](crate::ParamSegment)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Curve {
     /// Its position along itself at its event's frame, in frames.
-    pub(crate) position: f32,
+    pub(crate) position: u32,
     /// Its length, in frames.
-    pub(crate) length: f32,
+    pub(crate) length: u32,
 }
 
 /// One event source's ramp: its value, and the move it is on — a
 /// [`ParamRamp`](crate::ParamRamp) along its shape from the value it had, or
-/// a curve segment between its own endpoints.
+/// a curve segment between its own endpoints. The move is the unit's `f64`
+/// quantity throughout; a value crosses to the lane's float once, where it is
+/// written (`lane::cross`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct Ramp<F: Float> {
-    value: F,
-    from: F,
-    target: F,
+pub(crate) struct Ramp {
+    value: f64,
+    from: f64,
+    target: f64,
     /// A ramp's length, in frames.
     len: u32,
     /// A ramp's shape.
@@ -610,71 +604,68 @@ pub(crate) struct Ramp<F: Float> {
     /// Whether the source has sent its first event: from then on its value
     /// replaces the port's base.
     started: bool,
-    /// Frames after its event the move arrives on (`None`: not within
-    /// `u32::MAX`).
-    arrive: Option<u32>,
+    /// Frames after its event the move arrives on.
+    arrive: u32,
     /// The param it moves, set by [`render_ramps`]: a circular one takes the
     /// short arc.
     param: Option<UnitParam>,
 }
 
-impl<F: Float> Ramp<F> {
+impl Ramp {
     /// Whether a segment of `piece` and `curve` on this frame continues the
     /// move in flight: the same piece, bit for bit, arriving on the same
     /// frame (or both at rest on it).
     fn continues(&self, piece: Piece, curve: Curve) -> bool {
-        // A segment's endpoints are `f32` words, widened exactly to `F`.
-        let bits = |from: F, to: F, law: Law| (from.to_f64().to_bits(), to.to_f64().to_bits(), law);
+        let bits = |from: f64, to: f64, law: Law| (from.to_bits(), to.to_bits(), law);
         if !self.started
             || self.curve.is_none()
-            || bits(self.from, self.target, self.shape)
-                != bits(F::from_f32(piece.from), F::from_f32(piece.to), piece.law)
+            || bits(self.from, self.target, self.shape) != bits(piece.from, piece.to, piece.law)
         {
             return false;
         }
-        let arrive = crate::event::arrival(curve.position, curve.length);
+        let arrive = arrival(curve.position, curve.length);
         if self.active {
-            self.arrive.map(|a| a.checked_sub(self.done)) == arrive.map(Some)
+            self.arrive.checked_sub(self.done) == Some(arrive)
         } else {
-            arrive == Some(0)
+            arrive == 0
         }
     }
 
     /// Start a ramp to `target` along `shape` over `len` frames from this
     /// frame on, from the value the last frame had. A second ramp on the
     /// same frame replaces the first, from the same value.
-    fn start(&mut self, target: f32, len: usize, shape: Law) {
+    fn start(&mut self, target: f64, len: usize, shape: Law) {
         self.from = self.value;
-        self.target = F::from_f32(target);
+        self.target = target;
         self.len = u32::try_from(len).unwrap_or(u32::MAX);
         self.shape = shape;
         self.done = 0;
         self.active = true;
         self.curve = None;
         self.started = true;
-        self.arrive = Some(self.len.saturating_sub(1));
+        self.arrive = self.len.saturating_sub(1);
     }
 
     /// Start a curve segment from this frame on: its own endpoints, so the
     /// value it interrupts is not read. A second event on the same frame
     /// replaces it.
     fn start_segment(&mut self, piece: Piece, curve: Curve) {
-        self.from = F::from_f32(piece.from);
-        self.target = F::from_f32(piece.to);
+        self.from = piece.from;
+        self.target = piece.to;
         self.shape = piece.law;
         self.len = 0;
         self.done = 0;
         self.active = true;
         self.curve = Some(curve);
         self.started = true;
-        self.arrive = crate::event::arrival(curve.position, curve.length);
+        self.arrive = arrival(curve.position, curve.length);
     }
 
     /// The move's value at progress `t`: along the short arc for a circular
     /// param.
     #[inline]
-    fn at(&self, t: Normalized) -> F {
-        piece_in(self.param, self.from, self.target, self.shape, t)
+    fn at(&self, t: Normalized) -> f64 {
+        Piece::new(self.from, self.target, self.shape).value(self.param, t)
     }
 
     /// The value at this frame, after any move started on it. A ramp: its
@@ -682,7 +673,7 @@ impl<F: Float> Ramp<F> {
     /// its last step (a zero-length ramp reaches it on its first frame). A segment: its shape at its
     /// progress this frame, the target once it has arrived.
     #[inline]
-    fn step(&mut self) -> F {
+    fn step(&mut self) -> f64 {
         if self.active {
             if let Some(c) = self.curve {
                 // `segment_value`'s arithmetic, stepped: arrived, it holds
@@ -723,8 +714,8 @@ impl<F: Float> Ramp<F> {
 /// from `base` at its own frame, whether or not a segment came before it
 /// on that frame.
 pub(crate) fn render_ramps<F: Float>(
-    ramp: &mut Ramp<F>,
-    events: &[Event],
+    ramp: &mut Ramp,
+    events: &[ParamEvent],
     param: UnitAddr,
     out: &mut [F],
     base: impl Fn(usize) -> F,
@@ -739,19 +730,19 @@ pub(crate) fn render_ramps<F: Float>(
         let mut at_rest = false;
         while let Some(e) = next.next_if(|e| e.offset.index() <= i) {
             match e.kind {
-                EventKind::Ramp(r) if r.addr() == want => {
+                ParamKind::Ramp(r) if r.addr() == want => {
                     if !ramp.started {
-                        ramp.value = base(i);
+                        ramp.value = base(i).into();
                     }
                     ramp.start(r.raw_target(), r.duration().get(), r.shape());
                     corners.mark(i);
                 }
-                EventKind::Segment(s) if s.is_for(want) => {
+                ParamKind::Segment(s) if s.is_for(want) => {
                     // A segment never reads the value it interrupts, but a
                     // ramp that replaces it on this frame does: a first one
                     // starts from the base, as it would alone.
                     if !ramp.started {
-                        ramp.value = base(i);
+                        ramp.value = base(i).into();
                     }
                     let (position, length) = s.timing();
                     let curve = Curve { position, length };
@@ -764,13 +755,8 @@ pub(crate) fn render_ramps<F: Float>(
                         corners.mark(i);
                     }
                 }
-                // Another param's, MIDI, a chord, or a resync: a port re-sends
-                // nothing.
-                EventKind::Ramp(_)
-                | EventKind::Segment(_)
-                | EventKind::Midi(_)
-                | EventKind::Harmony(_)
-                | EventKind::Resync => {}
+                // Another param's: a port re-sends nothing.
+                ParamKind::Ramp(_) | ParamKind::Segment(_) => {}
             }
         }
         *o = if ramp.started {
@@ -780,7 +766,7 @@ pub(crate) fn render_ramps<F: Float>(
                 // It arrived on this frame and holds its end from here.
                 corners.mark(i);
             }
-            v
+            control_in(v)
         } else {
             base(i)
         };
@@ -940,7 +926,7 @@ pub(crate) struct PortState<F: Float> {
     fade: usize,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
-    ramp: Ramp<F>,
+    ramp: Ramp,
 }
 
 impl<F: Float> Default for PortState<F> {
@@ -1107,7 +1093,7 @@ impl<F: Float> ParamState<F> {
         k: usize,
         param: UnitAddr,
         frames: usize,
-        m: Option<(EventOut, &[Event])>,
+        m: Option<(EventOut, &[ParamEvent])>,
         base: Option<F>,
     ) {
         let d = self.declick;
@@ -1210,9 +1196,9 @@ impl<F: Float> Drop for ParamState<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::ParamRamp;
+    use crate::param_event::{ParamEvent, ParamRamp};
     use crate::time::Offset;
-    use tutti_units::{Hz, ParamKey, SamplePosition, Samples};
+    use tutti_units::{Hz, ParamKey, Real, Samples};
 
     const AZ: Option<UnitParam> = Some(UnitParam::Azimuth);
     const EL: Option<UnitParam> = Some(UnitParam::Elevation);
@@ -1271,7 +1257,7 @@ mod tests {
     #[test]
     fn a_ramp_lands_on_its_last_frame() {
         let ev = |at: usize, t: f64, len: usize| {
-            Event::ramp(
+            ParamEvent::ramp(
                 Offset::of(Samples(at), Samples(16)),
                 ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(t), Samples(len)),
             )
@@ -1310,7 +1296,7 @@ mod tests {
     /// would alone, under a base that moves every frame.
     #[test]
     fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
-        use crate::event::ParamSegment;
+        use crate::param_event::ParamSegment;
         let at = Offset::of(Samples(4), Samples(8));
         let seg = ParamSegment::new(
             ParamKey::<Hz>::CUTOFF,
@@ -1322,7 +1308,7 @@ mod tests {
         let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(0.0), Samples(2));
         let base = |i: usize| 1.0 + i as f32;
         let mut after_segment = [0.0f32; 8];
-        let events = [Event::segment(at, seg), Event::ramp(at, ramp)];
+        let events = [ParamEvent::segment(at, seg), ParamEvent::ramp(at, ramp)];
         render_ramps(
             &mut Ramp::default(),
             &events,
@@ -1332,7 +1318,7 @@ mod tests {
             &mut Corners::new(&mut [0; 4096]),
         );
         let mut alone = [0.0f32; 8];
-        let events = [Event::ramp(at, ramp)];
+        let events = [ParamEvent::ramp(at, ramp)];
         render_ramps(
             &mut Ramp::default(),
             &events,
@@ -1352,10 +1338,12 @@ mod tests {
     fn a_linear_ramp_renders_the_unshaped_bits() {
         for len in [1usize, 2, 3, 7, 10, 64, 97, 1000] {
             for (from, target) in [(0.0f64, 1.0f64), (0.3, -7.9), (440.0, 1234.5)] {
-                // The port renders in `f32`: the oracle narrows the span once.
-                let (from32, target32) = (from as f32, target as f32);
+                // The port renders in `f64` and crosses to `f32` once a frame:
+                // the oracle is the same line, from the base the lane gives it.
+                let from32 = f32::from_unit(Hz(from));
+                let start = f64::from(from32);
                 let frames = len + 4;
-                let events = [Event::ramp(
+                let events = [ParamEvent::ramp(
                     Offset::of(Samples(1), Samples(frames)),
                     ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
                 )];
@@ -1371,11 +1359,11 @@ mod tests {
                 );
                 for (j, &v) in out[1..].iter().enumerate() {
                     let done = j + 1;
-                    let want = if done >= len {
-                        target32
+                    let want = f32::from_unit(Hz(if done >= len {
+                        target
                     } else {
-                        from32 + (target32 - from32) * (done as f32 / len as f32)
-                    };
+                        start + (target - start) * (done as f64 / len as f64)
+                    }));
                     assert_eq!(v.to_bits(), want.to_bits(), "len {len}, frame {j}");
                 }
             }
@@ -1412,13 +1400,13 @@ mod tests {
     /// corner; a ramp's frame and the frame it lands on are corners.
     #[test]
     fn corners_are_where_the_trajectory_changes_piece() {
-        use crate::event::ParamSegment;
+        use crate::param_event::ParamSegment;
         let key = ParamKey::<Hz>::CUTOFF;
         let at = |i: usize| Offset::of(Samples(i), Samples(64));
         let seg = |from: f64, to: f64, len: usize| {
             ParamSegment::new(key, Hz(from), Hz(to), Samples(len), Law::Linear)
         };
-        let corners = |events: &[Event]| {
+        let corners = |events: &[ParamEvent]| {
             let mut buf = [0u32; 64];
             let mut c = Corners::new(&mut buf);
             render_ramps(
@@ -1435,30 +1423,39 @@ mod tests {
         // A segment at 4 over 10 frames, in the ramp convention (its frame
         // one step in): its frame and the frame it lands on, 13.
         let a = seg(1.0, 2.0, 10);
-        assert_eq!(corners(&[Event::segment(at(4), a)]), [4, 13]);
+        assert_eq!(corners(&[ParamEvent::segment(at(4), a)]), [4, 13]);
         // The same piece re-sent resumed at 9, five frames on: still 4, 13.
-        let resent = a.resumed(a.position() + SamplePosition(5.0), a.length());
+        let resent = a.resumed(a.position() + Samples(5), a.length());
         assert_eq!(
-            corners(&[Event::segment(at(4), a), Event::segment(at(9), resent)]),
+            corners(&[
+                ParamEvent::segment(at(4), a),
+                ParamEvent::segment(at(9), resent)
+            ]),
             [4, 13]
         );
         // Re-sent after it arrived, at rest on its end: no corner either.
         let rested = a.resumed(a.length(), a.length());
         assert_eq!(
-            corners(&[Event::segment(at(4), a), Event::segment(at(30), rested)]),
+            corners(&[
+                ParamEvent::segment(at(4), a),
+                ParamEvent::segment(at(30), rested)
+            ]),
             [4, 13]
         );
         // A different piece at 9 is a corner, and so is its own arrival.
         let b = seg(1.5, 3.0, 4);
         assert_eq!(
-            corners(&[Event::segment(at(4), a), Event::segment(at(9), b)]),
+            corners(&[ParamEvent::segment(at(4), a), ParamEvent::segment(at(9), b)]),
             [4, 9, 12]
         );
         // A step is one corner on its frame.
-        assert_eq!(corners(&[Event::segment(at(7), seg(0.0, 5.0, 0))]), [7]);
+        assert_eq!(
+            corners(&[ParamEvent::segment(at(7), seg(0.0, 5.0, 0))]),
+            [7]
+        );
         // A ramp of 3 frames at 20: its frame and the frame it lands on, 22.
         let ramp = ParamRamp::new(key, Hz(8.0), Samples(3));
-        assert_eq!(corners(&[Event::ramp(at(20), ramp)]), [20, 22]);
+        assert_eq!(corners(&[ParamEvent::ramp(at(20), ramp)]), [20, 22]);
     }
 
     /// **A range's two bounds are one publish's.** While another thread

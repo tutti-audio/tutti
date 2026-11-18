@@ -658,6 +658,7 @@ mod mode;
 mod node;
 mod par;
 mod param;
+mod param_event;
 mod pass;
 mod plan;
 mod play;
@@ -688,8 +689,8 @@ pub use editor::{
 };
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
-    HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, ParamRamp, ParamSegment,
-    SortedEvents, SubBlocks, UmpAt, note_off_room,
+    HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, SortedEvents, SubBlocks, UmpAt,
+    note_off_room,
 };
 pub use event_inlet::{
     EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
@@ -702,7 +703,7 @@ pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
-pub use lane::{fade_gains, fade_in, ramp_in};
+pub use lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
@@ -732,8 +733,9 @@ pub use node::{
 pub use par::Pool;
 pub use param::{
     MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRange,
-    ParamRangeCell, ParamRangeReader, RangeView, control_word,
+    ParamRangeCell, ParamRangeReader, RangeView,
 };
+pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};
 pub use plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,

@@ -20,7 +20,7 @@ use core::fmt;
 
 use tutti_curve::{Law, Piece};
 use tutti_units::{
-    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement,
+    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, Real,
     SamplePosition, SampleRate, UnitParam,
 };
 
@@ -142,8 +142,8 @@ pub struct Amount {
 impl Amount {
     /// The offset `raw` gives, in the target's units.
     #[inline]
-    pub fn offset(&self, raw: f32, span: f64) -> f64 {
-        f64::from(shape(raw, self.depth, self.polarity, self.curve)) * span
+    pub fn offset<R: Real + Into<f64>>(&self, raw: R, span: f64) -> f64 {
+        shape(raw, self.depth, self.polarity, self.curve).into() * span
     }
 
     /// Whether the offset bends where the raw value crosses zero: a
@@ -495,7 +495,7 @@ impl ControlProgram {
         knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
-        inputs: &[Option<f32>],
+        inputs: &[Option<f64>],
     ) -> Option<f64> {
         self.evaluate(param, knob, at, span, inputs, Limit::At)
     }
@@ -510,7 +510,7 @@ impl ControlProgram {
         knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
-        inputs: &[Option<f32>],
+        inputs: &[Option<f64>],
     ) -> Option<f64> {
         self.evaluate(param, knob, at, span, inputs, Limit::Before)
     }
@@ -521,7 +521,7 @@ impl ControlProgram {
         knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
-        inputs: &[Option<f32>],
+        inputs: &[Option<f64>],
         limit: Limit,
     ) -> Option<f64> {
         let circular = param.filter(|p| p.is_circular());
@@ -529,7 +529,6 @@ impl ControlProgram {
             .automation
             .as_ref()
             .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit, circular))
-            .map(f64::from)
             .filter(|v| v.is_finite())
             .or(knob)?;
         if !span.is_finite() {
@@ -616,7 +615,7 @@ fn automation_at(
     b: f64,
     limit: Limit,
     circular: Option<UnitParam>,
-) -> Option<f32> {
+) -> Option<f64> {
     if limit == Limit::At {
         // A circular param's move is the short arc, which the curve's own
         // `value_at` (a straight line between values) does not know.
@@ -964,8 +963,10 @@ fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
         let q = points[after];
         (p, p.at.get(), q, q.at.get())
     };
-    let t = Normalized::clamped((frac - start) / (end - start));
-    Piece::new(p.value, q.value, p.curve).value(None, t)
+    // The point values are `f32` lane levels, and so is the piece between
+    // them: the progress crosses into the lane once.
+    let t = f32::from_unit(Normalized::clamped((frac - start) / (end - start)));
+    p.value + (q.value - p.value) * p.curve.eval_in(t)
 }
 
 /// Where in `(0, 1)` a `curve` piece from `a` to `b` crosses zero, if its
@@ -982,7 +983,7 @@ fn crossing(curve: Law, a: f32, b: f32) -> Option<f64> {
     let below = a < 0.0;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
-        let v = Piece::new(a, b, curve).value(None, Normalized::clamped(mid));
+        let v = Piece::new(f64::from(a), f64::from(b), curve).value(None, Normalized::clamped(mid));
         if (v < 0.0) == below {
             lo = mid;
         } else {

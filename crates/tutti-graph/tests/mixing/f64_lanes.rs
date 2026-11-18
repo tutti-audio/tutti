@@ -8,7 +8,7 @@ use tutti_graph::testing as common;
 
 use common::prepare;
 use tutti_graph::{
-    Cx, Editor, Event, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutPort, ParamIn,
+    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutPort, ParamEvent, ParamIn,
     ParamNode, ParamRamp, ParamRange, ParamSet, Params, Prepare, Shape, Source, Status,
     TransportPosition, declare_params,
 };
@@ -73,6 +73,7 @@ impl<F: Float> Node<F> for Ramp {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -80,7 +81,7 @@ impl<F: Float> Node<F> for Ramp {
         if cx.env.frame.get() == 0 {
             let offset = io.offset(self.at).expect("inside the block");
             let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(self.target), Samples(self.len));
-            let _ = io.event_out(0).push(Event::ramp(offset, ramp));
+            let _ = io.event_out(0).push_param(ParamEvent::ramp(offset, ramp));
         }
         Status::Silent
     }

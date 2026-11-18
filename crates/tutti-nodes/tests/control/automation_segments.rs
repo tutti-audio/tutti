@@ -47,7 +47,7 @@ fn automation(curve: impl Curve + 'static) -> ControlLaneNode {
     )
 }
 /// A tempo whose beat is not a whole number of frames, so breakpoints fall
-/// between frames.
+/// between frames (and are placed on the nearest).
 const TEMPO: Bpm = Bpm::of(113.0);
 const TOL: f64 = 2e-5;
 const MAX: usize = 128;
@@ -147,10 +147,25 @@ fn check_rolling(
         let out = block(&mut ed, &mut exec, &t, &TransportChanges::NONE, n);
         for (i, &v) in out.iter().enumerate() {
             let beat = clock.beat();
-            let want = curve.value_at(beat).expect("a value").get();
+            // A segment starts and ends on a whole frame, so a breakpoint
+            // between frames is placed on the nearest, each end by up to half
+            // a frame: a frame reads what the curve has within a frame of it.
+            let value = |b: f64| curve.value_at(Beat(b)).expect("a value").get();
+            let frame = TEMPO.get() / (60.0 * RATE);
+            let (from, to) = (beat.get() - frame, beat.get() + frame);
+            // The window's ends and every breakpoint inside it (a peak is not
+            // at either end).
+            let inside = curve
+                .breakpoints()
+                .iter()
+                .map(|p| p.time.get())
+                .filter(|t| (from..=to).contains(t));
+            let values: Vec<f64> = [from, to].into_iter().chain(inside).map(value).collect();
+            let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
+            let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             assert!(
-                (f64::from(v) - want).abs() <= TOL,
-                "frame {} (block of {n}, frame {i}), beat {}: {v} vs the curve's {want}",
+                (lo - TOL..=hi + TOL).contains(&f64::from(v)),
+                "frame {} (block of {n}, frame {i}), beat {}: {v} outside the curve's {lo}..{hi}",
                 all.len() + i,
                 beat.get()
             );
@@ -270,7 +285,7 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
 /// executor's frame count: it starts at 0 and the transport rolls from its
 /// first block) is a multiple of the control grid (`tutti_modulation::CONTROL_GRID`), and a line between two
 /// such frames. Returns the rendered values.
-fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f32) -> Vec<f32> {
+fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f64) -> Vec<f32> {
     let (mut ed, mut exec) = graph(lane);
     let mut clock = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE));
     let mut out = Vec::new();
@@ -288,8 +303,11 @@ fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f
     for (f, &v) in out.iter().enumerate() {
         let g = f - f % step;
         let (v0, v1) = (at(g), at(g + step));
-        let want = v0 + (v1 - v0) * ((f - g) as f32 / step as f32);
-        assert!((v - want).abs() <= tol, "frame {f}: {v} vs {want}");
+        let want = v0 + (v1 - v0) * ((f - g) as f64 / step as f64);
+        assert!(
+            (f64::from(v) - want).abs() <= tol,
+            "frame {f}: {v} vs {want}"
+        );
     }
     out
 }
@@ -323,8 +341,8 @@ fn an_unrepresentable_piece_is_linear_on_the_grid() {
 fn a_curve_without_pieces_takes_the_grid() {
     struct Sine;
     impl Curve for Sine {
-        fn value_at(&self, beat: Beat) -> Option<f32> {
-            Some((beat.get() as f32 * 3.0).sin())
+        fn value_at(&self, beat: Beat) -> Option<f64> {
+            Some((beat.get() * 3.0).sin())
         }
     }
     let curve: Arc<dyn Curve> = Arc::new(Sine);

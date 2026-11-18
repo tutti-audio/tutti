@@ -21,7 +21,7 @@ use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMa
 use crate::param::{CellValue, ParamInput};
 use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
-use crate::slots::{AudioSlots, EventSlots, SlotFlags};
+use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
@@ -400,7 +400,7 @@ pub(super) fn run_params<
         let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
-                let events = st.events.ev(p.slot);
+                let events = st.events.pev(p.slot);
                 params.port(k, param, frames, Some((p.from, events)), base);
             }
             None => params.port(k, param, frames, None, base),
@@ -441,7 +441,9 @@ pub(super) fn node_op_with<
         && !injected
         && !scheduled
         && in_silent.covers(ain.len())
-        && ein.iter().all(|&s| st.events.ev(s).is_empty());
+        && ein
+            .iter()
+            .all(|&s| st.events.ev(s).is_empty() && st.events.pev(s).is_empty());
 
     // See the module docs: a node with event inputs parks only on its own
     // say-so (`Status::Idle`); one without parks when its inputs, its last
@@ -481,7 +483,7 @@ pub(super) fn node_op_with<
             st.flags.set(s, SILENT | CONSTANT);
         }
         for &s in eout {
-            st.events.ev_mut(s).clear();
+            st.events.slot_mut(s).clear();
         }
         return;
     }
@@ -590,6 +592,7 @@ pub(super) fn node_op_with<
         constant: in_constant,
         cap: rec.event_capacity.map_or(h.cap, |n| n.get() as usize),
         injected,
+        discards,
         scheduled: &views[..n_views],
         params,
     };
@@ -625,7 +628,9 @@ pub(super) fn node_op_with<
     // sink, called for its side effects, and a skip would starve them.
     u.last_quiet = !(aout.is_empty() && eout.is_empty())
         && aout.iter().all(|&s| st.flags.get(s) & SILENT != 0)
-        && eout.iter().all(|&s| st.events.ev(s).is_empty());
+        && eout
+            .iter()
+            .all(|&s| st.events.ev(s).is_empty() && st.events.pev(s).is_empty());
     if u.keys.is_closing() {
         // A replace took over from a unit that held keys: close them ahead
         // of this block's events, as many as the slot takes; the rest next
@@ -706,6 +711,9 @@ pub(super) struct Call<'p, 'e, F: Float> {
     cap: usize,
     /// Whether flushed events wait for this call (see the module docs).
     injected: bool,
+    /// Whether the node is bypassed: its event inputs carry only what it
+    /// must close.
+    discards: bool,
     /// `(port, start, end)` into the overlay buffer: ports whose events this
     /// block include scheduled commands.
     scheduled: &'p [(u16, u32, u32)],
@@ -806,19 +814,34 @@ impl<'p, F: Float> Call<'p, '_, F> {
         arena.borrow(frames, &borrows[rec.borrows.range()], &mut ins, &mut outs);
 
         let mut evin: [SortedEvents<'_>; M] = [SortedEvents::EMPTY; M];
-        let mut evout_bufs: [Option<&mut Vec<Event>>; M] = std::array::from_fn(|_| None);
+        let mut evout_bufs: [Option<&mut EventSlot>; M] = std::array::from_fn(|_| None);
         events.borrow_sorted(
             &borrows[rec.event_borrows.range()],
-            |port, v| evin[port as usize] = SortedEvents::trusted(v, frames),
+            |port, v| {
+                evin[port as usize] =
+                    SortedEvents::trusted(&v.events, frames).trusted_params(&v.params, frames);
+            },
             |port, v| evout_bufs[port as usize] = Some(v),
         );
+        // Flushed events and scheduled commands replace a port's events; its
+        // param events are the slot's.
         if self.injected {
             for inj in inject.iter().filter(|i| i.live && i.unit == rec.unit) {
-                evin[inj.port as usize] = SortedEvents::trusted(&inj.merged, frames);
+                let port = inj.port as usize;
+                evin[port] = SortedEvents::trusted(&inj.merged, frames)
+                    .trusted_params(evin[port].params(), frames);
             }
         }
         for &(port, a, b) in self.scheduled {
-            evin[port as usize] = SortedEvents::trusted(&overlay[a as usize..b as usize], frames);
+            let port = port as usize;
+            // A bypassed node is sent no param events either.
+            let params = if self.discards {
+                &[]
+            } else {
+                evin[port].params()
+            };
+            evin[port] = SortedEvents::trusted(&overlay[a as usize..b as usize], frames)
+                .trusted_params(params, frames);
         }
         // One count per port, so a loss is charged to the port that had it.
         let drops: [PortCount; M] = std::array::from_fn(|_| PortCount::default());
@@ -829,9 +852,10 @@ impl<'p, F: Float> Call<'p, '_, F> {
             .zip(&drops)
             .take(e_out)
         {
-            let b = b.take().expect("event output borrowed");
-            b.clear();
-            *w = EventWriter::new(b, self.cap, frames as u32, d);
+            let slot = b.take().expect("event output borrowed");
+            slot.clear();
+            let EventSlot { events, params } = slot;
+            *w = EventWriter::new(events, params, self.cap, frames as u32, d);
         }
         let unplaced = Cell::new(0u32);
         let io = Io::new(

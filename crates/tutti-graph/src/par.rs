@@ -90,7 +90,7 @@ use crate::loss::Dropped;
 use crate::node::{Env, MAX_PORTS};
 use crate::plan::{Op, Plan, Span};
 use crate::rtlog::LogLane;
-use crate::slots::{ArenaView, EventSlots, EventsView, SharedFlags};
+use crate::slots::{ArenaView, EventSlot, EventSlots, EventsView, SharedFlags};
 use tutti_types::MaxBlock;
 
 /// A pool of threads that runs a job on several of them — what the parallel
@@ -283,7 +283,7 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) outputs: &'b mut [&'o mut [F]],
     pub(crate) arena: &'b mut Arena<F>,
     pub(crate) flags: &'b mut [u8],
-    pub(crate) events: &'b mut [Vec<Event>],
+    pub(crate) events: &'b mut [EventSlot],
     pub(crate) store: &'b mut [Option<Unit<F>>],
     pub(crate) rings: &'b mut [Option<Ring<F>>],
     pub(crate) audio_fb: &'b mut [Option<crate::kernels::AudioRing<F>>],
@@ -318,7 +318,7 @@ struct Shared<'s, 'o, F: Float = f32> {
     graph: &'s TaskGraph,
     arena: SplitRw<'s, Line>,
     flags: &'s [AtomicU8],
-    events: SplitRw<'s, Vec<Event>>,
+    events: SplitRw<'s, EventSlot>,
     store: SplitMut<'s, Option<Unit<F>>>,
     rings: SplitMut<'s, Option<Ring<F>>>,
     audio_fb: SplitMut<'s, Option<crate::kernels::AudioRing<F>>>,

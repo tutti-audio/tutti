@@ -29,6 +29,8 @@ use tutti_units::Samples;
 
 use crate::event::Event;
 use crate::held::Held;
+use crate::param_event::ParamEvent;
+use crate::slots::EventSlot;
 use crate::time::Offset;
 
 /// An audio delay line of fixed length.
@@ -190,11 +192,20 @@ pub(crate) struct EventFifo {
     /// poured in, as room frees, ahead of each block's input. Present only
     /// in a FIFO the editor built for a cut edge ([`with_owed`](Self::with_owed)).
     owed: Option<Held>,
+    /// The param events in flight, as `q` holds the events: due time and
+    /// event, oldest first. It has room only in a FIFO built for a source that
+    /// writes them ([`with_params`](Self::with_params)); a param event past
+    /// its room is dropped and counted, newest first, with no note-off to
+    /// keep.
+    pq: VecDeque<(u64, ParamEvent)>,
+    /// The most param events queued.
+    plimit: usize,
 }
 
 impl EventFifo {
     /// A FIFO for a delay of `len`, sized from the declared rate (see the
     /// type docs). Control side: allocates.
+    #[cfg(test)]
     pub(crate) fn sized(len: Samples, cap: usize, max_block: usize) -> Self {
         Self::sized_for(len, cap, max_block, 0)
     }
@@ -212,7 +223,17 @@ impl EventFifo {
             reserve,
             rate: cap.max(1),
             owed: None,
+            pq: VecDeque::new(),
+            plimit: 0,
         }
+    }
+
+    /// This FIFO with room for param events: as many as it holds events (its
+    /// limit), for a source that writes them. Control side: allocates.
+    pub(crate) fn with_params(mut self) -> Self {
+        self.pq = VecDeque::with_capacity(self.limit);
+        self.plimit = self.limit;
+        self
     }
 
     /// This FIFO with a table for owed closes. Control side: allocates.
@@ -310,6 +331,7 @@ impl EventFifo {
         self.limit = limit.min(room);
         self.reserve = reserve.min(room - self.limit);
         self.rate = cap.max(1);
+        self.plimit = limit.min(self.pq.capacity());
         // A table pours up to `limit - rate`: staging sizes the room for the
         // new bound, so the clamp above never leaves a FIFO that carries
         // events no room to pour into.
@@ -321,7 +343,7 @@ impl EventFifo {
 
     /// How many events are queued.
     pub(crate) fn queued(&self) -> usize {
-        self.q.len()
+        self.q.len() + self.pq.len()
     }
 
     /// Take over `old`'s queue and clock into this FIFO, which was built on
@@ -343,6 +365,14 @@ impl EventFifo {
                 self.q.remove(i);
                 self.q.push_back(item);
                 lost += 1;
+            } else {
+                lost += 1;
+            }
+        }
+        let proom = self.pq.capacity();
+        while let Some(item) = old.pq.pop_front() {
+            if self.pq.len() < proom {
+                self.pq.push_back(item);
             } else {
                 lost += 1;
             }
@@ -370,7 +400,9 @@ impl EventFifo {
     /// Returns how many did not fit. Allocates nothing.
     pub(crate) fn flush_into(&self, out: &mut Vec<Event>) -> usize {
         let first = self.q.front().map_or(0, |&(t, _)| t + self.len);
-        let mut lost = 0;
+        // The param events in flight go no further: a sink that outlives its
+        // delay takes up the source's own segments again (each is absolute).
+        let mut lost = self.pq.len();
         for &(t, e) in &self.q {
             if out.len() == out.capacity() {
                 lost += 1;
@@ -431,6 +463,52 @@ impl EventFifo {
         }
     }
 
+    /// Queue this block's `input`, events and param events. Returns how many
+    /// were dropped.
+    pub(crate) fn push_slot(&mut self, input: &EventSlot) -> u32 {
+        self.push(&input.events) + self.push_params(&input.params)
+    }
+
+    /// Emit into `out` what falls due in the block of `frames`, events and
+    /// param events.
+    pub(crate) fn pop_due_slot(&mut self, out: &mut EventSlot, frames: usize) {
+        self.pop_due(&mut out.events, frames);
+        self.pop_due_params(&mut out.params, frames);
+    }
+
+    /// Queue this block's param events `input`. Returns how many were
+    /// dropped.
+    fn push_params(&mut self, input: &[ParamEvent]) -> u32 {
+        let mut dropped = 0;
+        let start = self.clock;
+        for e in input {
+            if self.pq.len() < self.plimit {
+                self.pq.push_back((start + u64::from(e.offset.get()), *e));
+            } else {
+                dropped += 1;
+            }
+        }
+        dropped
+    }
+
+    /// Emit into `out` the param events that fall due in the block of
+    /// `frames`, as [`pop_due`](Self::pop_due) does events.
+    fn pop_due_params(&mut self, out: &mut Vec<ParamEvent>, frames: usize) {
+        let start = self.clock;
+        let end = start + frames as u64;
+        while let Some(&(t, e)) = self.pq.front() {
+            let due = t + self.len;
+            if due >= end || out.len() >= out.capacity() {
+                break;
+            }
+            self.pq.pop_front();
+            out.push(ParamEvent {
+                offset: Offset::raw(due.saturating_sub(start) as u32),
+                ..e
+            });
+        }
+    }
+
     /// Move the clock past a block of `frames`.
     pub(crate) fn advance(&mut self, frames: usize) {
         self.clock += frames as u64;
@@ -447,11 +525,11 @@ impl EventFifo {
     /// bounds nothing, delivered it). Order is kept: every queued event was
     /// input before this block's, at the same length, so it falls due no
     /// later.
-    pub(crate) fn run(&mut self, input: &[Event], out: &mut Vec<Event>, frames: usize) -> u32 {
-        self.pop_due(out, frames);
+    pub(crate) fn run(&mut self, input: &EventSlot, out: &mut EventSlot, frames: usize) -> u32 {
+        self.pop_due_slot(out, frames);
         self.pour();
-        let dropped = self.push(input);
-        self.pop_due(out, frames);
+        let dropped = self.push_slot(input);
+        self.pop_due_slot(out, frames);
         self.advance(frames);
         dropped
     }
@@ -460,7 +538,30 @@ impl EventFifo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::param_event::ParamRamp;
     use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
+
+    /// [`EventFifo::run`] over a list of events and the `out` it fills.
+    fn run(f: &mut EventFifo, input: &[Event], out: &mut Vec<Event>, frames: usize) -> u32 {
+        let input = EventSlot {
+            events: input.to_vec(),
+            params: Vec::new(),
+        };
+        let mut slot = EventSlot {
+            events: std::mem::take(out),
+            params: Vec::new(),
+        };
+        let lost = f.run(&input, &mut slot, frames);
+        *out = slot.events;
+        lost
+    }
+
+    fn param(offset: u32, target: f64) -> ParamEvent {
+        ParamEvent::ramp(
+            Offset::raw(offset),
+            ParamRamp::foreign(tutti_units::ParamId::new(1), target, Samples(0)),
+        )
+    }
 
     /// A ring of `n` outputs its input `n` samples later, across blocks.
     #[test]
@@ -538,13 +639,14 @@ mod tests {
     fn fifo_delays_events_across_blocks() {
         let mut f = EventFifo::sized(Samples(6), 8, 8);
         let mut out = Vec::with_capacity(8);
-        f.run(
+        run(
+            &mut f,
             &[Event::midi(Offset::raw(2), Ump([7, 0, 0, 0]))],
             &mut out,
             8,
         );
         assert!(out.is_empty(), "due at 8, which is the next block");
-        f.run(&[], &mut out, 8);
+        run(&mut f, &[], &mut out, 8);
         assert_eq!(out, vec![Event::midi(Offset::ZERO, Ump([7, 0, 0, 0]))]);
     }
 
@@ -563,7 +665,7 @@ mod tests {
         f.resize(2, 64);
         let input = [note(0, false, 100), note(1, false, 101)];
         let mut out = Vec::with_capacity(EventFifo::bound(1, 2, 64));
-        let dropped = f.run(&input, &mut out, 64);
+        let dropped = run(&mut f, &input, &mut out, 64);
         assert_eq!(dropped, 0, "nothing refused");
         let tags: Vec<u32> = out
             .iter()
@@ -577,6 +679,39 @@ mod tests {
             tags, want,
             "the backlog first, then the input, all this block"
         );
+    }
+
+    /// A param event is delayed as an event is: `len` frames later, on the
+    /// frame it was due, in whichever block that is, and in order.
+    #[test]
+    fn fifo_delays_param_events_across_blocks() {
+        let mut f = EventFifo::sized(Samples(6), 8, 8).with_params();
+        let block = |params: Vec<ParamEvent>| EventSlot {
+            events: Vec::new(),
+            params,
+        };
+        let mut out = EventSlot::with_capacity(8, 8);
+        f.run(&block(vec![param(2, 0.25), param(5, 0.5)]), &mut out, 8);
+        // Due at 8 and 11: neither in this block.
+        assert!(out.params.is_empty());
+        out.clear();
+        f.run(&block(Vec::new()), &mut out, 8);
+        assert_eq!(out.params, vec![param(0, 0.25), param(3, 0.5)]);
+    }
+
+    /// A FIFO built without room for param events drops what it is given and
+    /// counts it: the compiler gives room only to a source that declares it.
+    #[test]
+    fn a_fifo_with_no_param_room_drops_param_events() {
+        let mut f = EventFifo::sized(Samples(6), 8, 8);
+        let input = EventSlot {
+            events: Vec::new(),
+            params: vec![param(0, 1.0)],
+        };
+        let mut out = EventSlot::with_capacity(8, 8);
+        assert_eq!(f.run(&input, &mut out, 8), 1);
+        f.run(&EventSlot::default(), &mut out, 8);
+        assert!(out.params.is_empty());
     }
 
     /// A feedback ring read before it is written delays by exactly its
