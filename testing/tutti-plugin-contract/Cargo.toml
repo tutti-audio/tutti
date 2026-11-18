@@ -28,7 +28,6 @@ tutti-shared-plugin = { path = "../tutti-shared-plugin" }
 # clap,vst3` and `cargo build -p tutti-plugin-probe` first: the server
 # cannot be a dependency (it depends on `tutti-plugin`), and a dependency's
 # binary is not built for a test.
-tutti-plugin = { path = "../../crates/tutti-plugin", features = ["clap", "vst2", "vst3"], optional = true }
 # `tests/probe.rs` applies a probe's `Delta` to a `PluginDb` to read the descriptor.
 tutti-plugin-host = { path = "../../crates/tutti-plugin-host", optional = true }
 tutti-plugin-db = { path = "../../crates/tutti-plugin-db", optional = true }
@@ -38,7 +37,7 @@ tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc", optional = true }
 [features]
 # `tests/server.rs`: the same configuration and transcript through a real
 # `plugin-server` process.
-server = ["dep:tutti-plugin", "dep:tutti-plugin-host", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
+server = ["dep:tutti-plugin-host", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
 
 [[test]]
 name = "server"
@@ -51,6 +50,9 @@ name = "probe"
 required-features = ["server"]
 
 [dev-dependencies]
+# `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
+# does not, and an optional dependency cannot be a dev-dependency.
+tutti-plugin = { path = "../../crates/tutti-plugin", features = ["clap", "vst2", "vst3"] }
 # `tests/probe.rs` copies the plugin under the file name its `init` reads.
 tempfile = "3"
 # `tests/probe.rs`: a CLAP factory of two plugins and a VST2 shell of two, whose ids

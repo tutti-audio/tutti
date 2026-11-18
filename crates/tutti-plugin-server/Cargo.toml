@@ -58,14 +58,15 @@ tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = t
 # VST3 plugin hosting (optional)
 tutti-vst3-host = { version = "0.0.1", path = "../tutti-vst3-host", optional = true }
 
-# Audio Unit hosting (optional, macOS only)
-tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
-
 # The OS calls of the host watchdog and the connection wait, behind safe calls.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 # `ParamId`, in the served plugin's parameter calls.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Audio Unit hosting (optional, macOS only): `au` enables nothing elsewhere.
+tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }

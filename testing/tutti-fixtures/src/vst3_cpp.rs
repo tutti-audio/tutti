@@ -2,6 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+// Names the C++ twin's crate so cargo builds its bundle in this invocation; its
+// `links` key hands the bundle directory to `build.rs`.
+use tutti_shared_plugin_vst3_cpp as _;
+
 #[cfg_attr(windows, path = "vst3_cpp/ext_windows.rs")]
 #[cfg_attr(target_os = "macos", path = "vst3_cpp/ext_macos.rs")]
 #[cfg_attr(not(any(windows, target_os = "macos")), path = "vst3_cpp/ext_other.rs")]

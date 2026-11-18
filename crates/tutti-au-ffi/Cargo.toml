@@ -19,13 +19,17 @@ workspace = true
 # production build; the host crate's tests turn it on.
 testing = []
 
-[dependencies]
-# The editor's sizes, which name their unit (`dpi::LogicalSize`: a Cocoa view is in points).
-dpi.workspace = true
+[target.'cfg(target_os = "macos")'.dependencies]
 # The derive of every error type's `Display` and `Error`.
 thiserror = { workspace = true, features = ["std"] }
 # The block views (`Planes`, `PlanesMut`) a render converts to and from the AU's f32.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+# `Bpm`, `Beat` on the host transport figures.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+# `Midi1Parser`, which reads a plugin's MIDI 1.0 output.
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+# The editor's sizes, which name their unit (`dpi::LogicalSize`: a Cocoa view is in points).
+dpi.workspace = true
 # The MIDI 2.0 widening of what a plugin emits.
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # `RenderCount`: the renders in flight, which a MIDI-output withdrawal checks
@@ -34,12 +38,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `WindowHandle` (the parent window of an editor), `TransportInfo` and
 # `WireMidi`: the values the AU surface is spoken in.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
-# `Bpm`, `Beat` on the host transport figures.
-tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `Midi1Parser`, which reads a plugin's MIDI 1.0 output.
-tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-
-[target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 coreaudio-sys = "0.2"
