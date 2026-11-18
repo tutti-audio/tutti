@@ -444,7 +444,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         edits: Vec::new(),
         events: Vec::new(),
         refused: false,
-        ties: crate::ties::Ties::detached(),
+        ties: crate::ties::ties().expect("bells").0,
     };
     let prepare = Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(512)));
     assert!(

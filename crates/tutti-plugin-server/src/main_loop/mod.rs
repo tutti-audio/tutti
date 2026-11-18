@@ -139,6 +139,7 @@ pub(crate) fn serve_every(
     period: Duration,
 ) -> BridgeResult<()> {
     let bell = session.ties().bell.clone();
+    let host_gone = session.ties().host_gone.clone();
     let mut ticker = Ticker::new(Instant::now(), period);
     // What the plugin wants waited on, and what the wait found ready: reused,
     // so a steady watch set allocates nothing.
@@ -172,6 +173,11 @@ pub(crate) fn serve_every(
             .until_due(now)
             .map_or(ticker.wait(now), |due| due.min(ticker.wait(now)));
         let readable = backend.wait(transport, main, timeout, &wakeups, &bell, &mut ready)?;
+        // The host process ended (the watch rang the bell to end the wait): the
+        // session is over, as when the control connection ends.
+        if host_gone.is_stopped() {
+            return Ok(());
+        }
         // A plugin called the host from a thread of its own (its `request_process`,
         // say) and rang the bell: what it raised leaves now, not on the tick.
         if bell.rung() {

@@ -38,9 +38,9 @@
 //! command the main thread pushed before it answered the host is in effect for
 //! every block the host sends after that answer.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tutti_rt::{StopToken, ThreadHandle};
+use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
 use std::borrow::Cow;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
@@ -651,7 +651,7 @@ impl RenderSide {
         self.drain();
         self.poll_seat();
         let Some(io) = io else {
-            self.wake.wait(None);
+            self.wake.wait(None)?;
             return Ok(());
         };
         let readable = io.wait_readable(None, &self.wake)?;
@@ -860,6 +860,22 @@ impl RenderSide {
     }
 }
 
+/// A render thread that could not start, with the side it was to run.
+pub(crate) struct SpawnFailed {
+    /// Why it could not start.
+    pub(crate) error: std::io::Error,
+    /// The render side, still whole.
+    pub(crate) side: RenderSide,
+}
+
+impl std::fmt::Debug for SpawnFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpawnFailed")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The thread that renders: owns the [`RenderSide`] and the host's audio
 /// connection until it is stopped.
 pub(crate) struct RenderThread {
@@ -877,24 +893,40 @@ impl RenderThread {
     ///
     /// The thread asks the OS for the highest priority it grants
     /// ([`crate::server::request_audio_priority`]): it is the one that renders.
+    ///
+    /// # Errors
+    ///
+    /// The thread could not start: the render side comes back with the error,
+    /// for whoever still has a Processor to bring home through it.
     pub(crate) fn spawn(
         side: RenderSide,
         audio: Option<Box<dyn Transport>>,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self, Box<SpawnFailed>> {
         let ended = Arc::new(OnceLock::new());
         let wake = side.wake.clone();
-        let handle = tutti_rt::spawn_named("plugin-render", None, {
-            let ended = Arc::clone(&ended);
+        let slot = Arc::new(Mutex::new(Some(side)));
+        let spawned = tutti_rt::spawn_named("plugin-render", None, {
+            let (ended, slot) = (Arc::clone(&ended), Arc::clone(&slot));
             move |stop: &StopToken| {
+                let side = slot.lock_recover().take().expect("the side is taken once");
                 crate::server::request_audio_priority("the render thread");
                 run(side, audio, stop, &ended)
             }
-        })?;
-        Ok(Self {
-            handle: Some(handle),
-            wake,
-            ended,
-        })
+        });
+        match spawned {
+            Ok(handle) => Ok(Self {
+                handle: Some(handle),
+                wake,
+                ended,
+            }),
+            Err(error) => Err(Box::new(SpawnFailed {
+                error,
+                side: slot
+                    .lock_recover()
+                    .take()
+                    .expect("a thread that did not start took nothing"),
+            })),
+        }
     }
 
     /// Why the audio connection ended, once it has.
@@ -1013,11 +1045,6 @@ mod tests {
         /// harness's limit, so a thread no command wakes fails.
         #[test]
         fn a_command_wakes_a_render_thread_that_waits_on_a_quiet_connection() {
-            use crate::main_loop::Stream;
-            use crate::transport::SocketTransport;
-            use std::os::fd::OwnedFd;
-            use std::os::unix::net::UnixStream;
-
             let (mut link, side) = link().expect("bells");
             let (_host_end, server_end) = UnixStream::pair().expect("socket pair");
             let audio = SocketTransport::audio(Stream::from(OwnedFd::from(server_end)));

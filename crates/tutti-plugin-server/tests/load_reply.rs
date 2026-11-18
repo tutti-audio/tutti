@@ -87,6 +87,13 @@ fn fixtures() -> (PathBuf, PathBuf) {
 
 /// A `plugin-server` process and its handshake connection, past `Ready`.
 fn start_server() -> (Server, Stream) {
+    let (server, stream, _) = start_server_for(std::process::id());
+    (server, stream)
+}
+
+/// [`start_server`] for a server that takes the process `host` for its host,
+/// and the socket it serves.
+fn start_server_for(host: u32) -> (Server, Stream, PathBuf) {
     // The default config makes a fresh socket path that fits a socket address.
     let socket = tutti_plugin_ipc::BridgeConfig::at(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
@@ -96,7 +103,7 @@ fn start_server() -> (Server, Stream) {
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
             .arg(&socket)
-            .env("TUTTI_PLUGIN_HOST_PID", std::process::id().to_string())
+            .env(tutti_plugin_ipc::HOST_PID_ENV, host.to_string())
             .stdout(Stdio::piped())
             .spawn()
             .expect("spawn plugin-server"),
@@ -106,7 +113,7 @@ fn start_server() -> (Server, Stream) {
         read_frame::<_, BridgeMessage>(&mut stream),
         Ok(BridgeMessage::Ready { .. })
     ));
-    (server, stream)
+    (server, stream, socket)
 }
 
 /// A load that fails gets the loader's reason and leaves the server serving.
@@ -232,4 +239,42 @@ fn a_handshake_frame_that_does_not_decode_ends_the_server() {
         .expect("send a frame");
     let (status, _) = ended(&mut server);
     assert!(!status.success(), "the server ended as if the host left");
+}
+
+/// **A host that ends once the session is running shuts the server down as an
+/// end of the control connection does, and the plugin is released.** This test
+/// process keeps all three connections open, so no end of stream says the host
+/// is gone: only the watch on the host process does. The server must leave by
+/// its own exit (status 0, not a signal), which only a teardown that ran
+/// reaches, and without the log of a plugin it had to leak.
+#[test]
+fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
+    let (_not_a_plugin, good) = fixtures();
+    let mut host = Command::new("sleep")
+        .arg("600")
+        .spawn()
+        .expect("spawn the stand-in host");
+    let (mut server, mut handshake, socket) = start_server_for(host.id());
+    assert!(matches!(
+        load(&mut handshake, &good, PluginFormat::Clap),
+        BridgeMessage::PluginLoaded { .. }
+    ));
+    drop(handshake);
+    let mut audio = connect(&socket, &mut server);
+    let mut control = connect(&socket, &mut server);
+    for stream in [&mut audio, &mut control] {
+        assert!(matches!(
+            read_frame::<_, BridgeMessage>(stream),
+            Ok(BridgeMessage::Ready { .. })
+        ));
+    }
+
+    host.kill().expect("the host ends");
+    host.wait().expect("reaped");
+    let (status, printed) = ended(&mut server);
+    assert_eq!(status.code(), Some(0), "{status:?}: {printed}");
+    assert!(
+        !printed.contains("leaking the plugin"),
+        "the plugin was leaked: {printed}"
+    );
 }

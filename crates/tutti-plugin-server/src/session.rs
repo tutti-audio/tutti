@@ -952,7 +952,7 @@ mod tests {
                         }
                         // As the render thread waits: for what the session
                         // rings it for.
-                        wake.wait(None);
+                        wake.wait(None).expect("a wait");
                     }
                 }
             });
@@ -2998,7 +2998,7 @@ mod tests {
             None,
             &mut || {},
             tutti_plugin_types::Hand::local(),
-            crate::ties::Ties::detached(),
+            crate::ties::ties().expect("bells").0,
         )
         .expect("the vendored VST3 probe loads");
         let vst3: &dyn crate::served::ServedPlugin = &vst3;

@@ -37,17 +37,21 @@ impl Bell {
 
     /// Waits up to `timeout` (`None`: for ever) for a ring and clears it:
     /// whether one came, napping at most 1 ms between looks.
-    pub(crate) fn wait(&self, timeout: Option<std::time::Duration>) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// Never on this platform.
+    pub(crate) fn wait(&self, timeout: Option<std::time::Duration>) -> std::io::Result<bool> {
         const NAP: std::time::Duration = std::time::Duration::from_millis(1);
         let started = std::time::Instant::now();
         while !self.rung() {
             let left = timeout.map(|t| t.saturating_sub(started.elapsed()));
             if left.is_some_and(|left| left.is_zero()) {
-                return false;
+                return Ok(false);
             }
             std::thread::sleep(left.map_or(NAP, |left| left.min(NAP)));
         }
-        self.take()
+        Ok(self.take())
     }
 
     /// Clears a ring this thread has woken for.

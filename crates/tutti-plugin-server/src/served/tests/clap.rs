@@ -187,7 +187,7 @@ fn the_buses_are_those_the_plugin_has_at_activation() {
         None,
         &mut || {},
         Hand::local(),
-        crate::ties::Ties::detached(),
+        crate::ties::ties().expect("bells").0,
     )
     .expect("activate")
     .0;
@@ -259,7 +259,7 @@ fn a_plugin_that_drops_its_64_bit_flags_after_open_loads_as_32_bit() {
         None,
         &mut || {},
         Hand::local(),
-        crate::ties::Ties::detached(),
+        crate::ties::ties().expect("bells").0,
     )
     .expect("falls back to 32-bit audio")
     .0;

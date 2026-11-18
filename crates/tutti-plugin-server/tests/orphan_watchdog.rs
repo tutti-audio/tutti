@@ -116,7 +116,7 @@ fn dead_socket_path(tag: &str) -> std::path::PathBuf {
 /// original parent is gone, and the server has been reparented to whoever the
 /// reaper is on this system.
 ///
-/// The shell states its own PID in `TUTTI_PLUGIN_HOST_PID`, exactly as
+/// The shell states its own PID in `HOST_PID_ENV`, exactly as
 /// `tutti_plugin`'s `spawn_process` does, which is what makes it a fair
 /// stand-in for a real host.
 ///
@@ -131,7 +131,8 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
         // orphaning. `$$` is the shell's own PID — the host, as far as the
         // server is concerned. `echo $!` hands the server's PID back; the
         // shell then exits at once.
-        "TUTTI_PLUGIN_HOST_PID=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!"
+        "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!",
+        env = tutti_plugin_ipc::HOST_PID_ENV
     );
     let out = Command::new("/bin/sh")
         .arg("-c")
@@ -208,7 +209,10 @@ fn a_server_with_a_live_parent_serves_its_host() {
     let socket = dead_socket_path("live-parent");
     let mut child = Command::new(exe)
         .arg(&socket)
-        .env("TUTTI_PLUGIN_HOST_PID", std::process::id().to_string())
+        .env(
+            tutti_plugin_ipc::HOST_PID_ENV,
+            std::process::id().to_string(),
+        )
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -236,8 +240,10 @@ fn a_host_that_ends_after_connecting_ends_the_server() {
     let socket = dead_socket_path("after-connect");
     // The shell is the host until its stdin closes: it prints the server's PID
     // and waits for the end of its input.
-    let script =
-        format!("TUTTI_PLUGIN_HOST_PID=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!; read _");
+    let script = format!(
+        "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!; read _",
+        env = tutti_plugin_ipc::HOST_PID_ENV
+    );
     let mut host = Command::new("/bin/sh")
         .arg("-c")
         .arg(&script)

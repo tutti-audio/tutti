@@ -1343,7 +1343,7 @@ mod tests {
             None,
             &mut || {},
             tutti_plugin_types::Hand::local(),
-            crate::ties::Ties::detached(),
+            crate::ties::ties().expect("bells").0,
         )
         .expect("the vendored VST3 probe must load");
 

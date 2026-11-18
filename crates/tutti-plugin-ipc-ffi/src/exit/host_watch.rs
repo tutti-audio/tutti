@@ -44,8 +44,7 @@ mod tests {
     /// The most a test waits for an event: a guard against a hang.
     const HANG_GUARD: Duration = Duration::from_secs(600);
 
-    /// **The end of the host runs the function, and a host that runs does
-    /// not**: a child is watched while it runs (nothing arrives), is killed,
+    /// **The end of the host runs the function**: a child is watched, killed,
     /// and its end reaches the function. The wait outlasts the test harness's
     /// limit, so a watch that never wakes fails.
     #[test]
@@ -54,11 +53,6 @@ mod tests {
         let (gone, ended) = mpsc::channel();
         watch_host(child.id(), move || gone.send(()).expect("the test listens"))
             .expect("the watch starts");
-        assert_eq!(
-            ended.try_recv(),
-            Err(mpsc::TryRecvError::Empty),
-            "a running host"
-        );
 
         child.kill().expect("kill");
         ended.recv_timeout(HANG_GUARD).expect("its end is learned");

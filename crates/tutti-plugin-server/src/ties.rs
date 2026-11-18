@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_rt::{Doorbell, LockExt, Sleeper, doorbell};
+use tutti_rt::{Doorbell, LockExt, Sleeper, StopToken, doorbell};
 
 use crate::bell::Bell;
 
@@ -105,6 +105,9 @@ pub(crate) struct Ties {
     pub(crate) wake: Bell,
     /// The render thread's progress.
     pub(crate) settle: Settle,
+    /// Stopped when the host process has ended: the main loop then shuts down
+    /// as it does when the control connection ends.
+    pub(crate) host_gone: StopToken,
 }
 
 /// The render thread's half of [`Ties`].
@@ -132,6 +135,7 @@ pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
                 progress: Arc::clone(&progress),
                 sleeper: Arc::new(Mutex::new(sleeper)),
             },
+            host_gone: StopToken::new(),
         },
         RenderTies {
             wake,
@@ -141,15 +145,6 @@ pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
             },
         },
     ))
-}
-
-#[cfg(test)]
-impl Ties {
-    /// Ties to no render thread: what a served plugin that renders in place
-    /// is built with.
-    pub(crate) fn detached() -> Self {
-        ties().expect("bells").0
-    }
 }
 
 #[cfg(test)]

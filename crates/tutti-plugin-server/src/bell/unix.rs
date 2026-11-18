@@ -70,23 +70,29 @@ impl Bell {
 
     /// Waits up to `timeout` (`None`: for ever) for a ring and clears it:
     /// whether one came. The wait of a thread with nothing else to wait on.
-    pub(crate) fn wait(&self, timeout: Option<std::time::Duration>) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The OS refused the wait.
+    pub(crate) fn wait(&self, timeout: Option<std::time::Duration>) -> std::io::Result<bool> {
         let rung = loop {
             match tutti_plugin_ipc_ffi::wait_readable(self.as_fd(), timeout) {
                 // A signal during the wait is not a failure; wait again.
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                other => break other.unwrap_or(true),
+                other => break other?,
             }
         };
         self.clear();
-        rung
+        Ok(rung)
     }
 
-    /// Clears a ring this thread has woken for: the flag and the byte.
+    /// Clears a ring this thread has woken for: the flag and the byte. The byte
+    /// is read whether or not the flag was set: a ring stores the flag and then
+    /// writes the byte, so a clear between the two leaves a byte with no flag,
+    /// which a wait that left it would return on at once, for ever.
     pub(crate) fn clear(&self) {
-        if self.take() {
-            self.drain();
-        }
+        self.take();
+        self.drain();
     }
 
     /// Reads the bytes [`ring`](Self::ring) wrote, so the descriptor is quiet
@@ -105,6 +111,29 @@ mod tests {
     fn readable(bell: &Bell, wait: std::time::Duration) -> bool {
         use std::os::fd::AsFd;
         tutti_plugin_ipc_ffi::wait_readable(bell.shared.rx.as_fd(), Some(wait)).expect("poll")
+    }
+
+    /// **A byte left with no flag wakes one wait and not the next.** A ring
+    /// stores the flag and then writes the byte; a clear between the two takes
+    /// the flag and finds no byte, and the byte lands after. That state is made
+    /// here in order, and the wait that follows must read the byte: a wait that
+    /// left it would be readable for ever, a spin.
+    #[test]
+    fn a_byte_left_without_its_flag_wakes_one_wait_and_not_the_next() {
+        use std::io::Write as _;
+        let bell = Bell::new().expect("a bell");
+        bell.shared
+            .rung
+            .store(true, std::sync::atomic::Ordering::Release);
+        bell.clear();
+        (&bell.shared.tx).write_all(&[1]).expect("the late byte");
+        assert!(!bell.rung(), "the flag is gone, the byte is not");
+        assert!(bell.wait(Some(std::time::Duration::ZERO)).expect("a wait"));
+        assert!(
+            !bell.wait(Some(std::time::Duration::ZERO)).expect("a wait"),
+            "the byte was read"
+        );
+        assert!(!readable(&bell, std::time::Duration::ZERO));
     }
 
     /// **A ring ends a wait on the bell's descriptor at once, and a drain

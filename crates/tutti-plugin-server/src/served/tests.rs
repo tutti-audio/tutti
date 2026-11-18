@@ -31,7 +31,7 @@ impl<F: ServerSide> Served<F> {
             None,
             &mut || {},
             Hand::local(),
-            crate::ties::Ties::detached(),
+            crate::ties::ties().expect("bells").0,
         )
         .map(|(served, _)| served)
     }
@@ -57,7 +57,7 @@ impl<F: ServerSide> Served<F> {
             None,
             &mut || {},
             Hand::local(),
-            crate::ties::Ties::detached(),
+            crate::ties::ties().expect("bells").0,
         )
         .map(|(served, _)| served)
     }
@@ -87,7 +87,7 @@ fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
         false,
         None,
         &mut || {},
-        crate::ties::Ties::detached(),
+        crate::ties::ties().expect("bells").0,
     )
     .map(|(plugin, _, _)| plugin)
 }
