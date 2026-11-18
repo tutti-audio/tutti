@@ -75,8 +75,11 @@ pub enum Event<'a> {
         millis: u32,
     },
     /// The driver closed the port (`MIM_CLOSE`): the device was removed, or
-    /// the driver was stopped. Nothing is delivered after it. Not sent for
-    /// the close that dropping the input makes.
+    /// the driver was stopped. Nothing is delivered after it. Dropping the
+    /// input then makes no call on the handle, which may be reused, and leaks
+    /// its state (the buffers and the handler) for the life of the process,
+    /// because the driver may still hold them: once per unplug of an open port.
+    /// Not sent for the close that dropping the input makes.
     Closed,
 }
 
@@ -142,6 +145,11 @@ static REGISTRY: Registry<Shared> = Registry::new();
 /// A `MidiIn` exists only once its port is open, and the port is closed in
 /// `Drop` and nowhere else, so every path out of `open` after the port opened
 /// closes it exactly once.
+///
+/// After the driver closes the port (`Event::Closed`) the drop makes no call on
+/// the handle, which winmm may have reused, and leaks the input's state (the
+/// buffers and the handler) for the life of the process: the driver may still
+/// hold the headers. That costs one state per unplug of an open port.
 ///
 /// Dropping a `MidiIn` on the handler's own thread (inside the callback) leaks
 /// the port: the drop waits for the callbacks in flight, the handler's own is
@@ -352,6 +360,9 @@ impl Drop for MidiIn {
 impl MidiIn {
     /// Resets and closes the port, once no callback is inside.
     fn teardown(&self, closed: &Slot<Shared>) -> bool {
+        // `Closed::teardown` skips this closure after a driver `MIM_CLOSE`: the
+        // handle is then invalid (Microsoft's `MIM_CLOSE` page) and the state is
+        // leaked.
         // SAFETY: `handle` is the open input. A reset stops recording and
         // returns every queued buffer to its owner.
         unsafe { midiInReset(self.handle) };
@@ -380,6 +391,12 @@ fn requeue(shared: &Slot<Shared>, mut wait: TimerWaiter) {
             return;
         }
         for buffer in &shared.buffers {
+            // Checked before each queueing: a handle the driver closed may be
+            // another input's. No lock is taken, so a close in the driver's
+            // thread is never waited on.
+            if shared.driver_closed() {
+                return;
+            }
             if buffer.done.swap(false, Ordering::AcqRel) {
                 let handle = shared.handle.load(Ordering::Acquire);
                 // SAFETY: the header is prepared and has been returned to us
@@ -423,6 +440,11 @@ extern "system" fn callback(
         return;
     };
     let shared: &Slot<Shared> = &inside;
+    // The OS documents the handle as invalid from `MIM_CLOSE` on; recorded
+    // before the closing early-out so a close in that window is not lost.
+    if message == MM_MIM_CLOSE {
+        shared.note_driver_closed();
+    }
     if shared.closing() {
         return;
     }

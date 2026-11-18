@@ -20,6 +20,13 @@
 //!   complete give a [`Leaked`] instead, which owns the slot and never frees it:
 //!   the OS may still reach the state, so dropping a `Leaked` leaks it.
 //!
+//! A callback that sees the driver close the port records it with
+//! [`Slot::note_driver_closed`]. [`Closed::teardown`] then runs no teardown,
+//! because the OS has declared the handle invalid (and may have reused its
+//! value), and gives a [`Leaked`]: the driver may still hold the headers and
+//! buffers, so the state is never freed. The mark is made while the callback is
+//! inside, so a [`Closed`] always sees it.
+//!
 //! No callback that entered holds a reference the teardown could free, because
 //! the count is final (above) before the teardown starts, and the slot itself
 //! is an `Arc`, so a callback that outlives the owner leaves last and frees it.
@@ -54,6 +61,8 @@ pub(crate) struct Slot<S> {
     /// Callbacks inside; incremented under the registry lock.
     in_flight: AtomicUsize,
     closing: AtomicBool,
+    /// Set by a callback inside when the driver has closed the port.
+    driver_closed: AtomicBool,
 }
 
 impl<S> Slot<S> {
@@ -61,6 +70,20 @@ impl<S> Slot<S> {
     /// does not start now, and what the worker no longer feeds.
     pub(crate) fn closing(&self) -> bool {
         self.closing.load(Ordering::Acquire)
+    }
+
+    /// Records that the driver closed the port (`MIM_CLOSE`): the OS documents
+    /// the handle as no longer valid, so a teardown must not call the OS with
+    /// it. A callback calls this while it is [`Inside`], so the mark is made
+    /// before the count a [`Closed`] proves is 0.
+    pub(crate) fn note_driver_closed(&self) {
+        self.driver_closed.store(true, Ordering::Release);
+    }
+
+    /// Whether a callback has recorded the driver's close. Read by a teardown,
+    /// which runs after every callback has left, so it reads the final value.
+    pub(crate) fn driver_closed(&self) -> bool {
+        self.driver_closed.load(Ordering::Acquire)
     }
 }
 
@@ -108,6 +131,7 @@ impl<S> Registry<S> {
             state,
             in_flight: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
+            driver_closed: AtomicBool::new(false),
         });
         self.slots().push((id, Arc::clone(&slot)));
         Owner {
@@ -260,8 +284,11 @@ impl<S> Closed<S> {
     /// Runs the teardown, which frees what the OS holds of the state and says
     /// whether it let go (the port closed, or gone); when it did not, the state
     /// is [`Leaked`].
+    ///
+    /// After a driver close ([`Slot::note_driver_closed`]) `f` does not run and
+    /// the state is [`Leaked`].
     pub(crate) fn teardown(self, f: impl FnOnce(&Slot<S>) -> bool) -> Outcome<S> {
-        if f(&self.0) {
+        if !self.0.driver_closed() && f(&self.0) {
             Outcome::Closed
         } else {
             Outcome::Leaked(Leaked(Some(self.0)))
@@ -311,7 +338,7 @@ impl<S> Leaked<S> {
 
 #[cfg(all(test, not(loom)))]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
 
@@ -412,6 +439,47 @@ mod tests {
         };
         drop(second);
         assert!(matches!(closing.poll(Duration::ZERO), Poll::Quiesced(_)));
+    }
+
+    #[test]
+    fn a_driver_close_noted_inside_a_callback_is_seen_by_the_teardown_and_not_before() {
+        let registry = Registry::new();
+        let owner = registry.open(());
+        let inside = registry.enter(owner.id()).expect("open");
+        assert!(!inside.driver_closed());
+        inside.note_driver_closed();
+        drop(inside);
+        let closed = owner.begin_close(BOUND).poll(Duration::ZERO).into_closed();
+        assert!(closed.driver_closed());
+
+        let fresh = registry.open(()).begin_close(BOUND);
+        assert!(!fresh.poll(Duration::ZERO).into_closed().driver_closed());
+    }
+
+    #[test]
+    fn a_driver_closed_teardown_runs_nothing_and_leaks_the_state() {
+        let drops = AtomicUsize::new(0);
+        let registry = Registry::new();
+        let owner = registry.open(Counted(&drops));
+        registry
+            .enter(owner.id())
+            .expect("open")
+            .note_driver_closed();
+        let ran = AtomicBool::new(false);
+        let Outcome::Leaked(leaked) = owner
+            .begin_close(BOUND)
+            .poll(Duration::ZERO)
+            .into_closed()
+            .teardown(|_| {
+                ran.store(true, Ordering::SeqCst);
+                true
+            })
+        else {
+            panic!("the driver may still hold the buffers");
+        };
+        assert!(!ran.load(Ordering::SeqCst));
+        drop(leaked);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -583,6 +651,46 @@ mod loom_model {
     #[test]
     fn a_callback_racing_the_close_reads_before_the_teardown_or_finds_nothing() {
         run(&[0]);
+    }
+
+    /// A callback that marks the driver's close while inside is seen by the
+    /// teardown whenever it entered, and never half-seen.
+    #[test]
+    fn a_driver_close_marked_inside_a_callback_is_seen_by_the_teardown_that_follows_it() {
+        loom::model(|| {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let registry: Shared = Arc::new(Registry::new());
+            let owner = registry.open(Probe::new(&drops));
+            let id = owner.id();
+            let marker = {
+                let registry = Arc::clone(&registry);
+                thread::spawn(move || {
+                    let inside = registry.enter(id)?;
+                    inside.note_driver_closed();
+                    Some(())
+                })
+            };
+            let closed = wait(owner.begin_close(Duration::MAX));
+            let mut ran = false;
+            let outcome = closed.teardown(|state| {
+                ran = true;
+                state.teardown();
+                true
+            });
+            let entered = marker.join().expect("callback").is_some();
+            // The teardown ran exactly when no driver close was marked, and a
+            // marked close leaves the state leaked, never freed.
+            assert_eq!(ran, !entered);
+            match outcome {
+                Outcome::Closed => assert!(!entered),
+                Outcome::Leaked(leaked) => {
+                    assert!(entered);
+                    assert_eq!(drops.load(Ordering::SeqCst), 0);
+                    leaked.release();
+                }
+            }
+            assert_eq!(drops.load(Ordering::SeqCst), 1);
+        });
     }
 
     #[test]
