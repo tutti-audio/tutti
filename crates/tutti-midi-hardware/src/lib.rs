@@ -275,7 +275,7 @@ pub use devices::{
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
-pub use fault::{Errno, InputFault};
+pub use fault::{Errno, ErrnoOutOfRange, InputFault};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{
