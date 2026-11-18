@@ -444,7 +444,7 @@ impl<S: ControlSet> Params<S> {
             let fold = |pick: fn(f64, f64) -> f64| {
                 lane.into_iter()
                     .flatten()
-                    .map(|v| v.to_f64())
+                    .map(|&v| -> f64 { v.into() })
                     .filter(|v| v.is_finite())
                     .fold(base, pick)
             };
@@ -504,7 +504,7 @@ impl<S: ControlSet> Params<S> {
             };
             *v = match (lane, control.read) {
                 (Some(lane), _) => {
-                    let x = lane[at.frame].to_f64();
+                    let x: f64 = lane[at.frame].into();
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Glide) => {
