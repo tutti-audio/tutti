@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
-use tutti_rt::{Setting, SettingWord};
+use tutti_rt::{LockExt, Setting, SettingWord};
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
 use tutti_units::Amplitude;
@@ -30,6 +30,14 @@ pub enum SlotId {
     ClickVolume,
     /// When the click sounds.
     ClickMode,
+    /// Where the mix lands.
+    OutputPolicy,
+    /// Who the session is on the MIDI wire.
+    #[cfg(feature = "midi-hardware")]
+    MidiPolicy,
+    /// The MIDI outputs' own latency and offset.
+    #[cfg(feature = "midi")]
+    OutputLatency,
 }
 
 /// A session value behind a target: how it is read, checked and stored.
@@ -133,6 +141,40 @@ slot_target!(
     ClickVolumeTarget,
     Amplitude,
     SlotId::ClickVolume
+);
+
+slot_target!(
+    /// Where the mix lands ([`OutputPolicy`](crate::OutputPolicy)), as
+    /// `session.policy::<OutputPolicy>()` names it. A write is checked
+    /// against the device and the root now, staged, and applied by the next
+    /// [`Session::update`](crate::Session::update), live. It is refused with
+    /// [`SetRefusal::OutputPolicy`] when it has no place.
+    OutputPolicyTarget,
+    crate::OutputPolicy,
+    SlotId::OutputPolicy
+);
+
+#[cfg(feature = "midi-hardware")]
+slot_target!(
+    /// Who the session is on the MIDI wire ([`MidiPolicy`](crate::MidiPolicy)),
+    /// as `session.policy::<MidiPolicy>()` names it. A write is applied by the
+    /// next [`Session::update`](crate::Session::update), and is refused with
+    /// [`SetRefusal::MidiPolicy`] for an identity on a session with no OS
+    /// MIDI layer.
+    MidiPolicyTarget,
+    crate::MidiPolicy,
+    SlotId::MidiPolicy
+);
+
+#[cfg(feature = "midi")]
+slot_target!(
+    /// The MIDI outputs' own latency and offset: what a MIDI device takes to
+    /// sound an event, and a trim on top, as `session.midi().output_latency()`
+    /// names it. It applies from the next drain, to every output: it is one
+    /// setting of the session, not an output's.
+    OutputLatencyTarget,
+    tutti_midi_runtime::OutputLatency,
+    SlotId::OutputLatency
 );
 
 /// A session setting held in one atomic word ([`SettingWord`]): the click's
@@ -313,5 +355,62 @@ impl ClickTargets {
     #[must_use]
     pub const fn mode(self) -> SettingTarget<MetronomeMode> {
         SettingTarget::new(SlotId::ClickMode)
+    }
+}
+
+/// A control-side value the session reads when it applies it: the policy
+/// last written, and whether it was written since it was last taken.
+pub(crate) struct Cell<V> {
+    value: std::sync::Mutex<V>,
+    staged: std::sync::atomic::AtomicBool,
+    /// Whether `value` may be stored: the part of the check that reads the
+    /// session's own state.
+    check: Box<dyn Fn(&V) -> Result<(), SetRefusal> + Send + Sync>,
+}
+
+impl<V> std::fmt::Debug for Cell<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cell").finish_non_exhaustive()
+    }
+}
+
+impl<V: Clone> Cell<V> {
+    /// A cell holding `value`, nothing staged, storing what `check` accepts.
+    pub(crate) fn new(
+        value: V,
+        check: impl Fn(&V) -> Result<(), SetRefusal> + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            value: std::sync::Mutex::new(value),
+            staged: std::sync::atomic::AtomicBool::new(false),
+            check: Box::new(check),
+        })
+    }
+
+    /// The value now: the one in force, or the one written and not yet taken.
+    pub(crate) fn current(&self) -> V {
+        self.value.lock_recover().clone()
+    }
+
+    /// The value written since the last call, once.
+    pub(crate) fn take_staged(&self) -> Option<V> {
+        self.staged
+            .swap(false, Ordering::AcqRel)
+            .then(|| self.current())
+    }
+}
+
+impl<V: Clone + Send + Sync + 'static> Slot<V> for Cell<V> {
+    fn load(&self) -> V {
+        self.current()
+    }
+
+    fn check(&self, value: &V) -> Result<(), SetRefusal> {
+        (self.check)(value)
+    }
+
+    fn store(&self, value: &V) {
+        *self.value.lock_recover() = value.clone();
+        self.staged.store(true, Ordering::Release);
     }
 }

@@ -79,44 +79,22 @@ pub enum MidiPolicyError {
 }
 
 impl Policy for MidiPolicy {
-    type Handle<'a, F: tutti_buffers::Float> = MidiPolicyHandle<'a>;
+    type Target = crate::MidiPolicyTarget;
 
-    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> MidiPolicyHandle<'_> {
-        MidiPolicyHandle {
-            attached: session.midi_io.is_some(),
-            policy: &mut session.midi_policy,
-        }
+    fn target() -> crate::MidiPolicyTarget {
+        crate::MidiPolicyTarget::new()
     }
 }
 
-/// Reads and changes a session's [`MidiPolicy`].
-#[derive(Debug)]
-pub struct MidiPolicyHandle<'a> {
-    attached: bool,
-    policy: &'a mut MidiPolicy,
-}
-
-impl MidiPolicyHandle<'_> {
-    /// The policy in force, or the one set and not yet applied.
-    #[must_use]
-    pub fn get(&self) -> &MidiPolicy {
-        self.policy
-    }
-
-    /// Sets the policy, applied by the next [`Session::update`](crate::Session::update).
-    ///
-    /// # Errors
-    ///
-    /// [`MidiPolicyError::NoHardware`] for an identity on a session with no OS
-    /// MIDI layer; the policy in force is kept. Presenting nothing is always
-    /// accepted.
-    pub fn set(&mut self, policy: MidiPolicy) -> Result<(), MidiPolicyError> {
-        if policy.identity.is_some() && !self.attached {
-            return Err(crate::NoHardware.into());
+/// The cell of the session's MIDI policy: an identity is refused when the
+/// session has no OS MIDI layer (`attached` is false).
+pub(crate) fn policy_cell(attached: bool) -> std::sync::Arc<crate::value::Cell<MidiPolicy>> {
+    crate::value::Cell::new(MidiPolicy::default(), move |policy| {
+        if policy.identity.is_some() && !attached {
+            return Err(MidiPolicyError::from(crate::NoHardware).into());
         }
-        *self.policy = policy;
         Ok(())
-    }
+    })
 }
 
 impl<K: crate::AppKey, C: Clock> Session<K, C> {
@@ -130,6 +108,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
             .groups();
         let wanted = self
             .midi_policy
+            .current()
             .identity
             .map(|identity| Presented { identity, groups });
         if let Some(io) = &mut self.midi_io

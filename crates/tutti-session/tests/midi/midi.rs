@@ -613,15 +613,17 @@ pub(crate) fn hot_plug_session_ci(
 /// The policy that presents `identity` on every MIDI device, named "Session".
 #[cfg(feature = "midi-hardware")]
 fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
-    s.policy::<tutti_session::MidiPolicy>()
-        .set(tutti_session::MidiPolicy {
-            identity: Some(tutti_midi_device::MidiIdentity {
-                device: identity,
-                name: tutti_midi_device::EndpointName::new("Session").unwrap(),
-                instance: None,
+    s.set(
+        s.policy::<tutti_session::MidiPolicy>()
+            .to(tutti_session::MidiPolicy {
+                identity: Some(tutti_midi_device::MidiIdentity {
+                    device: identity,
+                    name: tutti_midi_device::EndpointName::new("Session").unwrap(),
+                    instance: None,
+                }),
             }),
-        })
-        .expect("the session has an OS MIDI layer");
+    )
+    .expect("the session has an OS MIDI layer");
 }
 
 /// The device events of an update, as `(kind, device name)`.
@@ -2156,4 +2158,27 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
         assert!(t >= last, "stamps do not go back: {sent:?}");
         last = t;
     }
+}
+
+/// The outputs' latency and offset are a target: the default is nothing, and
+/// what is written is read back whole.
+#[test]
+fn the_output_latency_is_written_and_read_through_its_target() {
+    use tutti_midi_runtime::{OutputLatency, OutputOffset};
+    use tutti_units::Seconds;
+
+    let mut s = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
+    let target = s.midi().output_latency();
+    assert_eq!(s.get(target).unwrap(), OutputLatency::default());
+    let latency = OutputLatency::new(
+        std::time::Duration::from_millis(7),
+        OutputOffset::new(Seconds(-0.002)).unwrap(),
+    )
+    .unwrap();
+    s.set(target.to(latency)).unwrap();
+    assert_eq!(s.get(target).unwrap(), latency);
+    assert_eq!(s.midi().output_terms(), None, "offline has no terms");
 }

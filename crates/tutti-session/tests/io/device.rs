@@ -1199,8 +1199,7 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         ..OutputPolicy::default()
     };
     session
-        .policy::<OutputPolicy>()
-        .set(policy.clone())
+        .set(session.policy::<OutputPolicy>().to(policy.clone()))
         .unwrap();
     let _ = session.update();
 
@@ -1217,7 +1216,7 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         Ok(_) => panic!("the map has no output 4 on a four-channel device"),
     }
     assert_eq!(
-        session.policy::<OutputPolicy>().get().map,
+        session.get(session.policy::<OutputPolicy>()).unwrap().map,
         policy.map,
         "never reset to the identity"
     );
@@ -1226,7 +1225,9 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
     // A map the new device has places for, and the restart goes through.
     let mut fits = policy;
     fits.map = OutputMap::channels([2, 3]).unwrap();
-    session.policy::<OutputPolicy>().set(fits).unwrap();
+    session
+        .set(session.policy::<OutputPolicy>().to(fits))
+        .unwrap();
     let (driver, _four) = ManualStreamDriver::new();
     session
         .restart_on(spec(4), driver, None, None)

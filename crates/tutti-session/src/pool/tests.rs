@@ -1330,13 +1330,12 @@ mod clock_switch {
         spawned.run_all();
         let _ = events(&mut s);
         s.when_loaded(&"a", |s| {
-            s.policy::<crate::OutputPolicy>()
-                .set(crate::OutputPolicy {
-                    monitor: Some(tutti_types::Bed::Stereo.topology()),
-                    map: tutti_engine::OutputMap::channels([4, 5]).unwrap(),
-                    ..crate::OutputPolicy::default()
-                })
-                .unwrap();
+            s.set(s.policy::<crate::OutputPolicy>().to(crate::OutputPolicy {
+                monitor: Some(tutti_types::Bed::Stereo.topology()),
+                map: tutti_engine::OutputMap::channels([4, 5]).unwrap(),
+                ..crate::OutputPolicy::default()
+            }))
+            .unwrap();
         })
         .unwrap();
         let (driver, spec) = card();

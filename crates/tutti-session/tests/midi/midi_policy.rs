@@ -16,7 +16,7 @@ use tutti_midi_runtime::MidiClipNode;
 use tutti_session::Peer as _;
 use tutti_session::{
     EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
-    midi_input, midi_output,
+    SetRefusal, ValueErrorKind, midi_input, midi_output,
 };
 use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
@@ -221,8 +221,7 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
     let sent = clock.say(&mut s, &fake, ask_everything());
     assert!(streams(&sent).is_empty(), "no identity, no Endpoint");
 
-    s.policy::<MidiPolicy>()
-        .set(policy(2, "My App"))
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .expect("the session has an OS MIDI layer");
     let _ = clock.run(&mut s, &fake, 5);
     let sent = streams(&clock.say(&mut s, &fake, ask_everything()));
@@ -272,7 +271,8 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
 #[test]
 fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() {
     let (mut s, fake) = wired(0);
-    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+        .unwrap();
     let mut clock = Clock::new();
     clock.run(&mut s, &fake, 50);
     let asked = |protocol| {
@@ -312,7 +312,8 @@ fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() 
 fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
     let (mut s, fake) = wired(0);
     let mut clock = Clock::new();
-    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+        .unwrap();
     let first = clock.run(&mut s, &fake, 400);
     let [CiMessage::Discovery { header, data }] = first.as_slice() else {
         panic!("one Discovery as the first identity: {first:?}");
@@ -323,7 +324,8 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     assert_eq!(port.info().peers().len(), 1, "the peer was found");
     let _ = clock.profile_changes();
 
-    s.policy::<MidiPolicy>().set(policy(9, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(9, "My App")))
+        .unwrap();
     let then = clock.run(&mut s, &fake, 400);
     assert!(
         clock.profile_changes().contains(&ProfilesChange::Dropped),
@@ -350,7 +352,8 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
         "found again under the new MUID"
     );
     let _ = clock.profile_changes();
-    s.policy::<MidiPolicy>().set(MidiPolicy::default()).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(MidiPolicy::default()))
+        .unwrap();
     let then = clock.run(&mut s, &fake, 400);
     assert!(
         clock.profile_changes().contains(&ProfilesChange::Dropped),
@@ -381,7 +384,8 @@ fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
     let output = s.midi_output(&"out").expect("loaded");
     assert_eq!(input.losses(), Losses::NONE);
     fake.refuse_sends(true);
-    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+        .unwrap();
     let _ = clock.run(&mut s, &fake, 400);
     assert_eq!(input.losses().refused, 1, "the one Discovery");
     assert_eq!(input.losses().lost, 0);
@@ -392,16 +396,23 @@ fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
 /// and the policy in force is kept; presenting nothing is always accepted.
 #[test]
 fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
-    let mut s = Session::builder()
+    let s = Session::builder()
         .sample_rate(SampleRate::of(48_000.0))
         .build()
         .expect("builds");
     assert_eq!(
-        s.policy::<MidiPolicy>().set(policy(2, "My App")),
-        Err(MidiPolicyError::NoHardware(tutti_session::NoHardware))
+        s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::Refused(SetRefusal::MidiPolicy(MidiPolicyError::NoHardware(
+            tutti_session::NoHardware
+        )))
     );
-    assert_eq!(s.policy::<MidiPolicy>().get().identity, None);
-    assert_eq!(s.policy::<MidiPolicy>().set(MidiPolicy::default()), Ok(()));
+    assert_eq!(s.get(s.policy::<MidiPolicy>()).unwrap().identity, None);
+    assert_eq!(
+        s.set(s.policy::<MidiPolicy>().to(MidiPolicy::default())),
+        Ok(())
+    );
 }
 
 /// M2-104 §7.1.6.2: after a Stream Configuration Request is granted, the
@@ -412,7 +423,8 @@ fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
 #[test]
 fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
     let (mut s, fake) = wired(0);
-    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+        .unwrap();
     let mut clock = Clock::new();
     clock.run(&mut s, &fake, 50);
     let out = s.midi_output(&"out").expect("loaded");
@@ -465,7 +477,8 @@ fn under_jitter_reduction_the_endpoint_reports_that_it_receives_jr() {
         0,
         MidiHardwareOptions::new().input_timing(tutti_midi_hardware::InputTiming::JitterReduction),
     );
-    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
+        .unwrap();
     let mut clock = Clock::new();
     clock.run(&mut s, &fake, 50);
     let sent = streams(&clock.say(&mut s, &fake, ask_everything()));

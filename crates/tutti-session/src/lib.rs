@@ -245,14 +245,14 @@ use hang::HangDetector;
 #[cfg(feature = "plugin")]
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
-pub use midi_hardware::{MidiPolicy, MidiPolicyError, MidiPolicyHandle};
+pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
-pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
+pub use policy::{OutputPolicy, OutputPolicyError, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{
     FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,
@@ -294,6 +294,11 @@ pub use tutti_graph::{
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
+#[cfg(feature = "midi-hardware")]
+pub use value::MidiPolicyTarget;
+#[cfg(feature = "midi")]
+pub use value::OutputLatencyTarget;
+pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
     IntoRead, Knobs, MeterTarget, Modify, Moved, ParamTarget, ScalarTarget, SetRefusal,
