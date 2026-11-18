@@ -218,13 +218,8 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
         vec![track],
     )
     .unwrap();
-    assert!(matches!(
-        s.midi()
-            .play_file(synth, Beat(0.0), sequential.timebase().metrical().unwrap()),
-        Err(MidiError::NoTimeline(
-            tutti_midi_file::TimelineError::NoCommonTimeline
-        ))
-    ));
+    // A format 2 file has a timeline per sequence: no metrical view to pass.
+    assert!(sequential.timebase().metrical().is_none());
 
     // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
     // and no beats to play on: it has no metrical view to pass.

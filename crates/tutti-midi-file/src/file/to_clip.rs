@@ -17,9 +17,7 @@ use tutti_ump::{
 use unicode_normalization::UnicodeNormalization;
 
 use super::Container;
-use crate::{
-    FileEvent, Meta, MetricalView, MicrosPerQuarter, MidiFile, TextKind, Tick, TimelineError, Track,
-};
+use crate::{FileEvent, Meta, MetricalView, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
 
 use lyrics::Lyrics;
 
@@ -29,12 +27,6 @@ mod lyrics;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToClipError {
-    /// A format 2 file (or one of a format above 2) holds independent
-    /// sequences, each on its own timeline; a clip is one sequence (M2-116
-    /// section 7: one Start of Clip and one End of Clip), so there is no one
-    /// clip to make of them.
-    #[error(transparent)]
-    Timeline(#[from] TimelineError),
     /// The file is a Clip File already.
     #[error("the file is a Clip File already")]
     AlreadyClip,
@@ -442,7 +434,7 @@ enum Source {
 }
 
 impl MetricalView<'_> {
-    /// A Standard MIDI File of format 0 or 1 as a MIDI 2.0 Clip File
+    /// A Standard MIDI File of format 0 or 1 (the only formats with one timeline) as a MIDI 2.0 Clip File
     /// (M2-116), its meta events replaced by the UMP messages of Appendix B,
     /// with the events that have no replacement beside it.
     ///
@@ -525,7 +517,6 @@ impl MetricalView<'_> {
     ///
     /// # Errors
     ///
-    /// [`ToClipError::Timeline`] for a format 2 file,
     /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::TooLarge`]
     /// if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
@@ -534,12 +525,8 @@ impl MetricalView<'_> {
             file,
             ticks_per_quarter: tpq,
         } = self;
-        match file.container {
-            Container::Smf(format, _) if !format.shares_timeline() => {
-                return Err(TimelineError::NoCommonTimeline.into());
-            }
-            Container::Smf(..) => {}
-            Container::Clip(_) => return Err(ToClipError::AlreadyClip),
+        if matches!(file.container, Container::Clip(_)) {
+            return Err(ToClipError::AlreadyClip);
         }
 
         // Track order, then the track's own: the stable sort by tick keeps it.
