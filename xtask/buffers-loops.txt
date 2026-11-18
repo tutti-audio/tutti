@@ -18,7 +18,7 @@ crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::chunk  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  pending
 crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  pending
-crates/tutti-graph/src/arena.rs::Arena::leading_mut  not-audio: slot bookkeeping, the arena's lines per slot (`stride`), not a channel interleave
+crates/tutti-graph/src/arena.rs::Arena::leading_mut  not-interleave: slot bookkeeping, the arena's lines per slot (`stride`), not a channel interleave
 crates/tutti-rt/src/pos_ring.rs::PosRing::new  pending
 crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/streamer/io/wave_io.rs::read_wave  pending
