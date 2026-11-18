@@ -161,6 +161,29 @@ impl NodeControls {
         self.delivery.dropped_transport_changes()
     }
 
+    /// What the node did not render, or the plugin did not take, since it was
+    /// bound: see [`BlockLosses`](crate::BlockLosses). RT-safe: relaxed loads.
+    pub fn block_losses(&self) -> crate::BlockLosses {
+        self.delivery.losses.blocks()
+    }
+
+    /// MIDI events the plugin sent that the node had no room to put on its
+    /// event output, since it was bound. Only a chunked Processor's pieces
+    /// are gathered before they leave, and so can overflow here; the
+    /// executor counts what the output itself refuses. RT-safe: one relaxed
+    /// load.
+    pub fn midi_out_dropped(&self) -> u64 {
+        self.delivery.losses.midi_out.get()
+    }
+
+    /// Chords and scales on the node's event input that the sequencer context
+    /// had no room for, since it was bound: past
+    /// [`HARMONY_CAPACITY`](tutti_plugin_types::HARMONY_CAPACITY) in one
+    /// piece of a block. RT-safe: one relaxed load.
+    pub fn harmony_dropped(&self) -> u64 {
+        self.delivery.losses.harmony.get()
+    }
+
     /// Give the node the project meter, for the signature and bar it tells
     /// the plugin. The node's meter follows it, so an edit the host
     /// publishes there reaches the running plugin with nothing re-installed.

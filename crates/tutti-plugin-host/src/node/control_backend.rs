@@ -1,4 +1,4 @@
-//! An in-process plugin of any [`InProcess`] format, behind a handle: its
+//! An in-process plugin of any [`InProcess`](tutti_plugin_types::InProcess) format, behind a handle: its
 //! [`AnyThread`] (the hop to the main thread), its [`Health`] and the
 //! [`MainThreadControl`] a handle's token-taking calls reach it by.
 //!
@@ -37,12 +37,12 @@ use tutti_types::ParkedSampleRate;
 
 use parking_lot::Mutex;
 
-use super::instance::Instance;
+use super::instance::{Changes, Instance, Lost};
 use super::off_main_wait::{OffMainWait, Wait};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, Loaded,
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, RenderMode, TerminationReason};
@@ -51,24 +51,67 @@ use tutti_types::ParamId;
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
 /// the user-installed callback.
-pub(crate) struct ControlBackend<F: InProcess> {
+pub(crate) struct ControlBackend<F: Loaded> {
     pub(super) inner: Arc<Mutex<Instance<F>>>,
     pub(crate) param_sink: ParameterChangeSink,
     /// The cell the audio unit parks a rate change in, shared with the
     /// node. Drained here because telling a plugin its rate deactivates and
     /// activates it, which allocates.
     pub(crate) pending_sample_rate: Arc<ParkedSampleRate>,
-    /// Where a re-read that found the plugin's latency, tail or pins moved is
-    /// reported (`PluginHandle::subscribe`).
-    pub(crate) invalidate_sink: crate::InvalidateSink,
-    /// Where what the plugin asked of the transport is delivered.
-    pub(crate) transport_sink: crate::TransportSink,
+    /// Where what a pump finds is delivered: a re-read that found the
+    /// plugin's latency, tail or pins moved, what it asked of the transport
+    /// (`PluginHandle::subscribe`).
+    pub(crate) reporting: Reporting,
+    /// Whether the plugin is lost, and why: what the handle's health reads.
+    pub(crate) lost: Arc<Lost>,
     /// The plugin's format name, for the refusal of an advisory no in-process
     /// format carries.
     pub(crate) format: &'static str,
     /// The collector of the plugin's owner: where an off-main call posts its
     /// work for the main thread's next tick.
     pub(crate) work: MainWorkHandle,
+}
+
+/// The listeners what a pump finds is delivered to: the invalidations
+/// ([`InvalidateSink`](crate::InvalidateSink)) and the plugin's requests of the
+/// transport ([`TransportSink`](crate::TransportSink)).
+#[derive(Clone, Debug)]
+pub(crate) struct Reporting {
+    pub(crate) invalidate: crate::InvalidateSink,
+    pub(crate) transport: crate::TransportSink,
+}
+
+impl Reporting {
+    /// Delivers what a pump found, in the order the plugin did it: what the
+    /// instance reported of itself (a refused rate, a death), the figures an
+    /// activation re-read, the pins, then the transport requests. Never under
+    /// the instance's lock: a callback may call back.
+    pub(super) fn deliver(&self, changes: Changes) {
+        use tutti_plugin_types::PluginInvalidation;
+        let Changes {
+            latency,
+            tail,
+            io,
+            transport,
+            reports,
+        } = changes;
+        for report in reports {
+            self.invalidate.fire(report);
+        }
+        if let Some(samples) = latency {
+            self.invalidate
+                .fire(PluginInvalidation::Latency { samples });
+        }
+        if let Some(tail) = tail {
+            self.invalidate.fire(PluginInvalidation::Tail { tail });
+        }
+        if io {
+            self.invalidate.fire(PluginInvalidation::Io);
+        }
+        for request in transport {
+            self.transport.fire(request);
+        }
+    }
 }
 
 /// How long an off-main-thread call waits for the main thread to run its work
@@ -86,7 +129,7 @@ const OFF_MAIN_DEADLINE: Duration = if cfg!(test) {
 
 impl<F> ControlBackend<F>
 where
-    F: InProcess + 'static,
+    F: Loaded + 'static,
     F::Processor: 'static,
 {
     /// Runs `work` on the plugin on the main thread, under the instance lock,
@@ -150,7 +193,7 @@ where
 
 impl<F> AnyThread for ControlBackend<F>
 where
-    F: InProcess + 'static,
+    F: Loaded + 'static,
     F::Processor: 'static,
 {
     /// `None` for a lost plugin, and when the main thread does not answer.
@@ -295,16 +338,17 @@ where
     }
 }
 
-/// An in-process plugin cannot be observed to die: a crash takes the host with
-/// it, so a returning caller never sees a crashed state, and the rest is the
-/// trait's defaults.
-impl<F: InProcess> Health for ControlBackend<F> {
+/// An in-process plugin is dead once its lifecycle poisons: a panic out of a
+/// call into it latches the instance's [`Lost`], which is what this reads, with
+/// no lock. A plugin that takes the host down with it is not observed; the rest
+/// is the trait's defaults.
+impl<F: Loaded> Health for ControlBackend<F> {
     fn is_crashed(&self) -> bool {
-        false
+        self.lost.is_lost()
     }
 
     fn crash_cause(&self) -> Option<PluginFailure> {
-        None
+        self.lost.cause()
     }
 
     fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
@@ -320,7 +364,7 @@ impl<F: InProcess> Health for ControlBackend<F> {
 
 impl<F> MainThreadControl for ControlBackend<F>
 where
-    F: InProcess + 'static,
+    F: Loaded + 'static,
     F::Processor: 'static,
 {
     /// Under the instance's lock; not called for a lost plugin.
@@ -345,42 +389,23 @@ where
             // asked for. Re-read here, on the main thread, where a latency or
             // tail query belongs.
             let changes = instance.pump(main);
-            // Before the lost check: a refusal that lost the plugin is the one to report.
-            if let Some(report) = instance.take_rate_report() {
-                use tutti_plugin_types::PluginInvalidation;
-                self.invalidate_sink.fire(match report {
-                    Some((rate, reason)) => PluginInvalidation::RateRefused { rate, reason },
-                    None => PluginInvalidation::RateRestored,
-                });
-            }
-            let Some(control) = instance.control() else {
-                return;
+            let param_changes = match instance.control() {
+                Some(control) => {
+                    control.editor_idle(main);
+                    instance.drain_param_changes(main)
+                }
+                // A lost plugin has nothing to idle; what it reported is told.
+                None => Vec::new(),
             };
-            control.editor_idle(main);
-            (changes, instance.drain_param_changes(main))
+            (changes, param_changes)
         };
         // Drain any plugin-internal parameter changes (knob movement on
         // the editor surface) and forward them to the user sink. Fires
         // on the GUI thread — same threading contract as the parameter
         // sink callback for the subprocess backend (which fires on the
         // bridge thread). After the lock is released: a callback may call back.
-        for edit in param_changes {
-            self.param_sink.fire(edit);
-        }
-        use tutti_plugin_types::PluginInvalidation;
-        if let Some(samples) = changes.latency {
-            self.invalidate_sink
-                .fire(PluginInvalidation::Latency { samples });
-        }
-        if let Some(tail) = changes.tail {
-            self.invalidate_sink.fire(PluginInvalidation::Tail { tail });
-        }
-        if changes.io {
-            self.invalidate_sink.fire(PluginInvalidation::Io);
-        }
-        for request in changes.transport {
-            self.transport_sink.fire(request);
-        }
+        self.param_sink.fire_all(param_changes);
+        self.reporting.deliver(changes);
     }
 }
 
@@ -610,10 +635,11 @@ mod off_main_tests {
         );
     }
 
-    /// **An in-process plugin is never observed dead**: alive, no refusal,
-    /// zero block counts, and a `terminate` that ends nothing.
+    /// **A healthy in-process plugin reads alive, with no refusal and zero
+    /// block counts, and a `terminate` ends nothing**: there is no process to
+    /// end.
     #[test]
-    fn an_in_process_plugin_is_never_observed_dead() {
+    fn a_healthy_in_process_plugin_reads_alive() {
         let (_client, handle, _pump) = loaded();
         assert!(!handle.is_crashed());
         assert!(matches!(handle.status(), crate::PluginStatus::Alive));
@@ -630,7 +656,6 @@ mod off_main_tests {
             "there is no process to end"
         );
     }
-
     /// **The rest of the calls have the same unavailable answer when nothing
     /// pumps the main thread**: the catalog and the text are `None`, a render
     /// mode is refused (`false`), never a default that looks like an answer.
@@ -662,5 +687,111 @@ mod off_main_tests {
             automation,
             Err(AutomationModeError::Unsupported { .. })
         ));
+    }
+}
+
+/// An in-process plugin that panics reads lost through its handle.
+#[cfg(test)]
+mod lost_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use parking_lot::Mutex;
+    use tutti_fixtures::main_thread;
+    use tutti_plugin_types::fake::{FakeLoaded, FakePlugin};
+    use tutti_plugin_types::{
+        Control, Loaded, MainWork, PluginFailure, PluginInvalidation, Prepare, Request,
+    };
+    use tutti_types::{MaxBlock, SampleRate, Samples};
+
+    use super::{ControlBackend, Reporting};
+    use crate::node::instance::Instance;
+    use crate::{Notice, ParameterChangeSink, PluginHandle, PluginStatus};
+
+    /// A fake plugin active in an instance, behind a handle whose notices it
+    /// counts, with the Processor's end kept alive.
+    fn rig() -> (
+        FakePlugin,
+        PluginHandle,
+        Arc<AtomicUsize>,
+        crate::Subscription,
+        tutti_rt::Rt<tutti_plugin_types::fake::FakeProcessor>,
+    ) {
+        let (fake, loaded) = FakePlugin::new();
+        let main = main_thread();
+        let wiring = loaded.wiring(main);
+        let descriptor = loaded.info().clone();
+        let prepare = Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::new(Samples(64)).expect("a block"),
+        );
+        let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+            panic!("the fake activates");
+        };
+        let (instance, rt) = Instance::<FakeLoaded>::adopt(processor, controller, prepare, &wiring);
+        let lost = instance.lost_latch();
+        let inner = Arc::new(Mutex::new(instance));
+        let (_collector, work) = MainWork::new();
+        let reporting = Reporting {
+            invalidate: crate::InvalidateSink::new(),
+            transport: crate::TransportSink::new(),
+        };
+        let backend = Arc::new(ControlBackend {
+            inner,
+            param_sink: ParameterChangeSink::new(),
+            pending_sample_rate: Arc::default(),
+            reporting: reporting.clone(),
+            lost,
+            format: "fake",
+            work,
+        });
+        let control: Arc<dyn crate::MainThreadControl> = backend.clone();
+        let handle = PluginHandle::from_backend(
+            backend,
+            Some(control),
+            descriptor,
+            wiring,
+            ParameterChangeSink::new(),
+        )
+        .with_invalidate_sink(reporting.invalidate);
+        let crashes = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&crashes);
+        let hearing = handle.subscribe(move |notice| {
+            if matches!(
+                notice,
+                Notice::Invalidate(PluginInvalidation::Crashed {
+                    cause: PluginFailure::Panicked { .. }
+                })
+            ) {
+                seen.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        (fake, handle, crashes, hearing, rt)
+    }
+
+    /// **A panic out of an in-process plugin's call is observed as death**: the
+    /// handle's status is `Dead` with a `PluginFailure::Panicked` cause, which
+    /// is what the session turns into `PluginChange::Died`, and the listeners
+    /// hear `Crashed` once.
+    #[test]
+    fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
+        let (fake, handle, crashes, _hearing, _rt) = rig();
+        assert!(matches!(handle.status(), PluginStatus::Alive));
+        fake.panic_in_latency(true);
+        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        handle.editor_idle(main_thread());
+        assert!(handle.is_crashed());
+        assert!(
+            matches!(
+                handle.status(),
+                PluginStatus::Dead {
+                    cause: PluginFailure::Panicked { .. }
+                }
+            ),
+            "{:?}",
+            handle.status()
+        );
+        handle.editor_idle(main_thread());
+        assert_eq!(crashes.load(Ordering::Relaxed), 1, "heard once");
     }
 }

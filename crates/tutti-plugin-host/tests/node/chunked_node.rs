@@ -70,6 +70,10 @@ struct Rig {
     unsent: AtomicBool,
     /// Declare a second input bus (one placed channel) beside the stereo main.
     key_bus: AtomicBool,
+    /// Fail every `process` call.
+    fail: AtomicBool,
+    /// MIDI events each `process` call sends out.
+    emit: AtomicUsize,
 }
 
 impl Rig {
@@ -83,6 +87,8 @@ impl Rig {
             lose: AtomicUsize::new(0),
             unsent: AtomicBool::new(false),
             key_bus: AtomicBool::new(false),
+            fail: AtomicBool::new(false),
+            emit: AtomicUsize::new(0),
         })
     }
 
@@ -324,6 +330,15 @@ impl Processor for RecProcessor {
     }
 
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+        if self.rig.fail.load(Ordering::Relaxed) {
+            return Err(PluginError::Block("scripted failure"));
+        }
+        let emitted = self.rig.emit.load(Ordering::Relaxed);
+        io.out
+            .emit_midi((0..emitted).map(|_| tutti_plugin_types::WireMidi {
+                offset: 0,
+                ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
+            }));
         let PluginAudio::F32(buffer) = &mut io.buffer else {
             unreachable!("the graph is f32");
         };
@@ -704,6 +719,61 @@ fn midi_and_harmony_arrive_on_the_frames_of_their_piece() {
             "declared: {declared}"
         );
     }
+}
+
+/// **The MIDI a chunked processor sends past the block's room is counted**, not
+/// lost silently: two 64-frame pieces each send 200 events into a block that
+/// holds `MIDI_STACK_CAPACITY` (256), so the 144 that do not fit are counted in
+/// `midi_out_dropped`, and the 256 that fit leave on the event output.
+#[test]
+fn chunked_midi_out_past_the_blocks_room_is_counted() {
+    let rig = Rig::new(Some(64), Features::TRANSPORT | Features::MIDI_OUT);
+    rig.emit.store(200, Ordering::Relaxed);
+    let (mut unit, controls) = node(&rig, 128, tempo(None));
+    run_block(&mut unit, 0, 128);
+    let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
+    assert_eq!(controls.midi_out_dropped(), (2 * 200 - room) as u64);
+    assert_eq!(unit.events_out(0).len(), room);
+}
+
+/// **Chords past the capacity of a piece are counted**, in the whole-block path
+/// and the chunked one alike: `HARMONY_CAPACITY` fit, each one more is dropped
+/// and counted in `harmony_dropped`.
+#[test]
+fn chords_past_the_capacity_of_a_piece_are_counted() {
+    let over = 3;
+    let chords: Vec<Event> = (0..tutti_plugin_types::HARMONY_CAPACITY + over)
+        .map(|i| Event::harmony(at(i, 64), Harmony::chord(0, 0, 0b1001_0001)))
+        .collect();
+    for chunk in [None, Some(64)] {
+        let rig = Rig::new(chunk, Features::TRANSPORT | Features::SEQUENCER_CONTEXT);
+        let (mut unit, controls) = node(&rig, 64, tempo(None));
+        unit.events(0, &chords);
+        run_block(&mut unit, 0, 64);
+        assert_eq!(controls.harmony_dropped(), over as u64, "chunk {chunk:?}");
+        let seen = rig.seen.lock().unwrap();
+        assert_eq!(
+            seen[0].chords.as_ref().map(Vec::len),
+            Some(tutti_plugin_types::HARMONY_CAPACITY),
+            "chunk {chunk:?}"
+        );
+    }
+}
+
+/// **A block the Processor fails is counted as failed** in the node's controls,
+/// where an app reads it, and its MIDI is counted lost with the rest.
+#[test]
+fn a_failed_block_is_counted_in_the_nodes_controls() {
+    let rig = Rig::new(None, Features::TRANSPORT);
+    let (mut unit, controls) = node(&rig, 64, tempo(None));
+    unit.events(0, &[note_on(3, 64)]);
+    rig.fail.store(true, Ordering::Relaxed);
+    run_block(&mut unit, 0, 64);
+    rig.fail.store(false, Ordering::Relaxed);
+    run_block(&mut unit, 64, 64);
+    let losses = controls.block_losses();
+    assert_eq!((losses.failed, losses.unlent), (1, 0));
+    assert_eq!(controls.dropped_midi_in(), 1, "the failed block's MIDI");
 }
 
 /// **The chunked audio path allocates nothing** once warm: blocks of 100 over

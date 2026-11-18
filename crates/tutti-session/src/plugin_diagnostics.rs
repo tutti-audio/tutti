@@ -49,6 +49,18 @@ impl<'a> Diagnostics<'a> {
         self.hosted.handle.block_counts()
     }
 
+    /// What the node did not render, or the plugin did not take, over the
+    /// life of the node: blocks with no Processor in hand, blocks the plugin
+    /// failed, blocks it wrote a NaN or an infinity in, and the entries and
+    /// input messages it refused. Counted in blocks and entries, not events
+    /// (what such a block costs in MIDI is in
+    /// [`Plugin::losses`](crate::Plugin::losses)). For a plugin that runs in
+    /// a server, its node counts the same: a block the pipeline did not
+    /// answer is [`missed_chunks`](Self::missed_chunks).
+    pub fn block_losses(&self) -> tutti_plugin_host::BlockLosses {
+        self.hosted.node.block_losses()
+    }
+
     /// The chunks the plugin's pipeline had not answered by the time the node
     /// played them (each played as silence: a dropout), since the plugin was
     /// bound. Zero for a plugin that runs in this process, which has no

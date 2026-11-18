@@ -143,6 +143,57 @@ fn each_kind_of_loss_lands_in_the_plugins_losses() {
     );
 }
 
+/// **The chords a plugin node had no room for are the plugin's refused events,
+/// counted by the node itself.** A real node over the fake plugin, sharing the
+/// hosted node's controls, is given `HARMONY_CAPACITY` + 3 chords in one block:
+/// the 3 past the cap read as `refused` in `losses()`, and nothing else is lost.
+#[test]
+fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
+    use tutti_graph::contract::Direct;
+    use tutti_graph::{Event, Harmony, Offset};
+    use tutti_plugin_types::fake::FakeLoaded;
+    use tutti_plugin_types::{Control, Features, HARMONY_CAPACITY, Loaded, MaxBlock, Prepare};
+
+    let (s, node, counters, _fake) = hosted();
+    let (_plugin, loaded) = FakePlugin::new();
+    let main = tutti_fixtures::main_thread();
+    let mut wiring = loaded.wiring(main);
+    wiring.features.insert(Features::SEQUENCER_CONTEXT);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::new(Samples(64)).expect("a block"),
+    );
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the fake activates");
+    };
+    let client = tutti_plugin_host::client_over::<FakeLoaded>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        Some(counters.controls.clone()),
+    )
+    .expect("the fake is narrow");
+    let mut unit = Direct::new(client.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
+    let over = 3;
+    let chords: Vec<Event> = (0..HARMONY_CAPACITY + over)
+        .map(|i| {
+            Event::harmony(
+                Offset::of(Samples(i), Samples(64)),
+                Harmony::chord(0, 0, 0b1001),
+            )
+        })
+        .collect();
+    assert_eq!(losses(&s, node), Losses::NONE);
+    unit.events(0, &chords);
+    unit.block();
+    assert_eq!(losses(&s, node), Losses::refused(over as u64));
+}
+
 /// **The count only grows across a rebuild of the node and a swap of the
 /// plugin at the same key.** A node rebuilt for new ports starts its counters
 /// at zero, and a swap brings a handle that has dropped no edits: what the

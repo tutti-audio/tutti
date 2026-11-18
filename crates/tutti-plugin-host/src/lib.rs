@@ -23,6 +23,7 @@ mod listeners;
 mod liveness;
 mod meter;
 mod node;
+mod node_losses;
 mod param_delivery;
 mod param_input;
 mod param_values;
@@ -45,6 +46,7 @@ pub use node::{
     InProcClient, Pending, PluginNode, RebindError, Rebinder, Settlement, client_over, load_client,
     load_client_restoring,
 };
+pub use node_losses::BlockLosses;
 pub use param_delivery::{DeliveryCounters, ParamDelivery, ParamDeliveryStats};
 pub use param_values::{ParamRead, ParamReporter, ParamSnapshot, PluginParamValues};
 pub use render_mode::needs_announcement;

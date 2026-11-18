@@ -202,6 +202,8 @@ pub struct DeliveryCounters {
     pub(super) bridge_midi_dropped: OnceLock<Tally<u64>>,
     /// Set once, at bind ([`ParamDelivery::new`]).
     record: OnceLock<Arc<DeliveredRecord>>,
+    /// What the node lost besides parameter points and MIDI input.
+    pub(crate) losses: crate::node_losses::LossCounts,
 }
 
 /// What the node last delivered for each parameter the plugin listed at
@@ -269,6 +271,7 @@ impl Default for DeliveryCounters {
             transport_dropped,
             bridge_midi_dropped: OnceLock::new(),
             record: OnceLock::new(),
+            losses: crate::node_losses::LossCounts::default(),
         }
     }
 }
@@ -614,6 +617,12 @@ impl ParamDelivery {
     /// (`DeliveryCounters::count_transport_dropped`). RT-safe.
     pub(crate) fn count_transport_dropped(&self, n: u64) {
         self.counters.count_transport_dropped(n);
+    }
+
+    /// What the node lost besides parameter points and MIDI input, counted by
+    /// the audio thread.
+    pub(crate) fn losses(&self) -> &crate::node_losses::LossCounts {
+        &self.counters.losses
     }
 
     /// The counters and record this delivery writes, for the node's

@@ -36,9 +36,11 @@ pub struct Listener<A> {
 
 type Callback<A> = Arc<dyn Fn(A) + Send + Sync>;
 
+/// The subscribers, as a list replaced whole on every change: a notification
+/// takes it with one `Arc` clone and allocates nothing.
 struct Subscribers<A> {
     next: u64,
-    list: Vec<(u64, Callback<A>)>,
+    list: Arc<[(u64, Callback<A>)]>,
 }
 
 /// A callback's registration with a [`Listener`]: it hears notifications until
@@ -118,7 +120,7 @@ impl<A> Default for Listener<A> {
         Self {
             inner: Arc::new(Mutex::new(Subscribers {
                 next: 0,
-                list: Vec::new(),
+                list: Arc::from([]),
             })),
         }
     }
@@ -147,30 +149,45 @@ impl<A: Clone> Listener<A> {
         let mut inner = self.inner.lock();
         let id = inner.next;
         inner.next += 1;
-        inner.list.push((id, Arc::new(f)));
+        inner.list = inner
+            .list
+            .iter()
+            .cloned()
+            .chain([(id, Arc::new(f) as Callback<A>)])
+            .collect();
         let shared = Arc::clone(&self.inner);
         Subscription {
             unsubscribe: Some(Box::new(move || {
-                shared.lock().list.retain(|(n, _)| *n != id);
+                let mut inner = shared.lock();
+                inner.list = inner
+                    .list
+                    .iter()
+                    .filter(|(n, _)| *n != id)
+                    .cloned()
+                    .collect();
             })),
         }
     }
 
     /// Calls every subscriber with `event`. The callbacks run outside the lock
-    /// (their `Arc`s are cloned out), so one may subscribe or unsubscribe from
-    /// inside.
+    /// (the list is taken as one `Arc`), so one may subscribe or unsubscribe
+    /// from inside; one that subscribes inside the call hears the next
+    /// notification, not this one.
     ///
     /// Public for `tutti-plugin`'s bridge thread, which feeds a served plugin's notifications in.
     pub fn fire(&self, event: A) {
-        let callbacks: Vec<Callback<A>> = self
-            .inner
-            .lock()
-            .list
-            .iter()
-            .map(|(_, cb)| Arc::clone(cb))
-            .collect();
-        for cb in callbacks {
-            cb(event.clone());
+        self.fire_all([event]);
+    }
+
+    /// Calls every subscriber with each of `events`, in order, taking the
+    /// subscribers once: a preset that moves a thousand parameters is one lock,
+    /// not a thousand.
+    pub fn fire_all(&self, events: impl IntoIterator<Item = A>) {
+        let callbacks = Arc::clone(&self.inner.lock().list);
+        for event in events {
+            for (_, cb) in &*callbacks {
+                cb(event.clone());
+            }
         }
     }
 }
@@ -269,5 +286,33 @@ mod tests {
             2,
             "the callback added inside the first fire hears the second; the first one, unsubscribed, ran once"
         );
+    }
+
+    /// **A batch is heard whole and in order by every subscriber, and a
+    /// subscriber that joins during it hears the next batch**: the batch takes
+    /// the subscribers once, so what is added or removed inside it changes the
+    /// next one.
+    #[test]
+    fn a_batch_is_heard_in_order_by_the_subscribers_it_started_with() {
+        let listener = Listener::<u32>::new();
+        let seen: Arc<Mutex<Vec<(u32, u32)>>> = Arc::default();
+        let joined: Arc<Mutex<Vec<Subscription>>> = Arc::default();
+        let _first = {
+            let (listener, seen, joined) = (listener.clone(), seen.clone(), joined.clone());
+            listener.clone().subscribe(move |n| {
+                seen.lock().push((1, n));
+                if n == 10 {
+                    let seen = seen.clone();
+                    joined
+                        .lock()
+                        .push(listener.subscribe(move |n| seen.lock().push((2, n))));
+                }
+            })
+        };
+        listener.fire_all([10, 11]);
+        assert_eq!(*seen.lock(), [(1, 10), (1, 11)], "the late one waits");
+        seen.lock().clear();
+        listener.fire_all([12]);
+        assert_eq!(*seen.lock(), [(1, 12), (2, 12)], "and hears the next batch");
     }
 }

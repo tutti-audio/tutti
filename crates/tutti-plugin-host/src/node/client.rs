@@ -7,10 +7,11 @@
 //! (`super::instance::Instance`: its `Lifecycle`) is behind an `Arc<Mutex<_>>`
 //! that only control threads take: the handle, the node's `shape` and
 //! `prepare`, a fork. A block with no Processor in hand (it was recalled for a
-//! rate change, or the plugin refused its rate) renders silence, counted by
-//! [`InProcClient::unlent_blocks`]; a block the Processor failed renders
-//! silence too, counted by [`InProcClient::failed_blocks`]; an entry the plugin refused
-//! within a block that ran is counted by [`InProcClient::refused_entries`].
+//! rate change, or the plugin refused its rate) renders silence, counted as an
+//! unlent block; a block the Processor failed renders silence too, counted as a
+//! failed one, with its cause logged; an entry the plugin refused within a block
+//! that ran is counted too ([`BlockLosses`](crate::BlockLosses), read through
+//! [`NodeControls::block_losses`](crate::NodeControls::block_losses)).
 //!
 //! A block is one [`Processor::process`]: the graph's channel slices as
 //! [`PluginAudio`](tutti_plugin_types::PluginAudio), the block's MIDI, parameter chunk and transport as a
@@ -18,14 +19,15 @@
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
 
+use crate::node_losses::LossCounts;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginTail, ProcessContext,
-    ProcessOutput, Processor, process_block, sanitize,
+    Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginError,
+    ProcessContext, ProcessOutput, Processor, process_block, sanitize,
 };
-use tutti_rt::{Rt, Tally, TallyWriter, tally};
+use tutti_rt::Rt;
 
 use arrayvec::ArrayVec;
 use parking_lot::Mutex;
@@ -35,7 +37,8 @@ use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
 use tutti_types::{BusTopology, ChannelLayout, ParkedSampleRate, SampleRate, Samples};
 
-use super::instance::Instance;
+use super::control_backend::Reporting;
+use super::instance::{Figures, Instance, Lost};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -56,9 +59,9 @@ use tutti_types::ParamId;
 ///
 /// There is no process isolation: a plugin crash takes the host down. The
 /// audio thread renders through the Processor it was lent and takes no lock;
-/// while it holds none it outputs silence (counted by
-/// [`unlent_blocks`](Self::unlent_blocks)). Steady state processing does not
-/// allocate.
+/// while it holds none it outputs silence (counted in
+/// [`BlockLosses::unlent`](crate::BlockLosses::unlent)). Steady state processing
+/// does not allocate.
 ///
 /// A graph holding this node forks (`Editor::fork`, which an offline export
 /// takes) **by state transfer**: a second instance of the plugin, from the same
@@ -71,8 +74,17 @@ pub struct InProcClient<F: Loaded> {
     pub(super) inner: Arc<Mutex<Instance<F>>>,
     /// The realtime end the plugin's Processor is lent to.
     pub(super) rt: Rt<F::Processor>,
-    /// Whether the plugin is lost, read with no lock ([`Instance::lost_flag`]).
-    lost: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
+    lost: Arc<Lost>,
+    /// The plugin's latency and tail as the control side last read them
+    /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
+    /// locked or not.
+    pub(super) figures: Arc<Figures>,
+    /// Where a pump of the instance delivers what it finds, for a node whose
+    /// plugin has a handle to hear it; the successor a [`Rebinder`] builds
+    /// delivers through the same. `None` for a served plugin, whose own
+    /// listener reports it.
+    pub(super) reporting: Option<Reporting>,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
@@ -92,9 +104,8 @@ pub struct InProcClient<F: Loaded> {
     /// learns unlisted ones into: what a successor node's delivery is made from.
     pub(super) parameters: Vec<ParamId>,
     pub(super) spares: usize,
-    /// The pin counts, latency and tail the plugin declared when the node was
-    /// built: what `shape` and `process` size by while the instance lock is
-    /// held elsewhere. Moves are reported through the handle
+    /// The pin counts the plugin declared when the node was built: what `shape`
+    /// and `process` size by. Moves are reported through the handle
     /// (`PluginInvalidation`), not here.
     pub(super) declared: Declared,
     /// The block's MIDI in: its event input's.
@@ -125,25 +136,6 @@ pub struct InProcClient<F: Loaded> {
     ///
     /// Shared with the control backend, which drains it.
     pub(super) pending_sample_rate: Arc<ParkedSampleRate>,
-    /// Blocks rendered silent because the realtime end held no Processor.
-    /// Shared with the loader's handle side.
-    pub(super) unlent: Tally<u64>,
-    /// The audio thread's writer of `unlent`, minted in `new`.
-    pub(super) unlent_writer: TallyWriter<u64>,
-    /// Blocks rendered silent because the Processor failed them
-    /// ([`Processor::process`] returned an error).
-    pub(super) failed: Tally<u64>,
-    /// The audio thread's writer of `failed`, minted in `new`.
-    pub(super) failed_writer: TallyWriter<u64>,
-    /// Audio entries the plugin refused in blocks that otherwise ran
-    /// ([`ProcessOutput::entries_refused`]).
-    pub(super) refused: Tally<u64>,
-    /// The audio thread's writer of `refused`, minted in `new`.
-    pub(super) refused_writer: TallyWriter<u64>,
-    /// Input messages the plugin's host refused ([`ProcessOutput::input_refused`]).
-    pub(super) input_refused: Tally<u64>,
-    /// The audio thread's writer of `input_refused`, minted in `new`.
-    pub(super) input_refused_writer: TallyWriter<u64>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -226,7 +218,7 @@ pub struct InProcClient<F: Loaded> {
 /// does when the session retires its node.
 impl<F: Loaded> Drop for InProcClient<F> {
     fn drop(&mut self) {
-        if self.lost.load(std::sync::atomic::Ordering::Acquire) || self.rt.held().is_none() {
+        if self.lost.is_lost() || self.rt.held().is_none() {
             return;
         }
         let _ = self.rt.poll(Processor::stop);
@@ -249,8 +241,6 @@ pub(super) struct Declared {
     /// The plugin's channels as the node's ports: its buses as the node's
     /// buses, in bus order, and the channels past them as ports.
     pub(super) ports: Shape,
-    pub(super) latency: Samples,
-    pub(super) tail: PluginTail,
 }
 
 impl Declared {
@@ -261,8 +251,7 @@ impl Declared {
     /// [`PluginTooWide`] when the plugin has more channels in a direction than
     /// a block serves.
     pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
-        let mut declared =
-            Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)?;
+        let mut declared = Self::from_layout(&Layout::from(loaded))?;
         // A plugin with a bypass of its own keeps running in
         // `NodeMode::Bypassed`: the host writes that bypass
         // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
@@ -273,27 +262,20 @@ impl Declared {
     }
 
     /// What the plugin reports now: the ports of the layout the lifecycle last
-    /// read ([`State::layout`](tutti_plugin_types::State::layout)), and the
-    /// figures `latency` and `tail`. A bypass of the plugin's own is not part of
+    /// read ([`State::layout`](tutti_plugin_types::State::layout)). A bypass of the plugin's own is not part of
     /// a layout: the caller keeps it ([`Rebinder`](super::Rebinder) does).
     ///
     /// # Errors
     ///
     /// [`PluginTooWide`] when the layout has more channels in a direction than
     /// a block serves.
-    pub(super) fn from_layout(
-        layout: &Layout,
-        latency: Samples,
-        tail: PluginTail,
-    ) -> Result<Self, PluginTooWide> {
+    pub(super) fn from_layout(layout: &Layout) -> Result<Self, PluginTooWide> {
         layout.check_width()?;
         Ok(Self {
             ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).with_ports(
                 ChannelLayout::clamped(layout.total_inputs()),
                 ChannelLayout::clamped(layout.total_outputs()),
             ),
-            latency,
-            tail,
         })
     }
 }
@@ -526,7 +508,7 @@ impl<F: Loaded> InProcClient<F> {
         features: Features,
         sample_rate: SampleRate,
         pending_sample_rate: Arc<ParkedSampleRate>,
-        unlent: Tally<u64>,
+        counters: Option<Arc<crate::DeliveryCounters>>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
         controls: Option<PluginControls>,
@@ -549,9 +531,13 @@ impl<F: Loaded> InProcClient<F> {
         if let Some(controls) = &controls {
             controls.set_pipeline(pipeline);
         }
+        // A served plugin's controls own the counters; an in-process node's are
+        // the loader's, or a predecessor's successor's own.
         let counters = controls
             .as_ref()
-            .map_or_else(Arc::default, PluginControls::delivery_counters);
+            .map(PluginControls::delivery_counters)
+            .or(counters)
+            .unwrap_or_default();
         let parameters: Vec<ParamId> = parameters.into_iter().collect();
         let params = ParamDelivery::with_spares(parameters.iter().copied(), counters, spares);
         let transport = controls
@@ -559,7 +545,10 @@ impl<F: Loaded> InProcClient<F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let lost = inner.lock().lost_flag();
+        let (lost, figures) = {
+            let instance = inner.lock();
+            (instance.lost_latch(), instance.figure_cell())
+        };
         // The Processor's room: the one on offer, else the predecessor's, else
         // the node's own intake (a node built before its Processor reached it,
         // with no predecessor).
@@ -569,13 +558,12 @@ impl<F: Loaded> InProcClient<F> {
             .or(event_room)
             .unwrap_or(tutti_plugin_types::MIDI_STACK_BOUND);
         let event_input = event_room;
-        let failed = tally();
-        let refused = tally();
-        let input_refused = tally();
         Self {
             inner,
             rt,
             lost,
+            figures,
+            reporting: None,
             descriptor,
             reload,
             pipeline,
@@ -590,14 +578,6 @@ impl<F: Loaded> InProcClient<F> {
             features,
             sample_rate,
             pending_sample_rate,
-            unlent_writer: unlent.writer(),
-            unlent,
-            failed_writer: failed.writer(),
-            failed,
-            refused_writer: refused.writer(),
-            refused,
-            input_refused_writer: input_refused.writer(),
-            input_refused,
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
@@ -664,45 +644,6 @@ impl<F: Loaded> InProcClient<F> {
     /// (`tutti-plugin`) does it through this.
     pub fn go_offline(&mut self) {
         self.transport.go_offline();
-    }
-
-    /// Returns how many blocks the node rendered silent because its realtime
-    /// end held no Processor (recalled for a rate change, or a plugin that
-    /// refused its rate), since construction.
-    ///
-    /// Intended for diagnostics.
-    pub fn unlent_blocks(&self) -> u64 {
-        self.unlent.get()
-    }
-
-    /// Returns how many blocks the node rendered silent because the plugin
-    /// failed them ([`Processor::process`] returned an error), since
-    /// construction. Such a block loses its MIDI, counted with the rest.
-    ///
-    /// Intended for diagnostics.
-    pub fn failed_blocks(&self) -> u64 {
-        self.failed.get()
-    }
-
-    /// Returns how many audio entries the plugin refused in blocks that
-    /// otherwise ran ([`ProcessOutput::entries_refused`]: a closed or dead
-    /// plugin, a missing entry, pins grown past the buffer), since
-    /// construction. Each is a block or a piece of one that rendered silence; the
-    /// block is not a failed one, and its MIDI loss is counted with the rest.
-    ///
-    /// Intended for diagnostics.
-    pub fn refused_entries(&self) -> u64 {
-        self.refused.get()
-    }
-
-    /// Returns how many input messages the plugin's host refused
-    /// ([`ProcessOutput::input_refused`]), since construction, in the host's unit: a MIDI
-    /// 1.0 message or a whole SysEx message, not the node's events. They are not in
-    /// [`dropped_midi_in`](crate::NodeControls::dropped_midi_in).
-    ///
-    /// Intended for diagnostics.
-    pub fn refused_inputs(&self) -> u64 {
-        self.input_refused.get()
     }
 }
 
@@ -881,8 +822,18 @@ pub(super) enum Rendered {
     Ran,
     /// No Processor in hand: the block was not rendered.
     Unlent,
-    /// The Processor failed the block.
-    Failed,
+    /// The Processor failed the block, for this reason.
+    Failed(&'static str),
+}
+
+/// What a failed block's log says: the reason when the Processor gave a
+/// constant one ([`PluginError::Block`]), else that it failed. A reason that is
+/// text (`PluginError::Process`) is not logged: the log is a constant.
+fn cause_of(error: &PluginError) -> &'static str {
+    match error {
+        PluginError::Block(why) => why,
+        _ => "the plugin failed a block",
+    }
 }
 
 /// What a block, or the piece of one a chunked Processor is handed, carries
@@ -907,7 +858,7 @@ pub(super) struct Inputs<'a> {
 /// the silence.
 pub(super) fn render_with<P: Processor>(
     processor: Option<&mut P>,
-    counters: (&TallyWriter<u64>, &TallyWriter<u64>),
+    losses: &LossCounts,
     params: &ParamDelivery,
     midi: &mut MidiEventVec,
     out: &mut ProcessOutput,
@@ -916,7 +867,6 @@ pub(super) fn render_with<P: Processor>(
     outputs: &mut [&mut [f32]],
     size: usize,
 ) -> Rendered {
-    let (unlent, failed) = counters;
     // Taken whether or not the plugin runs: a block with no Processor drops
     // its MIDI rather than play it a block late. Sorted, stably: a queue may
     // hold it out of order.
@@ -931,7 +881,7 @@ pub(super) fn render_with<P: Processor>(
         .map(|e| (Offset::clamped(e.offset, block), e.ump))
         .collect();
     let Some(processor) = processor else {
-        unlent.add(1);
+        losses.unlent.add(1);
         return Rendered::Unlent;
     };
     out.clear();
@@ -944,14 +894,16 @@ pub(super) fn render_with<P: Processor>(
     match processed {
         Ok(()) => {
             // A plugin's NaN or infinity would poison every node downstream of it.
+            let mut wrote = false;
             for channel in outputs.iter_mut() {
-                sanitize(channel);
+                wrote |= sanitize(channel);
             }
+            losses.nonfinite.add(u64::from(wrote));
             Rendered::Ran
         }
-        Err(_) => {
-            failed.add(1);
-            Rendered::Failed
+        Err(error) => {
+            losses.failed.add(1);
+            Rendered::Failed(cause_of(&error))
         }
     }
 }
@@ -1242,17 +1194,13 @@ mod render_tests {
 
     /// One block of 8 frames through `render_with`, the rest of its arguments at
     /// their quiet values.
-    fn block(
-        rt: &mut Rt<Scripted>,
-        counters: &(TallyWriter<u64>, TallyWriter<u64>),
-        out: &mut ProcessOutput,
-    ) -> Rendered {
+    fn block(rt: &mut Rt<Scripted>, losses: &LossCounts, out: &mut ProcessOutput) -> Rendered {
         let params = ParamDelivery::closed([], Arc::default());
         let mut midi = MidiEventVec::new();
         let mut channel = [0.0f32; 8];
         render_with(
             rt.poll(Processor::stop),
-            (&counters.0, &counters.1),
+            losses,
             &params,
             &mut midi,
             out,
@@ -1273,13 +1221,12 @@ mod render_tests {
     /// block runs.
     #[test]
     fn a_failed_block_is_counted_apart_from_an_unlent_one() {
-        let (unlent, failed) = (tally(), tally());
-        let counters = (unlent.writer(), failed.writer());
+        let losses = LossCounts::default();
         let mut out = ProcessOutput::default();
         let (mut hand, mut rt) = tutti_rt::handoff();
-        assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Unlent);
-        assert_eq!(unlent.get(), 1, "unlent");
-        assert_eq!(failed.get(), 0, "failed");
+        assert_eq!(block(&mut rt, &losses, &mut out), Rendered::Unlent);
+        assert_eq!(losses.unlent.get(), 1, "unlent");
+        assert_eq!(losses.failed.get(), 0, "failed");
 
         assert!(
             hand.lend(Scripted {
@@ -1288,13 +1235,17 @@ mod render_tests {
             })
             .is_ok()
         );
-        assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Failed);
-        assert_eq!(unlent.get(), 1, "unlent");
-        assert_eq!(failed.get(), 1, "failed");
+        assert_eq!(
+            block(&mut rt, &losses, &mut out),
+            Rendered::Failed("scripted failure"),
+            "the Processor's constant reason is the logged cause"
+        );
+        assert_eq!(losses.unlent.get(), 1, "unlent");
+        assert_eq!(losses.failed.get(), 1, "failed");
 
         rt.held().expect("still in hand").fail = false;
-        assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Ran);
-        assert_eq!(failed.get(), 1, "failed, once");
+        assert_eq!(block(&mut rt, &losses, &mut out), Rendered::Ran);
+        assert_eq!(losses.failed.get(), 1, "failed, once");
     }
 
     /// **The plugin's MIDI out is what it emitted in this block**: the block
@@ -1302,8 +1253,7 @@ mod render_tests {
     /// head of every block.
     #[test]
     fn a_blocks_midi_out_is_what_the_plugin_emitted_in_it() {
-        let (unlent, failed) = (tally(), tally());
-        let counters = (unlent.writer(), failed.writer());
+        let losses = LossCounts::default();
         let mut out = ProcessOutput::default();
         let (mut hand, mut rt) = tutti_rt::handoff();
         assert!(
@@ -1313,10 +1263,10 @@ mod render_tests {
             })
             .is_ok()
         );
-        assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Ran);
+        assert_eq!(block(&mut rt, &losses, &mut out), Rendered::Ran);
         assert_eq!(out.midi_events.len(), 1);
         assert_eq!(out.midi_events[0].offset, 3);
-        assert_eq!(block(&mut rt, &counters, &mut out), Rendered::Ran);
+        assert_eq!(block(&mut rt, &losses, &mut out), Rendered::Ran);
         assert!(
             out.midi_events.is_empty(),
             "last block's MIDI is not this one's"
@@ -1358,11 +1308,12 @@ mod sanitize_tests {
 
     /// **The in-process path zeroes NaN and both infinities of a block the
     /// plugin rendered and keeps its finite samples**, as the plugin server does
-    /// before a block leaves its process.
+    /// before a block leaves its process, and counts the block once, however
+    /// many samples were bad.
     #[test]
-    fn an_in_process_plugins_non_finite_output_is_zeroed_and_finite_output_kept() {
-        let (unlent, failed) = (tally(), tally());
-        let counters = (unlent.writer(), failed.writer());
+    fn an_in_process_plugins_non_finite_output_is_zeroed_finite_output_kept_and_the_block_counted()
+    {
+        let losses = LossCounts::default();
         let params = ParamDelivery::closed([], Arc::default());
         let mut midi = MidiEventVec::new();
         let mut out = ProcessOutput::default();
@@ -1371,7 +1322,7 @@ mod sanitize_tests {
         assert!(hand.lend(Poisoned).is_ok());
         let rendered = render_with(
             rt.poll(Processor::stop),
-            (&counters.0, &counters.1),
+            &losses,
             &params,
             &mut midi,
             &mut out,
@@ -1386,6 +1337,7 @@ mod sanitize_tests {
         );
         assert_eq!(rendered, Rendered::Ran);
         assert_eq!(channel, [0.5, 0.0, 0.0, 0.0]);
+        assert_eq!(losses.nonfinite.get(), 1, "one block, three bad samples");
     }
 }
 

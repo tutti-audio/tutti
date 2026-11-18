@@ -1090,11 +1090,14 @@ impl HostedPlugin {
     }
 
     /// What the node lost: MIDI past a block's capacity, in a block the plugin
-    /// did not run, or from a SysEx message that lost a packet (all
+    /// did not run, or from a SysEx message that lost a packet, and the MIDI
+    /// the plugin sent that the node had no room to put out (all
     /// [`lost`](tutti_graph::Losses::lost)), the parameter points it did not
-    /// deliver as they were, and, for a served plugin, the commands its
-    /// bridge's queue [refused](tutti_graph::Losses::refused) and the responses
-    /// it [lost](tutti_graph::Losses::lost).
+    /// deliver as they were, the chords and scales past the capacity of a
+    /// block's sequencer context ([refused](tutti_graph::Losses::refused)), and,
+    /// for a served plugin, the commands its bridge's queue
+    /// [refused](tutti_graph::Losses::refused) and the responses it
+    /// [lost](tutti_graph::Losses::lost).
     fn node_losses(&self) -> tutti_graph::Losses {
         use tutti_graph::Losses;
         let points = self.node.param_delivery();
@@ -1103,6 +1106,8 @@ impl HostedPlugin {
         });
         bridge
             + Losses::lost(self.node.dropped_midi_in())
+            + Losses::lost(self.node.midi_out_dropped())
+            + Losses::refused(self.node.harmony_dropped())
             + Losses::lost(points.grid_points_dropped)
             + Losses::evicted(points.points_merged)
             + Losses::refused(points.points_dropped)
@@ -1318,11 +1323,17 @@ impl<'a> Plugin<'a> {
     /// - [`evicted`](crate::Losses::evicted): parameter points that replaced
     ///   the last one of a full queue.
     /// - [`refused`](crate::Losses::refused): parameter points for a
-    ///   parameter the node has no slot for.
+    ///   parameter the node has no slot for, and chords and scales past the
+    ///   capacity of a block's sequencer context.
+    ///
+    /// The MIDI the plugin sent that the node had no room to put out is in
+    /// [`lost`](crate::Losses::lost) too.
     ///
     /// [`late`](crate::Losses::late) stays zero. Audio the plugin's pipeline did
     /// not answer in time is not an event loss: it is counted in chunks, by
-    /// [`Diagnostics::missed_chunks`].
+    /// [`Diagnostics::missed_chunks`]; the blocks the node did not render and
+    /// the entries the plugin refused are counted in blocks, by
+    /// [`Diagnostics::block_losses`].
     #[must_use]
     pub fn losses(&self) -> crate::Losses {
         self.hosted.losses()
