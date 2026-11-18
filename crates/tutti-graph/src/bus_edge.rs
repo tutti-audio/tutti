@@ -229,8 +229,7 @@ impl Lowering {
             .iter()
             .filter_map(|(&id, &w)| {
                 let fade = self.fades.get(&id).copied().unwrap_or_default();
-                (w.get().to_bits() != 1.0f32.to_bits() || fade != EdgeFade::None)
-                    .then_some((id, (w, fade)))
+                (w != Amplitude::UNITY || fade != EdgeFade::None).then_some((id, (w, fade)))
             })
             .collect()
     }
@@ -328,7 +327,7 @@ impl GraphSpec {
         shapes: &Shapes,
         id: EdgeId,
     ) -> Option<(BusSource, Option<BusRef>, EdgeFade)> {
-        let has = |lanes: Result<Vec<(EdgeId, f32)>, BusError>| {
+        let has = |lanes: Result<Vec<(EdgeId, Amplitude)>, BusError>| {
             lanes.is_ok_and(|l| l.iter().any(|(lane, _)| *lane == id))
         };
         for (&to, feeds) in &self.bus_edges {
@@ -361,7 +360,7 @@ impl GraphSpec {
         from: BusSource,
         to: BusRef,
         fold: BusFold,
-    ) -> Result<Vec<(EdgeId, f32)>, BusError> {
+    ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
         let sink_shape = shapes
             .get(&to.node)
             .ok_or(BusError::NoSuchNode { node: to.node })?;
@@ -389,7 +388,7 @@ impl GraphSpec {
         shapes: &Shapes,
         from: BusSource,
         fold: BusFold,
-    ) -> Result<Vec<(EdgeId, f32)>, BusError> {
+    ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
         // The engine's roots are at most `MAX_CHANNELS` wide, a bus's width, so
         // a root with no `BusTopology` is one never declared.
         let root = self.root.ok_or(BusError::RootUndeclared)?;
@@ -409,7 +408,7 @@ impl GraphSpec {
         sink: BusTopology,
         by: BusFold,
         at: impl Fn(usize) -> Sink,
-    ) -> Result<Vec<(EdgeId, f32)>, LaneError> {
+    ) -> Result<Vec<(EdgeId, Amplitude)>, LaneError> {
         let (source_topology, source_first, source_node) = match from {
             BusSource::Node(bus) => {
                 let shape = shapes
@@ -432,7 +431,7 @@ impl GraphSpec {
         };
 
         let fold = match by {
-            BusFold::Speakers => Fold::between(
+            BusFold::Speakers => Fold::<f64>::between(
                 &ChannelTopology::from(source_topology),
                 &ChannelTopology::from(sink),
             ),
@@ -454,7 +453,7 @@ impl GraphSpec {
                         sink: at(c),
                         from: Edge::Direct(source),
                     },
-                    gain,
+                    Amplitude(gain),
                 ));
             }
         }
@@ -519,7 +518,7 @@ impl GraphSpec {
         let mut fades = BTreeMap::new();
         let mut place = |spec: &mut GraphSpec,
                          id: EdgeId,
-                         weight: f32,
+                         weight: Amplitude,
                          fade: EdgeFade|
          -> Result<(), BusError> {
             // Against the spec as lowered so far, so two bus edges that make
@@ -542,19 +541,19 @@ impl GraphSpec {
                     unreachable!("a bus lane is a direct edge");
                 }
             }
-            if weight.to_bits() != 1.0f32.to_bits() || fade != EdgeFade::None {
+            if weight != Amplitude::UNITY || fade != EdgeFade::None {
                 spec.gains.insert(
                     id,
                     EdgeGain {
                         fade,
-                        ..EdgeGain::new(Amplitude::new(weight))
+                        ..EdgeGain::new(weight)
                     },
                 );
             }
             if fade != EdgeFade::None {
                 fades.insert(id, fade);
             }
-            lanes.insert(id, Amplitude::new(weight));
+            lanes.insert(id, weight);
             Ok(())
         };
         for (&to, sources) in &self.bus_edges {

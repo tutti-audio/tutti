@@ -509,14 +509,17 @@ impl Player {
         // the voices' own gains, on every plane: the sends carry them too.
         let (from, to) = (self.master_applied, self.voicing.master_gain());
         self.master_applied = to;
+        // The chunk is `f32`: the master gains narrow once per chunk.
+        let (from_left, from_right) = (from.left.get() as f32, from.right.get() as f32);
+        let (to_left, to_right) = (to.left.get() as f32, to.right.get() as f32);
         for voice in self.voices.iter() {
             let (prev_l, cur_l) = (
-                MASTER_VOLUME * from.left.get() * voice.previous_mix_gain_left,
-                MASTER_VOLUME * to.left.get() * voice.current_mix_gain_left,
+                MASTER_VOLUME * from_left * voice.previous_mix_gain_left,
+                MASTER_VOLUME * to_left * voice.current_mix_gain_left,
             );
             let (prev_r, cur_r) = (
-                MASTER_VOLUME * from.right.get() * voice.previous_mix_gain_right,
-                MASTER_VOLUME * to.right.get() * voice.current_mix_gain_right,
+                MASTER_VOLUME * from_right * voice.previous_mix_gain_right,
+                MASTER_VOLUME * to_right * voice.current_mix_gain_right,
             );
             let mut write = |plane: Plane, previous: f32, current: f32| {
                 if write_block(

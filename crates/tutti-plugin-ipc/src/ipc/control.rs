@@ -294,7 +294,7 @@ macro_rules! served_control {
             }
 
             fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> bool {
-                !self.link.bridge.is_crashed() && self.link.bridge.load_preset(id.clone())
+                self.link.bridge.load_preset(id.clone())
             }
 
             fn current_preset(&mut self, _main: MainThreadMarker) -> Option<PresetId> {

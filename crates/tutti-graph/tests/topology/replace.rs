@@ -450,11 +450,13 @@ fn a_replace_during_a_fade_waits_for_it() {
     let expect: Vec<f32> = (0..out.len())
         .map(|f| match f {
             0..100 => {
-                let (o, i) = FadeLaw::EqualAmplitude.gains(f, 100);
+                let (o, i) = FadeLaw::EqualAmplitude.gains(Samples(f), Samples(100));
+                let (o, i) = (o.get() as f32, i.get() as f32);
                 2.0 * i + 1.0 * o
             }
             100..150 => {
-                let (o, i) = FadeLaw::EqualAmplitude.gains(f - 100, 50);
+                let (o, i) = FadeLaw::EqualAmplitude.gains(Samples(f - 100), Samples(50));
+                let (o, i) = (o.get() as f32, i.get() as f32);
                 8.0 * i + 2.0 * o
             }
             _ => 8.0,

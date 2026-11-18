@@ -84,9 +84,9 @@ fn beta_formula(a: f64) -> f64 {
 
 #[test]
 fn kaiser_beta_matches_the_published_formula() {
-    for a in [20.0f32, 21.0, 40.0, 50.0, 60.0, 80.0] {
+    for a in [20.0f64, 21.0, 40.0, 50.0, 60.0, 80.0] {
         let got = kaiser_beta(Db(a));
-        let want = beta_formula(f64::from(a));
+        let want = beta_formula(a);
         assert!((got - want).abs() < 1e-12, "A = {a}: {got} vs {want}");
     }
     assert_eq!(kaiser_beta(Db(20.0)), 0.0);
@@ -135,8 +135,8 @@ fn the_length_is_odd_and_follows_the_estimate() {
 /// passband and 3 dB in the stopband.
 #[test]
 fn every_response_meets_its_ripple_and_attenuation() {
-    for a in [40.0f32, 60.0, 80.0] {
-        let delta = 10f64.powf(-f64::from(a) / 20.0);
+    for a in [40.0f64, 60.0, 80.0] {
+        let delta = Db(-a).to_amplitude().get();
         for response in responses() {
             let transition = 1_000.0f64;
             let fir = FirDesign::new(response, hz(transition))
@@ -158,7 +158,7 @@ fn every_response_meets_its_ripple_and_attenuation() {
                         "{response:?} A={a} f={f}: {got}"
                     );
                 } else {
-                    let limit = 10f64.powf((-f64::from(a) + 3.0) / 20.0);
+                    let limit = 10f64.powf((-a + 3.0) / 20.0);
                     assert!(got <= limit, "{response:?} A={a} f={f}: {got} > {limit}");
                 }
             }
@@ -333,7 +333,7 @@ fn a_non_positive_transition_or_attenuation_is_refused() {
         let err = FirDesign::new(low, hz(t)).design(rate()).unwrap_err();
         assert!(matches!(err, FirError::NonPositiveTransition(_)), "{err:?}");
     }
-    for a in [0.0, -60.0, f32::NAN] {
+    for a in [0.0, -60.0, f64::NAN] {
         let err = FirDesign::new(low, hz(500.0))
             .attenuation(Db(a))
             .design(rate())

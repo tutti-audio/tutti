@@ -7,7 +7,7 @@ description = "Plays and records audio through the sound card with cpal, for tut
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-keywords = ["audio", "cpal", "audio-io", "real-time"]
+keywords = ["audio", "cpal", "capture", "real-time"]
 categories = ["multimedia::audio"]
 
 [lints]

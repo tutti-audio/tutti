@@ -78,7 +78,7 @@ fn a_step_onset_follows_the_attack_branch() {
     let mut n = prepared(
         TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::MONO)
-                .attack(Db(attack as f32))
+                .attack(Db(attack))
                 .fast(FAST)
                 .slow(SLOW),
         ),

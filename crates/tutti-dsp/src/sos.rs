@@ -143,7 +143,7 @@ impl System for Sos {
             return Ring::Unbounded;
         }
         let (tau, period) = self.slowest();
-        let eps = f64::from(floor.to_amplitude().get());
+        let eps = floor.to_amplitude().get();
         let settled = (2.0 * self.sections.len() as f64 * tau) as u64;
         let window = (3.0 * tau + period).ceil().max(16.0) as u64;
         let sections: Vec<_> = self

@@ -1831,7 +1831,7 @@ fn a_voice_out_of_its_window_adds_nothing_at_any_gain() {
         wave.set(1, i, -value(i));
     }
     let wave = Arc::new(wave);
-    let voice = |start: f64, len: Option<f64>, gain: f32| {
+    let voice = |start: f64, len: Option<f64>, gain: f64| {
         let play = Playback {
             gain: Amplitude(gain),
             ..Playback::default()
@@ -1851,7 +1851,7 @@ fn a_voice_out_of_its_window_adds_nothing_at_any_gain() {
         }
     };
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    for silent_gain in [3.0f32, f32::INFINITY, f32::NAN] {
+    for silent_gain in [3.0f64, f64::INFINITY, f64::NAN] {
         let mut pool = VoicePool::with_channels(2u16).expect("stereo");
         pool.insert_voice(SlotId(0), voice(0.0, None, 0.5));
         pool.insert_voice(SlotId(1), voice(1_000.0, None, silent_gain));

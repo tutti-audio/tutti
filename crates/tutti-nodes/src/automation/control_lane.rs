@@ -17,7 +17,7 @@ use tutti_modulation::{
 use tutti_rt::{PackedAtomic, Publisher, Reader};
 use tutti_types::{AtomicF32, ParamCell};
 use tutti_units::{
-    Beat, Frame, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
+    Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -473,9 +473,9 @@ fn value_along(seg: &ParamSegment, from: f32, to: f32, j: f64) -> f32 {
     if !(l > 0.0 && l.is_finite()) {
         return to;
     }
-    let t = ((p + j) / l) as f32;
+    let t = (p + j) / l;
     if t < 1.0 {
-        Piece::new(from, to, seg.shape()).value(seg.unit_param(), t)
+        Piece::new(from, to, seg.shape()).value(seg.unit_param(), Normalized::clamped(t))
     } else {
         to
     }

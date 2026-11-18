@@ -169,7 +169,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         let design = Design::of(&GateControls::DEFAULT, rate);
         Self {
-            range: Glide::landed(<F as Float>::from_f32(design.range.get())),
+            range: Glide::landed(F::from_f64(design.range.get())),
             design,
             steps,
             rate,
@@ -224,7 +224,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
             );
         }
         self.range.aim_by(
-            <F as Float>::from_f32(self.design.range.get()),
+            F::from_f64(self.design.range.get()),
             Steps::Fixed(self.steps),
         );
     }
@@ -253,7 +253,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.design;
-        let threshold = <F as Float>::from_f32(d.threshold.get());
+        let threshold = F::from_f64(d.threshold.get());
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
         let held = db_gain(self.range.target());

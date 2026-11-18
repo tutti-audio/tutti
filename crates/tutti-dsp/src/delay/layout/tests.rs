@@ -61,7 +61,7 @@ fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
 }
 
 /// `v` as signed gains.
-fn gains(v: &[f32]) -> Vec<Gain> {
+fn gains(v: &[f64]) -> Vec<Gain> {
     v.iter().map(|&x| Gain::new(x)).collect()
 }
 
@@ -79,7 +79,7 @@ fn a_routing_refuses_what_it_cannot_hold() {
             got: 3
         })
     );
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let e = Routing::new(two, &gains(&[0.0, bad, 1.0, 0.0])).unwrap_err();
         assert!(
             matches!(
@@ -126,8 +126,8 @@ fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
     let four = bus(4);
     let r = Routing::normalized(four, &gains(&[1.0; 16])).unwrap();
     for row in 0..4 {
-        let sum: f32 = (0..4).map(|c| r.weight(row, c).magnitude().get()).sum();
-        assert!((sum - 1.0).abs() < 1e-6, "row {row}: {sum}");
+        let sum: f64 = (0..4).map(|c| r.weight(row, c).magnitude().get()).sum();
+        assert!((sum - 1.0).abs() < 1e-15, "row {row}: {sum}");
         assert!((0..4).all(|c| r.weight(row, c) == Gain::new(0.25)));
     }
     let mut m = [0.0; 16];
@@ -160,7 +160,7 @@ fn the_routing_presets_are_what_their_names_say() {
         for j in 0..4 {
             assert_eq!(
                 ring.weight(c, j),
-                Gain::new(f32::from(u8::from(j == (c + 3) % 4))),
+                Gain::new(f64::from(u8::from(j == (c + 3) % 4))),
                 "({c}, {j})"
             );
         }

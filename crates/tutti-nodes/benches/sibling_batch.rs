@@ -370,7 +370,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                     }
                     Kind::BusStrip => {
                         let s = BusStripNode::stereo();
-                        s.set_volume(Amplitude::new(0.5 + m as f32 * 1e-3));
+                        s.set_volume(Amplitude::new(0.5 + m as f64 * 1e-3));
                         ed.insert(k, "bus strip", s);
                     }
                     Kind::Biquad => {

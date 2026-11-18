@@ -450,7 +450,7 @@ fn the_node_is_the_room_alone() {
         }
     }
     assert!(out.iter().all(|c| c[0] == 0.0), "nothing at once");
-    assert!((out[0][1_215] - FreeverbBank::<f32>::FIXED_GAIN.get()).abs() < 1e-6);
+    assert!((out[0][1_215] - FreeverbBank::<f32>::FIXED_GAIN.get() as f32).abs() < 1e-6);
 }
 
 /// A fork of the node starts from silence with the values set, and shares nothing

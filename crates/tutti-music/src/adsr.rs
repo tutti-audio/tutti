@@ -66,15 +66,13 @@ impl Adsr {
         Self::new(Seconds(0.5), Seconds(0.2), Amplitude(0.8), Seconds(1.0))
     }
 
-    fn bits(&self) -> ([u64; 3], u32) {
-        (
-            [
-                self.attack.get().to_bits(),
-                self.decay.get().to_bits(),
-                self.release.get().to_bits(),
-            ],
+    fn bits(&self) -> [u64; 4] {
+        [
+            self.attack.get().to_bits(),
+            self.decay.get().to_bits(),
+            self.release.get().to_bits(),
             self.sustain.get().to_bits(),
-        )
+        ]
     }
 }
 

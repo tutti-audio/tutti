@@ -18,10 +18,10 @@
 //! warning and **outlives the session** until its work returns.
 
 #![cfg_attr(
-    not(any(test, all(feature = "device", feature = "audio-io"))),
+    not(any(test, feature = "capture")),
     expect(
         dead_code,
-        reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
+        reason = "the take's pump (feature `capture`) is the streaming half's user"
     )
 )]
 
@@ -84,10 +84,10 @@ impl fmt::Debug for Task {
 /// and never fails the work: after the session is gone a message is
 /// returned to the sender and dropped.
 #[cfg_attr(
-    not(any(test, all(feature = "device", feature = "audio-io"))),
+    not(any(test, feature = "capture")),
     expect(
         dead_code,
-        reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
+        reason = "the take's pump (feature `capture`) is the streaming half's user"
     )
 )]
 pub(crate) struct Landings<M> {
@@ -105,10 +105,10 @@ impl<M: Send + 'static> Landings<M> {
     ///
     /// The message back, when the session is gone.
     #[cfg_attr(
-        not(any(test, all(feature = "device", feature = "audio-io"))),
+        not(any(test, feature = "capture")),
         expect(
             dead_code,
-            reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
+            reason = "the take's pump (feature `capture`) is the streaming half's user"
         )
     )]
     pub(crate) fn send(&self, message: M) -> Result<(), M> {
@@ -128,10 +128,10 @@ impl<M: Send + 'static> Landings<M> {
     /// The session is gone: nothing sent will land, and the job's result
     /// will not either.
     #[cfg_attr(
-        not(any(test, all(feature = "device", feature = "audio-io"))),
+        not(any(test, feature = "capture")),
         expect(
             dead_code,
-            reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
+            reason = "the take's pump (feature `capture`) is the streaming half's user"
         )
     )]
     pub(crate) fn is_closed(&self) -> bool {
@@ -158,10 +158,10 @@ struct Slot(u64);
 /// What crosses from a worker to the control thread.
 enum Arrival {
     #[cfg_attr(
-        not(any(test, all(feature = "device", feature = "audio-io"))),
+        not(any(test, feature = "capture")),
         expect(
             dead_code,
-            reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
+            reason = "the take's pump (feature `capture`) is the streaming half's user"
         )
     )]
     Message(Slot, Box<dyn Any + Send>),

@@ -21,7 +21,7 @@ const SMOOTH_PERIOD_FRACTION: f64 = 1.0 / 32.0;
 
 /// A leading or trailing beat is dropped when its smoothed score is below this
 /// share of the RMS of the beats' smoothed scores.
-const TRIM_FRACTION: f32 = 0.5;
+const TRIM_FRACTION: f64 = 0.5;
 
 /// A frame starts the chain once its score reaches this share of the maximum.
 const START_FRACTION: f32 = 0.01;
@@ -176,8 +176,8 @@ fn trim(beats: &mut Vec<usize>, local: &[f32]) {
         })
         .collect();
     let cut = TRIM_FRACTION * rms(Mono::new(&smooth)).get();
-    let first = smooth.iter().position(|&s| s >= cut);
-    let last = smooth.iter().rposition(|&s| s >= cut);
+    let first = smooth.iter().position(|&s| f64::from(s) >= cut);
+    let last = smooth.iter().rposition(|&s| f64::from(s) >= cut);
     match (first, last) {
         (Some(f), Some(l)) => {
             beats.truncate(l + 1);

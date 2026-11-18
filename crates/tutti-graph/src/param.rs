@@ -40,9 +40,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::NodeKey;
+use crate::fade::Fade;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, Samples, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::spec::EventOut;
@@ -633,7 +634,7 @@ impl Ramp {
     /// The move's value at progress `t`: along the short arc for a circular
     /// param.
     #[inline]
-    fn at(&self, t: f32) -> f32 {
+    fn at(&self, t: Normalized) -> f32 {
         self.piece().value(self.param, t)
     }
 
@@ -665,7 +666,10 @@ impl Ramp {
                 } else {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
-                    let t = self.done as f32 / self.len as f32;
+                    let t = Normalized::progress(
+                        Samples(self.done as usize),
+                        Samples(self.len as usize),
+                    );
                     self.at(t)
                 };
             }
@@ -1052,7 +1056,7 @@ impl ParamState {
                     events,
                     param,
                     out,
-                    |i| Piece::ramp_at(Some(param.param), from, b1, i, frames),
+                    |i| Piece::ramp_at(Some(param.param), from, b1, Samples(i), Samples(frames)),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1071,7 +1075,7 @@ impl ParamState {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = Piece::ramp_at(Some(param.param), from, b1, i, frames);
+                    *o = Piece::ramp_at(Some(param.param), from, b1, Samples(i), Samples(frames));
                 }
             }
         }
@@ -1082,7 +1086,7 @@ impl ParamState {
                 if j >= d {
                     break;
                 }
-                let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
+                let (out, inn) = Fade::lane_gains(FadeLaw::EqualAmplitude, Samples(j), Samples(d));
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.

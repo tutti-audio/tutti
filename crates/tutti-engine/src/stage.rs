@@ -4,14 +4,15 @@
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
 use tutti_types::MAX_CHANNELS;
+use tutti_units::{Amplitude, Normalized, Samples};
 
 /// One output's ramp: from the gain it left off at to the target, `done` of
 /// `frames` frames along.
 #[derive(Clone, Copy)]
 struct Ramp {
-    from: f32,
-    to: f32,
-    now: f32,
+    from: Amplitude,
+    to: Amplitude,
+    now: Amplitude,
     done: usize,
     /// The length this ramp was started with: a ramp keeps its own, so a
     /// declick length that changes (a re-prepare at another rate) neither
@@ -21,9 +22,9 @@ struct Ramp {
 
 impl Ramp {
     const STEADY: Self = Self {
-        from: 1.0,
-        to: 1.0,
-        now: 1.0,
+        from: Amplitude::UNITY,
+        to: Amplitude::UNITY,
+        now: Amplitude::UNITY,
         done: 0,
         frames: 0,
     };
@@ -54,8 +55,10 @@ impl OutputStage {
         frames: usize,
     ) {
         for (c, ramp) in self.ramps.iter_mut().enumerate().take(out_ch) {
-            let to = targets.gain(c).get();
-            if to.to_bits() != ramp.to.to_bits() {
+            let to = targets.gain(c);
+            // Bit equality: a NaN target equals itself here, so it does not
+            // restart the ramp every block, and `-0.0` stays apart from `0.0`.
+            if to.get().to_bits() != ramp.to.get().to_bits() {
                 *ramp = Ramp {
                     from: ramp.now,
                     to,
@@ -65,13 +68,13 @@ impl OutputStage {
                 };
             }
             if ramp.done >= ramp.frames {
-                if ramp.now != 1.0 {
-                    // The ramp's gain is an `f32` level (an `Amplitude`).
+                if ramp.now != Amplitude::UNITY {
+                    let gain = F::from_f64(ramp.now.get());
                     block
                         .iter_mut()
                         .skip(c)
                         .step_by(out_ch)
-                        .for_each(|s| *s *= F::from_f32(ramp.now));
+                        .for_each(|s| *s *= gain);
                 }
                 continue;
             }
@@ -79,13 +82,15 @@ impl OutputStage {
                 ramp.now = if ramp.done + 1 >= ramp.frames {
                     ramp.to
                 } else {
-                    ramp.from
-                        + (ramp.to - ramp.from) * ((ramp.done + 1) as f32 / ramp.frames as f32)
+                    ramp.from.lerp(
+                        ramp.to,
+                        Normalized::progress(Samples(ramp.done + 1), Samples(ramp.frames)),
+                    )
                 };
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
-                *s *= F::from_f32(ramp.now);
+                *s *= F::from_f64(ramp.now.get());
             }
         }
     }
@@ -96,7 +101,7 @@ mod tests {
     use super::*;
     use tutti_units::Amplitude;
 
-    fn targets(first: f32) -> StageTargets {
+    fn targets(first: f64) -> StageTargets {
         let mut t = StageTargets::UNITY;
         t.0[0] = Amplitude(first);
         t
@@ -134,5 +139,22 @@ mod tests {
         let line = |k: usize| 1.0 + (0.5 - 1.0) * ((k + 1) as f32 / 20.0);
         assert_eq!(first[0], line(0));
         assert_eq!(rest[0], line(10));
+    }
+
+    /// A NaN target is the same target on the next block: the ramp to it runs
+    /// its length once and is not restarted every block.
+    #[test]
+    fn a_nan_target_does_not_restart_its_ramp_every_block() {
+        let mut stage = OutputStage::new();
+        let to_nan = targets(f64::NAN);
+        let mut a = [1.0f32; 4];
+        stage.apply(&mut a, 1, &to_nan, 8);
+        assert_eq!(stage.ramps[0].done, 4);
+        let mut b = [1.0f32; 4];
+        stage.apply(&mut b, 1, &to_nan, 8);
+        assert_eq!(
+            stage.ramps[0].done, 8,
+            "the second block continued the ramp"
+        );
     }
 }

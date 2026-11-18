@@ -2182,9 +2182,7 @@ impl<F: Float> Graph<F> {
         }
         let _ = self.editor.set_edge_fade(id, EdgeFade::None);
         let plain = self.editor.spec().gains.get(&id).is_some_and(|g| {
-            g.base.get().to_bits() == 1.0f32.to_bits()
-                && g.source.is_none()
-                && g.range == EdgeGain::DEFAULT_RANGE
+            g.base == Amplitude::UNITY && g.source.is_none() && g.range == EdgeGain::DEFAULT_RANGE
         });
         if plain {
             self.editor.spec_mut().clear_edge_gain(id);
@@ -3747,7 +3745,7 @@ fn render<F: Float>(
     // With no device there is no fold: the root's channels are the output's
     // by index, and a root change crossfades channel by channel, the old
     // root's channels after the new root's.
-    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
+    let gains = fade.map(|f| f.fade.law.gains(f.done, f.fade.duration));
     for (c, o) in output.iter_mut().enumerate() {
         let new = scratch
             .get(c)
@@ -3760,8 +3758,7 @@ fn render<F: Float>(
                 } else {
                     F::ZERO
                 };
-                // A fade law's gains are `f32` levels.
-                old * F::from_f32(go) + new * F::from_f32(gn)
+                old * F::from_f64(go.get()) + new * F::from_f64(gn.get())
             }
             _ => new,
         };

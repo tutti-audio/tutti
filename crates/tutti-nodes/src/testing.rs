@@ -252,7 +252,7 @@ impl Osc {
     /// The next sample, advancing the phase.
     #[inline]
     fn next(&mut self) -> f32 {
-        let y = naive(self.waveform, self.phase) * f64::from(self.amplitude.get());
+        let y = naive(self.waveform, self.phase) * self.amplitude.get();
         self.phase = self
             .phase
             .advance(PhaseIncrement::per_sample(self.frequency, self.sample_rate));

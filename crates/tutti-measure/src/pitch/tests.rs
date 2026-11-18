@@ -5,7 +5,7 @@ use tutti_units::SampleRate;
 const SR: SampleRate = SampleRate::SR_48K;
 const N: usize = 4096;
 
-fn sine(freq: Hz, amp: f32) -> Vec<f32> {
+fn sine(freq: Hz, amp: f64) -> Vec<f32> {
     tutti_fixtures::signal::sine(
         freq,
         tutti_units::Amplitude(amp),

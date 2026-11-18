@@ -194,8 +194,7 @@ impl<F: Float> Rendered<F> {
     /// Multiplies every sample by `gain` — the apply half of a
     /// measure-then-apply normalization.
     pub fn apply_gain(&mut self, gain: tutti_units::Db) {
-        // A gain is an `Amplitude`, an `f32` level.
-        let scale = F::from_f32(gain.to_amplitude().get());
+        let scale = F::from_f64(gain.to_amplitude().get());
         for plane in self.planes.iter_mut() {
             for s in plane.iter_mut() {
                 *s *= scale;

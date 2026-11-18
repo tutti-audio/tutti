@@ -494,8 +494,9 @@ impl Voice {
         // note's, plus the zone's, over the 50 that is hard right.
         let pan = self.note.pan.unwrap_or_else(|| 50_f32 * state.pan().get());
         let (left, right) = pan_gains(Pan((pan + self.instrument_pan) / 50_f32), PanLaw::Rp036);
-        self.current_mix_gain_left = mix_gain * left.get();
-        self.current_mix_gain_right = mix_gain * right.get();
+        // The voice's mix gains are `f32`: the pan gains narrow into them.
+        self.current_mix_gain_left = mix_gain * left.get() as f32;
+        self.current_mix_gain_right = mix_gain * right.get() as f32;
 
         self.current_reverb_send = SoundFontMath::clamp(
             channel_info.reverb_send() + self.instrument_reverb,
@@ -595,7 +596,7 @@ mod tests {
                 .map(|hz| gain(resonance, hz as f32))
                 .fold(0.0f64, f64::max);
             let want = f64::from(resonance);
-            let peak_db = Db::from_amplitude(Amplitude::new(peak as f32)).get();
+            let peak_db = Db::from_amplitude(Amplitude::new(peak)).get();
             // 0 dB asks for no peak: the Butterworth maximum is 1.
             assert!(
                 (peak / want - 1.0).abs() < 0.03 || (db == 0.0 && (peak_db < 0.1)),
@@ -617,7 +618,7 @@ mod tests {
             assert!((got / want - 1.0).abs() < 0.02, "{hz} Hz: {got} vs {want}");
         }
         let octave = Db::from_amplitude(Amplitude::new(
-            (gain(resonance, 4_000.0) / gain(resonance, 2_000.0)) as f32,
+            gain(resonance, 4_000.0) / gain(resonance, 2_000.0),
         ))
         .get();
         assert!((octave + 12.0).abs() < 1.0, "{octave} dB per octave");

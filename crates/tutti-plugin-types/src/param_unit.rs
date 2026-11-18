@@ -204,8 +204,6 @@ macro_rules! one_to_one {
     };
 }
 
-one_to_one!(Db, ParamUnit::Decibels);
-one_to_one!(Amplitude, ParamUnit::LinearGain);
 one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
 
 /// `PlainUnit` for an `f64` unit read from exactly one [`ParamUnit`]: the plain
@@ -226,6 +224,8 @@ macro_rules! whole_one_to_one {
     };
 }
 
+whole_one_to_one!(Db, ParamUnit::Decibels);
+whole_one_to_one!(Amplitude, ParamUnit::LinearGain);
 whole_one_to_one!(Hz, ParamUnit::Hertz);
 whole_one_to_one!(Cents, ParamUnit::Cents);
 whole_one_to_one!(Semitones, ParamUnit::Semitones);

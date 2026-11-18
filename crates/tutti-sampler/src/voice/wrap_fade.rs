@@ -500,7 +500,7 @@ fn a_seek_or_a_stop_during_the_fade_ends_it(host: Host) {
 /// inside and outside the voice's window (it starts 100 frames into the run
 /// and the run crosses a wrap).
 fn a_non_finite_gain_renders_silence(host: Host) {
-    for gain in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for gain in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let w = wave(1, 4 * FPB, tone);
         let mut rig = Rig::new(host, Some(region(LOOP_START_BEATS, LOOP_BEATS)), 1000);
         let play = Playback {

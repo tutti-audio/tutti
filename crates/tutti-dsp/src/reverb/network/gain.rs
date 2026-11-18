@@ -28,7 +28,7 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
     if trips == SampleSpan::ZERO {
         return Amplitude::SILENT;
     }
-    Amplitude(Db::to_amplitude_f64(-60.0 * delay.get() / trips.get()) as f32)
+    Db(-60.0 * delay.get() / trips.get()).to_amplitude()
 }
 
 /// The inverse of [`loop_gain`]: the RT60 of a loop of `delay` frames at
@@ -40,14 +40,15 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
 pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> Seconds {
     Seconds(decay_seconds(
         delay.get(),
-        Db::from_amplitude_f64(f64::from(gain.get())),
+        Db::from_amplitude(gain),
         rate.get(),
     ))
 }
 
 /// RT60 in seconds of a loop set (`delay_sum` frames in all, `db_sum` the sum of
 /// the loop gains' decibels per trip): `-60 Σm / (fs Σ dB)`.
-pub(crate) fn decay_seconds(delay_sum: f64, db_sum: f64, rate: f64) -> f64 {
+pub(crate) fn decay_seconds(delay_sum: f64, db_sum: Db, rate: f64) -> f64 {
+    let db_sum = db_sum.get();
     if db_sum.is_nan() || db_sum >= 0.0 {
         f64::INFINITY
     } else if db_sum == f64::NEG_INFINITY {

@@ -259,7 +259,7 @@ pub(crate) fn audible<F: Float>(gain: F) -> F {
 /// widened to `F`, and silence when it is NaN or infinite ([`audible`]).
 #[inline]
 pub(crate) fn audible_gain<F: Float>(gain: Amplitude) -> F {
-    audible(F::from_f32(gain.get()))
+    audible(F::from_f64(gain.get()))
 }
 
 /// `lane[i] *= gain`: one voice gain over a lane.

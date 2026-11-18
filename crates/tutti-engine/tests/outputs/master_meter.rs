@@ -78,7 +78,7 @@ fn engine(
 }
 
 /// `(peak, rms)` of every channel, taking what was held.
-fn levels(meter: &mut MeterReader) -> Vec<(f32, f32)> {
+fn levels(meter: &mut MeterReader) -> Vec<(f64, f64)> {
     meter
         .read()
         .iter()
@@ -306,7 +306,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     .expect("within limits");
     render(&engine, 1500, 6);
     let r = meter.read();
-    let rms = ((100.0 + 1400.0 * 0.01) / 1500.0f32).sqrt();
+    let rms = ((100.0 + 1400.0 * 0.01) / 1500.0f64).sqrt();
     assert!((r[2].peak.get() - 1.0).abs() < 1e-5, "{r:?}");
     assert!((r[2].rms.get() - rms).abs() < 1e-4, "{r:?} want rms {rms}");
     assert_eq!(r[2].frames, Samples(1500));

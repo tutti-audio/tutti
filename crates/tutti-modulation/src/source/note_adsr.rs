@@ -72,7 +72,8 @@ impl NoteAdsr {
             decay: Samples(0),
             release: Samples(0),
             // A NaN sustain is 0: the envelope never sends a NaN.
-            sustain: if s >= 0.0 { s.min(1.0) } else { 0.0 },
+            // The envelope's legs are `f32` lane levels: the sustain narrows once here.
+            sustain: if s >= 0.0 { s.min(1.0) as f32 } else { 0.0 },
             held: [0; NOTE_WORDS],
             holding: 0,
             stage: Stage::Idle,

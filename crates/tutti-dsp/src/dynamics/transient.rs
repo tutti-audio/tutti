@@ -95,10 +95,9 @@ struct Amounts {
 impl Lerp for Amounts {
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        let t = k as f32 / n as f32;
         Self {
-            attack: Db(crate::lerp(self.attack.get(), to.attack.get(), t)),
-            sustain: Db(crate::lerp(self.sustain.get(), to.sustain.get(), t)),
+            attack: Db(self.attack.get().lerp(&to.attack.get(), k, n)),
+            sustain: Db(self.sustain.get().lerp(&to.sustain.get(), k, n)),
         }
     }
 }
@@ -203,8 +202,8 @@ impl<F: Float + Lerp> TransientBank<F> {
                 *g = db_gain(gain_db(
                     fast,
                     slow,
-                    F::from_f32(a.attack.get()),
-                    F::from_f32(a.sustain.get()),
+                    F::from_f64(a.attack.get()),
+                    F::from_f64(a.sustain.get()),
                 ));
             }
             for c in 0..width {

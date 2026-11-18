@@ -29,7 +29,7 @@ pub fn rms<S: Sample>(x: Mono<'_, S>) -> Amplitude {
             v * v
         })
         .sum();
-    Amplitude(libm::sqrt(sum / samples.len() as f64) as f32)
+    Amplitude(libm::sqrt(sum / samples.len() as f64))
 }
 
 #[cfg(test)]

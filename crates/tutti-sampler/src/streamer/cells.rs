@@ -23,7 +23,7 @@
 //! streamer follows it, so there is nothing to request and nothing to flush.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_types::{AtomicF32, Param64};
+use tutti_types::{AtomicF32, AtomicF64, Param64};
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SrcRatio};
 
 /// A stream's scalar controls and counts: see the module docs for who writes
@@ -55,7 +55,7 @@ struct PlaybackParams {
     /// crate docs give: a live control is a shared cell the control thread
     /// writes through `&self` (`DiskVoiceControls::set_gain`), never a field of
     /// the node.
-    gain: AtomicF32,
+    gain: AtomicF64,
     /// Source samples consumed per output sample by a wrapping time-stretcher:
     /// `1 / stretch`. 1.0 when the voice does not stretch.
     ///
@@ -91,7 +91,7 @@ impl Cells {
             playback: PlaybackParams {
                 speed: AtomicF32::new(1.0),
                 src_ratio: Param64::new(SrcRatio::UNITY),
-                gain: AtomicF32::new(1.0),
+                gain: AtomicF64::new(1.0),
                 stretch_rate: Param64::new(ReadRate::UNITY),
             },
             health: BufferHealth {

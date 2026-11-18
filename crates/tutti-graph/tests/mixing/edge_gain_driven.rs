@@ -50,7 +50,7 @@ fn lane_out(node: u64) -> EventOut {
 }
 
 fn amp(v: f32) -> Amplitude {
-    Amplitude::new(v)
+    Amplitude::new(f64::from(v))
 }
 
 fn dc(value: f32) -> Kind {

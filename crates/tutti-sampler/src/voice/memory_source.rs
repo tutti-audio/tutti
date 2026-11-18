@@ -1233,7 +1233,7 @@ impl<F: Float> MemorySource<F> {
     /// A NaN or infinite one is silence ([`audible`]).
     #[inline]
     fn block_gain(&self) -> F {
-        audible(F::from_f32(
+        audible(F::from_f64(
             self.driven_gain.unwrap_or_else(|| self.gain.load()).get(),
         ))
     }
@@ -1284,8 +1284,9 @@ fn crossfade_wraps<F: Float, H: AsMut<[F]>>(
         let end = run.end.min(run.start + wrap.left());
         for at in run.start..end {
             let i = at - base;
-            let (g_out, g_in) = FadeLaw::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
-            let (g_out, g_in) = (F::from_f32(g_out), F::from_f32(g_in));
+            let (g_out, g_in) =
+                FadeLaw::EqualPower.gains(Samples(wrap.ago + at - run.start), Samples(wrap.len));
+            let (g_out, g_in) = (F::from_f64(g_out.get()), F::from_f64(g_in.get()));
             let g_in = if own_start { F::ONE } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
             let sounding = positions[i].is_some();
@@ -1421,7 +1422,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         self.driven_gain = self
             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
             .last_frame()
-            .map(|v| Amplitude(v.max(0.0)));
+            .map(|v| Amplitude(f64::from(v).max(0.0)));
         // Lent for the block and given back after it: the render borrows the
         // whole source.
         let mut reader = self.tempo.take();

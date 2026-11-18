@@ -20,8 +20,8 @@ use core::fmt;
 
 use tutti_curve::{Law, Piece};
 use tutti_units::{
-    Beat, BeatsPerCycle, Depth, Frame, Hz, Phase, PhaseIncrement, SamplePosition, SampleRate,
-    UnitParam,
+    Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, SamplePosition,
+    SampleRate, UnitParam,
 };
 
 use crate::curve::{Curve, CurveSegment};
@@ -608,9 +608,8 @@ enum Limit {
 /// `curve`'s value at beat `b`, or just before it for [`Limit::Before`].
 ///
 /// A left limit inside a piece the curve can describe is evaluated from
-/// the piece, its position rounded *down* to `f32`: a trajectory rounds the
-/// position up to 1.0 a nanobeat before a breakpoint, which on a stepped
-/// piece reads the level after the step.
+/// the piece, a nanobeat before its end, so its progress is below 1 and a
+/// stepped piece reads the level before the step.
 fn automation_at(
     curve: &dyn Curve,
     b: f64,
@@ -630,7 +629,7 @@ fn automation_at(
             }) = curve.segment_at(Beat(b))
             && end.get() > start.get()
         {
-            let t = ((b - start.get()) / (end.get() - start.get())) as f32;
+            let t = Normalized::clamped((Beat(b) - start) / (end - start));
             return Some(Piece::new(from, to, shape).value(Some(p), t));
         }
         return curve.value_at(Beat(b));
@@ -643,16 +642,10 @@ fn automation_at(
         to,
         shape,
     }) = curve.segment_at(Beat(x))
+        && end > start
     {
-        let (s, e) = (start.get(), end.get());
-        if e > s {
-            let t = (x - s) / (e - s);
-            let mut t32 = t as f32;
-            if f64::from(t32) > t {
-                t32 = t32.next_down();
-            }
-            return Some(Piece::new(from, to, shape).value(circular, t32));
-        }
+        let t = Normalized::clamped((Beat(x) - start) / (end - start));
+        return Some(Piece::new(from, to, shape).value(circular, t));
     }
     curve.value_at(Beat(x))
 }
@@ -970,7 +963,7 @@ fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
         let q = points[after];
         (p, p.at.get(), q, q.at.get())
     };
-    let t = ((frac - start) / (end - start)) as f32;
+    let t = Normalized::clamped((frac - start) / (end - start));
     Piece::new(p.value, q.value, p.curve).value(None, t)
 }
 
@@ -984,18 +977,18 @@ fn crossing(curve: Law, a: f32, b: f32) -> Option<f64> {
     if curve == Law::Linear {
         return Some(f64::from(a) / (f64::from(a) - f64::from(b)));
     }
-    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
     let below = a < 0.0;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
-        let v = Piece::new(a, b, curve).value(None, mid);
+        let v = Piece::new(a, b, curve).value(None, Normalized::clamped(mid));
         if (v < 0.0) == below {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    Some(f64::from(0.5 * (lo + hi)))
+    Some(0.5 * (lo + hi))
 }
 
 #[cfg(test)]

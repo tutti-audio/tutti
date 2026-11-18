@@ -257,7 +257,7 @@
 //!         let level = self
 //!             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
 //!             .last_frame()
-//!             .unwrap_or_else(|| self.level.load().get());
+//!             .unwrap_or_else(|| self.level.load().get() as f32);
 //!         io.channel(0).map(|x| x * level);
 //!         Status::Modified
 //!     }

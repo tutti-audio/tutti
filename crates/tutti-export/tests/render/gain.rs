@@ -51,7 +51,7 @@ fn sine(frequency: Hz) -> RenderGraph {
 fn a_peak_normalized_export_reports_its_gain_and_reading() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("six.wav");
-    for target in [-6.0f32, -3.0] {
+    for target in [-6.0f64, -3.0] {
         let written = render_normalized_to_file(
             sine(Hz(RATE.get() / 4.0)),
             &config(Pcm::Int16, Some(DitherShape::Triangular), 0.1),

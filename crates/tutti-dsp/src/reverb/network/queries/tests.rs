@@ -10,7 +10,7 @@ use crate::Lti as _;
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// `v` as a row of signed gains.
-fn gain_row<const N: usize>(v: &[f32]) -> Inline<Gain, N> {
+fn gain_row<const N: usize>(v: &[f64]) -> Inline<Gain, N> {
     let gains: Vec<Gain> = v.iter().map(|&x| Gain::new(x)).collect();
     Inline::from_slice(&gains).unwrap()
 }
@@ -127,9 +127,9 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
         gain: Amplitude(0.8),
         damp: 0.5,
     };
-    assert!((a.gain(Band::Low).get() - 0.8).abs() < 1e-7);
-    assert!((a.gain(Band::Mid).get() - 0.8 * 0.5 / 1.25f32.sqrt()).abs() < 1e-6);
-    assert!((a.gain(Band::High).get() - 0.8 * 0.5 / 1.5).abs() < 1e-6);
+    assert!((a.gain(Band::Low).get() - 0.8).abs() < 1e-15);
+    assert!((a.gain(Band::Mid).get() - 0.8 * 0.5 / 1.25f64.sqrt()).abs() < 1e-15);
+    assert!((a.gain(Band::High).get() - 0.8 * 0.5 / 1.5).abs() < 1e-15);
     let b = Absorption::Bands {
         low: Amplitude(0.9),
         mid: Amplitude(0.8),
@@ -263,10 +263,10 @@ fn stability_follows_the_gains_and_the_matrix() {
         Matrix::Diagonal
     ));
     assert!(!stable(
-        &[line(100.0, Absorption::Gain(Amplitude(f32::NAN)))],
+        &[line(100.0, Absorption::Gain(Amplitude(f64::NAN)))],
         Matrix::Diagonal
     ));
-    let ap = |gain: f32| {
+    let ap = |gain: f64| {
         let gain = Gain::new(gain);
         network(&[Stage::AllPass(
             Inline::from_slice(&[AllPass {
@@ -304,7 +304,7 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
         Matrix::Hadamard,
     ))]);
     assert!(!n.is_lossless());
-    assert_eq!(n.tail(Db(f32::NAN)), Ring::Unbounded);
+    assert_eq!(n.tail(Db(f64::NAN)), Ring::Unbounded);
     assert!(!network(&[]).is_lossless());
 }
 
@@ -397,7 +397,10 @@ fn the_shortest_path_decides_the_direct_path() {
         }])
         .unwrap(),
     );
-    assert!(network(std::slice::from_ref(&ap)).has_direct_path());
+    // A network is 111 KB: each is built and read in its own frame, never held across the test.
+    let min_delay = |stages: &[Stage]| network(stages).min_delay();
+    let direct = |stages: &[Stage]| network(stages).has_direct_path();
+    assert!(direct(std::slice::from_ref(&ap)));
     let comb = Stage::Fdn(fdn(
         &[line(100.0, Absorption::Gain(Amplitude(0.5)))],
         Matrix::Diagonal,
@@ -421,11 +424,11 @@ fn the_shortest_path_decides_the_direct_path() {
         )
     };
     assert_eq!(
-        network(&[plain(AllPassForm::Lattice)]).min_delay(),
+        min_delay(&[plain(AllPassForm::Lattice)]),
         Some(SampleSpan::of(100.0))
     );
-    assert!(!network(&[plain(AllPassForm::Lattice)]).has_direct_path());
-    assert!(network(&[plain(AllPassForm::Freeverb)]).has_direct_path());
+    assert!(!direct(&[plain(AllPassForm::Lattice)]));
+    assert!(direct(&[plain(AllPassForm::Freeverb)]));
     let tap = |d: f64| {
         Stage::Taps(Taps {
             taps: Inline::from_slice(&[Tap {
@@ -436,14 +439,11 @@ fn the_shortest_path_decides_the_direct_path() {
             .unwrap(),
         })
     };
-    assert!(network(&[tap(0.5)]).has_direct_path());
-    assert!(!network(&[tap(1.0)]).has_direct_path());
+    assert!(direct(&[tap(0.5)]));
+    assert!(!direct(&[tap(1.0)]));
+    assert_eq!(min_delay(&[tap(7.0), comb]), Some(SampleSpan::of(107.0)));
     assert_eq!(
-        network(&[tap(7.0), comb]).min_delay(),
-        Some(SampleSpan::of(107.0))
-    );
-    assert_eq!(
-        network(&[]).min_delay(),
+        min_delay(&[]),
         Some(SampleSpan::ZERO),
         "no stages: nothing is added to the pre-delay"
     );
@@ -480,7 +480,7 @@ fn a_capacity_measures_every_figure_of_its_network() {
     );
 }
 
-fn one_pole(gain: f32, damp: f32) -> Absorption {
+fn one_pole(gain: f64, damp: f32) -> Absorption {
     Absorption::OnePole {
         gain: Amplitude(gain),
         damp,
@@ -511,7 +511,7 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
     ] {
         let a = one_pole(0.9, damp);
         for band in Band::ALL {
-            assert_eq!(a.gain(band).get(), f32::INFINITY, "damp {damp}");
+            assert_eq!(a.gain(band).get(), f64::INFINITY, "damp {damp}");
         }
         assert!(!stable(a), "damp {damp}");
         let f = fdn(&[line(100.0, a)], Matrix::Diagonal);
@@ -562,7 +562,7 @@ fn a_delay_free_line_is_not_stable() {
 /// exactly orthogonal one.
 #[test]
 fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
-    let scaled = |c0: f32, n: usize| {
+    let scaled = |c0: f64, n: usize| {
         let mut row = Gains::filled(Gain::SILENT, n).unwrap();
         row.as_mut_slice()[0] = Gain::new(c0);
         let lines: Vec<Line> = (0..n)
@@ -580,7 +580,7 @@ fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
     assert!(exact.orthogonal() && exact.is_stable());
     assert_eq!(exact.norm_bound(), 1.0);
     // Nearly orthogonal: c = [1 + e/2, e/2] has norm a + b = 1 + e exactly.
-    let eta = 9e-7f32;
+    let eta = 9e-7f64;
     let near = fdn(
         &[
             line(100.0, Absorption::Gain(Amplitude(0.5))),
@@ -591,7 +591,7 @@ fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
     let Matrix::Circulant(c) = &near.matrix else {
         unreachable!()
     };
-    let truth = f64::from(c[0].get()) + f64::from(c[1].get());
+    let truth = c[0].get() + c[1].get();
     assert!(near.orthogonal());
     assert!(
         near.norm_bound() >= truth,
@@ -635,7 +635,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
     // shift registers, gain at the exit, an impulse in the first line.
     let g: Vec<f64> = lines
         .iter()
-        .map(|l| f64::from(l.absorption.gain(Band::Mid).get()))
+        .map(|l| l.absorption.gain(Band::Mid).get())
         .collect();
     let mut regs = [vec![0.0f64; 40], vec![0.0f64; 70]];
     regs[0][0] = 1.0;
@@ -695,7 +695,7 @@ fn a_nearly_orthogonal_matrix_adds_a_lag_a_structured_one_does_not() {
 /// loss.
 #[test]
 fn only_a_lattice_diffuser_is_inside_the_analysis() {
-    let nested = |form, gain: f32| Line {
+    let nested = |form, gain: f64| Line {
         diffuser: Some(AllPass {
             delay: SampleSpan::of(20.0),
             gain: Gain::new(gain),
@@ -728,7 +728,7 @@ fn only_a_lattice_diffuser_is_inside_the_analysis() {
 #[test]
 fn a_reflection_is_orthogonal_when_its_vector_is_a_unit() {
     let lines = [100.0, 130.0, 170.0, 190.0].map(|m| line(m, Absorption::Gain(Amplitude(1.0))));
-    let reflect = |v: &[f32]| network(&[Stage::Fdn(fdn(&lines, Matrix::Reflection(gain_row(v))))]);
+    let reflect = |v: &[f64]| network(&[Stage::Fdn(fdn(&lines, Matrix::Reflection(gain_row(v))))]);
     let unit = reflect(&[0.5, 0.5, 0.5, 0.5]);
     assert!(unit.is_lossless() && unit.is_stable());
     // A unit vector off the flat one is just as orthogonal.

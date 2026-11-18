@@ -23,9 +23,7 @@
 //! The design is [`FdnLayout::design_into`]: the controls to a [`Network`], in place, since
 //! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
 
-use tutti_units::{
-    Amplitude, Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth,
-};
+use tutti_units::{Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth};
 
 use crate::finite::finite_or;
 use crate::onepole::cutoff_pole;
@@ -211,12 +209,11 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
         return a;
     };
     let pole = crossover.map(|f| cutoff_pole(f, rate));
-    let [low, mid, high] =
-        crate::reverb::fdn::bank::rescale_bands([low.get(), mid.get(), high.get()], pole);
+    let [low, mid, high] = crate::reverb::fdn::bank::rescale_bands([low, mid, high], pole);
     Absorption::Bands {
-        low: Amplitude(low),
-        mid: Amplitude(mid),
-        high: Amplitude(high),
+        low,
+        mid,
+        high,
         crossover,
     }
 }
@@ -229,7 +226,7 @@ fn finite_secs(v: Seconds, default: Seconds) -> Seconds {
 impl FdnLayout {
     /// Designs `c` into `out` in place, at `rate`: the network the bank runs, and the public
     /// entry for designing one (for its analytic queries as much as for running it). A
-    /// network is about 67 KB, so it is built where it lives and never returned by value; no
+    /// network is about 111 KB, so it is built where it lives and never returned by value; no
     /// allocation.
     pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
@@ -259,7 +256,7 @@ impl FdnLayout {
             if w.get().is_nan() {
                 Db::UNITY
             } else if w <= SILENT_WET {
-                Db(f32::NEG_INFINITY)
+                Db(f64::NEG_INFINITY)
             } else {
                 w.min(MAX_WET)
             }
@@ -298,12 +295,12 @@ impl FdnLayout {
             for (i, x) in v.as_mut_slice().iter_mut().enumerate() {
                 let axis = if i == 0 { 1.0 } else { 0.0 };
                 let y = crate::lerp(axis, flat, f64::from(diffusion));
-                *x = Gain::new(y as f32);
+                *x = Gain::new(y);
                 norm += y * y;
             }
             let norm = norm.sqrt();
             for x in v.as_mut_slice() {
-                *x = Gain::new((f64::from(x.get()) / norm) as f32);
+                *x = Gain::new(x.get() / norm);
             }
         }
         let matrix = if diffusion <= 0.0 {
@@ -316,10 +313,10 @@ impl FdnLayout {
 
         // One mono input into every line, none when frozen; even lines to the
         // left ear, odd to the right.
-        let gain = (1.0 / (n as f32).sqrt()).min(1.0);
+        let gain = (1.0 / (n as f64).sqrt()).min(1.0);
         let input =
             Gains::filled(Gain::new(if freeze { 0.0 } else { gain }), n).unwrap_or_default();
-        let ear = (2.0 / n as f32).sqrt();
+        let ear = (2.0 / n as f64).sqrt();
         let mut left = Gains::filled(Gain::SILENT, n).unwrap_or_default();
         let mut right = Gains::filled(Gain::SILENT, n).unwrap_or_default();
         for (i, (l, r)) in left

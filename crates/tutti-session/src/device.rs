@@ -26,7 +26,7 @@
 //!   [`Session::latency`]), published before the first block.
 //!
 //! After the stream plays again, every input the session added
-//! (`Session::add_input`, feature `audio-io`) is reopened at the new rate
+//! (`Session::add_input`, feature `capture`) is reopened at the new rate
 //! and swapped into its inlet node: the node's key stays and nothing is
 //! rewired.
 //!
@@ -335,7 +335,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
                     .events
                     .push(SessionEvent::Device(DeviceEvent::Restarted(restarted)));
                 self.note_device(FollowEvent::Opened(name), now);
-                #[cfg(feature = "audio-io")]
+                #[cfg(feature = "capture")]
                 self.reopen_inputs();
                 Ok(restarted)
             }
@@ -516,7 +516,7 @@ impl<F: SessionFloat> Device<F> {
     /// callback's timestamp against the playback it predicts for the block
     /// just rendered; **input**, the capture instant of a frame against the
     /// callback that delivered it (what `Session::add_input`'s inputs
-    /// report, feature `audio-io`).
+    /// report, feature `capture`).
     ///
     /// A direction is `None` until its stream's first callback has reported,
     /// after a restart (the new stream reports afresh, at the new rate), and
@@ -780,7 +780,7 @@ pub enum DeviceEvent {
     RestartFailed(RestartError),
     /// An input the session added could not be reopened by a restart: it
     /// stays in the graph, silent, and is tried again at the next restart.
-    #[cfg(feature = "audio-io")]
+    #[cfg(feature = "capture")]
     InputReopenFailed {
         /// The input's inlet node ([`Input::node`](crate::Input::node), erased).
         input: tutti_graph::NodeKey,
@@ -790,7 +790,7 @@ pub enum DeviceEvent {
     /// A capture the session held ended because the session left the sound
     /// card's clock ([`Session::into_system_clock`]): the input's node stays in
     /// the graph, silent. One event for each input.
-    #[cfg(feature = "audio-io")]
+    #[cfg(feature = "capture")]
     InputClosed {
         /// The input's inlet node ([`Input::node`](crate::Input::node), erased).
         input: tutti_graph::NodeKey,

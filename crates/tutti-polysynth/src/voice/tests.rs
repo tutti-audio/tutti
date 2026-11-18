@@ -295,8 +295,8 @@ fn test_voice_stealing_quietest() {
     };
 
     // Set envelope levels - slot 0 is quieter
-    alloc.update_envelope_level(slot_1, 0.2);
-    alloc.update_envelope_level(slot_2, 0.8);
+    alloc.update_envelope_level(slot_1, Amplitude(0.2));
+    alloc.update_envelope_level(slot_2, Amplitude(0.8));
 
     // Third note should steal the quietest (slot 0, note 60)
     let result = alloc.allocate(
@@ -782,7 +782,7 @@ fn random_streams_keep_their_invariants() {
             // Real envelope levels, set before the message as the render would.
             for i in 0..max {
                 if !alloc.slots()[i].is_idle() {
-                    let level = rng.below(100) as f32 / 100.0;
+                    let level = Amplitude(rng.below(100) as f64 / 100.0);
                     alloc.update_envelope_level(i, level);
                 }
             }
@@ -969,7 +969,7 @@ fn expected_victim(
                 _ => Some(i),
             })
     };
-    let level = |i: usize| f64::from(alloc.slots()[i].envelope_level());
+    let level = |i: usize| alloc.slots()[i].envelope_level().get();
     if !released.is_empty() {
         return by(&released, &level);
     }

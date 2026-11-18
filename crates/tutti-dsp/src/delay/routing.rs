@@ -119,7 +119,7 @@ impl Routing {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.magnitude().get()).sum();
+            let sum: f64 = row.iter().map(|w| w.magnitude().get()).sum();
             if sum > 1.0 {
                 return Err(RoutingError::Row {
                     row: c,
@@ -132,7 +132,7 @@ impl Routing {
     }
 
     /// As [`new`](Self::new), with each row that sums past 1 scaled down to sum to 1
-    /// (to within `f32` rounding) instead of refused. The named saturation: the one way
+    /// (to within rounding) instead of refused. The named saturation: the one way
     /// a matrix is rescaled.
     ///
     /// # Errors
@@ -142,7 +142,7 @@ impl Routing {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.magnitude().get()).sum();
+            let sum: f64 = row.iter().map(|w| w.magnitude().get()).sum();
             let scale = Gain::new(if sum > 1.0 { 1.0 / sum } else { 1.0 });
             for (j, &w) in row.iter().enumerate() {
                 r.weights[c][j] = w * scale;

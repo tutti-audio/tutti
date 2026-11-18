@@ -188,9 +188,9 @@ mod tests {
     #[test]
     fn a_rendered_sine_has_the_analog_tilt_magnitude() {
         let pivot = Hz(bin(171));
-        for db in [-18.0f32, -6.0, 6.0, 18.0] {
+        for db in [-18.0f64, -6.0, 6.0, 18.0] {
             for f in [10, 34, 120, 240, 683, 2_400, 3_900].map(bin) {
-                let want = analog(pivot.get(), f64::from(db), f);
+                let want = analog(pivot.get(), db, f);
                 let got = gain_of(config(pivot, Db(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, db: f32| render(&mut node(config(Hz(hz), Db(db))), &input);
+        let at = |hz: f64, db: f64| render(&mut node(config(Hz(hz), Db(db))), &input);
         assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
         assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
         assert_eq!(at(500.0, 90.0), at(500.0, 24.0));
@@ -259,7 +259,7 @@ mod tests {
         };
         let ceiling = frames(kernel.tail());
         for fc in [20.0f64, 90.0, 700.0, 4_000.0, 15_000.0, 23_000.0] {
-            for db in [-24.0f32, -6.0, 6.0, 24.0] {
+            for db in [-24.0f64, -6.0, 6.0, 24.0] {
                 let controls = TiltFilterControls {
                     frequency: Hz(fc),
                     gain: Db(db),

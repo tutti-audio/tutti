@@ -96,7 +96,7 @@ full = [
     "synth",
     "soundfont",
     "sampler",
-    "audio-io",
+    "capture",
     "export",
     "encode-flac",
     "encode-aiff",
@@ -132,8 +132,8 @@ codec = ["dep:tutti-codec"]
 # `Recorder` and its pump loop (`tutti-session`'s `record`, in `tutti::session`).
 # Implies `session` and `codec` with the WAV writer: the sink is `tutti-codec`'s
 # `FileOut`, which writes a `Format`, and a `Format` has a value only with an
-# `encode-*` feature. Implied by `audio-io`, so it is rarely named directly.
-io = ["session", "tutti-session/record", "encode-wav"]
+# `encode-*` feature. Implied by `capture`, so it is rarely named directly.
+record = ["session", "tutti-session/record", "encode-wav"]
 
 # --- MIDI, two axes --------------------------------------------------------
 midi = [
@@ -154,7 +154,9 @@ soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "tutti-session?/sou
 sampler = ["dep:tutti-sampler", "tutti-session?/sampler"]
 # `Session::analyze` and `tutti::measure`.
 analyze = ["session", "dep:tutti-measure", "tutti-session?/analyze"]
-audio-io = ["io", "tutti-cpal?/capture", "tutti-session?/audio-io"]
+# Live audio input from the sound card: `Session::add_input`, takes, mic capture;
+# implies `device` and `record`.
+capture = ["record", "device", "tutti-cpal/capture", "tutti-session/capture"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`).

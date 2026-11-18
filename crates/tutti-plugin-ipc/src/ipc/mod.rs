@@ -53,9 +53,9 @@ use tutti_rt::LockExt;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
-    PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, ProcessWake,
-    Refused, Reopen, Request, RestartRules, ResyncKind, SampleFormat, SampleRate, Samples,
-    StateUse, Stuck,
+    PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, PresetId,
+    ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleFormat, SampleRate,
+    Samples, StateError, StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -607,6 +607,25 @@ impl Ipc {
             });
         };
         origin.reopen(self.link.rate(), state)
+    }
+
+    /// Loads the preset `id` into this plugin: `false` when it refused it. No
+    /// main thread: the served control is thread-agnostic. A served fork
+    /// restores with this, then [`load_state`](Self::load_state), after the
+    /// server has loaded the state and activated the plugin at launch.
+    pub fn load_preset(&self, id: &PresetId) -> bool {
+        self.link.bridge.load_preset(id.clone())
+    }
+
+    /// Loads `state` into this plugin, into its audio instance alone (an
+    /// instance no editor mirrors, a fresh fork's), so it needs no main
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// The plugin is dead, refused the state, or the transfer stalled.
+    pub fn load_state(&self, state: &[u8], state_use: StateUse) -> Result<(), StateError> {
+        self.link.bridge.load_state_unmirrored(state, state_use)
     }
 
     /// Watches this plugin as a fork: the returned [`OfflineWait`] holds what

@@ -8,7 +8,7 @@
 
 use tutti_curve::Law;
 
-use tutti_units::{Depth, Phase};
+use tutti_units::{Depth, Normalized, Phase};
 
 // =========================================================================
 // Value vocabulary
@@ -168,15 +168,22 @@ pub fn shape(x: f32, depth: Depth, polarity: Polarity, curve: Law) -> f32 {
     match polarity {
         // Bipolar: preserve sign, curve the magnitude, restore sign.
         Polarity::Bipolar => {
-            let mag = curve.eval(x.abs());
+            let mag = eval_lane(curve, x.abs());
             depth * mag * x.signum()
         }
         // Unipolar: remap [-1, 1] → [0, 1], then curve.
         Polarity::Unipolar => {
             let u = (x.clamp(-1.0, 1.0) + 1.0) * 0.5;
-            depth * curve.eval(u)
+            depth * eval_lane(curve, u)
         }
     }
+}
+
+/// The law at an `f32` lane sample `x` (pinned onto `0..=1`, a NaN is 0),
+/// narrowed once to the `f32` lane.
+#[inline]
+fn eval_lane(curve: Law, x: f32) -> f32 {
+    curve.eval(Normalized::clamped(f64::from(x))).get() as f32
 }
 
 #[cfg(test)]

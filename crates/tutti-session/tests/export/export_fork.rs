@@ -879,7 +879,7 @@ impl Node for Level {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.output(0).fill(self.0.load().get());
+        io.output(0).fill(self.0.load().get() as f32);
         Status::Modified
     }
     fn reset(&mut self) {}

@@ -185,7 +185,8 @@ impl<N: ?Sized> InstrumentHandle<N> {
     /// Sets the gain after the instrument's main pair, a linear amplitude.
     /// A store into the strip's cell, read once per block.
     pub fn set_gain(&self, gain: Amplitude) {
-        self.strip_params.set(UnitParam::Volume, gain.get());
+        // The param cell is an `f32` word: the gain narrows once.
+        self.strip_params.set(UnitParam::Volume, gain.get() as f32);
     }
 }
 

@@ -58,7 +58,7 @@ impl PeakBlock {
     /// The larger of the two excursions — what a peak meter shows.
     #[inline]
     pub fn peak(&self) -> Amplitude {
-        Amplitude(self.min.abs().max(self.max.abs()))
+        Amplitude(f64::from(self.min.abs().max(self.max.abs())))
     }
 
     /// The block covering both inputs' samples.

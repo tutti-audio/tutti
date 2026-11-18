@@ -10,7 +10,7 @@
 //! that interval the glide has travelled.
 
 use tutti_curve::Law;
-use tutti_units::{Hz, SampleRate, Seconds, Semitones};
+use tutti_units::{Hz, Normalized, SampleRate, Seconds, Semitones};
 
 /// When a new note glides from the previous pitch rather than jumping to its
 /// own.
@@ -140,14 +140,15 @@ enum Glide {
     /// At rest. `current` is the pitch the last step computed, which an
     /// arrival leaves within rounding of `target`, the pitch last glided to.
     Idle { current: Hz, target: Hz },
-    /// Between `from` and `to`, `progress` (below 1) of the way, advancing by
-    /// `rate` per frame. `current` is the pitch at `progress`.
+    /// Between `from` and `to`, `done` frames into a glide `length` frames
+    /// long (`done < length`). `current` is the pitch at `done / length` of
+    /// the way.
     Gliding {
         from: Hz,
         to: Hz,
         current: Hz,
-        progress: f32,
-        rate: f32,
+        done: f64,
+        length: f64,
     },
 }
 
@@ -192,11 +193,10 @@ impl Portamento {
                 self.config.time.get().get() * interval.max(MIN_INTERVAL_OCTAVES)
             };
 
-            // A fractional glide length feeding a reciprocal, not a frame
-            // count: it multiplies in f64 and narrows once to the `f32` progress.
-            let glide_samples = (glide_time * self.sample_rate.get()) as f32;
-            let rate = if glide_samples > 0.0 {
-                1.0 / glide_samples
+            // The glide length in frames, fractional: progress is `done / length`.
+            let glide_samples = glide_time * self.sample_rate.get();
+            let length = if glide_samples > 0.0 {
+                glide_samples
             } else {
                 1.0
             };
@@ -204,8 +204,8 @@ impl Portamento {
                 from,
                 to: freq,
                 current: from,
-                progress: 0.0,
-                rate,
+                done: 0.0,
+                length,
             };
         } else {
             self.glide = Glide::Idle {
@@ -220,7 +220,7 @@ impl Portamento {
     /// Control, which `tutti-voicing` resolves to a source key and a time). A
     /// glide of no time, or between equal pitches, is a jump.
     pub fn begin(&mut self, from: Hz, to: Hz, time: Seconds) {
-        let glide_samples = (time.get() * self.sample_rate.get()) as f32;
+        let glide_samples = time.get() * self.sample_rate.get();
         self.glide = if from == to || glide_samples <= 0.0 {
             Glide::Idle {
                 current: to,
@@ -231,8 +231,8 @@ impl Portamento {
                 from,
                 to,
                 current: from,
-                progress: 0.0,
-                rate: 1.0 / glide_samples,
+                done: 0.0,
+                length: glide_samples,
             }
         };
     }
@@ -256,13 +256,13 @@ impl Portamento {
             Glide::Gliding {
                 from,
                 to,
-                progress,
-                rate,
+                done,
+                length,
                 ..
             } => {
-                let progress = (progress + rate).min(1.0);
-                let current = glide_at(self.config.curve, from, to, progress);
-                self.glide = Self::after_step(from, to, current, progress, rate);
+                let done = done + 1.0;
+                let current = glide_at(self.config.curve, from, to, done / length);
+                self.glide = Self::after_step(from, to, current, done, length);
                 current
             }
         }
@@ -280,8 +280,8 @@ impl Portamento {
             from,
             to,
             mut current,
-            mut progress,
-            rate,
+            mut done,
+            length,
         } = self.glide
         else {
             return self.target();
@@ -289,24 +289,24 @@ impl Portamento {
         let mut stepped = false;
         let mut arrived_early = false;
         for _ in 0..frames {
-            if progress >= 1.0 {
+            if done >= length {
                 // `tick` returns the target here, and every later tick too.
                 arrived_early = true;
                 break;
             }
-            progress = (progress + rate).min(1.0);
+            done += 1.0;
             stepped = true;
         }
         if stepped {
-            current = glide_at(self.config.curve, from, to, progress);
+            current = glide_at(self.config.curve, from, to, done / length);
         }
-        self.glide = Self::after_step(from, to, current, progress, rate);
+        self.glide = Self::after_step(from, to, current, done, length);
         if arrived_early { to } else { current }
     }
 
-    /// The state after a step that left the glide `progress` of the way.
-    fn after_step(from: Hz, to: Hz, current: Hz, progress: f32, rate: f32) -> Glide {
-        if progress >= 1.0 {
+    /// The state after a step that left the glide `done` frames into `length`.
+    fn after_step(from: Hz, to: Hz, current: Hz, done: f64, length: f64) -> Glide {
+        if done >= length {
             Glide::Idle {
                 current,
                 target: to,
@@ -316,8 +316,8 @@ impl Portamento {
                 from,
                 to,
                 current,
-                progress,
-                rate,
+                done,
+                length,
             }
         }
     }
@@ -360,12 +360,11 @@ impl Portamento {
 /// The pitch at `progress` along the glide from `from` to `to`, through
 /// `curve`.
 #[inline]
-fn glide_at(curve: Law, from: Hz, to: Hz, progress: f32) -> Hz {
-    let t = curve.eval(progress);
+fn glide_at(curve: Law, from: Hz, to: Hz, progress: f64) -> Hz {
+    let t = curve.eval(Normalized::clamped(progress));
     // Equal steps in pitch: `from` moved `t` of the way along its interval to `to`.
     let interval = Semitones::from_pitch_ratio(to / from);
-    // The curve's value is an `f32`, widened exactly.
-    from * (interval * f64::from(t)).to_pitch_ratio()
+    from * (interval * t.get()).to_pitch_ratio()
 }
 
 #[cfg(test)]

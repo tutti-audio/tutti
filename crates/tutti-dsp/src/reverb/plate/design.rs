@@ -224,7 +224,7 @@ impl PlateControls {
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the
     /// input bandwidth, which a network does not describe, is the bank's). A control outside
     /// its range is clamped and a non-finite one takes its [`DEFAULT`](Self::DEFAULT) value.
-    /// A network is about 67 KB, so it is built where it lives; no allocation.
+    /// A network is about 111 KB, so it is built where it lives; no allocation.
     ///
     /// # Panics
     ///
@@ -245,11 +245,13 @@ impl PlateControls {
         }
         .clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
-        let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
+        // `diffusion` is an `f32` unit: it widens once into the `f64` design.
+        let diffusion =
+            f64::from(finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0));
 
         let total = SampleSpan::clamped(loop_frames(rate));
-        let loop_gain = f64::from(loop_gain(total, rt60, rate).get());
-        let c = libm::pow(loop_gain, 0.25) as f32;
+        let loop_gain = loop_gain(total, rt60, rate).get();
+        let c = libm::pow(loop_gain, 0.25);
         let lattice2 = Gain::new(diffusion * (c + 0.15).clamp(0.25, 0.5));
         let scale = |g: Gain| Gain::new(diffusion * g.get());
         let excursion =

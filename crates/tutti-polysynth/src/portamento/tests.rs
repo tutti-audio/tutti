@@ -148,8 +148,8 @@ fn advance_is_that_many_ticks() {
 /// the interval in cents (pitch is exponential in time for `Law::Linear`), and
 /// it arrives exactly on the frame the glide's length rounds up to, where the
 /// pitch the voice plays (`ratio`) is the target's, for each law and an interval up, down and across several octaves. The
-/// tolerance (0.05 cents, inaudible) covers the `f32` progress sum and the
-/// `ln`/`exp` of the pitch.
+/// tolerance (1e-6 cents) covers the `ln`/`exp` of the pitch and the
+/// square-root law's steepness at progress 0.
 #[test]
 fn a_glide_follows_its_law_in_cents() {
     let rate = SampleRate::SR_48K;
@@ -179,10 +179,10 @@ fn a_glide_follows_its_law_in_cents() {
             while porta.is_gliding() {
                 k += 1;
                 let got = 1200.0 * (porta.tick().get() / from).log2();
-                let p = ((k as f64) / frames).min(1.0) as f32;
-                let want = interval * f64::from(law.eval(p));
+                let p = Normalized::clamped(k as f64 / frames);
+                let want = interval * law.eval(p).get();
                 assert!(
-                    (got - want).abs() < 0.05,
+                    (got - want).abs() < 1e-6,
                     "{law:?} {from} -> {to} Hz, frame {k}: {got} cents, the law gives {want}"
                 );
             }
@@ -248,7 +248,7 @@ fn glide_time_keeps_the_range_checked_shape() {
 /// **A constant-rate glide scales with the interval in octaves**, floored at
 /// 10% of the base time: an octave takes the base time, and a quarter-tone
 /// (a twentieth of an octave) takes a tenth of it, not a twentieth. The
-/// tolerance (1% of the base time) covers the `f32` progress sum.
+/// glide length is the frame count to within one frame.
 #[test]
 fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
     let rate = SampleRate::SR_48K;
@@ -273,12 +273,12 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
     };
     let octave = frames_of(220.0, 440.0);
     assert!(
-        (octave - rate.get()).abs() <= 0.01 * rate.get(),
+        (octave - rate.get()).abs() <= 1.0,
         "an octave took {octave}"
     );
     let quarter_tone = frames_of(440.0, 440.0 * 2f64.powf(0.5 / 12.0));
     assert!(
-        (quarter_tone - 0.1 * rate.get()).abs() <= 0.001 * rate.get(),
+        (quarter_tone - 0.1 * rate.get()).abs() <= 1.0,
         "a quarter-tone took {quarter_tone}, the floor is a tenth of the base time"
     );
 }

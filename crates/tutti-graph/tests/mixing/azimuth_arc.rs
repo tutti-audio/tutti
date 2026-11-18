@@ -384,8 +384,8 @@ fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
         let arc = UnitParam::Azimuth.arc(base, target);
         assert_eq!(arc.abs(), 20.0);
         for (j, &v) in serial.iter().enumerate().take(d) {
-            let (_, inn) = FadeLaw::EqualAmplitude.gains(j, d);
-            let want = UnitParam::Azimuth.wrap(base + arc * inn);
+            let (_, inn) = FadeLaw::EqualAmplitude.gains(Samples(j), Samples(d));
+            let want = UnitParam::Azimuth.wrap(base + arc * inn.get() as f32);
             assert!((v - want).abs() < 1e-3, "frame {j}: {v} against {want}");
             assert!(v.abs() > 169.0, "frame {j}: {v} went through the middle");
         }

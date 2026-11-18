@@ -1,7 +1,7 @@
 //! [`SpeakerLayout`]: the tuples of a speaker array and the gain solve.
 
 use tutti_types::{Bed, MAX_CHANNELS};
-use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, Radians, Spread};
+use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, Gain, Radians, Spread};
 
 use super::error::SpeakerGeometryError;
 use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3};
@@ -17,14 +17,8 @@ use super::select;
 /// is bounded on the audio thread, not because any real bearing approaches it.
 const MAX_ELEVATION_RETREATS: u32 = 8;
 
-/// Below this, a gain vector's sum of squares is treated as zero and
-/// renormalising it would divide by about zero. An `f32` widened for the
-/// comparison, so it is a hair above `1e-10`; [`POWER_FLOOR`] is the exact
-/// `f64` one.
-const ENERGY_EPSILON: f32 = 1e-10;
-
-/// Below this, the sum of squares of one tuple's candidate gains is zero (a
-/// power, in `f64`).
+/// Below this, the sum of squares of a gain vector (one tuple's candidates, or the solved
+/// set) is treated as zero and renormalising it would divide by about zero.
 const POWER_FLOOR: f64 = 1e-10;
 
 /// A speaker above or below the horizontal plane by more than this makes a
@@ -255,14 +249,14 @@ impl SpeakerLayout {
         azimuth: Azimuth,
         elevation: Elevation,
         spread: Spread,
-        out: &mut [f32],
+        out: &mut [Gain],
     ) {
         debug_assert_eq!(out.len(), self.count);
         let mut scratch = [0.0f64; MAX_CHANNELS];
         self.unit_power_gains(azimuth, elevation, &mut scratch[..self.count]);
         let written = out.len().min(self.count);
         for (out, &g) in out.iter_mut().zip(&scratch[..written]) {
-            *out = g as f32;
+            *out = Gain(g);
         }
         // Silence stays silent: spread would blend in an equal gain.
         if scratch[..written].iter().all(|&g| g == 0.0) {
@@ -286,7 +280,7 @@ impl SpeakerLayout {
             self.tuple_gains(Direction::new(azimuth, elevation), scratch);
 
             let sum_sq: f64 = scratch.iter().map(|g| g * g).sum();
-            if sum_sq > f64::from(ENERGY_EPSILON) {
+            if sum_sq > POWER_FLOOR {
                 let norm = 1.0 / sum_sq.sqrt();
                 for gain in scratch.iter_mut() {
                     *gain *= norm;
@@ -378,22 +372,23 @@ fn fold_to_front(azimuth: Azimuth) -> Azimuth {
 /// the energy law the solve establishes, preserved across the diffusion blend
 /// rather than newly imposed by it.
 #[inline]
-fn apply_spread(spread: Spread, gains: &mut [f32]) {
+fn apply_spread(spread: Spread, gains: &mut [Gain]) {
     // Unwrapped once here: the blend below is interpolation arithmetic on the
-    // scalar, which `Spread` deliberately does not define operators for.
-    let spread = spread.get();
+    // scalar, which `Spread` deliberately does not define operators for. `Spread` is an
+    // `f32` unit; the blend is `f64`.
+    let spread = f64::from(spread.get());
     if spread <= 0.0 {
         return;
     }
-    let equal_gain = 1.0 / (gains.len() as f32).sqrt();
+    let equal_gain = 1.0 / (gains.len() as f64).sqrt();
     for gain in gains.iter_mut() {
-        *gain = crate::lerp(*gain, equal_gain, spread);
+        *gain = Gain(crate::lerp(gain.get(), equal_gain, spread));
     }
-    let sum_sq: f32 = gains.iter().map(|g| g * g).sum();
+    let sum_sq: f64 = gains.iter().map(|g| g.get() * g.get()).sum();
     if sum_sq > 0.0 {
         let norm = 1.0 / sum_sq.sqrt();
         for gain in gains.iter_mut() {
-            *gain *= norm;
+            *gain *= Gain(norm);
         }
     }
 }

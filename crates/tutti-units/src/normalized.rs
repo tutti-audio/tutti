@@ -53,4 +53,13 @@ impl Normalized {
             Self(v)
         }
     }
+
+    /// How far along `done` frames of `of` are: `done / of`, pinned onto
+    /// `0..=1` as [`clamped`](Self::clamped) pins it (`of == 0` reads as
+    /// arrived unless `done` is 0 too, which reads as not started). The one
+    /// spelling of a frame count as progress.
+    #[must_use]
+    pub fn progress(done: crate::Samples, of: crate::Samples) -> Self {
+        Self::clamped(done.get() as f64 / of.get() as f64)
+    }
 }

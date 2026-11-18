@@ -16,7 +16,8 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{
     ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParameterChanges,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, SampleFormat,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, PresetId,
+    SampleFormat,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -46,6 +47,9 @@ pub(super) fn beat_at(frame: u64) -> f64 {
     }
 }
 pub(super) const PARAMS: [u32; 2] = [7, 9];
+/// The preset the mock plugin reports as loaded, and the state it saves.
+pub(super) const PRESET: i32 = 42;
+pub(super) const STATE: [u8; 3] = [3, 1, 4];
 
 /// The bytes of every audio-path frame the mock server was sent.
 pub(super) type Record = Arc<Mutex<Vec<Vec<u8>>>>;
@@ -130,7 +134,14 @@ fn serve_lane(
             }),
             // What `PluginBridge::settle` asks, which a watched
             // plugin's retune waits on.
-            HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset { id: None }),
+            HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset {
+                id: Some(PresetId::Number(PRESET)),
+            }),
+            HostMessage::SaveState { .. } => Some(BridgeMessage::StateChunk {
+                seq: 0,
+                last: true,
+                bytes: STATE.to_vec(),
+            }),
             HostMessage::ProcessAudio(data) => {
                 log.lock().unwrap().push(bytes);
                 slab.as_mut().map(|slab| {

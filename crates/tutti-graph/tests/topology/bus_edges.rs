@@ -237,8 +237,11 @@ fn weighted_ops(plan: &Plan) -> usize {
 
 /// `((0 + w_0 * a_0) + w_1 * a_1) + ..`: a multiply and an add per lane, two
 /// roundings, in source order: how a sink sums its weighted lanes.
-fn weighted_fold(terms: &[(f32, &[f32])], i: usize) -> f32 {
-    terms.iter().fold(0.0f32, |acc, &(w, a)| acc + w * a[i])
+fn weighted_fold(terms: &[(f64, &[f32])], i: usize) -> f32 {
+    // The render is `f32`: each weight narrows to it.
+    terms
+        .iter()
+        .fold(0.0f32, |acc, &(w, a)| acc + w as f32 * a[i])
 }
 
 // ---------------------------------------------------------------------------
@@ -276,18 +279,18 @@ fn five_one_into_stereo_follows_the_itu_rows() {
     // The fold's rows (`Fold::contributions`): left is FL, C at -3 dB and Ls
     // at -3 dB; right is FR, C and Rs. The LFE (channel 3) feeds neither.
     let lowering = rig.lowering().unwrap();
-    let weights: Vec<(EdgeId, f32)> = lowering
+    let weights: Vec<(EdgeId, f64)> = lowering
         .lanes
         .iter()
         .map(|(&id, w)| (id, w.get()))
         .collect();
     let expect = [
         (lane(2, 0, out_port(1, 0)), 1.0),
-        (lane(2, 0, out_port(1, 2)), f32::MINUS_3_DB),
-        (lane(2, 0, out_port(1, 4)), f32::MINUS_3_DB),
+        (lane(2, 0, out_port(1, 2)), f64::MINUS_3_DB),
+        (lane(2, 0, out_port(1, 4)), f64::MINUS_3_DB),
         (lane(2, 1, out_port(1, 1)), 1.0),
-        (lane(2, 1, out_port(1, 2)), f32::MINUS_3_DB),
-        (lane(2, 1, out_port(1, 5)), f32::MINUS_3_DB),
+        (lane(2, 1, out_port(1, 2)), f64::MINUS_3_DB),
+        (lane(2, 1, out_port(1, 5)), f64::MINUS_3_DB),
     ];
     assert_eq!(weights, expect);
 
@@ -301,8 +304,8 @@ fn five_one_into_stereo_follows_the_itu_rows() {
                 weighted_fold(
                     &[
                         (1.0, &ch6[front]),
-                        (f32::MINUS_3_DB, &ch6[2]),
-                        (f32::MINUS_3_DB, &ch6[surround]),
+                        (f64::MINUS_3_DB, &ch6[2]),
+                        (f64::MINUS_3_DB, &ch6[surround]),
                     ],
                     i,
                 )
@@ -343,7 +346,7 @@ fn mono_into_stereo_copies_to_both_sides() {
 /// pinned, now through the bus edge it was deleted for.)
 #[test]
 fn seven_one_into_stereo_reads_out_the_matrix() {
-    let m = f32::MINUS_3_DB;
+    let m = f64::MINUS_3_DB;
     let want = [
         [1.0, 0.0, m, 0.0, m, 0.0, m, 0.0],
         [0.0, 1.0, m, 0.0, 0.0, m, 0.0, m],
@@ -980,18 +983,18 @@ fn root_rig(src: usize, dst: usize) -> Rig {
 fn five_one_into_a_stereo_root_follows_the_itu_rows() {
     let rig = root_rig(6, 2);
     let lowering = rig.lowering().unwrap();
-    let weights: Vec<(EdgeId, f32)> = lowering
+    let weights: Vec<(EdgeId, f64)> = lowering
         .lanes
         .iter()
         .map(|(&id, w)| (id, w.get()))
         .collect();
     let expect = [
         (root_lane(0, out_port(1, 0)), 1.0),
-        (root_lane(0, out_port(1, 2)), f32::MINUS_3_DB),
-        (root_lane(0, out_port(1, 4)), f32::MINUS_3_DB),
+        (root_lane(0, out_port(1, 2)), f64::MINUS_3_DB),
+        (root_lane(0, out_port(1, 4)), f64::MINUS_3_DB),
         (root_lane(1, out_port(1, 1)), 1.0),
-        (root_lane(1, out_port(1, 2)), f32::MINUS_3_DB),
-        (root_lane(1, out_port(1, 5)), f32::MINUS_3_DB),
+        (root_lane(1, out_port(1, 2)), f64::MINUS_3_DB),
+        (root_lane(1, out_port(1, 5)), f64::MINUS_3_DB),
     ];
     assert_eq!(weights, expect);
     assert!(lowering.spec.root_sources.is_empty() && lowering.spec.bus_edges.is_empty());
@@ -1005,8 +1008,8 @@ fn five_one_into_a_stereo_root_follows_the_itu_rows() {
                 weighted_fold(
                     &[
                         (1.0, &ch6[front]),
-                        (f32::MINUS_3_DB, &ch6[2]),
-                        (f32::MINUS_3_DB, &ch6[surround]),
+                        (f64::MINUS_3_DB, &ch6[2]),
+                        (f64::MINUS_3_DB, &ch6[surround]),
                     ],
                     i,
                 )

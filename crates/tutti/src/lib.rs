@@ -98,9 +98,9 @@
 //!   a `Format` names (each implies `codec`; none implies `export`, and
 //!   `encode-vorbis` is the one path to a C library).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
-//! - `io` — the session's `Recorder` and its pump loop. Implied by `audio-io`.
-//! - `audio-io` — mic capture and recording (implies `io`; the capture stream
-//!   itself needs `device`).
+//! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
+//! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
+//!   (implies `device` and `record`).
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
@@ -204,7 +204,7 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
-#[cfg(all(feature = "session", feature = "device", feature = "audio-io"))]
+#[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
 };
@@ -367,7 +367,7 @@ pub mod graph {
 pub mod session {
     #[cfg(feature = "device")]
     pub use tutti_cpal::Error as DeviceError;
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
@@ -425,7 +425,7 @@ pub mod session {
 
     #[cfg(feature = "export")]
     pub use tutti_dsp::FftFloat;
-    #[cfg(any(feature = "io", feature = "export"))]
+    #[cfg(any(feature = "record", feature = "export"))]
     pub use tutti_session::DitherShape;
     #[cfg(feature = "sampler")]
     pub use tutti_session::SamplerError;
@@ -436,7 +436,7 @@ pub mod session {
         Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
         Stage as BounceStage,
     };
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     pub use tutti_session::{
         Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
         Rolling, Start, TakeEnd, TakeId, Terms, Window,
@@ -464,7 +464,7 @@ pub mod session {
         Backoff, DeviceLatency, DevicePolicy, DeviceRestart, DeviceRestarted, DeviceWatch, Follow,
         FollowEvent, RestartError, RestartOutcome,
     };
-    #[cfg(feature = "io")]
+    #[cfg(feature = "record")]
     pub use tutti_session::{
         DitherSink, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
         RecorderError,
