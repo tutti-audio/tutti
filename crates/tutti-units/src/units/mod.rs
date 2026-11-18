@@ -110,6 +110,22 @@ pub trait Unit: Copy + Clone + core::fmt::Debug + PartialEq {
     fn to_raw(self) -> Self::Raw;
 }
 
+/// A checked value read as an `f64`: what crosses into data with
+/// [`Real::from_unit`](crate::Real::from_unit). Every `Unit<Raw = f64>` is one,
+/// and so is a `ranged!` type over `f64`. Counts and positions (integer raws)
+/// are not.
+pub trait Quantity: Copy {
+    /// The value as an `f64`.
+    fn value(self) -> f64;
+}
+
+impl<U: Unit<Raw = f64>> Quantity for U {
+    #[inline]
+    fn value(self) -> f64 {
+        self.to_raw()
+    }
+}
+
 // `From` for the conversions with exactly one answer.
 //
 // Between a unit and its own bare number there is no `From` at all: a bare
