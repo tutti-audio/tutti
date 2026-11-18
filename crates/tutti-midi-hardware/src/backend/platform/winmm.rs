@@ -2,7 +2,7 @@
 
 use crate::InputProducerHandle;
 use crate::endpoints::{InputConnection, MidiEndpoints};
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
 /// Why no virtual endpoint can be published here.
@@ -17,7 +17,7 @@ pub(crate) fn active() -> Box<dyn MidiEndpoints> {
 pub(crate) fn open_virtual_source(
     _spec: &VirtualSpec,
 ) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    Err(Error::Unsupported(VIRTUAL_REASON))
+    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 
 /// Refuses: winmm has no virtual ports.
@@ -25,8 +25,8 @@ pub(crate) fn open_virtual_destination(
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
 ) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
-    Err(Error::Unsupported(VIRTUAL_REASON))
+    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 
-/// The platform's own error, as [`Error::Os`](crate::Error::Os) carries it.
+/// The platform's own error, as [`MidiHardwareError::Os`] carries it.
 pub(crate) type OsError = tutti_winmm_ffi::Error;

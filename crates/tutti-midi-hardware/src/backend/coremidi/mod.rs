@@ -48,13 +48,13 @@ use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::guard::Guard;
 use tutti_coremidi_ffi::{
     Operation, OsStatus, UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints,
 };
 use tutti_midi_device::{EndpointId, Identity, OsDevice};
-use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
+use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_ump::{Protocol, split_stream};
 
 mod host_time;
@@ -245,7 +245,7 @@ impl CoreMidiEndpoints {
 
     fn client(&self) -> Result<&'static Client> {
         self.client.map_err(|status| {
-            Error::Os(tutti_coremidi_ffi::Error::call(
+            MidiHardwareError::Os(tutti_coremidi_ffi::Error::call(
                 Operation::CreateClient,
                 status,
             ))
@@ -444,7 +444,7 @@ struct CoreMidiOutput {
 
 impl CoreMidiOutput {
     /// Sends one message as one event list, so the OS takes all its packets or
-    /// none: each packet is stamped with the host time of its [`SendAt`], which
+    /// none: each packet is stamped with the host time of its `SendAt`, which
     /// CoreMIDI holds it until (0 is now). `pairing` is the batch's reading of
     /// the host clock against `Instant`, taken at its first scheduled packet:
     /// read afresh for each batch, so it neither drifts nor spans a sleep
@@ -461,12 +461,7 @@ impl CoreMidiOutput {
         };
         let mut buffer = EventBuffer::new(cm_protocol);
         for event in message {
-            let time = match event.send {
-                SendAt::Now => 0,
-                SendAt::At(instant) => pairing
-                    .get_or_insert_with(host_time::Pairing::now)
-                    .host_time_of(instant),
-            };
+            let time = host_time::stamp_of(event.send, pairing);
             buffer = buffer.with_packet(time, event.ump.words());
         }
         self.port
@@ -488,7 +483,7 @@ impl DeviceOut for CoreMidiOutput {
 
 impl MidiOut for CoreMidiOutput {
     /// Each message goes to CoreMIDI as one event list, its packets stamped
-    /// with the host time of their [`SendAt`]; CoreMIDI schedules them, and
+    /// with the host time of their `SendAt`; CoreMIDI schedules them, and
     /// takes a message whole or not at all ([`by_message`]).
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         let mut pairing = None;

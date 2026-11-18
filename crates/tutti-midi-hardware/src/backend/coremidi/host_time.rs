@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use crate::stamp::Paired;
 use tutti_coremidi_ffi::{Timebase, host_ticks};
+use tutti_midi_runtime::SendAt;
 
 /// The host clock and the OS's read together ([`Paired`]): to place a
 /// callback's packets, and to stamp a batch's.
@@ -48,6 +49,18 @@ impl Pairing {
         self.paired
             .departure(at)
             .map_or(0, |host| self.base.ticks(host))
+    }
+}
+
+/// The host-time stamp of a packet sent `send`: 0 ("now") for [`SendAt::Now`],
+/// else the host time of its instant by `pairing`, which is read from the clocks
+/// the first time a scheduled packet needs it.
+pub(super) fn stamp_of(send: SendAt, pairing: &mut Option<Pairing>) -> u64 {
+    match send {
+        SendAt::Now => 0,
+        SendAt::At(instant) => pairing
+            .get_or_insert_with(Pairing::now)
+            .host_time_of(instant),
     }
 }
 

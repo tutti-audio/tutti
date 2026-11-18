@@ -27,10 +27,11 @@
 //! an interleaved view of the implementor's format, on a clock the graph does
 //! not keep. A [`Pull`] says whether an empty read is late, finished or broken.
 //!
-//! [`convert()`], [`convert_mono`] and [`convert_planes`] change format, [`interleave`] and
-//! [`deinterleave`] change layout and format in one pass; a mismatch is an
-//! error, never a short copy. [`Fold`] turns one channel topology into
-//! another, built once on the control side.
+//! [`convert()`], [`convert_counting_clips`], [`convert_mono`] and
+//! [`convert_planes`] change format, [`interleave`] and [`deinterleave`] change
+//! layout and format in one pass; a mismatch is an error, never a short copy.
+//! [`Fold`] turns one channel topology into another, built once on the control
+//! side.
 //!
 //! ```
 //! use tutti_buffers::{convert, deinterleave, Interleaved, InterleavedMut, PlanesMut};
@@ -72,7 +73,9 @@ mod sample;
 mod stereo;
 mod wave;
 
-pub use convert::{convert, convert_mono, convert_planes, deinterleave, interleave};
+pub use convert::{
+    convert, convert_counting_clips, convert_mono, convert_planes, deinterleave, interleave,
+};
 pub use edge::{FiniteSource, Pull, Sink, SinkFailed, Source, Stop};
 pub use error::BufferError;
 pub use fold::{Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec};

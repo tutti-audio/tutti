@@ -20,7 +20,7 @@ fn a_spec_with_function_blocks_is_refused_by_name() {
         .block(block);
     assert!(matches!(
         UmpVirtualSource::open(&spec),
-        Err(Error::VirtualBlocksUnsupported)
+        Err(MidiHardwareError::VirtualBlocksUnsupported)
     ));
 }
 
