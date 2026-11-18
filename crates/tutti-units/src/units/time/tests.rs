@@ -27,12 +27,14 @@ fn a_frequency_and_its_period_are_one_route() {
     assert_eq!(Seconds(0.5).frequency(), Some(Hz(2.0)));
     assert_eq!(Hz(256.0).period(), Some(Seconds(0.003_906_25)));
     assert_eq!(Hz(256.0).period().unwrap().frequency(), Some(Hz(256.0)));
-    for bad in [0.0f32, -1.0, f32::NAN, f32::INFINITY] {
+    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY] {
         assert_eq!(Hz(bad).period(), None, "{bad}");
     }
-    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY, 1e-60, 1e300] {
+    // A subnormal time has a reciprocal past `f64::MAX`.
+    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY, 5e-324] {
         assert_eq!(Seconds(bad).frequency(), None, "{bad}");
     }
+    assert_eq!(Seconds(1e-60).frequency(), Some(Hz(1e60)));
     assert_eq!(Hz::ZERO, Hz(0.0));
     assert_eq!(Seconds::ZERO, Seconds(0.0));
 }
@@ -216,7 +218,7 @@ fn nyquist_crosses_from_clock_rate_to_signal_frequency() {
     assert_eq!(SampleRate::SR_48K.nyquist_scaled(1.0), Hz(24_000.0));
     assert_eq!(SampleRate::SR_48K.nyquist_scaled(0.5), Hz(12_000.0));
     let svf = SampleRate::SR_48K.nyquist_scaled(0.998);
-    assert!((svf.get() - 48_000.0 * 0.499).abs() < 1e-3);
+    assert!((svf.get() - 48_000.0 * 0.499).abs() < 1e-9);
 }
 
 #[test]
@@ -224,7 +226,7 @@ fn nyquist_scaled_refuses_to_exceed_nyquist() {
     // A margin above unity would hand back a frequency above Nyquist —
     // the exact aliasing bug the clamp exists to stop.
     assert_eq!(SampleRate::SR_48K.nyquist_scaled(1.5), Hz(24_000.0));
-    assert_eq!(SampleRate::SR_48K.nyquist_scaled(-0.2), Hz(0.0));
+    assert_eq!(SampleRate::SR_48K.nyquist_scaled(-0.2), Hz::ZERO);
 }
 
 /// A `Seconds` names every frame: a frame count round-trips exactly through
@@ -366,5 +368,23 @@ fn the_one_pole_coefficients_are_the_closed_form_in_f64() {
             "over, τ {tau}"
         );
         assert_eq!(over as f32, closed_over as f32);
+    }
+}
+
+/// A frequency is the reciprocal of its period in `f64`, with no narrowing between.
+#[test]
+fn a_frequency_is_the_reciprocal_of_its_period() {
+    assert_eq!(Hz(440.0).period(), Some(Seconds(1.0 / 440.0)));
+    assert_eq!(Seconds(1.0 / 440.0).frequency(), Some(Hz(440.0)));
+}
+
+/// A kernel in `f32` narrows a `Hz` and its period once; each is the `f32` closed form within 1 ulp.
+#[test]
+fn a_frequency_narrows_to_the_f32_closed_form() {
+    for hz in [20.0_f32, 261.625_58, 440.0, 1_000.0, 18_000.0] {
+        let period = Hz(f64::from(hz)).period().unwrap().get() as f32;
+        assert!((period - 1.0 / hz).abs() <= period * f32::EPSILON);
+        let nyquist = SampleRate::of(f64::from(hz)).nyquist().get() as f32;
+        assert_eq!(nyquist, hz / 2.0);
     }
 }

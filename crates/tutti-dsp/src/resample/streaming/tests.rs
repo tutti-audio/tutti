@@ -281,9 +281,8 @@ fn level_at(x: &[f32], rate: f64, f_hz: f64, from: usize, to: usize) -> f64 {
 
 /// `n` samples of a sine of amplitude `amp` at `hz`.
 fn tone(hz: f64, rate: f64, n: usize, amp: f32) -> Vec<f32> {
-    // `hz` narrows to the unit's `f32`; the probes sit within 1e-3 Hz of it.
     sine(
-        Hz::new(hz as f32),
+        Hz::new(hz),
         Amplitude::new(amp),
         SampleRate::of(rate),
         Samples(n),

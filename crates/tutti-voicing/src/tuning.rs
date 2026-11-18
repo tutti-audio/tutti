@@ -172,7 +172,7 @@ impl Tunings {
             let offset = offsets.offset(usize::from(k % 12)).to_semitones();
             table.set(
                 key,
-                TuningFrequency::nearest(Semitones(f32::from(k)) + offset),
+                TuningFrequency::nearest(Semitones(f64::from(k)) + offset),
             );
         }
         table
@@ -202,7 +202,7 @@ impl Tunings {
             .table(bank, program)
             .and_then(|t| t.get(key).pitch())
             .map_or(Semitones(0.0), |pitch| {
-                pitch - Semitones(f32::from(key.get()))
+                pitch - Semitones(f64::from(key.get()))
             });
         stored + self.octave[channel][usize::from(key.get() % 12)]
     }

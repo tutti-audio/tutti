@@ -33,7 +33,7 @@ impl ScaleDegree {
         }
     }
 
-    pub fn from_ratio(ratio: f32) -> Self {
+    pub fn from_ratio(ratio: f64) -> Self {
         Self {
             cents: Cents::from_pitch_ratio(ratio),
         }
@@ -45,8 +45,8 @@ impl ScaleDegree {
 /// place a voice's pitch is made of a note: the note logic says how far each key
 /// sounds from equal temperament (`tutti_voicing::Command::Start`'s `tune`), so
 /// the scale itself is no state of a voice.
-pub(crate) fn key_freq(note: f32, tune: Semitones) -> Hz {
-    A4_FREQ * (Semitones(note - f32::from(A4_NOTE.get())) + tune).to_pitch_ratio()
+pub(crate) fn key_freq(note: f64, tune: Semitones) -> Hz {
+    A4_FREQ * (Semitones(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
 }
 
 /// A note-number-to-frequency map, resolved once into a 128-entry table.
@@ -87,7 +87,7 @@ impl Tuning {
         reference_note: NoteNumber,
     ) -> Self {
         let degrees: Vec<ScaleDegree> = (0..12)
-            .map(|i| ScaleDegree::from_cents(Cents::new(i as f32 * 100.0)))
+            .map(|i| ScaleDegree::from_cents(Semitones(f64::from(i)).to_cents()))
             .collect();
 
         let mut tuning = Self {
@@ -199,7 +199,7 @@ impl Tuning {
     /// [`from_cents`](Self::from_cents) with the multiplication spelled the way
     /// historical tunings are written. Same octave-repeat and reference rules.
     #[must_use]
-    pub fn from_ratios(ratios: &[f32]) -> Self {
+    pub fn from_ratios(ratios: &[f64]) -> Self {
         let degrees: Vec<ScaleDegree> =
             ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
 
@@ -217,7 +217,7 @@ impl Tuning {
         let scale_size = self.degrees.len();
         if scale_size == 0 {
             for note in 0..128 {
-                let semitones = Semitones(note as f32 - f32::from(self.reference_note.get()));
+                let semitones = Semitones(note as f64 - f64::from(self.reference_note.get()));
                 self.freq_table[note] = self.reference_freq * semitones.to_pitch_ratio();
             }
             return;
@@ -235,7 +235,7 @@ impl Tuning {
 
             let octave_diff = note_octave - ref_octave;
             let cents_diff =
-                note_cents - ref_cents + Semitones::OCTAVE.to_cents() * octave_diff as f32;
+                note_cents - ref_cents + Semitones::OCTAVE.to_cents() * f64::from(octave_diff);
 
             self.freq_table[note] = self.reference_freq * cents_diff.to_pitch_ratio();
         }
@@ -262,8 +262,8 @@ impl Tuning {
         for (word, &hz) in words.iter_mut().zip(&self.freq_table) {
             // MIDI note 69 is A4 = 440 Hz: the pitch of a frequency is its
             // interval over A4 above that note.
-            let above_a4 = Semitones::from_pitch_ratio(hz.get() / A4_FREQ.get());
-            *word = TuningFrequency::nearest(above_a4 + Semitones(f32::from(A4_NOTE.get())));
+            let above_a4 = Semitones::from_pitch_ratio(hz / A4_FREQ);
+            *word = TuningFrequency::nearest(above_a4 + Semitones(f64::from(A4_NOTE.get())));
         }
         KeyTable::new(words)
     }

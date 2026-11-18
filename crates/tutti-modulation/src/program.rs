@@ -729,9 +729,9 @@ impl Clock {
                     Some(a) => {
                         let d = play - a.at.get() as f64;
                         let r = if d < 0.0 { a.prev_rate } else { rate };
-                        a.phase + f64::from(r.get()) * d / sr
+                        a.phase + r.get() * d / sr
                     }
-                    None => f64::from(rate.get()) * play / sr + phase.get(),
+                    None => rate.get() * play / sr + phase.get(),
                 }
             }
         };
@@ -762,7 +762,7 @@ impl Clock {
                 // The play frame at which a rate `r` from (`p0`, `c0`)
                 // reaches the wave's next corner.
                 let along = |r: Hz, p0: f64, c0: f64| {
-                    let r = f64::from(r.get());
+                    let r = r.get();
                     if r == 0.0 || !r.is_finite() {
                         return None;
                     }

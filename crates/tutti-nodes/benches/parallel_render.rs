@@ -96,7 +96,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f64)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -105,7 +105,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
                 "svf",
                 SvfFilterNode::<f64>::new(
                     SvfType::LowPass,
-                    Hz(500.0 + (lane * depth + i) as f32 * 3.0),
+                    Hz(500.0 + (lane * depth + i) as f64 * 3.0),
                     Q(0.7),
                 ),
             );
@@ -225,7 +225,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f64)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -234,7 +234,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
                 "svf",
                 SvfFilterNode::<f64>::new(
                     SvfType::LowPass,
-                    Hz(500.0 + (lane * depth + i) as f32 * 3.0),
+                    Hz(500.0 + (lane * depth + i) as f64 * 3.0),
                     Q(0.7),
                 ),
             );

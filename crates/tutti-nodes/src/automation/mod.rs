@@ -26,7 +26,7 @@ mod recording;
 pub use control_lane::LaneProbe;
 pub use control_lane::{ControlLaneNode, LaneControls};
 pub use lane::{AutomationLaneNode, LiveAutomationLane};
-pub use recording::{RecordMode, Recorder, RecordingConfig};
+pub use recording::{Automatable, RecordMode, Recorder, RecordingConfig};
 pub use tutti_modulation::Curve;
 
 pub use tutti_curve::{Breakpoint, Curvature, Exponent, Law, Trajectory};

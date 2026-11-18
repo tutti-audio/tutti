@@ -141,7 +141,7 @@ mod tests {
         prepared(TiltFilterNode::from(config))
     }
 
-    fn gain_of(config: TiltFilterConfig, f: f32) -> f64 {
+    fn gain_of(config: TiltFilterConfig, f: f64) -> f64 {
         gain(TiltFilterNode::from(config), f)
     }
 
@@ -190,7 +190,7 @@ mod tests {
         let pivot = Hz(bin(171));
         for db in [-18.0f32, -6.0, 6.0, 18.0] {
             for f in [10, 34, 120, 240, 683, 2_400, 3_900].map(bin) {
-                let want = analog(f64::from(pivot.get()), f64::from(db), f64::from(f));
+                let want = analog(pivot.get(), f64::from(db), f);
                 let got = gain_of(config(pivot, Db(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
@@ -231,7 +231,7 @@ mod tests {
         assert!(node.param_set().set(UnitParam::Cutoff, 4_000.0));
         assert!(node.param_set().set(UnitParam::GainDb, 12.0));
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
-        let want = analog(4_000.0, 12.0, f64::from(bin(256)));
+        let want = analog(4_000.0, 12.0, bin(256));
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
     }
 
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f32, db: f32| render(&mut node(config(Hz(hz), Db(db))), &input);
+        let at = |hz: f64, db: f32| render(&mut node(config(Hz(hz), Db(db))), &input);
         assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
         assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
         assert_eq!(at(500.0, 90.0), at(500.0, 24.0));
@@ -258,7 +258,7 @@ mod tests {
             other => panic!("{other:?}"),
         };
         let ceiling = frames(kernel.tail());
-        for fc in [20.0f32, 90.0, 700.0, 4_000.0, 15_000.0, 23_000.0] {
+        for fc in [20.0f64, 90.0, 700.0, 4_000.0, 15_000.0, 23_000.0] {
             for db in [-24.0f32, -6.0, 6.0, 24.0] {
                 let controls = TiltFilterControls {
                     frequency: Hz(fc),

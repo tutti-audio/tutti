@@ -398,7 +398,7 @@ impl Network {
                 _ => {}
             }
         }
-        Hz(total as f32)
+        Hz(total)
     }
 
     /// The shortest path from the input to the output, in frames: the

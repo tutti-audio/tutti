@@ -335,7 +335,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     ed.insert(NodeKey(0), "sine", Unforkable(src));
     let mut last = NodeKey(0);
     for i in 0..depth {
-        let cutoff = 500.0 + (i as f32) * 7.0;
+        let cutoff = 500.0 + (i as f64) * 7.0;
         let f: Box<dyn tutti_graph::Node> = if ours {
             tutti_graph::IntoNode::into_node(SvfFilterNode::<f64>::new(
                 SvfType::LowPass,
@@ -344,7 +344,8 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
             ))
             .0
         } else {
-            Box::new(Lowpass::new(cutoff, 0.7))
+            // The comparison filter takes `f32`.
+            Box::new(Lowpass::new(cutoff as f32, 0.7))
         };
         let k = NodeKey(1 + i as u64);
         ed.insert(k, "lowpass", Unforkable(f));

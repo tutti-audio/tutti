@@ -22,7 +22,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 /// does not drift with the length (an `f32` phase accumulates an error that
 /// grows with `i`).
 pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<f32> {
-    let step = std::f64::consts::TAU * f64::from(hz.get()) / rate.get();
+    let step = std::f64::consts::TAU * hz.get() / rate.get();
     let amp = f64::from(amplitude.get());
     (0..len.get())
         .map(|i| (amp * (step * i as f64).sin()) as f32)

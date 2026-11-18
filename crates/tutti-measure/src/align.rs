@@ -200,7 +200,7 @@ fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: Sa
     let in_band = |k: usize| {
         band.is_none_or(|b| {
             let hz = k as f64 * rate.get() / size as f64;
-            hz >= f64::from(b.min().get()) && hz <= f64::from(b.max().get())
+            hz >= b.min().get() && hz <= b.max().get()
         })
     };
     let strongest = bins

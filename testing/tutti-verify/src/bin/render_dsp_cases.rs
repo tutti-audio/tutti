@@ -110,7 +110,7 @@ impl Cases {
 
 fn svf(dir: &Path, cases: &mut Cases) {
     let rate = SampleRate::of(RATE);
-    let settings: [(SvfType, &str, f32, f32, f32); 24] = [
+    let settings: [(SvfType, &str, f64, f32, f32); 24] = [
         (SvfType::LowPass, "lowpass", 200.0, 0.707, 0.0),
         (SvfType::LowPass, "lowpass", 1_000.0, 2.0, 0.0),
         (SvfType::LowPass, "lowpass", 8_000.0, 0.5, 0.0),
@@ -163,7 +163,7 @@ fn ladder(dir: &Path, cases: &mut Cases) {
     let amplitude = 1e-4f32;
     for (ty, label) in [(LadderType::LP24, "lp24")] {
         for (freq, res) in [
-            (500.0f32, 0.0f32),
+            (500.0f64, 0.0f32),
             (500.0, 0.3),
             (4_000.0, 0.0),
             (4_000.0, 0.5),
@@ -197,7 +197,7 @@ fn ladder(dir: &Path, cases: &mut Cases) {
 fn crossover(dir: &Path, cases: &mut Cases) {
     let rate = SampleRate::of(RATE);
     for (name, splits) in [
-        ("lr4_2band", vec![1_000.0f32]),
+        ("lr4_2band", vec![1_000.0f64]),
         ("lr4_3band", vec![300.0, 3_000.0]),
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
@@ -216,7 +216,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 
 fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
-        for fc in [300.0f32, 2_000.0, 10_000.0] {
+        for fc in [300.0f64, 2_000.0, 10_000.0] {
             let c = allpass_coeff(Hz(fc), SampleRate::of(RATE));
             let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);

@@ -75,8 +75,8 @@ pub(super) mod test_utils {
 
     /// The frequency of bin `m` of the 8192-frame window the levels are read over: a sine
     /// there has whole cycles in it, so its RMS is exact.
-    pub fn bin(m: u32) -> f32 {
-        (crate::test_support::RATE.get() * f64::from(m) / 8192.0) as f32
+    pub fn bin(m: u32) -> f64 {
+        crate::test_support::RATE.get() * f64::from(m) / 8192.0
     }
 
     /// The amplitude of a sine whose samples are `x`.
@@ -118,7 +118,7 @@ pub(super) mod test_utils {
     }
 
     /// The gain of the settled half of a unit sine at `f` through `node`, prepared.
-    pub fn gain<N: Node>(node: N, f: f32) -> f64 {
+    pub fn gain<N: Node>(node: N, f: f64) -> f64 {
         let mut node = crate::test_support::prepared(node);
         let out = render(&mut node, &generate_sine(f, 48_000.0, 16_384));
         level(&out[8_192..])
@@ -140,7 +140,7 @@ pub(super) mod test_utils {
     }
 
     /// `signal::sine` at unit amplitude, for a test that holds bare numbers.
-    pub fn generate_sine(freq: f32, sample_rate: f32, num_samples: usize) -> Vec<f32> {
+    pub fn generate_sine(freq: f64, sample_rate: f32, num_samples: usize) -> Vec<f32> {
         signal::sine(
             Hz(freq),
             Amplitude(1.0),

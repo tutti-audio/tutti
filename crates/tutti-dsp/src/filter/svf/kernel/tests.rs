@@ -80,7 +80,7 @@ fn rbj_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 
 fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 {
     let c = SvfCoefficients::<f64>::from(&SvfCoeffs::new(
         ty,
-        Hz(fc as f32),
+        Hz(fc),
         Q(q as f32),
         Db(gain_db as f32),
         SampleRate::of(rate),

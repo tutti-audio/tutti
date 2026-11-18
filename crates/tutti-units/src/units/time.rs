@@ -4,7 +4,7 @@ use super::*;
 
 unit! {
     /// Frequency in Hertz. Used for filter cutoffs, LFO rates, EQ centers.
-    pub struct Hz(pub f32): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
+    pub struct Hz(pub f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
 }
 
 unit! {
@@ -30,9 +30,8 @@ impl Hz {
     #[inline]
     #[must_use]
     pub fn period(self) -> Option<Seconds> {
-        let hz = f64::from(self.0);
-        if hz.is_finite() && hz > 0.0 {
-            Some(Seconds(1.0 / hz))
+        if self.0.is_finite() && self.0 > 0.0 {
+            Some(Seconds(1.0 / self.0))
         } else {
             None
         }
@@ -44,21 +43,16 @@ impl Seconds {
     pub const ZERO: Seconds = Seconds(0.0);
 
     /// The frequency this is the period of (`1 / t`), or `None` for a zero, a negative or a
-    /// non-finite time, and for a time whose frequency an `f32` cannot hold above 0 (one
-    /// that overflows or underflows). Computed in `f64` and narrowed once; [`Hz::period`] is
-    /// its inverse.
+    /// non-finite time, and for a time whose frequency overflows. [`Hz::period`] is its
+    /// inverse.
     #[inline]
     #[must_use]
     pub fn frequency(self) -> Option<Hz> {
         if !(self.0.is_finite() && self.0 > 0.0) {
             return None;
         }
-        let hz = (1.0 / self.0) as f32;
-        if hz.is_finite() && hz > 0.0 {
-            Some(Hz(hz))
-        } else {
-            None
-        }
+        let hz = 1.0 / self.0;
+        if hz.is_finite() { Some(Hz(hz)) } else { None }
     }
 
     /// This time as an `f32`, for a kernel that runs in `f32`: the one place a
@@ -388,13 +382,10 @@ impl SampleRate {
     /// compare a cutoff against — not a clock rate. That crossing is the whole
     /// reason the method exists: it is the one sanctioned bridge between the
     /// two, so a filter clamping its cutoff does not reach for a raw float.
-    ///
-    /// Narrowing to `Hz`'s `f32` is safe here: Nyquist is at most ~96 kHz for
-    /// any real device rate, well inside `f32`'s exact-integer range.
     #[inline]
     #[must_use]
     pub fn nyquist(self) -> Hz {
-        Hz((self.0 * 0.5) as f32)
+        Hz(self.0 * 0.5)
     }
 
     /// Nyquist scaled by `margin`, for filters that must stay *below* it.
@@ -409,8 +400,8 @@ impl SampleRate {
     /// frequency *above* Nyquist, which is the bug this guards.
     #[inline]
     #[must_use]
-    pub fn nyquist_scaled(self, margin: f32) -> Hz {
-        Hz((self.0 * f64::from(margin.clamp(0.0, 1.0)) * 0.5) as f32)
+    pub fn nyquist_scaled(self, margin: f64) -> Hz {
+        Hz(self.0 * margin.clamp(0.0, 1.0) * 0.5)
     }
 }
 

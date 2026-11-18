@@ -16,7 +16,7 @@ const TYPES: [LadderType; 4] = [
     LadderType::HP24,
 ];
 
-fn design<F: Float + Lanes>(ty: LadderType, fc: f32, res: f32, drive: f32) -> LadderDesign<F> {
+fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f32, drive: f32) -> LadderDesign<F> {
     let controls = LadderControls {
         ty,
         freq: Hz(fc),
@@ -63,7 +63,7 @@ fn impulse(amplitude: f64, frames: usize) -> Vec<f64> {
 
 /// The ladder held at `ty`, `fc`, `res` (unity drive): the impulse response of a mono `f64`
 /// bank in `f64` audio.
-fn held_response(ty: LadderType, fc: f32, res: f32, amplitude: f64, frames: usize) -> Vec<f64> {
+fn held_response(ty: LadderType, fc: f64, res: f32, amplitude: f64, frames: usize) -> Vec<f64> {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
     let mut glide = Glide::landed(design(ty, fc, res, 1.0));
     run(
@@ -120,7 +120,7 @@ fn the_held_response_is_the_bilinear_image_of_the_continuous_ladder() {
     let amplitude = 1e-7;
     for ty in TYPES {
         for (fc, res) in [
-            (1_000.0f32, 0.0f32),
+            (1_000.0f64, 0.0f32),
             (1_000.0, 0.5),
             (1_000.0, 0.9),
             (4_000.0, 0.9),
@@ -131,7 +131,7 @@ fn the_held_response_is_the_bilinear_image_of_the_continuous_ladder() {
                 .map(|v| v / amplitude)
                 .collect();
             for hz in [50.0, 500.0, 975.0, 1_000.0, 2_000.0, 9_000.0, 20_000.0] {
-                let want = closed_form(ty, f64::from(fc), f64::from(res), hz);
+                let want = closed_form(ty, fc, f64::from(res), hz);
                 let got = dtft(&y, hz);
                 assert!(
                     (got - want).norm() < 1e-9 * want.norm().max(1.0),
@@ -268,7 +268,7 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
         .map(|i| f64::from((i * 7919) % 2003) / 1001.0 - 1.0)
         .collect();
     for ty in TYPES {
-        for fc in [1.0f32, 100.0, 12_000.0, 23_900.0] {
+        for fc in [1.0f64, 100.0, 12_000.0, 23_900.0] {
             for (res, drive) in [(1.0f32, 1e3f32), (1.0, 1.0), (0.5, 1e6)] {
                 let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
                 let mut glide = Glide::landed(design(ty, fc, res, drive));
@@ -478,15 +478,20 @@ fn a_reset_bank_is_silent() {
 fn a_glides_midpoint_is_stable() {
     const FRAMES: usize = 150_000;
     let mut seed = 24u32;
-    let mut next = |lo: f32, hi: f32| {
+    let mut next = |lo: f64, hi: f64| {
         seed ^= seed << 13;
         seed ^= seed >> 17;
         seed ^= seed << 5;
-        lo + (hi - lo) * (seed >> 8) as f32 / (1u32 << 24) as f32
+        lo + (hi - lo) * f64::from(seed >> 8) / f64::from(1u32 << 24)
     };
-    fn reachable(next: &mut dyn FnMut(f32, f32) -> f32) -> LadderDesign<f64> {
+    fn reachable(next: &mut dyn FnMut(f64, f64) -> f64) -> LadderDesign<f64> {
         let ty = TYPES[next(0.0, 4.0) as usize % 4];
-        design(ty, next(20.0, 3_000.0), next(0.0, 0.7), next(0.1, 8.0))
+        design(
+            ty,
+            next(20.0, 3_000.0),
+            next(0.0, 0.7) as f32,
+            next(0.1, 8.0) as f32,
+        )
     }
     for _ in 0..200 {
         let (a, b) = (reachable(&mut next), reachable(&mut next));

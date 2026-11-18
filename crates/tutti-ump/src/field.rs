@@ -358,8 +358,8 @@ impl Pitch {
     /// quarter tone up.
     #[inline]
     #[must_use]
-    pub fn note_number(self) -> f32 {
-        self.0 as f32 / (1u32 << 25) as f32
+    pub fn note_number(self) -> f64 {
+        f64::from(self.0) / f64::from(1u32 << 25)
     }
 }
 

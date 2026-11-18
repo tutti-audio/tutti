@@ -132,7 +132,7 @@ impl Default for PortamentoConfig {
 
 /// The shortest constant-rate glide, as a fraction of the base time: the
 /// interval in octaves is floored here.
-const MIN_INTERVAL_OCTAVES: f32 = 0.1;
+const MIN_INTERVAL_OCTAVES: f64 = 0.1;
 
 /// Where a voice's pitch is: at rest, or on its way to a new note.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,9 +188,8 @@ impl Portamento {
                 // The interval in octaves; `Semitones::from_pitch_ratio`
                 // guards the non-positive ratio a bare `log2` would turn into
                 // a NaN glide time.
-                let interval =
-                    (Semitones::from_pitch_ratio(freq.get() / from.get()).get() / 12.0).abs();
-                self.config.time.get().get() * f64::from(interval.max(MIN_INTERVAL_OCTAVES))
+                let interval = (Semitones::from_pitch_ratio(freq / from).get() / 12.0).abs();
+                self.config.time.get().get() * interval.max(MIN_INTERVAL_OCTAVES)
             };
 
             // A fractional glide length feeding a reciprocal, not a frame
@@ -242,10 +241,10 @@ impl Portamento {
     /// The glide's pitch over the pitch it is gliding to: what a voice multiplies
     /// its own pitch (a per-note tuning, the bend) by. 1 once it has arrived.
     #[inline]
-    pub fn ratio(&self) -> f32 {
+    pub fn ratio(&self) -> f64 {
         match self.glide {
             Glide::Idle { .. } => 1.0,
-            Glide::Gliding { to, current, .. } => current.get() / to.get(),
+            Glide::Gliding { to, current, .. } => current / to,
         }
     }
 
@@ -365,8 +364,9 @@ impl Portamento {
 fn glide_at(curve: Law, from: Hz, to: Hz, progress: f32) -> Hz {
     let t = curve.eval(progress);
     // Equal steps in pitch: `from` moved `t` of the way along its interval to `to`.
-    let interval = Semitones::from_pitch_ratio(to.get() / from.get());
-    Hz(from.get() * (interval * t).to_pitch_ratio())
+    let interval = Semitones::from_pitch_ratio(to / from);
+    // The curve's value is an `f32`, widened exactly.
+    from * (interval * f64::from(t)).to_pitch_ratio()
 }
 
 #[cfg(test)]

@@ -72,7 +72,7 @@ fn the_table_is_frequency_data() {
 #[test]
 fn test_from_cents() {
     // Create quarter-tone scale (24 notes per octave)
-    let cents: Vec<Cents> = (0..24).map(|i| Cents::new(i as f32 * 50.0)).collect();
+    let cents: Vec<Cents> = (0..24).map(|i| Cents::new(f64::from(i) * 50.0)).collect();
     let tuning = Tuning::from_cents(&cents);
 
     assert_eq!(tuning.scale_size(), 24);
@@ -117,7 +117,7 @@ fn test_boundary_notes() {
     );
 
     // 12-TET spans 127 semitones from note 0 to note 127.
-    let want = 2.0f32.powf(127.0 / 12.0);
+    let want = 2.0f64.powf(127.0 / 12.0);
     assert!(
         (high / low - want).abs() / want < 1e-3,
         "note 0 -> 127 spans {}x, expected {want}x",

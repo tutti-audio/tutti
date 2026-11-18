@@ -2,7 +2,7 @@ use super::*;
 
 const RATE: f64 = 48_000.0;
 
-fn check(freqs: &[f32]) -> Result<(), CrossoverError> {
+fn check(freqs: &[f64]) -> Result<(), CrossoverError> {
     let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
     validate(&f, SampleRate::of(RATE))
 }
@@ -29,7 +29,7 @@ fn the_band_count_is_two_to_six() {
 /// Frequencies must be finite, above 0, strictly increasing, below Nyquist.
 #[test]
 fn frequencies_are_validated() {
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -5.0] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -5.0] {
         assert!(
             matches!(
                 check(&[bad]),
@@ -79,7 +79,7 @@ fn a_set_is_fitted_under_the_rate_and_stays_increasing() {
     let mut set = [Hz(30_000.0), Hz(25_000.0)];
     fit_to_rate(&mut set, rate);
     assert!(set[0] < set[1], "{set:?}");
-    assert!(f64::from(set[1].get()) <= SOLVE_CEILING * RATE);
+    assert!(set[1].get() <= SOLVE_CEILING * RATE);
     let mut ok = [Hz(100.0), Hz(1_000.0)];
     fit_to_rate(&mut ok, rate);
     assert_eq!(ok, [Hz(100.0), Hz(1_000.0)]);

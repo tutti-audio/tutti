@@ -159,7 +159,7 @@ fn a_glide_follows_its_law_in_cents() {
         Law::PowerIn(Exponent::of(0.5)),
     ] {
         for (from, to, time) in [
-            (220.0f32, 1760.0f32, 0.01),
+            (220.0f64, 1760.0f64, 0.01),
             (1760.0, 311.0, 0.0073),
             (95.0, 97.0, 0.05),
         ] {
@@ -172,13 +172,13 @@ fn a_glide_follows_its_law_in_cents() {
                 rate,
                 Hz::new(440.0),
             );
-            porta.begin(Hz::new(from), Hz::new(to), Seconds(time));
+            porta.begin(Hz(from), Hz(to), Seconds(time));
             let frames = time * rate.get();
-            let interval = 1200.0 * f64::from(to / from).log2();
+            let interval = 1200.0 * (to / from).log2();
             let mut k = 0usize;
             while porta.is_gliding() {
                 k += 1;
-                let got = 1200.0 * f64::from(porta.tick().get() / from).log2();
+                let got = 1200.0 * (porta.tick().get() / from).log2();
                 let p = ((k as f64) / frames).min(1.0) as f32;
                 let want = interval * f64::from(law.eval(p));
                 assert!(
@@ -252,7 +252,7 @@ fn glide_time_keeps_the_range_checked_shape() {
 #[test]
 fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
     let rate = SampleRate::SR_48K;
-    let frames_of = |from: f32, to: f32| {
+    let frames_of = |from: f64, to: f64| {
         let mut porta = Portamento::new(
             PortamentoConfig {
                 mode: PortamentoMode::Always,
@@ -276,7 +276,7 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
         (octave - rate.get()).abs() <= 0.01 * rate.get(),
         "an octave took {octave}"
     );
-    let quarter_tone = frames_of(440.0, 440.0 * 2f32.powf(0.5 / 12.0));
+    let quarter_tone = frames_of(440.0, 440.0 * 2f64.powf(0.5 / 12.0));
     assert!(
         (quarter_tone - 0.1 * rate.get()).abs() <= 0.001 * rate.get(),
         "a quarter-tone took {quarter_tone}, the floor is a tenth of the base time"

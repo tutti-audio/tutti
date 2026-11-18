@@ -8,7 +8,7 @@ fn pitch_bend_sensitivity_rpn_roundtrip() {
             PitchBendSensitivity::from_rpn_bits(sens.to_rpn_bits()),
             sens
         );
-        assert_eq!(sens.semitones().get(), f32::from(s));
+        assert_eq!(sens.semitones().get(), f64::from(s));
     }
 }
 
@@ -19,7 +19,7 @@ fn pitch_bend_sensitivity_rpn_roundtrip() {
 fn a_whole_semitone_count_above_127_is_refused() {
     for s in 0..=PitchBendSensitivity::MAX_SEMITONES {
         let sens = PitchBendSensitivity::new(s).expect("in range");
-        assert_eq!(sens.semitones().get(), f32::from(s), "{s} semitones");
+        assert_eq!(sens.semitones().get(), f64::from(s), "{s} semitones");
         assert_eq!(PitchBendSensitivity::of(s), sens);
     }
     for s in 128..=u8::MAX {
@@ -40,9 +40,15 @@ fn every_rpn_word_is_in_range() {
     for bits in [0, 1, 1 << 24, 48 << 25, 0x0C00_0000, u32::MAX - 1, u32::MAX] {
         let sens = PitchBendSensitivity::from_rpn_bits(bits);
         assert_eq!(sens.to_rpn_bits(), bits);
-        // The top words round to exactly 128.0 in f32; the bits are the truth.
-        assert!(sens.semitones().get() <= 128.0);
+        // The 32-bit word is exact in `f64`: even the top word is below 128.
+        assert!(sens.semitones().get() < 128.0);
     }
+    assert_eq!(
+        PitchBendSensitivity::from_rpn_bits(u32::MAX)
+            .semitones()
+            .get(),
+        128.0 - 2f64.powi(-25)
+    );
 }
 
 #[cfg(feature = "serde")]
@@ -123,7 +129,7 @@ fn channel_data_saturates_at_127_semitones_99_cents() {
 fn every_fractional_bit_of_the_word_is_read() {
     for k in 0..25u32 {
         let bits = 1u32 << k;
-        let want = 2f32.powi(k as i32 - 25);
+        let want = 2f64.powi(k as i32 - 25);
         assert_eq!(
             PitchBendSensitivity::from_rpn_bits(bits).semitones().get(),
             want,
@@ -132,8 +138,8 @@ fn every_fractional_bit_of_the_word_is_read() {
     }
     // 2 + 1/2 + 1/16 semitones, then the same with a bit 2^-16 more.
     for (bits, want) in [
-        (0x0520_0000u32, 2.5625f32),
-        (0x0520_0200, 2.5625 + 2f32.powi(-16)),
+        (0x0520_0000u32, 2.5625f64),
+        (0x0520_0200, 2.5625 + 2f64.powi(-16)),
     ] {
         assert_eq!(
             PitchBendSensitivity::from_rpn_bits(bits).semitones().get(),

@@ -18,10 +18,10 @@ const SETTLE: usize = 12_000;
 /// only averages down.
 const TOL: f64 = 1e-6;
 
-/// A unit sine at `hz` (on the 5 Hz grid, exact in `f32`) at `rate`.
+/// A unit sine at `hz` (on the 5 Hz grid) at `rate`.
 fn unit_sine(hz: f64, rate: f64, len: usize) -> Vec<f32> {
     sine(
-        Hz::new(hz as f32),
+        Hz::new(hz),
         Amplitude::new(1.0),
         SampleRate::of(rate),
         Samples(len),
@@ -40,7 +40,7 @@ fn sweep() -> Vec<f64> {
 
 /// Band `b`'s phasor and the bands' summed amplitude for a unit tone at
 /// `hz`, in steady state: the tree of `freqs` at 48 kHz run as the crossover runs it.
-fn bands_at(freqs: &[f32], hz: f64) -> (Vec<(f64, f64)>, f64) {
+fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
     let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
     let model = CrossoverModel::new(&freqs, SampleRate::of(RATE)).unwrap();
     let mut state = CrossoverState::default();
@@ -68,7 +68,7 @@ fn mag(z: (f64, f64)) -> f64 {
     z.0.hypot(z.1)
 }
 
-fn assert_flat(freqs: &[f32]) {
+fn assert_flat(freqs: &[f64]) {
     for hz in sweep() {
         let (_, sum) = bands_at(freqs, hz);
         assert!(
@@ -174,7 +174,7 @@ fn max_gain() -> f64 {
 /// The two ends of the range: a split at the floor (1 Hz, `g` of about 1e-4, a section
 /// that is nearly a Jordan block) and at the cap (`g` of about 318, a pole near -1).
 fn ends(splits: usize) -> [CrossoverCoefficients; 2] {
-    let at = |lo: f32, hi: f32| {
+    let at = |lo: f64, hi: f64| {
         let f: Vec<Hz> = [lo, hi][..splits].iter().map(|&f| Hz(f)).collect();
         // Strictly increasing and under Nyquist as `new` checks; `design_into` clamps to the cap.
         CrossoverModel::new(&f, SampleRate::of(RATE))

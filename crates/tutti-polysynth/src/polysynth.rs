@@ -327,7 +327,7 @@ impl PolySynth {
     }
 
     /// The frequency ratio a channel's bend applies.
-    fn bend_ratio(&self, channel: MidiChannel) -> f32 {
+    fn bend_ratio(&self, channel: MidiChannel) -> f64 {
         self.bends[channel.index()].to_pitch_ratio()
     }
 
@@ -470,7 +470,7 @@ impl PolySynth {
     fn sound(voice: &mut SynthVoice, bends: &[tutti_units::Semitones; 16]) {
         let base_freq = voice
             .tuned()
-            .unwrap_or_else(|| key_freq(f32::from(voice.note().get()), voice.tune()));
+            .unwrap_or_else(|| key_freq(f64::from(voice.note().get()), voice.tune()));
         let bend = bends[voice.channel().index()].to_pitch_ratio();
         voice.set_pitch(base_freq * voice.glide_ratio() * bend);
     }
@@ -532,7 +532,7 @@ impl PolySynth {
         is_legato: bool,
         glide: Option<Glide>,
     ) {
-        let base_freq = key_freq(f32::from(note.get()), tune);
+        let base_freq = key_freq(f64::from(note.get()), tune);
         let last = std::mem::replace(&mut self.last_freq, base_freq);
         let bend_multiplier = self.bend_ratio(channel);
         let voice = &mut self.voices[slot_index];
@@ -555,7 +555,7 @@ impl PolySynth {
         }
         match glide {
             Some(g) => {
-                let from = key_freq(f32::from(g.from.get()), g.from_tune);
+                let from = key_freq(f64::from(g.from.get()), g.from_tune);
                 voice.begin_glide(from, base_freq, g.time);
             }
             None => voice.config_glide(last, base_freq, is_legato),

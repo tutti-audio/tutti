@@ -126,12 +126,12 @@ impl Resonance {
 
 unit! {
     /// Pitch offset in semitones. 12 semitones = 1 octave.
-    pub struct Semitones(pub f32): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct Semitones(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 
 unit! {
     /// Pitch offset in cents. 100 cents = 1 semitone.
-    pub struct Cents(pub f32): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct Cents(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 
 impl Cents {
@@ -143,7 +143,7 @@ impl Cents {
     /// A real converter, not `self / 100.0`: `Cents` is `Scalable`, so
     /// `cents / 100.0` compiles and returns **`Cents`** —
     /// a value wrong by 100x whose *type* says it is fine. Sites that divide
-    /// the raw `f32` today are correct by luck; this is the form that stays
+    /// the raw `f64` today are correct by luck; this is the form that stays
     /// correct once they hold the typed value.
     #[inline]
     #[must_use]
@@ -154,8 +154,8 @@ impl Cents {
     /// This offset as a frequency multiplier. 1200 cents doubles the pitch.
     #[inline]
     #[must_use]
-    pub fn to_pitch_ratio(self) -> f32 {
-        libm::exp2f(self.0 / 1200.0)
+    pub fn to_pitch_ratio(self) -> f64 {
+        libm::exp2(self.0 / 1200.0)
     }
 
     /// The interval a frequency multiplier spans. Inverse of
@@ -167,9 +167,9 @@ impl Cents {
     /// that reaches a frequency table before anyone notices.
     #[inline]
     #[must_use]
-    pub fn from_pitch_ratio(ratio: f32) -> Cents {
+    pub fn from_pitch_ratio(ratio: f64) -> Cents {
         if ratio > 0.0 {
-            Cents(1200.0 * libm::log2f(ratio))
+            Cents(1200.0 * libm::log2(ratio))
         } else {
             Cents(0.0)
         }
@@ -183,7 +183,7 @@ impl Cents {
 /// direction, so a negative one is unwritable rather than clamped at each use.
 ///
 /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-/// anything below zero, and so do `TryFrom<f32>` and serde. [`of`](Self::of)
+/// anything below zero, and so do `TryFrom<f64>` and serde. [`of`](Self::of)
 /// is for a literal. [`clamped`](Self::clamped) is the one saturating
 /// constructor, for a value that arrives from a lane or a knob;
 /// [`Unit::from_raw`] is it too, since a cell holds any float.
@@ -198,8 +198,8 @@ impl Cents {
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-pub struct CentsSpan(f32);
+#[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+pub struct CentsSpan(f64);
 
 // NOT `Additive` and NOT `Scalable`: a difference or a negative factor leaves
 // the range. Do the arithmetic on the raw number and call `new` (or
@@ -211,8 +211,8 @@ impl CentsSpan {
     /// The distance, or `None` when `raw` is NaN, infinite or below zero.
     #[inline]
     #[must_use]
-    pub const fn new(raw: f32) -> Option<CentsSpan> {
-        if raw >= 0.0 && raw <= f32::MAX {
+    pub const fn new(raw: f64) -> Option<CentsSpan> {
+        if raw >= 0.0 && raw <= f64::MAX {
             Some(CentsSpan(raw))
         } else {
             None
@@ -229,21 +229,21 @@ impl CentsSpan {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub const fn of(raw: f32) -> CentsSpan {
+    pub const fn of(raw: f64) -> CentsSpan {
         match Self::new(raw) {
             Some(span) => span,
             None => panic!("a cents span is finite and not below zero"),
         }
     }
 
-    /// `raw` constrained into `0..=f32::MAX`; NaN is [`ZERO`](Self::ZERO).
+    /// `raw` constrained into `0..=f64::MAX`; NaN is [`ZERO`](Self::ZERO).
     #[inline]
     #[must_use]
-    pub const fn clamped(raw: f32) -> CentsSpan {
+    pub const fn clamped(raw: f64) -> CentsSpan {
         if raw.is_nan() || raw < 0.0 {
             CentsSpan::ZERO
-        } else if raw > f32::MAX {
-            CentsSpan(f32::MAX)
+        } else if raw > f64::MAX {
+            CentsSpan(f64::MAX)
         } else {
             CentsSpan(raw)
         }
@@ -252,7 +252,7 @@ impl CentsSpan {
     /// Returns the raw distance, for a boundary the unit types do not cross.
     #[inline]
     #[must_use]
-    pub const fn get(self) -> f32 {
+    pub const fn get(self) -> f64 {
         self.0
     }
 
@@ -288,29 +288,29 @@ impl core::fmt::Display for CentsSpan {
 /// `from_raw` saturates ([`CentsSpan::clamped`]): a parameter cell holds any
 /// float, and a unit's `from_raw` cannot refuse.
 impl Unit for CentsSpan {
-    type Raw = f32;
+    type Raw = f64;
     #[inline]
-    fn from_raw(v: f32) -> Self {
+    fn from_raw(v: f64) -> Self {
         Self::clamped(v)
     }
     #[inline]
-    fn to_raw(self) -> f32 {
+    fn to_raw(self) -> f64 {
         self.0
     }
 }
 
-impl TryFrom<f32> for CentsSpan {
+impl TryFrom<f64> for CentsSpan {
     type Error = CentsSpanOutOfRange;
 
     #[inline]
-    fn try_from(raw: f32) -> Result<CentsSpan, CentsSpanOutOfRange> {
+    fn try_from(raw: f64) -> Result<CentsSpan, CentsSpanOutOfRange> {
         CentsSpan::new(raw).ok_or(CentsSpanOutOfRange(raw))
     }
 }
 
-impl From<CentsSpan> for f32 {
+impl From<CentsSpan> for f64 {
     #[inline]
-    fn from(span: CentsSpan) -> f32 {
+    fn from(span: CentsSpan) -> f64 {
         span.0
     }
 }
@@ -319,7 +319,7 @@ impl From<CentsSpan> for f32 {
 /// [`CentsSpan::new`]).
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 #[error("a cents span is finite and not below zero, got {0}")]
-pub struct CentsSpanOutOfRange(pub f32);
+pub struct CentsSpanOutOfRange(pub f64);
 
 impl Semitones {
     /// The unison: no transposition, a pitch ratio of 1.
@@ -339,8 +339,8 @@ impl Semitones {
     /// This offset as a frequency multiplier. 12 semitones doubles the pitch.
     #[inline]
     #[must_use]
-    pub fn to_pitch_ratio(self) -> f32 {
-        libm::exp2f(self.0 / 12.0)
+    pub fn to_pitch_ratio(self) -> f64 {
+        libm::exp2(self.0 / 12.0)
     }
 
     /// The interval a frequency multiplier spans. Inverse of
@@ -354,9 +354,9 @@ impl Semitones {
     ///
     #[inline]
     #[must_use]
-    pub fn from_pitch_ratio(ratio: f32) -> Semitones {
+    pub fn from_pitch_ratio(ratio: f64) -> Semitones {
         if ratio > 0.0 {
-            Semitones(12.0 * libm::log2f(ratio))
+            Semitones(12.0 * libm::log2(ratio))
         } else {
             Semitones::UNISON
         }

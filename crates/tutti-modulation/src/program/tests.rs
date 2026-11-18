@@ -51,7 +51,7 @@ fn beats(per_cycle: f64) -> Clock {
     }
 }
 
-fn seconds(rate: f32) -> Clock {
+fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
         rate: Hz(rate),
         phase: PhaseIncrement(0.0),
@@ -650,7 +650,7 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
 #[test]
 fn a_constant_wave_needs_no_clock() {
     let dead = Clock::Seconds {
-        rate: Hz(f32::INFINITY),
+        rate: Hz(f64::INFINITY),
         phase: PhaseIncrement(0.0),
         anchor: None,
     };
@@ -687,7 +687,7 @@ fn a_constant_wave_needs_no_clock() {
 fn new_refuses_a_nan() {
     let l = || layer(3, beats(1.0), LfoShape::Sine, amount(0.1));
     let nan_rate = Layer {
-        clock: seconds(f32::NAN),
+        clock: seconds(f64::NAN),
         ..l()
     };
     let nan_const = Layer {

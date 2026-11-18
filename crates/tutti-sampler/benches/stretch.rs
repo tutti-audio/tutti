@@ -5,7 +5,7 @@
 //! frame per hop, so the time per block is the FFT pair, the per-bin phase
 //! work and the overlap-add together. Throughput is in frames.
 
-use std::f32::consts::TAU;
+use std::f64::consts::TAU;
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -22,7 +22,7 @@ fn stretch(c: &mut Criterion) {
         unit.set_stretch_factor(StretchFactor(1.5));
         unit.set_pitch_cents(Cents(200.0));
         let sine: Vec<f32> = (0..BLOCK)
-            .map(|i| (TAU * 440.0 * i as f32 / 48_000.0).sin() * 0.5)
+            .map(|i| ((TAU * 440.0 * i as f64 / 48_000.0).sin() * 0.5) as f32)
             .collect();
         let input = [&sine[..], &sine[..]];
         let mut left = vec![0.0f32; BLOCK];

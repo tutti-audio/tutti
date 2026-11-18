@@ -74,7 +74,7 @@ fn the_latency_is_the_padded_round_trip_of_the_stage_delays() {
         let delays: Vec<usize> = (0..stages)
             .map(|j| {
                 let wide = f64::from(1u32 << j);
-                let transition = Hz((BASE * (wide - 0.9).min(wide / 2.0)) as f32);
+                let transition = Hz(BASE * (wide - 0.9).min(wide / 2.0));
                 FirDesign::new(FirResponse::HalfBand, transition)
                     .attenuation(Db(100.0))
                     .design(SampleRate::new(BASE * f64::from(2u32 << j)).unwrap())
@@ -284,8 +284,8 @@ fn a_bad_attenuation_is_the_designs_refusal() {
     ));
 }
 
-/// A rate at which no half-band can be designed, where `0.1 × rate` underflows or
-/// overflows `f32`, is refused at `plan`, for every factor; 48 kHz plans.
+/// A rate at which no half-band can be designed, where the transition width underflows or the
+/// scaled rate overflows, is refused at `plan`, for every factor; 48 kHz plans.
 #[test]
 fn a_rate_no_half_band_fits_is_refused() {
     for factor in [
@@ -294,7 +294,7 @@ fn a_rate_no_half_band_fits_is_refused() {
         OversamplingFactor::X8,
     ] {
         let o = Oversampling::new(factor);
-        for hz in [1e-50, 1e308] {
+        for hz in [5e-324, 1e308] {
             let rate = SampleRate::new(hz).expect("a positive, finite rate");
             assert!(o.plan(rate).is_err(), "{factor:?} at {hz} Hz");
         }

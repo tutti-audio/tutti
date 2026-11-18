@@ -42,13 +42,15 @@ use crate::volume_envelope::VolumeEnvelope;
 /// of 1 (0 dB) lands on Butterworth.
 fn low_pass(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<Biquad> {
     const PEAK_OFFSET: f32 = 1.0 - core::f32::consts::FRAC_1_SQRT_2;
-    if f64::from(cutoff) >= SOLVE_CEILING * rate.get() {
+    // The voice's cutoff is an `f32` state; the design takes it as `Hz`.
+    let cutoff = Hz(f64::from(cutoff));
+    if cutoff.get() >= SOLVE_CEILING * rate.get() {
         return None;
     }
     let q = resonance - PEAK_OFFSET / (1.0 + 6.0 * (resonance - 1.0));
     let controls = SvfControls {
         ty: SvfType::LowPass,
-        freq: Hz(cutoff),
+        freq: cutoff,
         q: Q(q),
         gain: Db(0.0),
     };
@@ -301,14 +303,15 @@ impl Voice {
     /// Sets how far the voice's key sounds from equal temperament, with no new
     /// attack. A glide in progress keeps the offset it left with.
     pub(crate) fn tune(&mut self, tune: Semitones) {
-        self.tune = tune.get();
+        // The voice's pitch state is `f32`.
+        self.tune = tune.get() as f32;
     }
 
     /// Moves the voice to `key` with no new attack (a legato move, or the voice
     /// a Portamento Control names). With a glide it jumps to the glide's key and
     /// glides to the new one; without, it is at the new key at once.
     pub(crate) fn retarget(&mut self, key: NoteNumber, tune: Semitones, glide: Option<Glide>) {
-        self.tune = tune.get();
+        self.tune = tune.get() as f32;
         let key = i32::from(key.get());
         self.transpose += (key - self.played) as f32;
         self.played = key;
@@ -317,7 +320,8 @@ impl Voice {
 
     fn glide_run(&self, glide: Glide) -> GlideRun {
         GlideRun {
-            offset: (i32::from(glide.from.get()) - self.played) as f32 + glide.from_tune.get()
+            offset: (i32::from(glide.from.get()) - self.played) as f32
+                + glide.from_tune.get() as f32
                 - self.tune,
             frames: (glide.time.get() * self.rate.get()) as f32,
             done: 0_f32,
@@ -353,7 +357,7 @@ impl Voice {
     /// no generator in a SoundFont voice to drive and is dropped.
     pub(crate) fn control(&mut self, control: NoteControl) {
         match control {
-            NoteControl::Pitch(pitch) => self.note.pitch = Some(pitch.note_number()),
+            NoteControl::Pitch(pitch) => self.note.pitch = Some(pitch.note_number() as f32),
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
                 self.note.volume = value_to_unit_f32(ControlValue::new(value));
             }
@@ -425,13 +429,14 @@ impl Voice {
 
         // The wheel's depth in cents (the Modulation Depth Range of RPN 5 over its
         // position) and the generator's, as semitones.
-        let vib_pitch_change = (0.01_f32 * state.modulation_depth().get() + self.vib_lfo_to_pitch)
+        let vib_pitch_change = (0.01_f32 * state.modulation_depth().get() as f32
+            + self.vib_lfo_to_pitch)
             * self.vib_lfo.value();
         let mod_pitch_change = self.mod_lfo_to_pitch * self.mod_lfo.value()
             + self.mod_env_to_pitch * self.mod_env.value();
         // The core's pitch for the channel: the wheel over its sensitivity and
         // the Channel Tuning (RP-022).
-        let channel_pitch_change = bends[self.channel as usize].0;
+        let channel_pitch_change = bends[self.channel as usize].get() as f32;
         let glide = self.step_glide(self.block.len());
         let pitch = self.note.pitch.unwrap_or(self.key as f32 + self.tune)
             + self.transpose

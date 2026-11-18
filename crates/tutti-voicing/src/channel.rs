@@ -68,7 +68,8 @@ pub(crate) struct Bend {
 
 impl Bend {
     pub(crate) fn semitones(self) -> Semitones {
-        self.range * self.position + self.coarse + self.fine
+        // The wheel position is an `f32` reading; the range it scales is `Semitones`.
+        self.range * f64::from(self.position) + self.coarse + self.fine
     }
 }
 
@@ -182,7 +183,7 @@ impl ChannelState {
     /// translator sends it.
     pub(crate) fn set_modulation_range(&mut self, value: u32) {
         let data = RegisteredData::from_word(value);
-        let (semitones, eighths) = (f32::from(data.msb().get()), f32::from(data.lsb().get()));
+        let (semitones, eighths) = (f64::from(data.msb().get()), f64::from(data.lsb().get()));
         self.modulation_range = Cents(semitones * 100.0 + eighths * 100.0 / 128.0);
     }
 
@@ -270,16 +271,16 @@ impl ChannelState {
             Rpn::PITCH_BEND_SENSITIVITY => {
                 // MSB semitones, LSB cents: `bend_sensitivity`'s inverse.
                 let hundredths =
-                    libm::roundf(self.bend.range.get() * 100.0).clamp(0.0, 12_799.0) as u32;
+                    libm::round(self.bend.range.get() * 100.0).clamp(0.0, 12_799.0) as u32;
                 Some(registered(hundredths / 100, hundredths % 100).to_word())
             }
             Rpn::CHANNEL_FINE_TUNING => {
                 let fourteen =
-                    libm::roundf((self.bend.fine.get() + 1.0) * 8192.0).clamp(0.0, 16_383.0);
+                    libm::round((self.bend.fine.get() + 1.0) * 8192.0).clamp(0.0, 16_383.0);
                 Some(RegisteredData::from_fourteen(U14::masked(fourteen as u16)).to_word())
             }
             Rpn::CHANNEL_COARSE_TUNING => {
-                let msb = libm::roundf(self.bend.coarse.get() + 64.0).clamp(0.0, 127.0);
+                let msb = libm::round(self.bend.coarse.get() + 64.0).clamp(0.0, 127.0);
                 Some(registered(msb as u32, 0).to_word())
             }
             Rpn::TUNING_PROGRAM_SELECT => {
@@ -291,8 +292,8 @@ impl ChannelState {
             Rpn::MODULATION_DEPTH_RANGE => {
                 // MSB semitones, LSB 100/128 cent: `set_modulation_range`'s inverse.
                 let cents = self.modulation_range.get().clamp(0.0, 12_700.0);
-                let semitones = libm::floorf(cents / 100.0);
-                let eighths = libm::roundf((cents - semitones * 100.0) * 128.0 / 100.0).min(127.0);
+                let semitones = libm::floor(cents / 100.0);
+                let eighths = libm::round((cents - semitones * 100.0) * 128.0 / 100.0).min(127.0);
                 Some(registered(semitones as u32, eighths as u32).to_word())
             }
             _ => None,
@@ -334,7 +335,7 @@ impl ChannelState {
     /// Modulation Depth Range, linear in cents.
     #[must_use]
     pub fn modulation_depth(&self) -> Cents {
-        self.modulation_range * self.modulation()
+        self.modulation_range * f64::from(self.modulation())
     }
 
     /// Channel Volume's position, `0.0..=1.0` (CC 7 and 39). The law that

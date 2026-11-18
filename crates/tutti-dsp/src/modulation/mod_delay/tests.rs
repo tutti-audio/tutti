@@ -11,7 +11,7 @@ fn bus(width: u16) -> BusTopology {
     BusTopology::assumed(width.into()).expect("a test width is one bus")
 }
 
-fn controls(rate: f32, depth: f64, feedback: f32) -> ModDelayControls {
+fn controls(rate: f64, depth: f64, feedback: f32) -> ModDelayControls {
     ModDelayControls {
         rate: Hz(rate),
         depth: Seconds(depth),
@@ -134,16 +134,16 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
 #[test]
 fn the_controls_are_made_safe() {
     let chorus = ModDelayBank::<f32>::new(&ModDelayLayout::chorus(bus(1)), RATE);
-    let step = |hz: f32| PhaseIncrement::per_sample(Hz(hz), RATE);
+    let step = |hz: f64| PhaseIncrement::per_sample(Hz(hz), RATE);
     for (hz, effective) in [
-        (-3.0f32, 0.01),
+        (-3.0f64, 0.01),
         (0.0, 0.01),
         (0.005, 0.01),
         (0.01, 0.01),
         (0.5, 0.5),
-        (f32::NAN, 1.0),
-        (f32::NEG_INFINITY, 1.0),
-        (f32::INFINITY, 1.0),
+        (f64::NAN, 1.0),
+        (f64::NEG_INFINITY, 1.0),
+        (f64::INFINITY, 1.0),
     ] {
         assert_eq!(
             chorus.design(&controls(hz, 0.005, 0.3)).inc,

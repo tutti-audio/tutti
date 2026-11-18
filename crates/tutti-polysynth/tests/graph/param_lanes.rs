@@ -29,7 +29,7 @@ const LANE: NodeKey = NodeKey(3);
 
 /// A saw synth with no attack; with `unison`, three sub-voices at
 /// `detune` cents and no spread.
-fn synth(unison: bool, detune: f32) -> PolySynth {
+fn synth(unison: bool, detune: f64) -> PolySynth {
     PolySynth::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {

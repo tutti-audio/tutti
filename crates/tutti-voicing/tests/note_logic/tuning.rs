@@ -40,7 +40,7 @@ fn rpn(core: &mut Voicing, channel: u8, which: Rpn, value: u8) -> Vec<Command> {
 }
 
 /// The tuning a note's `Start` carries.
-fn start_tune(commands: &[Command]) -> f32 {
+fn start_tune(commands: &[Command]) -> f64 {
     commands
         .iter()
         .find_map(|c| match c {
@@ -51,7 +51,7 @@ fn start_tune(commands: &[Command]) -> f32 {
 }
 
 /// What the `Tune` commands say, by voice.
-fn tunes(commands: &[Command]) -> Vec<(u64, f32)> {
+fn tunes(commands: &[Command]) -> Vec<(u64, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {

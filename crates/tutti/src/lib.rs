@@ -234,8 +234,8 @@ pub mod nodes {
     };
     pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
-        RecordMode, RecordingConfig, Trajectory,
+        Automatable, AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls,
+        LiveAutomationLane, RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,

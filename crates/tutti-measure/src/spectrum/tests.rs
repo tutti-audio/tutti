@@ -13,7 +13,7 @@ const RATE: f64 = 48_000.0;
 /// `20 log10(1 + 1e-4)`.
 const FFT_TOL: f32 = 1e-3;
 
-fn band(min: f32, max: f32) -> FrequencyBand {
+fn band(min: f64, max: f64) -> FrequencyBand {
     FrequencyBand::new(Hz(min), Hz(max)).unwrap()
 }
 
@@ -431,11 +431,9 @@ fn a_band_sums_the_power_of_its_bins() {
         let (min, bands, edge): (f64, usize, Box<dyn Fn(usize) -> f64>) = match banding {
             Banding::Octave { per_octave, band } => {
                 let (min, max) = (band.min(), band.max());
-                let n = (per_octave.get() as f64
-                    * (f64::from(max.get()) / f64::from(min.get())).log2()
-                    + 1e-9)
-                    .floor() as usize;
-                let lo = f64::from(min.get());
+                let n = (per_octave.get() as f64 * (max.get() / min.get()).log2() + 1e-9).floor()
+                    as usize;
+                let lo = min.get();
                 (
                     lo,
                     n,
@@ -445,7 +443,7 @@ fn a_band_sums_the_power_of_its_bins() {
             Banding::Log { count, band } => {
                 let (min, max) = (band.min(), band.max());
                 let count = count.get();
-                let (lo, hi) = (f64::from(min.get()), f64::from(max.get()));
+                let (lo, hi) = (min.get(), max.get());
                 (
                     lo,
                     count,
@@ -472,7 +470,7 @@ fn a_band_sums_the_power_of_its_bins() {
                 "{banding:?} band {j} ({n} bins): {level:?} vs {want}"
             );
             let geometric_mean = (edge(j) * edge(j + 1)).sqrt();
-            assert!((f64::from(centre.get()) / geometric_mean - 1.0).abs() < 1e-6);
+            assert!((centre.get() / geometric_mean - 1.0).abs() < 1e-6);
         }
         let held = (0..=size / 2)
             .filter(|&k| (k as f64 * width) >= min && (k as f64 * width) < edge(bands))
@@ -503,8 +501,8 @@ fn an_empty_band_names_itself_and_the_window_that_holds_it() {
         panic!("a 4096-point window cannot hold the lowest third-octave band");
     };
     assert_eq!(band, 1);
-    assert!((lower.get() - 20.0 * 2f32.powf(1.0 / 3.0)).abs() < 1e-4);
-    assert!((upper.get() - 20.0 * 2f32.powf(2.0 / 3.0)).abs() < 1e-4);
+    assert!((lower.get() - 20.0 * 2f64.powf(1.0 / 3.0)).abs() <= 20.0 * f64::EPSILON * 4.0);
+    assert!((upper.get() - 20.0 * 2f64.powf(2.0 / 3.0)).abs() <= 40.0 * f64::EPSILON * 4.0);
     assert_eq!(window, Samples(16_384));
     assert!(
         Measure::<f32>::measure(&config(16_384, 4096).banding(banding), SampleRate::of(RATE))
@@ -647,7 +645,7 @@ fn bad_settings_are_errors() {
         "4000 bands of 513 bins cannot all hold a bin"
     );
 
-    let oct = |per_octave: usize, min: f32, max: f32| {
+    let oct = |per_octave: usize, min: f64, max: f64| {
         cfg.banding(Banding::Octave {
             per_octave: BandsPerOctave::new(per_octave).unwrap(),
             band: band(min, max),
@@ -669,8 +667,8 @@ fn bad_settings_are_errors() {
         "1/48 octave is finer than the bins"
     );
     for (min, max) in [
-        (f32::NAN, 1000.0),
-        (100.0, f32::INFINITY),
+        (f64::NAN, 1000.0),
+        (100.0, f64::INFINITY),
         (0.0, 1000.0),
         (1000.0, 100.0),
     ] {

@@ -30,9 +30,9 @@ pub fn spectral_centroid(magnitudes: &[f32], bin_width: Hz) -> Hz {
             (w + k as f64 * f64::from(m), t + f64::from(m))
         });
     if total.is_finite() && total > 0.0 {
-        Hz((weighted / total * f64::from(bin_width.get())) as f32)
+        Hz(weighted / total * bin_width.get())
     } else {
-        Hz(0.0)
+        Hz::ZERO
     }
 }
 
@@ -97,7 +97,7 @@ pub fn spectral_rolloff(magnitudes: &[f32], bin_width: Hz, fraction: f32) -> Hz 
     }
     // The bin that crossed the target, or, if the float sum fell a hair short
     // of the total at a full share, the last one that holds energy.
-    Hz(last_active as f32 * bin_width.get())
+    Hz(last_active as f64 * bin_width.get())
 }
 
 /// The three features of one frame.

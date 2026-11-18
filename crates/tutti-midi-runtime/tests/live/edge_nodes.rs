@@ -909,7 +909,7 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     for channel in 1..=6 {
         assert_eq!(
             ranges.semitones(tutti_ump::MidiChannel::of(channel)),
-            12.0,
+            tutti_units::Semitones(12.0),
             "channel {channel}"
         );
     }
@@ -946,7 +946,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
     for channel in 1..=7 {
         assert_eq!(
             ranges.semitones(tutti_ump::MidiChannel::of(channel)),
-            12.0,
+            tutti_units::Semitones(12.0),
             "channel {channel}"
         );
     }

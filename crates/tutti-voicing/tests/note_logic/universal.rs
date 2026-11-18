@@ -23,7 +23,7 @@ fn cc(n: u8, value7: u32) -> Voice2 {
 }
 
 /// The pitch of each channel a list of commands retunes.
-fn retunes(commands: &[Command]) -> Vec<(u8, f32)> {
+fn retunes(commands: &[Command]) -> Vec<(u8, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {

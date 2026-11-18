@@ -5,7 +5,7 @@ use tutti_units::{Db, Hz, SampleRate};
 
 /// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
 pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
-    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
+    libm::exp(-std::f64::consts::TAU * cutoff.get() / rate.get())
 }
 
 /// The frames, fractional (a count `Samples` does not cover), for the decay `pole^n` to reach `floor`: `ln(floor) / ln(pole)`.

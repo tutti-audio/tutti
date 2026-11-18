@@ -258,9 +258,8 @@ impl Node for LfoNode {
                 let rate_lane = self
                     .declared_param::<{ UnitParam::Rate as u16 }>(&io)
                     .frames();
-                // In f64, not `PhaseIncrement::per_sample` (f32): the step is
-                // accumulated for as long as the node runs, and an f32-rounded
-                // step drifts the cycle index off the frame.
+                // The step is accumulated in `f64` for as long as the node runs: an
+                // `f32`-rounded step drifts the cycle index off the frame.
                 let out = io.output(0);
                 let Some(sample_rate) = self.sample_rate else {
                     out[..size].fill(0.0);
@@ -268,12 +267,13 @@ impl Node for LfoNode {
                 };
                 let per_hz = 1.0 / sample_rate.get();
                 for (i, o) in out[..size].iter_mut().enumerate() {
+                    // A driven rate is an `f32` lane value, widened exactly.
                     let rate = rate_lane
-                        .map(|l| l[i])
+                        .map(|l| f64::from(l[i]))
                         .filter(|v| v.is_finite())
                         .unwrap_or(rate_cell);
                     *o = self.evaluate(self.position, offset, depth_at(i));
-                    self.position += f64::from(rate) * per_hz;
+                    self.position += rate * per_hz;
                 }
             }
             LfoClock::Synced(beats_per_cycle) => {

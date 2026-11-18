@@ -161,7 +161,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist.
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: Amplitude) -> Hz {
-        let ratio = (self.controls.depth * env.get()).to_pitch_ratio();
+        let ratio = (self.controls.depth * f64::from(env.get())).to_pitch_ratio();
         (self.controls.base * ratio).clamp(
             Hz(1.0),
             self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),

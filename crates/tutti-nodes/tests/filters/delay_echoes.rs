@@ -81,7 +81,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
     let delay = 16.5f64;
     let hz = SR.get() / 64.0;
     let w = std::f64::consts::TAU * hz / SR.get();
-    let x = sine(Hz::new(hz as f32), Amplitude::new(1.0), SR, Samples(512));
+    let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples(512));
     let mut errors = Vec::new();
     for (mode, tolerance) in [
         (InterpolationMode::Linear, w * w / 8.0 * 1.05),
