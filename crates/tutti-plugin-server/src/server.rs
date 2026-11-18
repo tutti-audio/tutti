@@ -11,6 +11,7 @@ use crate::transport::{Transport, TransportListener};
 use tutti_plugin_ipc::{BridgeConfig, BridgeMessage, PROTOCOL_VERSION};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_rt::StopToken;
 
 /// Ask the OS for the highest priority it grants this thread, now that it is
 /// about to do nothing but per-block audio work (the render thread, and a
@@ -57,6 +58,9 @@ pub struct PluginServer {
     /// The thread that built the server: the one the plugin's main-thread
     /// calls run on, claimed once at startup.
     main: MainThreadMarker,
+    /// Stopped once the shutdown is under way: a host that ends then finds the
+    /// teardown, itself bounded, and is let finish ([`watch_host`]).
+    served: StopToken,
 }
 
 impl std::fmt::Debug for PluginServer {
@@ -68,29 +72,37 @@ impl std::fmt::Debug for PluginServer {
 }
 
 impl PluginServer {
-    /// Creates a server for `config`, recording the spawning host's PID.
+    /// Creates a server for `config`, and starts the watch on the spawning host:
+    /// a host that ends is told to the main loop, which shuts down as it does
+    /// when the control connection ends. A server that has not done so within
+    /// two seconds (blocked in an accept, a plugin's modal dialog, a
+    /// block) is ended outright, without running a plugin library's exit
+    /// handlers, and its socket file is removed.
     ///
-    /// The socket is not created until [`PluginServer::run`]. Call this early:
-    /// the recorded PID is what orphan detection compares against.
+    /// The socket is not created until [`PluginServer::run`]. Call this early.
     ///
     /// # Errors
     ///
-    /// Currently infallible; the `BridgeResult` is part of the constructor's contract
-    /// so setup that can fail may be added without a breaking change.
+    /// The thread is not the process's main thread, or the OS refused the
+    /// session's bells.
     pub fn new(config: BridgeConfig) -> BridgeResult<Self> {
-        // Before anything can block: the orphan check compares against the PID
-        // recorded here, and recording it later would sample a reaper instead
-        // of the real spawner. See `main_loop::record_parent_pid`.
-        crate::main_loop::record_parent_pid();
         let main = MainThreadMarker::new().ok_or(BridgeError::ProtocolError(
             "the plugin server must be built on the process's main thread",
         ))?;
-        let (session, render) = Session::new();
+        let (session, render) = Session::new()?;
+        let served = StopToken::new();
+        watch_host(
+            config.socket_path.clone(),
+            session.ties().host_gone.clone(),
+            session.ties().bell.clone(),
+            served.clone(),
+        );
         Ok(Self {
             config,
             session,
             render: Some(render),
             main,
+            served,
         })
     }
 
@@ -119,11 +131,21 @@ impl PluginServer {
     ///
     /// # Errors
     ///
-    /// Returns an error if the socket cannot be bound, or if the control
-    /// connection fails. A transport failure during the *handshake* is treated
-    /// as the host having gone away and returns `Ok(())`: there is no session
-    /// to report an error to.
+    /// Returns an error if the socket cannot be bound, if a handshake frame
+    /// does not decode (a host of another protocol), or if the control
+    /// connection fails. The handshake connection closing is the host's way of
+    /// ending that phase, not an error. However it ends, the plugin is
+    /// released first.
     pub fn run(mut self) -> BridgeResult<()> {
+        let served = self.serve();
+        // Idempotent: the paths that never reached the control phase.
+        self.served.stop();
+        self.release();
+        served
+    }
+
+    /// The phases of [`run`](Self::run), up to the plugin's release.
+    fn serve(&mut self) -> BridgeResult<()> {
         let listener = TransportListener::bind(&self.config.socket_path)?;
 
         // First connection: handshake.
@@ -149,8 +171,16 @@ impl PluginServer {
             .render
             .take()
             .ok_or(BridgeError::ProtocolError("the audio phase runs once"))?;
-        let render = RenderThread::spawn(side, Box::new(audio))?;
+        let render = RenderThread::spawn(side, Some(Box::new(audio))).map_err(|failed| {
+            // Whole again, for the release.
+            self.render = Some(failed.side);
+            failed.error
+        })?;
         let served = self.control_phase(&mut control, &render);
+        // The teardown below is bounded by the Processor's homecoming patience,
+        // so the host watch has nothing left to guard: a host that ends now is
+        // let finish it.
+        self.served.stop();
         // The plugin goes home before the render thread stops: its Processor
         // is returned by that thread's poll, and the plugin is destroyed only
         // once it has it back.
@@ -160,11 +190,41 @@ impl PluginServer {
         served
     }
 
+    /// Releases a plugin whose audio phase never began: the Processor was lent
+    /// to a seat nothing polls, so a render thread with no connection trades
+    /// it home first, and the plugin is destroyed with it back.
+    fn release(&mut self) {
+        if !self.session.has_plugin() {
+            return;
+        }
+        let Some(side) = self.render.take() else {
+            return;
+        };
+        match RenderThread::spawn(side, None) {
+            Ok(thread) => {
+                self.session.drop_plugin(self.main);
+                drop(thread.stop());
+                self.session.report_final_losses();
+            }
+            Err(failed) => {
+                tracing::error!(
+                    "plugin-server: the plugin cannot be released: {}",
+                    failed.error
+                );
+                self.render = Some(failed.side);
+            }
+        }
+    }
+
     fn handshake_phase(&mut self, transport: &mut dyn Transport) -> BridgeResult<bool> {
         loop {
             let msg = match transport.recv() {
                 Ok(m) => m,
-                Err(_) => return Ok(false),
+                // The host closed the connection, or went away: the phase is over.
+                Err(BridgeError::Io(_)) => return Ok(false),
+                // A frame that does not decode (a host of another protocol), or
+                // one past the cap: the cause is the error, not a host that left.
+                Err(e) => return Err(e),
             };
             // A load says it is restoring a state before it does (the host's wait
             // changes with it); the transport is the interim sink.
@@ -206,5 +266,83 @@ impl PluginServer {
 impl Drop for PluginServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.config.socket_path);
+    }
+}
+
+/// How long a server is given to shut down after its host ended, before it is
+/// ended outright: a bound on a wait for the shutdown, never a delay to it.
+const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The host's process id: its own statement in
+/// [`HOST_PID_ENV`](tutti_plugin_ipc::HOST_PID_ENV), else the parent in the
+/// process table (a server started by hand). `None` when neither names one.
+fn host_pid() -> Option<u32> {
+    host_pid_given(
+        std::env::var(tutti_plugin_ipc::HOST_PID_ENV)
+            .ok()
+            .as_deref(),
+        tutti_plugin_ipc_ffi::parent_process_id(),
+    )
+}
+
+/// [`host_pid`] over its two sources: the statement, if it is a process id past
+/// init's, else `parent`.
+fn host_pid_given(stated: Option<&str>, parent: Option<u32>) -> Option<u32> {
+    stated
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|&pid| pid > 1)
+        .or(parent)
+}
+
+/// Starts the watch on the host. When the host ends, `host_gone` is stopped and
+/// `bell` rung so the main loop shuts down; if `served` is not stopped within
+/// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
+/// process ended outright. A server whose host is unknown cannot watch it: that
+/// is logged, and only the host's connections end it.
+fn watch_host(
+    socket_path: std::path::PathBuf,
+    host_gone: StopToken,
+    bell: crate::bell::Bell,
+    served: StopToken,
+) {
+    let Some(host) = host_pid() else {
+        tracing::warn!("the host's process id is unknown: this server cannot notice its end");
+        return;
+    };
+    let watch = tutti_plugin_ipc_ffi::watch_host(host, move || {
+        tracing::info!("the host process is gone; shutting the server down");
+        host_gone.stop();
+        bell.ring();
+        // A shutdown already under way is let finish; one that does not come is
+        // ended: a plugin library's exit handlers must not run on an orphan
+        // whose other threads are killed mid-call.
+        if !served.wait(HOST_GONE_GRACE) {
+            let _ = std::fs::remove_file(&socket_path);
+            tutti_plugin_ipc_ffi::terminate_process()
+        }
+    });
+    if let Err(e) = watch {
+        tracing::warn!("the host watch cannot start: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_pid_given;
+
+    /// **A stated pid wins, if it is a pid past init's; otherwise the parent.**
+    #[test]
+    fn a_stated_host_pid_wins_and_the_parent_is_the_fallback() {
+        assert_eq!(host_pid_given(Some("4242"), Some(7)), Some(4242));
+        assert_eq!(host_pid_given(None, Some(7)), Some(7));
+        assert_eq!(host_pid_given(None, None), None);
+        for unusable in ["", "x", "-5", "4294967296", "1", "0"] {
+            assert_eq!(
+                host_pid_given(Some(unusable), Some(7)),
+                Some(7),
+                "{unusable:?} names no host"
+            );
+        }
+        assert_eq!(host_pid_given(Some("2"), None), Some(2));
     }
 }

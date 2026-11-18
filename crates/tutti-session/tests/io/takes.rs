@@ -117,8 +117,8 @@ impl Rig {
         self.events.extend(self.session.update());
         // A callback's timestamp reports the playback delay each block.
         match self.delay {
-            Some(delay) => self.stream.render_block_delayed(frames, delay),
-            None => self.stream.render_block(frames),
+            Some(delay) => self.stream.render_block_delayed(Samples(frames), delay),
+            None => self.stream.render_block(Samples(frames)),
         }
         .expect("the stream is open");
         self.events.extend(self.session.update());

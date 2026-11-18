@@ -1184,7 +1184,10 @@ mod clock_switch {
         );
         let mut live = err.into_session();
         assert!(live.device().is_running(), "still on the card");
-        assert!(stream.render_block(64).is_some(), "and rendering");
+        assert!(
+            stream.render_block(tutti_units::Samples(64)).is_some(),
+            "and rendering"
+        );
         spawned.run_all();
         let _ = events(&mut live);
         let _ = live.update();

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::{Float, SampleFormat};
 use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::SampleRate;
 
@@ -77,7 +77,7 @@ impl OutputSpec {
 ///
 /// [`OutputStream`] owns the spec, the fault record and the stop, and hands a
 /// driver only the [`OutputBlock`] to run.
-pub trait StreamDriver {
+pub trait StreamDriver<F: Float = f32> {
     /// The handle of the started stream; dropping it stops the stream.
     type Running: RunningStream + 'static;
 
@@ -92,7 +92,7 @@ pub trait StreamDriver {
     fn open(
         self,
         spec: &OutputSpec,
-        block: OutputBlock,
+        block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<Self::Running, Self::Error>;
 }
@@ -196,9 +196,9 @@ impl OutputStream {
     /// [`StartError::AlreadyRunning`] if a stream is running (it is left
     /// running and the driver is not opened); otherwise whatever the driver's
     /// [`open`](StreamDriver::open) reports.
-    pub fn start_with<D: StreamDriver>(
+    pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
-        state: Arc<AudioCallbackState>,
+        state: Arc<AudioCallbackState<F>>,
         driver: D,
     ) -> Result<(), StartError<D::Error>> {
         if self.is_running() {
@@ -221,9 +221,9 @@ impl OutputStream {
     ///
     /// # Errors
     /// As [`start_with`](Self::start_with).
-    pub fn start_at<D: StreamDriver>(
+    pub fn start_at<F: Float, D: StreamDriver<F>>(
         &mut self,
-        state: Arc<AudioCallbackState>,
+        state: Arc<AudioCallbackState<F>>,
         spec: OutputSpec,
         driver: D,
     ) -> Result<(), StartError<D::Error>> {

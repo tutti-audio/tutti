@@ -67,7 +67,9 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
 fn play(s: &mut LiveSession, stream: &ManualStream, frames: usize, blocks: usize) -> Vec<f32> {
     let mut left = Vec::new();
     for _ in 0..blocks {
-        let block = stream.render_block(frames).expect("the stream is open");
+        let block = stream
+            .render_block(Samples(frames))
+            .expect("the stream is open");
         left.extend(block.iter().step_by(2));
         let _ = s.update();
     }
@@ -270,7 +272,9 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     );
     assert_eq!(s.device().spec().channels, ChannelLayout::from(6u16));
     for _ in 0..4 {
-        let block = surround.render_block(480).expect("the stream is open");
+        let block = surround
+            .render_block(Samples(480))
+            .expect("the stream is open");
         assert_eq!(block.len(), 480 * 6);
         let _ = s.update();
     }

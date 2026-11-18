@@ -1,6 +1,7 @@
 //! The fallback backend of the main loop, for a platform that is neither unix nor
 //! Windows: nothing to wait on or to key liveness on, so a read blocks.
 
+use crate::bell::Bell;
 use crate::transport::Transport;
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
@@ -31,10 +32,11 @@ impl Native {
         main: MainThreadMarker,
         timeout: std::time::Duration,
         _wakeups: &Wakeups,
+        bell: &Bell,
         ready: &mut Vec<Ready>,
     ) -> BridgeResult<bool> {
         ready.clear();
-        let readable = transport.wait_readable(timeout)?;
+        let readable = transport.wait_readable(Some(timeout), bell)?;
         self.pump(main);
         Ok(readable)
     }
@@ -48,14 +50,10 @@ impl Native {
 /// # Errors
 ///
 /// Never.
-pub(crate) fn wait_readable(_stream: &Stream, _timeout: std::time::Duration) -> BridgeResult<bool> {
+pub(crate) fn wait_readable(
+    _stream: &Stream,
+    _timeout: Option<std::time::Duration>,
+    _wake: &Bell,
+) -> BridgeResult<bool> {
     Ok(true)
 }
-
-/// Neither Unix nor Windows: nothing to key on, so wait in `accept` as before.
-pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<super::Watching> {
-    Ok(super::Watching::nothing())
-}
-
-/// Nothing is recorded.
-pub(crate) fn record_parent_pid() {}

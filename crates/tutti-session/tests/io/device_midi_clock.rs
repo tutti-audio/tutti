@@ -9,7 +9,7 @@ use tutti_midi_runtime::MidiOut;
 use tutti_session::{LiveSession, Session, midi_sink};
 use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiGroup, System, Ump};
-use tutti_units::SampleRate;
+use tutti_units::{SampleRate, Samples};
 
 const OLD: f64 = 44_100.0;
 const NEW: f64 = 48_000.0;
@@ -45,7 +45,9 @@ fn clock(
 ) -> Vec<(Ump, u64)> {
     wire.0.lock().unwrap().clear();
     for _ in 0..blocks {
-        stream.render_block(frames).expect("the stream is open");
+        stream
+            .render_block(Samples(frames))
+            .expect("the stream is open");
     }
     let _ = s.update();
     let batches = std::mem::take(&mut *wire.0.lock().unwrap());

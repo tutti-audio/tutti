@@ -187,7 +187,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     let data: Vec<f32> = (0..3)
         .flat_map(|f| (0..16).map(move |c| (100 * f + c) as f32))
         .collect();
-    cap.block(&data);
+    cap.block(&data, edge::from_native::<f32>);
     assert_eq!(Source::layout(&mic), ChannelLayout::STEREO);
     assert_eq!(
         mic.topology().positions().unwrap(),
@@ -221,13 +221,13 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
 #[test]
 fn a_six_input_interface_is_six_inputs_not_five_point_one() {
     let (mut cap, mut mic, _ring) = capture(6, &[0, 1, 2, 3, 4, 5], 64);
-    cap.block(&[0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]);
+    cap.block(&[0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6], edge::from_native::<f32>);
     let mut out = [0.0f32; 6];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(1)));
     assert_eq!(out, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
 
     let (mut cap, mut mic, _ring) = capture(1, &[0, 0], 64);
-    cap.block(&[0.25f32, -0.5]);
+    cap.block(&[0.25f32, -0.5], edge::from_native::<f32>);
     let mut out = [0.0f32; 4];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(2)));
     assert_eq!(out, [0.25, 0.25, -0.5, -0.5]);
@@ -242,7 +242,7 @@ fn a_six_input_interface_is_six_inputs_not_five_point_one() {
 fn a_big_callback_runs_in_chunks_and_integers_convert() {
     let (mut cap, mut mic, _ring) = capture(2, &[1], 512);
     let data: Vec<i16> = (0..150).flat_map(|f| [0, f as i16 * 100]).collect();
-    cap.block(&data);
+    cap.block(&data, edge::from_native::<i16>);
     let mut out = vec![0.0f32; 200];
     let n = pull_into(&mut mic, &mut out);
     assert_eq!(n, Pull::Frames(Samples(150)));
@@ -382,12 +382,12 @@ fn the_capture_callback_does_not_allocate() {
     let f32s = vec![0.25f32; 8 * 150];
     let i16s = vec![1000i16; 8 * 150];
     // Warm both conversions, outside the gate.
-    cap.block(&f32s);
-    cap.block(&i16s);
+    cap.block(&f32s, edge::from_native::<f32>);
+    cap.block(&i16s, edge::from_native::<i16>);
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..8 {
-            cap.block(&f32s);
-            cap.block(&i16s);
+            cap.block(&f32s, edge::from_native::<f32>);
+            cap.block(&i16s, edge::from_native::<i16>);
         }
     });
     // The rings filled and refused whole frames; nothing was lost silently.
@@ -405,4 +405,18 @@ fn ring_depths_follow_the_stream_rate() {
         assert_eq!(MONITOR_RING.to_samples_ceil(rate), Samples(monitor));
         assert_eq!(CAPTURE_RING.to_samples_ceil(rate), Samples(capture));
     }
+}
+
+/// An offset-binary device reads by the rule in `Sample` on the signed format
+/// of its width, after the sign bit flips back: mid-scale is silence, `3 * 2^14`
+/// is 0.5 and 0 is -1.
+#[test]
+fn an_offset_binary_input_reads_mid_scale_as_silence() {
+    let (mut cap, mut mic, _ring) = capture(1, &[0], 64);
+    cap.block(&[32768u16, 49152, 0], edge::from_offset::<u16>);
+    let mut out = vec![9.0f32; 8];
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
+    assert_eq!(out[..3], [0.0, 0.5, -1.0]);
+    assert_eq!(edge::from_offset::<u8>(128), 0.0);
+    assert_eq!(edge::from_offset::<u32>(2_147_483_648), 0.0);
 }

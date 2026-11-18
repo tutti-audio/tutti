@@ -4,20 +4,14 @@
 //! schema and its version constant are `tutti_plugin_ipc`'s; this module
 //! only moves bytes.
 //!
-//! The other duty here is **not outliving the host**. A subprocess parked in
-//! `accept` has nothing to interrupt it, so both [`wait_for_connection`] and
-//! `parent_is_alive` (the backend's) exist to bound that wait by whether there is still
-//! anyone to serve.
-
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 use tutti_plugin_ipc::{
     BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
 };
 use tutti_plugin_types::{BridgeResult, MIDI_STACK_CAPACITY};
 
-use crate::main_loop::{
-    Listener as PlatformListener, Stream as PlatformStream, wait_for_connection,
-};
+use crate::bell::Bell;
+use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
 
 /// The longest request the audio connection takes: whatever the protocol
 /// allows ([`MAX_FRAME_BYTES`]). A block's request carries automation at the
@@ -46,9 +40,10 @@ pub(crate) trait Transport: Send {
     /// `Ready` handshake failed to catch.
     fn recv(&mut self) -> BridgeResult<HostMessage>;
 
-    /// Wait up to `timeout` for the host to have something to read: `Ok(true)`
-    /// when a [`recv`](Self::recv) now will find a frame begun (or the host gone,
-    /// which `recv` reports as the error it is), `Ok(false)` on a timeout.
+    /// Wait up to `timeout` (`None`: for ever) for the host to have something to
+    /// read: `Ok(true)` when a [`recv`](Self::recv) now will find a frame begun
+    /// (or the host gone, which `recv` reports as the error it is), `Ok(false)`
+    /// on a timeout, or when `wake` rang with nothing to read.
     ///
     /// This is what lets one thread serve the socket and the editor's idle tick
     /// ([`crate::main_loop`]): it returns **the instant** a byte arrives, so a
@@ -58,7 +53,11 @@ pub(crate) trait Transport: Send {
     /// # Errors
     ///
     /// The OS refuses the wait.
-    fn wait_readable(&mut self, timeout: std::time::Duration) -> BridgeResult<bool>;
+    fn wait_readable(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+        wake: &Bell,
+    ) -> BridgeResult<bool>;
 
     /// The connection's own OS stream, for a wait that also covers descriptors
     /// of the plugin's ([`crate::main_loop`]); `None` for a transport that is
@@ -131,8 +130,12 @@ impl Transport for SocketTransport {
 
     /// Waits for the host's next frame on the platform's wait
     /// ([`crate::main_loop`], which owns what each OS waits with).
-    fn wait_readable(&mut self, timeout: std::time::Duration) -> BridgeResult<bool> {
-        crate::main_loop::wait_readable(&self.stream, timeout)
+    fn wait_readable(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+        wake: &Bell,
+    ) -> BridgeResult<bool> {
+        crate::main_loop::wait_readable(&self.stream, timeout, wake)
     }
 
     fn stream(&self) -> Option<&PlatformStream> {
@@ -175,18 +178,14 @@ impl TransportListener {
         Ok(Self { listener })
     }
 
-    /// Wait for the host to connect, giving up if the host dies first.
+    /// Wait for the host to connect.
     ///
-    /// The accept itself is blocking, and the listener is never put into
-    /// non-blocking mode — that is what keeps the accepted stream from
-    /// inheriting `O_NONBLOCK`. The bail-out lives in [`wait_for_connection`],
-    /// which runs *before* the accept and can notice a dead host.
-    ///
-    /// Without that check, a host killed between the two connections this server
-    /// accepts — handshake, then audio — strands the subprocess permanently. The
-    /// audio loop exits cleanly on EOF, but it is never reached: the server is
-    /// parked in the second accept with nothing to interrupt it. One orphaned
-    /// process per loaded plugin, every time a DAW crashes or is force-quit.
+    /// The accept is blocking, and the listener is never put into non-blocking
+    /// mode: that is what keeps the accepted stream from inheriting
+    /// `O_NONBLOCK` (on BSD-derived systems, macOS included, the socket
+    /// `accept(2)` returns inherits the listener's flag, and every read on it
+    /// then fails with `WouldBlock`). A host that dies while this waits is the
+    /// host watch's to end the process ([`crate::server`]).
     pub(crate) fn accept(&self) -> BridgeResult<SocketTransport> {
         Ok(SocketTransport::new(self.accept_stream()?))
     }
@@ -198,9 +197,6 @@ impl TransportListener {
     }
 
     fn accept_stream(&self) -> BridgeResult<PlatformStream> {
-        // Held across the accept: where the wait cannot interrupt a blocked
-        // accept, this is what notices a host that dies during it.
-        let _watching = wait_for_connection(&self.listener)?;
         Ok(self.listener.accept()?)
     }
 }
@@ -259,10 +255,19 @@ mod wait_tests {
     fn a_quiet_wait_ends_unreadable_and_a_byte_ends_it() {
         let (mut host, mut transport) = pair();
 
-        assert!(!transport.wait_readable(Duration::from_millis(40)).unwrap());
+        let wake = Bell::new().expect("a bell");
+        assert!(
+            !transport
+                .wait_readable(Some(Duration::ZERO), &wake)
+                .unwrap()
+        );
 
         host.write_all(&[0]).expect("write");
-        assert!(transport.wait_readable(Duration::from_secs(600)).unwrap());
+        assert!(
+            transport
+                .wait_readable(Some(Duration::from_secs(600)), &wake)
+                .unwrap()
+        );
     }
 
     /// A host that hangs up is readable: `recv` reports the end as the error
@@ -271,8 +276,33 @@ mod wait_tests {
     fn a_closed_host_is_readable() {
         let (host, mut transport) = pair();
         drop(host);
-        assert!(transport.wait_readable(Duration::from_secs(10)).unwrap());
+        let wake = Bell::new().expect("a bell");
+        assert!(
+            transport
+                .wait_readable(Some(Duration::from_secs(600)), &wake)
+                .unwrap()
+        );
         assert!(transport.recv().is_err());
+    }
+
+    /// **A ring of the wake ends a wait on a quiet socket, readable to no one**:
+    /// the render thread's wait returns for a command the main thread queued.
+    /// The wait's timeout outlasts the test harness's limit, so a wait the ring
+    /// does not end fails.
+    #[test]
+    fn a_ring_ends_a_wait_on_a_quiet_socket() {
+        let (_host, mut transport) = pair();
+        let wake = Bell::new().expect("a bell");
+        let ringer = wake.clone();
+        let rung = std::thread::spawn(move || ringer.ring());
+        assert!(
+            !transport
+                .wait_readable(Some(Duration::from_secs(600)), &wake)
+                .unwrap(),
+            "woken, with nothing to read"
+        );
+        rung.join().expect("the ringer");
+        assert!(wake.take());
     }
 }
 
