@@ -19,7 +19,10 @@
 //! - **nothing is lost or repeated**: the items taken are `[1, 2]`, in order;
 //! - **a raised latch is seen**: after the producer joined, the drain ends in
 //!   `Failed`, never `Empty`;
-//! - **an unraised latch is never a failure** (the second test).
+//! - **an unraised latch is never a failure** (the second test);
+//! - **the first cause stays** (the third test): two producers raise different
+//!   causes; every read that sees the latch raised sees the one that won the
+//!   exchange, and it never changes after.
 
 #![cfg(loom)]
 
@@ -42,7 +45,7 @@ fn a_failure_is_never_read_before_the_frames_pushed_ahead_of_it() {
             thread::spawn(move || {
                 writer.push(1).expect("room");
                 writer.push(2).expect("room");
-                latch.raise();
+                latch.raise(());
             })
         };
 
@@ -51,7 +54,7 @@ fn a_failure_is_never_read_before_the_frames_pushed_ahead_of_it() {
             match latch.drain(|| reader.pop()) {
                 Drained::Item(n) => taken.push(n),
                 Drained::Empty => {}
-                Drained::Failed => {
+                Drained::Failed(()) => {
                     assert_eq!(taken, [1, 2], "a failure hid a frame");
                     break;
                 }
@@ -65,7 +68,7 @@ fn a_failure_is_never_read_before_the_frames_pushed_ahead_of_it() {
             match latch.drain(|| reader.pop()) {
                 Drained::Item(n) => taken.push(n),
                 Drained::Empty => panic!("the latch is raised, so an empty pop is a failure"),
-                Drained::Failed => break,
+                Drained::Failed(()) => break,
             }
         }
         assert_eq!(taken, [1, 2], "nothing lost, nothing repeated, in order");
@@ -87,8 +90,47 @@ fn an_unraised_latch_never_reads_as_failed() {
         });
         for _ in 0..2 {
             let verdict = latch.drain(|| reader.pop());
-            assert_ne!(verdict, Drained::Failed, "an empty pop is not a failure");
+            assert_ne!(
+                verdict,
+                Drained::Failed(()),
+                "an empty pop is not a failure"
+            );
         }
         producer.join().unwrap();
+    });
+}
+
+/// Two producers raise different causes: the latch keeps the first, a reader
+/// never sees it change once raised, and after both joined it reads the winner.
+#[test]
+fn the_first_cause_raised_is_the_one_every_reader_sees() {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct Code(u32);
+    impl tutti_rt::Cause for Code {
+        fn code(self) -> core::num::NonZeroU32 {
+            core::num::NonZeroU32::new(self.0).expect("non-zero")
+        }
+        fn from_code(code: core::num::NonZeroU32) -> Option<Self> {
+            Some(Code(code.get()))
+        }
+    }
+    loom::model(|| {
+        let latch = Arc::new(FaultLatch::<Code>::new());
+        let raisers: Vec<_> = [1, 2]
+            .into_iter()
+            .map(|n| {
+                let latch = Arc::clone(&latch);
+                thread::spawn(move || latch.raise(Code(n)))
+            })
+            .collect();
+        let seen = latch.cause();
+        for r in raisers {
+            r.join().unwrap();
+        }
+        let last = latch.cause().expect("raised by both");
+        assert!(last == Code(1) || last == Code(2));
+        if let Some(early) = seen {
+            assert_eq!(early, last, "the first cause never changes");
+        }
     });
 }
