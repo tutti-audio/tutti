@@ -28,8 +28,8 @@ pub trait FormatWriter: Sized {
     type Sink;
 
     /// Writes one block of any [`Sample`] format, converting each value to the
-    /// file's width by the rule in [`Sample`]; a block already in the file's
-    /// format is written as it is. An empty block writes nothing.
+    /// file's width by the rule in [`Sample`]; a value already in the file's
+    /// format is unchanged. An empty block writes nothing.
     ///
     /// # Errors
     ///
