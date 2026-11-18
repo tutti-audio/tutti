@@ -18,7 +18,7 @@
 //! - A file output that does not normalize **streams**: each block goes through
 //!   its resample, dither and encoder as it arrives and no PCM is held.
 //! - A file output that normalizes keeps what the graph rendered for it (in memory
-//!   up to 512 MiB across the render, then in a temporary `f32` file beside its
+//!   up to 512 MiB across the render, then in a temporary file beside its
 //!   target), measures it at the file's rate, and writes it again with the gain.
 //!   The graph is never rendered twice. An output can take another's gain
 //!   (`NormalizeSpec::from_output`), so a set of stems keeps the master's balance.
@@ -309,7 +309,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// folds it onto its [`Target`]'s layout, and writes it. An output that does
 /// not normalize is streamed through its resample, dither and encoder as the
 /// blocks arrive and holds no PCM; one that does keeps its audio (in memory up
-/// to 512 MiB across the render, past it in a temporary `f32` file beside its
+/// to 512 MiB across the render, past it in a temporary file beside its
 /// target, removed afterwards), is measured at its file's rate and written
 /// again with the gain, and the graph is never rendered twice. An output that
 /// takes another's gain ([`GainSource::FromOutput`]) is written with it, so a

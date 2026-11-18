@@ -368,7 +368,7 @@ impl ClickNode {
         } else {
             Amplitude(0.7)
         };
-        // The envelope is `f32` arithmetic over `f32` times.
+        // The stored click table is `f32`: its envelope is `f32` arithmetic over `f32` times.
         let (attack, hold_end) = (ATTACK.to_f32(), HOLD_END.to_f32());
         let release_len = CLICK_LEN.to_f32() - hold_end;
         let phase_inc = PhaseIncrement::per_sample(freq, sample_rate);
@@ -521,6 +521,7 @@ impl ClickNode {
         };
 
         if *click_pos < buffer.len() {
+            // The table and the volume are `f32`; the sample widens once here.
             let sample = F::from_f32(buffer[*click_pos] * volume.get());
             *click_pos += 1;
             sample

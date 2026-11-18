@@ -18,6 +18,7 @@ use f64_nodes::{Dc, FINE, Gain};
 /// away, and the buffer the stream renders is `f64`.
 #[test]
 fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
+    // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let (driver, stream) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
