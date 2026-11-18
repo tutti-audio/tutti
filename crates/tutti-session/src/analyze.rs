@@ -135,7 +135,8 @@ where
     type Error = AnalyzeError;
 }
 
-impl<K: AppKey, C: Clock> Session<K, C> {
+/// `f32` because an analysis job lands through the session's jobs, which land on `f32` sessions.
+impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// Folds `audio` through the meter `analysis` builds, on a worker, and
     /// lands the meter's output in a later [`update`](Self::update).
     ///

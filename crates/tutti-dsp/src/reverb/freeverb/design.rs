@@ -29,10 +29,11 @@ impl FreeverbControls {
         Feedback(position(self.room, Self::GENERAL_MIDI.room) * 0.28 + 0.7)
     }
 
-    /// The comb's damping, `damp * 0.4`: the one-pole's own pole, in `0..=0.4`.
+    /// The comb's damping, `damp * 0.4`: the one-pole's own pole, in `0..=0.4`, designed in
+    /// `f64` for the bank to narrow once.
     #[must_use]
-    pub(crate) fn damping(&self) -> f32 {
-        position(self.damp, Self::GENERAL_MIDI.damp) * 0.4
+    pub(crate) fn damping(&self) -> f64 {
+        f64::from(position(self.damp, Self::GENERAL_MIDI.damp)) * 0.4
     }
 }
 

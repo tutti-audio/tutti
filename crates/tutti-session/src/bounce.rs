@@ -78,7 +78,11 @@ use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::Session;
+use tutti_buffers::Float;
+use tutti_dsp::FftFloat;
+
 use crate::fork::PendingExport;
+use crate::format::Sealed;
 
 /// The span of the project a bounce renders, in the unit the caller thinks in.
 ///
@@ -207,7 +211,7 @@ mod sealed {
 /// [`Rendered`].
 pub trait Master: sealed::Sealed + Sized + 'static {
     /// What the master is once rendered.
-    type Result: std::fmt::Debug + Send;
+    type Result<F: Float>: std::fmt::Debug + Send;
 
     /// The file master, or `None` for memory.
     #[doc(hidden)]
@@ -215,17 +219,17 @@ pub trait Master: sealed::Sealed + Sized + 'static {
 
     /// The master's result out of what the pipeline produced for it.
     #[doc(hidden)]
-    fn result(produced: Produced) -> Self::Result;
+    fn result<F: Float>(produced: Produced<F>) -> Self::Result<F>;
 }
 
 impl Master for FileMaster {
-    type Result = Written;
+    type Result<F: Float> = Written;
 
     fn file(self) -> Option<FileMaster> {
         Some(self)
     }
 
-    fn result(produced: Produced) -> Written {
+    fn result<F: Float>(produced: Produced<F>) -> Written {
         match produced {
             Produced::File(written) => written,
             // The master's target was built from this kind alone.
@@ -235,13 +239,13 @@ impl Master for FileMaster {
 }
 
 impl Master for BufferMaster {
-    type Result = Rendered;
+    type Result<F: Float> = Rendered<F>;
 
     fn file(self) -> Option<FileMaster> {
         None
     }
 
-    fn result(produced: Produced) -> Rendered {
+    fn result<F: Float>(produced: Produced<F>) -> Rendered<F> {
         match produced {
             Produced::Buffers(rendered) => rendered,
             // The master's target was built from this kind alone.
@@ -275,7 +279,7 @@ impl Master for BufferMaster {
 /// handle that [`try_map`](Self::try_map) resolves to one before the bounce
 /// starts.
 #[must_use = "a bounce renders nothing until the session starts it"]
-pub struct Bounce<N = NodeKey, M = NoMaster> {
+pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     master: M,
     stems: Vec<AnyStem<N>>,
     range: Option<Range>,
@@ -291,10 +295,10 @@ pub struct Bounce<N = NodeKey, M = NoMaster> {
     dither: Option<DitherShape>,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
-    edit: Option<PrepareEdit>,
+    edit: Option<PrepareEdit<F>>,
 }
 
-impl<N> Bounce<N, NoMaster> {
+impl<N, F: Float> Bounce<N, NoMaster, F> {
     /// A bounce of the project's mix, with nothing chosen: a master
     /// ([`master`](Self::master) or [`master_buffers`](Self::master_buffers),
     /// without which it does not start) and a range when no loop is set. Name nodes as
@@ -329,7 +333,7 @@ impl<N> Bounce<N, NoMaster> {
     /// [`dither`](Bounce::dither), [`normalize`](Bounce::normalize)), which
     /// only a file honours: a [`master_buffers`](Self::master_buffers) bounce
     /// cannot be given them.
-    pub fn master(self, path: impl Into<PathBuf>, format: Format) -> Bounce<N, FileMaster> {
+    pub fn master(self, path: impl Into<PathBuf>, format: Format) -> Bounce<N, FileMaster, F> {
         self.with_master(FileMaster {
             path: path.into(),
             format,
@@ -348,14 +352,14 @@ impl<N> Bounce<N, NoMaster> {
     ///     .master_buffers()
     ///     .normalize(Normalize::Peak { target: Db(-1.0) });
     /// ```
-    pub fn master_buffers(self) -> Bounce<N, BufferMaster> {
+    pub fn master_buffers(self) -> Bounce<N, BufferMaster, F> {
         self.with_master(BufferMaster)
     }
 }
 
-impl<N, M> Bounce<N, M> {
+impl<N, M, F: Float> Bounce<N, M, F> {
     /// The same bounce with another master.
-    fn with_master<M2>(self, master: M2) -> Bounce<N, M2> {
+    fn with_master<M2>(self, master: M2) -> Bounce<N, M2, F> {
         let Self {
             master: _,
             stems,
@@ -409,7 +413,10 @@ impl<N, M> Bounce<N, M> {
     /// # Errors
     ///
     /// What `f` returns for the first node it refuses.
-    pub fn try_map<N2, E>(self, mut f: impl FnMut(N) -> Result<N2, E>) -> Result<Bounce<N2, M>, E> {
+    pub fn try_map<N2, E>(
+        self,
+        mut f: impl FnMut(N) -> Result<N2, E>,
+    ) -> Result<Bounce<N2, M, F>, E> {
         let Self {
             master,
             stems,
@@ -529,7 +536,7 @@ impl<N, M> Bounce<N, M> {
     }
 
     /// Edits the forked graph before it renders: see [`PrepareEdit`].
-    pub fn edit(mut self, edit: PrepareEdit) -> Self {
+    pub fn edit(mut self, edit: PrepareEdit<F>) -> Self {
         self.edit = Some(edit);
         self
     }
@@ -537,7 +544,7 @@ impl<N, M> Bounce<N, M> {
 
 /// What only a file honours: a rate conversion, a dither, a normalize, and the
 /// stems that share the master's format.
-impl<N> Bounce<N, FileMaster> {
+impl<N, F: Float> Bounce<N, FileMaster, F> {
     /// Also writes `node`'s own outputs into a file at `path` in the master's
     /// format, in the same pass as the master: see [`Stem`]
     /// ([`stem_with`](Self::stem_with) for one that places its channels or
@@ -580,7 +587,7 @@ impl<N> Bounce<N, FileMaster> {
     }
 }
 
-impl<N: std::fmt::Debug, M: std::fmt::Debug> std::fmt::Debug for Bounce<N, M> {
+impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounce<N, M, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Bounce")
             .field("master", &self.master)
@@ -818,15 +825,15 @@ pub enum StemGain {
 /// [`Rendered`] for [`BufferMaster`]), and one [`Produced`] per stem in the
 /// order the bounce named them.
 #[derive(Debug)]
-pub struct Bounced<M: Master> {
-    master: M::Result,
-    stems: Vec<Produced>,
+pub struct Bounced<M: Master, F: Float = f32> {
+    master: M::Result<F>,
+    stems: Vec<Produced<F>>,
 }
 
-impl<M: Master> Bounced<M> {
+impl<M: Master, F: Float> Bounced<M, F> {
     /// The master's result.
     #[must_use]
-    pub fn master(&self) -> &M::Result {
+    pub fn master(&self) -> &M::Result<F> {
         &self.master
     }
 
@@ -851,24 +858,24 @@ impl<M: Master> Bounced<M> {
     /// # }
     /// ```
     #[must_use]
-    pub fn stems(&self) -> &[Produced] {
+    pub fn stems(&self) -> &[Produced<F>] {
         &self.stems
     }
 
     /// The master's result, owned.
     #[must_use]
-    pub fn into_master(self) -> M::Result {
+    pub fn into_master(self) -> M::Result<F> {
         self.master
     }
 
     /// The master's result and then each stem's, owned.
     #[must_use]
-    pub fn into_parts(self) -> (M::Result, Vec<Produced>) {
+    pub fn into_parts(self) -> (M::Result<F>, Vec<Produced<F>>) {
         (self.master, self.stems)
     }
 
     /// The pipeline's outputs, the master first.
-    fn new(produced: Vec<Produced>) -> Self {
+    fn new(produced: Vec<Produced<F>>) -> Self {
         let mut produced = produced.into_iter();
         let master = produced
             .next()
@@ -1088,16 +1095,16 @@ impl From<tutti_export::Error> for BounceError {
 /// unit already in it cannot be refilled: insert a new one. The fork's
 /// executor, pool and root are the job's; the edit does not see them.
 #[derive(Debug)]
-pub struct PreparedGraph<'a> {
+pub struct PreparedGraph<'a, F: Float = f32> {
     /// The fork's editor.
-    pub editor: &'a mut Editor,
+    pub editor: &'a mut Editor<F>,
     /// The render's timeline, which the renderer advances. A node in the
     /// graph reads it through its block's `Env`; this is for the edit
     /// itself (to place what it inserts, say).
     pub ctx: &'a OfflineTransport,
 }
 
-impl PreparedGraph<'_> {
+impl<F: Float> PreparedGraph<'_, F> {
     /// A key no node in any graph holds, for a node the edit inserts
     /// (`editor.insert(prepared.fresh_key(), ..)`), minted from
     /// [`NodeKey::fresh`]'s process-wide counter as the live graph's are.
@@ -1115,7 +1122,7 @@ impl PreparedGraph<'_> {
 /// in-process VST2 plugin); such a node goes into the live graph, where the
 /// fork's gather builds it on the main thread. An edit that never runs (the
 /// build failed, the job was dropped) is dropped on the main thread.
-pub type PrepareEdit = Box<dyn for<'a> FnOnce(PreparedGraph<'a>) + Send>;
+pub type PrepareEdit<F = f32> = Box<dyn for<'a> FnOnce(PreparedGraph<'a, F>) + Send>;
 
 /// How long a bounce may be in flight, on the `now` the session's
 /// [`Phase::Collect`](crate::Phase::Collect) is given, before it warns that
@@ -1321,7 +1328,7 @@ struct Figures {
 
 impl Figures {
     /// The [`Job`], from what `graph` reports now.
-    fn job(&self, graph: &tutti_export::RenderGraph) -> Result<Job, BounceError> {
+    fn job<F: Float>(&self, graph: &tutti_export::RenderGraph<F>) -> Result<Job, BounceError> {
         let reported = graph.reported_latency();
         let latency = match self.latency {
             BounceLatency::Graph => reported,
@@ -1381,9 +1388,9 @@ const PREPARING_STEPS: u32 = 4;
 /// [`Session::bounce_start`] is refused with [`BounceError::InFlight`].
 /// Nothing else reports it; the session warns once after an hour.
 #[must_use = "a bounce renders nothing until it is run and finished"]
-pub struct BounceJob<M: Master> {
-    pending: ToMain<PendingExport>,
-    edit: Option<ToMain<PrepareEdit>>,
+pub struct BounceJob<M: Master, F: FftFloat = f32> {
+    pending: ToMain<PendingExport<F>>,
+    edit: Option<ToMain<PrepareEdit<F>>>,
     ctx: OfflineTransport,
     clock: Arc<dyn RenderClock>,
     master: Target,
@@ -1396,7 +1403,7 @@ pub struct BounceJob<M: Master> {
     kind: PhantomData<fn() -> M>,
 }
 
-impl<M: Master> std::fmt::Debug for BounceJob<M> {
+impl<M: Master, F: FftFloat> std::fmt::Debug for BounceJob<M, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BounceJob")
             .field("ctx", &self.ctx)
@@ -1408,7 +1415,7 @@ impl<M: Master> std::fmt::Debug for BounceJob<M> {
     }
 }
 
-impl<M: Master> BounceJob<M> {
+impl<M: Master, F: FftFloat> BounceJob<M, F> {
     /// The handle that cancels this job and reads its progress.
     #[must_use]
     pub fn handle(&self) -> BounceHandle {
@@ -1418,7 +1425,7 @@ impl<M: Master> BounceJob<M> {
     /// Builds the fork, runs the edit, commits it, and renders. Any thread;
     /// it blocks for the whole render, or until [`BounceHandle::cancel`]
     /// stops it.
-    pub fn run(self) -> BounceRendered<M> {
+    pub fn run(self) -> BounceRendered<M, F> {
         let Self {
             pending,
             edit,
@@ -1549,10 +1556,10 @@ struct StemTap {
 ///
 /// The ids are above any the edit hook opened. A node or channel the edit
 /// removed since the start's check is refused here, by the same names.
-fn open_stem_taps(
-    editor: &mut Editor,
+fn open_stem_taps<F: Float>(
+    editor: &mut Editor<F>,
     stems: &[StemTap],
-) -> Result<Vec<tutti_graph::TapReader>, BounceConfigError> {
+) -> Result<Vec<tutti_graph::TapReader<F>>, BounceConfigError> {
     // The fork's topology is isolated and never merges back, so its ids are
     // numbered above the ones it holds instead of minted from a counter.
     let mut next = editor
@@ -1599,14 +1606,14 @@ fn open_stem_taps(
 /// (dropped on the main thread by [`Session::finish_bounce`]), and the
 /// bounce's token. `Send`.
 #[must_use = "finish the bounce with `Session::finish_bounce` (or `finish_bounce_unannounced`)"]
-pub struct BounceRendered<M: Master> {
-    result: Result<Bounced<M>, BounceError>,
+pub struct BounceRendered<M: Master, F: Float = f32> {
+    result: Result<Bounced<M, F>, BounceError>,
     /// The fork, sealed or not: whatever it holds is dropped on the main thread.
     graph: Option<ToMain<Box<dyn Send>>>,
     _token: Arc<()>,
 }
 
-impl<M: Master> BounceRendered<M> {
+impl<M: Master, F: Float> BounceRendered<M, F> {
     fn cancelled(graph: Option<ToMain<Box<dyn Send>>>, token: Arc<()>) -> Self {
         Self {
             result: Err(BounceError::Cancelled),
@@ -1624,7 +1631,7 @@ impl<M: Master> BounceRendered<M> {
     }
 }
 
-impl<M: Master> std::fmt::Debug for BounceRendered<M> {
+impl<M: Master, F: Float> std::fmt::Debug for BounceRendered<M, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BounceRendered")
             .field(
@@ -1699,7 +1706,10 @@ fn span(
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
+where
+    C::Float: FftFloat,
+{
     /// Starts a bounce: checks what it names, derives what it does not,
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built
@@ -1740,8 +1750,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`BounceError::Fork`] for a node the fork cannot copy.
     pub fn bounce_start<M: Master>(
         &mut self,
-        bounce: Bounce<NodeKey, M>,
-    ) -> Result<BounceJob<M>, BounceError> {
+        bounce: Bounce<NodeKey, M, C::Float>,
+    ) -> Result<BounceJob<M, C::Float>, BounceError> {
         if self.bounce.in_flight() {
             return Err(BounceError::InFlight);
         }
@@ -1941,8 +1951,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         };
         // Offline is announced here, on the control thread, before the job
         // can render a block.
-        #[cfg(feature = "plugin")]
-        self.render_mode_phase();
+        C::Float::announce_render_mode(self);
         Ok(job)
     }
 
@@ -1962,11 +1971,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// error.
     pub fn finish_bounce<M: Master>(
         &mut self,
-        rendered: BounceRendered<M>,
-    ) -> Result<Bounced<M>, BounceError> {
+        rendered: BounceRendered<M, C::Float>,
+    ) -> Result<Bounced<M, C::Float>, BounceError> {
         let result = self.finish_bounce_unannounced(rendered);
-        #[cfg(feature = "plugin")]
-        self.render_mode_phase();
+        C::Float::announce_render_mode(self);
         result
     }
 
@@ -1993,8 +2001,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// As [`finish_bounce`](Self::finish_bounce).
     pub fn finish_bounce_unannounced<M: Master>(
         &mut self,
-        rendered: BounceRendered<M>,
-    ) -> Result<Bounced<M>, BounceError> {
+        rendered: BounceRendered<M, C::Float>,
+    ) -> Result<Bounced<M, C::Float>, BounceError> {
         let BounceRendered {
             result,
             graph,
@@ -2015,8 +2023,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// As `bounce_start` and `finish_bounce`.
     pub fn bounce<M: Master>(
         &mut self,
-        bounce: Bounce<NodeKey, M>,
-    ) -> Result<Bounced<M>, BounceError> {
+        bounce: Bounce<NodeKey, M, C::Float>,
+    ) -> Result<Bounced<M, C::Float>, BounceError> {
         let job = self.bounce_start(bounce)?;
         self.finish_bounce(job.run())
     }
@@ -2050,7 +2058,7 @@ mod tests {
     const RATE: SampleRate = SampleRate::SR_48K;
 
     /// A render of a few blocks into memory.
-    fn short() -> Bounce<NodeKey, BufferMaster> {
+    fn short() -> Bounce<NodeKey, BufferMaster, f32> {
         Bounce::project()
             .master_buffers()
             .range(Range::Seconds(Seconds(0.0), Seconds(0.01)))
@@ -2260,7 +2268,7 @@ mod tests {
         let mut session = session();
         fn refused<M: Master>(
             session: &mut crate::DetachedSession,
-            b: Bounce<NodeKey, M>,
+            b: Bounce<NodeKey, M, f32>,
         ) -> BounceConfigError {
             match session.bounce_start(b) {
                 Err(BounceError::Config(e)) => e,

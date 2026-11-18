@@ -423,12 +423,18 @@ fn dynamics(c: &mut Criterion) {
 
 /// The reverb: one input, two outputs, so the throughput counts two channels.
 fn reverb(c: &mut Criterion) {
-    run(c, "reverb", "freeverb", FreeverbNode::general_midi, None);
+    run(
+        c,
+        "reverb",
+        "freeverb",
+        FreeverbNode::<f32>::general_midi,
+        None,
+    );
     run(
         c,
         "reverb",
         "fdn",
-        || FdnNode::live(tutti_nodes::FdnLayout::default(), FdnControls::DEFAULT),
+        || FdnNode::<f32>::live(tutti_nodes::FdnLayout::default(), FdnControls::DEFAULT),
         None,
     );
 }

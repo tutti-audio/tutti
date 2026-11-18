@@ -6,6 +6,7 @@
 //! -p tutti-plugin-probe`.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::PlanesMut;
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -117,7 +118,7 @@ fn pump(s: &mut Session) -> Vec<SessionEvent> {
 }
 
 /// Updates (no render: the session has no output) until `done`.
-fn settle_until<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn settle_until<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     mut done: impl FnMut(&mut Session<K, C>) -> bool,
@@ -140,7 +141,7 @@ fn pump_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) ->
 }
 
 /// Updates until `done` finds what it waits for in an update's pool events.
-fn until<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn until<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     mut done: impl FnMut(&&'static str, &PoolEvent) -> bool,
@@ -161,7 +162,7 @@ fn until<K: tutti_session::AppKey, C: tutti_session::Clock>(
 }
 
 /// The key's pool events of the first update that has any.
-fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     key: &'static str,
@@ -186,7 +187,7 @@ fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock>(
     }
 }
 
-fn loaded<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn loaded<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     key: &'static str,
 ) {
@@ -754,7 +755,7 @@ fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::P
     with_node_in(session(true), catalog)
 }
 
-fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     mut s: Session<K, C>,
     catalog: &Catalog,
 ) -> (Session<K, C>, tutti_session::Key<tutti_session::PluginNode>) {
@@ -764,7 +765,7 @@ fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock>(
     (s, node)
 }
 
-fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &Session<K, C>,
     node: tutti_session::Key<tutti_session::PluginNode>,
 ) -> Option<u32> {
@@ -872,7 +873,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
 /// taken, until the audio side has run and an update has collected.
-fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
 ) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();
@@ -926,9 +927,9 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         Err(AddPluginError::Installed("fx"))
     ));
 
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the swap", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         pid_of(s, node) != first
     });
     assert_eq!(
@@ -954,9 +955,9 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
     );
 
     s.remove(node).unwrap();
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the re-prepare to resume", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         !s.graph_ref().testing().is_repreparing()
     });
     assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
@@ -1037,9 +1038,9 @@ fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
     );
     assert!(s.graph_ref().contains(node));
 
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the stand-in", |s| {
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         s.graph_ref().node_tail(node) == Ok(Tail::None)
     });
 }

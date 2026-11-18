@@ -8,6 +8,7 @@ mod declick;
 mod edge_gain;
 mod engine;
 mod event_ports;
+mod f64_session;
 mod failure_rule;
 mod fan_in;
 mod graph;

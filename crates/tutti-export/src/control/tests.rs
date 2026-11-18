@@ -167,7 +167,9 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
     use tutti_codec::{Format, Pcm};
     use tutti_types::ChannelLayout;
     use tutti_units::Db;
-    let streaming = [Output::master(BufferTarget::new(ChannelLayout::STEREO))];
+    let streaming = [Output::<f32>::master(BufferTarget::new(
+        ChannelLayout::STEREO,
+    ))];
     let normalized = [Output::master(
         FileTarget::new("n.wav", Format::Wav(Pcm::Int16), ChannelLayout::STEREO)
             .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-1.0))))),

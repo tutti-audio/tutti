@@ -411,7 +411,7 @@ fn phaser() {
 #[test]
 fn plate_reverb() {
     IsolateRow::new("PlateReverbNode", || {
-        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(1.0)))
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds(1.0)))
     })
     .control("decay", |p| {
         assert!(p.param_set().set(UnitParam::Decay, 6.0))

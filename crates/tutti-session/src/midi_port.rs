@@ -997,11 +997,11 @@ impl Ports {
 
     /// Opens `info` for the input port at `at` (the port is closed): the inlet
     /// joins the graph, wired to the ingest node, and a device arrives there.
-    fn connect_input(
+    fn connect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
         let port = &mut self.inputs[at];
@@ -1034,11 +1034,11 @@ impl Ports {
 
     /// Closes the open input port at `at`: the device's notes are released by
     /// the ingest node, and the inlet leaves the graph.
-    fn disconnect_input(
+    fn disconnect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
     ) {
         let port = &mut self.inputs[at];
         if let Some(id) = port.open.take() {
@@ -1057,10 +1057,10 @@ impl Ports {
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
     /// entry ended, takes in a device that went or came, sends what the handles
     /// asked, and reads what the devices said. What was edited.
-    pub(crate) fn poll(
+    pub(crate) fn poll<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
         now: std::time::Instant,
@@ -1087,7 +1087,11 @@ impl Ports {
 
     /// Ends the ports whose entry was released or swapped, and takes out the
     /// ingest nodes that have released what their devices held.
-    fn retire(&mut self, io: &mut MidiSession, graph: &mut crate::graph::Graph) -> Edits {
+    fn retire<F: tutti_buffers::Float>(
+        &mut self,
+        io: &mut MidiSession,
+        graph: &mut crate::graph::Graph<F>,
+    ) -> Edits {
         let mut edits = Edits::default();
         let mut at = 0;
         while at < self.inputs.len() {
@@ -1132,10 +1136,10 @@ impl Ports {
 
     /// The device `device` left the list: the ports that held it close and read
     /// [`PortCause::Unplugged`].
-    fn lose(
+    fn lose<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         device: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
@@ -1176,10 +1180,10 @@ impl Ports {
     /// what a load would bind: surely the saved device, or the only one of its
     /// name), and a port that fails to open reads [`PortCause::ReopenFailed`] and
     /// is tried again when a device next arrives.
-    fn restore(
+    fn restore<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         arrived: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
@@ -1280,10 +1284,10 @@ impl Ports {
 
     /// Steps the negotiations and the MIDI-CI of the open inputs, follows what
     /// they settled, reopens an input whose reader died, and says what changed.
-    fn step(
+    fn step<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         now: std::time::Instant,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
@@ -1465,7 +1469,7 @@ fn open_device_output(
     Ok(device)
 }
 
-impl crate::Midi<'_> {
+impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
     /// Opens the input port of `saved` as `id`: the ingest node joins the graph
     /// and the device, when it is present, opens into it.
     pub(crate) fn open_input_port(
@@ -1634,9 +1638,9 @@ impl Ports {
     /// Each output port's tap on one scale of frames, the rate it was opened
     /// at: where the graph has been re-prepared at another, drains the old
     /// reader and reopens that one tap. Whether any reopened.
-    pub(crate) fn reopen(
+    pub(crate) fn reopen<F: tutti_buffers::Float>(
         &mut self,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
         let mut edited = false;
