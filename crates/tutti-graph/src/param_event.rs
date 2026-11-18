@@ -8,7 +8,8 @@
 
 use tutti_curve::{Law, Piece};
 use tutti_units::{
-    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam,
+    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, SampleSpan, Samples, UnitAddr,
+    UnitParam,
 };
 
 use crate::declare::Scalar;
@@ -216,8 +217,8 @@ pub struct ParamSegment {
     // Whole frames along itself at the event's frame, the fraction of a frame
     // past them (`lead`, in `[0, 1)`), and its exact length in frames.
     position: u32,
-    lead: f64,
-    span: f64,
+    lead: SampleSpan,
+    span: SampleSpan,
     shape: Law,
 }
 
@@ -258,8 +259,8 @@ impl ParamSegment {
             from,
             to,
             position: 1,
-            lead: 0.0,
-            span: f64::from(saturate(duration)),
+            lead: SampleSpan::ZERO,
+            span: SampleSpan::from_samples(Samples(saturate(duration) as usize)),
             shape,
         }
     }
@@ -272,8 +273,8 @@ impl ParamSegment {
     #[must_use]
     pub fn resumed(mut self, position: Samples, length: Samples) -> Self {
         self.position = saturate(position);
-        self.lead = 0.0;
-        self.span = f64::from(saturate(length));
+        self.lead = SampleSpan::ZERO;
+        self.span = SampleSpan::from_samples(Samples(saturate(length) as usize));
         self
     }
 
@@ -287,8 +288,8 @@ impl ParamSegment {
     pub fn resumed_exactly(mut self, since: SamplePosition, span: SamplePosition) -> Self {
         let whole = since.to_samples_floor();
         self.position = saturate(whole);
-        self.lead = (since.get() - whole.get() as f64).max(0.0);
-        self.span = span.get().clamp(0.0, f64::from(u32::MAX));
+        self.lead = SampleSpan::clamped(since.get() - whole.get() as f64);
+        self.span = SampleSpan::clamped(span.get().min(f64::from(u32::MAX)));
         self
     }
 
@@ -338,7 +339,7 @@ impl ParamSegment {
 
     /// Its length, in frames.
     pub fn length(&self) -> Samples {
-        SamplePosition(self.span).to_samples_ceil()
+        SamplePosition(self.span.get()).to_samples_ceil()
     }
 
     /// The raw value `j` frames after the event's frame (`Samples(0)`: its
@@ -389,8 +390,8 @@ impl ParamSegment {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Timing {
     pub(crate) position: u32,
-    pub(crate) lead: f64,
-    pub(crate) span: f64,
+    pub(crate) lead: SampleSpan,
+    pub(crate) span: SampleSpan,
 }
 
 /// A segment's value `j` frames after its event: `to` exactly once it
@@ -411,7 +412,7 @@ pub(crate) fn segment_value(param: Option<UnitParam>, piece: Piece, timing: Timi
 /// corners, the reference interpreter's and [`ParamSegment::arrives_after`]
 /// share.
 pub(crate) fn arrival(t: Timing) -> u32 {
-    let left = t.span - (f64::from(t.position) + t.lead);
+    let left = t.span.get() - (f64::from(t.position) + t.lead.get());
     if left <= 0.0 {
         return 0;
     }
@@ -424,8 +425,11 @@ pub(crate) fn arrival(t: Timing) -> u32 {
 /// arrived: at 1 or past, or a zero span (a step).
 #[inline]
 pub(crate) fn segment_progress(t: Timing, j: u32) -> Option<Normalized> {
-    let done = f64::from(t.position) + f64::from(j) + t.lead;
-    (done < t.span).then(|| Normalized::clamped(done / t.span))
+    let (done, span) = (
+        f64::from(t.position) + f64::from(j) + t.lead.get(),
+        t.span.get(),
+    );
+    (done < span).then(|| Normalized::clamped(done / span))
 }
 
 /// What a [`ParamEvent`] says.

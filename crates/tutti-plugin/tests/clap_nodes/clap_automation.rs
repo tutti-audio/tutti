@@ -123,8 +123,8 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// blocks of an export of a graph with the probe at [`PLUGIN`] fed by
 /// `feeder` (inserted at key 1, its event output on the plugin's event
 /// input) when there is one, and `sends` (a node at key 2, its event output on
-/// the same input) sent on their frames. Also the delay through the plugin: output frame
-/// `f + delay` plays input frame `f`. That is the pipeline's chunk, which
+/// the same input) sent on their frames. Also the delay through the plugin:
+/// output frame `f + delay` plays input frame `f`. That is the pipeline's chunk, which
 /// an offline fork sets to its `MaxBlock` ([`BLOCK`]); the probe's own
 /// declared latency is not rendered in `TAG_ONLY` mode, so the figure is
 /// the chunk, not `declared_latency`.

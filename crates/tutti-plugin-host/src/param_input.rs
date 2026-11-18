@@ -90,12 +90,8 @@ pub fn take(
     // the rest of the piece.
     let mut done = from;
     loop {
-        let next = match (events.get(ei), params_in.get(pi)) {
-            (None, None) => break,
-            (Some(e), None) => Next::Event(e),
-            (None, Some(p)) => Next::Param(p),
-            (Some(e), Some(p)) if e.offset < p.offset => Next::Event(e),
-            (Some(_), Some(p)) => Next::Param(p),
+        let Some(next) = pick(events.get(ei), params_in.get(pi)) else {
+            break;
         };
         let o = match next {
             Next::Event(e) => {
@@ -174,6 +170,18 @@ pub fn take(
 enum Next<'a> {
     Event(&'a Event),
     Param(&'a ParamEvent),
+}
+
+/// The earlier of the next event and the next param event; on one frame the
+/// param event, so a note sounds with the value its frame sets.
+fn pick<'a>(event: Option<&'a Event>, param: Option<&'a ParamEvent>) -> Option<Next<'a>> {
+    match (event, param) {
+        (None, None) => None,
+        (Some(e), None) => Some(Next::Event(e)),
+        (None, Some(p)) => Some(Next::Param(p)),
+        (Some(e), Some(p)) if e.offset < p.offset => Some(Next::Event(e)),
+        (Some(_), Some(p)) => Some(Next::Param(p)),
+    }
 }
 
 /// Where `address` stood at the end of the frame before block frame `o`
@@ -531,5 +539,72 @@ mod tests {
             offsets.iter().all(|&o| (10 + o) % 32 != 0),
             "no point left on a grid frame: {offsets:?}"
         );
+    }
+
+    /// **On one frame a param event comes before an event.** A note at 5 and
+    /// at 10, a param step at 5 and at 10: the walk hands the events to `other`
+    /// on their frames, and each frame's param event is taken ahead of its
+    /// note, so the point is placed first.
+    #[test]
+    fn a_param_event_is_taken_before_an_event_on_its_frame() {
+        use tutti_ump::Ump;
+        let off = |i: usize| Offset::of(Samples(i), Samples(64));
+        let note = |i: usize| Event::midi(off(i), Ump([0x2090_3c64, 0, 0, 0]));
+        let step = |i: usize, v: f64| {
+            ParamEvent::ramp(off(i), ParamRamp::foreign(ParamId::new(7), v, Samples(0)))
+        };
+        let events = [note(5), note(10)];
+        let params = [step(5, 0.25), step(10, 0.75)];
+        let order: Vec<char> = {
+            let (mut ei, mut pi) = (0, 0);
+            let mut out = Vec::new();
+            while let Some(n) = pick(events.get(ei), params.get(pi)) {
+                match n {
+                    Next::Event(_) => {
+                        ei += 1;
+                        out.push('e');
+                    }
+                    Next::Param(_) => {
+                        pi += 1;
+                        out.push('p');
+                    }
+                }
+            }
+            out
+        };
+        assert_eq!(order, ['p', 'e', 'p', 'e']);
+
+        let address = ParamId::new(7);
+        let mut delivery = ParamDelivery::new([address], Arc::new(DeliveryCounters::default()));
+        delivery.prepare(64);
+        let mut segments = SegmentPoints::default();
+        segments.prepare(delivery.room());
+        delivery.begin();
+        segments.begin(64);
+        let env = env(64, 1);
+        let cx = Cx {
+            env: &env,
+            arrival: Latency::ZERO,
+            history: TransportHistory::none(),
+        };
+        let mut seen = Vec::new();
+        take(
+            &events,
+            &params,
+            0,
+            64,
+            0,
+            &cx,
+            &mut segments,
+            &mut delivery,
+            |_, frame| seen.push(frame),
+        );
+        assert_eq!(seen, [5, 10], "`other` sees the notes on their frames");
+        let frames: Vec<i32> = delivery.changes().queues[0]
+            .points
+            .iter()
+            .map(|p| p.sample_offset)
+            .collect();
+        assert_eq!(frames, [5, 10], "the param points land on frames 5 and 10");
     }
 }
