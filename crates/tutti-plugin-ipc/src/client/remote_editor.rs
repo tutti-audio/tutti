@@ -120,9 +120,7 @@ impl EditorWindow for RemoteEditor {
     fn set_editor_size(&mut self, _main: MainThreadMarker, requested: Size) -> PluginResult<Size> {
         self.hear_closed();
         if !self.open {
-            return Err(plugin_error(EditorError::PluginError(
-                "editor not open".into(),
-            )));
+            return Err(plugin_error(EditorError::NotOpen));
         }
         self.audio
             .set_editor_size_in_server(requested)
