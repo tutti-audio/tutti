@@ -5,7 +5,9 @@
 //! **Library code** is every `crates/*/src/**/*.rs` file that is not under a `tests`,
 //! `benches` or `examples` directory, not a file named `tests.rs` or ending `_tests.rs` and not a `contract`,
 //! `testing` or `test_support` module (`contract.rs`, `testing.rs`, `test_support.rs` or a
-//! directory of that name). Its text
+//! directory of that name), and not a file its parent declares as a module behind a
+//! `#[cfg(test)]` (`#[cfg(test)] mod doubles;` makes `doubles.rs`, `doubles/mod.rs`, a
+//! `#[path]` target and everything under `doubles/` test code). Its text
 //! is read with comments and literals blanked (so `//`, `///` and `//!` lines and doc
 //! examples are not code) with every test-only item blanked: the item behind a
 //! `#[cfg(test)]` (or `#[cfg(all(.., test, ..))]`), up to its `;` for an out-of-line `mod
@@ -260,7 +262,8 @@ fn skipped(dir: &str) -> bool {
 
 /// The library files of `crates/*/src`.
 fn library_files(tree: &dyn Tree) -> Vec<String> {
-    tree.files("crates", &skipped)
+    let files: Vec<String> = tree
+        .files("crates", &skipped)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();
@@ -281,7 +284,75 @@ fn library_files(tree: &dyn Tree) -> Vec<String> {
                     )
                 })
         })
+        .collect();
+    let test_only = test_modules(tree, &files);
+    files
+        .into_iter()
+        .filter(|f| {
+            !test_only
+                .iter()
+                .any(|t| f == t || t.strip_suffix(".rs").is_some_and(|d| under(f, d)))
+        })
         .collect()
+}
+
+/// Whether `file` sits in directory `dir`, at any depth.
+fn under(file: &str, dir: &str) -> bool {
+    file.strip_prefix(dir)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// The files of `files` that a parent declares as an out-of-line module behind a
+/// `#[cfg(test)]` (`#[cfg(test)] mod doubles;`): `doubles.rs`, `doubles/mod.rs`, or
+/// the `#[path]` the declaration names. Such a file is all test code; a file under a
+/// test module's directory is too (the caller skips `doubles/` for `doubles.rs`).
+fn test_modules(tree: &dyn Tree, files: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for parent in files {
+        let Some(src) = tree.read(parent) else {
+            continue;
+        };
+        let blanked = blank(&src);
+        let (dir, file) = parent.rsplit_once('/').unwrap_or(("", parent));
+        let module_dir = match file {
+            "lib.rs" | "main.rs" | "mod.rs" => dir.to_owned(),
+            f => format!("{dir}/{}", f.trim_end_matches(".rs")),
+        };
+        for (from, to) in test_ranges(&blanked) {
+            let item = &blanked[from..to.min(blanked.len())];
+            let Some(name) = out_of_line_mod(item) else {
+                continue;
+            };
+            let raw = &src[from..to.min(src.len())];
+            let candidates = match path_attr(raw) {
+                Some(path) => vec![format!("{dir}/{path}")],
+                None => vec![
+                    format!("{module_dir}/{name}.rs"),
+                    format!("{module_dir}/{name}/mod.rs"),
+                ],
+            };
+            out.extend(candidates.into_iter().filter(|c| files.contains(c)));
+        }
+    }
+    out
+}
+
+/// The name of an out-of-line module declaration (`mod x;`, `pub(crate) mod x;`) that
+/// `item` ends with, or `None` for any other item.
+fn out_of_line_mod(item: &str) -> Option<&str> {
+    let body = item.trim_end().strip_suffix(';')?;
+    let at = find_word_from(body, "mod", 0)?;
+    let name = body[at + 3..].trim();
+    (!name.is_empty() && name.bytes().all(word)).then_some(name)
+}
+
+/// The path a `#[path = "x"]` attribute in `raw` names, read from the unblanked text.
+fn path_attr(raw: &str) -> Option<&str> {
+    let at = raw.find("#[path")?;
+    let rest = &raw[at..];
+    let open = rest.find('"')? + 1;
+    let close = rest[open..].find('"')? + open;
+    Some(&rest[open..close])
 }
 
 /// The offsets of `needle` (a path or method spelling) followed by optional whitespace and `(`.
@@ -765,6 +836,40 @@ mod tests {
         let src = "#[cfg(test)]\nmod t { fn a() { y as f32; } }\nfn b() { z.to_f32(); }\n\
                    #[cfg(test)]\nuse x::y;\nfn c() { w as f32; }\n";
         assert_eq!(forms(src), ["to_f32", "as_f32"]);
+    }
+
+    #[test]
+    fn a_file_its_parent_declares_under_cfg_test_is_not_library_code() {
+        let bad = "fn f() { x as f32; }\n";
+        let r = run(
+            "",
+            &[
+                (
+                    "crates/a/src/lib.rs",
+                    "#[cfg(test)]\nmod doubles;\nmod live;\n",
+                ),
+                ("crates/a/src/doubles.rs", bad),
+                ("crates/a/src/doubles/inner.rs", bad),
+                ("crates/a/src/live.rs", bad),
+                (
+                    "crates/a/src/ledger.rs",
+                    "#[cfg(test)]\npub(crate) mod graphs;\n",
+                ),
+                ("crates/a/src/ledger/graphs/mod.rs", bad),
+                (
+                    "crates/a/src/lib2.rs",
+                    "#[cfg(test)]\n#[path = \"lib2/fake.rs\"]\nmod fake;\n",
+                ),
+                ("crates/a/src/lib2/fake.rs", bad),
+            ],
+        );
+        assert_eq!(
+            r.findings[1..],
+            [
+                "  crates/a/src/live.rs: 1 sites, max 0",
+                "    as_f32: line 1"
+            ]
+        );
     }
 
     #[test]
