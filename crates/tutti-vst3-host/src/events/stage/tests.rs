@@ -1,6 +1,6 @@
 use super::*;
 use tutti_graph::UmpAt;
-use tutti_ump::{Message, MidiChannel, MidiGroup, SysexStatus};
+use tutti_ump::{Message, MidiChannel, MidiGroup, SysexStatus, U7};
 
 use crate::events::event_text;
 use tutti_fixtures::midi;
@@ -50,7 +50,7 @@ fn a_per_note_bend_range_outlives_its_block() {
             Offset::ZERO,
             registered(
                 tutti_ump::Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-                ControlValue::new(PitchBendSensitivity::of(24).to_rpn_bits()),
+                ControlValue::new(PitchBendSensitivity::from_semitones(U7::of(24)).to_rpn_bits()),
             ),
         ),
     ];
@@ -120,7 +120,7 @@ fn vst3_and_clap_bend_one_stream_by_the_same_semitones() {
             Offset::ZERO,
             registered(
                 tutti_ump::Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-                ControlValue::new(PitchBendSensitivity::of(24).to_rpn_bits()),
+                ControlValue::new(PitchBendSensitivity::from_semitones(U7::of(24)).to_rpn_bits()),
             ),
         ),
         bend(0),

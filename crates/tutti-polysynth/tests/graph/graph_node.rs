@@ -19,8 +19,8 @@ use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
-fn saw() -> PolySynth {
-    PolySynth::new(SynthConfig {
+fn saw() -> PolySynth<f32> {
+    PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds(0.0),

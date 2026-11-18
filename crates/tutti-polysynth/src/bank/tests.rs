@@ -1,7 +1,5 @@
 use super::*;
-use tutti_buffers::Planes;
-use tutti_nodes::{LadderFilterNode, LadderType, SvfFilterNode};
-use tutti_units::{Amplitude, Seconds};
+use tutti_units::{Amplitude, Normalized, PhaseIncrement, Seconds};
 
 const SR: f64 = 48_000.0;
 
@@ -15,12 +13,18 @@ fn flat() -> Adsr {
     Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(1.0), Seconds(0.1))
 }
 
-fn bank(osc: OscillatorType, filter: FilterType, env: Adsr) -> VoiceBank {
+fn bank<F: SynthFloat>(osc: OscillatorType, filter: FilterType, env: Adsr) -> VoiceBank<F> {
     VoiceBank::new(osc, &filter, &env, sr(), 16, UnisonVoices::ONE)
 }
 
 /// Start `lane` sounding at `freq` with unity gains, as a note-on would.
-fn start(bank: &mut VoiceBank, lane: usize, freq: Hz, cutoff: Hz, res: Resonance) {
+fn start<F: SynthFloat>(
+    bank: &mut VoiceBank<F>,
+    lane: usize,
+    freq: Hz,
+    cutoff: Hz,
+    res: Resonance,
+) {
     bank.set_pitch(lane, freq);
     bank.set_filter(lane, 1, cutoff, res);
     bank.set_gains(lane, Amplitude::UNITY, Amplitude::UNITY);
@@ -32,7 +36,12 @@ fn start(bank: &mut VoiceBank, lane: usize, freq: Hz, cutoff: Hz, res: Resonance
 
 /// Render `frames` frames of the given lanes, one control step of `step`
 /// frames at a time, returning the left channel.
-fn render(bank: &mut VoiceBank, lanes: &[usize], frames: usize, step: usize) -> Vec<f32> {
+fn render<F: SynthFloat>(
+    bank: &mut VoiceBank<F>,
+    lanes: &[usize],
+    frames: usize,
+    step: usize,
+) -> Vec<F> {
     let mut out = Vec::with_capacity(frames);
     while out.len() < frames {
         let n = step.min(frames - out.len());
@@ -45,7 +54,7 @@ fn render(bank: &mut VoiceBank, lanes: &[usize], frames: usize, step: usize) -> 
 }
 
 /// The envelope level after each of `frames` single-frame steps.
-fn envelope_trace(bank: &mut VoiceBank, lane: usize, frames: usize) -> Vec<f64> {
+fn envelope_trace<F: SynthFloat>(bank: &mut VoiceBank<F>, lane: usize, frames: usize) -> Vec<f64> {
     (0..frames)
         .map(|_| {
             bank.mark_live(lane);
@@ -62,7 +71,7 @@ fn envelope_trace(bank: &mut VoiceBank, lane: usize, frames: usize) -> Vec<f64> 
 #[test]
 fn adsr_stages_take_their_authored_times() {
     let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
-    let mut b = bank(OscillatorType::Sine, FilterType::None, env);
+    let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
     start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
 
     let trace = envelope_trace(&mut b, 0, 3000);
@@ -114,7 +123,7 @@ fn adsr_stages_take_their_authored_times() {
 #[test]
 fn a_release_starts_from_the_current_level() {
     let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
-    let mut b = bank(OscillatorType::Sine, FilterType::None, env);
+    let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
     start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
 
     // 150 samples into a 480-sample attack.
@@ -166,7 +175,7 @@ fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
         resonance: Resonance(0.6),
     };
     let solo = |lane: usize, freq: Hz| {
-        let mut b = bank(OscillatorType::Saw, filter, flat());
+        let mut b = bank::<f32>(OscillatorType::Saw, filter, flat());
         start(&mut b, lane, freq, Hz(1_500.0), Resonance(0.6));
         render(&mut b, &[lane], 2048, CONTROL_BLOCK)
     };
@@ -185,7 +194,7 @@ fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
     // Two lanes of one group at once, and a lane in the next group.
     let other = solo(3, Hz(331.0));
     let far = solo(9, Hz(97.0));
-    let mut b = bank(OscillatorType::Saw, filter, flat());
+    let mut b = bank::<f32>(OscillatorType::Saw, filter, flat());
     start(&mut b, 0, Hz(220.0), Hz(1_500.0), Resonance(0.6));
     start(&mut b, 3, Hz(331.0), Hz(1_500.0), Resonance(0.6));
     start(&mut b, 9, Hz(97.0), Hz(1_500.0), Resonance(0.6));
@@ -199,68 +208,176 @@ fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
     }
 }
 
-/// Render the bank's unfiltered oscillator, then the same oscillator
-/// through the bank's filter, and the first through `reference`.
-/// A saw through the bank's lane `filter` (wet), and the same saw
-/// unfiltered (dry): what a reference filter runs on.
-fn filter_vs_dry(filter: FilterType, cutoff: Hz, res: Resonance) -> (Vec<f32>, Vec<f32>) {
-    let mut dry = bank(OscillatorType::Saw, FilterType::None, flat());
-    start(&mut dry, 0, Hz(110.0), cutoff, res);
-    let dry = render(&mut dry, &[0], 4096, CONTROL_BLOCK);
-
-    let mut wet = bank(OscillatorType::Saw, filter, flat());
-    start(&mut wet, 0, Hz(110.0), cutoff, res);
-    let wet = render(&mut wet, &[0], 4096, CONTROL_BLOCK);
-    (wet, dry)
+/// The steady-state amplitude of lane 0's output for a unit sine at `hz`: the bank's
+/// sine oscillator through its filter, settled for 4800 frames, then measured over the
+/// next 4800 by projecting onto `e^(-jwn)`. `hz` is a multiple of 10 Hz at 48 kHz, so the
+/// window holds whole cycles and the projection is `A/2` exactly for a sine of amplitude `A`.
+fn filtered_sine_amplitude<F: SynthFloat>(
+    filter: FilterType,
+    cutoff: Hz,
+    res: Resonance,
+    hz: f64,
+) -> f64 {
+    const WINDOW: usize = 4800;
+    let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
+    start(&mut b, 0, Hz(hz), cutoff, res);
+    let _ = render(&mut b, &[0], WINDOW, CONTROL_BLOCK);
+    let y = render(&mut b, &[0], WINDOW, CONTROL_BLOCK);
+    let w = core::f64::consts::TAU * hz / SR;
+    let (mut re, mut im) = (0.0, 0.0);
+    for (n, &v) in y.iter().enumerate() {
+        let v: f64 = v.into();
+        re += v * (w * n as f64).cos();
+        im -= v * (w * n as f64).sin();
+    }
+    2.0 * re.hypot(im) / WINDOW as f64
 }
 
-/// The lane SVF is `SvfFilterNode`'s filter: same coefficients (from the
-/// shared `SvfCoeffs::new`), same recurrence, same taps.
-#[test]
-fn the_lane_svf_matches_svf_filter_node() {
-    for (mode, ty) in [
-        (SvfMode::Lowpass, SvfType::LowPass),
-        (SvfMode::Highpass, SvfType::HighPass),
-        (SvfMode::Bandpass, SvfType::BandPass),
-        (SvfMode::Notch, SvfType::Notch),
+/// The bilinear map `s/wc = (1/g)(1 - z^-1)/(1 + z^-1)` at `hz`, prewarped at `fc`, as
+/// `(re, im)`: the map the trapezoidal integrators realise.
+fn s_over_wc(fc: f64, hz: f64) -> (f64, f64) {
+    let g = (core::f64::consts::PI * fc / SR).tan();
+    let w = core::f64::consts::TAU * hz / SR;
+    // (1 - e^-jw) / (1 + e^-jw) = j tan(w/2).
+    (0.0, (w / 2.0).tan() / g)
+}
+
+fn mul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
+}
+
+fn norm(a: (f64, f64)) -> f64 {
+    a.0.hypot(a.1)
+}
+
+/// `|H|` of the SVF tap at `hz`: with `s = s/wc` and `k = 1/Q`, `D = s^2 + k s + 1` and the
+/// taps `1`, `s^2`, `s` and `s^2 + 1` over it (low-pass, high-pass, band-pass, notch).
+fn svf_gain(mode: SvfMode, fc: f64, q: f64, hz: f64) -> f64 {
+    let s = s_over_wc(fc, hz);
+    let s2 = mul(s, s);
+    let d = (s2.0 + s.0 / q + 1.0, s2.1 + s.1 / q);
+    let num = match mode {
+        SvfMode::Lowpass => (1.0, 0.0),
+        SvfMode::Highpass => s2,
+        SvfMode::Bandpass => s,
+        SvfMode::Notch => (s2.0 + 1.0, s2.1),
+    };
+    norm(num) / norm(d)
+}
+
+/// The lane SVF's steady-state gain is the analytic `|H|` of its tap at the probes from a
+/// decade below the cutoff to a decade above, at `f32` and `f64`.
+///
+/// The bound is relative to the larger of `|H|` and `0.01` (a notch's zero is a
+/// subtraction of unit terms): `64 * EPSILON * Q^2`. Each coefficient is rounded by
+/// `EPSILON / 2` and the response moves by at most `Q^2` times that relative figure near
+/// the resonance. The projection's own error over 4800 samples is far below it.
+fn svf_gain_matches_the_closed_form<F: SynthFloat>() {
+    let (fc, q) = (900.0f64, 2.0f64);
+    let eps: f64 = F::EPSILON.into();
+    for mode in [
+        SvfMode::Lowpass,
+        SvfMode::Highpass,
+        SvfMode::Bandpass,
+        SvfMode::Notch,
     ] {
-        let (cutoff, q) = (Hz(900.0), Q(2.0));
-        let filter = FilterType::Svf { cutoff, q, mode };
-        let (wet, dry) = filter_vs_dry(filter, cutoff, Resonance::NONE);
-        // The node as a graph runs it, prepared at the bank's rate.
-        let mut node = tutti_graph::Solo::new(
-            SvfFilterNode::<f32>::new(ty, cutoff, q),
-            tutti_graph::Prepare::new(sr(), tutti_buffers::MaxBlock::of(tutti_units::Samples(64))),
-        );
-        let expected = node.render_input(Planes::new(&[&dry]).unwrap()).remove(0);
-        for (i, (w, e)) in wet.iter().zip(&expected).enumerate() {
+        let filter = FilterType::Svf {
+            cutoff: Hz(fc),
+            q: Q(q),
+            mode,
+        };
+        for hz in [90.0, 450.0, 900.0, 3_000.0, 9_000.0] {
+            let want = svf_gain(mode, fc, q, hz);
+            let got = filtered_sine_amplitude::<F>(filter, Hz(fc), Resonance::NONE, hz);
+            let bound = 64.0 * eps * q * q * want.max(0.01);
             assert!(
-                (w - e).abs() < 1e-4,
-                "{mode:?} frame {i}: lane {w}, node {e}"
+                (got - want).abs() < bound,
+                "{mode:?} at {hz} Hz: gain {got}, closed form {want}, bound {bound}"
             );
         }
     }
 }
 
-/// The lane ladder is `LadderFilterNode`'s LP24 ladder, up to the `tanh`
-/// approximation (worst case 2e-4, at the saturator's clamp).
 #[test]
-fn the_lane_ladder_matches_ladder_filter_node() {
-    let (cutoff, res) = (Hz(1_200.0), Resonance(0.7));
-    let filter = FilterType::Moog {
-        cutoff,
-        resonance: res,
+fn the_lane_svf_gain_is_the_closed_form_at_f32() {
+    svf_gain_matches_the_closed_form::<f32>();
+}
+
+#[test]
+fn the_lane_svf_gain_is_the_closed_form_at_f64() {
+    svf_gain_matches_the_closed_form::<f64>();
+}
+
+/// `|1 / ((1 + s)^4 + k)|`: the 24 dB ladder, `k = 4 res`, at `hz`.
+fn ladder_gain(fc: f64, res: f64, hz: f64) -> f64 {
+    let p = {
+        let s = s_over_wc(fc, hz);
+        (1.0 + s.0, s.1)
     };
-    let (wet, dry) = filter_vs_dry(filter, cutoff, res);
-    // The node as a graph runs it, prepared at the bank's rate.
-    let mut node = tutti_graph::Solo::new(
-        LadderFilterNode::<f32>::new(LadderType::LP24, cutoff, res),
-        tutti_graph::Prepare::new(sr(), tutti_buffers::MaxBlock::of(tutti_units::Samples(64))),
-    );
-    let expected = node.render_input(Planes::new(&[&dry]).unwrap()).remove(0);
-    for (i, (w, e)) in wet.iter().zip(&expected).enumerate() {
-        assert!((w - e).abs() < 2e-3, "frame {i}: lane {w}, node {e}");
+    let p2 = mul(p, p);
+    let p4 = mul(p2, p2);
+    1.0 / norm((p4.0 + 4.0 * res, p4.1))
+}
+
+/// The lane ladder's gain is `|1 / ((1 + s/wc)^4 + k)|`, `k = 4 res`, under the bilinear map
+/// prewarped at the cutoff. The bank's own coefficients (`g1`, `k` of the lane) drive
+/// `ladder_step` with the lane `tanh` and a sine of amplitude `1e-3`: the oscillator's
+/// unit amplitude would saturate. The
+/// saturator's cubic term is `u^2 / 3` of its input `u`, and `u = x / |1 + k L^4|` reaches
+/// `2x` at the cutoff for `res = 0.5` (`L^4 = -1/4`, `k = 2`), so `(2e-3)^2 / 3 = 1.3e-6`
+/// of the signal. The bound is `1e-5` for that plus `64 * EPSILON` of the response.
+fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
+    type L<F> = <F as SynthFloat>::Lanes;
+    let (fc, res) = (1_200.0f64, 0.5f64);
+    let eps: f64 = F::EPSILON.into();
+    let filter = FilterType::Moog {
+        cutoff: Hz(fc),
+        resonance: Resonance(res),
+    };
+    let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
+    b.set_filter(0, 1, Hz(fc), Resonance(res));
+    let c = b.coef_target[0];
+    let coefficients = tutti_dsp::LadderCoefficients { g1: c[0], k: c[1] };
+    const AMPLITUDE: f64 = 1e-3;
+    const WINDOW: usize = 4800;
+    for hz in [120.0, 600.0, 1_200.0, 4_800.0] {
+        let w = core::f64::consts::TAU * hz / SR;
+        let mut z = [L::<F>::ZERO; 4];
+        let (mut re, mut im) = (0.0, 0.0);
+        for n in 0..2 * WINDOW {
+            let x = L::<F>::splat(F::from_design(AMPLITUDE * (w * n as f64).sin()));
+            let y = tutti_dsp::ladder_step(
+                &coefficients,
+                tutti_dsp::LadderType::LP24,
+                &mut z,
+                x,
+                crate::kernel::tanh,
+            );
+            if n >= WINDOW {
+                let y: f64 = y.as_slice()[0].into();
+                let m = (n - WINDOW) as f64;
+                re += y * (w * m).cos();
+                im -= y * (w * m).sin();
+            }
+        }
+        let got = 2.0 * re.hypot(im) / WINDOW as f64 / AMPLITUDE;
+        let want = ladder_gain(fc, res, hz);
+        let bound = 1e-5 + 64.0 * eps;
+        assert!(
+            (got - want).abs() < bound * want.max(0.01),
+            "{hz} Hz: gain {got}, closed form {want}"
+        );
     }
+}
+
+#[test]
+fn the_lane_ladder_gain_is_the_closed_form_at_f32() {
+    ladder_gain_matches_the_closed_form::<f32>();
+}
+
+#[test]
+fn the_lane_ladder_gain_is_the_closed_form_at_f64() {
+    ladder_gain_matches_the_closed_form::<f64>();
 }
 
 /// A pitch change ramps across the control step, one increment per
@@ -270,7 +387,7 @@ fn the_lane_ladder_matches_ladder_filter_node() {
 /// ramp `2p - 1` exactly, so each sample's phase step is recoverable.
 #[test]
 fn a_pitch_change_ramps_every_sample_across_the_step() {
-    let mut b = bank(OscillatorType::Saw, FilterType::None, flat());
+    let mut b = bank::<f32>(OscillatorType::Saw, FilterType::None, flat());
     start(&mut b, 0, Hz(100.0), Hz(20_000.0), Resonance::NONE);
     b.start(0, Phase(0.1));
     let _ = render(&mut b, &[0], CONTROL_BLOCK, CONTROL_BLOCK);
@@ -305,7 +422,7 @@ fn a_pitch_change_ramps_every_sample_across_the_step() {
 #[test]
 fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
     let env = Adsr::new(Seconds(0.001), Seconds(0.001), Amplitude(1.5), Seconds(0.1));
-    let mut b = bank(OscillatorType::Sine, FilterType::None, env);
+    let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
     start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
     let held = envelope_trace(&mut b, 0, 500);
     let before = *held.last().unwrap();
@@ -326,7 +443,9 @@ fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
 #[test]
 fn a_zero_pulse_width_still_oscillates() {
     let mut b = bank(
-        OscillatorType::Square { pulse_width: 0.0 },
+        OscillatorType::Square {
+            pulse_width: Normalized::of(0.0),
+        },
         FilterType::None,
         flat(),
     );
@@ -342,7 +461,7 @@ fn a_zero_pulse_width_still_oscillates() {
 /// one seed would play the same noise, in both ears of a stereo stack.
 #[test]
 fn every_lane_starts_on_its_own_noise_seed() {
-    let bank = VoiceBank::new(
+    let bank = VoiceBank::<f32>::new(
         OscillatorType::Noise,
         &FilterType::None,
         &flat(),
@@ -353,6 +472,258 @@ fn every_lane_starts_on_its_own_noise_seed() {
     let seeds: Vec<u32> = bank.rng.iter().flat_map(|g| g.to_array()).collect();
     assert!(seeds.len() >= 16 * 7);
     assert!(seeds.iter().all(|&s| s != 0), "xorshift cannot leave zero");
+    let mut sorted = seeds.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), seeds.len(), "two lanes share a seed");
+}
+
+/// A bank of one voice at `rate`, a flat envelope of `release` and `sustain`.
+fn extreme_bank<F: SynthFloat>(rate: SampleRate, env: Adsr) -> VoiceBank<F> {
+    VoiceBank::new(
+        OscillatorType::Sine,
+        &FilterType::None,
+        &env,
+        rate,
+        1,
+        UnisonVoices::ONE,
+    )
+}
+
+/// Render `frames` frames of lane 0 a control step at a time.
+fn run<F: SynthFloat>(bank: &mut VoiceBank<F>, frames: usize) {
+    let mut left = frames;
+    while left > 0 {
+        let n = left.min(CONTROL_BLOCK);
+        bank.mark_live(0);
+        bank.render(n);
+        left -= n;
+    }
+}
+
+/// A release's level after `elapsed` of its `length` frames, from `from`: the straight
+/// line the envelope draws.
+fn release_level(from: f64, elapsed: usize, length: usize) -> f64 {
+    from * (1.0 - elapsed as f64 / length as f64)
+}
+
+/// The longest release at the highest rate: a 100 s release at 192 kHz is
+/// 19.2 million frames, so its slope is `1/N = 5.2e-8` of the level per frame. From
+/// a level of 0.27, in `[0.25, 0.5)` where `f32` steps by `2^-25 = 3e-8`, the slope
+/// `1.4e-8` is under half a step: a level that adds its slope plainly never moves, and
+/// the voice never ends. The level adds its slope compensated, so after a hundredth
+/// of the release it is a hundredth of the way down.
+///
+/// The bound is 4 steps of `f32` at the starting level (`4 * 3e-8 = 1.2e-7`): the
+/// level's own rounding (1 step), the slope's relative rounding (`6e-8` of `0.27`),
+/// and the final rounding of the tail of the compensated sum (1 step) with margin.
+#[test]
+fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f32() {
+    const RELEASE: usize = 19_200_000;
+    /// One second of it, a hundredth of the release.
+    const ELAPSED: usize = RELEASE / 100;
+    let sustain = 0.27;
+    let env = Adsr::new(
+        Seconds(0.0),
+        Seconds(0.0),
+        Amplitude(sustain),
+        Seconds(100.0),
+    );
+    let mut b = extreme_bank::<f32>(SampleRate::SR_192K, env);
+    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    run(&mut b, 32);
+    let from = b.envelope(0).get();
+    assert_eq!(from, f64::from(sustain as f32), "the sustain level");
+    b.gate_off(0);
+    run(&mut b, ELAPSED);
+
+    let level = b.envelope(0).get();
+    let want = release_level(from, ELAPSED, RELEASE);
+    let bound = 4.0 * f64::from(f32::EPSILON) / 2.0 * 0.5;
+    assert!(
+        (level - want).abs() < bound,
+        "mid-release level {level}, closed form {want}, bound {bound}"
+    );
+
+    // The plain sum of the same slope, `level += slope`, which the envelope no longer
+    // does, stays where it began.
+    let slope = -(from as f32) / RELEASE as f32;
+    let mut plain = from as f32;
+    for _ in 0..ELAPSED {
+        plain += slope;
+    }
+    assert_eq!(
+        plain, from as f32,
+        "a plain f32 sum stalls at the starting level"
+    );
+}
+
+/// The same release at `f64`: the level is a closed form to a few ulp of `f64`.
+///
+/// The bound is 4 steps of `f64` at the starting level, `4 * 2^-54`.
+#[test]
+fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f64() {
+    const RELEASE: usize = 19_200_000;
+    /// One second of it, a hundredth of the release.
+    const ELAPSED: usize = RELEASE / 100;
+    let env = Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(0.27), Seconds(100.0));
+    let mut b = extreme_bank::<f64>(SampleRate::SR_192K, env);
+    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    run(&mut b, 32);
+    let from = b.envelope(0).get();
+    assert_eq!(from, 0.27);
+    b.gate_off(0);
+    run(&mut b, ELAPSED);
+
+    let level = b.envelope(0).get();
+    let want = release_level(from, ELAPSED, RELEASE);
+    let bound = 4.0 * f64::EPSILON / 2.0 * 0.5;
+    assert!(
+        (level - want).abs() < bound,
+        "mid-release level {level}, closed form {want}, bound {bound}"
+    );
+}
+
+/// The distance between two phases on the unit circle.
+fn turn_distance(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(1.0);
+    d.min(1.0 - d)
+}
+
+/// A voice's phase after `frames` at `freq`: the closed form `frames * freq / rate`,
+/// modulo a turn. The increment is stored at `F` and so is off by half a step of `F`
+/// (`EPSILON / 2` relative), which `cycles` of them add up to; the phase's own rounding
+/// and the compensation's residue are a step each.
+fn pitch_after<F: SynthFloat>(freq: Hz, rate: SampleRate, frames: usize) {
+    let mut b = extreme_bank::<F>(
+        rate,
+        Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(1.0), Seconds(0.1)),
+    );
+    start(&mut b, 0, freq, Hz(20_000.0), Resonance::NONE);
+    b.start(0, Phase::START);
+    run(&mut b, frames);
+
+    // The exact phase: `frames * freq / rate` in whole-Hz rationals, modulo a turn.
+    let (num, den) = (freq.get() as u128, rate.get() as u128);
+    assert!(freq.get() == num as f64 && rate.get() == den as f64);
+    let want = ((frames as u128 * num) % den) as f64 / den as f64;
+    let cycles = frames as f64 * freq.get() / rate.get();
+    let got: f64 = b.phase(0).into();
+    let eps: f64 = F::EPSILON.into();
+    let bound = cycles * eps / 2.0 + 3.0 * eps;
+    assert!(
+        turn_distance(got, want) < bound,
+        "phase after {frames} frames {got}, exact {want}, bound {bound}"
+    );
+
+    // The plain sum of the same stored increment, which the bank no longer does, is
+    // out of the bound.
+    let inc = F::from_unit(PhaseIncrement::per_sample(freq, rate));
+    let mut plain = F::ZERO;
+    for _ in 0..frames {
+        plain += inc;
+        if plain >= F::ONE {
+            plain -= F::ONE;
+        }
+    }
+    let plain: f64 = plain.into();
+    assert!(
+        turn_distance(plain, want) > 2.0 * bound,
+        "the plain sum {plain} stays within the bound {bound} of {want}"
+    );
+}
+
+/// 20 Hz at 192 kHz is `1.04e-4` of a turn a frame: a second and a half cycle (the
+/// last 4800 frames) are 20.5 cycles. A phase that adds that increment plainly loses
+/// part of every sum to the phase's `6e-8` step, and drifts; the compensated one holds
+/// the pitch to the increment's own rounding.
+#[test]
+fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f32() {
+    pitch_after::<f32>(Hz(20.0), SampleRate::SR_192K, 192_000 + 4_800);
+}
+
+#[test]
+fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f64() {
+    pitch_after::<f64>(Hz(20.0), SampleRate::SR_192K, 192_000 + 4_800);
+}
+
+/// At `f64` the closed-form tests of the envelope's stage times hold as at `f32`, with
+/// the stages one sample off at most.
+#[test]
+fn adsr_stages_take_their_authored_times_at_f64() {
+    let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
+    let mut b = bank::<f64>(OscillatorType::Sine, FilterType::None, env);
+    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    let trace = envelope_trace(&mut b, 0, 3000);
+    let peak = trace.iter().position(|&e| e >= 1.0).unwrap();
+    assert!(
+        (478..=481).contains(&peak),
+        "attack peaked at sample {peak}"
+    );
+    assert!(
+        (trace[239] - 0.5).abs() < 1e-3,
+        "attack midpoint {}",
+        trace[239]
+    );
+    let sustained = peak + trace[peak..].iter().position(|&e| e <= 0.5).unwrap();
+    assert!((peak + 958..=peak + 962).contains(&sustained));
+    assert!(trace[2500..].iter().all(|&e| e == 0.5));
+    b.gate_off(0);
+    let release = envelope_trace(&mut b, 0, 2000);
+    let silent = release.iter().position(|&e| e == 0.0).unwrap();
+    assert!(
+        (1438..=1441).contains(&silent),
+        "release reached zero at {silent}"
+    );
+    assert!((release[719] - 0.25).abs() < 1e-3);
+}
+
+/// A lane renders the same in any lane of the group and the lanes sum, at `f64`: the
+/// sum of lanes rendered apart is the sum rendered together to a few ulp.
+///
+/// The sum of three samples under unity differs from three separate renders by at
+/// most the rounding of two additions, `2 * 2^-53 * 3`; the bound is `1e-14`.
+#[test]
+fn lanes_sum_and_do_not_touch_each_other_at_f64() {
+    let filter = FilterType::Moog {
+        cutoff: Hz(1_500.0),
+        resonance: Resonance(0.6),
+    };
+    let solo = |lane: usize, freq: Hz| {
+        let mut b = bank::<f64>(OscillatorType::Saw, filter, flat());
+        start(&mut b, lane, freq, Hz(1_500.0), Resonance(0.6));
+        render(&mut b, &[lane], 2048, CONTROL_BLOCK)
+    };
+    let (a, o, far) = (solo(0, Hz(220.0)), solo(3, Hz(331.0)), solo(5, Hz(97.0)));
+    assert_eq!(
+        a,
+        solo(2, Hz(220.0)),
+        "lane 2 renders differently from lane 0"
+    );
+    let mut b = bank::<f64>(OscillatorType::Saw, filter, flat());
+    for (lane, freq) in [(0, 220.0), (3, 331.0), (5, 97.0)] {
+        start(&mut b, lane, Hz(freq), Hz(1_500.0), Resonance(0.6));
+    }
+    let together = render(&mut b, &[0, 3, 5], 2048, CONTROL_BLOCK);
+    for (i, &t) in together.iter().enumerate() {
+        assert!((t - (a[i] + o[i] + far[i])).abs() < 1e-14, "frame {i}");
+    }
+}
+
+/// Every lane of an `f64` bank, which holds four to a group, starts on its own seed.
+#[test]
+fn every_lane_of_an_f64_bank_starts_on_its_own_noise_seed() {
+    let bank = VoiceBank::<f64>::new(
+        OscillatorType::Noise,
+        &FilterType::None,
+        &flat(),
+        sr(),
+        16,
+        UnisonVoices::of(7),
+    );
+    let seeds: Vec<u32> = bank.rng.iter().flat_map(|g| g.to_array()).collect();
+    assert!(seeds.len() >= 16 * 7);
+    assert!(seeds.iter().all(|&s| s != 0));
     let mut sorted = seeds.clone();
     sorted.sort_unstable();
     sorted.dedup();

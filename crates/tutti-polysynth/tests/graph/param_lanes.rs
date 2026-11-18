@@ -29,8 +29,8 @@ const LANE: NodeKey = NodeKey(3);
 
 /// A saw synth with no attack; with `unison`, three sub-voices at
 /// `detune` cents and no spread.
-fn synth(unison: bool, detune: f64) -> PolySynth {
-    PolySynth::new(SynthConfig {
+fn synth(unison: bool, detune: f64) -> PolySynth<f32> {
+    PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds(0.0),
@@ -77,13 +77,13 @@ struct Drive {
 /// Renders `synth` playing a note at frame 0, both channels, with `drive`'s
 /// lane on its port when given (wired before the first block, so it drives
 /// the port from frame 0: a unit's first block is not declicked).
-fn render(synth: PolySynth, drive: Option<Drive>) -> [Vec<f32>; 2] {
+fn render(synth: PolySynth<f32>, drive: Option<Drive>) -> [Vec<f32>; 2] {
     render_with_knob(synth, drive).0
 }
 
 /// [`render`], and the driven param's knob as the synth's `ParamSet` holds it
 /// after the render (`None` without a lane).
-fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f64>) {
+fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f64>) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),

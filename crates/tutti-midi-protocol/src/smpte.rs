@@ -9,34 +9,32 @@ use tutti_units::{SampleRate, Seconds};
 
 /// SMPTE frame rate for MTC/LTC.
 ///
-/// The discriminants are not MTC's wire values: they are the encoding the
-/// clock master keeps in an atomic (`TryFrom<u8>` reads it back). MTC's two-bit
-/// rate code in the last Quarter Frame and in a Full Message's hours byte is
-/// [`MtcRate`], which has no 29.97 non-drop: [`mtc_rate`](Self::mtc_rate) is
-/// `None` for it, and every `MtcRate` converts to a `SmpteFrameRate`.
+/// MTC's two-bit rate code in the last Quarter Frame and in a Full Message's
+/// hours byte is [`MtcRate`], which has no 29.97 non-drop:
+/// [`mtc_rate`](Self::mtc_rate) is `None` for it, and every `MtcRate` converts
+/// to a `SmpteFrameRate`.
 ///
 /// # Two rates are 29.97, and the difference is counting, not speed
 ///
 /// [`Fps2997Df`](Self::Fps2997Df) and [`Fps2997Ndf`](Self::Fps2997Ndf) run at the
-/// identical rate — [`fps`](Self::fps) returns the same number for both. They
+/// identical rate — [`ratio`](Self::ratio) returns the same fraction for both. They
 /// differ in whether the *labels* skip: drop-frame omits two frame numbers a
 /// minute so the timecode stays aligned with wall-clock time, non-drop counts
 /// every frame and drifts about 3.6 seconds an hour. Treating one as the other
 /// keeps playing at the right speed and reports the wrong position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[repr(u8)]
 pub enum SmpteFrameRate {
     /// 24 fps (film)
-    Fps24 = 0,
+    Fps24,
     /// 25 fps (PAL video)
-    Fps25 = 1,
+    Fps25,
     /// 29.97 fps drop-frame (NTSC video)
-    Fps2997Df = 2,
+    Fps2997Df,
     /// 29.97 fps non-drop (rare)
-    Fps2997Ndf = 3,
+    Fps2997Ndf,
     /// 30 fps (audio/music)
-    Fps30 = 4,
+    Fps30,
 }
 
 /// The frame rate MTC names in its two-bit code: in the last Quarter Frame of a
@@ -77,11 +75,8 @@ impl MtcRate {
     /// frame field.
     #[must_use]
     pub const fn labels_per_second(self) -> u8 {
-        match self {
-            Self::Fps24 => 24,
-            Self::Fps25 => 25,
-            Self::Fps2997Df | Self::Fps30 => 30,
-        }
+        // At most 30, so it fits a byte.
+        self.frame_rate().labels_per_second() as u8
     }
 
     /// The two-bit code on the wire.
@@ -89,9 +84,7 @@ impl MtcRate {
     pub const fn code(self) -> u8 {
         self as u8
     }
-}
 
-impl MtcRate {
     /// The rate as a [`SmpteFrameRate`].
     #[must_use]
     pub const fn frame_rate(self) -> SmpteFrameRate {
@@ -107,28 +100,6 @@ impl MtcRate {
 impl From<MtcRate> for SmpteFrameRate {
     fn from(rate: MtcRate) -> Self {
         rate.frame_rate()
-    }
-}
-
-/// A byte that is none of [`SmpteFrameRate`]'s discriminants (0 to 4): what
-/// `SmpteFrameRate::try_from` refuses, carrying the byte.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{} is not an SMPTE frame rate discriminant (0 to 4)", .0)]
-pub struct UnknownFrameRate(pub u8);
-
-impl TryFrom<u8> for SmpteFrameRate {
-    type Error = UnknownFrameRate;
-
-    /// Reads a discriminant (`rate as u8`) back into a rate.
-    fn try_from(val: u8) -> Result<Self, UnknownFrameRate> {
-        match val {
-            0 => Ok(Self::Fps24),
-            1 => Ok(Self::Fps25),
-            2 => Ok(Self::Fps2997Df),
-            3 => Ok(Self::Fps2997Ndf),
-            4 => Ok(Self::Fps30),
-            raw => Err(UnknownFrameRate(raw)),
-        }
     }
 }
 
@@ -155,30 +126,12 @@ impl SmpteFrameRate {
         }
     }
 
-    /// Frames per second, as the exact rational the standard specifies.
-    ///
-    /// **`f64`, deliberately, and not a unit type.** The 29.97 rates are
-    /// `30000 / 1001`, which no binary float represents exactly, and a timecode
-    /// position is multiplied by this over durations measured in hours. `Seconds`
-    /// is `f32` and would accumulate visible drift across a long-form timeline —
-    /// this is the "precision the unit cannot carry" case the units rule carves
-    /// out. Narrow to `f32` at the point of use, not here.
-    ///
-    /// Identical for both 29.97 variants; see the type docs for what actually
-    /// separates them.
-    pub fn fps(&self) -> f64 {
-        match self {
-            Self::Fps24 => 24.0,
-            Self::Fps25 => 25.0,
-            Self::Fps2997Df | Self::Fps2997Ndf => 30000.0 / 1001.0,
-            Self::Fps30 => 30.0,
-        }
-    }
-
     /// The rate as an exact fraction of frames over seconds, `(num, den)`:
-    /// `24/1`, `25/1`, `30000/1001` for both 29.97 rates, `30/1`. Integer
-    /// frame arithmetic at a position in samples uses this, not [`fps`](Self::fps).
-    pub const fn ratio(&self) -> (u64, u64) {
+    /// `24/1`, `25/1`, `30000/1001` for both 29.97 rates, `30/1`. The 29.97
+    /// rates are not a binary float, so arithmetic over a long timeline and
+    /// integer frame arithmetic at a position in samples use this fraction.
+    #[must_use]
+    pub const fn ratio(self) -> (u64, u64) {
         match self {
             Self::Fps24 => (24, 1),
             Self::Fps25 => (25, 1),
@@ -199,7 +152,7 @@ impl SmpteFrameRate {
     ///
     /// [`SmpteTimecode::from_seconds`]: SmpteTimecode::from_seconds
     #[must_use]
-    pub fn frames_at(&self, seconds: Seconds) -> f64 {
+    pub fn frames_at(self, seconds: Seconds) -> f64 {
         let (num, den) = self.ratio();
         seconds.get() * num as f64 / den as f64
     }
@@ -207,19 +160,16 @@ impl SmpteFrameRate {
     /// The samples in one frame at `sample_rate`: the exact ratio's
     /// `rate * den / num`.
     #[must_use]
-    pub fn samples_per_frame(&self, sample_rate: SampleRate) -> f64 {
+    pub fn samples_per_frame(self, sample_rate: SampleRate) -> f64 {
         let (num, den) = self.ratio();
         sample_rate.get() * den as f64 / num as f64
     }
 
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,
     /// 30, 30 for the two 29.97 rates).
-    pub const fn labels_per_second(&self) -> u64 {
-        match self {
-            Self::Fps24 => 24,
-            Self::Fps25 => 25,
-            Self::Fps2997Df | Self::Fps2997Ndf | Self::Fps30 => 30,
-        }
+    pub const fn labels_per_second(self) -> u64 {
+        let (num, den) = self.ratio();
+        num.div_ceil(den)
     }
 
     /// Reports whether frame *numbers* are skipped to track wall-clock time.
@@ -228,7 +178,7 @@ impl SmpteFrameRate {
     /// produces timecode that is correct frame-by-frame and wrong by seconds an
     /// hour in.
     #[must_use]
-    pub fn is_drop_frame(&self) -> bool {
+    pub fn is_drop_frame(self) -> bool {
         matches!(self, Self::Fps2997Df)
     }
 }
@@ -241,12 +191,64 @@ impl SmpteFrameRate {
 /// these fields directly is wrong. Convert with [`to_seconds`](Self::to_seconds)
 /// first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "SmpteTimecodeRaw", into = "SmpteTimecodeRaw")
+)]
 pub struct SmpteTimecode {
     hours: u8,
     minutes: u8,
     seconds: u8,
     frames: u8,
     frame_rate: SmpteFrameRate,
+}
+
+/// The persisted shape of a [`SmpteTimecode`]: its labels as written, checked
+/// by `TryFrom` on the way back in.
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SmpteTimecodeRaw {
+    hours: u8,
+    minutes: u8,
+    seconds: u8,
+    frames: u8,
+    frame_rate: SmpteFrameRate,
+}
+
+/// A persisted position with a label out of range for its rate.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("a timecode label is out of range for its frame rate")]
+pub struct InvalidSmpteTimecode;
+
+#[cfg(feature = "serde")]
+impl From<SmpteTimecode> for SmpteTimecodeRaw {
+    fn from(t: SmpteTimecode) -> Self {
+        Self {
+            hours: t.hours,
+            minutes: t.minutes,
+            seconds: t.seconds,
+            frames: t.frames,
+            frame_rate: t.frame_rate,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<SmpteTimecodeRaw> for SmpteTimecode {
+    type Error = InvalidSmpteTimecode;
+
+    fn try_from(raw: SmpteTimecodeRaw) -> Result<Self, Self::Error> {
+        Self::new(
+            raw.hours,
+            raw.minutes,
+            raw.seconds,
+            raw.frames,
+            raw.frame_rate,
+        )
+        .ok_or(InvalidSmpteTimecode)
+    }
 }
 
 impl SmpteTimecode {
@@ -297,26 +299,26 @@ impl SmpteTimecode {
 
     /// Hours, 0..=23. MTC carries this in 5 bits split across two nibbles.
     #[must_use]
-    pub const fn hours(&self) -> u8 {
+    pub const fn hours(self) -> u8 {
         self.hours
     }
 
     /// Minutes, 0..=59.
     #[must_use]
-    pub const fn minutes(&self) -> u8 {
+    pub const fn minutes(self) -> u8 {
         self.minutes
     }
 
     /// Seconds, 0..=59.
     #[must_use]
-    pub const fn seconds(&self) -> u8 {
+    pub const fn seconds(self) -> u8 {
         self.seconds
     }
 
     /// Frames within the second, below [`frame_rate`](Self::frame_rate)'s label
     /// count.
     #[must_use]
-    pub const fn frames(&self) -> u8 {
+    pub const fn frames(self) -> u8 {
         self.frames
     }
 
@@ -324,7 +326,7 @@ impl SmpteTimecode {
     /// the top hours bit, so it arrives with the position rather than being
     /// configured out of band.
     #[must_use]
-    pub const fn frame_rate(&self) -> SmpteFrameRate {
+    pub const fn frame_rate(self) -> SmpteFrameRate {
         self.frame_rate
     }
 }
@@ -347,7 +349,7 @@ impl SmpteTimecode {
     /// are mapped to the frames that elapsed. Non-drop 29.97 labels are counted
     /// at face value, at 30000/1001 frames per second.
     #[must_use]
-    pub fn to_seconds(&self) -> Seconds {
+    pub fn to_seconds(self) -> Seconds {
         let (num, den) = self.frame_rate.ratio();
         Seconds::new(self.frame_count() as f64 * den as f64 / num as f64)
     }
@@ -357,7 +359,7 @@ impl SmpteTimecode {
     /// Under [`SmpteFrameRate::Fps2997Df`] this skips the labels `;00` and
     /// `;01` that each minute not divisible by ten omits (SMPTE 12M). Labels
     /// that cannot occur in drop-frame are counted as the next label that does.
-    pub fn frame_count(&self) -> u64 {
+    pub fn frame_count(self) -> u64 {
         let per_sec = self.frame_rate.labels_per_second();
         let minutes = u64::from(self.hours) * 60 + u64::from(self.minutes);
         let mut frames = u64::from(self.frames);

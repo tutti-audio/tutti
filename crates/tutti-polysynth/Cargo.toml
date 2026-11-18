@@ -29,7 +29,10 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # same functions `SvfFilterNode`/`LadderFilterNode` use, rather than a copy.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 
-# `f32x8` lanes for the voice bank.
+# The float the synth is generic over.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+
+# The `f32x8` and `f64x4` lanes of the voice bank.
 wide = { version = "1.6", default-features = false }
 
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
