@@ -45,7 +45,7 @@ fn tone(freq: f32, frames: usize) -> Arc<Wave> {
 }
 
 /// Render one case through a real pool and return interleaved stereo output.
-fn render(stretch: f32, cents: f64, seek_at: Option<usize>) -> Vec<f32> {
+fn render(stretch: f64, cents: f64, seek_at: Option<usize>) -> Vec<f32> {
     let (pool, handle) = VoicePool::new().with_handle();
     let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
     // A rolling transport this example advances by hand, a block at a time.
@@ -141,7 +141,7 @@ fn main() {
 
     // name, stretch, cents, seek_at. Every case states what it should sound
     // like; the Python side asserts it without reading this file.
-    let cases: &[(&str, f32, f64, Option<usize>)] = &[
+    let cases: &[(&str, f64, f64, Option<usize>)] = &[
         ("dry", 1.0, 0.0, None),
         ("pitch_up_octave", 1.0, 1200.0, None),
         ("pitch_down_octave", 1.0, -1200.0, None),

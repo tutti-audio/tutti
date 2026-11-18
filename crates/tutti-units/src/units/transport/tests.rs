@@ -226,10 +226,10 @@ fn src_ratio_converts_mismatched_rates() {
 /// at its bound.
 #[test]
 fn playback_rate_follows_the_non_finite_rule() {
-    assert!(PlaybackRate::new_clamped(f32::NAN).get().is_nan());
-    assert_eq!(PlaybackRate::new_clamped(f32::INFINITY), PlaybackRate::MAX);
+    assert!(PlaybackRate::new_clamped(f64::NAN).get().is_nan());
+    assert_eq!(PlaybackRate::new_clamped(f64::INFINITY), PlaybackRate::MAX);
     assert_eq!(
-        PlaybackRate::new_clamped(f32::NEG_INFINITY),
+        PlaybackRate::new_clamped(f64::NEG_INFINITY),
         PlaybackRate::MIN
     );
 }
@@ -305,13 +305,13 @@ fn read_rates_compose_in_series() {
 fn stretch_factor_clamps_and_follows_the_non_finite_rule() {
     assert_eq!(StretchFactor::new_clamped(8.0), StretchFactor::MAX);
     assert_eq!(StretchFactor::new_clamped(0.1), StretchFactor::MIN);
-    assert!(StretchFactor::new_clamped(f32::NAN).get().is_nan());
+    assert!(StretchFactor::new_clamped(f64::NAN).get().is_nan());
     assert_eq!(
-        StretchFactor::new_clamped(f32::INFINITY),
+        StretchFactor::new_clamped(f64::INFINITY),
         StretchFactor::MAX
     );
     assert_eq!(
-        StretchFactor::new_clamped(f32::NEG_INFINITY),
+        StretchFactor::new_clamped(f64::NEG_INFINITY),
         StretchFactor::MIN
     );
 }

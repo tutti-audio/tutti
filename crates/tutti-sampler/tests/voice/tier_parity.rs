@@ -691,7 +691,7 @@ fn disk_varispeed_transposes_by_its_factor() {
          the disk tier is not at unity rate and every ratio below is meaningless"
     );
 
-    for factor in [2.0f32, 0.5, 1.5] {
+    for factor in [2.0f64, 0.5, 1.5] {
         // Rewind before each factor.
         //
         // A placed voice's read position is `playhead x rate`, so a faster
@@ -703,7 +703,7 @@ fn disk_varispeed_transposes_by_its_factor() {
         clock.seek_seconds(0.0);
         voice.set_speed(PlaybackRate::new(factor));
 
-        let want = base_hz * factor as f64;
+        let want = base_hz * factor;
 
         // A varispeed change moves the file position without moving the
         // playhead, so the gate re-seeks and the streamer refills from the new
@@ -752,7 +752,7 @@ fn the_tiers_agree_under_varispeed() {
         .expect("streamer builds");
     let (mut disk, disk_clock, _stream) = stream_at(&mut streamer, &path, 0.0);
 
-    for factor in [2.0f32, 0.5] {
+    for factor in [2.0f64, 0.5] {
         // --- disk ---
         //
         // Rewind first. The memory tier below is rebuilt with a fresh clock each
