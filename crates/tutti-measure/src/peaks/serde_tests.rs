@@ -7,7 +7,7 @@ fn block(v: f32) -> PeakBlock {
     PeakBlock {
         min: -v,
         max: v,
-        rms: Amplitude(v / 2.0),
+        rms: Amplitude(f64::from(v / 2.0)),
     }
 }
 

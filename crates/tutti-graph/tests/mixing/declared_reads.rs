@@ -58,8 +58,8 @@ impl Node for Declared {
         let band1 = self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, 1);
         show(io.output(0), cutoff, self.cutoff.load().0 as f32);
         show(io.output(1), q, self.q.load().0);
-        show(io.output(2), band1, self.bands[1].load().0);
-        show(io.output(3), band0, self.bands[0].load().0);
+        show(io.output(2), band1, self.bands[1].load().0 as f32);
+        show(io.output(3), band0, self.bands[0].load().0 as f32);
         Status::Modified
     }
     fn reset(&mut self) {}

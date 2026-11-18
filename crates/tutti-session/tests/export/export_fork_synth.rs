@@ -254,7 +254,7 @@ fn an_exported_polysynth_plays_its_clip() {
 /// `Session::set`.)
 #[test]
 fn a_param_on_a_synth_reaches_it_and_its_fork() {
-    let peak = |volume: Option<f32>| {
+    let peak = |volume: Option<f64>| {
         let mut session = Session::builder()
             .inputs(ChannelLayout::EMPTY)
             .outputs_floor(ChannelLayout::STEREO)
@@ -269,7 +269,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             let _ = session.update();
             assert_eq!(
                 controls.get(UnitParam::Volume),
-                Some(v),
+                Some(v as f32),
                 "the write reaches the live synth's volume cell"
             );
         }

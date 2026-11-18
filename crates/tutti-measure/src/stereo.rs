@@ -127,7 +127,7 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     }
 
     let count = n as f64;
-    let rms = |sum: f64| Amplitude((sum / count).sqrt() as f32);
+    let rms = |sum: f64| Amplitude((sum / count).sqrt());
 
     let denominator = (sum_ll * sum_rr).sqrt();
     let correlation = if denominator > 1e-20 {
@@ -139,7 +139,8 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     let (level_l, level_r) = (rms(sum_ll), rms(sum_rr));
     let total = level_l.get() + level_r.get();
     let balance = if total > 1e-20 {
-        StereoBalance::new_clamped((level_r.get() - level_l.get()) / total)
+        // `StereoBalance` is an `f32` unit: the ratio narrows once.
+        StereoBalance::new_clamped(((level_r.get() - level_l.get()) / total) as f32)
     } else {
         StereoBalance::CENTER
     };
@@ -214,6 +215,13 @@ impl StereoSmoother {
         let cfg = self.cfg;
         let smooth =
             |old: f32, new: f32| Smoother::toward(old, new, cfg.coeff_over(new > old, dt) as f32);
+        let smooth_level = |old: Amplitude, new: Amplitude| {
+            Amplitude(Smoother::toward(
+                old.get(),
+                new.get(),
+                cfg.coeff_over(new > old, dt),
+            ))
+        };
 
         let correlation = Correlation::new_clamped(smooth(
             self.current.correlation.get(),
@@ -223,22 +231,10 @@ impl StereoSmoother {
             StereoBalance::new_clamped(smooth(self.current.balance.get(), instant.balance.get()));
 
         let levels = StereoLevels {
-            mid: Amplitude(smooth(
-                self.current.levels.mid.get(),
-                instant.levels.mid.get(),
-            )),
-            side: Amplitude(smooth(
-                self.current.levels.side.get(),
-                instant.levels.side.get(),
-            )),
-            left: Amplitude(smooth(
-                self.current.levels.left.get(),
-                instant.levels.left.get(),
-            )),
-            right: Amplitude(smooth(
-                self.current.levels.right.get(),
-                instant.levels.right.get(),
-            )),
+            mid: smooth_level(self.current.levels.mid, instant.levels.mid),
+            side: smooth_level(self.current.levels.side, instant.levels.side),
+            left: smooth_level(self.current.levels.left, instant.levels.left),
+            right: smooth_level(self.current.levels.right, instant.levels.right),
         };
 
         self.current = StereoReading {

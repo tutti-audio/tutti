@@ -89,7 +89,7 @@ impl Rig {
     }
 }
 
-fn faded(base: f32) -> EdgeGain {
+fn faded(base: f64) -> EdgeGain {
     EdgeGain::new(Amplitude::new(base))
 }
 
@@ -245,7 +245,7 @@ fn parallel_equals_serial_for_a_graph_mid_fade() {
                 EdgeFade::Out
             };
             ed.set_edge_fade(output_edge(k), fade).expect("edge");
-            ed.set_edge_gain(output_edge(k), Amplitude::new(0.25 * k as f32))
+            ed.set_edge_gain(output_edge(k), Amplitude::new(0.25 * k as f64))
                 .expect("edge");
         }
         ed.commit().expect("commits");

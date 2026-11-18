@@ -6,9 +6,9 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// 10^-3 exactly. At RT60 2 s it loses 30 dB: 10^-1.5.
 #[test]
 fn a_loop_that_decays_sixty_decibels_per_trip_has_a_thousandth_gain() {
-    assert!((loop_gain(SampleSpan::of(48_000.0), Seconds(1.0), RATE).get() - 1e-3).abs() < 1e-9);
+    assert!((loop_gain(SampleSpan::of(48_000.0), Seconds(1.0), RATE).get() - 1e-3).abs() < 1e-17);
     let g = loop_gain(SampleSpan::of(48_000.0), Seconds(2.0), RATE);
-    assert!((g.get() - 10f32.powf(-1.5)).abs() < 1e-6, "{g}");
+    assert!((g.get() - 10f64.powf(-1.5)).abs() < 1e-15, "{g:?}");
 }
 
 /// The two functions are inverses, over delays, decays and rates.
@@ -74,7 +74,7 @@ fn the_edges_of_the_formula() {
         f32::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(f32::NAN), SampleSpan::of(100.0), RATE).to_f32(),
+        rt60_from_gain(Amplitude(f64::NAN), SampleSpan::of(100.0), RATE).to_f32(),
         f32::INFINITY
     );
     assert_eq!(

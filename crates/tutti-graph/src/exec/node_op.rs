@@ -264,7 +264,7 @@ pub(super) fn fading_node_op<
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
             let (g_out, g_in) = x.law.gains(x.done + i, x.len);
-            *y = *y * F::from_f32(g_in) + o * F::from_f32(g_out);
+            *y = *y * F::from_f64(g_in.get()) + o * F::from_f64(g_out.get());
         }
         st.flags.set(s, 0);
     }

@@ -49,12 +49,8 @@ fn reduction(level: f64, threshold: f64, knee: f64, ratio: f64) -> f64 {
 /// The band's gain in dB at `level` dB: the cut of a downward band, the boost of an upward
 /// one (the reduction curve about the threshold, mirrored), held within `range`.
 fn band_gain(mode: DynamicMode, level: f64, c: &DynamicEqControls) -> f64 {
-    let (t, k, r) = (
-        f64::from(c.threshold.get()),
-        f64::from(c.knee.get()),
-        f64::from(c.ratio.get()),
-    );
-    let range = f64::from(c.range.get());
+    let (t, k, r) = (c.threshold.get(), c.knee.get(), f64::from(c.ratio.get()));
+    let range = c.range.get();
     match mode {
         DynamicMode::Downward => -reduction(level, t, k, r).min(range),
         DynamicMode::Upward => reduction(2.0 * t - level, t, k, r).min(range),
@@ -75,7 +71,7 @@ fn bell_db(f: f64, f0: f64, q: f64, gain: f64) -> f64 {
     10.0 * (re * re + im * im).log10()
 }
 
-fn controls(threshold: f32, knee: f32, ratio: f32, range: f32, q: f32) -> DynamicEqControls {
+fn controls(threshold: f64, knee: f64, ratio: f32, range: f64, q: f32) -> DynamicEqControls {
     DynamicEqControls {
         threshold: Db(threshold),
         knee: Db(knee),
@@ -150,7 +146,7 @@ fn a_downward_band_settles_on_the_static_curve_at_its_centre() {
                     "q {q} {c:?} at {level} dB: {got} against the curve's {want}"
                 );
                 assert!(
-                    (f64::from(held.get()) - want).abs() < 0.1,
+                    (held.get() - want).abs() < 0.1,
                     "q {q} {c:?} at {level} dB: the band holds {held:?}, the curve gives {want}"
                 );
             }
@@ -178,7 +174,7 @@ fn an_upward_band_settles_on_the_mirrored_static_curve_at_its_centre() {
                     "q {q} {c:?} at {level} dB: {got} against the curve's {want}"
                 );
                 assert!(
-                    (f64::from(held.get()) - want).abs() < 0.1,
+                    (held.get() - want).abs() < 0.1,
                     "q {q} {c:?} at {level} dB: the band holds {held:?}, the curve gives {want}"
                 );
             }
@@ -273,7 +269,7 @@ fn the_attack_reaches_one_minus_inverse_e_in_its_time_constant() {
     let x = sine(1000.0, amplitude(-6.0), tau);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     run(&mut b, &[&x], &[&x], 480);
-    let fraction = f64::from(b.gain().get()) / full;
+    let fraction = b.gain().get() / full;
     assert!(
         (fraction - (1.0 - (-1.0f64).exp())).abs() < 0.03,
         "after one time constant {fraction}"
@@ -294,10 +290,10 @@ fn the_release_falls_to_inverse_e_in_its_time_constant() {
     let loud = sine(1000.0, amplitude(-6.0), SETTLE);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     run(&mut b, &[&loud], &[&loud], 480);
-    assert!((f64::from(b.gain().get()) - full).abs() < 0.1);
+    assert!((b.gain().get() - full).abs() < 0.1);
     let quiet = vec![0.0f32; tau];
     run(&mut b, &[&quiet], &[&quiet], 480);
-    let fraction = f64::from(b.gain().get()) / full;
+    let fraction = b.gain().get() / full;
     assert!(
         (fraction - (-1.0f64).exp()).abs() < 0.03,
         "after one time constant {fraction}"
@@ -367,23 +363,19 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
             ..base
         },
     ];
-    for (bad, bad_hz) in [
-        (f32::NAN, f64::NAN),
-        (f32::INFINITY, f64::INFINITY),
-        (f32::NEG_INFINITY, f64::NEG_INFINITY),
-    ] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(DynamicEqControls {
-            center: Hz(bad_hz),
-            q: Q(bad),
+            center: Hz(bad),
+            q: Q(bad as f32),
             threshold: Db(bad),
             knee: Db(bad),
-            ratio: CompressionRatio(bad),
+            ratio: CompressionRatio(bad as f32),
             range: Db(bad),
             ..base
         });
         all.push(DynamicEqControls {
-            attack: Seconds(f64::from(bad)),
-            release: Seconds(f64::from(bad)),
+            attack: Seconds(bad),
+            release: Seconds(bad),
             ..base
         });
     }

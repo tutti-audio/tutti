@@ -68,7 +68,7 @@ fn probe(name: &str, bad: f32, make: impl FnOnce() -> Box<dyn Node>) -> Option<S
 #[test]
 fn sweep() {
     let mut bad_cases = vec![];
-    let d = |v: f32| Db(v);
+    let d = |v: f32| Db(f64::from(v));
     let s = |v: f32| Seconds::from_f32(v);
     for (b, bz) in BAD.into_iter().zip(BAD_HZ) {
         let mut add = |r: Option<String>| bad_cases.extend(r);

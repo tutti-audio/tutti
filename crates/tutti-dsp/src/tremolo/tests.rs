@@ -169,8 +169,14 @@ fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
             for (n, (&out_l, &out_r)) in out[0].iter().zip(&out[1]).enumerate() {
                 let u = (TAU * HZ * n as f64 / RATE.get()).sin();
                 let (l, r) = pan_gains(Pan((f64::from(d) * u) as f32), law);
-                assert!((out_l - l.get()).abs() < 1e-5, "{law:?} {d} L {n}");
-                assert!((out_r - r.get()).abs() < 1e-5, "{law:?} {d} R {n}");
+                assert!(
+                    (f64::from(out_l) - l.get()).abs() < 1e-5,
+                    "{law:?} {d} L {n}"
+                );
+                assert!(
+                    (f64::from(out_r) - r.get()).abs() < 1e-5,
+                    "{law:?} {d} R {n}"
+                );
                 let power = out_l * out_l + out_r * out_r;
                 assert!((power - 1.0).abs() < 1e-5, "{law:?} {d} power {n}");
             }

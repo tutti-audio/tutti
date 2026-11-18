@@ -162,11 +162,15 @@ fn a_mute_and_a_dim_ramp_and_settle() {
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
     // Left ramps from unity to silence; right from unity to the dim.
     for k in 0..n {
-        let t = (k + 1) as f32 / n as f32;
+        // The ramp is `f64`; the `f32` samples take its gain narrowed.
+        let t = (k + 1) as f64 / n as f64;
         let (left, right) = if k + 1 >= n {
             (0.0, 0.5)
         } else {
-            (1.0 + (0.0 - 1.0) * t, 1.0 + (0.5 - 1.0) * t)
+            (
+                (1.0 + (0.0 - 1.0) * t) as f32,
+                (1.0 + (0.5 - 1.0) * t) as f32,
+            )
         };
         assert_eq!(out[2 * k], left, "left, frame {k}");
         assert_eq!(out[2 * k + 1], right, "right, frame {k}");
@@ -182,7 +186,7 @@ fn a_level_that_is_not_a_gain_is_refused_when_set() {
     let mut s = offline(Session::builder(), 2);
     let policy = OutputPolicy {
         levels: FoldLevels {
-            surround: Amplitude(f32::NAN),
+            surround: Amplitude(f64::NAN),
             ..FoldLevels::default()
         },
         ..OutputPolicy::default()

@@ -18,7 +18,7 @@ pub(crate) fn ring_frames(pole: f64, floor: Db) -> f64 {
     if pole >= 1.0 {
         return f64::INFINITY;
     }
-    let target = libm::log(Db::to_amplitude_f64(f64::from(floor.get())));
+    let target = libm::log(floor.to_amplitude().get());
     (target / libm::log(pole)).max(0.0)
 }
 

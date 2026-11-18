@@ -124,7 +124,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         g.connect(from, to).unwrap();
     }
     let kept = Edge::new(OutPort::new(a, 0), x.input(0));
-    kept.set_gain(g, Amplitude::new(GAIN)).expect("an edge");
+    kept.set_gain(g, Amplitude::new(f64::from(GAIN)))
+        .expect("an edge");
     let events = s.update();
     assert!(!refused(&events));
     assert!(unwired(&events).is_empty(), "nothing was dropped yet");
@@ -172,7 +173,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     );
     assert_eq!(
         kept.gain(s.graph()),
-        Some(Amplitude::new(GAIN)),
+        Some(Amplitude::new(f64::from(GAIN))),
         "the surviving edge keeps its gain"
     );
     assert!(

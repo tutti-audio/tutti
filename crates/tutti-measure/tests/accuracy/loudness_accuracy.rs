@@ -49,9 +49,9 @@ fn measure(rate: f64, amp: f64) -> tutti_measure::Loudness {
 fn true_peak_is_the_signals_amplitude() {
     for &amp in &[1.0f64, 0.5, 0.25, 0.1, 0.01] {
         let got = measure(48_000.0, amp).true_peak.get();
-        let want = f64::from(Db::from_amplitude(Amplitude::new(amp as f32)).get());
+        let want = Db::from_amplitude(Amplitude::new(amp)).get();
         assert!(
-            (got as f64 - want).abs() < 0.3,
+            (got - want).abs() < 0.3,
             "amplitude {amp} should peak at {want:.3} dBTP, got {got:.3} — \
              true peak is 4x oversampled so a small overshoot is expected, \
              0.3 dB is not"
@@ -78,7 +78,7 @@ fn a_known_signal_reads_the_loudness_the_spec_says() {
     ] {
         let got = measure(48_000.0, amp).lufs.get();
         assert!(
-            (got as f64 - want).abs() < 0.5,
+            (got - want).abs() < 0.5,
             "a 1 kHz stereo sine at amplitude {amp} should read {want:.2} LUFS, \
              got {got:.3} — beyond the 0.5 LU R128 allows between meters"
         );
@@ -95,9 +95,9 @@ fn a_known_signal_reads_the_loudness_the_spec_says() {
 fn loudness_tracks_amplitude_in_db() {
     for &(hi, lo) in &[(1.0f64, 0.5f64), (0.5, 0.25), (0.1, 0.01)] {
         let delta = measure(48_000.0, hi).lufs.get() - measure(48_000.0, lo).lufs.get();
-        let want = f64::from(Db::from_amplitude(Amplitude::new((hi / lo) as f32)).get());
+        let want = Db::from_amplitude(Amplitude::new(hi / lo)).get();
         assert!(
-            (delta as f64 - want).abs() < 0.15,
+            (delta - want).abs() < 0.15,
             "going from amplitude {hi} to {lo} should drop {want:.3} dB, \
              got {delta:.3}"
         );
@@ -112,7 +112,7 @@ fn loudness_tracks_amplitude_in_db() {
 /// same *signal*, resynthesised per rate, and checks the readings agree.
 #[test]
 fn loudness_is_independent_of_sample_rate() {
-    let readings: Vec<(f64, f32, f32)> = [44_100.0f64, 48_000.0, 96_000.0]
+    let readings: Vec<(f64, f64, f64)> = [44_100.0f64, 48_000.0, 96_000.0]
         .iter()
         .map(|&rate| {
             let l = measure(rate, 0.5);
@@ -120,18 +120,18 @@ fn loudness_is_independent_of_sample_rate() {
         })
         .collect();
 
-    let lufs: Vec<f32> = readings.iter().map(|r| r.1).collect();
-    let spread = lufs.iter().cloned().fold(f32::MIN, f32::max)
-        - lufs.iter().cloned().fold(f32::MAX, f32::min);
+    let lufs: Vec<f64> = readings.iter().map(|r| r.1).collect();
+    let spread = lufs.iter().cloned().fold(f64::MIN, f64::max)
+        - lufs.iter().cloned().fold(f64::MAX, f64::min);
     assert!(
         spread < 0.2,
         "the same 1 kHz tone reads {spread:.3} LU differently across sample \
          rates: {readings:?}"
     );
 
-    let peaks: Vec<f32> = readings.iter().map(|r| r.2).collect();
-    let peak_spread = peaks.iter().cloned().fold(f32::MIN, f32::max)
-        - peaks.iter().cloned().fold(f32::MAX, f32::min);
+    let peaks: Vec<f64> = readings.iter().map(|r| r.2).collect();
+    let peak_spread = peaks.iter().cloned().fold(f64::MIN, f64::max)
+        - peaks.iter().cloned().fold(f64::MAX, f64::min);
     assert!(
         peak_spread < 0.3,
         "true peak varies by {peak_spread:.3} dB across sample rates: \

@@ -9,12 +9,23 @@ use crate::testing::noise;
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
 
-fn controls(db: f32) -> BrickwallControls {
+/// The ceiling the `f32` clip runs at: the amplitude of `db`, narrowed once.
+fn ceiling_of(db: f64) -> f32 {
+    Db(db).to_amplitude().get() as f32
+}
+
+/// The ceiling a fed `f32` lane value runs at: `10^(db / 20)` computed in `f32`, as the per-frame
+/// read does.
+fn fed_ceiling_of(db: f32) -> f32 {
+    libm::powf(10.0, db / 20.0)
+}
+
+fn controls(db: f64) -> BrickwallControls {
     BrickwallControls { ceiling: Db(db) }
 }
 
 /// The ceilings the tests run at: a grid across the range and seeded draws.
-fn ceilings() -> Vec<f32> {
+fn ceilings() -> Vec<f64> {
     let mut all = vec![-96.0, -60.0, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0];
     let mut rng = StdRng::seed_from_u64(24);
     all.extend((0..64).map(|_| rng.random_range(-80.0..20.0)));
@@ -51,13 +62,13 @@ fn render_blocks(
 }
 
 /// `xs` on one channel through a bank aimed at `db`.
-fn through(db: f32, xs: &[f32]) -> Vec<f32> {
+fn through(db: f64, xs: &[f32]) -> Vec<f32> {
     render_blocks(controls(db), xs, None, 64).remove(0)
 }
 
 /// The ceiling of `db` from its definition, `10^(db/20)`.
-fn amplitude_of(db: f32) -> f64 {
-    10f64.powf(f64::from(db) / 20.0)
+fn amplitude_of(db: f64) -> f64 {
+    10f64.powf(db / 20.0)
 }
 
 /// `y = clamp(x, -c, c)`, from the definition.
@@ -76,7 +87,7 @@ fn definition(x: f32, c: f32) -> f32 {
 /// is the default, 0 dB.
 #[test]
 fn the_ceiling_is_the_amplitude_of_the_decibels() {
-    for db in [-96.0f32, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0] {
+    for db in [-96.0f64, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0] {
         let c = f64::from(through(db, &[1e30])[0]);
         assert!(
             (c / amplitude_of(db) - 1.0).abs() < 1e-6,
@@ -84,10 +95,10 @@ fn the_ceiling_is_the_amplitude_of_the_decibels() {
             amplitude_of(db)
         );
     }
-    assert_eq!(through(f32::INFINITY, &[1e30])[0], 1e30);
-    assert_eq!(through(f32::NEG_INFINITY, &[1e30])[0], 0.0);
+    assert_eq!(through(f64::INFINITY, &[1e30])[0], 1e30);
+    assert_eq!(through(f64::NEG_INFINITY, &[1e30])[0], 0.0);
     assert_eq!(
-        through(f32::NAN, &[2.0])[0],
+        through(f64::NAN, &[2.0])[0],
         1.0,
         "a NaN ceiling is the default, 0 dB"
     );
@@ -105,7 +116,7 @@ fn the_bank_is_the_clamp_and_its_four_consequences() {
     xs.extend((-400..=400).map(|i| i as f32 * 0.01));
     let negated: Vec<f32> = xs.iter().map(|x| -x).collect();
     for db in ceilings() {
-        let ceiling = Db(db).to_amplitude().get();
+        let ceiling = ceiling_of(db);
         let y = through(db, &xs);
         let again = through(db, &y);
         let odd = through(db, &negated);
@@ -129,9 +140,9 @@ fn the_bank_is_the_clamp_and_its_four_consequences() {
 #[test]
 fn infinite_ceilings_pass_everything_and_mute() {
     let xs = [1e30f32, -3.0, 0.0, f32::INFINITY, f32::NEG_INFINITY];
-    assert_eq!(through(f32::INFINITY, &xs), xs);
+    assert_eq!(through(f64::INFINITY, &xs), xs);
     assert!(
-        through(f32::NEG_INFINITY, &xs)
+        through(f64::NEG_INFINITY, &xs)
             .iter()
             .all(|y| y.abs() == 0.0)
     );
@@ -142,8 +153,8 @@ fn infinite_ceilings_pass_everything_and_mute() {
 #[test]
 fn the_render_is_the_clamp_at_any_block() {
     let x = noise(5, 2048, 2.0);
-    for db in [-18.0f32, -6.0, 0.0, 6.0] {
-        let c = Db(db).to_amplitude().get();
+    for db in [-18.0f64, -6.0, 0.0, 6.0] {
+        let c = ceiling_of(db);
         for block in [1, 17, 64, 512] {
             for (ch, out) in render_blocks(controls(db), &x, None, block)
                 .iter()
@@ -172,14 +183,14 @@ fn a_fed_ceiling_is_read_per_frame() {
     lane[100] = f32::INFINITY;
     lane[101] = f32::NEG_INFINITY;
     let base = -6.0;
-    let held = Db(base).to_amplitude().get();
+    let held = ceiling_of(base);
     for block in [1, 17, 64, 512] {
         for out in render_blocks(controls(base), &x, Some(&lane), block) {
             for (i, (&y, &x)) in out.iter().zip(&x).enumerate() {
                 let want = if lane[i].is_nan() {
                     definition(x, held)
                 } else {
-                    definition(x, Db(lane[i]).to_amplitude().get())
+                    definition(x, fed_ceiling_of(lane[i]))
                 };
                 assert_eq!(y, want, "block {block}, frame {i}, lane {}", lane[i]);
             }
@@ -208,8 +219,8 @@ fn the_output_never_passes_the_ceiling_for_a_square_an_impulse_train_or_a_burst(
             _ => f32::NEG_INFINITY,
         })
         .collect();
-    for db in [-60.0f32, -18.0, -6.0, -0.3, 0.0] {
-        let ceiling = Db(db).to_amplitude().get();
+    for db in [-60.0f64, -18.0, -6.0, -0.3, 0.0] {
+        let ceiling = ceiling_of(db);
         for (name, x) in [("square", &square), ("train", &train), ("burst", &burst)] {
             for out in render_blocks(controls(db), x, None, 64) {
                 let peak = out.iter().fold(0.0f32, |m, y| m.max(y.abs()));
@@ -244,21 +255,19 @@ fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
         Planes::new(&[&x64[..]]).unwrap(),
         PlanesMut::new(&mut [&mut y64[..]]).unwrap(),
     );
-    let c = Db(-6.0).to_amplitude().get();
+    let c = ceiling_of(-6.0);
     for (i, (&y, &x)) in y64.iter().zip(&x32).enumerate() {
         assert_eq!(y, f64::from(definition(x, c)), "frame {i}");
     }
 }
 
 /// An `f64` clipper clamps in `f64`: over `-20 dB` a signal of more than 24 bits leaves at the
-/// closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it (`Db` stores `f32`),
-/// and widened, to 1e-15, and under `0 dB` it comes
-/// out as it went in.
+/// closed form `10^(-20 / 20)`, to 1e-15, and under `0 dB` it comes out as it went in.
 #[test]
 fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = wide_signal(64);
-    let render = |db: f32| -> Vec<f64> {
+    let render = |db: f64| -> Vec<f64> {
         let mut bank = BrickwallBank::<f64>::new();
         bank.aim(&controls(db));
         let mut y = vec![0.0f64; x.len()];
@@ -271,7 +280,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     };
     assert_close_f64(
         &render(-20.0),
-        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); x.len()],
+        &vec![Db(-20.0).to_amplitude().get(); x.len()],
         1e-15,
     );
     assert_close_f64(&render(0.0), &x, 0.0);

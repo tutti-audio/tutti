@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn test_amplitude_db_conversion() {
-    assert!((amplitude_to_db(Amplitude::new(1.0)).get() - 0.0).abs() < 0.001);
-    assert!((amplitude_to_db(Amplitude::new(0.5)).get() - (-6.02)).abs() < 0.1);
-    assert!((Db::new(0.0).to_amplitude().get() - 1.0).abs() < 0.001);
-    assert!((Db::new(-6.0).to_amplitude().get() - 0.501).abs() < 0.01);
+    assert_eq!(amplitude_to_db(Amplitude::UNITY), Db::UNITY);
+    assert!((amplitude_to_db(Amplitude::new(0.5)).get() + 6.020_599_913_279_624).abs() < 1e-12);
+    assert_eq!(Db::UNITY.to_amplitude(), Amplitude::UNITY);
+    assert!((Db::new(-6.0).to_amplitude().get() - 0.501_187_233_627_272_3).abs() < 1e-15);
 }
 
 /// The floor lives here, not in `Db::from_amplitude`. The shared converter
@@ -66,7 +66,7 @@ fn test_compressor_gain_reduction_hard_knee() {
         Db::new(0.0),
     )
     .get();
-    assert!((gr - 7.5).abs() < 0.01); // 10dB over * (1 - 1/4) = 7.5
+    assert_eq!(gr, 7.5); // 10dB over * (1 - 1/4) = 7.5
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_compressor_gain_reduction_soft_knee() {
         Db::new(6.0),
     )
     .get();
-    assert!((gr_hard - gr_soft).abs() < 0.01);
+    assert_eq!(gr_hard, gr_soft);
     // In knee region: quadratic transition (non-zero, less than hard)
     let gr_knee = compute_compressor_gain_reduction(
         Db::new(-20.0),
@@ -114,7 +114,7 @@ fn test_compressor_gain_reduction_soft_knee() {
 fn test_compute_limiter_gain() {
     // Below threshold: gain = ceiling - threshold offset
     let gain = compute_limiter_gain(Db::new(-20.0), Db::new(-6.0), Db::new(-0.3)).get();
-    assert!((gain - Db(-0.3 - (-6.0)).to_amplitude().get()).abs() < 0.001);
+    assert_eq!(gain, Db(-0.3 - (-6.0)).to_amplitude().get());
     // Above threshold: reduces gain
     let gain = compute_limiter_gain(Db::new(0.0), Db::new(-6.0), Db::new(-0.3)).get();
     assert!(gain < 1.0);
@@ -128,7 +128,7 @@ fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
     let (threshold, ceiling) = (Db(-6.0), Db(-0.3));
     let curve = LimiterCurve::new(threshold, ceiling);
     for (input, want) in [
-        (-60.0f32, -54.3f32),
+        (-60.0f64, -54.3f64),
         (-7.0, -1.3),
         (-6.1, -0.4),
         (-5.9, -0.3),
@@ -141,8 +141,8 @@ fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
             peak * compute_limiter_gain(amplitude_to_db(peak), threshold, ceiling).get(),
         )
         .get();
-        assert!((block - want).abs() < 1e-3, "block: {input} -> {block}");
-        assert!((fed - want).abs() < 1e-3, "fed: {input} -> {fed}");
+        assert!((block - want).abs() < 1e-12, "block: {input} -> {block}");
+        assert!((fed - want).abs() < 1e-12, "fed: {input} -> {fed}");
     }
 }
 
@@ -152,19 +152,19 @@ fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
 #[test]
 fn the_block_and_fed_forms_are_one_curve() {
     for (t, c) in [
-        (-6.0f32, -0.3f32),
+        (-6.0f64, -0.3f64),
         (-12.0, -1.0),
         (-3.0, -9.0),
         (-6.0, -6.0),
     ] {
         let curve = LimiterCurve::new(Db(t), Db(c));
-        let mut peak_db = -80.0f32;
+        let mut peak_db = -80.0f64;
         while peak_db <= 12.0 {
             let peak = Db(peak_db).to_amplitude();
             let block = curve.gain(peak).get();
             let fed = compute_limiter_gain(amplitude_to_db(peak), Db(t), Db(c)).get();
             assert!(
-                (block - fed).abs() <= 1e-5 * fed,
+                (block - fed).abs() <= 1e-12 * fed,
                 "({t}, {c}) at {peak_db}: {block} against {fed}"
             );
             peak_db += 0.5;
@@ -176,48 +176,84 @@ fn the_block_and_fed_forms_are_one_curve() {
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
     let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(Amplitude(f32::NAN)), curve.below);
+    assert_eq!(curve.gain(Amplitude(f64::NAN)), curve.below);
     assert!(curve.below > Amplitude(1.0));
 }
 
-/// The generic dB helpers at `f32` are `Db`'s converters to the bit, over a sweep that
-/// includes silence, negatives, the infinities, NaN, unity and the extremes: `level_db` is
-/// `Db::from_amplitude` with silence at `Db::FLOOR`, and `db_gain` is `Db::to_amplitude`.
+/// A threshold past the clamp (under -758 dB, or `-inf`) and a peak down to the smallest
+/// subnormal never make a gain that is not finite, and the output `peak * gain` never passes
+/// the ceiling: the boost under the threshold is held to the ceiling over the clamped threshold.
 #[test]
-fn the_generic_db_helpers_are_the_f32_converters_to_the_bit() {
-    let levels = (-300..=300).map(|k| 10f32.powf(k as f32 / 10.0)).chain([
-        0.0,
-        1.0,
-        f32::MIN_POSITIVE,
-        f32::MAX,
-        0.5,
-        2.0,
-        -1.0,
-        -0.0,
-        f32::NEG_INFINITY,
-        f32::INFINITY,
-        f32::NAN,
-    ]);
+fn a_threshold_past_the_clamp_never_overshoots_the_ceiling() {
+    for threshold in [f64::NEG_INFINITY, -800.0, -758.0, -2_000.0] {
+        for ceiling in [-6.0, 0.0, 12.0, 20.0] {
+            let curve = LimiterCurve::new(Db(threshold), Db(ceiling));
+            let bound = Db(ceiling).to_amplitude().get() * (1.0 + 1e-12);
+            for peak in [0.0, 5e-324, 1e-320, 1e-308, 1e-300, 1e-100, 1e-3, 1.0, 1e30] {
+                let gain = curve.gain(Amplitude(peak)).get();
+                assert!(
+                    gain.is_finite(),
+                    "({threshold}, {ceiling}) at {peak}: {gain}"
+                );
+                assert!(
+                    peak * gain <= bound,
+                    "({threshold}, {ceiling}) at {peak}: {}",
+                    peak * gain
+                );
+            }
+        }
+    }
+}
+
+/// The generic dB helpers at `f64` are `Db`'s converters to the bit (silence at `Db::FLOOR`), and
+/// at `f32` the closed forms `20 log10 x` and `10^(d / 20)` computed in `f32` through `libm`, to
+/// the bit, over a sweep that includes silence, the extremes and the infinities.
+#[test]
+fn the_generic_db_helpers_are_the_converters_at_f64_and_the_closed_forms_at_f32() {
+    let levels = (-300..=300)
+        .map(|k| 10f64.powf(f64::from(k) / 10.0))
+        .chain([
+            0.0,
+            1.0,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            0.5,
+            2.0,
+            -1.0,
+            -0.0,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+        ]);
     for x in levels {
         let want = if x <= 0.0 {
             Db::FLOOR
         } else {
             Db::from_amplitude(Amplitude(x))
         };
-        let got = level_db::<f32>(x);
-        if x.is_nan() {
-            assert!(got.is_nan() && want.get().is_nan(), "a NaN level is NaN");
+        assert_eq!(level_db::<f64>(x), want.get(), "level {x}");
+        let narrow = x as f32;
+        let want32 = if narrow <= 0.0 {
+            Db::FLOOR.get() as f32
         } else {
-            assert_eq!(got, want.get(), "level {x}");
-        }
+            20.0f32 * libm::log10f(narrow)
+        };
+        assert_eq!(level_db::<f32>(narrow), want32, "f32 level {narrow}");
     }
-    let dbs = (-4000..=4000).map(|k| k as f32 / 10.0).chain([
+    assert!(level_db::<f64>(f64::NAN).is_nan() && level_db::<f32>(f32::NAN).is_nan());
+    let dbs = (-4000..=4000).map(|k| f64::from(k) / 10.0).chain([
         0.0,
         Db::FLOOR.get(),
-        f32::NEG_INFINITY,
-        f32::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
     ]);
     for d in dbs {
-        assert_eq!(db_gain::<f32>(d), Db(d).to_amplitude().get(), "{d} dB");
+        assert_eq!(db_gain::<f64>(d), Db(d).to_amplitude().get(), "{d} dB");
+        let narrow = d as f32;
+        assert_eq!(
+            db_gain::<f32>(narrow),
+            libm::powf(10.0, narrow / 20.0),
+            "f32 {narrow} dB"
+        );
     }
+    assert!(db_gain::<f64>(f64::NAN).is_nan() && db_gain::<f32>(f32::NAN).is_nan());
 }

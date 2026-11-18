@@ -274,7 +274,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
         panic!("a finite tail")
     };
     let g = f64::from(gm.feedback().get());
-    let trips = (f64::from(TAIL_FLOOR.get()) / 20.0 * std::f64::consts::LN_10 / g.ln()).ceil();
+    let trips = (TAIL_FLOOR.get() / 20.0 * std::f64::consts::LN_10 / g.ln()).ceil();
     let comb = (1.0 + trips) * (1640.0 + 2.0);
     let chain: f64 = [579.0f64, 464.0, 364.0, 248.0]
         .iter()
@@ -620,7 +620,7 @@ fn an_f64_all_pass_is_its_difference_equation() {
 fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x0 = wide_signal(1)[0];
-    let g = f64::from(FreeverbBank::<f64>::FIXED_GAIN.get());
+    let g = FreeverbBank::<f64>::FIXED_GAIN.get();
     let mut x = vec![0.0f64; 1_300];
     x[0] = x0;
     let bank = FreeverbBank::<f64>::new(SampleRate::SR_44K1);

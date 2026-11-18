@@ -125,7 +125,7 @@ fn meter_ops(r: &Rig) -> (usize, usize) {
     )
 }
 
-fn level(m: &mut MeterReader) -> Vec<(f32, f32, usize)> {
+fn level(m: &mut MeterReader) -> Vec<(f64, f64, usize)> {
     m.read()
         .iter()
         .map(|l| (l.peak.get(), l.rms.get(), l.frames.get()))
@@ -156,11 +156,12 @@ fn a_constant_reads_exactly_per_channel() {
     for (k, &v) in values.iter().enumerate() {
         assert!(outs[k].iter().all(|&s| s == v), "output {k} is untouched");
     }
-    let want: Vec<(f32, f32, usize)> = values.iter().map(|&v| (v, v, 100)).collect();
+    let at = |v: f32| (f64::from(v), f64::from(v), 100);
+    let want: Vec<(f64, f64, usize)> = values.iter().map(|&v| at(v)).collect();
     assert_eq!(level(&mut master), want);
     assert_eq!(
         level(&mut track),
-        vec![(values[2], values[2], 100), (values[0], values[0], 100)],
+        vec![at(values[2]), at(values[0])],
         "lanes follow the sources' order"
     );
 }
@@ -238,7 +239,7 @@ fn a_spike_is_held_until_read_and_read_once() {
         "the spike survives three later blocks"
     );
     assert_eq!(l[0].frames, Samples(4000));
-    assert_eq!(l[0].rms.get(), (1.0f64 / 4000.0).sqrt() as f32);
+    assert_eq!(l[0].rms.get(), (1.0f64 / 4000.0).sqrt());
     assert_eq!(
         m.read(),
         vec![Level::default()],
@@ -654,7 +655,7 @@ fn the_master_reads_at_the_outputs_time() {
     // What the output carries: the pulse from frame 30.
     assert!(outs[1][..30].iter().all(|&s| s == 0.0));
     assert!(outs[1][30..].iter().all(|&s| s == 1.0));
-    let tenth = (10.0f64 / 40.0).sqrt() as f32;
+    let tenth = (10.0f64 / 40.0).sqrt();
     assert_eq!(
         level(&mut master),
         vec![(1.0, tenth, 40), (1.0, tenth, 40)],
@@ -672,10 +673,7 @@ fn the_master_reads_at_the_outputs_time() {
     );
     // The pulse ends at frame 50 at the node and at 80 on the output.
     block(&mut r, 40);
-    assert_eq!(
-        level(&mut raw),
-        vec![(1.0, (10.0f64 / 40.0).sqrt() as f32, 40)]
-    );
+    assert_eq!(level(&mut raw), vec![(1.0, (10.0f64 / 40.0).sqrt(), 40)]);
     assert_eq!(
         level(&mut master)[1],
         (1.0, 1.0, 40),

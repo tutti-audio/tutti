@@ -2,7 +2,7 @@ use tutti_ump::ControlValue;
 
 use super::super::*;
 
-fn gain(raw: u32) -> f32 {
+fn gain(raw: u32) -> f64 {
     volume_gain(ControlValue::new(raw)).get()
 }
 
@@ -10,7 +10,7 @@ fn gain(raw: u32) -> f32 {
 fn full_scale_is_0_db_and_zero_is_silence() {
     // M2-125 Table 6, M2-121 Table 8: 0xFFFFFFFF is 0 dB, 0 is -infinity.
     assert_eq!(gain(0xFFFF_FFFF), 0.0);
-    assert_eq!(gain(0), f32::NEG_INFINITY);
+    assert_eq!(gain(0), f64::NEG_INFINITY);
 }
 
 #[test]
@@ -35,6 +35,7 @@ fn a_send_level_is_linear_in_amplitude_and_100_percent_at_full_scale() {
     let level = |raw| send_level(ControlValue::new(raw)).get();
     assert_eq!(level(0xFFFF_FFFF), 1.0);
     assert_eq!(level(0), 0.0);
-    assert!((level(0x4000_0000) - 0.25).abs() < 1e-6);
-    assert!((level(0x8000_0000) - 0.5).abs() < 1e-6);
+    let full = f64::from(u32::MAX);
+    assert_eq!(level(0x4000_0000), f64::from(0x4000_0000_u32) / full);
+    assert_eq!(level(0x8000_0000), f64::from(0x8000_0000_u32) / full);
 }

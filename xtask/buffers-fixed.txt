@@ -13,7 +13,6 @@
 #         spec-f32: <why>    a spec fixes f32 (control values, param lanes).
 #
 # Fixed f32 on audio stays only as one of those kinds; a free-text `measured:` is refused.
-crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  not-audio: a weight per speaker, not a signal
 crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights

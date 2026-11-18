@@ -118,9 +118,9 @@ impl Master {
 
     /// The gain of both sides.
     pub(crate) fn gain(&self) -> MasterGain {
-        let volume: f32 = self.volume.iter().map(|&v| volume_gain(v)).product();
-        let side = |balanced: fn(U14) -> f32| -> Amplitude {
-            Amplitude(volume * self.balance.iter().map(|&b| balanced(b)).product::<f32>())
+        let volume: f64 = self.volume.iter().map(|&v| volume_gain(v)).product();
+        let side = |balanced: fn(U14) -> f64| -> Amplitude {
+            Amplitude(volume * self.balance.iter().map(|&b| balanced(b)).product::<f64>())
         };
         MasterGain {
             left: side(left_gain),
@@ -136,27 +136,27 @@ impl Master {
 }
 
 /// `(value / 16383)^2`.
-fn volume_gain(value: U14) -> f32 {
-    let x = f32::from(value.get()) / f32::from(U14::MAX.get());
+fn volume_gain(value: U14) -> f64 {
+    let x = f64::from(value.get()) / f64::from(U14::MAX.get());
     x * x
 }
 
 /// The left side: unity up to the centre, then falling linearly to 0 at the top.
-fn left_gain(balance: U14) -> f32 {
+fn left_gain(balance: U14) -> f64 {
     let b = balance.get();
     if b <= CENTRE_14 {
         1.0
     } else {
-        f32::from(U14::MAX.get() - b) / f32::from(U14::MAX.get() - CENTRE_14)
+        f64::from(U14::MAX.get() - b) / f64::from(U14::MAX.get() - CENTRE_14)
     }
 }
 
 /// The right side: 0 at the bottom, rising linearly to unity at the centre.
-fn right_gain(balance: U14) -> f32 {
+fn right_gain(balance: U14) -> f64 {
     let b = balance.get();
     if b >= CENTRE_14 {
         1.0
     } else {
-        f32::from(b) / f32::from(CENTRE_14)
+        f64::from(b) / f64::from(CENTRE_14)
     }
 }

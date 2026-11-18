@@ -134,7 +134,8 @@ impl Balance {
     #[inline]
     #[must_use]
     pub fn gains(self) -> (Amplitude, Amplitude) {
-        let b = self.0.clamp(-1.0, 1.0);
+        // A balance is not yet `f64`; its position widens exactly into the `f64` amplitudes.
+        let b = f64::from(self.0.clamp(-1.0, 1.0));
         (Amplitude((1.0 - b).min(1.0)), Amplitude((1.0 + b).min(1.0)))
     }
 }

@@ -19,11 +19,11 @@ fn detect_at(cfg: &OnsetConfig, samples: &[f32], fft: &mut FftScratch) -> Vec<On
     detect_onsets(cfg, Mono::new(samples), rate(), fft).unwrap()
 }
 
-fn amplitude(a: f32) -> OnsetThreshold {
+fn amplitude(a: f64) -> OnsetThreshold {
     OnsetThreshold::of(Amplitude(a))
 }
 
-fn gain(a: f32) -> OnsetSensitivity {
+fn gain(a: f64) -> OnsetSensitivity {
     OnsetSensitivity::of(Amplitude(a))
 }
 
@@ -36,7 +36,7 @@ fn gap(seconds: f64) -> OnsetGap {
 #[test]
 fn the_novelty_curve_is_readable_per_frame_and_scaled_by_sensitivity() {
     let samples = signal(0.5, &[0.2]);
-    let run = |factor: f32| {
+    let run = |factor: f64| {
         let mut meter = OnsetConfig::new(DetectionFunction::Energy)
             .sensitivity(gain(factor))
             .measure(rate())
@@ -220,8 +220,8 @@ fn energy_misses_short_decaying_spikes() {
 #[test]
 fn the_defaults_are_the_documented_ones() {
     let p = plan(flux());
-    assert_eq!(p.threshold, Amplitude(0.3));
-    assert_eq!(p.sensitivity, Amplitude::UNITY);
+    assert_eq!(p.threshold, 0.3);
+    assert_eq!(p.sensitivity, 1.0);
     assert_eq!(p.min_gap, Samples(2205));
     assert_eq!(p.geometry().window(), Samples(2048));
     assert_eq!(p.geometry().hop(), Samples(512));
@@ -253,7 +253,7 @@ fn a_wide_gap_suppresses_close_onsets() {
 
 #[test]
 fn suppression_keeps_the_stronger_of_a_close_pair() {
-    let onset = |pos: usize, strength: f32| Onset {
+    let onset = |pos: usize, strength: f64| Onset {
         position: Samples(pos),
         strength: Amplitude(strength),
     };
@@ -278,7 +278,7 @@ fn suppression_keeps_the_stronger_of_a_close_pair() {
 /// 0 (600 is too close to it), then 1200 (1200 from 0), then drops 1800.
 #[test]
 fn suppression_measures_from_the_last_kept_onset() {
-    let at = |p: usize, s: f32| Onset {
+    let at = |p: usize, s: f64| Onset {
         position: Samples(p),
         strength: Amplitude(s),
     };
@@ -296,7 +296,7 @@ fn suppression_measures_from_the_last_kept_onset() {
 /// be suppressed.
 #[test]
 fn suppression_handles_unsorted_input() {
-    let onset = |pos: usize, strength: f32| Onset {
+    let onset = |pos: usize, strength: f64| Onset {
         position: Samples(pos),
         strength: Amplitude(strength),
     };

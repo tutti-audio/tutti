@@ -67,7 +67,7 @@ type Write<N> = Box<dyn Fn(&N)>;
 /// #     fn shape(&self) -> Shape { Shape::through_unassigned(ChannelLayout::MONO) }
 /// #     fn prepare(&mut self, _: &Prepare) {}
 /// #     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-/// #         let g = self.0.load().get();
+/// #         let g = self.0.load().get() as f32;
 /// #         let (i, mut o) = io.split();
 /// #         for (y, x) in o.get(0).iter_mut().zip(i.get(0)) { *y = x * g; }
 /// #         Status::Modified
@@ -275,7 +275,7 @@ mod tests {
         fn prepare(&mut self, _: &Prepare) {}
 
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-            let g = self.addressed.load().get() * self.trim.load().get();
+            let g = (self.addressed.load().get() * self.trim.load().get()) as f32;
             let (i, mut o) = io.split();
             for (y, x) in o.get(0).iter_mut().zip(i.get(0)) {
                 *y = x * g;

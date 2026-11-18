@@ -95,7 +95,7 @@ pub struct PolySynth {
     master_volume: Param<Amplitude>,
     /// The last finite master volume the node read: a cell a host wrote a NaN
     /// or an infinity into reads as this, not as itself.
-    last_volume: f32,
+    last_volume: Amplitude,
     /// The Universal System Exclusive the synth's Group carries to it: the
     /// edge that reassembles it and keeps what is addressed to this synth.
     universal: UniversalReader,
@@ -161,7 +161,7 @@ impl PolySynth {
             unison,
             bends,
             master_volume,
-            last_volume: Amplitude::UNITY.get(),
+            last_volume: Amplitude::UNITY,
             universal,
             master_applied: MasterGain::UNITY,
             finished_indices: Vec::with_capacity(polyphony),
@@ -196,8 +196,8 @@ impl PolySynth {
     /// A master volume as [`set_volume`](Self::set_volume) stores it:
     /// floored at 0. Shared by the setter and a driven port's value.
     #[inline]
-    pub(crate) fn clamp_volume(volume: f32) -> f32 {
-        volume.max(0.0)
+    pub(crate) fn clamp_volume(volume: Amplitude) -> Amplitude {
+        volume.max(Amplitude::SILENT)
     }
 
     /// Sets the master output gain as a linear [`Amplitude`]: `1.0` (the
@@ -209,8 +209,7 @@ impl PolySynth {
     /// gain is the synth's `ParamSet` entry, `Volume`, which a host writes and a
     /// modulation lane takes as its knob.
     pub fn set_volume(&mut self, volume: Amplitude) {
-        self.master_volume
-            .store(Amplitude(Self::clamp_volume(volume.get())));
+        self.master_volume.store(Self::clamp_volume(volume));
     }
 
     /// Returns the current master gain as a linear amplitude.
@@ -620,7 +619,7 @@ impl PolySynth {
         &mut self,
         start: usize,
         frames: usize,
-        volume: f32,
+        volume: Amplitude,
         emit: &mut impl FnMut(usize, f32, f32),
     ) {
         let mut done = 0;
@@ -633,14 +632,18 @@ impl PolySynth {
             // ended to where the Universal messages have put it: at unity
             // throughout it is the identity.
             let (from, to) = (self.master_applied, self.allocator.master_gain());
-            let ramp = |from: Amplitude, to: Amplitude, i: usize| {
-                tutti_dsp::lerp(from.get(), to.get(), (i + 1) as f32 / n as f32)
-            };
+            // The output is `f32`: the volume and the ramp's ends narrow once per step and the
+            // ramp runs in `f32`.
+            let volume = volume.get() as f32;
+            let (from_left, to_left) = (from.left.get() as f32, to.left.get() as f32);
+            let (from_right, to_right) = (from.right.get() as f32, to.right.get() as f32);
+            let ramp =
+                |from: f32, to: f32, i: usize| tutti_dsp::lerp(from, to, (i + 1) as f32 / n as f32);
             for (i, (&l, &r)) in left.iter().zip(right).enumerate() {
                 emit(
                     start + done + i,
-                    l * volume * ramp(from.left, to.left, i),
-                    r * volume * ramp(from.right, to.right, i),
+                    l * (volume * ramp(from_left, to_left, i)),
+                    r * (volume * ramp(from_right, to_right, i)),
                 );
             }
             self.master_applied = to;
@@ -682,7 +685,7 @@ impl PolySynth {
     fn render_events(
         &mut self,
         blocks: SubBlocks<'_>,
-        volume: f32,
+        volume: Amplitude,
         emit: &mut impl FnMut(usize, f32, f32),
     ) {
         for (range, events) in blocks {

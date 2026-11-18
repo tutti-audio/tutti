@@ -91,7 +91,11 @@ impl Fade {
     /// 1 from the fade's end on.
     #[inline]
     fn weight<F: Float>(frames: usize, k: usize) -> F {
-        F::from_f32(FadeLaw::EqualAmplitude.between(0.0, 1.0, k, frames))
+        F::from_f64(
+            FadeLaw::EqualAmplitude
+                .between(Amplitude::SILENT, Amplitude::UNITY, k, frames)
+                .get(),
+        )
     }
 }
 
@@ -612,7 +616,11 @@ impl<F: Float> State<F> {
         let out_ramp = if left > declick {
             F::ONE
         } else {
-            F::from_f32(FadeLaw::EqualAmplitude.between(1.0, 0.0, declick - left, declick))
+            F::from_f64(
+                FadeLaw::EqualAmplitude
+                    .between(Amplitude::UNITY, Amplitude::SILENT, declick - left, declick)
+                    .get(),
+            )
         };
         fade.started |= new;
 

@@ -168,7 +168,7 @@ impl<S: Sample> SilenceMeter<S> {
     fn scan(&mut self, samples: &[f32]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
-            if sample.abs() < self.floor.get() || sample.is_nan() {
+            if f64::from(sample.abs()) < self.floor.get() || sample.is_nan() {
                 continue;
             }
             let at = self.seen.get() + offset;

@@ -110,38 +110,39 @@ impl Cases {
 
 fn svf(dir: &Path, cases: &mut Cases) {
     let rate = SampleRate::of(RATE);
-    let settings: [(SvfType, &str, f64, f32, f32); 24] = [
-        (SvfType::LowPass, "lowpass", 200.0, 0.707, 0.0),
-        (SvfType::LowPass, "lowpass", 1_000.0, 2.0, 0.0),
-        (SvfType::LowPass, "lowpass", 8_000.0, 0.5, 0.0),
-        (SvfType::HighPass, "highpass", 200.0, 0.707, 0.0),
-        (SvfType::HighPass, "highpass", 1_000.0, 2.0, 0.0),
-        (SvfType::HighPass, "highpass", 8_000.0, 0.5, 0.0),
-        (SvfType::BandPass, "bandpass", 200.0, 0.707, 0.0),
-        (SvfType::BandPass, "bandpass", 1_000.0, 4.0, 0.0),
-        (SvfType::BandPass, "bandpass", 8_000.0, 1.0, 0.0),
-        (SvfType::Notch, "notch", 200.0, 0.707, 0.0),
-        (SvfType::Notch, "notch", 1_000.0, 4.0, 0.0),
-        (SvfType::Notch, "notch", 8_000.0, 1.0, 0.0),
-        (SvfType::Allpass, "allpass", 1_000.0, 0.707, 0.0),
-        (SvfType::Allpass, "allpass", 4_000.0, 3.0, 0.0),
-        (SvfType::Bell, "bell", 1_000.0, 1.0, 9.0),
-        (SvfType::Bell, "bell", 250.0, 0.707, -6.0),
-        (SvfType::Bell, "bell", 6_000.0, 3.0, 12.0),
-        (SvfType::LowShelf, "lowshelf", 200.0, 0.707, 9.0),
-        (SvfType::LowShelf, "lowshelf", 1_000.0, 1.0, -12.0),
-        (SvfType::LowShelf, "lowshelf", 4_000.0, 0.5, 6.0),
-        (SvfType::HighShelf, "highshelf", 500.0, 0.707, -9.0),
-        (SvfType::HighShelf, "highshelf", 3_000.0, 1.0, 12.0),
-        (SvfType::HighShelf, "highshelf", 8_000.0, 0.5, -6.0),
-        (SvfType::HighShelf, "highshelf", 12_000.0, 0.707, 6.0),
+    let settings: [(SvfType, &str, f64, f32, Db); 24] = [
+        (SvfType::LowPass, "lowpass", 200.0, 0.707, Db::UNITY),
+        (SvfType::LowPass, "lowpass", 1_000.0, 2.0, Db::UNITY),
+        (SvfType::LowPass, "lowpass", 8_000.0, 0.5, Db::UNITY),
+        (SvfType::HighPass, "highpass", 200.0, 0.707, Db::UNITY),
+        (SvfType::HighPass, "highpass", 1_000.0, 2.0, Db::UNITY),
+        (SvfType::HighPass, "highpass", 8_000.0, 0.5, Db::UNITY),
+        (SvfType::BandPass, "bandpass", 200.0, 0.707, Db::UNITY),
+        (SvfType::BandPass, "bandpass", 1_000.0, 4.0, Db::UNITY),
+        (SvfType::BandPass, "bandpass", 8_000.0, 1.0, Db::UNITY),
+        (SvfType::Notch, "notch", 200.0, 0.707, Db::UNITY),
+        (SvfType::Notch, "notch", 1_000.0, 4.0, Db::UNITY),
+        (SvfType::Notch, "notch", 8_000.0, 1.0, Db::UNITY),
+        (SvfType::Allpass, "allpass", 1_000.0, 0.707, Db::UNITY),
+        (SvfType::Allpass, "allpass", 4_000.0, 3.0, Db::UNITY),
+        (SvfType::Bell, "bell", 1_000.0, 1.0, Db(9.0)),
+        (SvfType::Bell, "bell", 250.0, 0.707, Db(-6.0)),
+        (SvfType::Bell, "bell", 6_000.0, 3.0, Db(12.0)),
+        (SvfType::LowShelf, "lowshelf", 200.0, 0.707, Db(9.0)),
+        (SvfType::LowShelf, "lowshelf", 1_000.0, 1.0, Db(-12.0)),
+        (SvfType::LowShelf, "lowshelf", 4_000.0, 0.5, Db(6.0)),
+        (SvfType::HighShelf, "highshelf", 500.0, 0.707, Db(-9.0)),
+        (SvfType::HighShelf, "highshelf", 3_000.0, 1.0, Db(12.0)),
+        (SvfType::HighShelf, "highshelf", 8_000.0, 0.5, Db(-6.0)),
+        (SvfType::HighShelf, "highshelf", 12_000.0, 0.707, Db(6.0)),
     ];
-    for (i, (ty, label, freq, q, gain)) in settings.into_iter().enumerate() {
+    for (i, (ty, label, freq, q, level)) in settings.into_iter().enumerate() {
+        let gain = level.get();
         let c = SvfControls {
             ty,
             freq: Hz(freq),
             q: Q(q),
-            gain: Db(gain),
+            gain: level,
         };
         // Every setting in f64; the first of each type again in f32 state.
         let name = format!("svf_f64_{label}_{freq}_{q}_{gain}_{i}");

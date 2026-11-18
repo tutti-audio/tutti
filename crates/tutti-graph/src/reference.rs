@@ -105,6 +105,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
+use crate::fade::Fade;
 use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
@@ -1619,7 +1620,7 @@ impl<F: Float> Reference<F> {
                 }
                 let (g_out, g_in) = f.law.gains(k, f.len);
                 for (o, x) in outs.iter_mut().zip(&old) {
-                    o[i] = o[i] * F::from_f32(g_in) + x[i] * F::from_f32(g_out);
+                    o[i] = o[i] * F::from_f64(g_in.get()) + x[i] * F::from_f64(g_out.get());
                 }
             }
             f.done = (f.done + frames).min(f.len);
@@ -1722,7 +1723,8 @@ impl<F: Float> Reference<F> {
                 !ran,
                 RefPortIn {
                     param: crate::EdgeGain::ADDR,
-                    b1: to.get(),
+                    // The param port is an `f32` lane: the target narrows once per block.
+                    b1: to.get() as f32,
                     range,
                     source: gain.source,
                     events: &evs,
@@ -1731,7 +1733,8 @@ impl<F: Float> Reference<F> {
                 },
             ) {
                 let (vals, _) = vals;
-                self.lane_prev.insert(id, Amplitude::new(vals[frames - 1]));
+                self.lane_prev
+                    .insert(id, Amplitude::new(f64::from(vals[frames - 1])));
                 return Some(RefWeight::Frames(vals));
             }
         }
@@ -2041,7 +2044,7 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
-            let (out, inn) = FadeLaw::EqualAmplitude.gains(j, decl);
+            let (out, inn) = Fade::lane_gains(FadeLaw::EqualAmplitude, j, decl);
             *v = st.hold * out + *v * inn;
         }
     }
@@ -2247,7 +2250,7 @@ impl<F: Float> RefMode<F> {
                         moving: lane.is_some() || from != to,
                     };
                 };
-                let g = FadeLaw::EqualAmplitude.gains(k, self.declick).1;
+                let g = Fade::lane_gains(FadeLaw::EqualAmplitude, k, self.declick).1;
                 let wy = begin.0 + (target.0 - begin.0) * g;
                 let wx = begin.1 + (target.1 - begin.1) * g;
                 (self.y, self.x) = (wy, wx);
@@ -2861,7 +2864,8 @@ fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F
                     *x = match &a.weight {
                         None => *x + *y,
                         Some(RefWeight::Ramp { from, to }) => {
-                            let (from, to) = (from.get(), to.get());
+                            // The ramp is an `f32` piece: its ends narrow once per block.
+                            let (from, to) = (from.get() as f32, to.get() as f32);
                             let w = if i + 1 == frames {
                                 to
                             } else {
