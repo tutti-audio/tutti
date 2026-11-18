@@ -145,6 +145,10 @@ pub struct InProcClient<F: Loaded> {
     /// changed, so a re-prepare at the same mode leaves what the session
     /// announced since.
     prepared_mode: tutti_graph::RenderMode,
+    /// The events per block the node declares it accepts on its event input
+    /// (`Shape::event_input_capacity`): the activation's bound until a
+    /// `prepare` computes it from the graph's block.
+    pub(super) event_input: std::num::NonZeroU32,
     /// The parameter events on the event input, as changes only: a slot per
     /// parameter the plugin declared at load and no spares (`closed`: the
     /// node addresses only its declared parameters), the value last
@@ -541,7 +545,10 @@ impl<F: Loaded> InProcClient<F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let lost = inner.lock().lost_flag();
+        let (lost, event_input) = {
+            let instance = inner.lock();
+            (instance.lost_flag(), instance.event_input())
+        };
         let failed = tally();
         Self {
             inner,
@@ -568,6 +575,7 @@ impl<F: Loaded> InProcClient<F> {
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
+            event_input,
             params,
             segments,
             phase: Samples(0),

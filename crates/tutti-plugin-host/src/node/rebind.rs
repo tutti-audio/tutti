@@ -361,6 +361,21 @@ mod tests {
         (fake, rebinder, node, inner)
     }
 
+    /// **The node declares the bound one event per frame of its block gives,
+    /// within the graph's port limits** (`EventDensity::per_frame`: a floor
+    /// of 256 events, a cap of 8192): 256 at the 64-frame block it was
+    /// built for, 2048 at 2048 frames, 8192 at 1 << 20.
+    #[test]
+    fn the_node_declares_one_event_per_frame_of_its_block_as_its_input_bound() {
+        let (_fake, _rebinder, node, _inner) = rig();
+        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
+        assert_eq!(bound(&node).map(|n| n.get()), Some(256));
+        let node = contract::prepared(node, SR, 2048);
+        assert_eq!(bound(&node).map(|n| n.get()), Some(2048));
+        let node = contract::prepared(node, SR, 1 << 20);
+        assert_eq!(bound(&node).map(|n| n.get()), Some(8_192));
+    }
+
     /// A node over the plugin's ports now, committed at once: the caller's
     /// swap that cannot fail.
     fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {

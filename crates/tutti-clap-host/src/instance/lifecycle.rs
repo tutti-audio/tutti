@@ -17,10 +17,10 @@ use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
 use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_clap_ffi::ActivateError;
-use tutti_graph::{MAX_EVENT_PORT_CAPACITY, note_off_room};
 use tutti_plugin_types::{
     Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
 };
@@ -28,10 +28,6 @@ use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
 use tutti_types::{MaxBlock, ParamId};
 
-/// The UMPs one block's input note port holds at the most: a graph event
-/// port's largest capacity and the room behind it for note-offs
-/// ([`note_off_room`]).
-const INPUT_PORT_UMPS: usize = note_off_room(MAX_EVENT_PORT_CAPACITY.get() as usize);
 /// The events the plugin's output list holds besides parameter values, in one
 /// block: notes, MIDI, note expressions, SysEx and gestures. A push past it is
 /// refused and counted ([`ClapProcessor::output_events_refused`]).
@@ -160,7 +156,7 @@ impl ClapLoaded {
         let max_frames = max_block.get();
         let mut scratch = AudioScratch::new(
             prepare.format(),
-            input_rooms(&table, max_frames),
+            input_rooms(&table, max_frames, prepare.event_input()),
             output_rooms(&table, max_frames),
         );
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
@@ -293,8 +289,8 @@ impl ClapLoaded {
 }
 
 /// The rooms of the input event list for a block of `max_frames`: the MIDI
-/// the input note port can deliver ([`InputRooms::for_port`] of
-/// [`INPUT_PORT_UMPS`]), the parameter points the host's chunk can arrive with
+/// the node is sent ([`InputRooms::for_port`] of `event_input`, the
+/// activation's [`Prepare::event_input`]), the parameter points the host's chunk can arrive with
 /// (`ParameterChanges::point_budget` for the plugin's parameters with a room of
 /// `ParameterQueue::chunk_room`: the chunk's pooled points, and one more in
 /// every queue for the value a skipped block carries, which the bridge
@@ -304,10 +300,10 @@ impl ClapLoaded {
 /// and the parameter points do not count. So a chunk the host's pool bounded
 /// reaches the plugin whole; past it (a set nothing bounded) the list's own
 /// overflow policy applies (`InputEventList::add_param_changes`).
-fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
+fn input_rooms(table: &RangeTable, max_frames: usize, event_input: NonZeroU32) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
-    InputRooms::for_port(INPUT_PORT_UMPS)
+    InputRooms::for_port(event_input)
         .param_points(param_points)
         .sources(
             EDIT_CAPACITY,
@@ -372,6 +368,9 @@ mod tests {
     use crate::ParamBounds;
     use tutti_midi_protocol::Narrower;
 
+    /// The declared event-input bound the tests size rooms from.
+    const EVENT_INPUT: NonZeroU32 = NonZeroU32::new(512).unwrap();
+
     /// **Activation reserves the pool budget, not parameters × room**: for
     /// 2 000 and 16 384 parameters at 512- and 4096-frame blocks, the input
     /// event list's parameter room is `ParameterChanges::point_budget` of
@@ -392,7 +391,7 @@ mod tests {
                 };
                 let mut scratch = AudioScratch::new(
                     SampleFormat::Float32,
-                    input_rooms(&table, frames),
+                    input_rooms(&table, frames, EVENT_INPUT),
                     output_rooms(&table, frames),
                 );
                 reserve_output_queues(&mut scratch, &table, frames);
@@ -411,7 +410,9 @@ mod tests {
                 );
                 assert!(
                     scratch.input_events.events.capacity()
-                        >= INPUT_PORT_UMPS * Narrower::MAX_MESSAGES + input + EDIT_CAPACITY
+                        >= EVENT_INPUT.get() as usize * Narrower::MAX_MESSAGES
+                            + input
+                            + EDIT_CAPACITY
                 );
                 assert!(3 * input < n * (room + 1));
                 assert_eq!(scratch.output_events.param_room, output);
@@ -443,7 +444,7 @@ mod tests {
         };
         let mut scratch = AudioScratch::new(
             SampleFormat::Float32,
-            input_rooms(&table, FRAMES),
+            input_rooms(&table, FRAMES, EVENT_INPUT),
             output_rooms(&table, FRAMES),
         );
         let room = ParameterQueue::chunk_room(FRAMES);

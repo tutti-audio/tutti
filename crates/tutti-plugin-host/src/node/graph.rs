@@ -36,7 +36,7 @@ use tutti_types::{Latency, Samples, Tail};
 
 use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
-use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
+use tutti_plugin_types::{BlockStatus, EVENT_INPUT_DENSITY, ProcessOutput, Processing};
 use tutti_plugin_types::{
     ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded,
     Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
@@ -82,6 +82,7 @@ where
         this.declared
             .ports
             .with_events(1, midi_out)
+            .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
@@ -96,6 +97,9 @@ where
     /// over); what was delivered to the plugin is kept.
     fn prepare(&mut self, p: &Prepare) {
         let this = &mut self.client;
+        // What the graph sends the event input in a block: the bound the
+        // host's input storage is sized from (`Prepare::event_input`).
+        this.event_input = EVENT_INPUT_DENSITY.capacity(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.
