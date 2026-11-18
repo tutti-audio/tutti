@@ -811,12 +811,12 @@ fn append_notice(held: Option<Box<[u8]>>, notice: &str) -> Box<[u8]> {
 /// A track: events in order, each at an absolute [`Tick`], and where the track
 /// ends.
 ///
-/// An SMF's track is one `MTrk` chunk and a Clip File's one sequence. The four
-/// meta events SMF 1.0 section 3.3 puts at the start of a track are its
-/// fields, not events: a Track Name ([`named`](Self::named)) and, where the
-/// specification allows them, a Sequence Number, an SMPTE Offset and a
-/// copyright notice, which a [`LeadTrack`] or a [`Pattern`] holds beside its
-/// track, so a track a file hands out carries none of them and cannot be
+/// An SMF's track is one `MTrk` chunk and a Clip File's one sequence. Of the
+/// four meta events SMF 1.0 section 3.3 puts at the start of a track, the Track
+/// Name is the track's field ([`named`](Self::named)), not an event. The
+/// Sequence Number, the SMPTE Offset and the copyright notice are held beside
+/// the track by a [`LeadTrack`] or a [`Pattern`], where the specification
+/// allows them, so a track a file hands out carries none of them and cannot be
 /// placed where they do not belong. The writer puts them at tick 0 before every
 /// event, in tutti's order: copyright (section 3.3: "the first event in the
 /// first track chunk"), Sequence Number, Track Name, SMPTE Offset; the
