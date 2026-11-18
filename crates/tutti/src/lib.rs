@@ -147,7 +147,8 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 
 // Units, channels, buffers and the musical meter.
 pub use tutti_buffers::{Interleaved, InterleavedMut};
-pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, Meter, MeterMap, TimeSignature};
+pub use tutti_music::{Meter, MeterMap, TimeSignature};
+pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, ParamId, Q,
     SampleRate, Samples, Seconds, Semitones,
@@ -283,7 +284,7 @@ pub mod nodes {
     };
 }
 
-/// The unit vocabulary (`tutti-units`, `tutti-types`, `tutti-buffers`) a program names less
+/// The unit vocabulary (`tutti-units`, `tutti-music`, `tutti-types`, `tutti-buffers`) a program names less
 /// often than the root's units: moments and notes, the parameter cell and its
 /// addresses, shape terms (`Tail`, `Latency`), the edge traits (`Source`,
 /// `Sink`, `Pull`), channel folds and the range errors.
@@ -297,19 +298,21 @@ pub mod types {
         FoldSpec, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes, Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
+    pub use tutti_music::{
+        Adsr, BarPosition, BeatsPerBar, FRAME_TOLERANCE, FrameClock, InvalidBeatsPerBar,
+        InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, NotOnMidiScale, Note,
+        NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
+        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+    };
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
-        Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, AtomicSampleRate, BarPosition, BeatsPerBar, Bed, BusTooWide,
-        BusTopology, ChannelIndex, ChannelIndexOutOfRange, FRAME_TOLERANCE, FrameClock,
-        InvalidBeatsPerBar, InvalidMaxBlock, InvalidNoteValue, LayoutError, LoopRange,
-        LoopRangeError, MAX_CHANNELS, MeterChange, NotOnMidiScale, Note, NoteNumberOutOfRange,
-        NoteValue, Param, Param64, ParamCell, ParamRaw, Pass, PassEnd, PitchClass, SegmentOrigin,
-        Speaker, Speakers, TimelineSegment, TopologyError, beats_per_sample,
-        first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+        AmbisonicOrdering, AtomicSampleRate, Bed, BusTooWide, BusTopology, ChannelIndex,
+        ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError, MAX_CHANNELS, Param, Param64,
+        ParamCell, ParamRaw, Speaker, Speakers, TopologyError,
     };
     pub use tutti_types::{Mint, Placement};
     pub use tutti_units::{

@@ -51,7 +51,7 @@
 //!   piece 0 after it.
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
-use tutti_types::{Meter, MeterMap, Pass, PassEnd, TimeSignature, first_frame_at_or_after};
+use tutti_music::{Meter, MeterMap, Pass, PassEnd, TimeSignature, first_frame_at_or_after};
 use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
 use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
@@ -305,7 +305,7 @@ impl ClockMaster {
             // Flex alone: no clock bytes or timecode, and the clock's own edge
             // and locate state is left as it was.
             if transport.playing {
-                let beats_per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
+                let beats_per_sample = tutti_music::beats_per_sample(transport.tempo, sample_rate);
                 let region = transport.looping;
                 let mut clock = transport.clock(sample_rate);
                 for pass in clock.passes(Samples(block_size), region) {
@@ -383,7 +383,7 @@ impl ClockMaster {
         // is a *position*. Both are beats-denominated and neither is an
         // `Hz` — a beat-synced rate is beats-per-cycle, the inverse of a
         // frequency. Unwrapping either lets the two mix silently.
-        let beats_per_sample = tutti_types::beats_per_sample(tempo, sample_rate);
+        let beats_per_sample = tutti_music::beats_per_sample(tempo, sample_rate);
 
         // --- seek while playing ---------------------------------------------
         // A block starts where the previous one ended; any other start, either
@@ -470,7 +470,7 @@ impl ClockMaster {
         at: Offset,
         emit: &mut impl FnMut(UmpAt),
     ) {
-        let per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
+        let per_sample = tutti_music::beats_per_sample(transport.tempo, sample_rate);
         let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
         for packet in MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps)).packets(self.group) {
             emit((at, packet));

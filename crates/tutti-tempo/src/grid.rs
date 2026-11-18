@@ -1,4 +1,4 @@
-use tutti_types::TimelineSegment;
+use tutti_music::TimelineSegment;
 use tutti_units::{Beat, Bpm, Frame, SampleRate};
 
 /// The length in frames of a [`Cell`]: how often a ramp's tempo is re-seated.

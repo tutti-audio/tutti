@@ -179,7 +179,7 @@
 //! algorithms in `tutti-dsp`; this crate calls them. Resampling is
 //! unconditional: it is not a codec, so it is not gated.
 //!
-//! A render is written from any `Float` (`Rendered<F>`, `f32` by default). A float
+//! A render is written from any `tutti_dsp::FftFloat` (`Rendered<F>`, `f32` by default). A float
 //! file takes it as it is; an integer file goes through one stage that adds the
 //! dither noise, converts by the rule in `tutti_buffers::Sample` and counts the
 //! values that clipped (`Written::clipped_samples`).
@@ -225,7 +225,7 @@ pub(crate) mod render;
 pub use process::ChunkSize;
 
 use std::path::PathBuf;
-use tutti_buffers::Float;
+use tutti_dsp::FftFloat;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
 use tutti_types::ChannelLayout;
@@ -431,7 +431,7 @@ fn the_one(mut produced: Vec<Produced>) -> Produced {
 /// dropped to make it fit); [`Error::EventsDropped`] under
 /// [`EventLossPolicy::Fail`]; [`Error::Resample`] or [`Error::Encode`] from the
 /// resample and encode stages.
-pub fn write_buffers<F: Float>(
+pub fn write_buffers<F: FftFloat>(
     rendered: &Rendered<F>,
     target: &FileTarget,
     on_event_loss: EventLossPolicy,

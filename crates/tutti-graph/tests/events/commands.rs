@@ -14,7 +14,8 @@ use tutti_graph::{
     Reference, ScheduleError, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ChannelLayout, LoopRange};
+use tutti_music::LoopRange;
+use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, Samples, Tail};
 

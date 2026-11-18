@@ -1,9 +1,10 @@
 //! `TransportHandle`: the transport's verbs from another thread.
 
 use tutti_buffers::InterleavedMut;
+use tutti_music::LoopRange;
 use tutti_session::{Session, TransportHandle};
 use tutti_transport::{FadeOut, MotionEvent, TimedError};
-use tutti_types::{ChannelLayout, LoopRange, MaxBlock};
+use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {

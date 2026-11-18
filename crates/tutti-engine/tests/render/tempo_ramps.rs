@@ -23,12 +23,13 @@ use tutti_engine::Engine;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, NodeKey, OutPort, Prepare, Shape, Source, Status, Unforkable,
 };
+use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
     render_graph,
 };
-use tutti_types::{ChannelLayout, LoopRange, first_frame_at_or_after};
+use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;

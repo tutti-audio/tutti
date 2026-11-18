@@ -25,13 +25,14 @@
 //! between. A step allocates nothing.
 
 use super::real::{Complex, RealFft, forward_post_pass, inverse_pre_pass, pass_twiddles, twiddle};
-use rustfft::{Fft as InnerFft, FftDirection, FftNum, FftPlannerScalar};
+use crate::FftFloat;
+use rustfft::{Fft as InnerFft, FftDirection, FftPlannerScalar};
 use std::f64::consts::PI;
 use std::sync::Arc;
-use tutti_buffers::{Float, Mono, MonoMut};
+use tutti_buffers::{Mono, MonoMut};
 
 /// One direction of the split transform.
-struct Split<F: Float + FftNum> {
+struct Split<F: FftFloat> {
     /// The `size / 2 / ways`-point sub-FFT.
     inner: Arc<dyn InnerFft<F>>,
     /// The real-input pass's twiddles (`size` points).
@@ -41,7 +42,7 @@ struct Split<F: Float + FftNum> {
     combine: Vec<Vec<Complex<F>>>,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for Split<F> {
+impl<F: FftFloat> std::fmt::Debug for Split<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Split")
             .field("passes", &self.combine.len())
@@ -49,7 +50,7 @@ impl<F: Float + FftNum> std::fmt::Debug for Split<F> {
     }
 }
 
-impl<F: Float + FftNum> Split<F> {
+impl<F: FftFloat> Split<F> {
     fn new(size: usize, ways: usize, direction: FftDirection) -> Self {
         let sub = size / 2 / ways;
         let mut planner = FftPlannerScalar::<F>::new();
@@ -79,13 +80,13 @@ impl<F: Float + FftNum> Split<F> {
 /// Forward and inverse plans for one real frame length, in steps.
 ///
 /// The module docs state the stepping contract.
-pub(crate) struct StagedRealFft<F: Float + FftNum = f32> {
+pub(crate) struct StagedRealFft<F: FftFloat = f32> {
     fft: RealFft<F>,
     ways: usize,
     split: Option<Arc<(Split<F>, Split<F>)>>,
 }
 
-impl<F: Float + FftNum> Clone for StagedRealFft<F> {
+impl<F: FftFloat> Clone for StagedRealFft<F> {
     fn clone(&self) -> Self {
         Self {
             fft: self.fft.clone(),
@@ -95,7 +96,7 @@ impl<F: Float + FftNum> Clone for StagedRealFft<F> {
     }
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for StagedRealFft<F> {
+impl<F: FftFloat> std::fmt::Debug for StagedRealFft<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StagedRealFft")
             .field("fft", &self.fft)
@@ -105,7 +106,7 @@ impl<F: Float + FftNum> std::fmt::Debug for StagedRealFft<F> {
     }
 }
 
-impl<F: Float + FftNum> StagedRealFft<F> {
+impl<F: FftFloat> StagedRealFft<F> {
     /// Plans for `size` samples run as `ways` sub-FFTs: `ways` is a power of
     /// two, and at one the transform is [`RealFft`]'s single step. Allocates.
     ///
@@ -285,11 +286,7 @@ impl<F: Float + FftNum> StagedRealFft<F> {
 
 /// `dst[r * sub + j] = point(ways * j + r)`: the sub-FFTs' inputs, one after
 /// the other.
-fn gather<F: Float + FftNum>(
-    dst: &mut [Complex<F>],
-    ways: usize,
-    point: impl Fn(usize) -> Complex<F>,
-) {
+fn gather<F: FftFloat>(dst: &mut [Complex<F>], ways: usize, point: impl Fn(usize) -> Complex<F>) {
     let sub = dst.len() / ways;
     for (r, chunk) in dst.chunks_exact_mut(sub).enumerate() {
         for (j, d) in chunk.iter_mut().enumerate() {
@@ -299,7 +296,7 @@ fn gather<F: Float + FftNum>(
 }
 
 /// Sub-FFT `r`: `a`'s sequence `r` into `b`'s.
-fn sub_fft<F: Float + FftNum>(
+fn sub_fft<F: FftFloat>(
     s: &Split<F>,
     r: usize,
     a: &mut [Complex<F>],
@@ -320,7 +317,7 @@ fn sub_fft<F: Float + FftNum>(
 /// the even part and sequence `r + ways >> (p + 1)` the odd part of the
 /// sequence of twice the points congruent to `r` modulo `ways >> (p + 1)`,
 /// which goes to `dst`'s sequence `r`.
-fn combine<F: Float + FftNum>(
+fn combine<F: FftFloat>(
     s: &Split<F>,
     p: usize,
     ways: usize,

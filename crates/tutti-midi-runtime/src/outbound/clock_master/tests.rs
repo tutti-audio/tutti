@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
+use tutti_music::LoopRange;
+use tutti_music::MeterChange;
 use tutti_transport::ProjectMeter;
-use tutti_types::LoopRange;
-use tutti_types::MeterChange;
 use tutti_ump::{Flex, Message, MidiGroup, System};
 use tutti_units::{Bpm, Seconds};
 
@@ -24,7 +24,7 @@ struct TestTransport {
     beat: AtomicF64,
     tempo: Bpm,
     playing: StdAtomicBool,
-    looping: std::sync::Mutex<Option<tutti_types::LoopRange>>,
+    looping: std::sync::Mutex<Option<tutti_music::LoopRange>>,
 }
 
 impl TestTransport {
@@ -61,7 +61,7 @@ impl TestTransport {
 struct Rig {
     cm: ClockMaster,
     messages: SyncMessages,
-    meter: tutti_rt::Reader<tutti_types::MeterMap>,
+    meter: tutti_rt::Reader<tutti_music::MeterMap>,
     transport: Arc<TestTransport>,
     out: Collected,
 }
@@ -813,11 +813,11 @@ fn play_layout(from: f64, region: (f64, f64), mtc: bool, lens: &[usize]) -> Vec<
     transport.set_loop(region.0, region.1);
     transport.set_playing(true);
     cm.set_send_mtc(mtc);
-    let looping = tutti_types::LoopRange::new(
+    let looping = tutti_music::LoopRange::new(
         tutti_units::Beat::new(region.0),
         tutti_units::Beat::new(region.1),
     );
-    let mut host = tutti_types::FrameClock::new(Beat(from), Bpm::of(120.0), SampleRate::SR_48K);
+    let mut host = tutti_music::FrameClock::new(Beat(from), Bpm::of(120.0), SampleRate::SR_48K);
     let mut frame = 0u64;
     let mut out = Vec::new();
     for &len in lens {
@@ -1157,7 +1157,7 @@ fn no_full_message_is_sent_with_mtc_off() {
 /// A master with the project meter's reader it ticks over, and what it sends.
 struct FlexMaster {
     cm: ClockMaster,
-    reader: tutti_rt::Reader<tutti_types::MeterMap>,
+    reader: tutti_rt::Reader<tutti_music::MeterMap>,
     messages: SyncMessages,
 }
 

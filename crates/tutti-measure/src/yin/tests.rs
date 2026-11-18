@@ -173,7 +173,7 @@ fn note_names_use_both_spellings() {
     let pitch = Pitch {
         frequency: Hz(277.18),
         confidence: Confidence(0.9),
-        note: Note::new(tutti_types::PitchClass::CSharp, 4),
+        note: Note::new(tutti_music::PitchClass::CSharp, 4),
         cents_offset: Cents(0.0),
     };
     assert_eq!(pitch.note_name(), "C#4");
@@ -241,7 +241,7 @@ fn reaches_the_ends_of_a_widened_range() {
         "expected ~82.41 Hz, got {}",
         pitch.frequency.get()
     );
-    assert_eq!(pitch.note, Note::new(tutti_types::PitchClass::E, 2));
+    assert_eq!(pitch.note, Note::new(tutti_music::PitchClass::E, 2));
 
     // C6.
     let high = pitch_of(&cfg, &sine(44100.0, 1046.5, 0.1)).unwrap();

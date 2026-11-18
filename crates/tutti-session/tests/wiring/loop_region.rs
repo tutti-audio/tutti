@@ -5,8 +5,8 @@
 //! a block has applied it. `LoopRange::try_from` is where an inverted brace is
 //! refused.
 
+use tutti_music::LoopRange;
 use tutti_transport::{LoopEdit, LoopRegion};
-use tutti_types::LoopRange;
 use tutti_units::Beat;
 
 #[test]

@@ -158,7 +158,7 @@ mod synth;
 pub use synth::{FilterModConfig, FilterType, OscillatorType, SvfMode, SynthConfig};
 // The amplitude envelope `SynthConfig::envelope` takes; one type with the
 // modulation sources' note envelope.
-pub use tutti_types::Adsr;
+pub use tutti_music::Adsr;
 
 mod polysynth;
 // `PolySynth::fork_instance`: the synth in a fork of the

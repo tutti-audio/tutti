@@ -11,7 +11,7 @@
 //! chroma with no spread, which is why silence and a flat chroma are errors
 //! rather than an arbitrary key.
 
-use tutti_types::PitchClass;
+use tutti_music::PitchClass;
 use tutti_units::Confidence;
 
 use crate::chroma::{CLASSES, mean_of_rows};

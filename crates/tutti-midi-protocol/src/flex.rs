@@ -1,9 +1,9 @@
 //! The Flex Data values the transport follows, as the project's unit types:
 //! Set Tempo (M2-104 section 7.5.3) as a [`Bpm`] and Set Time Signature
-//! (section 7.5.4) as a [`tutti_types::TimeSignature`]. [`tutti_ump::Flex`]
+//! (section 7.5.4) as a [`tutti_music::TimeSignature`]. [`tutti_ump::Flex`]
 //! holds the wire's integers; this is the one reading of them as units.
 
-use tutti_types::{BeatsPerBar, NoteValue};
+use tutti_music::{BeatsPerBar, NoteValue};
 use tutti_ump::FlexTimeSignature;
 use tutti_units::Bpm;
 
@@ -63,20 +63,20 @@ pub fn flex_tempo_field(bpm: Bpm) -> u32 {
 ///
 /// ```
 /// use tutti_midi_protocol::flex_time_signature;
-/// use tutti_types::TimeSignature;
+/// use tutti_music::TimeSignature;
 /// use tutti_ump::FlexTimeSignature as Wire;
 ///
 /// let seven_eight = Wire { numerator: 7, denominator: 3, thirty_seconds: 8 };
 /// assert_eq!(flex_time_signature(seven_eight), Some(TimeSignature::of(7, 8)));
 /// ```
 #[must_use]
-pub fn flex_time_signature(wire: FlexTimeSignature) -> Option<tutti_types::TimeSignature> {
+pub fn flex_time_signature(wire: FlexTimeSignature) -> Option<tutti_music::TimeSignature> {
     let beats = BeatsPerBar::new(u32::from(wire.numerator))?;
     // The field is an exponent, so a shift past the word is no note value.
     let value = 1u32
         .checked_shl(u32::from(wire.denominator))
         .filter(|_| wire.denominator != 0)?;
-    Some(tutti_types::TimeSignature::new(
+    Some(tutti_music::TimeSignature::new(
         beats,
         NoteValue::new(value)?,
     ))
@@ -92,7 +92,7 @@ pub fn flex_time_signature(wire: FlexTimeSignature) -> Option<tutti_types::TimeS
 ///
 /// ```
 /// use tutti_midi_protocol::{flex_time_signature, flex_time_signature_wire};
-/// use tutti_types::TimeSignature;
+/// use tutti_music::TimeSignature;
 ///
 /// let seven_eight = TimeSignature::of(7, 8);
 /// let wire = flex_time_signature_wire(seven_eight).unwrap();
@@ -101,7 +101,7 @@ pub fn flex_time_signature(wire: FlexTimeSignature) -> Option<tutti_types::TimeS
 /// ```
 #[must_use]
 pub fn flex_time_signature_wire(
-    signature: tutti_types::TimeSignature,
+    signature: tutti_music::TimeSignature,
 ) -> Option<FlexTimeSignature> {
     let denominator = signature.note_value().get().trailing_zeros() as u8;
     (denominator != 0).then(|| FlexTimeSignature {

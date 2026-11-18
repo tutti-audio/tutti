@@ -32,7 +32,8 @@ use tutti_buffers::Wave;
 use tutti_graph::{
     Env, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
 };
-use tutti_types::{ChannelLayout, FrameClock};
+use tutti_music::FrameClock;
+use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor,
 };

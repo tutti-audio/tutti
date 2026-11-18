@@ -611,7 +611,7 @@ fn the_graph_reads_the_render_clocks_transport() {
         sample_rate: RATE,
         loop_range: None,
     });
-    let bps = tutti_types::beats_per_sample(Bpm::of(120.0), RATE).get();
+    let bps = tutti_music::beats_per_sample(Bpm::of(120.0), RATE).get();
 
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let clock = g.add(Unforkable(BeatPorts));

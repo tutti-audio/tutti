@@ -1,6 +1,6 @@
 //! Cross-correlation through the FFT.
 
-use rustfft::FftNum;
+use crate::FftFloat;
 use tutti_buffers::{Float, Mono, MonoMut};
 
 use super::{Complex, FftScratch};
@@ -14,20 +14,20 @@ use super::{Complex, FftScratch};
 /// grows past every earlier one; [`with_capacity`](Self::with_capacity) sizes
 /// them up front. Generic over the [`Float`] it runs in, `f32` by default.
 #[derive(Debug)]
-pub struct Correlator<F: Float + FftNum = f32> {
+pub struct Correlator<F: FftFloat = f32> {
     a: Vec<F>,
     b: Vec<F>,
     spectrum_a: Vec<Complex<F>>,
     spectrum_b: Vec<Complex<F>>,
 }
 
-impl<F: Float + FftNum> Default for Correlator<F> {
+impl<F: FftFloat> Default for Correlator<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F: Float + FftNum> Correlator<F> {
+impl<F: FftFloat> Correlator<F> {
     /// A correlator that allocates on its first call.
     #[must_use]
     pub fn new() -> Self {
@@ -87,7 +87,7 @@ impl<F: Float + FftNum> Correlator<F> {
 }
 
 /// The spectrum of `signal` zero-padded to `size`, in `padded` and `out`.
-fn spectrum<F: Float + FftNum>(
+fn spectrum<F: FftFloat>(
     padded: &mut Vec<F>,
     out: &mut Vec<Complex<F>>,
     signal: &[F],

@@ -825,7 +825,7 @@ fn is_recording_and_is_cycling_read_their_own_flags() {
         // region so the state is not rejected on some other ground.
         if cycling {
             info = info.with_loop(tutti_plugin_types::LoopRegion::new(
-                tutti_types::LoopRange::new(tutti_units::Beat(4.0), tutti_units::Beat(20.0))
+                tutti_music::LoopRange::new(tutti_units::Beat(4.0), tutti_units::Beat(20.0))
                     .expect("a loop"),
             ));
         }

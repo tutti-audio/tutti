@@ -13,8 +13,9 @@ use tutti_midi_runtime::{
     DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode, MidiKeys,
     MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
 };
-use tutti_types::{FrameClock, LoopRange};
-use tutti_types::{MaxBlock, MeterChange, MeterMap, TimeSignature};
+use tutti_music::{FrameClock, LoopRange};
+use tutti_music::{MeterChange, MeterMap, TimeSignature};
+use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 use tutti_units::{Beat, Bpm, Frame, Moment, SampleRate, Samples};
 
@@ -445,7 +446,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();
-    let region = tutti_types::LoopRange::new(start, end).unwrap();
+    let region = tutti_music::LoopRange::new(start, end).unwrap();
     let looping = Some(LoopRange::new(start, end).expect("a loop"));
     let mut clock = FrameClock::new(start, Bpm::of(120.0), SampleRate::of(RATE));
     let mut drain = [(0, Ump([0; 4])); 256];

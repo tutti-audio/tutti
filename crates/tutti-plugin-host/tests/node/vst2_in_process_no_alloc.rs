@@ -70,8 +70,8 @@ fn process_steady_state_does_not_allocate() {
 /// borrow of the node's meter cell — and still does not allocate.
 #[test]
 fn process_with_a_meter_does_not_allocate() {
+    use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
     use tutti_transport::ProjectMeter;
-    use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
     use tutti_units::Beat;
 
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();

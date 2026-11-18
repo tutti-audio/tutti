@@ -12,8 +12,8 @@ use tutti_tempo::TempoMap;
 use super::walk::TempoWalk;
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_types::FrameClock;
-use tutti_types::LoopRange;
+use tutti_music::FrameClock;
+use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// Configuration for constructing an [`OfflineTimeline`].
@@ -519,7 +519,7 @@ mod tests {
         timeline.advance(Samples(block));
 
         let expected_lag =
-            tutti_types::beats_per_sample(Bpm::of(tempo), SampleRate::of(sample_rate));
+            tutti_music::beats_per_sample(Bpm::of(tempo), SampleRate::of(sample_rate));
         // After the block the timeline sits one sample ahead of the last
         // EMITTED sample, because emit-then-advance means sample N-1 carried
         // the beat before the final increment.
@@ -813,14 +813,14 @@ mod tests {
         assert_eq!(first.tempo, Bpm::of(120.0));
         assert_eq!(changes.len(), tutti_graph::MAX_TRANSPORT_CHANGES);
         let sec: f64 = (0..9).map(|i| 0.001 * 60.0 / (120.0 + f64::from(i))).sum();
-        let ninth = tutti_types::first_frame_at_or_after(sec * 48_000.0) as usize;
+        let ninth = tutti_music::first_frame_at_or_after(sec * 48_000.0) as usize;
         assert_eq!(n, ninth);
         assert!(n < 512);
         // The eighth, one change earlier.
         let sec8: f64 = (0..8).map(|i| 0.001 * 60.0 / (120.0 + f64::from(i))).sum();
         assert_eq!(
             changes.as_slice()[7].at.index(),
-            tutti_types::first_frame_at_or_after(sec8 * 48_000.0) as usize
+            tutti_music::first_frame_at_or_after(sec8 * 48_000.0) as usize
         );
     }
 

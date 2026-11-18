@@ -181,7 +181,7 @@ touched.
 - A setting the audio thread reads is a `tutti_rt::Setting<T>` over a `SettingWord`
   (`setting_word!`); a node declares it in `declare_params!`'s `settings` block.
 - An id type is written with `tutti_types::id!` and minted from a `Mint`.
-- Time and layout have one type each: `tutti_types::LoopRange` for a loop,
+- Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
   `ChannelLayout`, `ChannelTopology` and `BusTopology` for channels, and
   `tutti_curve::Trajectory<U>` for an automation curve.
@@ -281,7 +281,7 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 
 0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-units`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-types`, `tutti-ump`
+1. `tutti-types`, `tutti-music`, `tutti-ump`
 2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
 3. `tutti-rt`
 4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,

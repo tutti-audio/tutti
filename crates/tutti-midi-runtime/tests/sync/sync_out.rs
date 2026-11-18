@@ -222,7 +222,7 @@ fn full_message(rate_bits: u8, seconds: u8, frame: u8) -> Vec<u8> {
 /// the node's rate (25 fps here: hours byte `0x20`).
 #[test]
 fn a_cue_a_jump_and_a_wrap_are_full_messages_on_their_frames() {
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     let mut rig = Rig::new(
         G,
         SyncMessages {
@@ -425,7 +425,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
 /// both on the start's frame, and nothing more while the transport rolls on.
 #[test]
 fn flex_states_the_tempo_and_the_nodes_meter_once() {
-    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
     let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
         Beat(0.0),
         TimeSignature::of(3, 4),
@@ -545,7 +545,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
 /// on frame 4 096; the wrap's own frame sends nothing.
 #[test]
 fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
     let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
     let first = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
@@ -615,7 +615,7 @@ fn mtc_sends_without_the_beat_clock() {
 #[test]
 fn a_fork_states_the_live_nodes_meter() {
     use tutti_graph::{ForkMode, ForkTarget};
-    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
     let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
         Beat(0.0),
         TimeSignature::of(3, 4),

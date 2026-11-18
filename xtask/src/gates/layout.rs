@@ -56,7 +56,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-units",
         "tutti-plugin-ipc-ffi",
     ],
-    &["tutti-types", "tutti-ump"],
+    &["tutti-types", "tutti-music", "tutti-ump"],
     &[
         "tutti-midi-protocol",
         "tutti-midi-device",
@@ -110,7 +110,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
 const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-midi-protocol",
-        &["tutti-ump", "tutti-types", "tutti-units"],
+        &["tutti-ump", "tutti-music", "tutti-units"],
     ),
     ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
     ("tutti-ump", &["tutti-units"]),
@@ -126,7 +126,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-codec",
         &["tutti-types", "tutti-units", "tutti-buffers", "tutti-rt"],
     ),
-    ("tutti-tempo", &["tutti-types", "tutti-units"]),
+    ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
         "tutti-voicing",
         &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
@@ -135,6 +135,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-transport",
         &[
             "tutti-types",
+            "tutti-music",
             "tutti-units",
             "tutti-buffers",
             "tutti-rt",
@@ -147,6 +148,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-plugin-ipc",
         &[
             "tutti-types",
+            "tutti-music",
             "tutti-units",
             "tutti-buffers",
             "tutti-rt",
@@ -163,6 +165,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-transport",
             "tutti-tempo",
             "tutti-types",
+            "tutti-music",
             "tutti-units",
             "tutti-rt",
             "tutti-ump",
@@ -213,16 +216,23 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-buffers", &["tutti-types", "tutti-units"]),
     (
         "tutti-modulation",
-        &["tutti-types", "tutti-units", "tutti-curve", "tutti-ump"],
+        &["tutti-units", "tutti-music", "tutti-curve", "tutti-ump"],
     ),
     (
         "tutti-measure",
-        &["tutti-types", "tutti-units", "tutti-buffers", "tutti-dsp"],
+        &[
+            "tutti-types",
+            "tutti-music",
+            "tutti-units",
+            "tutti-buffers",
+            "tutti-dsp",
+        ],
     ),
     (
         "tutti-graph",
         &[
             "tutti-types",
+            "tutti-music",
             "tutti-units",
             "tutti-buffers",
             "tutti-rt",
@@ -691,7 +701,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 50 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
     }
 
     #[test]

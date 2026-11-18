@@ -216,6 +216,10 @@ tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_no
 # tutti-modulation
 tutti-modulation  ctor-result  crates/tutti-modulation/src/program.rs::ControlProgram::new
 
+# tutti-music
+tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_sample_rate
+tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_tempo
+
 # tutti-nodes
 tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_beat_sync
 tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_depth
@@ -516,8 +520,6 @@ tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettin
 tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
 
 # tutti-types
-tutti-types  setter  crates/tutti-types/src/value/frame_clock.rs::FrameClock::set_sample_rate
-tutti-types  setter  crates/tutti-types/src/value/frame_clock.rs::FrameClock::set_tempo
 tutti-types  ctor-result  crates/tutti-types/src/topology.rs::ChannelTopology::new
 tutti-types  ctor-result  crates/tutti-types/src/topology.rs::Speakers::new
 

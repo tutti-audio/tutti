@@ -44,6 +44,7 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # The project's tempo map, and the reader a placed voice lends it through: over

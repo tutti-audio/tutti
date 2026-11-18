@@ -28,7 +28,7 @@ use tutti_buffers::{
     Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
 };
 use tutti_codec::{Encoder, Finalized, IntDepth, Spec};
-use tutti_dsp::{DitherSink, StreamingResampler, needs_resampling, resampled_frames};
+use tutti_dsp::{DitherSink, FftFloat, StreamingResampler, needs_resampling, resampled_frames};
 use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
@@ -59,7 +59,7 @@ fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
 /// encoder judges the frames the file will hold, which are the plan's kept
 /// frames at the output rate (`tutti_dsp::resampled_frames`), and the
 /// error is its own. The frames of `plan` are at `source_rate`.
-pub(crate) fn open_file<F: Float>(
+pub(crate) fn open_file<F: FftFloat>(
     target: &FileTarget,
     plan: &RenderPlan,
     source_rate: SampleRate,
@@ -95,7 +95,7 @@ pub(crate) struct Landed {
     pub(crate) frames: Samples,
 }
 
-impl<F: Float> Chain<F> {
+impl<F: FftFloat> Chain<F> {
     /// Flushes the converter and closes the encoder's file beside its path:
     /// everything that can fail for the file's own sake, short of moving it.
     pub(crate) fn finalize(mut self) -> Result<Closed> {
@@ -252,15 +252,15 @@ impl<F: Float> Quantized<F> {
 }
 
 /// A converter and the planes it takes from and gives to.
-pub(crate) type Resampler = (StreamingResampler, Vec<Vec<f32>>, Vec<Vec<f32>>);
+pub(crate) type Resampler<F> = (StreamingResampler<F>, Vec<Vec<F>>, Vec<Vec<F>>);
 
 /// The converter `target` calls for from frames at `source_rate` of `ch`
 /// channels, or `None` when the file is at the rate the frames are.
-pub(crate) fn resampler_for(
+pub(crate) fn resampler_for<F: FftFloat>(
     target: &FileTarget,
     source_rate: SampleRate,
     ch: usize,
-) -> Result<Option<Resampler>> {
+) -> Result<Option<Resampler<F>>> {
     // Whether to convert at all is the converter's to say
     // (`tutti_dsp::needs_resampling`), not a float comparison here.
     //
@@ -271,8 +271,8 @@ pub(crate) fn resampler_for(
     Ok(match target.resample {
         Some(r) if needs_resampling(source_rate, r.target_rate) => Some((
             StreamingResampler::new(ch, source_rate, r.target_rate, r.chunk)?,
-            vec![Vec::<f32>::new(); ch],
-            vec![Vec::<f32>::new(); ch],
+            vec![Vec::<F>::new(); ch],
+            vec![Vec::<F>::new(); ch],
         )),
         // A resample to the rate the frames are already at is not a resample.
         _ => None,
@@ -292,9 +292,8 @@ pub(crate) fn resampler_for(
 /// LSB. The quantize stage is the [`DitherSink`] over the encoder; a float
 /// format skips it and the encoder takes the block as it is.
 ///
-/// `F` is the format the blocks arrive in. The converter works on `f32` planes
-/// (it is not yet generic), so a block resampled is converted to them and back.
-pub(crate) struct Chain<F: Float> {
+/// `F` is the format the blocks arrive in and the converter runs in.
+pub(crate) struct Chain<F: FftFloat> {
     layout: ChannelLayout,
     sink: Quantized<F>,
     /// Interleaved, so it is a flat sample buffer with `ch` samples per frame.
@@ -303,10 +302,10 @@ pub(crate) struct Chain<F: Float> {
     /// normalize of a file, which was measured at the file's rate.
     gain: Option<Amplitude>,
     /// The converter, and the planes it takes from and gives to.
-    resampler: Option<Resampler>,
+    resampler: Option<Resampler<F>>,
 }
 
-impl<F: Float> Chain<F> {
+impl<F: FftFloat> Chain<F> {
     /// The chain for `target`, from frames at `source_rate`, ending in
     /// `encoder`.
     fn new(target: &FileTarget, source_rate: SampleRate, encoder: FileEncoder) -> Result<Self> {
@@ -348,7 +347,7 @@ impl<F: Float> Chain<F> {
             self.staging.resize(block.samples().len(), F::SILENCE);
             convert(block, InterleavedMut::new(&mut self.staging, self.layout)?)?;
             if let Some(gain) = gain {
-                let gain = F::from_f32(gain.get());
+                let gain = <F as Float>::from_f32(gain.get());
                 for s in &mut self.staging {
                     *s *= gain;
                 }
@@ -389,7 +388,7 @@ fn failure_of<F: Float>(sink: &mut Quantized<F>) -> Error {
 /// Interleave the resampler's output planes, apply the gain, hand them on, and
 /// clear the planes for the next push.
 fn emit_planes<F: Float>(
-    out: &mut [Vec<f32>],
+    out: &mut [Vec<F>],
     staging: &mut Vec<F>,
     sink: &mut Quantized<F>,
     layout: ChannelLayout,
@@ -397,7 +396,7 @@ fn emit_planes<F: Float>(
 ) -> Result<()> {
     crate::planar::join(out, staging, layout)?;
     if let Some(gain) = gain {
-        let gain = F::from_f32(gain.get());
+        let gain = <F as Float>::from_f32(gain.get());
         for s in staging.iter_mut() {
             *s *= gain;
         }
@@ -420,7 +419,7 @@ fn emit_planes<F: Float>(
 /// frames of `stage` were already spent in the pass (by the outputs before
 /// this one). The token is checked before every block. A cancelled pass is
 /// [`Outcome::Cancelled`].
-pub(crate) fn replay_through<F: Float>(
+pub(crate) fn replay_through<F: FftFloat>(
     replay: &mut dyn Replay<F>,
     chain: &mut Chain<F>,
     block_frames: usize,
@@ -455,7 +454,7 @@ pub(crate) fn replay_through<F: Float>(
 /// never a dropped channel.
 ///
 /// Returns the chain with every frame written, for the finalize.
-pub(crate) fn write_planes<F: Float>(
+pub(crate) fn write_planes<F: FftFloat>(
     rendered: &crate::Rendered<F>,
     target: &FileTarget,
     control: &mut Control<'_>,

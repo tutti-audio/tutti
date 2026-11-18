@@ -24,7 +24,8 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, LoopRange};
+use tutti_music::LoopRange;
+use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
 use tutti_units::{Beat, Bpm, Latency, SampleRate, Samples};
 
