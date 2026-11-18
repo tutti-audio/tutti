@@ -33,7 +33,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::contract::Direct;
-use tutti_plugin_host::{HostedNode, load_client};
+use tutti_plugin_host::{PluginNode, load_client};
 use tutti_units::SampleRate;
 
 const SR: f64 = 48_000.0;
@@ -41,8 +41,8 @@ const SR: f64 = 48_000.0;
 /// reads against are per 64-frame block).
 const BLOCK: usize = 64;
 
-fn unit() -> Direct<HostedNode<Vst2Loaded>> {
-    let (unit, _handle) = load_client::<Vst2Loaded>(
+fn unit() -> Direct<PluginNode<Vst2Loaded>> {
+    let (unit, _handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         tutti_fixtures::vst2_probe(),
@@ -55,7 +55,7 @@ fn unit() -> Direct<HostedNode<Vst2Loaded>> {
     Direct::new(unit.bind(tempo), SampleRate::of(SR), BLOCK)
 }
 
-fn drive(unit: &mut Direct<HostedNode<Vst2Loaded>>) {
+fn drive(unit: &mut Direct<PluginNode<Vst2Loaded>>) {
     unit.block();
     black_box(unit.output().plane(0).samples().first().copied());
 }
@@ -78,7 +78,7 @@ fn bench_many(c: &mut Criterion) {
     let mut group = c.benchmark_group("vst2/instances");
     group.throughput(Throughput::Elements(BLOCK as u64));
     for n in [1usize, 4, 16] {
-        let mut units: Vec<Direct<HostedNode<Vst2Loaded>>> = (0..n).map(|_| unit()).collect();
+        let mut units: Vec<Direct<PluginNode<Vst2Loaded>>> = (0..n).map(|_| unit()).collect();
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
             b.iter(|| {
                 for u in &mut units {

@@ -10,7 +10,7 @@
 #
 # step  R1/S7 dsp: banks to one float, then PolySynth, SoundFont and GM generic over F
 #       B2/B3 graph: param cells, ranges, ramps and segments at f64
-#       plugins step 7 plugins: HostedNode<F>, ABI width negotiation
+#       plugins step 7 plugins: PluginNode<F>, ABI width negotiation
 #       dsp S7/instruments  the instruments' f32 engines
 #       midi units  the MIDI crates' f32 units
 #       foundation  units, types, curve and plumbing: the last f32 unit families
@@ -101,7 +101,7 @@ crates/tutti-nodes/src/modulation/mod_delay.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/sweep_clock.rs  1  migrating: B2/B3
 crates/tutti-nodes/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
-crates/tutti-plugin-host/src/node/graph.rs  1  migrating: plugins step 7
+crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
 crates/tutti-plugin-host/src/param_delivery.rs  3  migrating: plugins step 7
 crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
 crates/tutti-polysynth/src/bank.rs  17  migrating: dsp S7/instruments

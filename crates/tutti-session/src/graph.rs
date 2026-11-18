@@ -910,7 +910,7 @@ impl Graph {
     pub fn insert_plugin(
         &mut self,
         client: Box<tutti_plugin::PluginClient>,
-    ) -> Key<crate::PluginNode> {
+    ) -> Key<crate::AnyPlugin> {
         let (key, rebinder) = self.insert_plugin_with_rebinder(client);
         if let Some(hosted) = self.plugins.get_mut(&key.erase()) {
             hosted.set_rebinder(rebinder);
@@ -924,10 +924,7 @@ impl Graph {
     pub(crate) fn insert_plugin_with_rebinder(
         &mut self,
         client: Box<tutti_plugin::PluginClient>,
-    ) -> (
-        Key<crate::PluginNode>,
-        tutti_plugin::catalog::PluginRebinder,
-    ) {
+    ) -> (Key<crate::AnyPlugin>, tutti_plugin::catalog::PluginRebinder) {
         let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::served(
             client.handle(),

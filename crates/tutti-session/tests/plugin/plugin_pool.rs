@@ -751,14 +751,14 @@ fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
 }
 
 /// One session with the first plugin loaded and in a node, under key `fx`.
-fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::PluginNode>) {
+fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::AnyPlugin>) {
     with_node_in(session(true), catalog)
 }
 
 fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     mut s: Session<K, C>,
     catalog: &Catalog,
-) -> (Session<K, C>, tutti_session::Key<tutti_session::PluginNode>) {
+) -> (Session<K, C>, tutti_session::Key<tutti_session::AnyPlugin>) {
     s.pool(s.plugin_entry("fx", &first_id(), catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -767,7 +767,7 @@ fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
 
 fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &Session<K, C>,
-    node: tutti_session::Key<tutti_session::PluginNode>,
+    node: tutti_session::Key<tutti_session::AnyPlugin>,
 ) -> Option<u32> {
     s.plugin_view(node).unwrap().diagnostics().server_pid()
 }

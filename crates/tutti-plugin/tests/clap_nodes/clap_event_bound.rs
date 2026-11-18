@@ -25,7 +25,7 @@ fn declared_at(node: &mut impl Node, frames: usize) -> Option<u32> {
 #[test]
 fn the_declared_bound_is_what_the_list_holds_and_the_intake_takes() {
     let _lock = machine_lock();
-    let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded>(
+    let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         tutti_fixtures::clap_probe(),

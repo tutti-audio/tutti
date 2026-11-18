@@ -15,10 +15,11 @@ use std::sync::{Arc, OnceLock};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
     PluginError, PluginFailure, PluginInvalidation, Prepare, Processor, RenderMode,
-    RenderModeSupport, SampleRate, Samples, State, Successor, standing,
+    RenderModeSupport, SampleRate, Samples, State, Successor, Widths, standing,
 };
 use tutti_rt::Rt;
 
@@ -123,15 +124,18 @@ impl Figures {
     }
 }
 
-/// A plugin of hosting `F` and where it is in its life.
-pub(super) struct Instance<F: Loaded> {
-    lifecycle: Lifecycle<F>,
+/// A plugin of hosting `L` and where it is in its life.
+pub(super) struct Instance<L: Loaded> {
+    lifecycle: Lifecycle<L>,
     state: State,
     /// The Processor's way to the node's realtime end.
-    hand: Hand<F::Processor>,
+    hand: Hand<L::Processor>,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
     origin: Option<Origin>,
+    /// The widths the plugin processes audio in, as read before its
+    /// activation (for a plugin its shell activated, the width it runs at).
+    widths: Widths,
     /// What the plugin runs at, or was last asked to. Its `mode` follows the
     /// live render mode ([`set_render_mode`](Self::set_render_mode)), so
     /// a rate change activates in the mode the plugin was told.
@@ -153,10 +157,11 @@ pub(super) struct Instance<F: Loaded> {
     figures: Arc<Figures>,
 }
 
-impl<F: InProcess> Instance<F> {
+impl<L: InProcess> Instance<L> {
     /// Loads and activates the plugin at `sample_rate` and blocks of up to
-    /// `block_size`, 32-bit, in realtime mode, and lends its Processor to the
-    /// realtime end this returns. Main thread.
+    /// `block_size`, at the width [`Widths::negotiate`] settles `width` on, in
+    /// realtime mode, and lends its Processor to the realtime end this returns.
+    /// Main thread.
     ///
     /// # Errors
     ///
@@ -173,36 +178,39 @@ impl<F: InProcess> Instance<F> {
         load: &Load,
         sample_rate: SampleRate,
         block_size: usize,
-        restore: Option<&mut dyn FnMut(&mut F) -> Result<(), StateError>>,
-    ) -> Result<(Self, Rt<F::Processor>, Option<Result<(), StateError>>), (LoadStage, String)> {
-        let mut loaded = F::load_in_process(main, work, path, load).map_err(|e| match e {
+        width: FloatWidth,
+        restore: Option<&mut dyn FnMut(&mut L) -> Result<(), StateError>>,
+    ) -> Result<(Self, Rt<L::Processor>, Option<Result<(), StateError>>), (LoadStage, String)> {
+        let mut loaded = L::load_in_process(main, work, path, load).map_err(|e| match e {
             PluginError::Load { stage, reason } => (stage, reason),
             other => (LoadStage::Opening, other.to_string()),
         })?;
         let origin = loaded.origin().clone();
         let restored = restore.map(|restore| restore(&mut loaded));
-        let (this, rt) = Self::start(main, loaded, Some(origin), sample_rate, block_size)?;
+        let (this, rt) = Self::start(main, loaded, Some(origin), sample_rate, block_size, width)?;
         Ok((this, rt, restored))
     }
 }
 
-impl<F: Loaded> Instance<F> {
+impl<L: Loaded> Instance<L> {
     /// Activates `loaded` at `sample_rate` and blocks of up to `block_size`,
-    /// 32-bit, in realtime mode, and lends its Processor to the realtime end
-    /// this returns. Main thread.
+    /// at the width [`Widths::negotiate`] settles `width` on, in realtime mode,
+    /// and lends its Processor to the realtime end this returns. Main thread.
     ///
     /// # Errors
     ///
     /// The stage that failed and the reason.
     pub(super) fn start(
         main: MainThreadMarker,
-        loaded: F,
+        loaded: L,
         origin: Option<Origin>,
         sample_rate: SampleRate,
         block_size: usize,
-    ) -> Result<(Self, Rt<F::Processor>), (LoadStage, String)> {
+        width: FloatWidth,
+    ) -> Result<(Self, Rt<L::Processor>), (LoadStage, String)> {
+        let widths = loaded.widths();
         let prepare = MaxBlock::new(Samples(block_size))
-            .map(|block| Prepare::new(sample_rate, block))
+            .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
             .ok_or_else(|| {
                 (
                     LoadStage::Activation,
@@ -212,9 +220,10 @@ impl<F: Loaded> Instance<F> {
         let (hand, rt) = Hand::threaded();
         let mut this = Self {
             lifecycle: Lifecycle::new(loaded),
-            state: Lifecycle::<F>::initial_state(),
+            state: Lifecycle::<L>::initial_state(),
             hand,
             origin,
+            widths,
             prepare,
             changes: Changes::default(),
             reports: Vec::new(),
@@ -239,12 +248,16 @@ impl<F: Loaded> Instance<F> {
     /// A plugin its shell activated itself, on any thread, at `prepare`
     /// (`Lifecycle::adopt`): the Processor is lent to the realtime end this
     /// returns. For a hosting whose activation needs no main thread.
+    ///
+    /// The [`widths`](Self::widths) of an adopted instance are the width it
+    /// runs at, not the plugin's capability: a served plugin's capability is
+    /// the server's `Loaded::widths`, which this side is not told.
     pub(super) fn adopt(
-        processor: F::Processor,
-        controller: F::Controller,
+        processor: L::Processor,
+        controller: L::Controller,
         prepare: Prepare,
         wiring: &tutti_plugin_types::LoadedPlugin,
-    ) -> (Self, Rt<F::Processor>) {
+    ) -> (Self, Rt<L::Processor>) {
         let (mut hand, rt) = Hand::threaded();
         let (lifecycle, state) =
             Lifecycle::adopt(processor, controller, prepare, wiring, &mut hand);
@@ -253,6 +266,7 @@ impl<F: Loaded> Instance<F> {
             state,
             hand,
             origin: None,
+            widths: Widths::new(prepare.format() == FloatWidth::F64),
             prepare,
             changes: Changes::default(),
             reports: Vec::new(),
@@ -265,6 +279,18 @@ impl<F: Loaded> Instance<F> {
         (this, rt)
     }
 
+    /// The widths the plugin processes audio in: read before its activation
+    /// when this loaded it, the width it runs at when its shell activated it.
+    pub(super) fn widths(&self) -> Widths {
+        self.widths
+    }
+
+    /// The width the Processor runs at: it stays through a rate or a mode
+    /// change, which reactivate with the same [`Prepare`] but for those.
+    pub(super) fn width(&self) -> FloatWidth {
+        self.prepare.format()
+    }
+
     /// Steps `event` and keeps what it told; what stopped it from taking
     /// effect, if something did.
     ///
@@ -275,7 +301,7 @@ impl<F: Loaded> Instance<F> {
         let changes = &mut self.changes;
         // The lifecycle takes the state by value and hands the next back; a
         // fresh state is no allocation, so the one held is moved, not cloned.
-        let state = std::mem::replace(&mut self.state, Lifecycle::<F>::initial_state());
+        let state = std::mem::replace(&mut self.state, Lifecycle::<L>::initial_state());
         self.state =
             self.lifecycle
                 .drive(state, event, &mut self.hand, main, |notice| match notice {
@@ -400,7 +426,7 @@ impl<F: Loaded> Instance<F> {
     /// the successor's. A plugin that refuses the restart renders nothing until
     /// one it takes: the refusal is kept for the control side, as a rate's is
     /// ([`take_reports`](Self::take_reports)).
-    pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<F::Processor>) {
+    pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<L::Processor>) {
         self.hand.install(successor);
         if let Some(trouble) = self.drive(main, Event::Op(HostOp::Relend)) {
             self.note(trouble);
@@ -453,7 +479,7 @@ impl<F: Loaded> Instance<F> {
         &mut self,
         main: MainThreadMarker,
         mode: RenderMode,
-        rt: Option<&mut Rt<F::Processor>>,
+        rt: Option<&mut Rt<L::Processor>>,
     ) -> bool {
         self.prepare = self.prepare.with_mode(mode);
         self.state.set_mode(mode);
@@ -515,7 +541,7 @@ impl<F: Loaded> Instance<F> {
         &mut self,
         main: MainThreadMarker,
         rate: SampleRate,
-        rt: Option<&mut Rt<F::Processor>>,
+        rt: Option<&mut Rt<L::Processor>>,
     ) -> Result<(), String> {
         let wanted = self.prepare.with_rate(rate);
         let mut outcome = self.drive(main, Event::Op(HostOp::Reconfigure(wanted)));
@@ -709,6 +735,7 @@ mod tests {
             &Load::new(),
             SampleRate::SR_48K,
             0,
+            FloatWidth::F32,
             None,
         ) {
             Err((LoadStage::Activation, reason)) => {
@@ -717,6 +744,49 @@ mod tests {
             Err((stage, reason)) => panic!("{stage:?} {reason}"),
             Ok(_) => panic!("a block of no frames must be refused"),
         }
+    }
+
+    /// **A plugin that processes 32-bit audio only, started for a 64-bit graph,
+    /// is activated at 32-bit**: [`Widths::negotiate`] lowers the request, the
+    /// instance reports the plugin's widths as `Widths::F32` and the width it
+    /// runs at as 32-bit, and the plugin was sent a 32-bit activation. The load
+    /// then returns it in a `WidthError` (`load_client`) rather than hosting it.
+    #[test]
+    fn a_32_bit_plugin_started_for_64_bit_runs_at_32() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        fake.only_32_bit();
+        let (instance, _rt) = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F64,
+        )
+        .expect("the plugin activates at 32-bit");
+        assert_eq!(instance.widths(), Widths::F32);
+        assert_eq!(instance.width(), FloatWidth::F32);
+        assert_eq!(fake.activated_width(), Some(FloatWidth::F32));
+        assert!(instance.renders());
+    }
+
+    /// **A plugin that processes both widths, started for 64-bit, is activated
+    /// at 64-bit.**
+    #[test]
+    fn a_64_bit_plugin_started_for_64_bit_runs_at_64() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        let (instance, _rt) = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F64,
+        )
+        .expect("the plugin activates at 64-bit");
+        assert_eq!(instance.widths(), Widths::BOTH);
+        assert_eq!(instance.width(), FloatWidth::F64);
+        assert_eq!(fake.activated_width(), Some(FloatWidth::F64));
     }
 
     /// **A rate the plugin takes is the instance's new configuration, and a
@@ -731,6 +801,7 @@ mod tests {
             &Load::new(),
             SampleRate::SR_48K,
             64,
+            FloatWidth::F32,
             None,
         )
         .expect("loads");
@@ -759,6 +830,7 @@ mod tests {
             &Load::new(),
             SampleRate::SR_48K,
             64,
+            FloatWidth::F32,
             None,
         )
         .expect("loads");

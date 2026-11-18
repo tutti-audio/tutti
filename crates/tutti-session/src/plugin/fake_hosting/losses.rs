@@ -168,7 +168,7 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };
-    let client = tutti_plugin_host::client_over::<FakeLoaded>(
+    let client = tutti_plugin_host::client_over::<FakeLoaded, f32>(
         processor,
         controller,
         prepare,
@@ -213,7 +213,7 @@ fn leave_unlent(controls: &PluginControls, blocks: usize) {
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };
-    let client = tutti_plugin_host::client_over::<FakeLoaded>(
+    let client = tutti_plugin_host::client_over::<FakeLoaded, f32>(
         processor,
         controller,
         prepare,

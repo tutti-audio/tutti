@@ -5,7 +5,7 @@
 //! All three are over the plugin's [`Control`]
 //! surface ([`Lifecycle::control`](tutti_plugin_types::Lifecycle::control),
 //! which reaches it whether the plugin is loaded or active). Holds the plugin's
-//! control side, the `Arc<Mutex<Instance<F>>>` the node's `shape` and
+//! control side, the `Arc<Mutex<Instance<L>>>` the node's `shape` and
 //! `prepare` also take. Control-thread calls take the lock for the duration of
 //! one plugin operation — short for parameter / state methods, potentially long
 //! for editor ones. The audio thread never takes it: it renders through the
@@ -51,8 +51,8 @@ use tutti_units::ParamId;
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
 /// the user-installed callback.
-pub(crate) struct ControlBackend<F: InProcess> {
-    pub(super) inner: Arc<Mutex<Instance<F>>>,
+pub(crate) struct ControlBackend<L: InProcess> {
+    pub(super) inner: Arc<Mutex<Instance<L>>>,
     pub(crate) param_sink: ParameterChangeSink,
     /// The cell the audio unit parks a rate change in, shared with the
     /// node. Drained here because telling a plugin its rate deactivates and
@@ -121,10 +121,10 @@ impl Reporting {
 /// refused rather than queued without bound. The decision is [`OffMainWait`]'s.
 const OFF_MAIN_DEADLINE: Duration = Duration::from_secs(2);
 
-impl<F> ControlBackend<F>
+impl<L> ControlBackend<L>
 where
-    F: InProcess + 'static,
-    F::Processor: 'static,
+    L: InProcess + 'static,
+    L::Processor: 'static,
 {
     /// Runs `work` on the plugin on the main thread, under the instance lock,
     /// from whichever thread asks. `None` when it cannot be answered: the
@@ -132,7 +132,7 @@ where
     /// [`OFF_MAIN_DEADLINE`].
     fn on_main<R: Send + 'static>(
         &self,
-        work: impl FnOnce(MainThreadMarker, &mut Instance<F>) -> R + Send + 'static,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
     ) -> Option<R> {
         if let Some(main) = MainThreadMarker::new() {
             return Some(work(main, &mut self.inner.lock()));
@@ -154,7 +154,7 @@ where
 
     /// `work` on the plugin now, when this is the main thread and the instance is
     /// not locked; `None` otherwise. Never waits.
-    fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<F>) -> R) -> Option<R> {
+    fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R) -> Option<R> {
         let main = MainThreadMarker::new()?;
         let mut instance = self.inner.try_lock()?;
         Some(work(main, &mut instance))
@@ -163,7 +163,7 @@ where
     /// `work` on the main thread without waiting: at once on it, posted to the
     /// owner's collector off it (refused while that collector has never run).
     /// Skipped when the instance is locked.
-    fn post(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<F>) + Send + 'static) {
+    fn post(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) + Send + 'static) {
         if let Some(main) = MainThreadMarker::new() {
             if let Some(mut instance) = self.inner.try_lock() {
                 work(main, &mut instance);
@@ -179,10 +179,10 @@ where
     }
 }
 
-impl<F> AnyThread for ControlBackend<F>
+impl<L> AnyThread for ControlBackend<L>
 where
-    F: InProcess + 'static,
-    F::Processor: 'static,
+    L: InProcess + 'static,
+    L::Processor: 'static,
 {
     /// `None` for a lost plugin, and when the main thread does not answer.
     fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
@@ -328,7 +328,7 @@ where
 /// call into it latches the instance's [`Lost`], which is what this reads, with
 /// no lock. A plugin that takes the host down with it is not observed; the rest
 /// is the trait's defaults.
-impl<F: InProcess> Health for ControlBackend<F> {
+impl<L: InProcess> Health for ControlBackend<L> {
     fn is_crashed(&self) -> bool {
         self.lost.is_lost()
     }
@@ -348,10 +348,10 @@ impl<F: InProcess> Health for ControlBackend<F> {
     fn terminate(&self, _reason: TerminationReason) {}
 }
 
-impl<F> MainThreadControl for ControlBackend<F>
+impl<L> MainThreadControl for ControlBackend<L>
 where
-    F: InProcess + 'static,
-    F::Processor: 'static,
+    L: InProcess + 'static,
+    L::Processor: 'static,
 {
     /// Under the instance's lock; not called for a lost plugin.
     fn lend(&self, f: &mut dyn FnMut(&mut dyn Control)) {
@@ -429,7 +429,7 @@ mod off_main_tests {
     /// The probe, loaded in process, with parameter 1 written to 0.75; its main-thread
     /// work goes to `work`.
     fn load(work: &MainWorkHandle) -> (crate::InProcClient<Vst2Loaded>, PluginHandle) {
-        let (client, handle) = crate::load_client::<Vst2Loaded>(
+        let (client, handle) = crate::load_client::<Vst2Loaded, f32>(
             main_thread(),
             work,
             tutti_fixtures::vst2_probe(),

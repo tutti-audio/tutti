@@ -18,7 +18,9 @@
 //! the plugin dies meanwhile ([`Lost`](Settlement::Lost)) no Processor moves,
 //! and neither node renders.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
+use tutti_buffers::Float;
 
 use parking_lot::Mutex;
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
@@ -27,7 +29,7 @@ use tutti_types::ParkedSampleRate;
 use tutti_units::ParamId;
 use tutti_units::Samples;
 
-use super::client::{Declared, HostedNode, InProcClient, Reload};
+use super::client::{Declared, InProcClient, PluginNode, Reload};
 use super::control_backend::Reporting;
 use super::instance::Instance;
 use crate::{DeliveryCounters, PluginControls};
@@ -55,8 +57,12 @@ pub enum RebindError {
 /// Made from the node it replaces ([`InProcClient::rebinder`]) and kept on the
 /// control side. [`prepare`](Self::prepare) takes the instance lock, so never the
 /// audio thread.
-pub struct Rebinder<F: Loaded> {
-    inner: Arc<Mutex<Instance<F>>>,
+///
+/// `F` is the graph float of the node it replaces. The default `F = f32` is the
+/// common width and converts nothing; it is staging until every caller names
+/// its graph's float.
+pub struct Rebinder<L: Loaded, F: Float = f32> {
+    inner: Arc<Mutex<Instance<L>>>,
     descriptor: PluginDescriptor,
     reload: Option<Reload>,
     features: Features,
@@ -81,9 +87,10 @@ pub struct Rebinder<F: Loaded> {
     /// The node declares a bypass of the plugin's own.
     own_bypass: bool,
     tempo: TempoReader,
+    width: PhantomData<fn() -> F>,
 }
 
-impl<F: Loaded> Clone for Rebinder<F> {
+impl<L: Loaded, F: Float> Clone for Rebinder<L, F> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -101,11 +108,12 @@ impl<F: Loaded> Clone for Rebinder<F> {
             event_room: self.event_room,
             own_bypass: self.own_bypass,
             tempo: self.tempo.clone(),
+            width: PhantomData,
         }
     }
 }
 
-impl<F: Loaded> std::fmt::Debug for Rebinder<F> {
+impl<L: Loaded, F: Float> std::fmt::Debug for Rebinder<L, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Rebinder")
             .field("descriptor", &self.descriptor)
@@ -113,9 +121,9 @@ impl<F: Loaded> std::fmt::Debug for Rebinder<F> {
     }
 }
 
-impl<F: Loaded + 'static> Rebinder<F>
+impl<L: Loaded + 'static, F: Float> Rebinder<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
     /// A node over the plugin with the ports it declares now, and the
     /// [`Pending`] that moves the plugin's Processor to it.
@@ -143,7 +151,7 @@ where
     /// [`NotRunning`](RebindError::NotRunning) for a plugin that is loaded or
     /// refused; [`Restarting`](RebindError::Restarting) while its own restart is
     /// under way.
-    pub fn prepare(&self) -> Result<(HostedNode<F>, Pending<F>), RebindError> {
+    pub fn prepare(&self) -> Result<(PluginNode<L, F>, Pending<L>), RebindError> {
         let instance = self.inner.lock();
         let layout = instance.layout().ok_or(RebindError::NoPorts)?;
         let mut declared = Declared::from_layout(layout)?;
@@ -231,22 +239,22 @@ where
 /// Dropping it without [`commit`](Self::commit) changes nothing: the node it
 /// came with stays empty and silent.
 #[must_use = "a node renders nothing until its move is committed"]
-pub struct Pending<F: Loaded> {
-    inner: Arc<Mutex<Instance<F>>>,
-    successor: Successor<F::Processor>,
+pub struct Pending<L: Loaded> {
+    inner: Arc<Mutex<Instance<L>>>,
+    successor: Successor<L::Processor>,
     /// The rebinder's record of the newest committed node's counters.
     delivery: Arc<Mutex<Arc<DeliveryCounters>>>,
     /// The node's own, which `delivery` holds once it is committed.
     counters: Arc<DeliveryCounters>,
 }
 
-impl<F: Loaded> std::fmt::Debug for Pending<F> {
+impl<L: Loaded> std::fmt::Debug for Pending<L> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pending").finish_non_exhaustive()
     }
 }
 
-impl<F: Loaded> Pending<F> {
+impl<L: Loaded> Pending<L> {
     /// Names the node's realtime end the Processor's way, and recalls the
     /// Processor from the node it replaces: the plugin keeps running, and the
     /// Processor is lent to this node at the instance's next pump, with no
@@ -289,20 +297,20 @@ pub enum Settlement {
     Lost,
 }
 
-impl<F: Loaded> HostedNode<F> {
+impl<L: Loaded, F: Float> PluginNode<L, F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
     /// reader the node was bound to. See [`InProcClient::rebinder`].
     #[must_use]
-    pub fn rebinder(&self) -> Rebinder<F> {
+    pub fn rebinder(&self) -> Rebinder<L, F> {
         self.client.rebinder(self.tempo.clone())
     }
 }
 
-impl<F: Loaded> InProcClient<F> {
+impl<L: Loaded, F: Float> InProcClient<L, F> {
     /// The [`Rebinder`] for this node, over the same plugin, binding its
     /// successors to `tempo`.
     #[must_use]
-    pub fn rebinder(&self, tempo: TempoReader) -> Rebinder<F> {
+    pub fn rebinder(&self, tempo: TempoReader) -> Rebinder<L, F> {
         Rebinder {
             inner: Arc::clone(&self.inner),
             descriptor: self.descriptor.clone(),
@@ -319,6 +327,7 @@ impl<F: Loaded> InProcClient<F> {
             event_room: self.event_room,
             own_bypass: self.declared.ports.own_bypass,
             tempo,
+            width: PhantomData,
         }
     }
 }
@@ -356,7 +365,7 @@ mod tests {
     fn rig() -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        HostedNode<FakeLoaded>,
+        PluginNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_with(false)
@@ -368,7 +377,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        HostedNode<FakeLoaded>,
+        PluginNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_over(own_bypass, [])
@@ -380,7 +389,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        HostedNode<FakeLoaded>,
+        PluginNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_over(false, parameters)
@@ -392,7 +401,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        HostedNode<FakeLoaded>,
+        PluginNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         let (fake, loaded) = FakePlugin::new();
@@ -410,7 +419,7 @@ mod tests {
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");
         };
-        let client = client_over::<FakeLoaded>(
+        let client = client_over::<FakeLoaded, f32>(
             processor, controller, prepare, descriptor, &wiring, parameters, 0, None,
         )
         .expect("the fake is narrow");
@@ -426,7 +435,7 @@ mod tests {
     #[test]
     fn the_node_declares_no_more_than_its_midi_intake_takes() {
         let (_fake, _rebinder, node, _inner) = rig();
-        let bound = |node: &HostedNode<FakeLoaded>| node.shape().event_input_capacity;
+        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
         assert_eq!(bound(&node).map(|n| n.get()), Some(256));
         let node = contract::prepared(node, SR, 2048);
         assert_eq!(bound(&node).map(|n| n.get()), Some(256));
@@ -442,7 +451,7 @@ mod tests {
     fn the_node_declares_no_more_than_its_processor_takes() {
         let (fake, _rebinder, node, _inner) = rig();
         fake.hold_events(100);
-        let bound = |node: &HostedNode<FakeLoaded>| node.shape().event_input_capacity;
+        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
         let node = contract::prepared(node, SR, 2048);
         assert_eq!(bound(&node).map(|n| n.get()), Some(100));
         let node = contract::prepared(node, SR, 64);
@@ -478,7 +487,7 @@ mod tests {
 
     /// A node over the plugin's ports now, committed at once: the caller's
     /// swap that cannot fail.
-    fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<HostedNode<FakeLoaded>, RebindError> {
+    fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {
         let (node, pending) = rebinder.prepare()?;
         pending.commit(main_thread());
         Ok(node)
@@ -496,12 +505,12 @@ mod tests {
     }
 
     /// One block with an impulse on both inputs: a sounding plugin answers it.
-    fn block(node: &mut HostedNode<FakeLoaded>, frame: u64) -> Driven {
+    fn block(node: &mut PluginNode<FakeLoaded>, frame: u64) -> Driven {
         block_with(node, frame, &[])
     }
 
     /// [`block`], with `events` on the node's event input.
-    fn block_with(node: &mut HostedNode<FakeLoaded>, frame: u64, events: &[Event]) -> Driven {
+    fn block_with(node: &mut PluginNode<FakeLoaded>, frame: u64, events: &[Event]) -> Driven {
         let mut x = vec![0.0f32; BLOCK];
         x[0] = 1.0;
         drive_input(
@@ -518,7 +527,7 @@ mod tests {
     /// back and gets the restarted one.
     fn change_ports(
         fake: &FakePlugin,
-        node: &mut HostedNode<FakeLoaded>,
+        node: &mut PluginNode<FakeLoaded>,
         inner: &Mutex<Instance<FakeLoaded>>,
         outputs: u16,
     ) {
@@ -542,7 +551,7 @@ mod tests {
     /// moved.
     fn settle(
         rebinder: &Rebinder<FakeLoaded>,
-        old: &mut HostedNode<FakeLoaded>,
+        old: &mut PluginNode<FakeLoaded>,
         inner: &Mutex<Instance<FakeLoaded>>,
         mut frame: u64,
     ) -> u64 {
@@ -780,7 +789,7 @@ mod tests {
     fn a_rebuilt_node_does_not_resend_the_value_the_replaced_node_delivered() {
         let (_fake, rebinder, mut first, inner) = rig_params([PARAM]);
         let sent =
-            |node: &HostedNode<FakeLoaded>| node.client.params.counters().snapshot().points_sent;
+            |node: &PluginNode<FakeLoaded>| node.client.params.counters().snapshot().points_sent;
         block_with(&mut first, 0, &ramp(0.5));
         assert_eq!(sent(&first), 1, "the first node delivers it");
 

@@ -144,7 +144,7 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 ///
 /// ```compile_fail,E0277
 /// use tutti_plugin_types::OutOfProcess;
-/// fn served<F: OutOfProcess>() {}
+/// fn served<L: OutOfProcess>() {}
 /// served::<tutti_vst2_host::Vst2Loaded>();
 /// ```
 ///
@@ -153,7 +153,7 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 ///
 /// ```
 /// use tutti_plugin_types::InProcess;
-/// fn here<F: InProcess>() {}
+/// fn here<L: InProcess>() {}
 /// here::<tutti_vst2_host::Vst2Loaded>();
 /// ```
 ///

@@ -124,7 +124,7 @@
 //! - **A fork of its own.** The node the fork source builds is inserted
 //!   without one, like every forked node.
 //!
-//! An in-process plugin (`HostedNode` over an `InProcess` format) forks by state
+//! An in-process plugin (`PluginNode` over an `InProcess` format) forks by state
 //! transfer too, into a second instance in this process from the same
 //! library (`tutti-plugin-host`'s `fork` module).
 
