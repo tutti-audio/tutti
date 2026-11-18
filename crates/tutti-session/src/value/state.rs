@@ -153,6 +153,7 @@ impl ValueTable {
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
     /// session's own wiring (a clip `Midi` plays).
+    #[cfg(feature = "midi")]
     pub(crate) fn write<A: Stageable>(&self, assign: A) -> Result<(), ValueErrorKind> {
         let held = self.enter().ok_or(ValueErrorKind::Reentrant)?;
         let mut batch = Batch::new(held.params());
