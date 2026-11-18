@@ -20,7 +20,7 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
 use tutti_types::{
@@ -388,9 +388,9 @@ impl SendError {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource};
-/// # use tutti_codec::Wave;
+/// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_samples(tutti_types::SampleRate::SR_48K, &[0.0; 64]));
+/// # let wave = Arc::new(Wave::from_mono(tutti_types::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
 /// # let voice = Voice {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),
@@ -404,9 +404,9 @@ impl SendError {
 ///
 /// ```
 /// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
-/// # use tutti_codec::Wave;
+/// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_samples(tutti_types::SampleRate::SR_48K, &[0.0; 64]));
+/// # let wave = Arc::new(Wave::from_mono(tutti_types::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
 /// # let voice = Voice {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),

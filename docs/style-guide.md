@@ -196,7 +196,7 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   Result`.
 - **D5. Links** (`C-LINK`): types and methods are intra-doc links; a link
   rustdoc cannot resolve, a redundant explicit target, or a public doc linking
-  a private item fails CI (`cargo xtask doc`, `check-doc-features`).
+  a private item fails CI (`cargo xtask doc`).
 - **D6. A comment states what the code does and the invariant it holds**
   (`M-NO-META-DESIGN-DOCUMENTATION`): safety, ordering, real-time, in the
   present tense; rustdoc documents the item. Everything else is deleted, not
@@ -287,7 +287,7 @@ output. In audit terms:
   on; a test that has flaked is fixed at the cause or recorded in the flake
   list with its cause.
 - **X6. Feature-gated suites are listed** where CI runs them
-  (`test-features`, the dark-features job).
+  (the `-p` list of `test-features` and the dark-features job).
 
 ## P. Packaging
 
@@ -389,7 +389,7 @@ the reading time goes to judgment:
 | Check | How |
 |---|---|
 | Lints | `cargo clippy -p <crate> --all-targets --all-features -- -D warnings -W clippy::pedantic` (pedantic is advisory: report, do not gate) |
-| Docs | `cargo xtask doc`, `cargo xtask check-doc-features` |
+| Docs | `cargo xtask doc` |
 | Public surface | the crate root's `pub use` list against what other crates and docs actually use (T14) |
 | Size | files over ~1,500 lines (C1), inline `mod tests {` (C1) |
 | Lint exceptions | `#[allow(` / `#![allow(` per crate (C4) |

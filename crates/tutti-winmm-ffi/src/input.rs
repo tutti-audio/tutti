@@ -38,6 +38,7 @@ use windows_sys::Win32::Media::{
     MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MM_MIM_LONGERROR, MMSYSERR_INVALHANDLE,
 };
 
+use crate::InputPort;
 use crate::error::{Error, MmOperation, OsOperation, check};
 use crate::sleeper::{TimerWaiter, TimerWaker, waitable_timer};
 
@@ -173,7 +174,7 @@ fn header_size() -> u32 {
 }
 
 impl MidiIn {
-    /// Opens input port `index` and starts it: `handler` runs on winmm's
+    /// Opens `port` and starts it: `handler` runs on winmm's
     /// thread for each message from then on.
     ///
     /// The handler is called from a thread winmm owns, one call at a time, and
@@ -185,18 +186,28 @@ impl MidiIn {
     /// callback that was inside when the drop finished leaves last), so its
     /// destructor must be fit to run there.
     ///
+    /// winmm answers the device interface query for a device id and refuses a
+    /// handle, so the open cannot ask the open handle which device it is. It
+    /// reads the port's position before `midiInOpen`, and opens only if the
+    /// device there is the one listed, then reads it again once open and
+    /// closes the port (with no reset) unless it still is. Only a shift
+    /// between those two reads that puts the listed device back at the position
+    /// goes unseen.
+    ///
     /// # Errors
     ///
-    /// The failing call: `midiInOpen`
+    /// [`Error::PortMoved`] when the device at the position is not the one
+    /// listed (checked before and after the open); otherwise the failing call: `midiInOpen`
     /// ([`MmResult::Allocated`](crate::MmResult::Allocated) when another
     /// application holds the port exclusively,
     /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is
     /// gone), a buffer's preparation, `midiInStart`, or the worker's or its
     /// wake event's creation.
     pub fn open(
-        index: u32,
+        port: &InputPort,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
+        port.verify()?;
         let (wake, wait) = waitable_timer()?;
         let shared = Arc::new(Shared {
             handler: Mutex::new(Box::new(handler)),
@@ -223,7 +234,7 @@ impl MidiIn {
         let code = unsafe {
             midiInOpen(
                 &raw mut handle,
-                index,
+                port.index(),
                 callback as *const () as usize,
                 id,
                 CALLBACK_FUNCTION,
@@ -233,6 +244,11 @@ impl MidiIn {
             unregister(id);
             return Err(e);
         }
+        // Until confirmed the open is a `Pending`, which unregisters and only
+        // closes: nothing was queued or started, so no reset is sent.
+        let pending = Pending { id, handle };
+        port.verify()?;
+        pending.disarm();
         shared.handle.store(handle, Ordering::Release);
         // The port is open: from here `input` owns it, and a failure drops
         // `input`, which closes the port (once, in `Drop`).
@@ -329,6 +345,29 @@ impl Drop for MidiIn {
         if closed != 0 && closed != MMSYSERR_INVALHANDLE {
             std::mem::forget(Arc::clone(&self.shared));
         }
+    }
+}
+
+/// An input opened but not yet known to be the listed device: dropping it
+/// removes it from the registry and closes the port, with no reset (no buffer
+/// was prepared and no worker exists).
+struct Pending {
+    id: usize,
+    handle: HMIDIIN,
+}
+
+impl Pending {
+    /// The open input is the listed device: leave it open.
+    fn disarm(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        unregister(self.id);
+        // SAFETY: `handle` is the input just opened, closed once.
+        unsafe { midiInClose(self.handle) };
     }
 }
 

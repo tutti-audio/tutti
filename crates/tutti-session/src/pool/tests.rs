@@ -744,7 +744,7 @@ mod audio {
         writer.finalize().unwrap();
     }
 
-    fn wave(session: &crate::DetachedSession, key: &'static str) -> Arc<tutti_codec::Wave> {
+    fn wave(session: &crate::DetachedSession, key: &'static str) -> Arc<tutti_buffers::Wave> {
         match session.audio(&key).unwrap() {
             AudioEntry::Resident(wave) => wave,
             other => panic!("a resident entry reads as its wave, got {other:?}"),

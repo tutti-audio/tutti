@@ -1,5 +1,6 @@
 //! `tutti_sampler::Clip`, a placed sample that is a graph node as it stands.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_sampler::Clip;
@@ -16,10 +17,11 @@ fn offline() -> Session {
 }
 
 /// One second of a constant mono wave.
-fn level(value: f32) -> tutti_codec::Wave {
-    let mut wave = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+fn level(value: f32) -> tutti_buffers::Wave {
+    let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for _ in 0..RATE as usize {
-        wave.push_frame(&[value]);
+        wave.append(Interleaved::new(&[value], wave.layout()).unwrap())
+            .unwrap();
     }
     wave
 }

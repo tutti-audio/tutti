@@ -41,6 +41,7 @@
 //! pin the sizing; `rt_no_alloc`'s ragged 512-frame gates pin that it costs
 //! no allocation.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
@@ -50,7 +51,7 @@ use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
@@ -75,7 +76,8 @@ const SCHEDULES: &[(usize, &[usize])] = &[(64, &[64]), (512, &[512]), (512, RAGG
 fn tone(secs: f64) -> Arc<Wave> {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for i in 0..(secs * SR) as usize {
-        w.push_frame(&frame_at(i));
+        w.append(Interleaved::new(&frame_at(i), w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

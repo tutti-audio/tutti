@@ -15,7 +15,7 @@ mod tests;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_measure::{Measure, Meter};
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
 
@@ -222,12 +222,14 @@ impl<'w> Reader<'w> {
                 let wave: &'w Wave = wave;
                 let frames = CHUNK_FRAMES.min(Samples(wave.len().get() - at.get()));
                 let span = at.get()..at.get() + frames.get();
-                chunk.hold_planes((0..wave.channels()).map(|c| &wave.channel(c)[span.clone()]));
+                chunk.hold_planes(
+                    (0..wave.channels()).map(|c| &wave.channel(c).samples()[span.clone()]),
+                );
                 *at = Samples(span.end);
             }
             #[cfg(codec)]
             Self::File(file) => {
-                let filled = file.fill_sequential_interleaved(chunk.fill(CHUNK_FRAMES))?;
+                let filled = file.fill_sequential_interleaved(chunk.fill(CHUNK_FRAMES)?)?;
                 chunk.truncate(filled);
             }
         }

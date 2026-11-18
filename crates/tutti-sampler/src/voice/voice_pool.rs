@@ -8,6 +8,7 @@
 //! [`node`](super::node).
 
 use crate::testing::loop_frames;
+use tutti_buffers::Mono;
 
 use super::command::*;
 use super::loop_span::Loop;
@@ -18,7 +19,7 @@ use super::types::*;
 use crate::streamer::StreamId;
 use crossbeam_channel::bounded;
 use std::sync::{Arc, Mutex};
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
 use tutti_types::MaxBlock;
 use tutti_types::SampleRate;
@@ -72,7 +73,7 @@ fn make_wave(samples: usize) -> Arc<Wave> {
     let data: Vec<f32> = (0..samples)
         .map(|i| (i as f32 + 1.0) / samples as f32)
         .collect();
-    Arc::new(Wave::from_samples(SampleRate::SR_44K1, &data))
+    Arc::new(Wave::from_mono(SampleRate::SR_44K1, Mono::new(&data)))
 }
 
 /// Send an in-memory voice through the one `AddVoice` path — the test-setup
@@ -349,7 +350,7 @@ fn a_transport_seek_flushes_stretch_state() {
             }
         })
         .collect();
-    let wave = Arc::new(Wave::from_samples(SampleRate::of(SR), &data));
+    let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(SILENT_BEAT), Bpm::of(120.0));
     let (mut unit, handle) = VoicePool::with_channels(1u16)
@@ -446,7 +447,7 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
             }
         })
         .collect();
-    let wave = Arc::new(Wave::from_samples(SampleRate::of(SR), &data));
+    let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(SILENT_BEAT), Bpm::of(120.0));
     let sampler =
@@ -511,7 +512,7 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
     let data: Vec<f32> = (0..LEN)
         .map(|i| 0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin())
         .collect();
-    let wave = Arc::new(Wave::from_samples(SampleRate::of(SR), &data));
+    let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
     let sampler =
@@ -588,7 +589,7 @@ fn a_stretched_placed_voice_holds_its_pitch_across_blocks() {
         let data: Vec<f32> = (0..(SR as usize * 4))
             .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / SR as f32).sin())
             .collect();
-        let wave = Arc::new(Wave::from_samples(SampleRate::of(SR), &data));
+        let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
         let source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
@@ -637,7 +638,7 @@ fn a_stretched_placed_voice_holds_its_pitch_across_blocks() {
 fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
     const LEN: usize = 4_096;
     let data: Vec<f32> = (0..LEN).map(|i| (i + 1) as f32).collect();
-    let wave = Arc::new(Wave::from_samples(SampleRate::of(24_000.0), &data));
+    let wave = Arc::new(Wave::from_mono(SampleRate::of(24_000.0), Mono::new(&data)));
     for direction in [Direction::Forward, Direction::Reverse] {
         for via_tick in [false, true] {
             let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
@@ -838,7 +839,7 @@ fn continuous_playback_does_not_flush_the_stretch_filter() {
     let data: Vec<f32> = (0..LEN)
         .map(|i| 0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin())
         .collect();
-    let wave = Arc::new(Wave::from_samples(SampleRate::of(SR), &data));
+    let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
     let (mut unit, handle) = VoicePool::with_channels(1u16)

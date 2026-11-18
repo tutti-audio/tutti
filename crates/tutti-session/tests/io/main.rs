@@ -1,8 +1,8 @@
 //! The session's I/O edges: devices and their restart, the recorder, the inlets and the taps.
 
 // The device-free device tests (`ManualStreamDriver`): `device` is a feature,
-// so this suite runs under it (CI's dark-features job names it; a workspace run
-// no longer turns it on).
+// so this suite runs under it (CI's dark-features job runs the crate with every
+// feature on; a workspace run does not turn it on).
 // A session changes clock between the system clock and a sound card.
 #[cfg(feature = "device")]
 mod clock_switch;

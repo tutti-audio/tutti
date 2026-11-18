@@ -513,15 +513,16 @@ impl IntoNode for VoiceNode {
 mod tests {
     use super::*;
     use crate::{MemorySource, Playback, VoiceSource, VoiceWindow};
+    use tutti_buffers::Mono;
     use tutti_types::Beat;
 
     /// A steering the node held across the next `set_window` is freed by
     /// the next `reclaim`, with no further publish.
     #[test]
     fn reclaim_frees_a_window_a_block_held_across_the_next() {
-        let wave = Arc::new(tutti_codec::Wave::from_samples(
+        let wave = Arc::new(tutti_buffers::Wave::from_mono(
             SampleRate::SR_48K,
-            &[0.0; 64],
+            Mono::new(&[0.0; 64]),
         ));
         let voice = Voice {
             source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
@@ -545,9 +546,9 @@ mod tests {
     /// reads, at the stretch it plays.
     #[test]
     fn a_nodes_ring_out_is_the_ceiling_its_steering_allows() {
-        let wave = Arc::new(tutti_codec::Wave::from_samples(
+        let wave = Arc::new(tutti_buffers::Wave::from_mono(
             SampleRate::SR_48K,
-            &[0.0; 4_800],
+            Mono::new(&[0.0; 4_800]),
         ));
         let prepare = Prepare::new(
             SampleRate::SR_48K,

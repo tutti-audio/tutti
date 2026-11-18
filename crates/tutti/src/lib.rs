@@ -163,7 +163,7 @@ pub use tutti_sampler::Clip;
 
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
-pub use tutti_codec::Wave;
+pub use tutti_buffers::Wave;
 #[cfg(feature = "codec")]
 pub use tutti_codec::{Format, Pcm};
 
@@ -253,8 +253,9 @@ pub mod nodes {
         CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
         CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls,
-        DynamicEqNode, DynamicMode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout,
-        FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
+        DynamicEqNode, DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls,
+        EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode,
+        FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
         InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
         ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
@@ -269,16 +270,16 @@ pub mod nodes {
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
         ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
-        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
-        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
-        LimiterKernel, ModDelayKernel, PhaserKernel, PlateKernel, ReconcileError, SvfKernel,
-        TiltFilterKernel, TransientShaperKernel,
+        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
+        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
+        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
-        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
-        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, PlateSet, SvfSet, TiltFilterSet,
-        TransientShaperSet,
+        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet,
+        PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
 }
 
@@ -478,17 +479,24 @@ pub mod session {
 #[cfg(feature = "codec")]
 pub mod codec {
     #[cfg(any(
-        feature = "decode-wav",
-        feature = "decode-flac",
-        feature = "decode-mp3",
-        feature = "decode-ogg"
+        feature = "encode-wav",
+        feature = "encode-flac",
+        feature = "encode-aiff",
+        feature = "encode-vorbis"
     ))]
-    pub use tutti_codec::WaveMetadata;
+    pub use tutti_codec::write_wave;
     pub use tutti_codec::{Codec, Error, Sample};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Quality, QualityOutOfRange, Spec, SpecError, can_decode,
         decodable_extensions,
     };
+    #[cfg(any(
+        feature = "decode-wav",
+        feature = "decode-flac",
+        feature = "decode-mp3",
+        feature = "decode-ogg"
+    ))]
+    pub use tutti_codec::{WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata};
 }
 
 /// Sample playback (`tutti-sampler`): voices and their loops, the placement

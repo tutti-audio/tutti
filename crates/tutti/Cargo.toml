@@ -111,7 +111,7 @@ jack = ["device", "tutti-cpal/jack"]
 # --- codecs -----------------------------------------------------------------
 #
 # The decoder is `tutti-codec`'s, so a format turns on `codec` (below):
-# `Wave::read` is reached at the root; `FileIn` is `tutti-codec`'s.
+# `read_wave` is in `tutti::codec`; `FileIn` is `tutti-codec`'s.
 decode-wav = ["codec", "tutti-codec/decode-wav"]
 decode-flac = ["codec", "tutti-codec/decode-flac"]
 decode-mp3 = ["codec", "tutti-codec/decode-mp3"]

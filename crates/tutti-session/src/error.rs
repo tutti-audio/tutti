@@ -479,7 +479,7 @@ pub enum Error {
     #[error(transparent)]
     Timed(tutti_transport::TimedError<tutti_transport::TransportCommand>),
 
-    /// A file could not be decoded (`Wave::read`, `FileIn`).
+    /// A file could not be decoded (`read_wave`, `FileIn`).
     #[error(transparent)]
     Decode(#[from] tutti_codec::DecodeError),
 

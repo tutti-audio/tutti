@@ -521,7 +521,7 @@ impl Recorded {
     #[cfg(feature = "sampler")]
     pub fn clip(&self) -> crate::Result<tutti_sampler::Clip> {
         let path = self.path().ok_or(TakeError::NoFile)?;
-        let wave = tutti_codec::Wave::read(path)?;
+        let wave = tutti_codec::read_wave::<f32>(path)?;
         Ok(tutti_sampler::Clip::new(wave)?.at(self.placement.start_beat))
     }
 }

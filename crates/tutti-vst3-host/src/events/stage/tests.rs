@@ -2,6 +2,7 @@ use super::*;
 use tutti_graph::UmpAt;
 use tutti_ump::{Message, MidiChannel, MidiGroup, SysexStatus};
 
+use crate::events::event_text;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_types::Samples;
@@ -226,27 +227,24 @@ fn staging_every_source_is_allocation_free_after_warmup() {
         expression_type: tutti_plugin_types::NoteExpressionType::Tuning,
         value: 0.5,
     }];
-    let cmaj: Vec<u16> = "Cmaj7".encode_utf16().collect();
     let chords = [Utf16Chord {
         sample_offset: 0,
         root: 60,
         bass_note: 48,
         mask: 0,
-        text: cmaj.clone(),
+        text: event_text("Cmaj7"),
     }];
-    let dorian: Vec<u16> = "D Dorian".encode_utf16().collect();
     let scales = [Utf16Scale {
         sample_offset: 0,
         root: 62,
         mask: 0,
-        text: dorian.clone(),
+        text: event_text("D Dorian"),
     }];
-    let lyric: Vec<u16> = "la".encode_utf16().collect();
     let texts = [Utf16Text {
         sample_offset: 0,
         note_id: 0,
         type_id: 0,
-        text: lyric.clone(),
+        text: event_text("la"),
     }];
     let ints = [NoteExpressionIntValue {
         sample_offset: 0,
@@ -317,7 +315,7 @@ fn chord(offset: i32, root: i16) -> Utf16Chord {
         root,
         bass_note: 0,
         mask: 0,
-        text: "C".encode_utf16().collect(),
+        text: event_text("C"),
     }
 }
 
@@ -350,7 +348,7 @@ fn a_full_block_from_every_source_stages_without_allocating() {
             sample_offset: backwards(i),
             root: i as i16,
             mask: 0,
-            text: "D".encode_utf16().collect(),
+            text: event_text("D"),
         })
         .collect();
     let expr_texts: Vec<Utf16Text> = (0..HARMONY_CAPACITY)
@@ -358,7 +356,7 @@ fn a_full_block_from_every_source_stages_without_allocating() {
             sample_offset: backwards(i),
             note_id: i as i32,
             type_id: 0,
-            text: "la".encode_utf16().collect(),
+            text: event_text("la"),
         })
         .collect();
     let expr_ints: Vec<NoteExpressionIntValue> = (0..HARMONY_CAPACITY)
@@ -549,7 +547,7 @@ fn note_expressions_past_their_budget_leave_the_harmony_room() {
             sample_offset: i32::from(j),
             root: j,
             mask: 0,
-            text: "D".encode_utf16().collect(),
+            text: event_text("D"),
         })
         .collect();
 

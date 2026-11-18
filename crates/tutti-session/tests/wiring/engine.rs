@@ -7,6 +7,7 @@
 //! test pins a past render.
 
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 use tutti_graph::ForkByClone;
 use tutti_types::MaxBlock;
 
@@ -150,9 +151,10 @@ fn tone_at(i: usize) -> f32 {
 /// by `cents`. It reads the transport from its blocks' `Env`.
 fn voice(cents: f32) -> tutti_sampler::VoicePool {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
-    let mut wave = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+    let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize {
-        wave.push_frame(&[tone_at(i)]);
+        wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
+            .unwrap();
     }
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(tutti_types::Beat(0.0)))
         .expect("a placeable wave");

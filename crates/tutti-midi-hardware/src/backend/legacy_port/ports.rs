@@ -48,25 +48,28 @@ const FINGERPRINT_SHIFT: u32 = 32;
 /// which device a port is. The 64-bit hash is folded to 31 bits; two devices
 /// that collide are numbered apart by their occurrence, so a collision costs
 /// nothing but a possible swap of two ports' ids across an unplug.
-pub(in crate::backend) fn fingerprint(info: &PortInfo) -> u32 {
+pub(in crate::backend) fn fingerprint(device: &WinMmDevice) -> u32 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let hash = info
-        .device
+    let hash = device
         .to_string()
         .bytes()
         .fold(OFFSET, |h, b| (h ^ u64::from(b)).wrapping_mul(PRIME));
     ((hash >> 32) ^ hash) as u32 & ((1 << FINGERPRINT_BITS) - 1)
 }
 
-/// The id of the `occurrence`th port on `side` that `info` describes.
-pub(in crate::backend) fn endpoint_id(side: Side, occurrence: u32, info: &PortInfo) -> EndpointId {
+/// The id of the `occurrence`th port on `side` that `device` names.
+pub(in crate::backend) fn endpoint_id(
+    side: Side,
+    occurrence: u32,
+    device: &WinMmDevice,
+) -> EndpointId {
     let side = match side {
         Side::Input => 0,
         Side::Output => OUTPUT_BIT,
     };
     EndpointId::from_raw(
-        side | u64::from(fingerprint(info)) << FINGERPRINT_SHIFT | u64::from(occurrence),
+        side | u64::from(fingerprint(device)) << FINGERPRINT_SHIFT | u64::from(occurrence),
     )
 }
 
@@ -85,18 +88,18 @@ pub(in crate::backend) fn slot_of(id: EndpointId) -> Slot {
     }
 }
 
-/// The position in the OS's list of the port `slot` names: the
-/// `occurrence`th of `listed` (position and what the driver reports there)
-/// whose digest matches. `None` when the device is not listed.
-pub(in crate::backend) fn locate(
+/// The port `slot` names: the `occurrence`th of `listed` (a port as the OS
+/// edge returns it, and what names its device: never its display name) whose
+/// digest matches. `None` when the device is not listed.
+pub(in crate::backend) fn locate<P>(
     slot: Slot,
-    listed: impl IntoIterator<Item = (u32, PortInfo)>,
-) -> Option<u32> {
+    listed: impl IntoIterator<Item = (P, WinMmDevice)>,
+) -> Option<P> {
     listed
         .into_iter()
-        .filter(|(_, info)| fingerprint(info) == slot.fingerprint)
+        .filter(|(_, device)| fingerprint(device) == slot.fingerprint)
         .nth(slot.occurrence as usize)
-        .map(|(index, _)| index)
+        .map(|(port, _)| port)
 }
 
 /// The endpoint of the `occurrence`th port that `info` describes on `side`: a
@@ -107,7 +110,7 @@ pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) 
         Side::Output => Identity::winmm_output(info.device.clone()),
     };
     OsEndpoint {
-        id: endpoint_id(side, occurrence, &info),
+        id: endpoint_id(side, occurrence, &info.device),
         identity,
         name: info.name,
         capability: UmpCapability::midi1(),
@@ -124,7 +127,7 @@ pub(in crate::backend) fn endpoints(
     ports
         .into_iter()
         .map(|info| {
-            let count = seen.entry(fingerprint(&info)).or_insert(0);
+            let count = seen.entry(fingerprint(&info.device)).or_insert(0);
             let occurrence = *count;
             *count += 1;
             endpoint(side, occurrence, info)

@@ -20,6 +20,7 @@
 
 use std::path::Path;
 use std::time::{Duration, Instant};
+use tutti_buffers::Interleaved;
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
@@ -122,9 +123,10 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
             (s.graph().add(voice).0.erase(), Some(stream))
         }
         Tier::Memory => {
-            let mut wave = tutti_codec::Wave::new(2, tutti_nodes::SampleRate::of(RATE));
+            let mut wave = tutti_buffers::Wave::new(2, tutti_nodes::SampleRate::of(RATE));
             for i in 0..LEN {
-                wave.push_frame(&[value(i), -value(i)]);
+                wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
+                    .unwrap();
             }
             let source =
                 MemorySource::placed(std::sync::Arc::new(wave), VoiceWindow::from(Beat(1.0)))
