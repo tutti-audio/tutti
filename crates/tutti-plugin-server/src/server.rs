@@ -187,6 +187,11 @@ impl PluginServer {
         self.session.drop_plugin(self.main);
         drop(render.stop());
         self.session.report_final_losses();
+        if served.is_ok() {
+            tracing::info!(
+                "plugin-server: the control phase ended cleanly and its teardown is done"
+            );
+        }
         served
     }
 
@@ -259,9 +264,7 @@ impl PluginServer {
         render: &RenderThread,
     ) -> BridgeResult<()> {
         let main = self.main;
-        crate::main_loop::serve(&mut self.session, transport, main, render)?;
-        tracing::info!("plugin-server: the control phase ended cleanly");
-        Ok(())
+        crate::main_loop::serve(&mut self.session, transport, main, render)
     }
 }
 

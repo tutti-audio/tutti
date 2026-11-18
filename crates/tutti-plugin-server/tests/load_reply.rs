@@ -249,8 +249,9 @@ fn a_handshake_frame_that_does_not_decode_ends_the_server() {
 /// process keeps the connections open, so no end of stream says the host is gone:
 /// only the watch on the host process does. The host is a shell that states its
 /// pid and spawns the server. When it ends, the server's own teardown closes its
-/// sockets (the stream ends) and logs that the control phase ended cleanly, which
-/// an end by `SIGKILL` cannot do; the log carries no plugin it had to leak.
+/// sockets (the stream ends) and, once the plugin has gone home and the render
+/// thread has stopped, logs that its teardown is done, which an end by `SIGKILL`
+/// cannot do; the log carries no plugin it had to leak.
 #[test]
 fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     use std::io::BufRead as _;
@@ -317,7 +318,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
 
     let printed = std::fs::read_to_string(&log).expect("the server's log");
     assert!(
-        printed.contains("the control phase ended cleanly"),
+        printed.contains("the control phase ended cleanly and its teardown is done"),
         "no clean teardown in the log: {printed}"
     );
     assert!(
