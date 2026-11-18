@@ -1057,6 +1057,7 @@ fn stretching_preserves_the_signals_level() {
         const WARM: usize = 500;
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
+                // The stretcher's input is `f32` samples: the tone narrows here.
                 let s = phase.sin() as f32 * 0.5;
                 phase = phase.advance(step);
                 *slot = s;
@@ -1109,6 +1110,7 @@ fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
 
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
+                // The stretcher's input is `f32` samples: the tone narrows here.
                 let s = phase.sin() as f32 * 0.5;
                 phase = phase.advance(step);
                 *slot = s;
