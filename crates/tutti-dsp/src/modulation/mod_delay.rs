@@ -229,7 +229,7 @@ impl ModDelayLayout {
 /// size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
 pub struct ModDelayBank {
-    lines: Box<[DelayLine]>,
+    lines: Box<[DelayLine<f32>]>,
     sweep: Sweep,
     rate: SampleRate,
     /// The line's capacity in frames: no delay is past it.

@@ -115,3 +115,50 @@ fn trips_count_the_echoes_to_the_floor_in_decibels() {
     assert_eq!(taps::trips(0.5, Db(-120.0)), 20.0);
     assert_eq!(taps::trips(0.0, Db(-60.0)), 0.0);
 }
+
+/// A line in `f64` returns the 29-bit signal `d` frames later exactly at every mode and
+/// every whole delay, across the wrap.
+#[test]
+fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
+    use crate::testing::{assert_close_f64, wide_signal};
+    const MAX: usize = 6;
+    let signal = wide_signal(4 * MAX + 1);
+    for mode in [
+        InterpolationMode::None,
+        InterpolationMode::Linear,
+        InterpolationMode::CubicHermite,
+    ] {
+        for d in 0..=MAX {
+            let mut line = DelayLine::<f64>::new(Samples(MAX));
+            let got: Vec<f64> = signal
+                .iter()
+                .map(|&x| {
+                    line.push_sample(x);
+                    line.read_sample(d as f32, mode)
+                })
+                .collect();
+            let want: Vec<f64> = (0..signal.len())
+                .map(|i| if i >= d { signal[i - d] } else { 0.0 })
+                .collect();
+            assert_close_f64(&got, &want, 0.0);
+        }
+    }
+}
+
+/// A feedback-free `delay_step` of `d` frames in `f64` returns the wide input `d` frames
+/// later exactly.
+#[test]
+fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
+    use crate::testing::{assert_close_f64, wide_signal};
+    const D: usize = 4;
+    let signal = wide_signal(20);
+    let mut line = DelayLine::<f64>::new(Samples(8));
+    let got: Vec<f64> = signal
+        .iter()
+        .map(|&x| delay_step(&mut line, x, D as f32, 0.0, InterpolationMode::Linear))
+        .collect();
+    let want: Vec<f64> = (0..signal.len())
+        .map(|i| if i >= D { signal[i - D] } else { 0.0 })
+        .collect();
+    assert_close_f64(&got, &want, 0.0);
+}

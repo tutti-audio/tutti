@@ -125,7 +125,7 @@ struct Detector {
     knee: Db,
     ratio: CompressionRatio,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
-    ballistics: Follower,
+    ballistics: Follower<f32>,
 }
 
 impl Detector {

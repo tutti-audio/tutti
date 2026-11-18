@@ -1,4 +1,6 @@
-//! [`DelayRing`]: the one `f32` ring every delay in the crate stores its history in.
+//! [`DelayRing`]: the one ring every delay in the crate stores its history in.
+
+use tutti_buffers::Float;
 
 /// A ring of `len` frames with a cursor: `put` writes the slot at the cursor, `advance` moves
 /// it to the next, and a read counts back from it.
@@ -8,18 +10,18 @@
 /// `advance` therefore reaches the frame just put with `back(1)`. The length is fixed at
 /// construction, so no call allocates after it.
 #[derive(Clone, Debug)]
-pub(crate) struct DelayRing {
-    buf: Vec<f32>,
+pub(crate) struct DelayRing<F> {
+    buf: Vec<F>,
     w: usize,
 }
 
-impl DelayRing {
+impl<F: Float> DelayRing<F> {
     /// A silent ring of `len` frames, at least one. Allocates.
     #[must_use]
     pub(crate) fn new(len: usize) -> Self {
         assert!(len >= 1, "a ring holds at least one frame");
         Self {
-            buf: vec![0.0; len],
+            buf: vec![F::ZERO; len],
             w: 0,
         }
     }
@@ -32,13 +34,13 @@ impl DelayRing {
 
     /// Silences the ring and returns the cursor to slot 0.
     pub(crate) fn clear(&mut self) {
-        self.buf.fill(0.0);
+        self.buf.fill(F::ZERO);
         self.w = 0;
     }
 
     /// Writes `x` at the cursor.
     #[inline]
-    pub(crate) fn put(&mut self, x: f32) {
+    pub(crate) fn put(&mut self, x: F) {
         self.buf[self.w] = x;
     }
 
@@ -53,20 +55,20 @@ impl DelayRing {
 
     /// `put` then `advance`.
     #[inline]
-    pub(crate) fn push(&mut self, x: f32) {
+    pub(crate) fn push(&mut self, x: F) {
         self.put(x);
         self.advance();
     }
 
     /// The slot at the cursor: the frame `len` slots back, the oldest the ring holds.
     #[inline]
-    pub(crate) fn oldest(&self) -> f32 {
+    pub(crate) fn oldest(&self) -> F {
         self.buf[self.w]
     }
 
     /// The frame `k` slots before the cursor, for `k` up to the length.
     #[inline]
-    pub(crate) fn back(&self, k: usize) -> f32 {
+    pub(crate) fn back(&self, k: usize) -> F {
         let len = self.buf.len();
         debug_assert!(k <= len, "{k} slots back in a ring of {len}");
         // `w < len` and `k <= len`, so the sum is below `2 * len`: one subtract wraps it.
@@ -77,14 +79,14 @@ impl DelayRing {
     /// The frame `delay` slots before the cursor, linearly interpolated between the two whole
     /// slots around it: `delay` is at least 0 and its next whole slot is at most the length.
     #[inline]
-    pub(crate) fn at(&self, delay: f32) -> f32 {
+    pub(crate) fn at(&self, delay: f32) -> F {
         let whole = delay as usize;
         let frac = delay - whole as f32;
         let a = self.back(whole);
         if frac == 0.0 {
             return a;
         }
-        crate::lerp(a, self.back(whole + 1), frac)
+        crate::lerp(a, self.back(whole + 1), F::from_f32(frac))
     }
 }
 

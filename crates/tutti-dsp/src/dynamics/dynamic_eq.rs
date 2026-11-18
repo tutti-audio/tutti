@@ -130,7 +130,7 @@ struct Design {
     knee: Db,
     ratio: CompressionRatio,
     range: Db,
-    ballistics: Follower,
+    ballistics: Follower<f32>,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
     key_scale: f32,
     /// The one-pole coefficient of the detector's mean square.

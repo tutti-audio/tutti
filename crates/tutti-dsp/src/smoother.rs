@@ -1,6 +1,8 @@
 //! The one-pole smoother: `y += c * (x - y)`, the recurrence every
 //! de-zippering and envelope-following filter in the engine runs.
 
+use tutti_buffers::Float;
+
 /// A one-pole smoother over an `f32` quantity: each step closes the fraction
 /// `coeff` of the gap to the target (`1` is instant, `0` holds).
 ///
@@ -35,7 +37,7 @@ impl Smoother {
     /// exact there, but in `f32` its `1 - c` rounds to 1 for a long time
     /// constant and the value then stops approaching a lower target.
     #[inline]
-    pub fn toward(current: f32, target: f32, coeff: f32) -> f32 {
+    pub fn toward<F: Float>(current: F, target: F, coeff: F) -> F {
         current + coeff * (target - current)
     }
 

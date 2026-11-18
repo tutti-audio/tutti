@@ -91,7 +91,7 @@ struct Design {
     silence_opens: bool,
     /// The one-pole coefficients: the attack while the gate opens, the release while it
     /// closes.
-    ballistics: Follower,
+    ballistics: Follower<f32>,
     /// `floor(hold * rate)`.
     hold_samples: usize,
     /// The closed gain's level in dB, at most 0.

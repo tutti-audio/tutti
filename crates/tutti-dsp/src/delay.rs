@@ -17,6 +17,7 @@ pub use routing::{Routing, RoutingError};
 pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
+use tutti_buffers::Float;
 use tutti_units::Samples;
 
 /// How a fractional delay position is turned into a sample.
@@ -54,12 +55,12 @@ pub enum InterpolationMode {
 /// [`read_sample`]: Self::read_sample
 /// [`read_whole`]: Self::read_whole
 #[derive(Clone)]
-pub struct DelayLine {
-    ring: DelayRing,
+pub struct DelayLine<F> {
+    ring: DelayRing<F>,
     max_delay_samples: usize,
 }
 
-impl std::fmt::Debug for DelayLine {
+impl<F> std::fmt::Debug for DelayLine<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DelayLine")
             .field("max_delay_samples", &self.max_delay_samples)
@@ -67,7 +68,7 @@ impl std::fmt::Debug for DelayLine {
     }
 }
 
-impl DelayLine {
+impl<F: Float> DelayLine<F> {
     /// Allocates a line holding up to `capacity` frames of history.
     ///
     /// The backing buffer is one frame longer than the maximum delay, so that
@@ -88,7 +89,7 @@ impl DelayLine {
     /// Call exactly once per frame: the cursor *is* the line's clock, so a
     /// skipped or doubled push shifts every subsequent read by that much.
     #[inline]
-    pub fn push_sample(&mut self, sample: f32) {
+    pub fn push_sample(&mut self, sample: F) {
         self.ring.push(sample);
     }
 
@@ -105,7 +106,7 @@ impl DelayLine {
     /// The delay is clamped to `0.0..=max_delay_samples`, so an over-long
     /// request shortens silently rather than panicking. Does not allocate.
     #[inline]
-    pub fn read_sample(&self, delay_samples: f32, mode: InterpolationMode) -> f32 {
+    pub fn read_sample(&self, delay_samples: f32, mode: InterpolationMode) -> F {
         // Defensive only: a caller holds its delay inside the line, so this clamp is
         // reached by a caller that does not.
         let delay = delay_samples.clamp(0.0, self.max_delay_samples as f32);
@@ -116,14 +117,14 @@ impl DelayLine {
             }
             InterpolationMode::Linear => {
                 let floor = delay.floor() as usize;
-                let frac = delay - floor as f32;
+                let frac = F::from_f32(delay - floor as f32);
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
                 s0 + frac * (s1 - s0)
             }
             InterpolationMode::CubicHermite => {
                 let floor = delay.floor() as usize;
-                let frac = delay - floor as f32;
+                let frac = F::from_f32(delay - floor as f32);
                 let sm1 = self.read_whole(floor.saturating_sub(1));
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
@@ -146,7 +147,7 @@ impl DelayLine {
     /// capacity reads the oldest it holds. Does not allocate.
     #[inline]
     #[must_use]
-    pub fn read_whole(&self, frames: usize) -> f32 {
+    pub fn read_whole(&self, frames: usize) -> F {
         // The newest write is one slot behind the cursor, and the clamped read is at
         // most `max_delay_samples`, so the ring (one frame longer) holds it.
         self.ring.back(frames.min(self.max_delay_samples) + 1)
@@ -162,9 +163,15 @@ impl DelayLine {
 /// per channel, and its caller lowers its span to the position once per frame after the
 /// clamp that makes it a span (a delay glide's value is already an `f32` of frames).
 #[inline(always)]
-pub fn delay_step(line: &mut DelayLine, x: f32, d: f32, fb: f32, interp: InterpolationMode) -> f32 {
+pub fn delay_step<F: Float>(
+    line: &mut DelayLine<F>,
+    x: F,
+    d: f32,
+    fb: f32,
+    interp: InterpolationMode,
+) -> F {
     let tap = line.read_sample((d.max(1.0) - 1.0).max(0.0), interp);
-    line.push_sample(x + tap * fb);
+    line.push_sample(x + tap * F::from_f32(fb));
     line.read_sample(d, interp)
 }
 
