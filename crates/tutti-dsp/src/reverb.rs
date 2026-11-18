@@ -16,7 +16,7 @@ pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
 
-use tutti_types::{SampleRate, Tail};
+use tutti_types::{Hz, SampleRate, Seconds, Tail};
 
 use crate::{Ring, Steps};
 
@@ -25,11 +25,17 @@ use crate::{Ring, Steps};
 pub(crate) const CHUNK: usize = 32;
 
 /// The longest ramp of a reverb's gain, in seconds.
-const RAMP: f64 = 0.020;
+const RAMP: Seconds = Seconds(0.020);
 
 /// A 20 ms ramp at `rate`, in whole chunks (at least one).
-pub(crate) fn ramp(rate: f64) -> Steps {
-    Steps::Fixed(((RAMP * rate / CHUNK as f64).ceil() as u32).max(1))
+pub(crate) fn ramp(rate: SampleRate) -> Steps {
+    let chunks = RAMP.to_samples_ceil(rate).get().div_ceil(CHUNK);
+    Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
+}
+
+/// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
+pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
+    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
 }
 
 /// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:

@@ -22,8 +22,8 @@ fn direct_convolve(x: &[f32], h: &[f32]) -> Vec<f32> {
 
 /// Run `x` through the convolver and drop the reported latency.
 fn run(ir: &[f32], x: &[f32], block: usize) -> Vec<f32> {
-    let mut c = Convolver::new(Mono::new(ir), block);
-    let lat = c.latency();
+    let mut c = Convolver::new(Mono::new(ir), Samples(block));
+    let lat = c.latency().get();
     // Feed `lat` extra zeros so the tail that latency delays still comes out.
     let mut out: Vec<f32> = x
         .iter()
@@ -108,8 +108,8 @@ fn a_unit_impulse_ir_passes_the_signal_through_unchanged() {
 fn reported_latency_is_the_real_latency() {
     let ir = [1.0f32];
     for block in [2usize, 8, 64, 512] {
-        let mut c = Convolver::new(Mono::new(&ir), block);
-        let lat = c.latency();
+        let mut c = Convolver::new(Mono::new(&ir), Samples(block));
+        let lat = c.latency().get();
 
         // Impulse at 0; with a unit IR the output impulse must land at
         // exactly `lat`.
@@ -143,10 +143,10 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
         .map(|i| ((i as f32) * 0.173).sin() * 0.8 + if i % 97 == 0 { 0.5 } else { 0.0 })
         .collect();
     for block in [2usize, 8, 64] {
-        let mut per_sample = Convolver::new(Mono::new(&ir), block);
+        let mut per_sample = Convolver::new(Mono::new(&ir), Samples(block));
         let want: Vec<f32> = x.iter().map(|&s| per_sample.process_sample(s)).collect();
 
-        let mut blocked = Convolver::new(Mono::new(&ir), block);
+        let mut blocked = Convolver::new(Mono::new(&ir), Samples(block));
         let mut got = vec![0.0f32; x.len()];
         let lens = [1usize, 7, 64, 3, 16, 33, 5, 64, 9];
         let (mut at, mut k) = (0, 0);
@@ -188,7 +188,7 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
 fn a_nan_input_propagates_and_then_leaves() {
     let ir: Vec<f32> = vec![0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
     let block = 4;
-    let mut c = Convolver::new(Mono::new(&ir), block);
+    let mut c = Convolver::new(Mono::new(&ir), Samples(block));
     let out: Vec<f32> = std::iter::once(f32::NAN)
         .chain(std::iter::repeat_n(0.0, 64))
         .map(|x| c.process_sample(x))
@@ -197,7 +197,7 @@ fn a_nan_input_propagates_and_then_leaves() {
         out.iter().any(|y| y.is_nan()),
         "the NaN never reached the output"
     );
-    let latency = c.latency();
+    let latency = c.latency().get();
     // The NaN is still in the output through the third block after the
     // latency and gone from the fourth on.
     assert!(
@@ -255,7 +255,7 @@ fn incremental_path_matches_direct_convolution_at_any_call_length() {
     for part in [32usize, 64, 128] {
         for lens in patterns {
             let mut c = Convolver::with_parts(&ir, part, &[part]);
-            let lat = c.latency();
+            let lat = c.latency().get();
             assert_eq!(lat, part);
             let mut padded = x.clone();
             padded.extend(std::iter::repeat_n(0.0, lat));
@@ -289,9 +289,13 @@ fn incremental_path_is_linear() {
     let (a, b) = (0.75f32, -1.25f32);
     let mix: Vec<f32> = x.iter().zip(&y).map(|(&p, &q)| a * p + b * q).collect();
     let lens = [13usize, 64, 5];
-    let cx = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &x, &lens);
-    let cy = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &y, &lens);
-    let cm = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &mix, &lens);
+    let cx = run_blocks(&mut Convolver::new(Mono::new(&ir), Samples(64)), &x, &lens);
+    let cy = run_blocks(&mut Convolver::new(Mono::new(&ir), Samples(64)), &y, &lens);
+    let cm = run_blocks(
+        &mut Convolver::new(Mono::new(&ir), Samples(64)),
+        &mix,
+        &lens,
+    );
     for i in 0..n {
         assert!((cm[i] - (a * cx[i] + b * cy[i])).abs() < 2e-3, "sample {i}");
     }
@@ -472,7 +476,7 @@ fn reset_clears_the_convolution_tail() {
     let ir: Vec<f32> = vec![0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
     let block = 8;
 
-    let mut c = Convolver::new(Mono::new(&ir), block);
+    let mut c = Convolver::new(Mono::new(&ir), Samples(block));
     // Drive it hard so there is a substantial tail in flight.
     for _ in 0..64 {
         c.process_sample(1.0);
@@ -550,9 +554,9 @@ fn boundary_lengths(head: usize, parts: &[usize]) -> Vec<usize> {
 /// The convolver's output for `x` then enough silence for the whole tail,
 /// fed in `lens`-cycled calls, with the latency dropped.
 fn render(c: &mut Convolver, x: &[f32], lens: &[usize]) -> Vec<f32> {
-    let lat = c.latency();
+    let lat = c.latency().get();
     let mut padded = x.to_vec();
-    padded.extend(std::iter::repeat_n(0.0, lat + c.ir_length()));
+    padded.extend(std::iter::repeat_n(0.0, lat + c.ir_length().get()));
     let mut got = run_blocks(c, &padded, lens);
     assert!(
         got[..lat].iter().all(|&s| s == 0.0),
@@ -636,8 +640,8 @@ fn an_impulse_gives_the_ir_at_the_declared_latency() {
         let ir = flat_ir(boundary_lengths(head, parts).into_iter().max().unwrap());
         let x = impulse_at(Samples(11), Samples(3));
         let mut c = Convolver::with_parts(&ir, head, parts);
-        assert_eq!(c.latency(), head);
-        let lat = c.latency();
+        assert_eq!(c.latency().get(), head);
+        let lat = c.latency().get();
         let mut padded = x.clone();
         padded.extend(std::iter::repeat_n(0.0, lat + ir.len()));
         let got = run_blocks(&mut c, &padded, &[9, 1, 40]);
@@ -727,11 +731,11 @@ fn the_render_is_independent_of_the_call_lengths() {
     }
     // The layout the cost model picks for a long IR, at odd calls.
     let ir = flat_ir(6000);
-    let mut per_sample = Convolver::new(Mono::new(&ir), 32);
+    let mut per_sample = Convolver::new(Mono::new(&ir), Samples(32));
     assert!(per_sample.spectra().levels.len() > 1);
     let want: Vec<f32> = x.iter().map(|&s| per_sample.process_sample(s)).collect();
     let got = run_blocks(
-        &mut Convolver::new(Mono::new(&ir), 32),
+        &mut Convolver::new(Mono::new(&ir), Samples(32)),
         &x,
         &[33, 5, 100, 1, 31],
     );
@@ -765,7 +769,7 @@ fn layouts_are_contiguous_and_schedule_inside_their_slack() {
     for head in [2usize, 4, 16, 64, 512, 2048, 8192] {
         for len in [1, 2, 5, 100, 1000, 3000, 24_000, 96_000, 240_000] {
             let ir = vec![0.25f32; len];
-            let s = IrSpectra::new(&ir, head);
+            let s = IrSpectra::new(&ir, Samples(head));
             let plan = plan_levels(len, head);
             assert_eq!(plan.len(), s.levels.len());
             let mut next = 0;
@@ -804,7 +808,7 @@ fn layouts_are_contiguous_and_schedule_inside_their_slack() {
 fn a_long_ir_is_cut_into_levels() {
     let ir = vec![0.1f32; 6000];
     assert!(
-        Convolver::<f32>::new(Mono::new(&ir), 32)
+        Convolver::<f32>::new(Mono::new(&ir), Samples(32))
             .spectra()
             .shape()
             .len()
@@ -820,7 +824,7 @@ fn a_long_ir_is_cut_into_levels() {
 #[test]
 fn the_cost_model_picks_uniform_for_short_irs_and_levels_for_long_ones() {
     let shape = |len: usize, head: usize| {
-        Convolver::<f32>::new(Mono::new(&vec![0.1; len]), head)
+        Convolver::<f32>::new(Mono::new(&vec![0.1; len]), Samples(head))
             .spectra()
             .shape()
     };
@@ -986,11 +990,11 @@ fn a_split_render_is_independent_of_the_call_lengths() {
 /// An empty IR is silence at the declared latency, with no panic.
 #[test]
 fn an_empty_ir_is_silence() {
-    let mut c = Convolver::<f32>::new(Mono::new(&[] as &[f32]), 64);
+    let mut c = Convolver::<f32>::new(Mono::new(&[] as &[f32]), Samples(64));
     let x = noise(300);
     let got = run_blocks(&mut c, &x, &[7, 100]);
     assert!(got.iter().all(|&s| s == 0.0));
-    assert_eq!(c.latency(), 64);
+    assert_eq!(c.latency().get(), 64);
 }
 
 /// `reset` clears every level, not just the head: after a reset, silence
@@ -1041,7 +1045,7 @@ fn a_reset_convolver_renders_as_a_fresh_one() {
         ),
         (
             "cost model, 512",
-            Box::new(|| Convolver::new(Mono::new(&flat_ir(100_000)), 512)),
+            Box::new(|| Convolver::new(Mono::new(&flat_ir(100_000)), Samples(512))),
         ),
     ];
     for (name, make) in &cases {
@@ -1091,7 +1095,7 @@ fn an_f64_convolver_sums_the_scaled_delayed_copies_of_the_ir() {
         2,
         "the IR is cut into two levels"
     );
-    let lat = c.latency();
+    let lat = c.latency().get();
     let mut got = vec![0.0f64; frames + lat];
     let padded: Vec<f64> = x.iter().copied().chain(vec![0.0; lat]).collect();
     for (xs, ys) in padded.chunks(77).zip(got.chunks_mut(77)) {

@@ -3,6 +3,7 @@
 //! keeps, what it refuses before anything stops, and what it hands back.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::InterleavedMut;
 
 use tutti_cpal::{DeviceId, DeviceSelector};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
@@ -132,7 +133,10 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     let mut heard = vec![0.0f32; 2 * BLOCK];
     wait_until("the constant never reached the tap", || {
         let _ = s.update();
-        let frames = tap.pop_into(&mut heard).0;
+        let frames = tap
+            .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+            .unwrap()
+            .0;
         frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25)
     });
     assert_eq!(s.faults().count(), 0);

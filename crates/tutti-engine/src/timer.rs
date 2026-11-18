@@ -106,7 +106,7 @@ impl StreamDriver for TimerDriver {
         let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get().min(MAX_FRAMES);
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
-        let mut scratch = vec![0.0f32; frames * block.channels()];
+        let mut scratch = vec![0.0f32; block.layout().interleaved_len(Samples(frames))];
         // A refusal of the priority leaves the thread at the default.
         let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
             let time = OsTime;

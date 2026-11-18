@@ -233,7 +233,7 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
     let decay1 = tank.lines[0].diffuser.unwrap();
     for (what, lattice, direct) in [("input 1", input[0], -0.75), ("decay 1", decay1, 0.70)] {
         let (d, g) = (lattice.delay.get() as usize, lattice.gain.get());
-        let mut line = Line::new(d);
+        let mut line = Line::new(Samples(d));
         let y: Vec<f32> = (0..80 * d)
             .map(|n| {
                 let y = line.lattice(if n == 0 { 1.0 } else { 0.0 }, g, d as f32);

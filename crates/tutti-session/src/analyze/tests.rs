@@ -4,7 +4,7 @@
 use std::num::NonZeroUsize;
 use std::path::Path;
 
-use tutti_buffers::{Interleaved, Mono, Wave};
+use tutti_buffers::{Float, Interleaved, Mono, Wave};
 use tutti_fixtures::signal;
 use tutti_measure::{
     ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
@@ -331,4 +331,75 @@ fn a_stereo_file_reads_each_channels_peak_through_deinterleaved_planes() {
     write(&path, RATE, 2, &samples);
     let job = s.analyze(path, ChannelPeaks);
     assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);
+}
+
+/// An analysis in the audio's own format: the largest absolute sample of a
+/// mono read, widened to `f64` without rounding.
+struct MaxAbs;
+
+struct MaxAbsMeter<S: Float>(S);
+
+impl<S: Float> tutti_measure::Measure<S> for MaxAbs {
+    type Context = ();
+    type Meter = MaxAbsMeter<S>;
+
+    fn measure(&self, (): ()) -> tutti_measure::Result<MaxAbsMeter<S>> {
+        Ok(MaxAbsMeter(S::SILENCE))
+    }
+}
+
+impl<S: Float> Meter for MaxAbsMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = f64;
+
+    fn push(
+        &mut self,
+        input: Self::Input<'_>,
+        _: &mut impl Extend<()>,
+    ) -> tutti_measure::Result<()> {
+        for &x in input.samples() {
+            let x = if x < S::SILENCE { -x } else { x };
+            if x > self.0 {
+                self.0 = x;
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> f64 {
+        self.0.to_f64()
+    }
+}
+
+#[test]
+fn an_f64_wave_reports_a_value_f32_cannot_hold_exactly_through_an_f64_measure() {
+    let mut s = session();
+    // 1 + 2^-40 is exact in f64 and rounds to 1.0 in f32.
+    let value = 1.0 + 2.0f64.powi(-40);
+    assert_ne!(f64::from(value as f32), value);
+    let wave: Wave<f64> = Wave::from_mono(RATE, Mono::new(&[0.0, value, -0.5]));
+    let job = s.analyze(wave, MaxAbs);
+    assert_eq!(job.wait(&mut s).unwrap(), value);
+}
+
+#[cfg(codec)]
+#[test]
+fn a_full_scale_i16_file_decoded_into_f32_peaks_at_32767_over_32768() {
+    let mut s = session();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("full_scale.wav");
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).unwrap();
+    for x in [0, i16::MAX, -1000, 0] {
+        w.write_sample(x).unwrap();
+    }
+    w.finalize().unwrap();
+    let job = s.analyze::<f32, _>(path, MaxAbs);
+    assert_eq!(job.wait(&mut s).unwrap(), 32767.0 / 32768.0);
 }
