@@ -101,9 +101,9 @@ impl Default for PlateReverbConfig {
 /// each block to what the controls in force ring, and once the input has been silent for that
 /// long it cuts the room off and parks ([`KernelNode`]).
 ///
-/// `F` is the state precision of the lattices and delays, `f64` by default; the lines are the
-/// paper's lengths scaled to the rate, so `PlateReverbNode::<f32>` halves the memory.
-pub type PlateReverbNode<F = f64> = KernelNode<PlateKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the lattices and delays; the lines are the
+/// paper's lengths scaled to the rate, so an `f32` graph halves the memory of an `f64` one.
+pub type PlateReverbNode<F> = KernelNode<PlateKernel<F>>;
 
 impl<F: Float + Lerp> From<PlateReverbConfig> for PlateReverbNode<F> {
     fn from(config: PlateReverbConfig) -> Self {
@@ -144,7 +144,7 @@ struct Running<F: Float> {
 /// The plate as a [`Kernel`]: a [`PlateBank`] sized at the prepared rate and the glides its
 /// design is aimed through.
 ///
-/// The bank's state is `F`; a block of another sample format is converted at the edges.
+/// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
 pub struct PlateKernel<F: Float> {
     /// `None` until [`prepare`](Kernel::prepare).
@@ -164,6 +164,7 @@ impl<F: Float + Lerp> PlateKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for PlateKernel<F> {
+    type Float = F;
     type Set = PlateSet;
 
     /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
@@ -203,11 +204,11 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {
             r.bank.process(&mut r.glides, input, output);

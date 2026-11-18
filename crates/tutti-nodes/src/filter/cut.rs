@@ -3,8 +3,8 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, CutResponse, LinkwitzRiley, Ring, SosCoefficients, System,
-    TAIL_FLOOR,
+    Butterworth, ButterworthOrder, CutResponse, Lanes, LinkwitzRiley, Ring, SosCoefficients,
+    System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
 use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
@@ -97,9 +97,9 @@ impl CutFilterConfig {
 /// # Panics
 ///
 /// `CutFilterNode::from` panics past 16 channels: a filter is one bus.
-pub type CutFilterNode = KernelNode<CutFilterKernel>;
+pub type CutFilterNode<F> = KernelNode<CutFilterKernel<F>>;
 
-impl From<CutFilterConfig> for CutFilterNode {
+impl<F: Float + Lanes> From<CutFilterConfig> for CutFilterNode<F> {
     fn from(config: CutFilterConfig) -> Self {
         Self::with_kernel(
             CutFilterKernel::new(filter_bus(config.width), &config),
@@ -126,18 +126,18 @@ control_set! {
 /// The filter as a [`Kernel`]: a [`SosBank`](tutti_dsp::SosBank) run with the glide of the
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
-pub struct CutFilterKernel {
+pub struct CutFilterKernel<F: Float + Lanes> {
     input: BusTopology,
     response: CutResponse,
     alignment: CutAlignment,
-    sos: GlidedSos,
+    sos: GlidedSos<F>,
     rate: SampleRate,
     /// The tail at each octave from [`MIN_CUT_CUTOFF`] up (`LADDER` rungs at most), found
     /// in `prepare`; the rungs past the Nyquist's are unused.
     ladder: [Tail; LADDER],
 }
 
-impl CutFilterKernel {
+impl<F: Float + Lanes> CutFilterKernel<F> {
     /// A filter on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
     fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
@@ -156,7 +156,7 @@ impl CutFilterKernel {
 
     /// The coefficients of the design at `cutoff`, read within [`MIN_CUT_CUTOFF`] and the
     /// Nyquist; the cascade as it is for a cutoff that is not a number. No allocation.
-    fn design(&mut self, cutoff: Hz) -> SosCoefficients<f64> {
+    fn design(&mut self, cutoff: Hz) -> SosCoefficients<F> {
         let top = self.rate.nyquist_scaled(0.99).get();
         let cutoff = Hz(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
         let (response, alignment, rate) = (self.response, self.alignment, self.rate);
@@ -176,7 +176,8 @@ fn rung_cutoff(rung: usize) -> Hz {
     MIN_CUT_CUTOFF * f64::from(1u32 << rung)
 }
 
-impl Kernel for CutFilterKernel {
+impl<F: Float + Lanes> Kernel for CutFilterKernel<F> {
+    type Float = F;
     type Set = CutFilterSet;
 
     const GRID: usize = GLIDE_STEPS as usize;
@@ -209,11 +210,11 @@ impl Kernel for CutFilterKernel {
         self.sos.aim(design);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);
     }
@@ -237,6 +238,7 @@ impl Kernel for CutFilterKernel {
 
 #[cfg(test)]
 mod tests {
+    // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use core::f64::consts::PI;
 
     use super::*;
@@ -259,7 +261,7 @@ mod tests {
         CutAlignment::LinkwitzRiley(ButterworthOrder::of(half))
     }
 
-    fn node(config: CutFilterConfig) -> CutFilterNode {
+    fn node(config: CutFilterConfig) -> CutFilterNode<f32> {
         prepared(CutFilterNode::from(config))
     }
 
@@ -275,7 +277,7 @@ mod tests {
     }
 
     /// `input` through `node` in blocks of 1024.
-    fn render(node: &mut CutFilterNode, input: &[f32]) -> Vec<f32> {
+    fn render(node: &mut CutFilterNode<f32>, input: &[f32]) -> Vec<f32> {
         input
             .chunks(1024)
             .flat_map(|c| drive_block(node, &[c]).remove(0))
@@ -368,7 +370,7 @@ mod tests {
         let (mut node, out) = {
             let n = assert_cell_glides(
                 make,
-                |n: &CutFilterNode| assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0)),
+                |n: &CutFilterNode<f32>| assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0)),
                 &[&sine[..2_048]],
                 &[&sine],
                 "cutoff",
@@ -468,7 +470,7 @@ mod tests {
             other => panic!("{other:?}"),
         };
         for response in [LP, HP] {
-            let mut kernel = CutFilterKernel::new(filter_bus(1u16.into()), &config);
+            let mut kernel = CutFilterKernel::<f64>::new(filter_bus(1u16.into()), &config);
             kernel.response = response;
             kernel.prepare(RATE, MaxBlock::of(Samples(64)));
             assert_eq!(

@@ -3,7 +3,7 @@
 //! [`EqKernel`](crate::EqKernel).
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError};
+use tutti_dsp::{Glide, Lanes, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::BusTopology;
 use tutti_units::SampleRate;
@@ -24,16 +24,16 @@ pub(super) fn filter_shape(input: BusTopology) -> Shape {
 /// The cascade of a [`Sos`] per channel, the design in progress and the glide of the
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
-pub(super) struct GlidedSos {
-    bank: SosBank<f64>,
-    coefficients: Glide<SosCoefficients<f64>>,
+pub(super) struct GlidedSos<F: Float + Lanes> {
+    bank: SosBank<F>,
+    coefficients: Glide<SosCoefficients<F>>,
     /// The design in progress, its room for [`MAX_SECTIONS`] sections held.
     scratch: Sos,
     /// Whether the first design after `prepare` has landed.
     landed: bool,
 }
 
-impl GlidedSos {
+impl<F: Float + Lanes> GlidedSos<F> {
     /// A silent cascade on the bus `input`, passing the input until a design is
     /// [`start`](Self::start)ed or [`restart`](Self::restart)ed.
     pub(super) fn new(input: BusTopology) -> Self {
@@ -50,7 +50,7 @@ impl GlidedSos {
     pub(super) fn design(
         &mut self,
         design: impl FnOnce(&mut Sos) -> Result<(), SosError>,
-    ) -> SosCoefficients<f64> {
+    ) -> SosCoefficients<F> {
         design(&mut self.scratch)
             .ok()
             .and_then(|()| SosCoefficients::new(&self.scratch))
@@ -63,7 +63,7 @@ impl GlidedSos {
     }
 
     /// Landed on `first`, where the node is built.
-    pub(super) fn start(&mut self, first: SosCoefficients<f64>) {
+    pub(super) fn start(&mut self, first: SosCoefficients<F>) {
         self.coefficients = Glide::landed(first);
     }
 
@@ -73,7 +73,7 @@ impl GlidedSos {
     }
 
     /// Back to the first design: `first` lands at once, later ones glide.
-    pub(super) fn restart(&mut self, first: SosCoefficients<f64>) {
+    pub(super) fn restart(&mut self, first: SosCoefficients<F>) {
         self.coefficients = Glide::landed(first).by(GLIDE_STEPS);
         self.landed = false;
     }
@@ -85,7 +85,7 @@ impl GlidedSos {
     }
 
     /// Glides to `design`; the first one after `prepare` lands at once.
-    pub(super) fn aim(&mut self, design: SosCoefficients<f64>) {
+    pub(super) fn aim(&mut self, design: SosCoefficients<F>) {
         self.coefficients.aim(design);
         if !self.landed {
             self.coefficients.settle();
@@ -94,7 +94,7 @@ impl GlidedSos {
     }
 
     /// Runs `input` into `output`.
-    pub(super) fn render<S: Float>(&mut self, input: Planes<'_, S>, output: PlanesMut<'_, '_, S>) {
+    pub(super) fn render(&mut self, input: Planes<'_, F>, output: PlanesMut<'_, '_, F>) {
         self.bank.process(&mut self.coefficients, input, output);
     }
 }

@@ -1,9 +1,9 @@
 //! Rendering helpers shared by the width-generic nodes' unit tests.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_graph::Node;
-use tutti_graph::contract::drive;
-use tutti_units::{Db, SampleRate};
+use tutti_buffers::{Planes, PlanesMut, Sample};
+use tutti_graph::contract::{BlockRig, drive};
+use tutti_graph::{IntoNode, Node};
+use tutti_units::{Db, Real, SampleRate};
 
 pub(crate) use tutti_fixtures::noise;
 
@@ -28,6 +28,64 @@ pub(crate) fn fed_sample_gain(db: f32) -> f32 {
 pub(crate) fn prepared<N: Node>(node: N) -> N {
     tutti_graph::contract::prepared(node, RATE, 1024)
 }
+
+/// `node` alone in an `f64` graph at `rate`: one block of `inputs` (one slice per input
+/// port, all the block's length `frames`) through the graph's executor, and what each output
+/// port holds.
+pub(crate) fn render_f64<N: IntoNode<f64>>(
+    node: N,
+    rate: SampleRate,
+    inputs: &[&[f64]],
+    frames: usize,
+) -> Vec<Vec<f64>> {
+    let (mut rig, _controls) = BlockRig::<f64>::with_format(node, rate, frames);
+    {
+        let mut ins = rig.inputs_mut();
+        for (c, x) in inputs.iter().enumerate() {
+            ins.plane_mut(c).samples_mut().copy_from_slice(x);
+        }
+    }
+    rig.block();
+    let out = rig.output();
+    (0..out.channels())
+        .map(|c| out.plane(c).samples().to_vec())
+        .collect()
+}
+
+/// A fresh node of `make` is linear in its input: the render of `a x + b y` is `a` times that
+/// of `x` plus `b` times that of `y`, over `frames` frames of `channels` input channels, to
+/// `2^-40` of the peak, which an `f32` in the stream or the state breaks at about `2^-24`. The
+/// peak is far above that, so the node sounds.
+#[track_caller]
+pub(crate) fn assert_linear<N: IntoNode<f64>>(
+    make: impl Fn() -> N,
+    rate: SampleRate,
+    channels: usize,
+    frames: usize,
+) {
+    let x = tutti_fixtures::signal::wide_signal(frames);
+    let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+    let (a, b) = (1.0 / 3.0, -core::f64::consts::PI / 7.0);
+    let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+    let run = |signal: &[f64]| render_f64(make(), rate, &vec![signal; channels], frames);
+    let (rx, ry, rm) = (run(&x), run(&y), run(&mix));
+    for c in 0..rm.len() {
+        let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+        assert!(peak > 1e-4, "channel {c} sounds");
+        for n in 0..frames {
+            let want = a * rx[c][n] + b * ry[c][n];
+            assert!(
+                (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                "channel {c}, frame {n}: {} against {want}",
+                rm[c][n]
+            );
+        }
+    }
+}
+
+/// The tolerance of an `f64` result that holds its figure to `2^-45`: far above `f64`'s
+/// rounding in a short render and far below the `2^-25` a narrowing to `f32` leaves.
+pub(crate) const F64_TOLERANCE: f64 = 1.0 / (1u64 << 45) as f64;
 
 /// One `process` call of a node over `inputs` (one slice per input
 /// port), its params at their bases.
@@ -140,20 +198,20 @@ pub(crate) fn sine(hz: f64, rate: f64, len: usize) -> Vec<f32> {
 /// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
 ///
 /// Exact (no leakage) when `x` spans a whole number of periods of `hz`.
-pub(crate) fn lock_in(x: &[f32], hz: f64, rate: f64) -> (f64, f64) {
+pub(crate) fn lock_in<S: Sample>(x: &[S], hz: f64, rate: f64) -> (f64, f64) {
     let w = 2.0 * core::f64::consts::PI * hz / rate;
     let (mut re, mut im) = (0.0, 0.0);
     for (n, &v) in x.iter().enumerate() {
         let a = w * n as f64;
-        re += f64::from(v) * libm::cos(a);
-        im -= f64::from(v) * libm::sin(a);
+        re += v.to_f64() * libm::cos(a);
+        im -= v.to_f64() * libm::sin(a);
     }
     let k = 2.0 / x.len() as f64;
     (re * k, im * k)
 }
 
 /// The amplitude of [`lock_in`].
-pub(crate) fn amplitude_at(x: &[f32], hz: f64, rate: f64) -> f64 {
+pub(crate) fn amplitude_at<S: Sample>(x: &[S], hz: f64, rate: f64) -> f64 {
     let (re, im) = lock_in(x, hz, rate);
     re.hypot(im)
 }
@@ -181,18 +239,18 @@ pub(crate) fn render_chunked(
 }
 
 /// The mean of `x`.
-pub(crate) fn mean(x: &[f32]) -> f64 {
-    x.iter().map(|&v| f64::from(v)).sum::<f64>() / x.len() as f64
+pub(crate) fn mean<S: Sample>(x: &[S]) -> f64 {
+    x.iter().map(|&v| v.to_f64()).sum::<f64>() / x.len() as f64
 }
 
 /// Renders `input` (one `Vec` per channel) through `k` in one call.
-pub(crate) fn render_kernel<K: Kernel, S: Float>(k: &mut K, input: &[Vec<S>]) -> Vec<Vec<S>> {
-    let ins: Vec<&[S]> = input.iter().map(Vec::as_slice).collect();
-    let mut out = vec![vec![S::ZERO; input[0].len()]; input.len()];
-    let mut outs: Vec<&mut [S]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Vec<Vec<K::Float>> {
+    let ins: Vec<&[K::Float]> = input.iter().map(Vec::as_slice).collect();
+    let mut out = vec![vec![K::Float::ZERO; input[0].len()]; input.len()];
+    let mut outs: Vec<&mut [K::Float]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     k.render(
         Planes::new(&ins).unwrap(),
-        ControlLanes::<S>::NONE,
+        ControlLanes::NONE,
         PlanesMut::new(&mut outs).unwrap(),
     );
     out
@@ -202,11 +260,11 @@ pub(crate) fn render_kernel<K: Kernel, S: Float>(k: &mut K, input: &[Vec<S>]) ->
 /// the frames of `input`: a retarget at every grid point and at every frame of `moves` (a
 /// control that moved), each at the controls in force there (`moves` is `(frame, controls)`
 /// in order, the first at frame 0), the frames between rendered together.
-pub(crate) fn drive_kernel<K: Kernel, S: Float>(
+pub(crate) fn drive_kernel<K: Kernel>(
     k: &mut K,
     moves: &[(usize, <K::Set as ControlSet>::Controls)],
-    input: &[Vec<S>],
-) -> Vec<Vec<S>> {
+    input: &[Vec<K::Float>],
+) -> Vec<Vec<K::Float>> {
     let frames = input[0].len();
     let mut stops: Vec<usize> = (0..frames).step_by(K::GRID).collect();
     stops.extend(moves.iter().map(|m| m.0).filter(|&f| f < frames));
@@ -217,7 +275,7 @@ pub(crate) fn drive_kernel<K: Kernel, S: Float>(
     for w in stops.windows(2) {
         let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
         k.retarget(&at);
-        let piece: Vec<Vec<S>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
+        let piece: Vec<Vec<K::Float>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
         for (o, y) in out.iter_mut().zip(render_kernel(k, &piece)) {
             o.extend(y);
         }

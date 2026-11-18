@@ -67,9 +67,9 @@ impl TremoloConfig {
 /// # Panics
 ///
 /// `TremoloNode::from` panics past 16 channels, where the node's shape is built: a tremolo is one bus.
-pub type TremoloNode = KernelNode<TremoloKernel>;
+pub type TremoloNode<F> = KernelNode<TremoloKernel<F>>;
 
-impl From<TremoloConfig> for TremoloNode {
+impl<F: Float> From<TremoloConfig> for TremoloNode<F> {
     fn from(config: TremoloConfig) -> Self {
         Self::with_kernel(
             TremoloKernel::new(config.width, config.wave),
@@ -96,24 +96,27 @@ control_set! {
 
 /// The tremolo as a [`Kernel`]: a [`Tremolo`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct TremoloKernel {
+pub struct TremoloKernel<F: Float> {
     width: ChannelLayout,
     wave: OscillatorWave,
     tremolo: Tremolo,
+    float: core::marker::PhantomData<fn() -> F>,
 }
 
-impl TremoloKernel {
+impl<F: Float> TremoloKernel<F> {
     /// A tremolo at a placeholder rate: an unprepared node renders nothing.
     fn new(width: ChannelLayout, wave: OscillatorWave) -> Self {
         Self {
             width,
             wave,
             tremolo: Tremolo::new(wave, SampleRate::SR_48K),
+            float: core::marker::PhantomData,
         }
     }
 }
 
-impl Kernel for TremoloKernel {
+impl<F: Float> Kernel for TremoloKernel<F> {
+    type Float = F;
     type Set = TremoloSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -137,11 +140,11 @@ impl Kernel for TremoloKernel {
         self.tremolo.aim(controls);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.tremolo.process(input, output);
     }
@@ -159,7 +162,7 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    fn node(width: u16, rate: f64, depth: f32) -> TremoloNode {
+    fn node(width: u16, rate: f64, depth: f32) -> TremoloNode<f32> {
         prepared(TremoloNode::from(
             TremoloConfig::new(width)
                 .rate(Hz(rate))
@@ -189,7 +192,7 @@ mod tests {
             shape.params.as_slice(),
             &[UnitParam::Rate, UnitParam::Depth][..]
         );
-        let d = TremoloNode::from(TremoloConfig::new(1u16));
+        let d = TremoloNode::<f32>::from(TremoloConfig::new(1u16));
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(5.0), Some(0.5)));
     }
 
@@ -210,7 +213,7 @@ mod tests {
     /// An empty layout is taken as mono.
     #[test]
     fn an_empty_layout_is_mono() {
-        let n = TremoloNode::from(TremoloConfig::new(ChannelLayout::EMPTY));
+        let n = TremoloNode::<f32>::from(TremoloConfig::new(ChannelLayout::EMPTY));
         assert_eq!(n.shape().audio_in().count(), 1);
     }
 }

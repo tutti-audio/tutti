@@ -83,7 +83,7 @@ fn run_node(c: &mut Criterion, group: &str, width: usize, node: impl Node, fed: 
 fn svf(c: &mut Criterion) {
     for w in [2usize, 6] {
         let make = || {
-            SvfFilterNode::<f64>::with_channels(
+            SvfFilterNode::<f32>::with_channels(
                 ChannelLayout::try_from(w).expect("a test width is small"),
                 SvfType::LowPass,
                 Hz::new(1_000.0),
@@ -97,7 +97,7 @@ fn svf(c: &mut Criterion) {
 
 fn ladder(c: &mut Criterion) {
     for w in [2usize, 6] {
-        let node = LadderFilterNode::<f64>::with_channels(
+        let node = LadderFilterNode::<f32>::with_channels(
             ChannelLayout::try_from(w).expect("a test width is small"),
             LadderType::LP24,
             Hz::new(1_000.0),

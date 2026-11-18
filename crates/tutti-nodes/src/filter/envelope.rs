@@ -78,13 +78,12 @@ impl EnvelopeFilterConfig {
 /// resonant filter rings for as long as its Q says. No latency. A [`KernelNode`]; made from
 /// an [`EnvelopeFilterConfig`] (`EnvelopeFilterNode::from`).
 ///
-/// `F` is the state precision of the envelope and the filter, `f64` by default: an `f64` graph
-/// runs them in `f64`, and a view of the other sample format is converted at the edges.
+/// `F` is the float of the graph it runs in, and of the envelope and the filter.
 ///
 /// # Panics
 ///
 /// `EnvelopeFilterNode::from` panics past 16 channels: a filter is one bus.
-pub type EnvelopeFilterNode<F = f64> = KernelNode<EnvelopeFilterKernel<F>>;
+pub type EnvelopeFilterNode<F> = KernelNode<EnvelopeFilterKernel<F>>;
 
 impl<F: Float + Lanes + Lerp> From<EnvelopeFilterConfig> for EnvelopeFilterNode<F> {
     fn from(config: EnvelopeFilterConfig) -> Self {
@@ -138,6 +137,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterKernel<F> {
 }
 
 impl<F: Float + Lanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
+    type Float = F;
     type Set = EnvelopeFilterSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -171,11 +171,11 @@ impl<F: Float + Lanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
             bank.process(input, output);
@@ -211,7 +211,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::<f64>::NONE,
+            ControlLanes::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);

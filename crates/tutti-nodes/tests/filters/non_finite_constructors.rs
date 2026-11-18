@@ -2,6 +2,8 @@
 //! at NaN, both infinities and a negative value: building and rendering never
 //! panics and never produces a non-finite sample.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
@@ -167,7 +169,7 @@ fn sweep() {
             Box::new(BrickwallLimiterNode::<f32>::new(d(b)))
         }));
         add(probe("eq freq", b, || {
-            Box::new(EqBandNode::<f64>::new(
+            Box::new(EqBandNode::<f32>::new(
                 SvfType::Bell,
                 Hz(bz),
                 Q(1.0),
@@ -175,7 +177,7 @@ fn sweep() {
             ))
         }));
         add(probe("eq q", b, || {
-            Box::new(EqBandNode::<f64>::new(
+            Box::new(EqBandNode::<f32>::new(
                 SvfType::Bell,
                 Hz(1000.0),
                 Q(b),
@@ -183,7 +185,7 @@ fn sweep() {
             ))
         }));
         add(probe("eq gain", b, || {
-            Box::new(EqBandNode::<f64>::new(
+            Box::new(EqBandNode::<f32>::new(
                 SvfType::Bell,
                 Hz(1000.0),
                 Q(1.0),
@@ -191,17 +193,17 @@ fn sweep() {
             ))
         }));
         add(probe("svf freq", b, || {
-            Box::new(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(bz), Q(1.0)))
+            Box::new(SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(bz), Q(1.0)))
         }));
         add(probe("svf q", b, || {
-            Box::new(SvfFilterNode::<f64>::new(
+            Box::new(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
                 Hz(1000.0),
                 Q(b),
             ))
         }));
         add(probe("svf gain", b, || {
-            Box::new(SvfFilterNode::<f64>::with_controls(
+            Box::new(SvfFilterNode::<f32>::with_controls(
                 ChannelLayout::MONO,
                 SvfControls {
                     ty: SvfType::Bell,
@@ -212,7 +214,7 @@ fn sweep() {
             ))
         }));
         add(probe("ladder freq", b, || {
-            Box::new(LadderFilterNode::<f64>::new(
+            Box::new(LadderFilterNode::<f32>::new(
                 tutti_nodes::LadderType::LP24,
                 Hz(bz),
                 Resonance::new(0.5),
