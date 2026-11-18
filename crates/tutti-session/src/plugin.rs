@@ -1310,7 +1310,7 @@ impl<'a> Plugin<'a> {
     ///   block the plugin did not run, or the rest of a SysEx message that
     ///   lost a packet; events past the node's declared event-input bound are
     ///   cut by the graph before the plugin runs, and are reported as
-    ///   [`SessionEvent::EventsDropped`](crate::SessionEvent::EventsDropped)
+    ///   [`SessionEvent::EventsDropped`]
     ///   with `port: None`, not here); parameter points of a sent grid that a full queue
     ///   dropped; and parameter edits the plugin made that the host did not
     ///   hear (a lost edit costs a stale readout, not audio, and the session
