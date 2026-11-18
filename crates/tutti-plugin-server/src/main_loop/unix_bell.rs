@@ -73,7 +73,7 @@ impl Bell {
 
     /// The descriptor the main loop's wait watches for readability.
     pub(crate) fn fd(&self) -> FdId {
-        FdId::new(self.shared.rx.as_raw_fd())
+        FdId::new(self.shared.rx.as_raw_fd()).expect("an open descriptor is not negative")
     }
 
     /// The descriptor, borrowed, for a wait that is also on another.

@@ -321,18 +321,18 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
         stamp: Option<crate::pool::Stamp>,
         done: Result<crate::pool::Staged, crate::LoadError>,
     ) {
-        self.pool.worker_ended();
-        self.pool.stamped(flight, stamp);
+        self.pool.entries.worker_ended();
+        self.pool.entries.stamped(flight, stamp);
         match done {
-            Ok(crate::pool::Staged::Done(value)) => self.pool.land(flight, Ok(value)),
-            Ok(crate::pool::Staged::Main(stage)) => self.pool.stage_main(flight, stage),
-            Err(error) => self.pool.land(flight, Err(error)),
+            Ok(crate::pool::Staged::Done(value)) => self.pool.entries.land(flight, Ok(value)),
+            Ok(crate::pool::Staged::Main(stage)) => self.pool.entries.stage_main(flight, stage),
+            Err(error) => self.pool.entries.land(flight, Err(error)),
         }
         self.pool_pump();
     }
 
     fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport {
-        let (starts, refreshed) = self.pool.reload_changed(checked);
+        let (starts, refreshed) = self.pool.entries.reload_changed(checked);
         self.pool_start(starts);
         refreshed
     }
