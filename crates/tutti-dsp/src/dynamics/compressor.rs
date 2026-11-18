@@ -27,7 +27,7 @@ use super::curves::{db_gain, gain_reduction, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
 use crate::finite::finite_or;
-use crate::follower::Follower;
+use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lanes, Lerp, Steps};
 
 /// The controls of a [`CompressorBank`].
@@ -46,7 +46,9 @@ pub struct CompressorControls {
     /// How fast the reduction rises toward a louder level: the time constant of a
     /// one-pole smoother. Below 0 reads as 0 (instant).
     pub attack: Seconds,
-    /// How fast the reduction falls once the level drops. Below 0 reads as 0.
+    /// How fast the reduction falls once the level drops. Below 0 reads as 0. A release of any
+    /// length keeps its time constant at every float, `f32` included: 10 s at 192 kHz holds it to
+    /// a few millionths of a dB, and 300 s still falls.
     pub release: Seconds,
     /// Gain added after the reduction, in dB.
     pub makeup: Db,
@@ -117,24 +119,25 @@ impl CompressorMember {
 }
 
 /// The figures the detector runs on: the controls it follows, with the times as one-pole
-/// coefficients at the rate in the working precision `F`.
+/// poles at the rate in the bank's float `F`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Detector<F> {
     threshold: Db,
-    knee: Db,
-    ratio: CompressionRatio,
+    /// The knee in dB, crossed once.
+    knee: F,
+    /// The ratio, crossed once.
+    ratio: F,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
     ballistics: Follower<F>,
 }
 
 impl<F: Float> Detector<F> {
-    /// The figures member `m` asks for: its controls widened to `F`, and the times as
-    /// coefficients at its rate.
+    /// The figures member `m` asks for: its controls and the times as poles at its rate.
     fn of(m: &CompressorMember) -> Self {
         Self {
             threshold: m.threshold,
-            knee: m.knee,
-            ratio: m.ratio,
+            knee: F::from_unit(m.knee),
+            ratio: F::from_unit(m.ratio),
             ballistics: Follower::of(floored(m.attack, m.release), m.rate),
         }
     }
@@ -142,8 +145,8 @@ impl<F: Float> Detector<F> {
     /// The figures of a compressor that does nothing, for a target to start from.
     const NEUTRAL: Self = Self {
         threshold: Db::UNITY,
-        knee: Db::UNITY,
-        ratio: CompressionRatio::UNITY,
+        knee: F::ZERO,
+        ratio: F::ONE,
         ballistics: Follower::NEUTRAL,
     };
 
@@ -152,33 +155,27 @@ impl<F: Float> Detector<F> {
     /// coefficient while it rises, the release while it falls) and the linear gain
     /// `-reduction + makeup`.
     #[inline]
-    fn frame(&self, reduction: &mut F, level: F, threshold: F, makeup: F) -> F {
-        // The knee and the ratio cross into `F` here.
-        let target = gain_reduction(
-            level_db(level),
-            threshold,
-            F::from_unit(self.ratio),
-            F::from_f64(self.knee.get()),
-        );
-        *reduction = self.ballistics.follow_raw(*reduction, target);
-        db_gain(makeup - *reduction)
+    fn frame(&self, reduction: &mut Smoothed<F>, level: F, threshold: F, makeup: F) -> F {
+        let target = gain_reduction(level_db(level), threshold, self.ratio, self.knee);
+        let reduced = self.ballistics.follow_raw(reduction, target);
+        db_gain(makeup - reduced)
     }
 }
 
-/// The per-frame lane a compressor reads beside its audio, in the audio's sample format,
-/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
-/// a frame past its end is not driven.
+/// The per-frame lane a compressor reads beside its audio, in the bank's float, `None` where
+/// nothing drives it. A lane is at least as long as the frames a call renders; a frame past
+/// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct CompressorLanes<'a, S: Float = f32> {
+pub struct CompressorLanes<'a, F: Float> {
     /// The threshold in dB. A frame that is not finite is the aimed threshold.
-    pub threshold: Option<Mono<'a, S>>,
+    pub threshold: Option<Mono<'a, F>>,
 }
 
 /// A feed-forward compressor of any width: one gain from the loudest key channel, applied
 /// to every channel, with the follower that smooths it and the makeup that glides.
 ///
-/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
-/// another sample format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state, the views and the lane are `F`, the
+/// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct CompressorBank<F: Float + Lanes> {
     detector: Detector<F>,
@@ -187,9 +184,8 @@ pub struct CompressorBank<F: Float + Lanes> {
     /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
-    /// The smoothed reduction, in dB and positive: a per-sample level in `F`; becomes `Db` once
-    /// that unit stores `f64`.
-    reduction: F,
+    /// The smoothed reduction, in dB and positive: a per-sample level in `F`.
+    reduction: Smoothed<F>,
     /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
     /// and positive: a per-sample level in `F`, as `reduction` is.
     deepest: F,
@@ -209,7 +205,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
             makeup: Glide::landed(F::ZERO),
             steps,
             rate,
-            reduction: F::ZERO,
+            reduction: Smoothed::ZERO,
             deepest: F::ZERO,
             key: None,
         }
@@ -230,7 +226,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
     /// Back to silence: no reduction, nothing metered, and the makeup landed on its target.
     /// No allocation.
     pub fn reset(&mut self) {
-        self.reduction = F::ZERO;
+        self.reduction = Smoothed::ZERO;
         self.deepest = F::ZERO;
         self.makeup.settle();
         if let Some(key) = &mut self.key {
@@ -258,14 +254,14 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
             key.aim(member.key_cutoff, member.key_q);
         }
         self.makeup
-            .aim_by(F::from_f64(member.makeup.get()), Steps::Fixed(self.steps));
+            .aim_by(F::from_unit(member.makeup), Steps::Fixed(self.steps));
     }
 
     /// The deepest smoothed reduction any frame reached since the last call (or since
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        Db(core::mem::replace(&mut self.deepest, F::ZERO).to_f64())
+        Db(core::mem::replace(&mut self.deepest, F::ZERO).into())
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
@@ -277,12 +273,12 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
     /// rendered are the fewest of the three views'. A NaN key sample reads as quiet and an
     /// infinite one as the largest finite level. Frame `i` reads the makeup at the glide's
     /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
-        lanes: CompressorLanes<'_, S>,
-        key: Planes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lanes: CompressorLanes<'_, F>,
+        key: Planes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input
             .frames()
@@ -291,7 +287,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.detector;
-        let aimed = F::from_f64(d.threshold.get());
+        let aimed = F::from_unit(d.threshold);
         let blended = self.makeup.blended(frames);
         let taken = self.makeup.taken();
         let mut gains = [F::ZERO; CHUNK];
@@ -310,7 +306,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
                 let threshold = lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| x.convert_to::<F>())
+                    .copied()
                     .filter(|t| t.is_finite())
                     .unwrap_or(aimed);
                 let makeup = if i < blended {
@@ -320,14 +316,14 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
                     self.makeup.target()
                 };
                 *g = d.frame(&mut self.reduction, *g, threshold, makeup);
-                self.deepest = self.deepest.max(self.reduction);
+                self.deepest = self.deepest.max(self.reduction.value());
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
-                for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
+                for ((y, &x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
+                    *y = x * g;
                 }
             }
             start = end;
