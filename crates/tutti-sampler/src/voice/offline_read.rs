@@ -513,7 +513,7 @@ impl<F: Float> Pages<F> {
         page.frames = frames;
         page.data.clear();
         page.data
-            .resize(Samples(frames).interleaved_len(self.layout), F::ZERO);
+            .resize(self.layout.interleaved_len(Samples(frames)), F::ZERO);
         #[cfg(codec)]
         {
             let fail = |what: ReadFault| OfflineReadError {

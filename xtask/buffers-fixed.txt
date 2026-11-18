@@ -16,14 +16,7 @@
 # Fixed f32 on audio stays only as one of those kinds; a free-text `measured:` is refused.
 crates/tutti-codec/src/encoder.rs::Encoder::write  pending
 crates/tutti-codec/src/writer.rs::FormatWriter::write  pending
-crates/tutti-dsp/src/dither.rs::DitherNoise::apply  pending
-crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::hold  pending
-crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::process  pending
-crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::finish  pending
-crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::push  pending
-crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::process  pending
-crates/tutti-dsp/src/spatial/vbap.rs::VbapGains::render_channel  pending
-crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  pending
+crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  not-audio: a weight per speaker, not a signal
 crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights

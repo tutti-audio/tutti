@@ -500,7 +500,7 @@ impl Measurer {
         // The scratch is taken out so the meter and the chunk borrow apart.
         let mut buf = std::mem::take(&mut self.scratch);
         buf.clear();
-        buf.resize(Samples(span.len()).interleaved_len(layout), 0.0);
+        buf.resize(layout.interleaved_len(Samples(span.len())), 0.0);
         let fed = (|| -> crate::Result<()> {
             let mut chunk = InterleavedMut::new(&mut buf, layout)?;
             let span = Samples(span.start)..Samples(span.end);

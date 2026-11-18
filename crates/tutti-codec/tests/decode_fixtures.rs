@@ -437,7 +437,7 @@ fn a_native_stream_returns_the_files_exact_integers() {
         let Pull::Frames(n) = dec.pull(out) else {
             break;
         };
-        let pulled = Interleaved::new(&buf[..n.interleaved_len(layout)], layout).unwrap();
+        let pulled = Interleaved::new(&buf[..layout.interleaved_len(n)], layout).unwrap();
         let mut planes = vec![vec![0i16; n.get()]; 2];
         deinterleave(pulled, PlanesMut::from_vecs(&mut planes).unwrap()).expect("same shape");
         for (plane, chunk) in got.iter_mut().zip(planes) {

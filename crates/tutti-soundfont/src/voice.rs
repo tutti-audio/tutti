@@ -2,6 +2,7 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
+use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::{
     Biquad, DirectForm1, PanLaw, SOLVE_CEILING, SvfControls, SvfModel, SvfType, pan_gains,
 };
@@ -456,8 +457,10 @@ impl Voice {
             self.low_pass = low_pass(self.smoothed_cutoff, self.resonance, self.rate);
         }
         match &self.low_pass {
-            Some(section) => self.history.process(section, &mut self.block[..]),
-            None => self.history.hold(&self.block[..]),
+            Some(section) => self
+                .history
+                .process(section, MonoMut::new(&mut self.block[..])),
+            None => self.history.hold(Mono::new(&self.block[..])),
         }
 
         self.previous_mix_gain_left = self.current_mix_gain_left;
@@ -535,7 +538,7 @@ mod tests {
             let mut block: Vec<f32> = (0..8)
                 .map(|n| (w * f64::from(chunk * 8 + n)).sin() as f32)
                 .collect();
-            state.process(&section, &mut block);
+            state.process(&section, MonoMut::new(&mut block));
             if chunk >= 800 {
                 peak = block.iter().fold(peak, |p, &y| p.max(f64::from(y).abs()));
             }

@@ -18,7 +18,7 @@ unit! {
     /// 1 is certainty.
     ///
     /// Not a [`Mix`] despite the shared range — nothing is being blended, and
-    /// `Mix::blend`, the reason that type exists, is meaningless here. Not an
+    /// a crossfade position (a linear interpolation's `t`) is meaningless here. Not an
     /// [`Amplitude`] either: a confidence is never multiplied onto a signal,
     /// and giving it a gain's algebra would license `sample * confidence`,
     /// silently turning an uncertain pitch estimate into a volume dip.
@@ -155,8 +155,8 @@ unit! {
     /// would license `sample * velocity`, silently turning a soft note into a
     /// volume dip. Same argument [`Confidence`] makes.
     ///
-    /// **Not a [`Mix`]**: nothing is being blended, and `Mix::blend` — the
-    /// reason that type exists — is meaningless here. **Not a [`Depth`]**: that
+    /// **Not a [`Mix`]**: nothing is being blended, and a crossfade
+    /// position (a linear interpolation's `t`) is meaningless here. **Not a [`Depth`]**: that
     /// is bipolar, and there is no such thing as negative velocity.
     pub struct Velocity(pub f32): Unit, Ordered, Bounded;
 }

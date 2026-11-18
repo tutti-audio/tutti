@@ -418,7 +418,7 @@ impl RegionOut {
     /// reports it as the stream's decode fault.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Result<Samples, BufferError> {
         let layout = self.writer.layout();
-        let whole = Samples::from_interleaved_len(samples.len(), layout).interleaved_len(layout);
+        let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
         self.writer
             .push(Interleaved::new(&samples[..whole], layout)?)
     }

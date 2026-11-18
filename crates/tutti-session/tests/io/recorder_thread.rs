@@ -142,8 +142,8 @@ impl Source for HalfStarving {
         if n.is_multiple_of(2) {
             return Pull::Starved;
         }
-        let frames = Samples::from_interleaved_len(out.len(), ChannelLayout::STEREO);
-        out[..frames.interleaved_len(ChannelLayout::STEREO)].fill(0.25);
+        let frames = ChannelLayout::STEREO.from_interleaved_len(out.len());
+        out[..ChannelLayout::STEREO.interleaved_len(frames)].fill(0.25);
         Pull::Frames(frames)
     }
 }
@@ -635,8 +635,8 @@ impl Source for AlwaysLive {
     fn pull(&mut self, mut out: InterleavedMut<'_>) -> Pull {
         let out = out.samples_mut();
         self.polls.fetch_add(1, Ordering::Release);
-        let frames = Samples::from_interleaved_len(out.len(), ChannelLayout::STEREO);
-        out[..frames.interleaved_len(ChannelLayout::STEREO)].fill(0.5);
+        let frames = ChannelLayout::STEREO.from_interleaved_len(out.len());
+        out[..ChannelLayout::STEREO.interleaved_len(frames)].fill(0.5);
         Pull::Frames(frames)
     }
 }

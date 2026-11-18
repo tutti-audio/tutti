@@ -32,8 +32,8 @@ pub(crate) fn read_wave<F: Float>(
     channels: ChannelLayout,
 ) -> bool {
     let channels = nonempty(channels);
-    let frames = Samples::from_interleaved_len(out.len(), channels);
-    let whole = frames.interleaved_len(channels);
+    let frames = channels.from_interleaved_len(out.len());
+    let whole = channels.interleaved_len(frames);
     out.fill(F::ZERO);
     if wave.layout() != channels {
         return false;
@@ -41,7 +41,7 @@ pub(crate) fn read_wave<F: Float>(
     let have = wave.len().get().saturating_sub(at).min(frames.get());
     let from = Samples(at.min(wave.len().get()));
     let planes = wave.planes().slice(from..Samples(from.get() + have));
-    let head = &mut out[..Samples(have).interleaved_len(channels).min(whole)];
+    let head = &mut out[..channels.interleaved_len(Samples(have)).min(whole)];
     InterleavedMut::new(head, channels)
         .and_then(|dst| interleave(planes, dst))
         .is_ok()
