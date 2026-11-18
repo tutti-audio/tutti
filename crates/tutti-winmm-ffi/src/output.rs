@@ -7,6 +7,7 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
+use crate::OutputPort;
 use crate::error::{Error, MmOperation, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
@@ -34,23 +35,56 @@ impl std::fmt::Debug for MidiOut {
 // `Sync`).
 unsafe impl Send for MidiOut {}
 
+/// An output opened but not yet known to be the listed device: dropping it
+/// closes the port and sends it nothing.
+struct Unconfirmed(HMIDIOUT);
+
+impl Unconfirmed {
+    /// The open output, once the device behind it is confirmed.
+    fn confirm(self) -> MidiOut {
+        let out = MidiOut {
+            handle: self.0,
+            leaked: false,
+        };
+        std::mem::forget(self);
+        out
+    }
+}
+
+impl Drop for Unconfirmed {
+    fn drop(&mut self) {
+        // SAFETY: the handle is the output just opened, closed once.
+        unsafe { midiOutClose(self.0) };
+    }
+}
+
 impl MidiOut {
-    /// Opens output port `index`.
+    /// Opens `port`.
+    ///
+    /// winmm refuses a handle in the device interface query, so the open
+    /// cannot ask the open handle which device it is. It reads the port's
+    /// position before `midiOutOpen`, and opens only if the device there is the
+    /// one listed, then reads it again once open and closes the port (with no
+    /// reset: a port not confirmed is never sent anything) unless it still is.
+    /// Only a shift between those two reads that puts the listed device back
+    /// at the position goes unseen.
     ///
     /// # Errors
     ///
-    /// `midiOutOpen`'s: [`MmResult::Allocated`](crate::MmResult::Allocated) when
+    /// [`Error::PortMoved`] when the device at the position is not the one
+    /// listed (checked before and after the open); otherwise `midiOutOpen`'s: [`MmResult::Allocated`](crate::MmResult::Allocated) when
     /// another application holds the port,
     /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is gone.
-    pub fn open(index: u32) -> Result<Self, Error> {
+    pub fn open(port: &OutputPort) -> Result<Self, Error> {
+        port.verify()?;
         let mut handle: HMIDIOUT = std::ptr::null_mut();
         // SAFETY: `handle` is a live out-pointer; no callback is registered.
-        let code = unsafe { midiOutOpen(&raw mut handle, index, 0, 0, CALLBACK_NULL) };
+        let code = unsafe { midiOutOpen(&raw mut handle, port.index(), 0, 0, CALLBACK_NULL) };
         check(MmOperation::MidiOutOpen, code)?;
-        Ok(Self {
-            handle,
-            leaked: false,
-        })
+        // Until confirmed the port is an `Unconfirmed`, which only closes.
+        let unconfirmed = Unconfirmed(handle);
+        port.verify()?;
+        Ok(unconfirmed.confirm())
     }
 
     /// Sends one short message: the status byte, then its data bytes, low

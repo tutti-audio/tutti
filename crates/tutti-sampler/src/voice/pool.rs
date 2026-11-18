@@ -21,7 +21,7 @@ use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     RenderMode, Shape, Status,

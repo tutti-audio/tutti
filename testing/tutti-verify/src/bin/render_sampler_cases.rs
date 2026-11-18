@@ -12,6 +12,7 @@
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_sampler_cases -- <outdir>`
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
@@ -19,7 +20,7 @@ use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::contract;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
@@ -35,7 +36,10 @@ const BLOCK: usize = 64;
 fn tone(freq: f32, frames: usize) -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames {
-        w.push_frame(&[(TAU * freq * i as f32 / SR as f32).sin()]);
+        w.append(
+            Interleaved::new(&[(TAU * freq * i as f32 / SR as f32).sin()], w.layout()).unwrap(),
+        )
+        .unwrap();
     }
     Arc::new(w)
 }

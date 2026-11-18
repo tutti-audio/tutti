@@ -48,11 +48,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_buffers::Interleaved;
-use tutti_codec::Wave;
+use tutti_buffers::{Interleaved, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
+#[cfg(codec)]
+use tutti_buffers::InterleavedMut;
 #[cfg(codec)]
 use tutti_codec::FileIn;
 
@@ -354,8 +355,10 @@ impl RegionOut {
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
+            let view = InterleavedMut::new(&mut *out, decoder.topology().width())
+                .expect("the ring is the file's width and `out` holds whole frames");
             let got = decoder
-                .fill_sequential_interleaved(out)
+                .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
             out[got * ch..].fill(0.0);
             let Some(fault) = decoder.error() else {
@@ -555,7 +558,7 @@ mod tests {
         let path = dir.path().join("cut.flac");
         std::fs::write(&path, &bytes[..bytes.len() * 9 / 10]).expect("write");
 
-        let decoder = FileIn::open(&path).expect("a cut file still opens");
+        let decoder = FileIn::<f32>::open(&path).expect("a cut file still opens");
         let total = decoder.total_frames().expect("flac reports a length").get();
         let (mut writer, _ring, _reader) = ring(4096, 2);
         writer.set_decoder(decoder);

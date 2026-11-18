@@ -744,7 +744,8 @@ pub(crate) fn buffer_size_for_file(
 mod tests {
     use super::super::io::wave_io::read_wave;
     use super::*;
-    use tutti_codec::Wave;
+    use tutti_buffers::Interleaved;
+    use tutti_buffers::Wave;
     use tutti_types::Seconds;
 
     /// A looped position the audio thread cannot place (`floor() as usize`
@@ -775,7 +776,8 @@ mod tests {
     fn make_test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, SampleRate::SR_48K);
         for (l, r) in samples {
-            wave.push_frame(&[*l, *r]);
+            wave.append(Interleaved::new(&[*l, *r], wave.layout()).unwrap())
+                .unwrap();
         }
         wave
     }
@@ -783,7 +785,8 @@ mod tests {
     fn make_mono_wave(samples: &[f32]) -> Wave {
         let mut wave = Wave::new(1, SampleRate::SR_48K);
         for s in samples {
-            wave.push_frame(&[*s]);
+            wave.append(Interleaved::new(&[*s], wave.layout()).unwrap())
+                .unwrap();
         }
         wave
     }
@@ -976,7 +979,14 @@ mod tests {
         let len = 3_000usize;
         let mut w = Wave::new(1, SampleRate::SR_48K);
         for i in 0..len {
-            w.push_frame(&[((i as f64 * 0.013).sin() + i as f64 * 1e-4) as f32]);
+            w.append(
+                Interleaved::new(
+                    &[((i as f64 * 0.013).sin() + i as f64 * 1e-4) as f32],
+                    w.layout(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
         }
         let wave = Arc::new(w);
         let mappings = [

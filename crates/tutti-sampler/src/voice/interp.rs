@@ -21,8 +21,8 @@
 
 use std::ops::Range;
 use std::sync::Arc;
+use tutti_buffers::Wave;
 use tutti_buffers::{Fold, FoldEnd, FoldError, MonoMut, Planes};
-use tutti_codec::Wave;
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_types::{
@@ -817,6 +817,7 @@ pub(crate) fn interpolate_taps(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Interleaved;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
     use tutti_types::MAX_CHANNELS;
     use tutti_types::{LoopRange, PlaybackRate, Seconds, SrcRatio};
@@ -852,7 +853,8 @@ mod tests {
         assert_eq!(tap_indices(100, below), ([4, 5, 6, 7], 0.0));
         let mut wave = Wave::new(1, SampleRate::SR_48K);
         for i in 0..16 {
-            wave.push_frame(&[(i as f32 + 1.0) * 0.1234567]);
+            wave.append(Interleaved::new(&[(i as f32 + 1.0) * 0.1234567], wave.layout()).unwrap())
+                .unwrap();
         }
         let wave = Arc::new(wave);
         let mut out = [0.0f32; 1];
@@ -1187,7 +1189,8 @@ mod tests {
     fn constant_wave(topology: tutti_types::ChannelTopology, frame: &[f32]) -> Wave {
         let mut w = Wave::with_topology(topology, SampleRate::SR_48K);
         for _ in 0..16 {
-            w.push_frame(frame);
+            w.append(Interleaved::new(frame, w.layout()).unwrap())
+                .unwrap();
         }
         w
     }
@@ -1321,7 +1324,8 @@ mod tests {
 
         let mut quad = Wave::new(4, SampleRate::SR_48K);
         for _ in 0..16 {
-            quad.push_frame(&[1.0, 2.0, 4.0, 8.0]);
+            quad.append(Interleaved::new(&[1.0, 2.0, 4.0, 8.0], quad.layout()).unwrap())
+                .unwrap();
         }
         let quad = Arc::new(quad);
         let mut out = [0.0f32; 2];
@@ -1346,7 +1350,8 @@ mod tests {
             Err(PlaceError::Fold(FoldError::Unplaced { channel: 8, .. }))
         ));
         let mut six = Wave::new(6, SampleRate::SR_48K);
-        six.push_frame(&[0.0; 6]);
+        six.append(Interleaved::new(&[0.0; 6], six.layout()).unwrap())
+            .unwrap();
         assert!(matches!(
             Place::for_wave(&six, ChannelLayout::from(5u16)),
             Err(PlaceError::Fold(FoldError::Unplaced { channel: 5, .. }))

@@ -15,13 +15,14 @@
 //! pieces from the block's start, so a device block that is a multiple of 64
 //! frames is the same pieces, and must render the same bits.
 
+use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
@@ -44,7 +45,8 @@ fn tone_at(i: usize) -> f32 {
 fn pool(cents: f32) -> VoicePool {
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..4 * SR as usize {
-        wave.push_frame(&[tone_at(i)]);
+        wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
+            .unwrap();
     }
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
         .expect("a placeable wave");

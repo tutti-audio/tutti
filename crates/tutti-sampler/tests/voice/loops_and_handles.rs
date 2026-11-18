@@ -9,8 +9,9 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_sampler::testing::{MockTransport, loop_frames, play, settle};
 use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, MemorySource,
@@ -45,7 +46,8 @@ fn looped_frame(n: usize, start: usize, end: usize) -> usize {
 fn ramp() -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..LEN {
-        w.push_frame(&[value(i)]);
+        w.append(Interleaved::new(&[value(i)], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

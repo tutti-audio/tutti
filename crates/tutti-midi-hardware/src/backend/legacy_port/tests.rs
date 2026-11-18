@@ -36,12 +36,12 @@ fn info(name: &str) -> PortInfo {
 #[test]
 fn an_id_gives_back_its_side_and_occurrence() {
     for (side, occurrence) in [(Side::Input, 0), (Side::Output, 5), (Side::Input, u32::MAX)] {
-        let id = endpoint_id(side, occurrence, &info("Keystep"));
+        let id = endpoint_id(side, occurrence, &info("Keystep").device);
         let slot = slot_of(id);
         assert_eq!((slot.side, slot.occurrence), (side, occurrence));
         assert_eq!(
             slot.fingerprint,
-            super::ports::fingerprint(&info("Keystep"))
+            super::ports::fingerprint(&info("Keystep").device)
         );
     }
 }
@@ -49,16 +49,20 @@ fn an_id_gives_back_its_side_and_occurrence() {
 #[test]
 fn an_id_does_not_find_the_port_that_took_its_position() {
     // The list shifts when a device is unplugged: position 1 is another device.
-    let slot = slot_of(endpoint_id(Side::Input, 0, &info("Keystep")));
-    let listed = |names: &[&str]| -> Vec<(u32, PortInfo)> {
-        names.iter().zip(0..).map(|(n, i)| (i, info(n))).collect()
+    let slot = slot_of(endpoint_id(Side::Input, 0, &info("Keystep").device));
+    let listed = |names: &[&str]| -> Vec<(u32, WinMmDevice)> {
+        names
+            .iter()
+            .zip(0..)
+            .map(|(n, i)| (i, info(n).device))
+            .collect()
     };
     assert_eq!(locate(slot, listed(&["Launchpad"])), None);
     let other_product = PortInfo {
         device: named("Keystep", 8),
         ..info("Keystep")
     };
-    assert_eq!(locate(slot, [(0, other_product)]), None);
+    assert_eq!(locate(slot, [(0, other_product.device)]), None);
 }
 
 #[test]
@@ -89,21 +93,28 @@ fn an_interface_path_names_the_device_whatever_its_position_or_name() {
         name: name.to_owned(),
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0001".to_owned()),
     };
-    let slot = slot_of(endpoint_id(Side::Input, 0, &path("Keystep")));
+    let slot = slot_of(endpoint_id(Side::Input, 0, &path("Keystep").device));
     // The same device, listed elsewhere with a different cut of its name.
-    assert_eq!(locate(slot, [(3, path("Keystep Pro MIDI"))]), Some(3));
+    assert_eq!(
+        locate(slot, [(3, path("Keystep Pro MIDI").device)]),
+        Some(3)
+    );
     let other = PortInfo {
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0002".to_owned()),
         ..path("Keystep")
     };
-    assert_eq!(locate(slot, [(0, other)]), None);
+    assert_eq!(locate(slot, [(0, other.device)]), None);
 }
 
 #[test]
 fn a_device_that_moved_in_the_list_is_found_where_it_went_and_one_gone_is_not() {
-    let slot = slot_of(endpoint_id(Side::Input, 0, &info("B")));
-    let list = |names: &[&str]| -> Vec<(u32, PortInfo)> {
-        names.iter().zip(0..).map(|(n, i)| (i, info(n))).collect()
+    let slot = slot_of(endpoint_id(Side::Input, 0, &info("B").device));
+    let list = |names: &[&str]| -> Vec<(u32, WinMmDevice)> {
+        names
+            .iter()
+            .zip(0..)
+            .map(|(n, i)| (i, info(n).device))
+            .collect()
     };
     assert_eq!(locate(slot, list(&["A", "C", "B"])), Some(2));
     assert_eq!(

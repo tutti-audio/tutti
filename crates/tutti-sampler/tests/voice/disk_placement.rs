@@ -376,7 +376,7 @@ fn fixtures() -> [Fixture; 3] {
 fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader) {
     let (dir, rig, reader) = stream_into(f.channels, f.mask, Some(ChannelLayout::from(8u16)));
     assert_eq!(
-        tutti_codec::FileIn::open(dir.path().join("placed.wav"))
+        tutti_codec::FileIn::<f32>::open(dir.path().join("placed.wav"))
             .expect("opens")
             .topology()
             .positions()

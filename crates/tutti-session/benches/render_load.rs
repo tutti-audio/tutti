@@ -78,6 +78,7 @@
 //! ```
 
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 
 /// How the sampler voices transpose, and whether the reverb is in the
 /// scene.
@@ -258,13 +259,14 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         strips.push(synth.erase());
     }
 
-    let mut tone = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+    let mut tone = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     let mut seed = 0x1234_5678;
     let frames = Seconds(20.0).to_samples(SampleRate::of(RATE)).get();
     for i in 0..frames {
         let t = i as f32 / RATE as f32;
         let x = (std::f32::consts::TAU * 220.0 * t).sin() * 0.3 + noise(&mut seed) * 0.05;
-        tone.push_frame(&[x]);
+        tone.append(Interleaved::new(&[x], tone.layout()).unwrap())
+            .unwrap();
     }
     let tone = Arc::new(tone);
     for t in 0..SAMPLER_TRACKS {
