@@ -355,10 +355,10 @@ impl Device {
     /// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
     /// Message resets a receiver to, as this node sends an MCM's).
     ///
-    /// **The comparison is load-bearing**: the mode stays published (the audio
-    /// thread cannot clear it without publishing), and `set_mode` rebuilds
-    /// the ingest, so re-adopting it every block would drop every sounding
-    /// note's voice mapping, and re-send the ranges, every block.
+    /// **The comparison is load-bearing**: the session's cell keeps the mode
+    /// it was last given, so every block reads it, and `set_mode` rebuilds the
+    /// ingest: re-adopting it every block would drop every sounding note's
+    /// voice mapping, and re-send the ranges, every block.
     fn adopt(&mut self, requested: Option<MpeMode>) -> bool {
         let Some(mode) = requested else {
             return false;

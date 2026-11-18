@@ -987,7 +987,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         #[cfg(feature = "midi")]
         table.provide(
             SlotId::MpeMode,
-            Arc::new(crate::value::MpeModeSlot(self.mpe_cell().clone()))
+            Arc::new(crate::value::PublishedSlot(self.mpe_cell().clone()))
                 as crate::value::SlotCell<tutti_midi_protocol::MpeMode>,
         );
         #[cfg(feature = "midi")]
@@ -1809,8 +1809,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.click
     }
 
-    /// The cell the session's MPE mode is published through: the one place
-    /// the session reaches into its MIDI state for it.
+    /// The cell the session's MPE mode is published through: the session's one
+    /// reach into its MIDI state for it. `Midi` and the ports read it from the
+    /// state they are handed ([`MidiState::mpe`](crate::midi)).
     #[cfg(feature = "midi")]
     fn mpe_cell(&self) -> &tutti_rt::Publisher<tutti_midi_protocol::MpeMode> {
         self.midi_state.mpe()

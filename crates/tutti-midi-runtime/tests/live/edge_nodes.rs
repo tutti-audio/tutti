@@ -1428,6 +1428,14 @@ fn transform(
     tutti_midi_runtime::MpeTransformControls,
     Seen,
 ) {
+    transform_over(MpeTransformNode::new(mode), script)
+}
+
+/// [`transform`] over any node that stands where the transform does.
+fn transform_over<N: tutti_graph::IntoNode>(
+    node: N,
+    script: Script,
+) -> (Editor, Executor, N::Controls, Seen) {
     let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
     for (block, batch) in script.0.iter().enumerate() {
         for &(offset, ump) in batch {
@@ -1435,7 +1443,7 @@ fn transform(
             writer.push(Stamp::Frame(frame), ump).expect("room");
         }
     }
-    rig_with(MpeTransformNode::new(mode), 1, 512, |ed| {
+    rig_with(node, 1, 512, |ed| {
         ed.insert(NodeKey(3), "inlet", inlet);
         ed.spec_mut().connect_events(
             EventIn {
@@ -1578,4 +1586,57 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
     assert_eq!(ranges(&mut d), 0, "told once");
     tutti_graph::Node::<f32>::reset(&mut *d.node);
     assert_eq!(ranges(&mut d), 7, "after the reset");
+}
+
+/// **A fork is a transform in the mode the cell held when it was forked, and
+/// does not follow the cell after it**: a fork of a transform whose session
+/// cell holds `Disabled`, the lower zone then written, still passes a member's
+/// bend as a channel bend and sends no zone ranges, where the live transform
+/// adopts the zone.
+#[test]
+fn a_fork_keeps_the_mode_it_was_forked_in() {
+    use tutti_graph::{ForkMode, NodeParts, Unforkable};
+    let member = MidiChannel::of(1);
+    let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
+    let note = at(
+        0,
+        midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
+    );
+    let script = || Script::new(vec![vec![note, bend], vec![bend]]);
+    let cell = Publisher::new(MpeMode::Disabled);
+    let NodeParts { fork, .. } =
+        tutti_graph::IntoNode::<f32>::into_parts(MpeTransformNode::new(&cell));
+    let forked = fork
+        .expect("a transform forks")
+        .fork(ForkMode::Live)
+        .expect("forks");
+    cell.publish(midi::lower_zone(6));
+
+    let (_ed, mut exec, (), seen) = transform_over(Unforkable(forked.node), script());
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    let got = voices(&seen);
+    assert!(
+        !got.iter().any(|(_, v)| matches!(
+            v,
+            Voice2::Registered { .. } | Voice2::PerNotePitchBend { .. }
+        )),
+        "the fork stays disabled: {got:?}"
+    );
+    assert_eq!(
+        got.iter()
+            .filter(|(_, v)| matches!(v, Voice2::PitchBend(_)))
+            .count(),
+        2,
+        "{got:?}"
+    );
+
+    // The live transform over the same cell adopts the zone.
+    let (_ed, mut exec, _c, seen) = transform_over(MpeTransformNode::new(&cell), script());
+    block(&mut exec, 512);
+    assert!(
+        voices(&seen)
+            .iter()
+            .any(|(_, v)| matches!(v, Voice2::Registered { .. }))
+    );
 }

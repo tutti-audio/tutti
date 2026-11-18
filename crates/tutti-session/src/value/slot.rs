@@ -500,6 +500,23 @@ impl Held for tutti_midi_runtime::HarmonyControls {
     }
 }
 
+/// A published cell of a `Copy` value, which the session owns: written
+/// through the cell itself, which publishes when the value differs.
+#[cfg(feature = "midi")]
+impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        *tutti_rt::Publisher::current(self)
+    }
+
+    fn replace(&self, value: &T) {
+        if *tutti_rt::Publisher::current(self) != *value {
+            self.publish(*value);
+        }
+    }
+}
+
 /// A value a node reads through a published cell, written through its
 /// control side ([`Held`]), which publishes when the value differs from the
 /// one in force.
@@ -521,28 +538,6 @@ where
 
     fn store(&self, value: &C::Value) {
         self.0.replace(value);
-    }
-}
-
-/// The session's MPE mode: the cell every ingest and clip transform reads,
-/// published to when the mode written differs from the one in force.
-#[cfg(feature = "midi")]
-pub(crate) struct MpeModeSlot(pub tutti_rt::Publisher<tutti_midi_protocol::MpeMode>);
-
-#[cfg(feature = "midi")]
-impl Slot<tutti_midi_protocol::MpeMode> for MpeModeSlot {
-    fn load(&self) -> tutti_midi_protocol::MpeMode {
-        *self.0.current()
-    }
-
-    fn check(&self, _: &tutti_midi_protocol::MpeMode) -> Result<(), SetRefusal> {
-        Ok(())
-    }
-
-    fn store(&self, value: &tutti_midi_protocol::MpeMode) {
-        if *self.0.current() != *value {
-            self.0.publish(*value);
-        }
     }
 }
 
@@ -680,7 +675,7 @@ mod tests {
     #[test]
     fn an_equal_value_publishes_nothing_and_a_different_one_publishes() {
         let cell = Publisher::new(MpeMode::Disabled);
-        let slot = MpeModeSlot(cell.clone());
+        let slot = PublishedSlot(cell.clone());
         let lower = tutti_fixtures::midi::lower_zone(3);
         let start = cell.seq();
         slot.store(&MpeMode::Disabled);
@@ -690,10 +685,15 @@ mod tests {
         slot.store(&lower);
         assert_eq!(cell.seq(), start + 1);
 
-        let clips = Publisher::new(tutti_midi_runtime::ClipEvents::default());
-        let slot = PublishedSlot(clips.clone());
-        let start = clips.seq();
+        let controls =
+            tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
+                .controls;
+        let slot = PublishedSlot(controls.clone());
+        let before = controls.current();
         slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));
-        assert_eq!(clips.seq(), start, "an equal clip, by value");
+        assert!(
+            Arc::ptr_eq(&controls.current(), &before),
+            "an equal clip, by value, publishes nothing"
+        );
     }
 }

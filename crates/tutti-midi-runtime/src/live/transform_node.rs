@@ -23,8 +23,9 @@
 //! goes in whole or is dropped whole, and the drops are counted
 //! ([`MpeTransformControls::losses`]).
 //!
-//! Its fork is a transform in the mode the cell holds when it is made, with
-//! no state of the notes: an offline render starts its clip from the top.
+//! Its fork is a transform in the mode the cell holds when it is made, which
+//! it keeps: a later write to the cell does not reach it, as an export renders
+//! the session as it stood at the fork. It has no state of the notes: an offline render starts its clip from the top.
 
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
@@ -227,14 +228,16 @@ impl<F: Float> Node<F> for MpeTransformNode {
     }
 }
 
-/// A [`MpeTransformNode`]'s fork: a transform in the mode the cell holds.
+/// A [`MpeTransformNode`]'s fork: a transform in the mode the cell holds when
+/// the fork is taken, over a cell of its own that no write reaches.
 struct ModeFork {
     mode: Publisher<MpeMode>,
 }
 
 impl<F: Float> ForkSource<F> for ModeFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
-        Ok(Forked::new(Box::new(MpeTransformNode::new(&self.mode))))
+        let snapshot = Publisher::new(*self.mode.current());
+        Ok(Forked::new(Box::new(MpeTransformNode::new(&snapshot))))
     }
 }
 
