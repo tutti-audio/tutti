@@ -6,7 +6,7 @@
 //! never by the name. Both read into the same shape: [`Track`]s of
 //! `(Tick, FileEvent)`, the file's division, and the [`TempoMap`] its tempo
 //! events declare. Ticks are integers, so a file read and written holds the
-//! same events with no rounding; [`MetricalFile::events`] is where they become
+//! same events with no rounding; [`MetricalView::events`] is where they become
 //! [`Beat`]s.
 //!
 //! The file layer does not translate. An SMF channel message is a MIDI 1.0
@@ -50,7 +50,7 @@ use tutti_ump::Voice1;
 /// A tick is a count, and the whole of `u64` is in range. Arithmetic is
 /// checked: [`checked_add`](Tick::checked_add), [`ticks_since`](Tick::ticks_since)
 /// and [`quarters`](Tick::quarters) answer `None` where `u64` would wrap.
-/// [`MetricalFile::beat_at`] is the conversion to a [`Beat`].
+/// [`MetricalView::beat_at`] is the conversion to a [`Beat`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tick(pub u64);
 
@@ -107,7 +107,7 @@ impl Tick {
     }
 
     /// This tick in quarter notes: the tick over the division
-    /// (`ticks_per_quarter`, [`MetricalFile::ticks_per_quarter`]).
+    /// (`ticks_per_quarter`, [`MetricalView::ticks_per_quarter`]).
     ///
     /// ```
     /// use tutti_midi_file::Tick;
@@ -584,7 +584,7 @@ impl Track {
     ///
     /// A second Set Tempo at the same tick is kept, after the first, and not
     /// refused (an SMF may hold any number): the later one governs the file's
-    /// [`tempo_map`](MetricalFile::tempo_map), as a sequencer applying them in order
+    /// [`tempo_map`](MetricalView::tempo_map), as a sequencer applying them in order
     /// would.
     ///
     /// # Examples
@@ -690,7 +690,7 @@ impl Track {
 
     /// The track's events as the packets a clip plays, at their beats for a
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
-    /// [`MetricalFile::timeline`]'s.
+    /// [`MetricalView::timeline`]'s.
     pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> Timeline {
         Timeline::of(
             self.events
@@ -855,9 +855,9 @@ impl Container {
 /// build one and check what a container can hold.
 ///
 /// Format 2 SMFs keep their sequences apart, and so do those of a format above
-/// 2: [`MetricalFile::events`] merges the tracks of a format 0 or 1 file and of
-/// a Clip File, which share one timeline, and has none for the others, whose
-/// tracks are independent ([`MetricalFile::tempo_map_of`] is each one's
+/// 2: `events` (on both views) merges the tracks of a format 0 or 1 file and of
+/// a Clip File, which share one timeline, and refuses the others, whose
+/// tracks are independent ([`MetricalView::tempo_maps`] has each one's
 /// own).
 ///
 /// An SMF in SMPTE time ([`SmfDivision::Smpte`]) counts its ticks in fractions
@@ -1151,7 +1151,7 @@ impl MidiFile {
     }
 
     /// An SMF's division word, `None` for a Clip File (whose division is
-    /// always [`MetricalFile::ticks_per_quarter`]).
+    /// always [`MetricalView::ticks_per_quarter`]).
     #[must_use]
     pub fn division(&self) -> Option<SmfDivision> {
         match self.container {
@@ -1165,11 +1165,11 @@ impl MidiFile {
     /// asked; each view answers only what its kind has.
     pub fn timebase(&self) -> Timebase<'_> {
         match self.container {
-            Container::Clip(ticks_per_quarter) => Timebase::Metrical(MetricalFile {
+            Container::Clip(ticks_per_quarter) => Timebase::Metrical(MetricalView {
                 file: self,
                 ticks_per_quarter,
             }),
-            Container::Smf(_, SmfDivision::Metrical(ticks)) => Timebase::Metrical(MetricalFile {
+            Container::Smf(_, SmfDivision::Metrical(ticks)) => Timebase::Metrical(MetricalView {
                 file: self,
                 ticks_per_quarter: ticks.into(),
             }),
@@ -1179,7 +1179,7 @@ impl MidiFile {
                     fps,
                     ticks_per_frame,
                 },
-            ) => Timebase::Smpte(SmpteFile {
+            ) => Timebase::Smpte(SmpteView {
                 file: self,
                 fps,
                 ticks_per_frame,
@@ -1192,15 +1192,18 @@ impl MidiFile {
         &self.tracks
     }
 
-    /// Seconds from the start of the file to `tick`, whichever its
-    /// [`timebase`](Self::timebase): [`MetricalFile::seconds_at`] or
-    /// [`SmpteFile::seconds_at`].
+    /// Seconds from the start of the file to `tick`. A metrical file reads it
+    /// over its [`tempo_map`](MetricalView::tempo_map), each stretch between
+    /// two changes at its own tempo (a file's changes are all steps; a format 2
+    /// file answers with the first sequence's map); an SMPTE file counts it as
+    /// the tick over the ticks in a second, `fps * ticks per frame`, with 29.97
+    /// as 30000/1001.
     ///
     /// What an offline render of the file lasts is `seconds_at(file.end())`.
     pub fn seconds_at(&self, tick: Tick) -> Seconds {
         match self.timebase() {
-            Timebase::Metrical(file) => file.seconds_at(tick),
-            Timebase::Smpte(file) => file.seconds_at(tick),
+            Timebase::Metrical(view) => view.tempo_map().seconds_at(view.beat_at(tick)),
+            Timebase::Smpte(view) => smpte_seconds(view.fps, view.ticks_per_frame, tick),
         }
     }
 
@@ -1233,28 +1236,19 @@ pub enum Timebase<'a> {
     /// Ticks are fractions of a quarter note: an SMF with a metrical
     /// [`SmfDivision`], and every Clip File. It has a beat grid, a tempo map
     /// and a clip.
-    Metrical(MetricalFile<'a>),
+    Metrical(MetricalView<'a>),
     /// Ticks are fractions of a second: an SMF with an [`SmfDivision::Smpte`]
     /// division. It has no beat grid, so no tempo map, beats or clip.
-    Smpte(SmpteFile<'a>),
+    Smpte(SmpteView<'a>),
 }
 
 impl<'a> Timebase<'a> {
     /// The metrical view, `None` for a file in SMPTE time.
     #[must_use]
-    pub fn metrical(self) -> Option<MetricalFile<'a>> {
+    pub fn metrical(self) -> Option<MetricalView<'a>> {
         match self {
             Self::Metrical(file) => Some(file),
             Self::Smpte(_) => None,
-        }
-    }
-
-    /// The SMPTE view, `None` for a metrical file.
-    #[must_use]
-    pub fn smpte(self) -> Option<SmpteFile<'a>> {
-        match self {
-            Self::Metrical(_) => None,
-            Self::Smpte(file) => Some(file),
         }
     }
 }
@@ -1263,18 +1257,12 @@ impl<'a> Timebase<'a> {
 /// beat grid, the tempo map its Set Tempo events declare, and the clip it
 /// converts to.
 #[derive(Clone, Copy, Debug)]
-pub struct MetricalFile<'a> {
+pub struct MetricalView<'a> {
     file: &'a MidiFile,
     ticks_per_quarter: TicksPerQuarterNote,
 }
 
-impl<'a> MetricalFile<'a> {
-    /// The file this is the view of.
-    #[must_use]
-    pub fn file(self) -> &'a MidiFile {
-        self.file
-    }
-
+impl<'a> MetricalView<'a> {
     /// The division as ticks per quarter note.
     #[must_use]
     pub fn ticks_per_quarter(self) -> TicksPerQuarterNote {
@@ -1308,35 +1296,21 @@ impl<'a> MetricalFile<'a> {
     /// and a Set Tempo at tick 0 of the sequence overrides it.
     ///
     /// For a format 2 file, which has a timeline per sequence, this is the
-    /// first sequence's; [`tempo_map_of`](Self::tempo_map_of) names one.
+    /// first sequence's; [`tempo_maps`](Self::tempo_maps) has each.
     ///
     /// It is shared: `file.tempo_map().clone()` is a reference count.
     #[must_use]
     pub fn tempo_map(self) -> &'a Arc<TempoMap> {
+        // A metrical file always has at least one tempo map.
         &self.file.tempo_maps[0]
     }
 
-    /// The tempo map `track` is read on: the file's for a file of one timeline,
-    /// the track's own for a format 2 file. `None` past the last track.
-    #[must_use]
-    pub fn tempo_map_of(self, track: usize) -> Option<&'a Arc<TempoMap>> {
-        if track >= self.file.tracks.len() {
-            return None;
-        }
+    /// The tempo map each track is read on, one per track in track order: the
+    /// file's own for a file of one timeline, the sequence's for a format 2
+    /// file. Zip it with [`tracks`](MidiFile::tracks).
+    pub fn tempo_maps(self) -> impl ExactSizeIterator<Item = &'a Arc<TempoMap>> {
         let maps = &self.file.tempo_maps;
-        maps.get(track).or_else(|| maps.first())
-    }
-
-    /// Seconds from the start of the file to `tick`, over the
-    /// [`tempo_map`](Self::tempo_map): each stretch between two changes at its
-    /// own tempo (a file's changes are all steps). For a format 2 file the
-    /// first sequence's map answers ([`tempo_map_of`](Self::tempo_map_of) names
-    /// another).
-    ///
-    /// What an offline render of the file lasts is `seconds_at(file.end())`.
-    #[must_use]
-    pub fn seconds_at(self, tick: Tick) -> Seconds {
-        self.tempo_map().seconds_at(self.beat_at(tick))
+        (0..self.file.tracks.len()).map(move |track| maps.get(track).unwrap_or(&maps[0]))
     }
 
     /// Every event of the file's one timeline (a Clip File's
@@ -1418,19 +1392,13 @@ impl<'a> MetricalFile<'a> {
 /// A [`MidiFile`] whose ticks are fractions of a second ([`Timebase::Smpte`]):
 /// a frame rate and the ticks in a frame.
 #[derive(Clone, Copy, Debug)]
-pub struct SmpteFile<'a> {
+pub struct SmpteView<'a> {
     file: &'a MidiFile,
     fps: MtcRate,
     ticks_per_frame: SmfTicksPerFrame,
 }
 
-impl<'a> SmpteFile<'a> {
-    /// The file this is the view of.
-    #[must_use]
-    pub fn file(self) -> &'a MidiFile {
-        self.file
-    }
-
+impl<'a> SmpteView<'a> {
     /// Frames per second.
     #[must_use]
     pub fn fps(self) -> MtcRate {
@@ -1441,18 +1409,6 @@ impl<'a> SmpteFile<'a> {
     #[must_use]
     pub fn ticks_per_frame(self) -> SmfTicksPerFrame {
         self.ticks_per_frame
-    }
-
-    /// Seconds from the start of the file to `tick`: the tick over the ticks
-    /// in a second, `fps * ticks per frame`, with 29.97 as 30000/1001. A Set
-    /// Tempo moves no tick.
-    #[must_use]
-    pub fn seconds_at(self, tick: Tick) -> Seconds {
-        // The header's -29 is 29.97: the specification says "-29 corresponds
-        // to 30 drop frame", the 30 drop-frame rate being 30000/1001.
-        let (frames, per) = self.fps.frame_rate().ratio();
-        let ticks = frames * u64::from(self.ticks_per_frame.get());
-        Seconds(tick.0 as f64 * per as f64 / ticks as f64)
     }
 
     /// Every event of the file's one timeline as `(seconds, event)`, in
@@ -1470,11 +1426,21 @@ impl<'a> SmpteFile<'a> {
             .file
             .merged()?
             .into_iter()
-            .map(move |(tick, event)| (self.seconds_at(tick), event)))
+            .map(move |(tick, event)| (smpte_seconds(self.fps, self.ticks_per_frame, tick), event)))
     }
 }
 
-/// Why a file has no one timeline ([`MetricalFile::events`], [`MetricalFile::timeline`]).
+/// Seconds of `tick` in SMPTE time: the tick over the ticks in a second,
+/// `fps * ticks per frame`, with 29.97 as 30000/1001. A Set Tempo moves no tick.
+fn smpte_seconds(fps: MtcRate, ticks_per_frame: SmfTicksPerFrame, tick: Tick) -> Seconds {
+    // The header's -29 is 29.97: the specification says "-29 corresponds to 30
+    // drop frame", the 30 drop-frame rate being 30000/1001.
+    let (frames, per) = fps.frame_rate().ratio();
+    let ticks = frames * u64::from(ticks_per_frame.get());
+    Seconds(tick.0 as f64 * per as f64 / ticks as f64)
+}
+
+/// Why a file has no one timeline ([`MetricalView::events`], [`MetricalView::timeline`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum TimelineError {
@@ -1484,7 +1450,7 @@ pub enum TimelineError {
     NoCommonTimeline,
 }
 
-/// Events as the packets a clip plays ([`MetricalFile::timeline`]), and the events
+/// Events as the packets a clip plays ([`MetricalView::timeline`]), and the events
 /// that gave none.
 #[derive(Clone, Debug, PartialEq, Default)]
 #[must_use = "`dropped` lists the events with no packet"]
@@ -1499,7 +1465,7 @@ pub struct Timeline {
     pub dropped: Vec<(Beat, FileEvent, TimelineDrop)>,
 }
 
-/// Why an event of [`MetricalFile::timeline`] has no packet ([`Timeline::dropped`]).
+/// Why an event of [`MetricalView::timeline`] has no packet ([`Timeline::dropped`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TimelineDrop {
@@ -1522,7 +1488,7 @@ fn ends_in_f7(data: &[u8]) -> bool {
 }
 
 impl Timeline {
-    /// The packets of `events`, by [`MetricalFile::timeline`]'s rule.
+    /// The packets of `events`, by [`MetricalView::timeline`]'s rule.
     fn of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> Self {
         let mut timeline = Self::default();
         // The parts of the divided message being read: its `F0` event, then

@@ -505,7 +505,7 @@ fn the_tempo_map_is_one_shared_value() {
     ));
     assert!(Arc::ptr_eq(
         metrical(&f).tempo_map(),
-        metrical(&f).tempo_map_of(0).unwrap()
+        metrical(&f).tempo_maps().next().unwrap()
     ));
     assert_eq!(metrical(&f).tempo_map().tempo_at(Beat(0.0)), Bpm::of(75.0));
 }

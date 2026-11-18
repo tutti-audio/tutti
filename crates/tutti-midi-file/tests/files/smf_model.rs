@@ -9,7 +9,9 @@
 
 use crate::common::{metrical, track};
 use crate::support::{Division, RawEvent, build_smf};
+use std::sync::Arc;
 use tutti_fixtures::{RangeContract, check_range_contract};
+
 use tutti_midi_file::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
     ReadError, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick, Track, TracksError,
@@ -271,10 +273,11 @@ fn format_2_keeps_its_sequences_apart() {
         "no common timeline to merge on"
     );
     assert_eq!(file.tracks().len(), 2);
-    let tempo = |i| metrical(&file).tempo_map_of(i).unwrap().tempo_at(Beat(0.0));
-    assert_eq!(tempo(0), Bpm::of(120.0));
-    assert_eq!(tempo(1), Bpm::of(60.0));
-    assert!(metrical(&file).tempo_map_of(2).is_none());
+    let tempos: Vec<Bpm> = metrical(&file)
+        .tempo_maps()
+        .map(|map| map.tempo_at(Beat(0.0)))
+        .collect();
+    assert_eq!(tempos, [Bpm::of(120.0), Bpm::of(60.0)]);
     assert_eq!(
         metrical(&file).tempo_map().tempo_at(Beat(0.0)),
         Bpm::of(120.0)
@@ -291,12 +294,10 @@ fn format_2_keeps_its_sequences_apart() {
         ],
     ));
     assert_eq!(metrical(&parallel).events().unwrap().count(), 3);
-    assert_eq!(
+    assert!(
         metrical(&parallel)
-            .tempo_map_of(1)
-            .unwrap()
-            .tempo_at(Beat(0.0)),
-        Bpm::of(120.0)
+            .tempo_maps()
+            .all(|map| Arc::ptr_eq(map, metrical(&parallel).tempo_map()))
     );
 }
 

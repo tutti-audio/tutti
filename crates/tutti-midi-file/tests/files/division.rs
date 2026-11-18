@@ -150,7 +150,9 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
         ]],
     );
     let file = read(&bytes);
-    let smpte = file.timebase().smpte().expect("an SMPTE file");
+    let Timebase::Smpte(smpte) = file.timebase() else {
+        panic!("an SMPTE file");
+    };
     let at: Vec<Seconds> = smpte.events().unwrap().map(|(time, _)| time).collect();
     assert_eq!(at, [Seconds(0.0), Seconds(1.0), Seconds(2.5)]);
     assert_eq!(smpte.fps(), MtcRate::Fps25);
@@ -167,6 +169,31 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
         }) if micros_per_quarter == MicrosPerQuarter::of(1_000_000)
     ));
     assert_eq!(file.to_bytes(), bytes);
+}
+
+/// A format 2 file in SMPTE time keeps its sequences apart as a metrical one's
+/// are: its SMPTE view has no merged events either.
+#[test]
+fn a_format_2_file_in_smpte_time_has_no_common_timeline() {
+    let bytes = build_smf(
+        2,
+        Division::Smpte {
+            fps: -25,
+            ticks_per_frame: 40,
+        },
+        &[
+            vec![RawEvent::note_on(0, 0, 60, 100)],
+            vec![RawEvent::note_on(0, 0, 62, 100)],
+        ],
+    );
+    let file = read(&bytes);
+    let Timebase::Smpte(smpte) = file.timebase() else {
+        panic!("an SMPTE file");
+    };
+    assert_eq!(
+        smpte.events().map(|_| ()),
+        Err(TimelineError::NoCommonTimeline)
+    );
 }
 
 /// SMF 1.0 section 2.1: "A program encountering an unknown format ID may still
@@ -194,7 +221,7 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
         metrical(&file).events().map(|_| ()),
         Err(TimelineError::NoCommonTimeline)
     ));
-    assert!(metrical(&file).tempo_map_of(1).is_some());
+    assert_eq!(metrical(&file).tempo_maps().len(), 2);
     assert_eq!(
         metrical(&file).timeline().unwrap_err(),
         TimelineError::NoCommonTimeline

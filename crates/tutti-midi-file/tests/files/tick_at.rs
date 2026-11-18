@@ -1,4 +1,4 @@
-//! The beat-to-tick inverse: `MidiFile::tick_at` and `Tick::from_beat` against
+//! The beat-to-tick inverse: `MetricalView::tick_at` and `Tick::from_beat` against
 //! the tick grid of the division (a tick is `1/ticks_per_quarter` of a quarter note).
 
 use crate::common::{metrical, track};

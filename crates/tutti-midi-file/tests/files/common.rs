@@ -1,6 +1,6 @@
 //! What the file tests share: a track of events and a note.
 
-use tutti_midi_file::{FileEvent, MetricalFile, MidiFile, Tick, Track};
+use tutti_midi_file::{FileEvent, MetricalView, MidiFile, Tick, Track};
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
 
 /// A track of `events`, in tick order, ending at the last of them.
@@ -19,6 +19,6 @@ pub fn note(channel: u8, key: u8) -> FileEvent {
 
 /// The metrical view of `file`; a test of a metrical file reads its beats, tempo map and clip
 /// through it.
-pub fn metrical(file: &MidiFile) -> MetricalFile<'_> {
+pub fn metrical(file: &MidiFile) -> MetricalView<'_> {
     file.timebase().metrical().expect("a metrical file")
 }

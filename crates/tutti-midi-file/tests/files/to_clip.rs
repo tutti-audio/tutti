@@ -1,4 +1,4 @@
-//! `MidiFile::to_clip`: a Standard MIDI File as a MIDI 2.0 Clip File, each
+//! `MetricalView::to_clip`: a Standard MIDI File as a MIDI 2.0 Clip File, each
 //! mapping checked against figures written out from the specifications (SMF
 //! 1.0 section 3.3 for the meta events, M2-116 section 3.3, 7.1.1, 7.1.2 and
 //! Appendix B for what replaces them, M2-104 section 7.5 for the Flex fields).
@@ -12,7 +12,7 @@ use crate::common::{metrical, note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
-    SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
+    SmfDivision, SmfFormat, TextKind, Tick, TimelineError, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
@@ -366,7 +366,7 @@ fn format_2_is_refused() {
     .unwrap();
     assert!(matches!(
         metrical(&smf).to_clip(),
-        Err(ToClipError::Sequential)
+        Err(ToClipError::Timeline(TimelineError::NoCommonTimeline))
     ));
 }
 
