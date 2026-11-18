@@ -21,7 +21,6 @@ crates/tutti-codec/src/format.rs  2  migrating: foundation
 crates/tutti-curve/src/piece.rs  6  migrating: foundation
 crates/tutti-curve/src/raw.rs  1  migrating: foundation
 crates/tutti-dsp/src/bit_crush.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/convolver.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/delay/bank.rs  4  migrating: R1/S7
 crates/tutti-dsp/src/dither.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/dynamics/brickwall.rs  1  migrating: R1/S7
@@ -42,15 +41,7 @@ crates/tutti-dsp/src/modulation/mod_delay.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/oversample.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/resample/fft.rs  10  migrating: R1/S7
-crates/tutti-dsp/src/reverb/fdn/bank.rs  15  migrating: R1/S7
-crates/tutti-dsp/src/reverb/fdn/design.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/reverb/freeverb/bank.rs  6  migrating: R1/S7
-crates/tutti-dsp/src/reverb/network.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/reverb/plate/bank.rs  14  migrating: R1/S7
 crates/tutti-dsp/src/smoother.rs  6  migrating: R1/S7
-crates/tutti-dsp/src/spatial/hrtf.rs  5  migrating: R1/S7
-crates/tutti-dsp/src/spatial/hrtf/sphere.rs  4  migrating: R1/S7
-crates/tutti-dsp/src/spatial/vbap.rs  8  migrating: R1/S7
 crates/tutti-dsp/src/stft/geometry.rs  3  migrating: R1/S7
 crates/tutti-dsp/src/stft/window.rs  8  migrating: R1/S7
 crates/tutti-dsp/src/tremolo.rs  3  migrating: R1/S7

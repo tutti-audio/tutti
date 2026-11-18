@@ -776,3 +776,83 @@ fn an_f64_fdn_is_linear() {
         }
     }
 }
+
+/// The absorption one-poles store their complements `c = 1 - exp(-2 pi fc / fs)`, designed in
+/// `f64`: a low crossover at 192 kHz has `c` of 3.3e-3 at 100 Hz, where the pole rounded to `f32`
+/// first and `1 - p` formed there is off by up to `u / (2 c)` of `c` (9e-6), and the complement is
+/// within `u = 2^-24`.
+#[test]
+fn the_absorption_complements_keep_their_relative_precision_where_one_minus_the_pole_does_not() {
+    let rate = SampleRate::SR_192K;
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let (mut stored, mut formed) = (0.0f64, 0.0f64);
+    for hz in (100..=400).map(f64::from) {
+        let mut target = Target::<f32>::new(2);
+        set_poles(&mut target, [Hz(hz), Hz(4_000.0)], rate);
+        let exact = -libm::expm1(-std::f64::consts::TAU * hz / rate.get());
+        stored = stored.max((f64::from(target.complement[0]) / exact - 1.0).abs());
+        let pole = target.pole[0] as f32;
+        formed = formed.max((f64::from(1.0f32 - pole) / exact - 1.0).abs());
+    }
+    assert!(
+        stored <= u,
+        "the complement's error {stored:e} against u = {u:e}"
+    );
+    assert!(
+        formed > 100.0 * u,
+        "`1 - p` in f32 is off by {formed:e}, not clearly worse than {u:e}"
+    );
+}
+
+/// The longest decay (`MaxDecay::CAP`, 60 s) at the highest rate in `f32`, on the shortest line:
+/// two parallel combs at room size 0 and no modulation, where line 0 is `L = 2244` frames
+/// (11.7 ms at 192 kHz) and its echoes are single samples, `a g^j` with the loop gain `g =
+/// 10^(-3 L / (fs T))` of the design, `T = 60 s`. The measured RT60 is `-3 L / (fs log10 g)`
+/// from the peaks of the echoes `1` and `K - 1` (`K` the trips in `T`).
+///
+/// The bound, in `ln g` a trip: `g` rounds once to `f32` (at most `u = 2^-24` relative) and the
+/// loop's one product rounds (at most `u`) each trip, `2 u` coherent; the two compared echoes
+/// each carry the roundings of their path out (the output sums and gains, at most `6 u`), a
+/// fixed `12 u` over the `K - 2` trips between them. The RT60's relative error is that over
+/// `|ln g| = 1.35e-3`: the loop gain stays a gain because it multiplies a line's sample, which
+/// rounds by `u` a trip whatever the form, so a complement stores nothing better.
+#[test]
+fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_in_f32() {
+    let rate = SampleRate::SR_192K;
+    let decay = MaxDecay::new(MaxDecay::CAP).unwrap();
+    let l = FdnLayout::new(2, decay, false).unwrap();
+    let c = still(|c| {
+        c.decay = [decay.get(); 3];
+        c.size = Mix(0.0);
+        c.diffusion = Mix(0.0);
+    });
+    let frames_per_line = fdn_of(&design(&l, rate, &c)).lines[0].length.get() as usize;
+    let trips = (decay.get().get() * rate.get() / frames_per_line as f64) as usize - 2;
+    let (mut bank, mut glides) = landed(&l, rate, &c);
+    let [left, _] = run(
+        &mut bank,
+        &mut glides,
+        &impulse((trips + 2) * frames_per_line),
+        4096,
+    );
+
+    let peak = |j: usize| {
+        left[j * frames_per_line - frames_per_line / 2..j * frames_per_line + frames_per_line / 2]
+            .iter()
+            .fold(0.0f64, |m, &s| m.max(f64::from(s).abs()))
+    };
+    let between = (trips - 1) as f64;
+    let g_measured = libm::pow(peak(trips) / peak(1), 1.0 / between);
+    let measured = -3.0 * frames_per_line as f64 / (rate.get() * g_measured.log10());
+
+    let u = f64::from(f32::EPSILON) / 2.0;
+    let per_trip = 2.0 * u + 12.0 * u / between;
+    let ln_g = -libm::log(10.0) * 3.0 * frames_per_line as f64 / (decay.get().get() * rate.get());
+    let bound = per_trip / ln_g.abs();
+    let error = (measured / decay.get().get() - 1.0).abs();
+    assert!(
+        error <= bound,
+        "RT60 {measured} s against {} s: error {error:e}, bound {bound:e} ({trips} trips of {frames_per_line} frames)",
+        decay.get().get()
+    );
+}
