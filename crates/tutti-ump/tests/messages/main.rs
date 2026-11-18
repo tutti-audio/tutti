@@ -8,6 +8,7 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod common;
 
 mod articulation;
+mod bipolar;
 mod by_value;
 mod constructors;
 mod fields;

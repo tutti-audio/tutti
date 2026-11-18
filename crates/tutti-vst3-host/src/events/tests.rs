@@ -2,7 +2,7 @@ use super::*;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{bend_to_signed_f32, channel_voice, narrow_velocity};
+use tutti_midi_protocol::{channel_voice, narrow_velocity};
 use tutti_midi_protocol::{widen_bend, widen_value};
 use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use tutti_ump::{
@@ -10,7 +10,7 @@ use tutti_ump::{
     PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, RegisteredPerNoteController};
-use tutti_units::Samples;
+use tutti_units::{Bipolar, Samples};
 use tutti_vst3_ffi::EventList;
 
 /// A packet from its words, zero-padded to four, at offset 0.
@@ -551,15 +551,15 @@ fn per_note_pitch_bend_becomes_tuning_expression() {
 /// sensitivity of 24 on channel 3, 6 semitones there and 12 elsewhere.
 #[test]
 fn a_per_note_bend_is_tuned_over_its_channels_range() {
-    use tutti_midi_protocol::{PitchBendSensitivity, signed_f32_to_bend};
+    use tutti_midi_protocol::PitchBendSensitivity;
 
-    let bend = |channel: u8, amount: f32| {
+    let bend = |channel: u8, amount: f64| {
         (
             Offset::ZERO,
             midi::per_note_pitch_bend(
                 MidiChannel::of(channel),
                 60,
-                signed_f32_to_bend(amount).get(),
+                BendValue::from_bipolar(Bipolar::of(amount)).get(),
             ),
         )
     };
@@ -573,8 +573,6 @@ fn a_per_note_bend_is_tuned_over_its_channels_range() {
         }
         other => panic!("expected a tuning expression, got {other:?}"),
     };
-    // The bend travels as a 32-bit word, which a position on `0..=1` only approximates.
-    let close = |got: f64, want: f64| (got - want).abs() < 1e-9;
 
     let mut encoder = MidiEncoder::default();
     // A note sounds on each channel: a bend with no note is held, not sent.
@@ -584,14 +582,8 @@ fn a_per_note_bend_is_tuned_over_its_channels_range() {
             midi::note_on(MidiChannel::of(channel), 60, 0x8000),
         ));
     }
-    assert!(close(
-        tuning(&mut encoder, &bend(3, 0.25)),
-        0.5 + 12.0 / 240.0
-    ));
-    assert!(close(
-        tuning(&mut encoder, &bend(3, -1.0)),
-        0.5 - 48.0 / 240.0
-    ));
+    assert_eq!(tuning(&mut encoder, &bend(3, 0.25)), 0.5 + 12.0 / 240.0);
+    assert_eq!(tuning(&mut encoder, &bend(3, -1.0)), 0.5 - 48.0 / 240.0);
 
     let sensitivity = (
         Offset::ZERO,
@@ -618,15 +610,9 @@ fn a_per_note_bend_is_tuned_over_its_channels_range() {
     let Payload::ExpressionValue(resent) = after[0].payload else {
         unreachable!()
     };
-    assert!(close(resent.value, 0.5 - 24.0 / 240.0), "{}", resent.value);
-    assert!(close(
-        tuning(&mut encoder, &bend(3, 0.25)),
-        0.5 + 6.0 / 240.0
-    ));
-    assert!(close(
-        tuning(&mut encoder, &bend(4, 0.25)),
-        0.5 + 12.0 / 240.0
-    ));
+    assert_eq!(resent.value, 0.5 - 24.0 / 240.0);
+    assert_eq!(tuning(&mut encoder, &bend(3, 0.25)), 0.5 + 6.0 / 240.0);
+    assert_eq!(tuning(&mut encoder, &bend(4, 0.25)), 0.5 + 12.0 / 240.0);
 }
 
 #[test]
@@ -876,7 +862,7 @@ fn legacy_cc_out_decodes_to_midi() {
     let pb_m = pb.to_midi(&mut OutputStream::new()).unwrap();
     match pb_m.ump.decode().expect("UMP") {
         Message::Midi2(_, Voice2::PitchBend(bend)) => {
-            assert!(bend_to_signed_f32(bend).abs() < 0.01)
+            assert_eq!(bend.bipolar(), Bipolar::ZERO)
         }
         other => panic!("expected PitchBend, got {other:?}"),
     }

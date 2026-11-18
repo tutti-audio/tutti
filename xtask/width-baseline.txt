@@ -84,7 +84,6 @@ crates/tutti-measure/src/transform.rs  5  migrating: measure step 10
 crates/tutti-measure/src/vectorscope.rs  2  migrating: measure step 10
 crates/tutti-measure/src/xcorr.rs  3  migrating: measure step 10
 crates/tutti-metering/src/load.rs  8  migrating: foundation
-crates/tutti-midi-protocol/src/unit.rs  4  migrating: midi units
 crates/tutti-modulation/src/compile.rs  1  migrating: B2/B3
 crates/tutti-modulation/src/curve.rs  4  migrating: B2/B3
 crates/tutti-modulation/src/program.rs  9  migrating: B2/B3
@@ -140,6 +139,5 @@ crates/tutti-soundfont/src/volume_envelope.rs  3  migrating: dsp S7/instruments
 crates/tutti-types/src/lib.rs  1  migrating: foundation
 crates/tutti-types/src/value/param.rs  12  migrating: foundation
 crates/tutti-units/src/unit_param.rs  4  migrating: foundation
-crates/tutti-units/src/units/amounts.rs  1  migrating: foundation
 crates/tutti-units/src/units/time.rs  5  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

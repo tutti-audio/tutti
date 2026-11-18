@@ -68,10 +68,10 @@
 //! - [`midi1()`](fn@midi1) for the bytes of the wire, a Program Change with a
 //!   bank as its three messages.
 //!
-//! The pitch bend's float scaling is here too: [`bend_to_signed_f32`] and
-//! its inverse [`signed_f32_to_bend`], a native bend as the `[-1, 1]` float a
-//! DSP node wants. Lossy by design; not the MIDI 1.0 to 2.0 path. A velocity or
-//! controller value as a position on `0..=1` is
+//! A bend as a position on `-1..=1` is
+//! [`BendValue::bipolar`](tutti_ump::BendValue::bipolar) and its inverse
+//! [`BendValue::from_bipolar`](tutti_ump::BendValue::from_bipolar); a velocity
+//! or controller value as a position on `0..=1` is
 //! [`NoteVelocity::normalized`](tutti_ump::NoteVelocity::normalized) and
 //! [`ControlValue::normalized`](tutti_ump::ControlValue::normalized).
 //!
@@ -151,7 +151,6 @@ mod smpte;
 mod song_position;
 mod translator;
 mod tuning;
-mod unit;
 mod universal;
 mod voice;
 
@@ -173,7 +172,6 @@ pub use tuning::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets,
     Timing, TuningFrequency, TuningMessage, TuningName,
 };
-pub use unit::{bend_to_signed_f32, signed_f32_to_bend};
 pub use universal::*;
 pub use voice::{
     channel_voice, widen, widen_bend, widen_bytes, widen_message, widen_value, widen_velocity,
