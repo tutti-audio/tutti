@@ -118,7 +118,7 @@ impl<U: Unit<Raw = f64> + Send + Sync> Curve for Trajectory<U> {
         // clamped as `value_at` clamps it.
         let hold = |until: Option<Beat>| {
             self.value_at(beat).map(|value| CurveSegment::Hold {
-                value: lane(value),
+                value: value.to_raw(),
                 until,
             })
         };
@@ -135,8 +135,8 @@ impl<U: Unit<Raw = f64> + Send + Sync> Curve for Trajectory<U> {
         Some(CurveSegment::Move {
             start: p.time,
             end: q.time,
-            from: lane(p.value),
-            to: lane(q.value),
+            from: p.value.to_raw(),
+            to: q.value.to_raw(),
             shape: p.law,
         })
     }
