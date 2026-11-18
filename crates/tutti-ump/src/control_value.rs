@@ -1,5 +1,7 @@
 //! The 32-bit data word of a MIDI 2.0 controller, pressure or per-note message.
 
+use tutti_units::Normalized;
+
 /// The 32-bit value of a MIDI 2.0 Control Change, Channel or Polyphonic
 /// Pressure, Registered or Assignable Controller, or Per-Note Controller
 /// (M2-104 section 7.4).
@@ -63,6 +65,22 @@ impl ControlValue {
     #[must_use]
     pub const fn get(self) -> u32 {
         self.0
+    }
+
+    /// The value as a position on `0..=1`: `get() / 0xFFFF_FFFF`.
+    #[inline]
+    #[must_use]
+    pub fn normalized(self) -> Normalized {
+        Normalized::clamped(f64::from(self.0) / f64::from(u32::MAX))
+    }
+
+    /// The value at position `n` of the 32-bit range: `round(n * 0xFFFF_FFFF)`.
+    /// Inverse of [`normalized`](Self::normalized).
+    #[inline]
+    #[must_use]
+    pub fn from_normalized(n: Normalized) -> Self {
+        // `n` is on `0..=1`, so the rounded product fits the 32-bit wire word.
+        Self(libm::round(n.get() * f64::from(u32::MAX)) as u32)
     }
 }
 
