@@ -21,12 +21,6 @@ impl Follower {
         release: 0.0,
     };
 
-    /// The attack and release coefficients.
-    #[cfg(test)]
-    pub(crate) fn coeffs(&self) -> (f32, f32) {
-        (self.attack, self.release)
-    }
-
     /// The follower of `ballistics` at `rate`.
     pub(crate) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {
         let (attack, release) = ballistics.coeffs(rate);
