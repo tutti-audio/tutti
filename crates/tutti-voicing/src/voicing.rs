@@ -2721,7 +2721,6 @@ mod tests {
             let mut s = Sim::new(POLY);
             s.send(1, rpn(semitones, cents, low), &One);
             let up = s.send(1, bend(u32::MAX), &One);
-            // A retune bend is `f32` `Semitones` state.
             assert!((retunes(&up)[0].1 - want).abs() < 1e-5, "{up:?} {want}");
             assert_eq!(
                 s.core.channel_pitch(MidiChannel::of(1)),
@@ -2747,7 +2746,6 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.send(1, relative(0, 3 << 25), &One);
         let up = s.send(1, bend(u32::MAX), &One);
-        // A retune bend is `f32` `Semitones` state.
         assert!((retunes(&up)[0].1 - 5.0).abs() < 1e-5, "{up:?}");
         s.send(1, relative(0, -(1 << 25)), &One);
         let up = s.send(1, bend(u32::MAX), &One);
@@ -2805,7 +2803,6 @@ mod tests {
         let up = s.send(3, bend(u32::MAX), &One);
         assert_eq!(retunes(&up).len(), 1);
         assert_eq!(retunes(&up)[0].0, 3);
-        // A retune bend is `f32` `Semitones` state.
         assert!((retunes(&up)[0].1 - 2.0).abs() < 1e-4, "{up:?}");
         let down = s.send(3, bend(0), &One);
         assert!((retunes(&down)[0].1 + 2.0).abs() < 1e-6);
@@ -3254,7 +3251,6 @@ mod tests {
         assert_eq!(glide.from, NoteNumber::of(60));
         // 400 cents at CC 5 = 0, the fastest rate of GM2 section 3.3.3's
         // figure (1,000 cent/msec): 0.4 ms.
-        // `glide_time` is computed in `f32` cents and rate, then widened to `Seconds`.
         assert!((glide.time.get() - 0.0004).abs() < 1e-6, "{glide:?}");
         assert_eq!(glide_of(&s.on(0, 65)), None);
         // Another channel's note is not the one it is for.
@@ -3318,7 +3314,6 @@ mod tests {
         s.cc(0, 5, 0);
         let g = glide_of(&s.on(0, 75)).expect("on");
         assert_eq!(g.from, NoteNumber::of(63));
-        // The time is computed in `f32` cents and rate, then widened to `Seconds`.
         assert!((g.time.get() - 0.0012).abs() < 1e-6, "{g:?}");
     }
 
@@ -3336,7 +3331,6 @@ mod tests {
         );
         // Fine: 0x3000 is half way between 0x2000 and 0x4000, 50 cents up.
         let r = retunes(&s.send(2, registered(1, 0x3000 << 18), &One));
-        // A retune bend is `f32` `Semitones` state.
         assert!((r[0].1 - 1.5).abs() < 1e-4, "{r:?}");
         // Full bend up at range 2 adds 2.
         let r = retunes(&s.send(2, bend(u32::MAX), &One));
