@@ -62,8 +62,8 @@ fn unity(freqs: &[f32]) -> MultibandSettings {
 
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
 /// threshold lane `lanes[b]` where given.
-fn run_in(
-    k: &mut MultibandBank<f32>,
+fn run_in<F: Float + Lanes + Lerp>(
+    k: &mut MultibandBank<F>,
     audio: &[&[f32]],
     lanes: [Option<&[f32]>; MAX_BANDS],
     chunk: usize,
@@ -89,7 +89,7 @@ fn run_in(
     out
 }
 
-fn run(k: &mut MultibandBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+fn run<F: Float + Lanes + Lerp>(k: &mut MultibandBank<F>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
     run_in(k, audio, [None; MAX_BANDS], 256)
 }
 
@@ -375,12 +375,13 @@ fn a_bypassed_band_passes_unprocessed() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
-    let mut k = bank(1, 3);
+    // An `f64` state: the `f32` views are converted at the edges, so the bypassed DC is the
+    // input to the output's rounding.
+    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
     k.aim(&set);
     let x = vec![0.5f32; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
-    // The state is `f32`: the DC of 0.5 through the crossover's sections rounds to a few 1e-6.
-    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-5);
+    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-6);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     set.bands[0].bypass = false;
     k.aim(&set);

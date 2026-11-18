@@ -677,14 +677,14 @@ mod tests {
     /// Whole periods of every 5 Hz-grid tone, and of 3 kHz (16 samples).
     const WINDOW: usize = 9_600;
     const SETTLE: usize = 24_000;
-    // The node under test is `f32` (the session's audio format), so its tolerances are `f32`'s;
-    // an `f64` node has its own test below.
+    // The nodes under test are `f64` (the default state) over `f32` audio, so a tolerance is the
+    // `f32` output's rounding; one `f32` node has its own test below.
 
     /// Frames a 5 ms glide takes at 48 kHz.
     const GLIDE: usize = 240;
-    /// The crossover's flatness tolerance for the `f32` node: its sections round at 2^-24 and
-    /// the low splits' integrators amplify that to a few 1e-6, summed over up to four bands.
-    const TOL: f64 = 1e-5;
+    /// The crossover's flatness tolerance: the `f32` rounding of the input, each band and the
+    /// sum, which the lock-in only averages down.
+    const TOL: f64 = 1e-6;
 
     /// A node's params by band and crossover, over its [`ParamSet`].
     struct Ctl {
@@ -750,8 +750,8 @@ mod tests {
         }
     }
 
-    fn node(bands: usize) -> (MultibandCompressorNode<f32>, Ctl) {
-        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, bands).unwrap();
+    fn node(bands: usize) -> (MultibandCompressorNode<f64>, Ctl) {
+        let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, bands).unwrap();
         let c = Ctl::new(&n);
         (n, c)
     }
@@ -775,16 +775,20 @@ mod tests {
         amplitude_at(&out[0][SETTLE..], hz, FS)
     }
 
-    /// The state of an `f64` node is `f64`: four unity bands at 185 Hz (the probe an `f32` state
-    /// leaves 1.3e-6 off) sum to unit magnitude within the rounding of the `f32` output, 1e-7.
+    /// An `f32` node holds its crossover in `f32`. A 4-band tree has 3 splits of 3 sections each
+    /// (the shared first stage and the two second stages) and 3 all-passes (one per band split
+    /// off before a later split): 12 sections. Each rounds its state and its tap at most once a
+    /// frame, twice each at a half-ulp of `2^-24` of a value of at most 1, so the unit-magnitude
+    /// sum is within `12 * 4 * 2^-24` (2.9e-6) of 1.
     #[test]
-    fn an_f64_node_sums_its_bands_to_unit_magnitude_within_the_output_rounding() {
-        let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, 4).unwrap();
+    fn an_f32_node_sums_its_bands_within_the_rounding_of_its_sections() {
+        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 4).unwrap();
         let c = Ctl::new(&n);
         unity(&c);
         let mut n = prepared(n);
         let a = gain_at(&mut n, 185.0);
-        assert!((a - 1.0).abs() < 1e-7, "{a}");
+        let bound = 12.0 * 4.0 * 2f64.powi(-24);
+        assert!((a - 1.0).abs() < bound, "{a}");
     }
 
     /// Unity-ratio, zero-makeup bands reproduce the crossover's sum, which is
@@ -823,10 +827,8 @@ mod tests {
     /// a ripple. With a -20 dB threshold at 4:1 the reduction is
     /// `(-6.02 + 20) * 0.75` dB, and a 2 dB makeup rides on it.
     ///
-    /// The follower is an `f32` one-pole, which stalls once its step falls
-    /// under half an ulp of the 10.5 dB reduction: within `ulp / (2 * coeff)`
-    /// of the curve, `coeff = 0.021` at 1 ms and 48 kHz, so 2.3e-5 dB or
-    /// 2.7e-6 of the level: the tolerance is 5e-6.
+    /// The settled follower is the curve's value to far under the `f32` output's rounding of
+    /// the level, so the tolerance (5e-6 of the level) is generous.
     ///
     /// The tone is 0.01 (-40 dB), under every band's -18 dB threshold. Band
     /// 0 carries `1 / (1 + 25^4) = 2.6e-6` of it, so it is unchanged to far
@@ -1242,7 +1244,7 @@ mod tests {
             let (n, c) = node(3);
             let mut n = prepared(n);
             let x = sine(440.0, FS, 2_048);
-            let finite = |n: &mut MultibandCompressorNode<f32>| {
+            let finite = |n: &mut MultibandCompressorNode<f64>| {
                 render_chunked(n, std::slice::from_ref(&x), 512)[0]
                     .iter()
                     .all(|s| s.is_finite())
@@ -1547,7 +1549,7 @@ mod tests {
         let mut n = prepared(n);
         // 120 Hz is 400 samples a period: 4000 frames is ten of them.
         let x = sine(120.0, FS, 4_000);
-        let amp = |n: &mut MultibandCompressorNode<f32>| {
+        let amp = |n: &mut MultibandCompressorNode<f64>| {
             render_chunked(n, std::slice::from_ref(&x), 500);
             amplitude_at(
                 &render_chunked(n, std::slice::from_ref(&x), 500)[0],

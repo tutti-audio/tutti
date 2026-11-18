@@ -128,7 +128,13 @@ impl BandReductions {
 }
 
 /// The width and band count of a [`MultibandBank`] that can be built: what
-/// [`BankShape::try_from`] makes, so [`MultibandBank::from_shape`] has nothing to refuse.
+/// [`BankShape::try_from`] makes (from `(width, bands)`), so [`MultibandBank::from_shape`] has
+/// nothing to refuse. The check does not depend on the bank's float.
+///
+/// # Errors
+///
+/// `BankShape::try_from((width, bands))` is [`CrossoverError::Bands`] if `bands` is not 2 to 4,
+/// and [`CrossoverError::Channels`] for no channels or more than the planes of a crossover hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BankShape {
     width: ChannelLayout,
@@ -154,12 +160,6 @@ impl BankShape {
     }
 }
 
-/// Whether a bank of `bands` bands over `width` can be built, as the shape that says so.
-///
-/// # Errors
-///
-/// [`CrossoverError::Bands`] if `bands` is not 2 to 4, and [`CrossoverError::Channels`] for no
-/// channels or more than the planes of a crossover hold.
 impl TryFrom<(ChannelLayout, usize)> for BankShape {
     type Error = CrossoverError;
 

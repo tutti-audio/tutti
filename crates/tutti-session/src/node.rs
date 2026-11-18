@@ -217,24 +217,25 @@ param_session_node!(
 
 /// The multiband compressor: its params by address, its band meters beside
 /// them in its controls.
-macro_rules! multiband_session_node {
-    ($($ty:ty),* $(,)?) => {$(
-        impl SessionNode for $ty {
-            fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
-                Some(controls.params().clone())
-            }
+impl SessionNode for tutti_nodes::MultibandCompressorNode<f32> {
+    fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
+        Some(controls.params().clone())
+    }
 
-            fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
-                Reclaims::Nothing
-            }
-        }
-    )*};
+    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
+        Reclaims::Nothing
+    }
 }
 
-multiband_session_node!(
-    tutti_nodes::MultibandCompressorNode<f32>,
-    tutti_nodes::MultibandCompressorNode<f64>,
-);
+impl SessionNode for tutti_nodes::MultibandCompressorNode<f64> {
+    fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
+        Some(controls.params().clone())
+    }
+
+    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 // The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(

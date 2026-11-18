@@ -285,7 +285,7 @@ fn the_attack_and_the_release_are_told_apart() {
 /// response, run in `f64` direct form I from rest, frame for frame to 1e-12.
 #[test]
 fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
-    use crate::filter::svf::rbj;
+    use crate::filter::svf::model::tests::rbj;
     use crate::testing::direct_form;
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = wide_signal(4_800);
