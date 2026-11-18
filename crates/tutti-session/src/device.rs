@@ -847,7 +847,7 @@ impl<K: crate::AppKey, C: RealTime> Session<K, C> {
     }
 }
 
-impl<K: crate::AppKey, C: Clock> Session<K, C> {
+impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The listing's share of [`Phase::Poll`](crate::Phase::Poll): the answer of
     /// the output-device listing, if one is running.
     pub(crate) fn listing_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {

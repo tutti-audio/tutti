@@ -19,7 +19,7 @@ fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
     })
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Hands what the diff started to the stage it begins with.
     pub(crate) fn pool_start(&mut self, starts: Vec<Start>) {
         for Start { flight, load } in starts {

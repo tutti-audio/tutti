@@ -108,7 +108,7 @@ impl GeneralMidi {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.
     ///

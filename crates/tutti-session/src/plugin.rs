@@ -1500,7 +1500,7 @@ impl Default for RenderModeState {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
     /// place a plugin enters the session, through
     /// [`add_pooled_plugin`](Self::add_pooled_plugin).

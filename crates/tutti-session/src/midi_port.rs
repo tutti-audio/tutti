@@ -730,7 +730,7 @@ impl Peer for MidiOutput {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// The input port of the `midi_input` entry under `key`.
     ///
     /// # Errors

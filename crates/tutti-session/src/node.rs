@@ -1,6 +1,7 @@
 //! [`SessionNode`], the trait [`Graph::add`](crate::Graph::add), the graph's one
 //! way in, takes, and the engine's own nodes as ones.
 
+use tutti_buffers::Float;
 use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unforkable};
 
 /// A node that may enter a session's graph: it declares its own ports (event
@@ -62,7 +63,7 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 ///     }
 /// }
 /// ```
-pub trait SessionNode: IntoNode + Send + 'static {
+pub trait SessionNode<F: Float = f32>: IntoNode<F> + Send + 'static {
     /// The node's params by address, read off its controls once it is in:
     /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and
     /// what a fork of the node starts from. `None`, the default, for a node
@@ -167,14 +168,14 @@ macro_rules! param_session_node {
 }
 
 /// A node forkable by a clone taken at insert: no controls, no params.
-impl<N: Node + Clone + Send + 'static> SessionNode for ForkByClone<N> {
+impl<F: Float, N: Node<F> + Clone + Send + 'static> SessionNode<F> for ForkByClone<N> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
 }
 
 /// A node no fork may take: no controls, no params.
-impl<N: Node + Send + 'static> SessionNode for Unforkable<N> {
+impl<F: Float, N: Node<F> + Send + 'static> SessionNode<F> for Unforkable<N> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -183,7 +184,7 @@ impl<N: Node + Send + 'static> SessionNode for Unforkable<N> {
 /// A host's [`ParamNode`], inserted as one: its [`ParamSet`] as its controls
 /// and its params reached by address, forked from the values set. Its typed
 /// param methods come from its own `tutti_graph::declare_params!`.
-impl<N: ParamNode + Clone + Send + 'static> SessionNode for Params<N> {
+impl<F: Float, N: ParamNode<F> + Clone + Send + 'static> SessionNode<F> for Params<N> {
     fn params(controls: &ParamSet) -> Option<ParamSet> {
         Some(controls.clone())
     }

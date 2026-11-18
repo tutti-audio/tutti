@@ -218,7 +218,7 @@ impl Peer for MidiSink {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// The sink of the `midi_sink` entry under `key`.
     ///
     /// # Errors

@@ -6,14 +6,17 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
-use tutti_nodes::{ClickNode, ClickSettings};
+use tutti_nodes::ClickSettings;
 use tutti_transport::Transport;
 use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
-use crate::{Clock, Offline, OfflineSession, Result, Session, SystemClock};
+use tutti_buffers::Float;
+
+use crate::format::Format;
+use crate::{Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock};
 use tutti_engine::BlockDates;
 
 /// Builds a [`Session`], declaratively: chain the options, then
@@ -238,8 +241,8 @@ impl Default for Workers {
 
 /// What every build path shares: the graph, the transport, the click, the
 /// MIDI nodes, and what the engine's callback state holds.
-struct Parts {
-    graph: Graph,
+struct Parts<F: Float> {
+    graph: Graph<F>,
     transport: Transport,
     click: Option<NodeKey>,
     click_settings: Arc<ClickSettings>,
@@ -252,7 +255,7 @@ struct Parts {
     device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
 
-impl Default for SessionBuilder<Offline> {
+impl<F: SessionFloat> Default for SessionBuilder<Offline<F>> {
     fn default() -> Self {
         Self {
             opts: Options::default(),
@@ -291,18 +294,6 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
 }
 
 impl SessionBuilder<Offline> {
-    /// Dates each block the host renders by `dates` ([`BlockDates`]), where the
-    /// default, [`BlockDates::Os`], reads the OS clock. An offline render dated
-    /// by [`BlockDates::Frames`] is the same on every run, whatever the host's
-    /// wall clock does. The dates belong to the offline builder:
-    /// [`system_clock`](Self::system_clock) and `device` sessions are timed by
-    /// the OS and take none.
-    #[must_use]
-    pub fn block_dates(mut self, dates: BlockDates) -> Self {
-        self.dates = dates;
-        self
-    }
-
     /// Steps the blocks with an OS timer thread instead: no sound card, for an
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.
@@ -338,6 +329,20 @@ impl SessionBuilder<Offline> {
             dates: (),
         }
     }
+}
+
+impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// Dates each block the host renders by `dates` ([`BlockDates`]), where the
+    /// default, [`BlockDates::Os`], reads the OS clock. An offline render dated
+    /// by [`BlockDates::Frames`] is the same on every run, whatever the host's
+    /// wall clock does. The dates belong to the offline builder:
+    /// [`system_clock`](Self::system_clock) and `device` sessions are timed by
+    /// the OS and take none.
+    #[must_use]
+    pub fn block_dates(mut self, dates: BlockDates) -> Self {
+        self.dates = dates;
+        self
+    }
 
     /// An offline session: everything but a stream. The host pulls blocks
     /// with [`Session::render`] (`Engine::process`), each up to
@@ -351,7 +356,7 @@ impl SessionBuilder<Offline> {
     /// When the engine refuses the graph, `outputs` has no channels or cannot take
     /// the root ([`Error::Output`](crate::Error::Output)),
     /// (`midi-hardware`) the MIDI device watch cannot start, or (`sampler`) the disk streamer cannot start.
-    pub fn build(mut self) -> Result<OfflineSession> {
+    pub fn build(mut self) -> Result<OfflineSession<&'static str, F>> {
         let BlockConfig {
             rate,
             outputs: layout,
@@ -397,7 +402,7 @@ impl SessionBuilder<Offline> {
     pub fn build_detached(
         mut self,
         rate: SampleRate,
-    ) -> Result<Session<&'static str, crate::Detached>> {
+    ) -> Result<Session<&'static str, crate::Detached<F>>> {
         let outputs = self.opts.root.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
             |r| usize::from(r.width().count()),
@@ -859,7 +864,7 @@ impl<C: Clock> SessionBuilder<C> {
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
         outputs: usize,
-    ) -> Result<Parts> {
+    ) -> Result<Parts<C::Float>> {
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -901,38 +906,22 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        // The metronome. It reads the beat, play and record state from its
-        // block's `Env`, and the count-in flag off the transport (read only).
-        // It is not wired to the output: what it feeds is the host's
-        // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
-
-        // The engine's MIDI as graph nodes: the sync node (sends nothing until a
-        // host sets its messages). An input port's ingest node and an output's
-        // node are made when their pool entries load, and the sync node feeds
-        // each output.
-        #[cfg(feature = "midi")]
-        let midi = {
-            let meter = click_settings.project_meter();
-            let (sync, sync_controls) = graph.add(
-                tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
-                    .meter(move || meter.reader()),
-            );
-            Some(crate::MidiNodes {
-                input_ports: self.opts.midi_ports,
-                sync: sync.erase(),
-                sync_controls,
-            })
-        };
+        let nodes = <C::Float as Format>::engine_nodes(
+            &mut graph,
+            &transport,
+            &click_settings,
+            #[cfg(feature = "midi")]
+            self.opts.midi_ports,
+        );
 
         Ok(Parts {
             graph,
             transport,
-            click: Some(click.erase()),
+            click: nodes.click,
             click_settings,
             compensation: Arc::default(),
             #[cfg(feature = "midi")]
-            midi,
+            midi: nodes.midi,
             #[cfg(feature = "midi-hardware")]
             midi_io,
             #[cfg(feature = "midi-hardware")]
@@ -944,7 +933,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// (`sampler`) a disk streamer when `streamer`.
     fn session<N: Clock>(
         &mut self,
-        parts: Parts,
+        parts: Parts<N::Float>,
         running: N::Running,
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
@@ -1035,7 +1024,7 @@ impl<C: Clock> SessionBuilder<C> {
 impl<C: Clock> SessionBuilder<C> {
     /// Gives the hardware MIDI devices' threads the engine's block clock, so
     /// each places its arrivals on frames.
-    fn clock_midi(parts: &Parts, engine: &tutti_engine::Engine) {
+    fn clock_midi(parts: &Parts<C::Float>, engine: &tutti_engine::Engine<C::Float>) {
         #[cfg(feature = "midi-hardware")]
         if let Some(io) = &parts.midi_io {
             io.ports()
@@ -1084,12 +1073,15 @@ impl<C: Clock> SessionBuilder<C> {
             // here so a refused root builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
-            Some(declared) => Graph::check_root(declared, Some(&placed))?,
+            Some(declared) => Graph::<C::Float>::check_root(declared, Some(&placed))?,
             None => {
                 let width = ChannelLayout::try_from(root).map_err(|e| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
-                tutti_graph::fold_to_topology::<f32>(&ChannelTopology::assumed(width), &placed)?;
+                tutti_graph::fold_to_topology::<C::Float>(
+                    &ChannelTopology::assumed(width),
+                    &placed,
+                )?;
             }
         }
         Ok(())
@@ -1097,7 +1089,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Declares the builder's root on the graph the engine was just built
     /// over, which publishes it to the engine.
-    fn declare(&self, graph: &mut Graph) -> Result<()> {
+    fn declare(&self, graph: &mut Graph<C::Float>) -> Result<()> {
         if self.opts.root.is_some() {
             graph.declare_root(self.opts.root.clone(), true)?;
         }

@@ -37,6 +37,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 #[cfg(feature = "testing")]
+use tutti_buffers::Float;
 use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]
@@ -180,39 +181,39 @@ struct Entry {
 
 /// The executor, while this side still holds it, and what a local render
 /// needs beside it.
-struct Local {
-    exec: Executor,
+struct Local<F: Float> {
+    exec: Executor<F>,
     /// Planar scratch, one `Vec` per global output.
     #[cfg(feature = "testing")]
-    scratch: Vec<Vec<f32>>,
+    scratch: Vec<Vec<F>>,
 }
 
 /// A node waiting to be swapped in, its type erased.
-trait ErasedSwap: Send {
+trait ErasedSwap<F: Float>: Send {
     /// Swap it in under `node`; on success, its controls, boxed.
     fn swap(
         self: Box<Self>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>>;
+    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<F>>>>;
 }
 
 struct Swap<N>(N);
 
-impl<N> ErasedSwap for Swap<N>
+impl<F: Float, N> ErasedSwap<F> for Swap<N>
 where
-    N: SessionNode,
+    N: SessionNode<F>,
     N::Controls: Send + 'static,
 {
     fn swap(
         self: Box<Self>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>> {
+    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<F>>>> {
         match graph.swap_node(node, self.0, fade, law) {
             Ok(controls) => {
                 graph.address::<N>(node, &controls);
@@ -228,14 +229,14 @@ where
 struct PluginSwap(Box<tutti_plugin::PluginClient>);
 
 #[cfg(feature = "plugin")]
-impl ErasedSwap for PluginSwap {
+impl ErasedSwap<f32> for PluginSwap {
     fn swap(
         self: Box<Self>,
         graph: &mut Graph,
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>> {
+    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<f32>>>> {
         match graph.replace_plugin(node, self.0, fade, law) {
             Ok(()) => Ok(Box::new(())),
             Err(ReplaceRefused::Busy(c)) => Err(ReplaceRefused::Busy(Box::new(PluginSwap(c)))),
@@ -245,15 +246,15 @@ impl ErasedSwap for PluginSwap {
 }
 
 /// A crossfade parked while the graph re-prepares.
-struct Parked {
+struct Parked<F: Float> {
     id: CrossfadeId,
     node: NodeKey,
-    swap: Box<dyn ErasedSwap>,
+    swap: Box<dyn ErasedSwap<F>>,
     fade: Seconds,
     law: FadeLaw,
 }
 
-impl std::fmt::Debug for Parked {
+impl<F: Float> std::fmt::Debug for Parked<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Parked")
             .field("id", &self.id)
@@ -279,8 +280,8 @@ pub(crate) enum Retried {
 }
 
 /// The engine's output folds and the device it renders into.
-struct Placed {
-    control: tutti_engine::OutputControl,
+struct Placed<F: Float> {
+    control: tutti_engine::OutputControl<F>,
     device: ChannelLayout,
 }
 
@@ -296,9 +297,9 @@ struct Placed {
 /// replace a node under a fade) and takes a node as `impl Into<NodeKey>` and
 /// ports as [`OutPort`] and [`InPort`], never a runtime type. There is no access to the
 /// `Editor`: the edit/commit boundary stays visible.
-pub struct Graph {
-    editor: Editor,
-    local: Option<Local>,
+pub struct Graph<F: Float = f32> {
+    editor: Editor<F>,
+    local: Option<Local<F>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
     /// table, which the session's `Knobs` share.
@@ -337,9 +338,9 @@ pub struct Graph {
     output_taps: BTreeMap<TapId, (Samples, usize)>,
     /// The readers the root's width opened again, each held under its id until
     /// claimed ([`Graph::take_reopened`]).
-    reopened: BTreeMap<RootReader, observe::Held>,
+    reopened: BTreeMap<RootReader, observe::Held<F>>,
     /// Crossfades refused `Busy`, in request order.
-    parked: VecDeque<Parked>,
+    parked: VecDeque<Parked<F>>,
     /// The wiring each re-insert dropped, by node, until the commit that
     /// carries the re-insert is sent and the session reports it
     /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
@@ -360,7 +361,7 @@ pub struct Graph {
     /// it, and a commit must fold into the device. One value, so a graph has
     /// folds to publish exactly when it has a device to place them on; a
     /// graph with no engine has neither, and nothing folds its root.
-    output: Option<Placed>,
+    output: Option<Placed<F>>,
     /// What the nodes logged on the audio thread, once an engine renders the
     /// graph: drained by the session's reclaim sweep ([`Graph::drain_rt_log`]).
     rt_log: Option<tutti_graph::RtLogReaders>,
@@ -426,7 +427,7 @@ impl std::fmt::Debug for RenderWorkerStart {
     }
 }
 
-impl std::fmt::Debug for Graph {
+impl<F: Float> std::fmt::Debug for Graph<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Graph");
         d.field("editor", &self.editor)
@@ -491,7 +492,7 @@ fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
     )
 }
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// An empty graph with `inputs` global inputs and `outputs` global
     /// outputs, prepared for `rate`, `max_block` and the device's callback
     /// `quantum` (when known), its executor local.
@@ -503,7 +504,7 @@ impl Graph {
         quantum: Option<MaxBlock>,
         tempo: tutti_transport::TempoReader,
     ) -> Self {
-        let (mut editor, exec) = Editor::new(prepare_for(rate, max_block, quantum));
+        let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
         topology.inputs = inputs;
         topology.set_outputs(vec![Source::Zero; outputs]);
@@ -607,7 +608,7 @@ impl Graph {
     }
 
     /// Hand the executor over: to the engine, or to a test's audio side.
-    fn take_executor(&mut self) -> Executor {
+    fn take_executor(&mut self) -> Executor<F> {
         self.local
             .take()
             .expect("the graph's audio side was already taken")
@@ -633,7 +634,7 @@ impl Graph {
         device: ChannelLayout,
         topology: Option<tutti_types::ChannelTopology>,
         dates: tutti_engine::BlockDates,
-    ) -> crate::Result<tutti_engine::Engine> {
+    ) -> crate::Result<tutti_engine::Engine<F>> {
         let mut exec = self.take_executor();
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
         // Built here, on the control side, after the pool sized the
@@ -748,7 +749,7 @@ impl Graph {
     /// [`Unforkable`](tutti_graph::Unforkable), or is a
     /// [`Params`](tutti_graph::Params), or implements [`SessionNode`]. Writing
     /// the node is `tutti_graph`'s crate guide ("Writing a node").
-    pub fn add<N: SessionNode>(&mut self, node: N) -> (Key<N>, N::Controls) {
+    pub fn add<N: SessionNode<F>>(&mut self, node: N) -> (Key<N>, N::Controls) {
         let (key, controls) = self.place(node.bind_tempo(&self.tempo));
         self.address::<N>(key.erase(), &controls);
         (key, controls)
@@ -757,7 +758,7 @@ impl Graph {
     /// Puts `node` in the editor under a fresh key, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
     /// are not a [`SessionNode`] (a bound plugin).
-    pub(crate) fn place<N: IntoNode>(&mut self, node: N) -> (Key<N>, N::Controls) {
+    pub(crate) fn place<N: IntoNode<F>>(&mut self, node: N) -> (Key<N>, N::Controls) {
         let id = NodeKey::fresh();
         // A fresh key has no wiring recorded, so nothing is unwired.
         let controls = self.editor.insert(id, N::kind(), node).controls;
@@ -765,7 +766,9 @@ impl Graph {
         self.edited = true;
         (Key::new(id), controls)
     }
+}
 
+impl Graph {
     /// Opens an inlet: audio a thread of your own pushes into the graph. A
     /// ring of `capacity` frames and `width` channels is read by an
     /// [`InletNode`] (unwired; declare what it feeds like any node), and the
@@ -864,7 +867,9 @@ impl Graph {
     pub fn add_event_inlet(&mut self, node: EventInletNode) -> Key<EventInletNode> {
         self.add(node).0
     }
+}
 
+impl<F: Float> Graph<F> {
     /// The table the node's params are addressed in: the session's value
     /// state shares it.
     pub(crate) fn value_table(&self) -> Arc<ValueTable> {
@@ -873,7 +878,7 @@ impl Graph {
 
     /// Keeps what a [`SessionNode`] says of its controls under `node`: its
     /// params and its reclaimer.
-    fn address<N: SessionNode>(&mut self, node: NodeKey, controls: &N::Controls) {
+    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
             if let Some(set) = N::params(controls) {
                 self.values.address(node, std::any::TypeId::of::<N>(), set);
@@ -881,7 +886,9 @@ impl Graph {
             entry.reclaimer = N::reclaimer(controls).into_reclaimer();
         }
     }
+}
 
+impl Graph {
     /// Inserts a hosted plugin: bound (`PluginClient::bind`, its typestate
     /// transition to a graph node, with a reader of the session's tempo map,
     /// so the plugin is told the project's tempo) and inserted as the `Node` it then is,
@@ -1172,7 +1179,9 @@ impl Graph {
             root,
         )
     }
+}
 
+impl<F: Float> Graph<F> {
     /// Emits what the nodes logged on the audio thread as `tracing` events
     /// (`rt_log.rs`), naming each node by its kind in the current graph; a
     /// node removed since it logged is named by its id alone. Control
@@ -1236,7 +1245,7 @@ impl Graph {
     /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `incoming`
     /// back; [`ReplaceRefused::Failed`] on a poisoned graph or a `node` not in
     /// it, dropping `incoming`.
-    pub fn replace<N: SessionNode>(
+    pub fn replace<N: SessionNode<F>>(
         &mut self,
         node: impl Into<NodeKey>,
         incoming: N,
@@ -1252,7 +1261,7 @@ impl Graph {
 
     /// The swap under [`replace`](Self::replace) and a crossfade, addressing
     /// nothing: the caller addresses the incoming node.
-    fn swap_node<N: IntoNode>(
+    fn swap_node<N: IntoNode<F>>(
         &mut self,
         node: NodeKey,
         incoming: N,
@@ -1268,7 +1277,7 @@ impl Graph {
     }
 
     /// [`replace`](Self::replace)'s swap, leaving the plugin record alone.
-    fn swap_unit<N: IntoNode>(
+    fn swap_unit<N: IntoNode<F>>(
         &mut self,
         node: NodeKey,
         incoming: N,
@@ -1431,7 +1440,7 @@ impl Graph {
         law: FadeLaw,
     ) -> Result<Crossfade<N::Controls>, CrossfadeRefused>
     where
-        N: SessionNode,
+        N: SessionNode<F>,
         N::Controls: Send + 'static,
     {
         let node = node.into();
@@ -1458,7 +1467,9 @@ impl Graph {
             Err(ReplaceRefused::Failed(refused)) => Err(refused),
         }
     }
+}
 
+impl Graph {
     /// [`crossfade`](Self::crossfade) for a hosted plugin: the swap is
     /// [`replace_plugin`](Self::replace_plugin)'s, and a landing reports `()`
     /// as its controls (capture the plugin's before handing it over).
@@ -1494,11 +1505,13 @@ impl Graph {
             Err(ReplaceRefused::Failed(refused)) => Err(refused),
         }
     }
+}
 
+impl<F: Float> Graph<F> {
     fn park(
         &mut self,
         node: NodeKey,
-        swap: Box<dyn ErasedSwap>,
+        swap: Box<dyn ErasedSwap<F>>,
         fade: Seconds,
         law: FadeLaw,
     ) -> CrossfadeId {
@@ -1944,7 +1957,9 @@ impl Graph {
     pub(crate) fn reaches_outputs(&self, node: NodeKey) -> bool {
         self.editor.reaches_outputs(node).unwrap_or(false)
     }
+}
 
+impl Graph {
     /// Applies `decl` to the editor through `m` (doc 014 §8.2), resolving the
     /// host's keys through `keys`. A native target's knob is its node's own
     /// `Param` cell, from the node's `ParamSet`. Marks the graph edited
@@ -1972,7 +1987,9 @@ impl Graph {
         }
         Ok((applied, host.plugin_targets.into_inner()))
     }
+}
 
+impl<F: Float> Graph<F> {
     /// Points each hosted plugin's driven parameters at the lanes `state` holds:
     /// where a set of a driven parameter goes.
     #[cfg(feature = "plugin")]
@@ -1981,7 +1998,9 @@ impl Graph {
             hosted.driven.replace(state.plugin_lanes(node));
         }
     }
+}
 
+impl Graph {
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
     pub(crate) fn send_mod_resyncs(&mut self, m: &mut tutti_nodes::Modulation) {
@@ -1992,7 +2011,9 @@ impl Graph {
         }
         self.pump_local();
     }
+}
 
+impl<F: Float> Graph<F> {
     // --- Edges ---
 
     /// The graph's raw source for an [`OutPort`].
@@ -2405,13 +2426,13 @@ impl Graph {
     /// two main buses of different widths, or, for a bus edge, the
     /// [`BusError`](tutti_graph::BusError) (a fold that does not exist is `FoldError`, never a silent
     /// drop).
-    pub fn connect<F: Outlet, T: Inlet<F::Wire>>(
+    pub fn connect<O: Outlet, T: Inlet<O::Wire>>(
         &mut self,
-        from: F,
+        from: O,
         to: T,
-    ) -> Result<Connection<'_, F::Wire>, ConnectError> {
+    ) -> Result<Connection<'_, O::Wire, F>, ConnectError> {
         let (from, to) = (from.out(), to.sink());
-        let edges = <F::Wire as Wire>::connect(self, from, to)?;
+        let edges = <O::Wire as Wire>::connect(self, from, to)?;
         Ok(Connection::new(self, edges, from, to))
     }
 
@@ -2434,12 +2455,12 @@ impl Graph {
     /// [`ConnectError`] for a node or port that does not exist; nothing
     /// changes. An edge that is not there is `Ok(false)`.
     #[must_use = "the call refuses a node or port that does not exist"]
-    pub fn disconnect<F: Outlet, T: Inlet<F::Wire>>(
+    pub fn disconnect<O: Outlet, T: Inlet<O::Wire>>(
         &mut self,
-        from: F,
+        from: O,
         to: T,
     ) -> Result<bool, ConnectError> {
-        <F::Wire as Wire>::disconnect(self, from.out(), to.sink(), false)
+        <O::Wire as Wire>::disconnect(self, from.out(), to.sink(), false)
     }
 
     /// [`disconnect`](Self::disconnect) with no fade: the edge is cut at the
@@ -2450,12 +2471,12 @@ impl Graph {
     ///
     /// As [`disconnect`](Self::disconnect).
     #[must_use = "the call refuses a node or port that does not exist"]
-    pub fn disconnect_hard<F: Outlet, T: Inlet<F::Wire>>(
+    pub fn disconnect_hard<O: Outlet, T: Inlet<O::Wire>>(
         &mut self,
-        from: F,
+        from: O,
         to: T,
     ) -> Result<bool, ConnectError> {
-        <F::Wire as Wire>::disconnect(self, from.out(), to.sink(), true)
+        <O::Wire as Wire>::disconnect(self, from.out(), to.sink(), true)
     }
 
     pub(crate) fn add_bus_edge(
@@ -3026,12 +3047,12 @@ impl Graph {
     }
 
     /// The graph's taps: open and close audio and event copies of it.
-    pub fn taps(&mut self) -> Taps<'_> {
+    pub fn taps(&mut self) -> Taps<'_, F> {
         Taps { graph: self }
     }
 
     /// The graph's level meters, the master's included.
-    pub fn meters(&mut self) -> Meters<'_> {
+    pub fn meters(&mut self) -> Meters<'_, F> {
         Meters { graph: self }
     }
 
@@ -3302,7 +3323,7 @@ impl Graph {
     }
 
     /// The control side of the engine's output folds; `None` with no engine.
-    pub(crate) fn output_control(&self) -> Option<&tutti_engine::OutputControl> {
+    pub(crate) fn output_control(&self) -> Option<&tutti_engine::OutputControl<F>> {
         self.output.as_ref().map(|placed| &placed.control)
     }
 
@@ -3677,7 +3698,7 @@ impl Graph {
 
     /// Render one frame on the local executor, under `transport`.
     #[cfg(feature = "testing")]
-    pub(crate) fn render_local(&mut self, transport: &TransportPosition, output: &mut [f32]) {
+    pub(crate) fn render_local(&mut self, transport: &TransportPosition, output: &mut [F]) {
         let local = self
             .local
             .as_mut()
@@ -3692,16 +3713,16 @@ impl Graph {
 /// `output` wider than the plan reads silence past it; narrower, the extra
 /// channels are dropped — the width a caller passes is its own business.
 #[cfg(feature = "testing")]
-fn render(
-    exec: &mut Executor,
-    scratch: &mut Vec<Vec<f32>>,
+fn render<F: Float>(
+    exec: &mut Executor<F>,
+    scratch: &mut Vec<Vec<F>>,
     transport: &TransportPosition,
-    input: &[f32],
-    output: &mut [f32],
+    input: &[F],
+    output: &mut [F],
 ) {
     exec.apply_pending();
     let Some(plan) = exec.plan() else {
-        output.fill(0.0);
+        output.fill(F::ZERO);
         return;
     };
     let (ins, outs, root) = (
@@ -3709,27 +3730,35 @@ fn render(
         plan.rendered_outputs(),
         plan.global_outputs(),
     );
-    scratch.resize_with(outs, || vec![0.0]);
-    let inputs: Vec<&[f32]> = (0..ins)
-        .map(|c| input.get(c).map_or(&[0.0f32][..], std::slice::from_ref))
+    scratch.resize_with(outs, || vec![F::ZERO]);
+    let silence = F::ZERO;
+    let inputs: Vec<&[F]> = (0..ins)
+        .map(|c| {
+            input
+                .get(c)
+                .map_or(std::slice::from_ref(&silence), std::slice::from_ref)
+        })
         .collect();
     let fade = exec.root_fade();
-    let mut outputs: Vec<&mut [f32]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
+    let mut outputs: Vec<&mut [F]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
     // With no device there is no fold: the root's channels are the output's
     // by index, and a root change crossfades channel by channel, the old
     // root's channels after the new root's.
     let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
     for (c, o) in output.iter_mut().enumerate() {
-        let new = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        let new = scratch
+            .get(c)
+            .filter(|_| c < root)
+            .map_or(F::ZERO, |s| s[0]);
         *o = match (fade, gains) {
             (Some(f), Some((go, gn))) => {
                 let old = if c < f.width {
                     scratch[root + c][0]
                 } else {
-                    0.0
+                    F::ZERO
                 };
-                old * go + new * gn
+                old * F::from_f32(go) + new * F::from_f32(gn)
             }
             _ => new,
         };
@@ -3797,7 +3826,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
             // The gain's knob is the edge's own cell, which the reconciler
             // takes from the editor: `Graph::set_edge_gain` is the one writer.
             return Some(tutti_nodes::Target::Edge {
-                id: Graph::edge_id(self.keys.edge(key)?)?,
+                id: Graph::<f32>::edge_id(self.keys.edge(key)?)?,
             });
         };
         let node = self.keys.node(bits)?;

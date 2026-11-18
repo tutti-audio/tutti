@@ -98,7 +98,7 @@ pub enum StateJobFailed {
     Wait(#[from] WaitError),
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
     /// for `state_use` ([`StateUse::Project`] is the state a project keeps).
     /// The round trip starts on the session's spawner and the state lands in a
