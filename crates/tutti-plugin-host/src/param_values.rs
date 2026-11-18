@@ -33,7 +33,8 @@ use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
 use crate::{Notice, PluginHandle, Subscription};
-use tutti_plugin_types::{Normalized, ParamRange, ParameterInfo};
+use tutti_plugin_types::{ParamRange, ParameterInfo};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// Edits the plugin reported or the host set, in order, waiting for
@@ -322,13 +323,13 @@ mod tests {
     }
 
     use crate::ParameterChangeSink;
-    use tutti_plugin_types::Normalized;
     use tutti_plugin_types::ParameterInfo;
     use tutti_plugin_types::StateError;
     use tutti_plugin_types::{
         AnyThread, AutomationMode, AutomationModeError, Health, PluginFailure, RenderMode,
         TerminationReason,
     };
+    use tutti_units::Normalized;
     use tutti_units::ParamId;
 
     /// A backend listing `params` (address, value); a value of `None` is a

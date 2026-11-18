@@ -28,9 +28,10 @@ use vst3::Steinberg::{
 };
 use vst3::{Class, ComWrapper};
 
-use tutti_plugin_types::{Normalized, PointBuf, PointPool};
 use tutti_plugin_types::{ParameterPoint, ParameterQueue};
+use tutti_plugin_types::{PointBuf, PointPool};
 use tutti_rt::{AudioThreadCell, BorrowGuard};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// The least point room a queue is built with. Typical automation carries a

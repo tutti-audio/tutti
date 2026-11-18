@@ -26,7 +26,8 @@
 // Every case returns `Err` with the message of the first figure that fails.
 #![allow(clippy::missing_errors_doc)]
 
-use crate::{Normalized, ParamMapping};
+use crate::ParamMapping;
+use tutti_units::Normalized;
 
 /// The positions the cases sweep: both ends, a hair inside each, a grid of
 /// sixteenths and a few that no grid names.

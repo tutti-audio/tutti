@@ -1115,7 +1115,7 @@ mod tests {
         ));
         assert_eq!(channels.block_counts().late, 1);
         let value = BridgeMessage::ParameterValue {
-            value: Some(crate::protocol::Normalized::of(0.25)),
+            value: Some(tutti_units::Normalized::of(0.25)),
         };
         assert!(owed.take(value, &channels).is_none());
         assert!(owed.take(chunk(0, false), &channels).is_none());

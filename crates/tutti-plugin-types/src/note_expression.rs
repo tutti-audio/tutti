@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tutti_midi_protocol::unit_f32_to_value;
 use tutti_ump::{CCNumber, ControlValue, NoteNumber, RegisteredPerNoteController, Voice2};
 
-use crate::Normalized;
+use tutti_units::Normalized;
 
 /// A per-note expression dimension.
 ///

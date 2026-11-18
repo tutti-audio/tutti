@@ -125,7 +125,8 @@
 //!
 //! ```rust,no_run
 //! # use std::path::Path;
-//! # use tutti_plugin_types::{Control, Normalized, StateUse};
+//! # use tutti_plugin_types::{Control, StateUse};
+//! # use tutti_units::Normalized;
 //! # use tutti_units::ParamId;
 //! # use tutti_vst3_host::{LoadOptions, Vst3Loaded};
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {

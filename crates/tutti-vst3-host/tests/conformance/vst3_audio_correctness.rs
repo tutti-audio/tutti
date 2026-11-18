@@ -1404,7 +1404,8 @@ fn the_listed_parameter_ids_are_the_plugins_own_in_order() {
 /// assert it.
 #[test]
 fn an_unlisted_parameter_id_is_reported_not_written() {
-    use tutti_plugin_types::{Control, Normalized};
+    use tutti_plugin_types::Control;
+    use tutti_units::Normalized;
 
     let _guard = plugin_guard();
     let mut loaded = Vst3Loaded::load(
@@ -1464,7 +1465,8 @@ fn an_unlisted_parameter_id_is_reported_not_written() {
 /// written.
 #[test]
 fn a_read_only_parameter_write_is_refused() {
-    use tutti_plugin_types::{Control, Normalized, ParamWriteError};
+    use tutti_plugin_types::{Control, ParamWriteError};
+    use tutti_units::Normalized;
 
     let _guard = plugin_guard();
     let mut loaded = Vst3Loaded::load(
@@ -1493,7 +1495,8 @@ fn a_read_only_parameter_write_is_refused() {
 
 mod loaded_writes {
     use super::*;
-    use tutti_plugin_types::{Control, Normalized};
+    use tutti_plugin_types::Control;
+    use tutti_units::Normalized;
 
     const MODE_RAMP: f64 = 0.1;
     const RAMP_LEVEL: f64 = 0.75;

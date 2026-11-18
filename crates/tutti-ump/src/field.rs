@@ -7,183 +7,55 @@
 
 use crate::ControlValue;
 
-/// A raw number above the largest the type holds, from `TryFrom` on an
-/// address type or a bit-width field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{} {} is above the largest, {}", .what, .value, .max)]
-pub struct OutOfRange {
-    /// What was out of range: "channel", "group", "controller number", or a
-    /// field's type name.
-    pub what: &'static str,
-    /// The refused number.
-    pub value: u32,
-    /// The largest the type accepts.
-    pub max: u32,
-}
-
-// A bit-width field, to the shape of a range-checked value: `new` refuses above `MAX`, `of` panics, `masked` masks.
-macro_rules! bits {
-    ($(#[$doc:meta])* $name:ident, $repr:ty, $repr_name:literal, $width:expr) => {
-        $(#[$doc])*
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[cfg_attr(feature = "serde", serde(try_from = $repr_name, into = $repr_name))]
-        #[repr(transparent)]
-        pub struct $name($repr);
-
-        impl $name {
-            /// The largest value.
-            pub const MAX: Self = Self((1 << $width) - 1);
-
-            /// The value, or `None` when it needs more bits than the field has.
-            #[inline]
-            #[must_use]
-            pub const fn new(raw: $repr) -> Option<Self> {
-                if raw <= Self::MAX.0 { Some(Self(raw)) } else { None }
-            }
-
-            /// The value, for a literal or a constant. For a value that
-            /// arrives from outside, use [`new`](Self::new).
-            ///
-            /// # Panics
-            ///
-            /// When `raw` needs more bits than the field has; in a `const`
-            /// that is a compile error.
-            #[inline]
-            #[must_use]
-            #[track_caller]
-            pub const fn of(raw: $repr) -> Self {
-                match Self::new(raw) {
-                    Some(value) => value,
-                    None => panic!(concat!("a ", stringify!($name), " is ", stringify!($width), " bits")),
-                }
-            }
-
-            /// The low bits of `raw` the field holds. Only for bits the wire
-            /// has just framed (a decoder's field, a byte a MIDI 1.0 parser
-            /// has already checked); a value from anywhere else is checked
-            /// with [`new`](Self::new).
-            #[inline]
-            #[must_use]
-            pub const fn masked(raw: $repr) -> Self {
-                Self(raw & Self::MAX.0)
-            }
-
-            /// The raw value.
-            #[inline]
-            #[must_use]
-            pub const fn get(self) -> $repr {
-                self.0
-            }
-        }
-
-        impl From<$name> for $repr {
-            #[inline]
-            fn from(value: $name) -> $repr {
-                value.0
-            }
-        }
-
-        impl TryFrom<$repr> for $name {
-            type Error = OutOfRange;
-
-            #[inline]
-            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
-                Self::new(raw).ok_or(OutOfRange {
-                    what: stringify!($name),
-                    value: raw as u32,
-                    max: Self::MAX.0 as u32,
-                })
-            }
-        }
-
-        // Deliberately no infallible `From<$repr>`: it would have to mask or
-        // fail (`masked` is the named one that masks).
-    };
-}
-
-// A field with a stated inclusive range that is not a bit width.
-macro_rules! bounded {
-    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
-        $(#[$doc])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $name($repr);
-
-        impl $name {
-            /// The value, or `None` when it is out of range.
-            #[must_use]
-            #[allow(unused_comparisons)]
-            pub const fn new(raw: $repr) -> Option<Self> {
-                if raw >= $min && raw <= $max { Some(Self(raw)) } else { None }
-            }
-
-            /// The value, for a literal or a constant. For a value that
-            /// arrives from outside, use [`new`](Self::new).
-            ///
-            /// # Panics
-            ///
-            /// When `raw` is out of range; in a `const` that is a compile error.
-            #[must_use]
-            #[track_caller]
-            pub const fn of(raw: $repr) -> Self {
-                match Self::new(raw) {
-                    Some(value) => value,
-                    None => panic!(concat!("a ", stringify!($name), " is out of range")),
-                }
-            }
-
-            /// The raw value, always in range.
-            #[must_use]
-            pub const fn get(self) -> $repr {
-                self.0
-            }
-        }
-    };
-}
-
-bits!(
+tutti_units::ranged! {
     /// A 4-bit value: an MDS id, a chord degree.
-    U4,
-    u8,
-    "u8",
-    4
-);
-bits!(
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    U4(u8), U4OutOfRange, bits 4
+}
+tutti_units::ranged! {
     /// A 7-bit data byte (`0..=127`): a velocity, a pressure, a program, a
     /// controller value, a SysEx byte.
-    U7,
-    u8,
-    "u8",
-    7
-);
-bits!(
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    U7(u8), U7OutOfRange, bits 7
+}
+tutti_units::ranged! {
     /// A 14-bit value (`0..=16383`): a MIDI 1.0 pitch bend, a song position.
-    U14,
-    u16,
-    "u16",
-    14
-);
-bits!(
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    U14(u16), U14OutOfRange, bits 14
+}
+tutti_units::ranged! {
     /// A 28-bit value (`0..=0x0FFF_FFFF`): a MIDI-CI MUID, a 28-bit size.
-    U28,
-    u32,
-    "u32",
-    28
-);
-bits!(
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
+    U28(u32), U28OutOfRange, bits 28
+}
+tutti_units::ranged! {
     /// A MIDI note number on the wire (`0..=127`), not a musical pitch.
-    NoteNumber,
-    u8,
-    "u8",
-    7
-);
-bits!(
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    NoteNumber(u8), NoteNumberOutOfRange, bits 7
+}
+tutti_units::ranged! {
     /// A Delta Clockstamp: ticks since the previous event (20 bits).
-    DeltaTicks,
-    u32,
-    "u32",
-    20
-);
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
+    DeltaTicks(u32), DeltaTicksOutOfRange, bits 20
+}
 
 impl U14 {
     /// `0x2000`, a pitch bend at rest (M1).
@@ -291,149 +163,94 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
-// Under `serde`, the bare number, read back through the type's `TryFrom` so a
-// document cannot carry a value the type refuses.
-macro_rules! bounded_serde {
-    ($name:ident, $repr:ty) => {
-        #[cfg(feature = "serde")]
-        impl serde::Serialize for $name {
-            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                self.get().serialize(serializer)
-            }
-        }
-
-        #[cfg(feature = "serde")]
-        impl<'de> serde::Deserialize<'de> for $name {
-            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let raw = <$repr as serde::Deserialize>::deserialize(deserializer)?;
-                Self::try_from(raw).map_err(serde::de::Error::custom)
-            }
-        }
-    };
-}
-
-// `From` into the raw, `TryFrom` from it, and the serde form, for a bounded
-// type with an unsigned raw.
-macro_rules! bounded_conversions {
-    ($name:ident, $repr:ty, $max:expr) => {
-        impl From<$name> for $repr {
-            fn from(value: $name) -> $repr {
-                value.get()
-            }
-        }
-
-        impl TryFrom<$repr> for $name {
-            type Error = OutOfRange;
-
-            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
-                Self::new(raw).ok_or(OutOfRange {
-                    what: stringify!($name),
-                    value: u32::from(raw),
-                    max: $max as u32,
-                })
-            }
-        }
-
-        bounded_serde!($name, $repr);
-    };
-}
-
-bounded!(
+tutti_units::ranged! {
     /// A Function Block number (`0..=31`). A reserved number read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
     /// this type.
-    FunctionBlockId,
-    u8,
-    0,
-    31
-);
-bounded_conversions!(FunctionBlockId, u8, 31);
-bounded!(
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    FunctionBlockId(u8), FunctionBlockIdOutOfRange, "within 0..=31", |raw| raw <= 31
+}
+tutti_units::ranged! {
     /// A Group number as a Function Block declares its first Group (`0..=15`).
     /// A reserved number read from the wire is a
     /// [`Field::Reserved`](crate::Field::Reserved).
-    FirstGroup,
-    u8,
-    0,
-    15
-);
-bounded_conversions!(FirstGroup, u8, 15);
-bounded!(
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    FirstGroup(u8), FirstGroupOutOfRange, "within 0..=15", |raw| raw <= 15
+}
+tutti_units::ranged! {
     /// How many Groups a Function Block spans (`1..=16`). A reserved count read
     /// from the wire is a [`Field::Reserved`](crate::Field::Reserved).
-    GroupSpan,
-    u8,
-    1,
-    16
-);
-bounded_conversions!(GroupSpan, u8, 16);
-bounded!(
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    GroupSpan(u8), GroupSpanOutOfRange, "within 1..=16", |raw| raw >= 1 && raw <= 16
+}
+tutti_units::ranged! {
     /// How many channels an MPE Profile zone has, its Manager Channel and one
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
-    MpeChannels,
-    u8,
-    2,
-    16
-);
-bounded_conversions!(MpeChannels, u8, 16);
-bounded!(
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    MpeChannels(u8), MpeChannelsOutOfRange, "within 2..=16", |raw| raw >= 2 && raw <= 16
+}
+tutti_units::ranged! {
     /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
     /// this type.
-    ChordType,
-    u8,
-    0,
-    0x1B
-);
-bounded_conversions!(ChordType, u8, 0x1B);
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    ChordType(u8), ChordTypeOutOfRange, "within 0..=0x1B", |raw| raw <= 0x1B
+}
 
-bounded!(
+tutti_units::ranged! {
     /// How many Function Blocks an Endpoint Info Notification declares
     /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
     /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),
     /// not a value of this type.
-    FunctionBlockCount,
-    u8,
-    0,
-    32
-);
-bounded_conversions!(FunctionBlockCount, u8, 32);
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    FunctionBlockCount(u8), FunctionBlockCountOutOfRange, "within 0..=32", |raw| raw <= 32
+}
 
 impl FunctionBlockCount {
     /// The most blocks an Endpoint declares.
     pub const MAX: Self = Self(32);
 }
 
-bounded!(
+tutti_units::ranged! {
     /// The Delta Clockstamp ticks per quarter note (`1..=65535`, M2-104
     /// §7.2.3.1); `0` is reserved. A zero read from the wire is a
     /// [`Utility::ReservedTicksPerQuarterNote`](crate::Utility::ReservedTicksPerQuarterNote),
     /// not a value of this type.
-    TicksPerQuarterNote,
-    u16,
-    1,
-    65535
-);
-bounded_conversions!(TicksPerQuarterNote, u16, u16::MAX);
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    TicksPerQuarterNote(u16), TicksPerQuarterNoteOutOfRange, "within 1..=65535", |raw| raw >= 1
+}
 
 impl TicksPerQuarterNote {
     /// The most ticks, 65535.
     pub const MAX: Self = Self(u16::MAX);
 }
 
-bounded!(
+tutti_units::ranged! {
     /// The channel count M of Mono Mode On, Control Change 126 (MIDI 1.0
     /// Detailed Specification, Channel Mode Messages, Omni-Off/Mono): `1..=16`
     /// channels from the Basic Channel, or `0`, which assigns every voice the
     /// receiver has one channel each, up to Channel 16. The MIDI 2.0 Protocol
     /// carries it in the top 7 bits of the Control Change's 32-bit value
     /// (M2-104 §7.4.6.1).
-    MonoChannels,
-    u8,
-    0,
-    16
-);
-bounded_conversions!(MonoChannels, u8, 16);
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    MonoChannels(u8), MonoChannelsOutOfRange, "within 0..=16", |raw| raw <= 16
+}
 
 impl MonoChannels {
     /// `0`: one channel for each voice of the receiver.
@@ -468,34 +285,13 @@ impl MonoChannels {
     }
 }
 
-bounded!(
+tutti_units::ranged! {
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
-    SharpsFlats,
-    i8,
-    -7,
-    7
-);
-
-/// A number that is not a count of sharps or flats: outside `-7..=7`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not a key signature's sharps or flats: -7 to 7")]
-pub struct NotSharpsFlats(pub i8);
-
-impl From<SharpsFlats> for i8 {
-    fn from(value: SharpsFlats) -> i8 {
-        value.get()
-    }
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "i8", into = "i8"))]
+    SharpsFlats(i8), SharpsFlatsOutOfRange, "within -7..=7", |raw| raw >= -7 && raw <= 7
 }
-
-impl TryFrom<i8> for SharpsFlats {
-    type Error = NotSharpsFlats;
-
-    fn try_from(raw: i8) -> Result<Self, NotSharpsFlats> {
-        Self::new(raw).ok_or(NotSharpsFlats(raw))
-    }
-}
-
-bounded_serde!(SharpsFlats, i8);
 
 /// An unsigned fixed-point pitch: a MIDI note number with a fraction of a
 /// semitone, stored as Q7.25 (7 integer bits, 25 fractional bits). Note On

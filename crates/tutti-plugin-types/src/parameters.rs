@@ -22,7 +22,7 @@
 //! [`step_count`](ParameterInfo::step_count), [`flag`](ParameterInfo::flag) —
 //! which answer the question a caller actually has without making them learn
 //! which format declined what. A range is **data for display**; converting a
-//! value between the plugin's plain domain and [`Normalized`] is the format's,
+//! value between the plugin's plain domain and [`Normalized`](tutti_units::Normalized) is the format's,
 //! asked through [`AnyThread::parameter_plain`](crate::AnyThread::parameter_plain)
 //! and [`parameter_normalized`](crate::AnyThread::parameter_normalized). The
 //! variants stay for the host that must produce them and for the caller
@@ -35,112 +35,6 @@ use tutti_units::ParamId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-/// A parameter value on the host's `0..=1` scale.
-///
-/// The four hosted formats disagree about which domain a parameter value is
-/// in — VST3 and VST2 speak normalized natively, AU and CLAP speak the
-/// plugin's own units — and the shared seam ([`Control`](crate::Control))
-/// picks normalized, leaving each format to convert at its own edge: what a
-/// `Normalized` means in plain units is the format's answer
-/// ([`Control::parameter_plain`](crate::Control::parameter_plain)), never a
-/// formula over a range.
-/// Carried only in prose over a bare `f64`, that rule is unenforceable: writing
-/// `set_parameter(id, 20_000.0)` against a filter cutoff compiles and sets the
-/// parameter to full scale rather than 20 kHz.
-///
-/// A `Normalized` is always a finite value on `0..=1`. [`new`](Self::new)
-/// refuses anything else (NaN included) and so does deserializing one.
-/// [`clamped`](Self::clamped) is the named saturation, for a value that
-/// arrives from outside and is better pinned than dropped (automation output,
-/// a plugin's own report).
-///
-/// Deliberately no `Deref`, no `From<f64>` and no arithmetic: those are the
-/// routes by which a raw float becomes a `Normalized` without passing the
-/// check. Same discipline as [`ParamId`].
-///
-/// There is no matching `Plain` newtype. A plain value's legal range is
-/// per-parameter, so the type could promise only "finite"; the conversions are
-/// the format's, [`Control::parameter_plain`](crate::Control::parameter_plain)
-/// and [`parameter_normalized`](crate::Control::parameter_normalized).
-///
-/// # Examples
-///
-/// ```
-/// use tutti_plugin_types::Normalized;
-///
-/// assert_eq!(Normalized::new(0.25).map(Normalized::get), Some(0.25));
-/// assert_eq!(Normalized::new(40.0), None);
-/// assert_eq!(Normalized::clamped(40.0), Normalized::of(1.0));
-/// assert_eq!(Normalized::clamped(f64::NAN), Normalized::of(0.0));
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
-pub struct Normalized(f64);
-
-impl Normalized {
-    /// `v`, if it lies on `0..=1`; [`None`] for anything else, NaN included.
-    #[must_use]
-    pub const fn new(v: f64) -> Option<Self> {
-        if v >= 0.0 && v <= 1.0 {
-            Some(Self(v))
-        } else {
-            None
-        }
-    }
-
-    /// `v` for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// If `v` is not on `0..=1`, in a `const` context at compile time.
-    #[must_use]
-    pub const fn of(v: f64) -> Self {
-        match Self::new(v) {
-            Some(n) => n,
-            None => panic!("a Normalized lies on 0..=1"),
-        }
-    }
-
-    /// `v` pinned onto `0..=1`: out-of-range input saturates at the nearest
-    /// bound, and NaN becomes `0.0`.
-    ///
-    /// NaN maps to `0.0` rather than clamping, because `f64::clamp` returns NaN
-    /// for a NaN input. This value reaches a live plugin parameter, and a NaN in
-    /// a filter coefficient does not stay confined to the parameter it entered.
-    /// The saturation reports nothing, so use it only where a pinned value is
-    /// better than a dropped one.
-    #[must_use]
-    pub fn clamped(v: f64) -> Self {
-        Self(clamp_unit(v))
-    }
-
-    /// Returns the underlying `0..=1` value.
-    #[must_use]
-    pub const fn get(self) -> f64 {
-        self.0
-    }
-}
-
-impl TryFrom<f64> for Normalized {
-    type Error = InvalidNormalized;
-
-    fn try_from(v: f64) -> Result<Self, InvalidNormalized> {
-        Self::new(v).ok_or(InvalidNormalized(v))
-    }
-}
-
-impl From<Normalized> for f64 {
-    fn from(n: Normalized) -> f64 {
-        n.0
-    }
-}
-
-/// A value that is not on `0..=1` (see [`Normalized::new`]).
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("{0} is not on 0..=1")]
-pub struct InvalidNormalized(pub f64);
 
 /// What the plugin declared about a parameter's value range.
 ///
@@ -200,11 +94,6 @@ impl ParamRange {
             Self::Normalized { default } | Self::Plain { default, .. } => default,
         }
     }
-}
-
-/// NaN checked before the clamp, which would pass it through.
-fn clamp_unit(v: f64) -> f64 {
-    if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) }
 }
 
 /// How many positions a parameter has.
@@ -836,80 +725,6 @@ mod tests {
             "a bit outside the known mask must not become readable"
         );
         assert!(!p.flags.contains(ParamFlags::BYPASS));
-    }
-
-    /// `Normalized` holds the unit interval, whatever it is handed.
-    ///
-    /// The three inputs that reach this from a live system: an automation curve
-    /// overshooting its endpoints, a wire payload from another process, and a
-    /// division that produced NaN. None may reach a plugin parameter unclamped
-    /// — see the type's docs for why NaN is mapped rather than clamped.
-    #[test]
-    fn a_normalized_value_is_always_on_the_unit_interval() {
-        for (input, want) in [
-            (0.5, 0.5),
-            (0.0, 0.0),
-            (1.0, 1.0),
-            (1.5, 1.0),
-            (-0.5, 0.0),
-            (f64::INFINITY, 1.0),
-            (f64::NEG_INFINITY, 0.0),
-            (f64::NAN, 0.0),
-        ] {
-            let n = Normalized::clamped(input);
-            assert_eq!(n.get(), want, "Normalized::clamped({input})");
-            assert!((0.0..=1.0).contains(&n.get()));
-        }
-    }
-
-    /// A plain value handed to `Normalized::clamped` is clamped, not carried;
-    /// `Normalized::new` refuses it.
-    ///
-    /// This is the mistake the type exists to stop: `set_parameter(id, 20_000.0)`
-    /// against a `[10, 22050]` Hz cutoff sets full scale, not 20 kHz. The write
-    /// still compiles — the clamp is total by design — but it cannot be mistaken
-    /// for a plain write, because the seam takes `Normalized` and the only way
-    /// to build one is through this clamp. Note the clamp is silent: the wrong
-    /// value arrives saturated rather than rejected.
-    #[test]
-    fn a_plain_value_cannot_masquerade_as_a_normalized_one() {
-        assert_eq!(Normalized::clamped(20_000.0).get(), 1.0);
-        assert_eq!(Normalized::new(20_000.0), None);
-    }
-
-    /// The range contract (`new`, `of`, `TryFrom`, `Into`, serde), checked by
-    /// the shared helper.
-    #[cfg(feature = "serde")]
-    #[test]
-    fn a_normalized_keeps_the_range_contract() {
-        let c = tutti_fixtures::RangeContract {
-            new: Normalized::new,
-            get: Normalized::get,
-            of: Some(Normalized::of),
-            valid: &[0.0, f64::MIN_POSITIVE, 0.25, 0.5, 1.0 - f64::EPSILON, 1.0],
-            invalid: &[
-                -f64::MIN_POSITIVE,
-                -0.1,
-                1.0 + f64::EPSILON,
-                2.0,
-                1e300,
-                f64::NAN,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-            ],
-        };
-        tutti_fixtures::check_range_contract(&c);
-        tutti_fixtures::check_range_serde(&c);
-    }
-
-    /// `clamped` pins to the nearest bound and maps NaN to zero.
-    #[test]
-    fn clamped_saturates_and_maps_nan_to_zero() {
-        assert_eq!(Normalized::clamped(-3.0).get(), 0.0);
-        assert_eq!(Normalized::clamped(3.0).get(), 1.0);
-        assert_eq!(Normalized::clamped(0.25).get(), 0.25);
-        assert_eq!(Normalized::clamped(f64::NAN).get(), 0.0);
-        assert_eq!(Normalized::clamped(f64::INFINITY).get(), 1.0);
     }
 
     /// A grouped parameter qualifies its name; an ungrouped one does not.

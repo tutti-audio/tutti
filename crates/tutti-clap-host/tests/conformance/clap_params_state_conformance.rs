@@ -38,7 +38,8 @@ use tutti_clap_test_plugin::{
     ProcessCapture, STATE_MAGIC,
 };
 use tutti_plugin_types::{AutomationMode, Control, StateUse};
-use tutti_plugin_types::{Normalized, ParamFlags, ParamSteps, Request, RescanScope};
+use tutti_plugin_types::{ParamFlags, ParamSteps, Request, RescanScope};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// CLAP event type constants, pinned here rather than imported: these are the

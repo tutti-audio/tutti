@@ -534,8 +534,6 @@ tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteMessage::from_vo
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
-tutti-ump  range-macro  crates/tutti-ump/src/field.rs::bits
-tutti-ump  range-macro  crates/tutti-ump/src/field.rs::bounded
 
 # tutti-voicing
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_bend_range

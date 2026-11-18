@@ -206,7 +206,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     for id in 0..PARAMS {
         assert_eq!(
             handle.parameter_value(ParamId::new((id as i32) as u32)),
-            Some(tutti_plugin_types::Normalized::clamped(f64::from(value(
+            Some(tutti_units::Normalized::clamped(f64::from(value(
                 71, 1, id
             )))),
             "parameter {id}"

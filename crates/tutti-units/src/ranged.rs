@@ -25,18 +25,67 @@
 /// assert_eq!(Voices::new(0), None);
 /// assert_eq!(Voices::try_from(9), Err(VoicesOutOfRange(9)));
 /// ```
+///
+/// `bits $width` in place of the predicate is the range `0..=(1 << $width) - 1`
+/// of a bit-width field. It adds `pub const MAX` and `pub const fn masked(raw)`,
+/// which keeps the low `$width` bits of a raw the wire has just framed, and its
+/// error derives `Eq`.
+///
+/// ```
+/// tutti_units::ranged! {
+///     /// A 5-bit field.
+///     Five(u8), FiveOutOfRange, bits 5
+/// }
+///
+/// assert_eq!(Five::MAX.get(), 31);
+/// assert_eq!(Five::new(32), None);
+/// assert_eq!(Five::masked(33).get(), 1);
+/// assert_eq!(Five::try_from(32), Err(FiveOutOfRange(32)));
+/// ```
 #[macro_export]
 macro_rules! ranged {
     (
         $(#[$meta:meta])*
         $name:ident($inner:ty), $err:ident, $what:literal, |$raw:ident| $valid:expr
     ) => {
+        $crate::ranged!(@items [] $(#[$meta])* $name($inner), $err, $what, |$raw| $valid);
+    };
+    (
+        $(#[$meta:meta])*
+        $name:ident($inner:ty), $err:ident, bits $width:literal
+    ) => {
+        $crate::ranged!(
+            @items [Eq]
+            $(#[$meta])*
+            $name($inner), $err, concat!("within ", $width, " bits"),
+            |raw| raw <= Self::MAX.0
+        );
+
+        impl $name {
+            #[doc = concat!("The largest value, ", $width, " bits all set.")]
+            pub const MAX: Self = Self(((1 as $inner) << $width) - 1);
+
+            /// The low bits of `raw` the type holds. Only for bits the wire
+            /// has just framed; a value from anywhere else is checked with
+            /// [`new`](Self::new).
+            #[inline]
+            #[must_use]
+            pub const fn masked(raw: $inner) -> Self {
+                Self(raw & Self::MAX.0)
+            }
+        }
+    };
+    (
+        @items [$($extra:ident),*]
+        $(#[$meta:meta])*
+        $name:ident($inner:ty), $err:ident, $what:expr, |$raw:ident| $valid:expr
+    ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct $name($inner);
 
         #[doc = concat!("A raw value that is not ", $what, ".")]
-        #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+        #[derive(Clone, Copy, Debug, PartialEq, $($extra,)* thiserror::Error)]
         #[error("{0:?} is not {what}", what = $what)]
         pub struct $err(pub $inner);
 

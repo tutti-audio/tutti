@@ -98,6 +98,7 @@ mod units;
 // `ranged!` is `#[macro_export]`ed: it is the one way any crate writes a
 // range-checked type, used as `tutti_units::ranged!`.
 mod maths;
+mod normalized;
 mod ranged;
 
 mod bars;
@@ -112,6 +113,7 @@ mod unit_param;
 pub use bars::{BarCount, BarNumber};
 pub use frame::{At, Frame, Moment};
 pub use latency::Latency;
+pub use normalized::{Normalized, NormalizedOutOfRange};
 pub use play::PlayReading;
 pub use resyncs::Resyncs;
 pub use samples::Samples;

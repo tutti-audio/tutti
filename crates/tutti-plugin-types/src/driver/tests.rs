@@ -9,11 +9,12 @@
 use super::*;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
-    HostOp, MaxBlock, Normalized, PluginAudio, PluginError, PluginIo, PluginResult, PluginTail,
-    ProcessContext, ProcessOutput, Processor, RenderMode, Request, RequestWord, SampleFormat,
-    Samples, Stage, taken,
+    HostOp, MaxBlock, PluginAudio, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
+    ProcessOutput, Processor, RenderMode, Request, RequestWord, SampleFormat, Samples, Stage,
+    taken,
 };
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// The test process's main thread: nextest runs each test in its own process,

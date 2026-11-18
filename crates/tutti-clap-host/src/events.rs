@@ -32,11 +32,12 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Edit, LinearRange, Normalized, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
+    Edit, LinearRange, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
     expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// The parameter edits the Controller can have queued to the Processor before
