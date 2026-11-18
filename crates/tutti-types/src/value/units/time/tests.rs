@@ -23,14 +23,14 @@ fn omitted_conversions_are_documented() {}
 /// are exact inverses at a power of two and refuse a value that has no period.
 #[test]
 fn a_frequency_and_its_period_are_one_route() {
-    assert!((Hz(1000.0).period().unwrap().get() - 0.001).abs() < 1e-18);
+    assert_eq!(Hz(1000.0).period(), Some(Seconds(0.001)));
     assert_eq!(Seconds(0.5).frequency(), Some(Hz(2.0)));
     assert_eq!(Hz(256.0).period(), Some(Seconds(0.003_906_25)));
     assert_eq!(Hz(256.0).period().unwrap().frequency(), Some(Hz(256.0)));
     for bad in [0.0f32, -1.0, f32::NAN, f32::INFINITY] {
         assert_eq!(Hz(bad).period(), None, "{bad}");
     }
-    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY, 1e-60] {
+    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY, 1e-60, 1e300] {
         assert_eq!(Seconds(bad).frequency(), None, "{bad}");
     }
     assert_eq!(Hz::ZERO, Hz(0.0));

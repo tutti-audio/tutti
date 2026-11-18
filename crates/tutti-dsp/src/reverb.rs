@@ -35,12 +35,7 @@ pub(crate) fn ramp(rate: SampleRate) -> Steps {
 
 /// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
 pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
-    cutoff_pole_at(cutoff, rate.get())
-}
-
-/// [`cutoff_pole`] for a rate held as `f64` Hz, as the network's response maths carries it.
-pub(crate) fn cutoff_pole_at(cutoff: Hz, rate: f64) -> f64 {
-    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate)
+    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
 }
 
 /// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:

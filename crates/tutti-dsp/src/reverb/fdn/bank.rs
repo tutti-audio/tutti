@@ -57,7 +57,7 @@ use tutti_types::{Hz, MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
-use crate::reverb::{CHUNK, cutoff_pole_at, ramp, read, tail_of};
+use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 /// How far a line's length moves in a chunk, in frames.
@@ -306,7 +306,7 @@ impl FdnBank {
         let cap = bounds.line.to_samples_ceil().get() + 4;
         let pre_cap = bounds.pre_delay.get() + 4;
         let mut target = Target::new(max_lines);
-        set_poles(&mut target, CROSSOVER.map(|f| f.get()), rate.get());
+        set_poles(&mut target, CROSSOVER.map(|f| f.get()), rate);
         let mut bank = Self {
             layout: *layout,
             rate,
@@ -432,7 +432,7 @@ impl FdnBank {
         let max_len = (self.cap - 4) as f32;
 
         if let Some(Absorption::Bands { crossover, .. }) = f.lines.first().map(|l| l.absorption) {
-            set_poles(t, [crossover[0].get(), crossover[1].get()], self.rate.get());
+            set_poles(t, [crossover[0].get(), crossover[1].get()], self.rate);
         }
         let flat = 1.0 / (n as f32).sqrt();
         for j in 0..n {
@@ -659,13 +659,13 @@ impl FdnBank {
 }
 
 /// Sets the one-poles of `t` to the crossovers, in Hz, at `rate`, when they moved.
-fn set_poles(t: &mut Target, crossover: [f32; 2], rate: f64) {
+fn set_poles(t: &mut Target, crossover: [f32; 2], rate: SampleRate) {
     if crossover == t.crossover {
         return;
     }
     t.crossover = crossover;
     for (p, f) in t.pole.iter_mut().zip(crossover) {
-        *p = cutoff_pole_at(Hz(f), rate) as f32;
+        *p = cutoff_pole(Hz(f), rate) as f32;
     }
 }
 

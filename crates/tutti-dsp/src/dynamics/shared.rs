@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_types::{Ballistics, SampleRate, Seconds};
+use tutti_types::{Amplitude, Ballistics, Db, SampleRate, Seconds};
 
 use crate::smoother::Smoother;
 
@@ -86,6 +86,18 @@ impl Follower {
             self.release
         };
         Smoother::toward(state, target, coeff)
+    }
+
+    /// [`follow`](Self::follow) on a level in dB.
+    #[inline]
+    pub(crate) fn follow_db(&self, state: Db, target: Db) -> Db {
+        Db(self.follow(state.get(), target.get()))
+    }
+
+    /// [`follow`](Self::follow) on an amplitude.
+    #[inline]
+    pub(crate) fn follow_amplitude(&self, state: Amplitude, target: Amplitude) -> Amplitude {
+        Amplitude(self.follow(state.get(), target.get()))
     }
 }
 

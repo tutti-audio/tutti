@@ -34,7 +34,7 @@
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_types::{Amplitude, Db, SampleRate, Seconds};
 
 use super::shared::{CHUNK, Follower, GAIN_GLIDE, floored, key_levels};
 use crate::delay::finite_or;
@@ -100,11 +100,11 @@ impl Lerp for Amounts {
 /// The gain in dB at the envelopes `fast` and `slow` (both at least 0 and finite) for the
 /// amounts `attack` and `sustain`: the closed form of the [module](self).
 #[inline]
-fn gain_db(fast: f32, slow: f32, attack: Db, sustain: Db) -> Db {
+fn gain_db(fast: Amplitude, slow: Amplitude, attack: Db, sustain: Db) -> Db {
     if fast > slow {
-        Db(attack.get() * (1.0 - slow / fast))
+        Db(attack.get() * (1.0 - slow.get() / fast.get()))
     } else if slow > fast {
-        Db(sustain.get() * (1.0 - fast / slow))
+        Db(sustain.get() * (1.0 - fast.get() / slow.get()))
     } else {
         Db::UNITY
     }
@@ -120,7 +120,7 @@ pub struct TransientBank {
     fast: Follower,
     slow: Follower,
     /// The fast and the slow envelope, both at 0 until a level is heard.
-    envelopes: (f32, f32),
+    envelopes: (Amplitude, Amplitude),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
     amounts: Glide<Amounts>,
     steps: u32,
@@ -139,7 +139,7 @@ impl TransientBank {
         Self {
             fast: follower(fast),
             slow: follower(slow),
-            envelopes: (0.0, 0.0),
+            envelopes: (Amplitude::SILENT, Amplitude::SILENT),
             amounts: Glide::landed(TransientControls::DEFAULT.designed()),
             steps,
         }
@@ -147,7 +147,7 @@ impl TransientBank {
 
     /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
     pub fn reset(&mut self) {
-        self.envelopes = (0.0, 0.0);
+        self.envelopes = (Amplitude::SILENT, Amplitude::SILENT);
         self.amounts.settle();
     }
 
@@ -191,8 +191,9 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let fast = self.fast.follow(self.envelopes.0, *g);
-                let slow = self.slow.follow(self.envelopes.1, *g);
+                let level = Amplitude::new(*g);
+                let fast = self.fast.follow_amplitude(self.envelopes.0, level);
+                let slow = self.slow.follow_amplitude(self.envelopes.1, level);
                 self.envelopes = (fast, slow);
                 *g = gain_db(fast, slow, a.attack, a.sustain)
                     .to_amplitude()

@@ -262,7 +262,7 @@ impl PlateBank {
         worst.design_into(rate, &mut network);
         let shape = shape_of(&network);
         let half = |h: &[Samples; 4]| Half {
-            modulated: Line::new(Samples(h[0].get() + shape.excursion.get() + 1)),
+            modulated: Line::new(h[0] + shape.excursion + Samples(1)),
             delay1: Line::new(h[1]),
             lattice2: Line::new(h[2]),
             delay2: Line::new(h[3]),
@@ -453,7 +453,7 @@ impl PlateBank {
             if let Some(y) = right.as_deref_mut() {
                 y[i] = r.convert_to::<S>();
             }
-            self.into = Samples((self.into.get() + 1) % Self::CHUNK);
+            self.into = (self.into + Samples(1)) % Samples(Self::CHUNK);
         }
     }
 

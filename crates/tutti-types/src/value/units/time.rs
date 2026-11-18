@@ -44,8 +44,9 @@ impl Seconds {
     pub const ZERO: Seconds = Seconds(0.0);
 
     /// The frequency this is the period of (`1 / t`), or `None` for a zero, a negative or a
-    /// non-finite time, or one whose frequency does not fit an `f32`. Computed in `f64` and
-    /// narrowed once; [`Hz::period`] is its inverse.
+    /// non-finite time, and for a time whose frequency an `f32` cannot hold above 0 (one
+    /// that overflows or underflows). Computed in `f64` and narrowed once; [`Hz::period`] is
+    /// its inverse.
     #[inline]
     #[must_use]
     pub fn frequency(self) -> Option<Hz> {
@@ -53,7 +54,11 @@ impl Seconds {
             return None;
         }
         let hz = (1.0 / self.0) as f32;
-        if hz.is_finite() { Some(Hz(hz)) } else { None }
+        if hz.is_finite() && hz > 0.0 {
+            Some(Hz(hz))
+        } else {
+            None
+        }
     }
 
     /// This time as an `f32`, for a kernel that runs in `f32`: the one place a

@@ -36,6 +36,9 @@ use crate::delay::finite_or;
 use crate::dynamics::{Follower, floored, key_levels};
 use crate::{COEFF_INTERVAL, Glide, Lanes};
 
+/// The frames between designs: the grid period.
+const GRID: Samples = Samples(COEFF_INTERVAL);
+
 /// The controls of an [`EnvelopeFilterBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvelopeFilterControls {
@@ -182,19 +185,21 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// allocation.
     pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
         let frames = input.frames().get().min(output.frames().get());
-        let mut levels = [0.0f32; COEFF_INTERVAL];
+        let mut levels = [0.0f32; GRID.get()];
         let mut start = 0;
         while start < frames {
             if self.phase == Samples::ZERO {
                 let design = self.design(self.env);
                 self.coefficients.aim(design);
             }
-            let n = (frames - start).min(COEFF_INTERVAL - self.phase.get());
+            let n = (frames - start).min(GRID.get() - self.phase.get());
             let end = start + n;
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = Amplitude(self.follower.follow(self.env.get(), l.min(1.0)));
+                self.env = self
+                    .follower
+                    .follow_amplitude(self.env, Amplitude::new(l.min(1.0)));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(
@@ -202,7 +207,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
                 input.slice(range.clone()),
                 output.slice_mut(range),
             );
-            self.phase = Samples((self.phase.get() + n) % COEFF_INTERVAL);
+            self.phase = (self.phase + Samples(n)) % GRID;
             start = end;
         }
     }
