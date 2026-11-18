@@ -37,7 +37,7 @@ fn the_pole_is_the_exponential_of_the_corner_over_the_rate() {
 /// is not finite as the default.
 #[test]
 fn the_corner_is_held_within_its_bounds() {
-    assert_eq!(dc_pole(Hz(0.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
+    assert_eq!(dc_pole(Hz::ZERO, RATE), dc_pole(MIN_DC_CORNER, RATE));
     assert_eq!(dc_pole(Hz(-5.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
     assert_eq!(dc_pole(Hz(1e9), RATE), dc_pole(Hz(24_000.0), RATE));
     assert_eq!(dc_pole(Hz(f32::NAN), RATE), dc_pole(DC_CORNER, RATE));

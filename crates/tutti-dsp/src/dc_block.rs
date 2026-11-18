@@ -32,7 +32,10 @@ pub fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
     } else {
         DC_CORNER.get()
     };
-    let corner = f64::from(corner).clamp(f64::from(MIN_DC_CORNER.get()), rate.get() / 2.0);
+    let corner = f64::from(corner).clamp(
+        f64::from(MIN_DC_CORNER.get()),
+        f64::from(rate.nyquist().get()),
+    );
     (-core::f64::consts::TAU * corner / rate.get()).exp()
 }
 

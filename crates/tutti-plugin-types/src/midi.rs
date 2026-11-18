@@ -44,6 +44,11 @@ impl WireMidi {
 /// either direction across the plugin boundary.
 pub const MIDI_STACK_CAPACITY: usize = 256;
 
+/// [`MIDI_STACK_CAPACITY`] as a bound: the most events per block the plugin
+/// node's own MIDI intake takes, so the most a node can send any Processor.
+pub const MIDI_STACK_BOUND: std::num::NonZeroU32 =
+    std::num::NonZeroU32::new(MIDI_STACK_CAPACITY as u32).unwrap();
+
 /// A per-block MIDI event list, inline and **capped** at
 /// [`MIDI_STACK_CAPACITY`].
 ///

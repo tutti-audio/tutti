@@ -27,7 +27,8 @@ pub struct ChannelOutOfRange {
 /// use tutti_types::{ChannelIndex, ChannelLayout};
 ///
 /// let flips = Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(1)]).unwrap();
-/// assert_eq!((flips.inverts(0), flips.inverts(1)), (false, true));
+/// let (first, second) = (ChannelIndex::of(0), ChannelIndex::of(1));
+/// assert_eq!((flips.inverts(first), flips.inverts(second)), (false, true));
 /// assert!(Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(2)]).is_err(), "no third channel");
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,8 +72,8 @@ impl Polarity {
 
     /// Whether `channel` is inverted; `false` for a channel the width lacks.
     #[must_use]
-    pub fn inverts(&self, channel: usize) -> bool {
-        self.inverted.get(channel).copied().unwrap_or(false)
+    pub fn inverts(&self, channel: ChannelIndex) -> bool {
+        self.inverted.get(channel.get()).copied().unwrap_or(false)
     }
 
     /// The width it was built for.

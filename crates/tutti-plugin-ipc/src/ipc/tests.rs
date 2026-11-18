@@ -360,6 +360,21 @@ fn activate(ipc: Ipc, block: usize) -> (IpcProcessor, IpcController) {
     }
 }
 
+/// **A served Processor declares exactly what a chunk's MIDI holds**: the
+/// inline `MidiEventVec` of the payload it fills, at any block. A node that
+/// declared more would be sent events the wire drops.
+#[test]
+fn the_served_processor_takes_what_a_chunks_midi_holds() {
+    let _machine = machine_lock();
+    for block in [48, 1000] {
+        let (ipc, _server) = mock();
+        let (processor, _controller) = activate(ipc, block);
+        let held = processor.event_input().get() as usize;
+        assert_eq!(held, tutti_plugin_types::MidiEventVec::new().capacity());
+        assert_eq!(held, tutti_plugin_types::MIDI_STACK_CAPACITY);
+    }
+}
+
 /// **`IpcProcessor::chunk()` is its configured chunk**: the block the plugin
 /// was activated for, never past the slab's ceiling. It is what the graph
 /// node cuts a block by, so a Processor that answered the trait's default

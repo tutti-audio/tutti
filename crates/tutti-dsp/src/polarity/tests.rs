@@ -56,6 +56,10 @@ fn a_channel_past_the_width_is_refused() {
         );
     }
     let none = Polarity::new(ChannelLayout::STEREO, []).unwrap();
-    assert!(!none.inverts(0) && !none.inverts(1) && !none.inverts(5));
+    assert!(
+        !none.inverts(ChannelIndex::of(0))
+            && !none.inverts(ChannelIndex::of(1))
+            && !none.inverts(ChannelIndex::of(5))
+    );
     assert_eq!(none.width(), ChannelLayout::STEREO);
 }

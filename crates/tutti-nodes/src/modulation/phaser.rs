@@ -168,8 +168,6 @@ pub struct PhaserKernel {
     /// Nyquist at the prepared rate.
     min: Hz,
     max: Hz,
-    /// The sample rate narrowed once to `f32`, for the coefficient.
-    sr: f32,
     rate: SampleRate,
     /// The glide length of the depth and the feedback: [`GAIN_GLIDE`] at the prepared rate.
     steps: u32,
@@ -201,17 +199,17 @@ impl PhaserKernel {
             _ => {}
         }
         let mut offsets = [PhaseIncrement(0.0); MAX_PHASER_CHANNELS];
-        for (c, o) in offsets.iter_mut().enumerate().take(width) {
+        let layout = input.layout();
+        for (c, o) in (0..width).filter_map(|c| layout.index(c)).zip(&mut offsets) {
             *o = stagger.offset(c);
         }
         let d = PhaserControls::DEFAULT;
         Ok(Self {
             input,
-            chain: PhaserChain::new(stages, width),
+            chain: PhaserChain::new(stages, input.layout()),
             range,
             min: range.min(),
             max: range.max(),
-            sr: 1.0,
             rate: SampleRate::SR_48K,
             steps: 0,
             coefficients: vec![Glide::landed(0.0); width].into_boxed_slice(),
@@ -227,11 +225,11 @@ impl PhaserKernel {
     fn solve(&mut self) {
         let depth_start = self.depth.now();
         let depth_end = self.depth.at(self.depth.taken().saturating_add(SEGMENT));
-        let (min, max, sr) = (self.min, self.max, self.sr);
+        let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.coefficients, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
             let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth));
-            allpass_coeff(sweep.get(), sr)
+            allpass_coeff(sweep, rate)
         });
     }
 }
@@ -261,8 +259,6 @@ impl Kernel for PhaserKernel {
     /// (the conversion saturates: a prepare must not panic), and the sweep restarts.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        // The sample rate narrows once, to the `f32` the coefficient is solved in.
-        self.sr = rate.get() as f32;
         self.min = self.range.min();
         self.max = self.range.max().min(rate.nyquist_scaled(0.90));
         self.steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
@@ -653,7 +649,7 @@ mod tests {
         }
         let lfo = (std::f64::consts::TAU * (f64::from(p.get()) + offset)).sin() as f32;
         let hz = sweep_hz(range.min(), range.max(), lfo, Depth::clamped(depth));
-        allpass_coeff(hz.get(), RATE.get() as f32)
+        allpass_coeff(hz, RATE)
     }
 
     fn silence(width: usize, frames: usize) -> Vec<Vec<f32>> {

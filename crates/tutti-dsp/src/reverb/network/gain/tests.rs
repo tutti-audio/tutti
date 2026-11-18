@@ -50,7 +50,7 @@ fn rt60_from_gain_is_exact() {
 #[test]
 fn the_edges_of_the_formula() {
     assert_eq!(
-        loop_gain(SampleSpan::of(100.0), Seconds(0.0), RATE),
+        loop_gain(SampleSpan::of(100.0), Seconds::ZERO, RATE),
         Amplitude::SILENT
     );
     assert_eq!(

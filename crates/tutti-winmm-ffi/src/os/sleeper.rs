@@ -9,7 +9,7 @@ use windows_sys::Win32::System::Threading::{
     SetEvent, SetWaitableTimer, TIMER_ALL_ACCESS, WaitForMultipleObjects,
 };
 
-use crate::error::{Error, OsOperation, last_os};
+use super::error::{Error, OsOperation, last_os};
 
 /// Why [`TimerWaiter::wait_for`] returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

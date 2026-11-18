@@ -7,8 +7,8 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
-use crate::OutputPort;
-use crate::error::{Error, MmOperation, check};
+use super::OutputPort;
+use super::error::{Error, MmOperation, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
 /// wire (320 microseconds each, rounded up to a millisecond per three).

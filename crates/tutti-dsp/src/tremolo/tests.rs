@@ -132,7 +132,7 @@ fn every_channel_takes_one_gain_and_rate_zero_holds() {
             assert!((f64::from(y) - sine_gain(0.6, n)).abs() < 1e-6, "{c} {n}");
         }
     }
-    let mut t = tremolo(OscillatorWave::Sine, Hz(0.0), 0.6);
+    let mut t = tremolo(OscillatorWave::Sine, Hz::ZERO, 0.6);
     let out = run(50, &[50], &ones[..1], |i, o| t.process(i, o));
     assert!(out[0].iter().all(|&y| (y - 0.7).abs() < 1e-6));
 }

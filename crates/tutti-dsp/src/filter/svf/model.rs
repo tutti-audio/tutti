@@ -42,7 +42,7 @@ impl SvfControls {
         ty: SvfType::LowPass,
         freq: Hz(1_000.0),
         q: Q::BUTTERWORTH,
-        gain: Db(0.0),
+        gain: Db::UNITY,
     };
 
     /// Whether these controls are past the dead-band of `applied`, the controls a
