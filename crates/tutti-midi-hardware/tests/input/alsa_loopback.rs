@@ -12,7 +12,7 @@
 //! (`sudo modprobe snd-seq-dummy`) and fails without them.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::listener::Listener;
 
@@ -88,7 +88,7 @@ impl Marker {
         }
     }
 
-    /// The notes of `events` that this process sent, as (starts, note).
+    /// The notes of `events` that this process sent, as (is_on, note).
     fn mine(&self, events: &[Ump]) -> Vec<(bool, u8)> {
         events
             .iter()
@@ -106,6 +106,32 @@ impl Marker {
     }
 }
 
+/// A hang guard: the waits below return when the events arrive.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+/// After the expected events, the loopback is drained this long for extras.
+const QUIET: Duration = Duration::from_millis(100);
+
+impl Marker {
+    /// Plays until `expected` is what `mine` holds of the arrivals, failing
+    /// with what was heard after [`PATIENCE`], then drains [`QUIET`] more so a
+    /// duplicate is heard too. Returns everything heard.
+    fn hear(&self, graph: &mut Listener, expected: &[(bool, u8)]) -> Vec<Ump> {
+        let end = Instant::now() + PATIENCE;
+        let mut heard = Vec::new();
+        while self.mine(&heard).len() < expected.len() {
+            assert!(
+                Instant::now() < end,
+                "{expected:?} never came back; heard {:?}",
+                self.mine(&heard)
+            );
+            heard.extend(graph.listen(Duration::from_millis(5)));
+        }
+        heard.extend(graph.listen(QUIET));
+        heard
+    }
+}
+
 /// `Midi Through` is a kernel-wide loopback, so a test running in parallel in
 /// another process puts its notes into the stream too: the test asserts on the
 /// events of its own [`Marker`] only.
@@ -117,21 +143,25 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
 
     let on = note_on(m.channel, base, 0x8000);
     assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
-    let heard = lb.graph.listen(Duration::from_millis(150));
-    assert_eq!(m.mine(&heard), [(true, base)], "the note on came back");
+    let heard = m.hear(&mut lb.graph, &[(true, base)]);
+    assert_eq!(m.mine(&heard), [(true, base)], "the note on came back once");
 
     let off = note_off(m.channel, base, 0x4000);
     assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]).packets(), 1);
-    let heard = lb.graph.listen(Duration::from_millis(150));
-    assert_eq!(m.mine(&heard), [(false, base)], "the note off came back");
+    let heard = m.hear(&mut lb.graph, &[(false, base)]);
+    assert_eq!(
+        m.mine(&heard),
+        [(false, base)],
+        "the note off came back once"
+    );
 
     for n in base..base + 10 {
         let _ = lb
             .sink
             .queue(&[(Offset::ZERO, note_on(m.channel, n, 0xA000))]);
     }
-    let heard = lb.graph.listen(Duration::from_millis(250));
     let burst: Vec<(bool, u8)> = (base..base + 10).map(|n| (true, n)).collect();
+    let heard = m.hear(&mut lb.graph, &burst);
     assert_eq!(
         m.mine(&heard),
         burst,
