@@ -13,13 +13,14 @@ pub(crate) const TIMER_MAX: Duration = Duration::from_secs(60 * 60);
 /// The longest the first Zero Length UMP Data Command may follow the last
 /// UMP Data Command that carried data (M2-124 section 7.2.1).
 const IDLE_INTERVAL_MAX: Duration = Duration::from_millis(300);
-/// The range M2-124 section 6.2 recommends for the delay between a repeated
-/// command's repeats.
-const REPEAT_INTERVAL_MIN: Duration = Duration::from_millis(300);
-const REPEAT_INTERVAL_MAX: Duration = Duration::from_secs(2);
 
 tutti_units::ranged! {
     /// A session timer: a wait, an interval or a timeout, from 1 ms to 1 h.
+    ///
+    /// The bounds are this crate's, not the specification's (M2-124 section 6.13 and the
+    /// other timers give no bound): no timer is zero, so no endpoint asks its driver
+    /// for the clock in a loop, and none is past an hour, so an `Instant` plus
+    /// a timer never overflows.
     Timer(Duration), TimerOutOfRange, "within 1 ms..=1 h",
     |raw| raw.as_nanos() >= TIMER_MIN.as_nanos() && raw.as_nanos() <= TIMER_MAX.as_nanos()
 }
@@ -30,14 +31,6 @@ tutti_units::ranged! {
     /// first.
     IdleInterval(Duration), IdleIntervalOutOfRange, "within 1 ms..=300 ms",
     |raw| raw.as_nanos() >= TIMER_MIN.as_nanos() && raw.as_nanos() <= IDLE_INTERVAL_MAX.as_nanos()
-}
-
-tutti_units::ranged! {
-    /// The delay between the repeats of an Invitation, Session Reset or Bye,
-    /// the 300 ms to 2 s M2-124 section 6.2 recommends.
-    RepeatInterval(Duration), RepeatIntervalOutOfRange, "within 300 ms..=2 s",
-    |raw| raw.as_nanos() >= REPEAT_INTERVAL_MIN.as_nanos()
-        && raw.as_nanos() <= REPEAT_INTERVAL_MAX.as_nanos()
 }
 
 const BUFFER_DEFAULT: NonZeroUsize = NonZeroUsize::new(256).unwrap();
@@ -111,7 +104,7 @@ pub struct SessionConfig {
     pub(crate) requests: Requests,
     pub(crate) ping_interval: Timer,
     pub(crate) liveness_timeout: Timer,
-    pub(crate) repeat_interval: RepeatInterval,
+    pub(crate) repeat_interval: Timer,
     pub(crate) command_timeout: Timer,
     pub(crate) pending_timeout: Timer,
 }
@@ -126,7 +119,7 @@ impl Default for SessionConfig {
             requests: Requests::UpTo(REQUESTS_DEFAULT),
             ping_interval: Timer::of(Duration::from_secs(2)),
             liveness_timeout: Timer::of(Duration::from_secs(6)),
-            repeat_interval: RepeatInterval::of(Duration::from_millis(500)),
+            repeat_interval: Timer::of(Duration::from_millis(500)),
             command_timeout: Timer::of(Duration::from_secs(5)),
             pending_timeout: Timer::of(Duration::from_secs(60)),
         }
@@ -193,8 +186,10 @@ impl SessionConfig {
     }
 
     /// The delay between the repeats of an Invitation, Session Reset or Bye.
+    /// M2-124 section 6.2 says "A delay between 300ms and 2 seconds is
+    /// recommended"; the default is 500 ms.
     #[must_use]
-    pub const fn with_repeat_interval(mut self, interval: RepeatInterval) -> Self {
+    pub const fn with_repeat_interval(mut self, interval: Timer) -> Self {
         self.repeat_interval = interval;
         self
     }
@@ -253,14 +248,11 @@ mod tests {
     }
 
     #[test]
-    fn a_repeat_interval_takes_the_300_ms_to_2_s_the_specification_recommends() {
-        check_range_contract(&RangeContract {
-            new: RepeatInterval::new,
-            get: RepeatInterval::get,
-            of: Some(RepeatInterval::of),
-            valid: &[MS(300), MS(500), Duration::from_secs(2)],
-            invalid: &[Duration::ZERO, MS(299), Duration::from_secs(2) + MS(1)],
-        });
+    fn a_repeat_interval_outside_the_recommended_300_ms_to_2_s_is_accepted_and_kept() {
+        for value in [MS(100), Duration::from_secs(5)] {
+            let config = SessionConfig::default().with_repeat_interval(Timer::of(value));
+            assert_eq!(config.repeat_interval.get(), value);
+        }
     }
 
     #[test]
@@ -270,7 +262,7 @@ mod tests {
             .with_reorder_wait(Timer::of(MS(1)))
             .with_ping_interval(Timer::of(MS(250)))
             .with_liveness_timeout(Timer::of(TIMER_MAX))
-            .with_repeat_interval(RepeatInterval::of(MS(300)))
+            .with_repeat_interval(Timer::of(MS(300)))
             .with_command_timeout(Timer::of(MS(7)))
             .with_pending_timeout(Timer::of(MS(9)));
         assert_eq!(config.idle_interval.get(), MS(300));

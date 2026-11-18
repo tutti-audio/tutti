@@ -179,7 +179,7 @@ fn a_device_serves_a_client_and_is_a_client_of_another_host_on_two_ports() {
 
 /// A device with two UMP Endpoints runs a Host for each, each with its own
 /// port and name and the Product Instance Id they share.
-/// Spec: m2-124/10#1, m2-124/10#2
+/// Spec: m2-124/10#1
 #[test]
 fn a_device_with_two_endpoints_runs_a_host_for_each_on_its_own_port_and_name() {
     let (keys, synth) = (identity("Keys", "DEV-1"), identity("Synth", "DEV-1"));

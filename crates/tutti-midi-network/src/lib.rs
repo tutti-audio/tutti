@@ -82,8 +82,8 @@ pub use command::{
     UserAuthentication,
 };
 pub use config::{
-    Fec, IdleInterval, IdleIntervalOutOfRange, RepeatInterval, RepeatIntervalOutOfRange, Requests,
-    Retransmit, SessionConfig, Timer, TimerOutOfRange,
+    Fec, IdleInterval, IdleIntervalOutOfRange, Requests, Retransmit, SessionConfig, Timer,
+    TimerOutOfRange,
 };
 pub use datagram::{
     Commands, DatagramBuilder, MAX_DATAGRAM_BYTES, Refused, SIGNATURE, SignatureError, parse,

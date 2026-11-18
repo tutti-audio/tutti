@@ -159,6 +159,7 @@ fn a_host_that_takes_no_more_sessions_still_answers_a_ping_from_a_stranger() {
         commands(&reply.payload),
         [Command::PingReply(PingId::new(7))]
     );
+    assert_eq!(host.session_count(), 1, "the Ping opens no Session");
 
     // The same Client's Invitation is refused: the Ping got no Session.
     let invitation = Command::Invitation(Invitation {
