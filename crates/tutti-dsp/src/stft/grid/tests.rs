@@ -117,3 +117,25 @@ fn shape_agreement_is_checkable_before_elementwise_work() {
     assert!(g.same_shape_as(&same));
     assert!(!g.same_shape_as(&different), "same length, different shape");
 }
+
+/// Frames of 4 every 2 over 9 samples: (9 - 4) / 2 + 1 = 3. Under one window
+/// none fit, and a zero window or hop fits none rather than dividing by zero.
+#[test]
+fn whole_frames_fit_by_the_closed_form_and_a_zero_window_or_hop_fits_none() {
+    assert_eq!(
+        FrameCount::fitting(Samples(9), Samples(4), Samples(2)),
+        FrameCount(3)
+    );
+    assert_eq!(
+        FrameCount::fitting(Samples(3), Samples(4), Samples(2)),
+        FrameCount(0)
+    );
+    assert_eq!(
+        FrameCount::fitting(Samples(9), Samples(4), Samples(0)),
+        FrameCount(0)
+    );
+    assert_eq!(
+        FrameCount::fitting(Samples(9), Samples(0), Samples(2)),
+        FrameCount(0)
+    );
+}
