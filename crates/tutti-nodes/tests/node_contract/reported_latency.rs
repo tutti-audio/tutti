@@ -313,7 +313,7 @@ mod convolver {
     #[test]
     fn convolver_dry_and_wet_leave_together_at_the_reported_latency() {
         for mix in [0.0_f32, 0.5, 1.0] {
-            let node = ConvolverNode::new(Mono::new(&[1.0]), Samples(256));
+            let node = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(256));
 
             let latency = node.latency_samples().0;
             assert_eq!(latency, 256);
@@ -338,18 +338,21 @@ mod convolver {
     /// same latency as its wet path.
     #[test]
     fn stereo_convolver_dry_and_wet_leave_together_at_the_reported_latency() {
-        type Build = fn() -> ConvolverNode;
+        type Build = fn() -> ConvolverNode<f32>;
         let builds: [(&str, Build); 7] = [
             ("mono", || {
-                ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), Samples(128)).unwrap()
+                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&[1.0]), Samples(128)).unwrap()
             }),
             ("dual mono", || {
-                ConvolverNode::per_channel(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(128))
-                    .unwrap()
+                ConvolverNode::<f32>::per_channel(
+                    &[Mono::new(&[1.0]), Mono::new(&[1.0])],
+                    Samples(128),
+                )
+                .unwrap()
             }),
             ("true stereo", || {
                 let one = [1.0_f32];
-                ConvolverNode::true_stereo(
+                ConvolverNode::<f32>::true_stereo(
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
@@ -358,17 +361,18 @@ mod convolver {
                 )
             }),
             ("folded", || {
-                ConvolverNode::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(128))
+                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(128))
                     .unwrap()
             }),
             ("shared x6", || {
-                ConvolverNode::shared_ir(6u16, Mono::new(&[1.0]), Samples(128)).unwrap()
+                ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples(128)).unwrap()
             }),
             ("per_channel x6", || {
-                ConvolverNode::per_channel(&[Mono::new(&[1.0_f32]); 6], Samples(128)).unwrap()
+                ConvolverNode::<f32>::per_channel(&[Mono::new(&[1.0_f32]); 6], Samples(128))
+                    .unwrap()
             }),
             ("folded x6", || {
-                ConvolverNode::folded(&[Mono::new(&[1.0_f32]); 6], Samples(128)).unwrap()
+                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0_f32]); 6], Samples(128)).unwrap()
             }),
         ];
         for (name, build) in builds {
@@ -398,7 +402,11 @@ mod convolver {
     /// aligned input is cleared by the graph's own reset.)
     #[test]
     fn convolver_reset_clears_the_buffered_take() {
-        let mut node = prepared(ConvolverNode::new(Mono::new(&[1.0]), Samples(64)), SR, 256);
+        let mut node = prepared(
+            ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(64)),
+            SR,
+            256,
+        );
 
         // Load the convolver with a take, then reset mid-block.
         drive(&mut node, SR, Planes::new(&[&[1.0; 32]]).unwrap(), &[]);
@@ -418,7 +426,7 @@ mod convolver {
     /// latency, so channels 1 and 2 each pre-roll by exactly that block.
     #[test]
     fn a_delay_after_a_convolver_adds_nothing_to_its_compensation() {
-        let conv = ConvolverNode::new(Mono::new(&[1.0]), Samples(256));
+        let conv = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(256));
         let latency = conv.latency_samples();
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
         let (conv, _) = g.add_with_controls(conv);

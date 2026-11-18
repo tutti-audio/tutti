@@ -134,18 +134,32 @@ fn the_band_limited_saw_leaves_the_aliased_lines_quiet() {
 #[test]
 fn a_frequency_that_is_not_finite_holds_the_phase() {
     let mut osc = Oscillator::new(OscillatorWave::Saw);
-    osc.step(Hz(1_000.0), RATE);
+    osc.step::<f32>(Hz(1_000.0), RATE);
     let held = osc;
-    osc.step(Hz(f64::NAN), RATE);
+    osc.step::<f32>(Hz(f64::NAN), RATE);
     assert_eq!(osc, held);
-    osc.step(Hz(-5.0), RATE);
+    osc.step::<f32>(Hz(-5.0), RATE);
     assert_eq!(osc, held);
 }
 
 #[test]
 fn reset_returns_the_phase_to_zero() {
     let mut osc = Oscillator::new(OscillatorWave::Sine);
-    osc.step(Hz(1_000.0), RATE);
+    osc.step::<f32>(Hz(1_000.0), RATE);
     osc.reset();
     assert_eq!(osc, Oscillator::new(OscillatorWave::Sine));
+}
+
+/// An `f64` step is the closed-form sine to `f64` precision: a quarter-rate sine is
+/// `0, 1, 0, -1` and a step at `1234.5 Hz` is `sin(2π f n / fs)`, so no step narrows to `f32`.
+#[test]
+fn an_f64_sine_is_the_closed_form_to_f64_precision() {
+    let mut osc = Oscillator::new(OscillatorWave::Sine);
+    for n in 0..4_800 {
+        let exact = libm::sin(TAU * 1_234.5 * f64::from(n) / RATE.get());
+        let y: f64 = osc.step(Hz(1_234.5), RATE);
+        // The phase is a 64-bit count of cycles, whose rounding of `1234.5 / 48000` is
+        // 2^-64 a step: far under the bound.
+        assert!((y - exact).abs() < 1e-12, "sample {n}: {y} vs {exact}");
+    }
 }

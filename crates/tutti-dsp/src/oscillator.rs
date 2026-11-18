@@ -92,9 +92,9 @@ fn near(phase: f64, edge: f64, dt: f64) -> Option<f64> {
 ///
 /// let mut osc = Oscillator::new(OscillatorWave::Sine);
 /// let rate = SampleRate::SR_48K;
-/// assert_eq!(osc.step(Hz(12_000.0), rate), 0.0);
+/// assert_eq!(osc.step::<f32>(Hz(12_000.0), rate), 0.0);
 /// // A quarter of a cycle later: the peak.
-/// assert!((osc.step(Hz(12_000.0), rate) - 1.0).abs() < 1e-6);
+/// assert!((osc.step::<f32>(Hz(12_000.0), rate) - 1.0).abs() < 1e-6);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Oscillator {
@@ -123,10 +123,11 @@ impl Oscillator {
         self.phase = RunningPhase::START;
     }
 
-    /// The sample at the current phase, then the phase advanced by one sample
-    /// of `frequency` at `rate`.
+    /// The sample at the current phase, in the float `F` it is wanted in, then the phase
+    /// advanced by one sample of `frequency` at `rate`. The wave is computed in `f64` and
+    /// narrows once, at the end.
     #[inline]
-    pub fn step(&mut self, frequency: Hz, rate: SampleRate) -> f32 {
+    pub fn step<F: Float>(&mut self, frequency: Hz, rate: SampleRate) -> F {
         // A non-finite frequency holds the phase.
         let f = finite_or(frequency.get(), 0.0);
         let dt = (f / rate.get()).clamp(0.0, 0.5);
@@ -165,7 +166,7 @@ impl Oscillator {
             }
         };
         self.phase = self.phase.advance(PhaseStep::from(PhaseIncrement(dt)));
-        y as f32
+        F::from_f64(y)
     }
 }
 
