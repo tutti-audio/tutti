@@ -173,41 +173,6 @@ impl CCNumber {
 mod tests {
     use super::*;
 
-    #[test]
-    fn try_from_agrees_with_new() {
-        for raw in 0..=255u8 {
-            assert_eq!(CCNumber::try_from(raw).ok(), CCNumber::new(raw));
-        }
-        assert_eq!(CCNumber::try_from(128), Err(CCNumberOutOfRange(128)));
-    }
-
-    #[test]
-    fn a_cc_number_out_of_range_is_refused() {
-        for raw in 0..=255u8 {
-            match CCNumber::new(raw) {
-                Some(controller) => {
-                    assert!(raw < 128);
-                    assert_eq!(controller.get(), raw);
-                    assert_eq!(CCNumber::of(raw), controller);
-                }
-                None => assert!(raw >= 128),
-            }
-        }
-    }
-
-    #[test]
-    fn masking_is_only_through_masked() {
-        assert_eq!(CCNumber::masked(128).get(), 0);
-        assert_eq!(CCNumber::masked(255).get(), 127);
-        assert_eq!(CCNumber::masked(74), CCNumber::BRIGHTNESS);
-    }
-
-    #[test]
-    #[should_panic(expected = "not within 7 bits")]
-    fn of_panics_out_of_range() {
-        let _ = CCNumber::of(128);
-    }
-
     /// The named roster against the MIDI 1.0 Control Change table. A wrong
     /// number here is silent at runtime — the synth just responds to the wrong
     /// knob — so the table is asserted rather than trusted.

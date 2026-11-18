@@ -1,8 +1,7 @@
 //! The Flex Data values the transport follows, as the project's unit types:
 //! Set Tempo (M2-104 section 7.5.3) as a [`Bpm`] and Set Time Signature
 //! (section 7.5.4) as a [`tutti_types::TimeSignature`]. [`tutti_ump::Flex`]
-//! holds the wire's integers and depends on no unit crate; this is the one
-//! reading of them.
+//! holds the wire's integers; this is the one reading of them as units.
 
 use tutti_types::{BeatsPerBar, NoteValue};
 use tutti_ump::FlexTimeSignature;

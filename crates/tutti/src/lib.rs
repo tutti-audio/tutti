@@ -739,9 +739,9 @@ pub mod midi {
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,
         FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupSpanOutOfRange,
-        MidiChannelOutOfRange, MidiGroupOutOfRange, MonoChannelsOutOfRange, MpeChannelsOutOfRange,
-        NoteNumberOutOfRange, SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange,
-        U7OutOfRange, U14OutOfRange, U28OutOfRange,
+        MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange, NoteNumberOutOfRange,
+        SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange, U7OutOfRange,
+        U14OutOfRange,
     };
     pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{

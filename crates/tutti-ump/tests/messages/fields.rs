@@ -6,9 +6,9 @@
 
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_ump::{
-    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-    MonoChannels, MpeChannels, NoteNumber, SharpsFlats, TicksPerQuarterNote, U4, U4OutOfRange, U7,
-    U14, U28,
+    CCNumber, ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
+    MidiChannel, MidiGroup, MonoChannels, MpeChannels, NoteNumber, SharpsFlats,
+    TicksPerQuarterNote, U4, U4OutOfRange, U7, U14, U28,
 };
 
 /// Every bit-width field: valid up to its all-ones value, refused above it.
@@ -42,6 +42,9 @@ fn each_bit_width_field_holds_zero_to_all_bits_set() {
     bit_field!(U28, u32, 28);
     bit_field!(NoteNumber, u8, 7);
     bit_field!(DeltaTicks, u32, 20);
+    bit_field!(MidiChannel, u8, 4);
+    bit_field!(MidiGroup, u8, 4);
+    bit_field!(CCNumber, u8, 7);
 }
 
 #[test]

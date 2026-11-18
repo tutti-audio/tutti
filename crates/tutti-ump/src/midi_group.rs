@@ -102,41 +102,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_from_agrees_with_new() {
-        for raw in 0..=255u8 {
-            assert_eq!(MidiGroup::try_from(raw).ok(), MidiGroup::new(raw));
-        }
-        assert_eq!(MidiGroup::try_from(16), Err(MidiGroupOutOfRange(16)));
-    }
-
-    #[test]
-    fn a_group_out_of_range_is_refused() {
-        for raw in 0..=255u8 {
-            match MidiGroup::new(raw) {
-                Some(group) => {
-                    assert!(raw < 16);
-                    assert_eq!(group.get(), raw);
-                    assert_eq!(MidiGroup::of(raw), group);
-                }
-                None => assert!(raw >= 16),
-            }
-        }
-    }
-
-    #[test]
-    fn masking_is_only_through_masked() {
-        assert_eq!(MidiGroup::masked(16).get(), 0);
-        assert_eq!(MidiGroup::masked(255).get(), 15);
-        assert_eq!(MidiGroup::masked(7), MidiGroup::of(7));
-    }
-
-    #[test]
-    #[should_panic(expected = "not within 4 bits")]
-    fn of_panics_out_of_range() {
-        let _ = MidiGroup::of(16);
-    }
-
-    #[test]
     fn a_group_and_a_channel_are_indistinguishable_by_value() {
         use crate::MidiChannel;
         // This is the premise that makes the separate type necessary, not a

@@ -88,41 +88,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_from_agrees_with_new() {
-        for raw in 0..=255u8 {
-            assert_eq!(MidiChannel::try_from(raw).ok(), MidiChannel::new(raw));
-        }
-        assert_eq!(MidiChannel::try_from(16), Err(MidiChannelOutOfRange(16)));
-    }
-
-    #[test]
-    fn a_channel_out_of_range_is_refused() {
-        for raw in 0..=255u8 {
-            match MidiChannel::new(raw) {
-                Some(channel) => {
-                    assert!(raw < 16);
-                    assert_eq!(channel.get(), raw);
-                    assert_eq!(MidiChannel::of(raw), channel);
-                }
-                None => assert!(raw >= 16),
-            }
-        }
-    }
-
-    #[test]
-    fn masking_is_only_through_masked() {
-        assert_eq!(MidiChannel::masked(16).get(), 0);
-        assert_eq!(MidiChannel::masked(255).get(), 15);
-        assert_eq!(MidiChannel::masked(9), MidiChannel::of(9));
-    }
-
-    #[test]
-    #[should_panic(expected = "not within 4 bits")]
-    fn of_panics_out_of_range() {
-        let _ = MidiChannel::of(16);
-    }
-
-    #[test]
     fn the_display_number_is_one_based() {
         assert_eq!(MidiChannel::FIRST.to_string(), "1");
         assert_eq!(MidiChannel::LAST.to_string(), "16");

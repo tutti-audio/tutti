@@ -8,14 +8,12 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/tutti-audio/tutti"
 publish = false
 
-# A dev-dependency of the crates whose tests read a repo asset or load a
+# A dev-dependency of the crates whose tests read a repo asset, load a
 # reference plugin or the plugin-server, check a range-checked type, or build
-# MIDI messages (`midi`). Its workspace dependencies without a feature are
-# `tutti-ump` and `tutti-midi-protocol`, which depends on `tutti-ump`, `tutti-units`
-# and `tutti-types` (the widened test values). `tutti-ump` and `tutti-midi-protocol`
-# dev-depend on this crate for `check_range_contract`, so their own tests meet a
-# second copy of them here: they use none of `midi`, whose signatures name them. It is never linked
-# into a shipped binary.
+# MIDI messages (`midi`). Without a feature it names `tutti-ump` and
+# `tutti-midi-protocol`. Those two dev-depend on this crate for
+# `check_range_contract`, so their tests link a second copy of them; they use
+# nothing of `midi`, whose signatures name them. It never ships.
 [dependencies]
 tutti-ump = { path = "../../crates/tutti-ump", default-features = false }
 # `MainThreadMarker`, the token `main_thread` makes: one type at the bottom of the
