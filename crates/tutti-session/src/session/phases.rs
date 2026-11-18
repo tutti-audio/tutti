@@ -218,7 +218,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     self.main_work.run(main);
                 }
                 self.graph.report_event_losses(out);
-                self.reports.silenced(self.output.load.as_ref(), out);
+                self.output.report_silenced(out);
                 // Last: the landings this update's own stages queued.
                 self.jobs.report_landed(out);
             }
@@ -355,7 +355,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// pre-roll to [`compensation`](Self::compensation), the total to
     /// [`latency`](Self::latency). Nothing before the first plan.
     pub(crate) fn publish_sent(&mut self) {
-        self.transport.publish(self.graph.sent_compensation());
+        self.graph.publish_sent();
     }
 
     /// Reports the newest fault the stream raised since the last poll, if the

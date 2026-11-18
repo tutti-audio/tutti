@@ -1,4 +1,4 @@
-//! [`Reports`]: what the session read at its last update, so the next reports only the rise.
+//! [`Reports`]: the fault count the last poll saw, and the events kept for the next poll.
 
 #![cfg_attr(
     not(feature = "device"),
@@ -6,18 +6,13 @@
 )]
 
 use tutti_engine::{OutputStream, StreamFaultKind};
-use tutti_metering::LoadMeter;
 
 use crate::SessionEvent;
 
-/// The readings the update's reports are rises against, and the events kept
-/// for the next poll.
+/// The stream-fault count the last poll saw, which the next reports the rise
+/// of, and the events kept for the next poll.
 #[derive(Debug, Default)]
 pub(crate) struct Reports {
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced) as
-    /// the last update read it: the next update reports the rise
-    /// ([`SessionEvent::BlocksSilenced`]).
-    silenced_seen: u64,
     /// The count of the stream's faults the last poll saw.
     faults_seen: u64,
     /// Events the session kept for its next poll: what a clock switch reported
@@ -26,20 +21,6 @@ pub(crate) struct Reports {
 }
 
 impl Reports {
-    /// The blocks the engine silenced since the last update, as one
-    /// [`SessionEvent::BlocksSilenced`]. The meter's count is cumulative
-    /// (and zeroed by a reset), so the rise is read against the last
-    /// reading; a reset restarts from the new count.
-    pub(crate) fn silenced(&mut self, load: Option<&LoadMeter>, out: &mut Vec<SessionEvent>) {
-        let Some(load) = load else { return };
-        let now = load.peek().silenced;
-        let rise = now.saturating_sub(self.silenced_seen);
-        self.silenced_seen = now;
-        if rise > 0 {
-            out.push(SessionEvent::BlocksSilenced(rise));
-        }
-    }
-
     /// Reports the newest fault `stream` raised since the last poll, if the
     /// clock has a stream. Whether the stream was lost: its device left.
     ///

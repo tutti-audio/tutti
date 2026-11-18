@@ -174,12 +174,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`PrerollTable::preroll`], `None` past the table's end. No audio
     /// thread reads it, so it is a plain lock, not a published cell.
     pub fn compensation(&self) -> &Arc<PrerollTable> {
-        &self.transport.compensation
+        self.graph.compensation()
     }
 
     /// The total latency of the plan sent last: what a DAW displays.
     pub fn latency(&self) -> Samples {
-        self.transport.latency
+        self.graph.latency()
     }
 
     /// The metronome's node (unwired: the host declares where it lands),

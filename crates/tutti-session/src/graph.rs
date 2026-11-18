@@ -401,6 +401,11 @@ pub struct Graph<F: Float = f32> {
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
+    /// The per-channel pre-roll of the plan sent last, for sources outside
+    /// the graph (a disk stream), republished with every plan.
+    compensation: Arc<tutti_graph::PrerollTable>,
+    /// The total latency of the plan sent last.
+    latency: Samples,
 }
 
 /// The wiring a re-insert at one key dropped, in the session's port types.
@@ -564,6 +569,8 @@ impl<F: Float> Graph<F> {
             graveyard: crate::plugin::Graveyard::default(),
             tempo,
             resumed: false,
+            compensation: Arc::default(),
+            latency: Samples(0),
         }
     }
 
@@ -3573,6 +3580,25 @@ impl<F: Float> Graph<F> {
     /// since it is what the executor is handed.
     pub(crate) fn sent_compensation(&self) -> Option<Compensation> {
         self.editor.base().map(|plan| compensation_of(plan))
+    }
+
+    /// Publishes the compensation of the plan sent last: the per-channel
+    /// pre-roll and the total latency. Nothing before the first plan.
+    pub(crate) fn publish_sent(&mut self) {
+        if let Some(sent) = self.sent_compensation() {
+            self.latency = sent.total();
+            self.compensation.set(sent.channels());
+        }
+    }
+
+    /// The per-channel pre-roll of the plan sent last.
+    pub(crate) fn compensation(&self) -> &Arc<tutti_graph::PrerollTable> {
+        &self.compensation
+    }
+
+    /// The total latency of the plan sent last.
+    pub(crate) fn latency(&self) -> Samples {
+        self.latency
     }
 
     /// A node's latency moved at runtime (a plugin's latency cell): hand

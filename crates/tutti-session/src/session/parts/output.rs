@@ -1,5 +1,5 @@
-//! [`OutputPart`]: where the mix lands: the root asked for, the policy, and what the engine
-//! exposes of its output (the load meter and the heard tap).
+//! [`OutputPart`]: the root asked for, the policy, and the engine's output-side readings (the
+//! heard tap, the load meter and its silenced count).
 
 #![cfg_attr(
     not(feature = "device"),
@@ -14,9 +14,9 @@ use tutti_graph::RootError;
 use tutti_metering::LoadMeter;
 use tutti_types::{ChannelLayout, ChannelTopology};
 
-use crate::OutputPolicy;
 use crate::graph::Graph;
 use crate::value::Cell;
+use crate::{OutputPolicy, SessionEvent};
 
 /// The root topology asked for, the output policy in force, and the engine's
 /// output-side readings.
@@ -35,6 +35,10 @@ pub(crate) struct OutputPart<F: Float> {
     pub(crate) heard: Option<(HeardTaps<F>, ChannelLayout)>,
     /// The engine's load meter, offline or on a device; `None` detached.
     pub(crate) load: Option<LoadMeter>,
+    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced) as
+    /// the last update read it: the next update reports the rise
+    /// ([`SessionEvent::BlocksSilenced`]).
+    silenced_seen: u64,
 }
 
 impl<F: Float> OutputPart<F> {
@@ -48,6 +52,7 @@ impl<F: Float> OutputPart<F> {
             policy,
             heard: None,
             load: None,
+            silenced_seen: 0,
         }
     }
 
@@ -107,6 +112,20 @@ impl<F: Float> OutputPart<F> {
     pub(crate) fn set_device_width(&mut self, width: ChannelLayout) {
         if let Some((_, layout)) = &mut self.heard {
             *layout = width;
+        }
+    }
+
+    /// The blocks the engine silenced since the last update, as one
+    /// [`SessionEvent::BlocksSilenced`]. The meter's count is cumulative
+    /// (and zeroed by a reset), so the rise is read against the last
+    /// reading; a reset restarts from the new count.
+    pub(crate) fn report_silenced(&mut self, out: &mut Vec<SessionEvent>) {
+        let Some(load) = &self.load else { return };
+        let now = load.peek().silenced;
+        let rise = now.saturating_sub(self.silenced_seen);
+        self.silenced_seen = now;
+        if rise > 0 {
+            out.push(SessionEvent::BlocksSilenced(rise));
         }
     }
 
