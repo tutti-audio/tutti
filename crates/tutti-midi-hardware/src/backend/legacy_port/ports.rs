@@ -21,9 +21,9 @@ pub(in crate::backend) struct PortInfo {
     /// The name to show: the friendly name where the device has one, shared by
     /// every port of a multi-port device.
     pub name: String,
-    /// The driver's product name for this port, which differs between a
+    /// The driver's name for this port (`szPname`), which differs between a
     /// device's ports where the friendly name does not.
-    pub product: String,
+    pub driver_name: String,
     /// What names the device: its interface path where the driver gives one.
     pub device: WinMmDevice,
 }
@@ -106,40 +106,73 @@ pub(in crate::backend) fn locate<P>(
         .map(|(port, _)| port)
 }
 
-/// The names to show for ports listed as `(shown, product)` in list order, each
-/// distinct from the rest.
+/// One port as the display rule sees it.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::backend) struct Listed<'a> {
+    /// The name to show before disambiguation.
+    pub shown: &'a str,
+    /// The driver's name for the port; empty or blank when it gives none.
+    pub driver_name: &'a str,
+}
+
+impl<'a> Listed<'a> {
+    /// The driver's name, trimmed; `None` when it gives none.
+    fn name(&self) -> Option<&'a str> {
+        let name = self.driver_name.trim();
+        (!name.is_empty()).then_some(name)
+    }
+}
+
+/// The names to show for `listed` ports, in list order, each distinct.
 ///
-/// A port whose shown name no other port has keeps it. Ports that share a shown
-/// name take their product names when those differ from each other; any name
-/// still taken by an earlier port gets a suffix, " 2", " 3", ... (the first
-/// number not taken), in list order. Display only: an id never reads a name.
-pub(in crate::backend) fn distinct_names(listed: &[(&str, &str)]) -> Vec<String> {
-    let shares = |shown: &str| listed.iter().filter(|(other, _)| *other == shown).count() > 1;
-    let products_differ = |shown: &str| {
-        let mut products: Vec<&str> = listed
-            .iter()
-            .filter(|(other, _)| *other == shown)
-            .map(|(_, product)| *product)
-            .collect();
-        products.sort_unstable();
-        products.windows(2).all(|pair| pair[0] != pair[1])
-    };
-    let mut names: Vec<String> = Vec::with_capacity(listed.len());
-    for (shown, product) in listed {
-        let wanted = if shares(shown) && products_differ(shown) {
-            product
-        } else {
-            shown
+/// 1. A shown name that only one port has is that port's, whatever the order:
+///    it is reserved before any other port is named.
+/// 2. A port whose shown name is shared takes its driver name (trimmed) when it
+///    is not blank, no other port of its group has the same one, and it is not
+///    another port's shown name.
+/// 3. The remaining ports of a group take the shown name, then " 2", " 3", ...
+///    (the first not yet taken), in list order.
+///
+/// Display only: an id never reads a name.
+pub(in crate::backend) fn distinct_names(listed: &[Listed<'_>]) -> Vec<String> {
+    let count = |shown: &str| listed.iter().filter(|l| l.shown == shown).count();
+    let mut names: Vec<Option<String>> = listed
+        .iter()
+        .map(|l| (count(l.shown) == 1).then(|| l.shown.to_owned()))
+        .collect();
+    for (at, l) in listed.iter().enumerate() {
+        if names[at].is_some() {
+            continue;
+        }
+        let Some(name) = l.name() else {
+            continue;
         };
-        let mut name = (*wanted).to_owned();
+        let alone_in_group = listed
+            .iter()
+            .filter(|other| other.shown == l.shown)
+            .filter(|other| other.name() == Some(name))
+            .count()
+            == 1;
+        let another_ports_shown = listed
+            .iter()
+            .any(|other| other.shown != l.shown && other.shown == name);
+        if alone_in_group && !another_ports_shown {
+            names[at] = Some(name.to_owned());
+        }
+    }
+    for (at, l) in listed.iter().enumerate() {
+        if names[at].is_some() {
+            continue;
+        }
+        let mut name = l.shown.to_owned();
         let mut number = 2;
-        while names.contains(&name) {
-            name = format!("{wanted} {number}");
+        while names.iter().flatten().any(|taken| *taken == name) {
+            name = format!("{} {number}", l.shown);
             number += 1;
         }
-        names.push(name);
+        names[at] = Some(name);
     }
-    names
+    names.into_iter().flatten().collect()
 }
 
 /// The endpoint of the `occurrence`th port that `info` describes on `side`: a
@@ -164,9 +197,12 @@ pub(in crate::backend) fn endpoints(
     ports: impl IntoIterator<Item = PortInfo>,
 ) -> Vec<OsEndpoint> {
     let ports: Vec<PortInfo> = ports.into_iter().collect();
-    let listed: Vec<(&str, &str)> = ports
+    let listed: Vec<Listed<'_>> = ports
         .iter()
-        .map(|info| (info.name.as_str(), info.product.as_str()))
+        .map(|info| Listed {
+            shown: &info.name,
+            driver_name: &info.driver_name,
+        })
         .collect();
     let names = distinct_names(&listed);
     let mut seen: BTreeMap<u32, u32> = BTreeMap::new();

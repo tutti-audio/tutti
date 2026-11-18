@@ -17,7 +17,10 @@
 //!   is gone instead of opening the device that took its place. The name shown is
 //!   the device's friendly name (from its property store) where it has one and
 //!   winmm's product name (31 characters at most) otherwise; identity is the
-//!   interface path or the product name and ids, never the friendly name. A
+//!   interface path or the product name and ids, never the friendly name. Ports
+//!   that share a shown name (a multi-port device) are shown by their driver
+//!   names where those differ, else numbered (`distinct_names`); an id never
+//!   reads a name. A
 //!   listed port owns its list position, and the open checks it again once the
 //!   port is open, failing when the device there is not the one listed.
 //! - **Input** is a winmm callback on the driver's thread. A short message is
@@ -89,14 +92,15 @@ fn identified<D: PortKind>() -> Vec<(Port<D>, WinMmDevice)> {
 }
 
 /// Every port of direction `D` now, as a listing shows it: the display name
-/// (the friendly name where the device has one, read here and nowhere else) and
+/// (the friendly name where the device has one, read here and nowhere else;
+/// `endpoints` makes shared names distinct by the driver names or numbers) and
 /// what names the device.
 fn shown<D: PortKind>() -> Vec<PortInfo> {
     ports::<D>()
         .iter()
         .map(|port| PortInfo {
             name: port.name().to_owned(),
-            product: port.caps().name.clone(),
+            driver_name: port.caps().name.clone(),
             device: device_of(port),
         })
         .collect()

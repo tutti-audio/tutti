@@ -21,10 +21,11 @@
 //!   the OS may still reach the state, so dropping a `Leaked` leaks it.
 //!
 //! A callback that sees the driver close the port records it with
-//! [`Slot::note_driver_closed`]; the teardown reads [`Slot::driver_closed`] and
-//! then makes no call with the handle, which the OS has declared invalid. The
-//! mark is made while the callback is inside, so a teardown that follows a
-//! [`Closed`] always sees it.
+//! [`Slot::note_driver_closed`]. [`Closed::teardown`] then runs no teardown,
+//! because the OS has declared the handle invalid (and may have reused its
+//! value), and gives a [`Leaked`]: the driver may still hold the headers and
+//! buffers, so the state is never freed. The mark is made while the callback is
+//! inside, so a [`Closed`] always sees it.
 //!
 //! No callback that entered holds a reference the teardown could free, because
 //! the count is final (above) before the teardown starts, and the slot itself
@@ -283,8 +284,11 @@ impl<S> Closed<S> {
     /// Runs the teardown, which frees what the OS holds of the state and says
     /// whether it let go (the port closed, or gone); when it did not, the state
     /// is [`Leaked`].
+    ///
+    /// After a driver close ([`Slot::note_driver_closed`]) `f` does not run and
+    /// the state is [`Leaked`].
     pub(crate) fn teardown(self, f: impl FnOnce(&Slot<S>) -> bool) -> Outcome<S> {
-        if f(&self.0) {
+        if !self.0.driver_closed() && f(&self.0) {
             Outcome::Closed
         } else {
             Outcome::Leaked(Leaked(Some(self.0)))
@@ -334,7 +338,7 @@ impl<S> Leaked<S> {
 
 #[cfg(all(test, not(loom)))]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
 
@@ -450,6 +454,32 @@ mod tests {
 
         let fresh = registry.open(()).begin_close(BOUND);
         assert!(!fresh.poll(Duration::ZERO).into_closed().driver_closed());
+    }
+
+    #[test]
+    fn a_driver_closed_teardown_runs_nothing_and_leaks_the_state() {
+        let drops = AtomicUsize::new(0);
+        let registry = Registry::new();
+        let owner = registry.open(Counted(&drops));
+        registry
+            .enter(owner.id())
+            .expect("open")
+            .note_driver_closed();
+        let ran = AtomicBool::new(false);
+        let Outcome::Leaked(leaked) = owner
+            .begin_close(BOUND)
+            .poll(Duration::ZERO)
+            .into_closed()
+            .teardown(|_| {
+                ran.store(true, Ordering::SeqCst);
+                true
+            })
+        else {
+            panic!("the driver may still hold the buffers");
+        };
+        assert!(!ran.load(Ordering::SeqCst));
+        drop(leaked);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -641,17 +671,25 @@ mod loom_model {
                 })
             };
             let closed = wait(owner.begin_close(Duration::MAX));
-            let mut seen = false;
-            assert!(matches!(
-                closed.teardown(|state| {
-                    seen = state.driver_closed();
-                    state.teardown();
-                    true
-                }),
-                Outcome::Closed
-            ));
+            let mut ran = false;
+            let outcome = closed.teardown(|state| {
+                ran = true;
+                state.teardown();
+                true
+            });
             let entered = marker.join().expect("callback").is_some();
-            assert_eq!(seen, entered);
+            // The teardown ran exactly when no driver close was marked, and a
+            // marked close leaves the state leaked, never freed.
+            assert_eq!(ran, !entered);
+            match outcome {
+                Outcome::Closed => assert!(!entered),
+                Outcome::Leaked(leaked) => {
+                    assert!(entered);
+                    assert_eq!(drops.load(Ordering::SeqCst), 0);
+                    leaked.release();
+                }
+            }
+            assert_eq!(drops.load(Ordering::SeqCst), 1);
         });
     }
 
