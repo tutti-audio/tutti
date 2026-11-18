@@ -677,11 +677,11 @@ pub mod midi {
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, Lead, LyricChange, MalformedMeta,
-        MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
+        Altered, Converted, DropReason, Dropped, Layout, Lead, LeadTrack, LyricChange,
+        MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
         OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        Placement, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
+        Pattern, Placement, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
         SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmpteFractionalFrames,
         SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
         SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,

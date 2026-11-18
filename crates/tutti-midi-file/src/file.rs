@@ -530,21 +530,22 @@ impl FileEvent {
 }
 
 /// One of the four meta events that open an SMF track (SMF 1.0 section 3.3),
-/// each a field of its [`Track`] and so never an event placed late: a Sequence
+/// each a field of its file or track and so never an event placed late: a Sequence
 /// Number, a Track Name, an SMPTE Offset and a copyright notice. A
 /// [`Normalized`] names the one it changed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Lead {
-    /// `FF 00 02 ssss`: the number of the track's sequence ([`Track::numbered`]).
+    /// `FF 00 02 ssss`: the number of the track's sequence
+    /// ([`LeadTrack::numbered`], [`Pattern::numbered`]).
     SequenceNumber(u16),
     /// `FF 03`: the track's name, as the file stores it ([`Track::named`]).
     TrackName(Box<[u8]>),
     /// `FF 54 05 hr mn se fr ff`: the SMPTE time the track starts at
-    /// ([`Track::smpte_start`]).
+    /// ([`LeadTrack::smpte_start`], [`Pattern::smpte_start`]).
     SmpteOffset(SmpteOffset),
     /// `FF 02`: the copyright notice, as the file stores it
-    /// ([`Track::copyright`]).
+    /// ([`LeadTrack::copyright`]).
     Copyright(Box<[u8]>),
 }
 
@@ -625,23 +626,205 @@ pub enum Normalized {
     },
 }
 
+/// The opening metas of a track other than its name: what a [`Pattern`] or the
+/// [`LeadTrack`] holds beside its [`Track`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct Opening {
+    /// The Sequence Number.
+    pub(crate) number: Option<u16>,
+    /// The SMPTE Offset.
+    pub(crate) smpte_start: Option<SmpteOffset>,
+}
+
+impl Opening {
+    /// The sequence number of the track at `index` in its file: its own, or
+    /// the place it has in the file.
+    fn number_at(self, index: usize) -> u16 {
+        self.number
+            .unwrap_or_else(|| u16::try_from(index).unwrap_or(u16::MAX))
+    }
+}
+
+/// The first track of a format 0 or 1 file: a [`Track`] and the three metas
+/// SMF 1.0 section 3.3 puts in the first track, the file's Sequence Number,
+/// SMPTE Offset and copyright notice. They belong to the lead and to no other
+/// type a file is built from, so a file cannot hold one anywhere else
+/// ([`Layout::Format0`], [`Layout::Format1`]). The writer puts them at tick 0
+/// before every event of the track, in tutti's order: copyright, Sequence
+/// Number, Track Name, SMPTE Offset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeadTrack {
+    track: Track,
+    opening: Opening,
+    copyright: Option<Box<[u8]>>,
+}
+
+impl LeadTrack {
+    /// The lead of a file: `track` with its events and name, and none of the
+    /// file's opening metas until [`numbered`](Self::numbered),
+    /// [`smpte_start`](Self::smpte_start) and [`copyright`](Self::copyright)
+    /// give them.
+    #[must_use]
+    pub fn new(track: Track) -> Self {
+        Self {
+            track,
+            opening: Opening::default(),
+            copyright: None,
+        }
+    }
+
+    /// The file's Sequence Number is `number` (replacing the one it has),
+    /// written at tick 0 where SMF 1.0 section 3.3 puts it: a format 0 or 1
+    /// file holds one sequence, whose number is in its first track.
+    #[must_use]
+    pub fn numbered(mut self, number: u16) -> Self {
+        self.opening.number = Some(number);
+        self
+    }
+
+    /// The file starts at the SMPTE time `offset` (replacing the one it has):
+    /// its SMPTE Offset is written at tick 0, where SMF 1.0 section 3.3 says
+    /// it belongs, and in a format 1 file it is stored with the tempo map.
+    #[must_use]
+    pub fn smpte_start(mut self, offset: SmpteOffset) -> Self {
+        self.opening.smpte_start = Some(offset);
+        self
+    }
+
+    /// A copyright notice, written as the file's first event at tick 0 (SMF
+    /// 1.0 section 3.3: the first event of the first track chunk). A file
+    /// holds one notice: a second is appended to it on a new line.
+    #[must_use]
+    pub fn copyright(mut self, notice: &str) -> Self {
+        self.copyright = Some(append_notice(self.copyright.take(), notice));
+        self
+    }
+}
+
+/// One sequence of a format 2 file: a [`Track`] with its own Sequence Number
+/// and SMPTE Offset (SMF 1.0 section 3.3: in a format 2 file the number
+/// identifies each pattern, and the offset says where its track chunk starts).
+/// The writer puts them at tick 0 before every event, in tutti's order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pattern {
+    track: Track,
+    opening: Opening,
+}
+
+impl Pattern {
+    /// The pattern `track`, numbered by its place in the file until
+    /// [`numbered`](Self::numbered).
+    #[must_use]
+    pub fn new(track: Track) -> Self {
+        Self {
+            track,
+            opening: Opening::default(),
+        }
+    }
+
+    /// The pattern's Sequence Number is `number` (replacing the one it has),
+    /// which a Cue message in a song refers to.
+    #[must_use]
+    pub fn numbered(mut self, number: u16) -> Self {
+        self.opening.number = Some(number);
+        self
+    }
+
+    /// The pattern starts at the SMPTE time `offset` (replacing the one it
+    /// has).
+    #[must_use]
+    pub fn smpte_start(mut self, offset: SmpteOffset) -> Self {
+        self.opening.smpte_start = Some(offset);
+        self
+    }
+}
+
+/// The tracks of an SMF by its format: each format holds the opening metas of
+/// SMF 1.0 section 3.3 where the specification allows them, so none can be
+/// misplaced ([`MidiFile::smf`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Layout {
+    /// Format 0: one track holding everything.
+    Format0(LeadTrack),
+    /// Format 1: simultaneous tracks of one timeline. The lead is the first
+    /// track, which carries the file's opening metas and, by tutti's rule
+    /// ([`TracksError::TempoMapNotInFirstTrack`]), the tempo map.
+    Format1 {
+        /// The first track.
+        lead: LeadTrack,
+        /// The tracks after it.
+        tracks: Vec<Track>,
+    },
+    /// Format 2: independent sequences, each with its own timeline.
+    Format2 {
+        /// The copyright notice of the file, written as the first event of
+        /// the first pattern (SMF 1.0 section 3.3). Notices of several pieces
+        /// go together in this one.
+        copyright: Option<String>,
+        /// The patterns, in file order.
+        patterns: Vec<Pattern>,
+    },
+}
+
+impl Layout {
+    /// The format, the tracks in file order, each one's opening metas, and
+    /// the notice written in the first.
+    fn into_parts(self) -> (SmfFormat, Vec<Track>, Vec<Opening>, Option<Box<[u8]>>) {
+        match self {
+            Self::Format0(lead) => (
+                SmfFormat::SingleTrack,
+                vec![lead.track],
+                vec![lead.opening],
+                lead.copyright,
+            ),
+            Self::Format1 { lead, tracks } => {
+                let openings = vec![Opening::default(); tracks.len()];
+                (
+                    SmfFormat::Parallel,
+                    std::iter::once(lead.track).chain(tracks).collect(),
+                    std::iter::once(lead.opening).chain(openings).collect(),
+                    lead.copyright,
+                )
+            }
+            Self::Format2 {
+                copyright,
+                patterns,
+            } => (
+                SmfFormat::Sequential,
+                patterns.iter().map(|p| p.track.clone()).collect(),
+                patterns.iter().map(|p| p.opening).collect(),
+                copyright.map(|notice| notice.as_bytes().into()),
+            ),
+        }
+    }
+}
+
+/// `held` with `notice` on a new line after it.
+fn append_notice(held: Option<Box<[u8]>>, notice: &str) -> Box<[u8]> {
+    match held {
+        Some(held) => [&*held, b"\n", notice.as_bytes()].concat().into(),
+        None => notice.as_bytes().into(),
+    }
+}
+
 /// A track: events in order, each at an absolute [`Tick`], and where the track
 /// ends.
 ///
-/// An SMF's track is one `MTrk` chunk and a Clip File's one sequence. The four
-/// meta events SMF 1.0 section 3.3 puts at the start of a track are its
-/// fields, not events: a Sequence Number ([`numbered`](Self::numbered)), a
-/// Track Name ([`named`](Self::named)), an SMPTE Offset
-/// ([`smpte_start`](Self::smpte_start)) and a copyright notice
-/// ([`copyright`](Self::copyright)). The writer puts them at tick 0 before
-/// every event, in tutti's order: copyright (section 3.3: "the first
-/// event in the first track chunk"), Sequence Number, Track Name, SMPTE
-/// Offset; the specification does not order the other three among themselves.
-/// They are written ahead of every other event at tick 0, so a track read with
-/// a Set Tempo and then a Track Name at tick 0 writes back with the Track Name
-/// first.
-/// So a track cannot hold one late, and one field holds the one notice a file
-/// has. A Clip File's track has none of them.
+/// An SMF's track is one `MTrk` chunk and a Clip File's one sequence. Of the
+/// four meta events SMF 1.0 section 3.3 puts at the start of a track, the Track
+/// Name is the track's field ([`named`](Self::named)), not an event. The
+/// Sequence Number, the SMPTE Offset and the copyright notice are held beside
+/// the track by a [`LeadTrack`] or a [`Pattern`], where the specification
+/// allows them, so a track a file hands out carries none of them and cannot be
+/// placed where they do not belong. The writer puts them at tick 0 before every
+/// event, in tutti's order: copyright (section 3.3: "the first event in the
+/// first track chunk"), Sequence Number, Track Name, SMPTE Offset; the
+/// specification does not order the other three among themselves. They are
+/// written ahead of every other event at tick 0, so a track read with a Set
+/// Tempo and then a Track Name at tick 0 writes back with the Track Name
+/// first. So a track cannot hold one late. A Clip File's track has none of
+/// them.
 ///
 /// The builder methods ([`note`](Self::note), [`meta`](Self::meta),
 /// [`push`](Self::push)) and [`Extend`] keep the events in tick order and the
@@ -650,14 +833,8 @@ pub enum Normalized {
 /// [`header`](Self::header) and [`header_end`](Self::header_end).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Track {
-    /// The Sequence Number, written first at tick 0 after the notice.
-    pub(crate) number: Option<u16>,
     /// The Track Name's bytes.
     pub(crate) name: Option<Box<[u8]>>,
-    /// The SMPTE Offset.
-    pub(crate) smpte_start: Option<SmpteOffset>,
-    /// The copyright notice's bytes.
-    pub(crate) copyright: Option<Box<[u8]>>,
     /// A Clip File's configuration header (M2-116 section 6), in order.
     pub(crate) header: Vec<(Tick, FileEvent)>,
     /// Where the header ends, on the header's clock.
@@ -857,15 +1034,6 @@ impl Track {
         self
     }
 
-    /// The track's Sequence Number is `number` (replacing the one it has),
-    /// written at tick 0 where SMF 1.0 section 3.3 puts it: before any nonzero
-    /// delta-time and any channel message.
-    #[must_use]
-    pub fn numbered(mut self, number: u16) -> Self {
-        self.number = Some(number);
-        self
-    }
-
     /// The track's Track Name is `name` (replacing the one it has), written at
     /// tick 0 (SMF 1.0 section 3.3: it appears at time 0). The name of a format
     /// 0 track or of the first track of a format 1 file names the sequence.
@@ -875,76 +1043,11 @@ impl Track {
         self
     }
 
-    /// The track starts at the SMPTE time `offset` (replacing the one it
-    /// has): its SMPTE Offset is written at tick 0, where SMF 1.0 section 3.3
-    /// says it belongs.
-    #[must_use]
-    pub fn smpte_start(mut self, offset: SmpteOffset) -> Self {
-        self.smpte_start = Some(offset);
-        self
-    }
-
-    /// A copyright notice, written as the track's first event at tick 0 (SMF
-    /// 1.0 section 3.3: the first event of the first track chunk, which is the
-    /// only track [`MidiFile::smf`] accepts one on). The track holds one
-    /// notice: a second is appended to it on a new line.
-    #[must_use]
-    pub fn copyright(mut self, notice: &str) -> Self {
-        self.copyright = Some(match self.copyright.take() {
-            Some(held) => [&*held, b"\n", notice.as_bytes()].concat().into(),
-            None => notice.as_bytes().into(),
-        });
-        self
-    }
-
-    /// The track's Sequence Number, if it has one.
-    #[must_use]
-    pub fn sequence_number(&self) -> Option<u16> {
-        self.number
-    }
-
-    /// The sequence number of the track at `index` in its file: its own, or
-    /// the place it has in the file.
-    fn number_at(&self, index: usize) -> u16 {
-        self.number
-            .unwrap_or_else(|| u16::try_from(index).unwrap_or(u16::MAX))
-    }
-
-    /// The track's copyright notice as the file stores it (no encoding is
-    /// declared), if it has one.
-    #[must_use]
-    pub fn copyright_bytes(&self) -> Option<&[u8]> {
-        self.copyright.as_deref()
-    }
-
     /// The track's name as the file stores it (no encoding is declared), if it
     /// has one.
     #[must_use]
     pub fn name_bytes(&self) -> Option<&[u8]> {
         self.name.as_deref()
-    }
-
-    /// The track's [`Lead`]s in the order the writer puts them first at tick
-    /// 0: the copyright notice, the Sequence Number, the Track Name, the SMPTE
-    /// Offset (tutti's order, see [`Track`]).
-    pub(crate) fn leads(&self) -> Vec<Lead> {
-        [
-            self.copyright.clone().map(Lead::Copyright),
-            self.number.map(Lead::SequenceNumber),
-            self.name.clone().map(Lead::TrackName),
-            self.smpte_start.map(Lead::SmpteOffset),
-        ]
-        .into_iter()
-        .flatten()
-        .collect()
-    }
-
-    /// Whether the track has any of the [`Lead`] fields.
-    pub(crate) fn has_lead(&self) -> bool {
-        self.number.is_some()
-            || self.name.is_some()
-            || self.smpte_start.is_some()
-            || self.copyright.is_some()
     }
 
     /// The events with the channel each belongs to (SMF 1.0 section 3.3, MIDI
@@ -1141,6 +1244,34 @@ pub struct PairedNote {
     pub end: Tick,
 }
 
+/// The [`Lead`]s of each track in the order the writer puts them first at tick
+/// 0: the copyright notice (the first track's), the Sequence Number, the Track
+/// Name, the SMPTE Offset (tutti's order, see [`Track`]).
+pub(crate) fn leads(
+    tracks: &[Track],
+    openings: &[Opening],
+    copyright: Option<&[u8]>,
+) -> Vec<Vec<Lead>> {
+    tracks
+        .iter()
+        .zip(openings)
+        .enumerate()
+        .map(|(index, (track, opening))| {
+            [
+                copyright
+                    .filter(|_| index == 0)
+                    .map(|notice| Lead::Copyright(notice.into())),
+                opening.number.map(Lead::SequenceNumber),
+                track.name.clone().map(Lead::TrackName),
+                opening.smpte_start.map(Lead::SmpteOffset),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        })
+        .collect()
+}
+
 /// The container a file was read from, with its division, and with it the
 /// rules it is written by. An SMF's metrical division has 15 bits, a Clip
 /// File's 16; an SMF may count in SMPTE time instead.
@@ -1190,14 +1321,14 @@ impl Container {
 /// a file is, and only the metrical views have beats, a tempo map and a clip.
 ///
 /// ```
-/// use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
+/// use tutti_midi_file::{LeadTrack, Layout, Meta, MidiFile, SmfDivision, Tick, Track};
 /// use tutti_types::{Bpm, Seconds};
 /// use tutti_ump::{MidiChannel, NoteNumber, U7};
 ///
 /// let track = Track::new()
 ///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
 ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
-/// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::per_quarter(480), vec![track])?;
+/// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 ///
 /// let again = MidiFile::from_bytes(&file.to_bytes())?;
 /// assert_eq!(again, file);
@@ -1209,6 +1340,10 @@ impl Container {
 pub struct MidiFile {
     container: Container,
     tracks: Vec<Track>,
+    /// The Sequence Number and SMPTE Offset of each track, in track order.
+    openings: Vec<Opening>,
+    /// The copyright notice, written as the first event of the first track.
+    copyright: Option<Box<[u8]>>,
     /// One map for a file of one timeline, one per track for a format 2 file;
     /// none for SMPTE time.
     tempo_maps: Vec<Arc<TempoMap>>,
@@ -1221,7 +1356,10 @@ pub struct MidiFile {
 /// part of the file.
 impl PartialEq for MidiFile {
     fn eq(&self, other: &Self) -> bool {
-        self.container == other.container && self.tracks == other.tracks
+        self.container == other.container
+            && self.tracks == other.tracks
+            && self.openings == other.openings
+            && self.copyright == other.copyright
     }
 }
 
@@ -1235,33 +1373,32 @@ impl MidiFile {
     /// three the same way, detecting rather than trusting any of them.
     pub const EXTENSIONS: &'static [&'static str] = &["mid", "midi", "midi2"];
 
-    /// An SMF of `format` and `division` over `tracks`.
+    /// An SMF of `division` over the tracks of `layout`, whose variant is the
+    /// format.
     ///
     /// # Errors
     ///
-    /// [`TracksError`] if there is no track, a format 0 file does not have
-    /// exactly one, a track's events are out of order or past its end, two
+    /// [`TracksError`] if a format 2 file has no pattern, a track's events are out of order or past its end, two
     /// events are further apart than the wire's 28-bit delta, a message is not
     /// a MIDI 1.0 channel message of the first Group, an event or the file is
     /// larger than the format's length fields hold (the error names which and
     /// where), the tempo events do not make a [`TempoMap`], or the events break
     /// a rule SMF 1.0 gives a writer: a SysEx message that does not end in `F7`
-    /// or has a channel message between its packets, a Sequence Number or
-    /// Track Name after time 0 (a Sequence Number or SMPTE Offset also after a
-    /// channel message, SysEx or escape, a Sequence Number also outside the
-    /// first track of a format 0 or 1 file), an SMPTE Offset, Set Tempo or Time
-    /// Signature outside the first track of a format 1 file, or a copyright
-    /// notice that is not the first event of the first track or is not the
-    /// file's only one. tutti's writer also refuses what the specification
-    /// only recommends: the format 1 tempo map outside the first track, and the
-    /// copyright placement.
+    /// or has a channel message between its packets. tutti's writer also
+    /// refuses what the specification only recommends: the format 1 tempo map
+    /// outside the first track. The placement of the Sequence Number, SMPTE
+    /// Offset and copyright notice is the [`Layout`]'s. A file of format 3 or
+    /// above cannot be authored, only written back as it was read.
     #[must_use = "an Err means no file was built"]
-    pub fn smf(
-        format: SmfFormat,
-        division: SmfDivision,
-        tracks: Vec<Track>,
-    ) -> Result<Self, TracksError> {
-        Self::build(Container::Smf(format, division), tracks, true)
+    pub fn smf(division: SmfDivision, layout: Layout) -> Result<Self, TracksError> {
+        let (format, tracks, openings, copyright) = layout.into_parts();
+        Self::build(
+            Container::Smf(format, division),
+            tracks,
+            openings,
+            copyright,
+            true,
+        )
     }
 
     /// A Clip File of division `ticks_per_quarter` over one sequence and its
@@ -1296,7 +1433,13 @@ impl MidiFile {
                 return Err(TracksError::TextInterrupted { at });
             }
         }
-        Self::build(Container::Clip(ticks_per_quarter), vec![track], true)
+        Self::build(
+            Container::Clip(ticks_per_quarter),
+            vec![track],
+            vec![Opening::default()],
+            None,
+            true,
+        )
     }
 
     /// The file of `tracks`, held to the container's rules. `authoring` adds
@@ -1305,15 +1448,12 @@ impl MidiFile {
     fn build(
         container: Container,
         tracks: Vec<Track>,
+        openings: Vec<Opening>,
+        copyright: Option<Box<[u8]>>,
         authoring: bool,
     ) -> Result<Self, TracksError> {
         if tracks.is_empty() {
             return Err(TracksError::NoTracks);
-        }
-        if matches!(container, Container::Smf(SmfFormat::SingleTrack, _)) && tracks.len() != 1 {
-            return Err(TracksError::SingleTrack {
-                tracks: tracks.len(),
-            });
         }
         if tracks.len() > usize::from(u16::MAX) {
             return Err(TracksError::TooManyTracks {
@@ -1321,7 +1461,7 @@ impl MidiFile {
             });
         }
         for (i, track) in tracks.iter().enumerate() {
-            if matches!(container, Container::Clip(_)) && track.has_lead() {
+            if matches!(container, Container::Clip(_)) && track.name.is_some() {
                 return Err(TracksError::Refused {
                     track: i,
                     part: TrackPart::Events,
@@ -1348,7 +1488,7 @@ impl MidiFile {
                 if authoring {
                     check_smf(format, &tracks)?;
                 }
-                smf::measure(&tracks)?;
+                smf::measure(&tracks, &leads(&tracks, &openings, copyright.as_deref()))?;
             }
             Container::Clip(_) => {
                 let track = &tracks[0];
@@ -1372,6 +1512,8 @@ impl MidiFile {
         Ok(Self {
             container,
             tracks,
+            openings,
+            copyright,
             tempo_maps,
             normalized: Vec::new(),
         })
@@ -1397,6 +1539,8 @@ impl MidiFile {
                 let mut file = Self::build(
                     Container::Smf(parts.format, parts.division),
                     parts.tracks,
+                    parts.openings,
+                    parts.copyright,
                     false,
                 )?;
                 file.normalized = parts.normalized;
@@ -1425,6 +1569,8 @@ impl MidiFile {
                 Ok(Self::build(
                     Container::Clip(clip.ticks_per_quarter),
                     vec![track],
+                    vec![Opening::default()],
+                    None,
                     false,
                 )?)
             }
@@ -1452,7 +1598,12 @@ impl MidiFile {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self.container {
-            Container::Smf(format, division) => smf::write(format, division, &self.tracks),
+            Container::Smf(format, division) => smf::write(
+                format,
+                division,
+                &self.tracks,
+                &leads(&self.tracks, &self.openings, self.copyright.as_deref()),
+            ),
             Container::Clip(ticks_per_quarter) => {
                 let track = &self.tracks[0];
                 clip_file::write(
@@ -1473,10 +1624,10 @@ impl MidiFile {
     /// place, so a crash leaves no partial file under `path`.
     ///
     /// ```
-    /// # use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Track, WriteError};
+    /// # use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Track, WriteError};
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("song.mid");
-    /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::per_quarter(480), vec![Track::new()])?;
+    /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(Track::new())))?;
     /// file.write(&path)?;
     /// assert!(matches!(file.write(&path), Err(WriteError::Exists { .. })));
     /// file.write_options().replace().write(&path)?;
@@ -1628,9 +1779,20 @@ impl MidiFile {
                 track.events.insert(lead + offset, (Tick(0), meta.into()));
             }
         }
-        let mut file = Self::build(self.container, tracks, false)?;
+        let mut file = Self::build(
+            self.container,
+            tracks,
+            self.openings.clone(),
+            self.copyright.clone(),
+            false,
+        )?;
         file.normalized.clone_from(&self.normalized);
         Ok(file)
+    }
+
+    /// The [`Lead`]s of each track, as the writer puts them first.
+    pub(crate) fn leads(&self) -> Vec<Vec<Lead>> {
+        leads(&self.tracks, &self.openings, self.copyright.as_deref())
     }
 
     /// What reading this file changed to make it writable, in the order of
@@ -1658,17 +1820,29 @@ impl MidiFile {
         &self.normalized
     }
 
-    /// The SMPTE time track `track` starts at: its SMPTE Offset, where that
-    /// has a meaning. In a format 1 file the offset is stored with the tempo
-    /// map and "has no meaning in any of the other tracks" (SMF 1.0 section
-    /// 3.3), so only the first track's counts. `None` for no such track or
-    /// offset.
+    /// The file's copyright notice as the file stores it (no encoding is
+    /// declared), if it has one: the first event of the first track (SMF 1.0
+    /// section 3.3).
+    #[must_use]
+    pub fn copyright(&self) -> Option<&[u8]> {
+        self.copyright.as_deref()
+    }
+
+    /// The Sequence Number of track `track`, if it has one: the lead's in a
+    /// file of one timeline, a pattern's otherwise. `None` for no such track
+    /// or number; the sequence views number a track with none by its place.
+    #[must_use]
+    pub fn sequence_number(&self, track: usize) -> Option<u16> {
+        self.openings.get(track)?.number
+    }
+
+    /// The SMPTE time track `track` starts at: its SMPTE Offset. A file of one
+    /// timeline holds only the lead's: in a format 1 file the offset is stored
+    /// with the tempo map and "has no meaning in any of the other tracks"
+    /// (SMF 1.0 section 3.3). `None` for no such track or offset.
     #[must_use]
     pub fn smpte_offset(&self, track: usize) -> Option<SmpteOffset> {
-        if matches!(self.container, Container::Smf(SmfFormat::Parallel, _)) && track > 0 {
-            return None;
-        }
-        self.tracks.get(track)?.smpte_start
+        self.openings.get(track)?.smpte_start
     }
 
     /// Where the tracks of a file of one timeline end: the longest track's end
@@ -1836,12 +2010,12 @@ impl<'a> MetricalView<'a> {
     /// The Clip File's [`header`](Track::header) is not on the timeline.
     ///
     /// ```
-    /// use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
+    /// use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Tick, Track};
     /// use tutti_types::Beat;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
     /// let track = Track::new().note(Tick(480), Tick(960), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
-    /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::per_quarter(480), vec![track])?;
+    /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
     /// let clip = file.timebase().metrical().unwrap().timeline();
     /// assert_eq!(clip.packets.len(), 2);
     /// assert_eq!(clip.packets[0].0, Beat(1.0));
@@ -1882,7 +2056,7 @@ impl<'a> MetricalSequences<'a> {
                 track,
                 tempo_map,
                 ticks_per_quarter,
-                number: track.number_at(index),
+                number: file.openings[index].number_at(index),
             },
         )
     }
@@ -2039,7 +2213,7 @@ impl<'a> SmpteSequences<'a> {
                 track,
                 fps,
                 ticks_per_frame,
-                number: track.number_at(index),
+                number: file.openings[index].number_at(index),
             })
     }
 }
@@ -2327,25 +2501,12 @@ fn check_run(
 }
 
 /// The rules a writer holds an SMF's tracks to that no type makes unwritable
-/// (SMF 1.0 sections 2.2, 3 and 3.3), that a reader keeps a file without: a
-/// divided System Exclusive message ends in an `F7` packet with no channel
-/// message or other `F0` event between its packets; the Sequence Number is in
-/// the first track of a format 0 or 1 file, the SMPTE Offset in the first track
-/// of a format 1 file, as are the Set Tempo and Time Signature; the copyright
-/// notice is in the first track.
+/// (SMF 1.0 sections 2.2 and 3), that a reader keeps a file without: a divided
+/// System Exclusive message ends in an `F7` packet with no channel message or
+/// other `F0` event between its packets; the Set Tempo and Time Signature of a
+/// format 1 file are in its first track.
 fn check_smf(format: SmfFormat, tracks: &[Track]) -> Result<(), TracksError> {
     for (track, body) in tracks.iter().enumerate() {
-        if track > 0 {
-            if format.shares_timeline() && body.number.is_some() {
-                return Err(TracksError::SequenceNumberNotInFirstTrack { track });
-            }
-            if format == SmfFormat::Parallel && body.smpte_start.is_some() {
-                return Err(TracksError::SmpteOffsetNotInFirstTrack { track });
-            }
-            if body.copyright.is_some() {
-                return Err(TracksError::CopyrightNotInFirstTrack { track });
-            }
-        }
         // The tick of the first packet of a divided message not yet ended by an `F7`.
         let mut open: Option<Tick> = None;
         for &(at, ref event) in &body.events {

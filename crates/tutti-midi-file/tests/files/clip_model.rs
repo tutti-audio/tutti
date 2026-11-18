@@ -9,8 +9,8 @@ use tutti_midi_device::{
     NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
 };
 use tutti_midi_file::{
-    ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfFormat,
-    Tick, Track, TracksError,
+    ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick, Track,
+    TracksError,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -499,7 +499,7 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
         )
     };
     let events = || vec![(0, packet(message(true))), (96, packet(message(false)))];
-    let smf = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track(events())]).unwrap();
+    let smf = crate::common::format0(SMF_DIVISION, track(events())).unwrap();
     let clip = MidiFile::clip(DIVISION, track(events())).unwrap();
     let read = |f: &MidiFile| MidiFile::from_bytes(&f.to_bytes()).unwrap();
     let (a, b) = (read(&smf), read(&clip));
@@ -766,7 +766,7 @@ fn an_smf_holds_no_header() {
         profile: ProfileId::MPE,
     });
     assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![with_profile]),
+        crate::common::format0(SMF_DIVISION, with_profile),
         Err(TracksError::HeaderInSmf { track: 0 })
     ));
 }

@@ -29,29 +29,23 @@ impl std::fmt::Display for TrackPart {
 /// and a read): each variant is one rule of the container, with where it was
 /// broken. A `track` is an index into the list given.
 ///
-/// [`SysExNotEnded`](Self::SysExNotEnded) to
-/// [`CopyrightNotInFirstTrack`](Self::CopyrightNotInFirstTrack) are the rules
-/// of SMF 1.0 a writer keeps that no type makes unwritable:
+/// [`SysExNotEnded`](Self::SysExNotEnded) and
+/// [`SysExInterrupted`](Self::SysExInterrupted) are the rules of SMF 1.0 a
+/// writer keeps that no type makes unwritable:
 /// [`MidiFile::smf`](crate::MidiFile::smf) refuses what breaks them. The rest
-/// of section 3.3's placement is a [`Track`](crate::Track)'s fields, written
-/// first at tick 0, and a read makes a file keep it
+/// of section 3.3's placement is a [`Layout`](crate::Layout)'s: the Sequence
+/// Number, SMPTE Offset and copyright notice are fields of its lead track or
+/// patterns, written first at tick 0, and a read makes a file keep it
 /// ([`MidiFile::normalized`](crate::MidiFile::normalized)). tutti's writer also
 /// refuses what the specification only recommends: the format 1 tempo map
 /// outside the first track
-/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)), and a
-/// copyright notice outside it.
+/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)).
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {
     /// The track list is empty.
     #[error("a file needs at least one track")]
     NoTracks,
-    /// A format 0 file has exactly one track.
-    #[error("a format 0 file has one track, not {tracks}")]
-    SingleTrack {
-        /// The tracks given.
-        tracks: usize,
-    },
     /// More tracks than the header's 16-bit count holds.
     #[error("{tracks} tracks are more than a file's 16-bit track count")]
     TooManyTracks {
@@ -111,22 +105,6 @@ pub enum TracksError {
         /// The tick of the event.
         at: Tick,
     },
-    /// A Sequence Number in a track of a format 0 or 1 file other than the
-    /// first (SMF 1.0 section 3.3: such a file holds one sequence, whose number
-    /// is in the first track).
-    #[error("track {track}: a Sequence Number belongs in the first track")]
-    SequenceNumberNotInFirstTrack {
-        /// The track.
-        track: usize,
-    },
-    /// An SMPTE Offset in a track of a format 1 file other than the first
-    /// (SMF 1.0 section 3.3: it is stored with the tempo map and means nothing
-    /// in the other tracks).
-    #[error("track {track}: an SMPTE Offset belongs in the first track")]
-    SmpteOffsetNotInFirstTrack {
-        /// The track.
-        track: usize,
-    },
     /// A Set Tempo or Time Signature in a track of a format 1 file other than
     /// the first (SMF 1.0 section 2.2: the tempo map is stored as the first
     /// track).
@@ -136,14 +114,6 @@ pub enum TracksError {
         track: usize,
         /// The tick of the event.
         at: Tick,
-    },
-    /// A copyright notice in a track other than the first (SMF 1.0 section
-    /// 3.3: the first event of the first track chunk, all of a file's notices
-    /// together in one event).
-    #[error("track {track}: the copyright notice belongs in the first track")]
-    CopyrightNotInFirstTrack {
-        /// The track.
-        track: usize,
     },
     /// The container cannot hold an event.
     #[error("track {track} {part}: {refusal}")]
