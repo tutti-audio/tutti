@@ -15,11 +15,12 @@ use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::{PluginHandle, RefreshSink};
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Health, Normalized, ParamFlags, ParamUnit,
-    ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
+    AnyThread, AutomationMode, AutomationModeError, Health, ParamFlags, ParamUnit, ParameterInfo,
+    PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_rt::LockExt;
 use tutti_types::ChannelLayout;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Db, Hz, SampleRate};
 

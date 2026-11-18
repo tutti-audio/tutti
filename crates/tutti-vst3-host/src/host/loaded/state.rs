@@ -499,10 +499,11 @@ pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, Stat
 #[cfg(test)]
 mod state_container_tests {
     use super::{
-        Normalized, ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError,
-        Unpacked, latest_listed, length_of, pack_state as try_pack_state,
+        ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError, Unpacked,
+        latest_listed, length_of, pack_state as try_pack_state,
         pack_state_with_pending as try_pack_pending, unpack_full,
     };
+    use tutti_units::Normalized;
 
     fn pack_state(component: &[u8], controller: &Option<Vec<u8>>) -> Vec<u8> {
         try_pack_state(component, controller).unwrap()

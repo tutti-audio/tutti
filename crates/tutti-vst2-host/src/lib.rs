@@ -116,7 +116,8 @@
 //! does the type.
 //!
 //! ```rust,no_run
-//! # use tutti_plugin_types::{Control, Normalized};
+//! # use tutti_plugin_types::Control;
+//! # use tutti_units::Normalized;
 //! # use tutti_vst2_host::Vst2Loaded;
 //! # fn ex() -> tutti_vst2_host::Result<()> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");

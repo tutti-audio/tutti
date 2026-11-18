@@ -6,15 +6,15 @@ use tutti_midi_protocol::{
     velocity_to_unit_f32, widen,
 };
 use tutti_plugin_types::{
-    Normalized, NoteExpressionType, NoteExpressionValue, WireMidi,
-    expression_of_per_note_controller, group_of_port, per_note_message, per_note_tuning,
-    plugin_note_id,
+    NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
+    group_of_port, per_note_message, per_note_tuning, plugin_note_id,
 };
 use tutti_rt::RtVec;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
     Ump, Voice1, Voice2, parse_exact,
 };
+use tutti_units::Normalized;
 use tutti_voicing::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 
 use super::{

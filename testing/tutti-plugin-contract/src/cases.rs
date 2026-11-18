@@ -6,13 +6,14 @@ use crate::transcript::select_tail;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    BusRole, BypassWrite, Control, Controller, Loaded, Normalized, OwnBypass, ParamFlags,
-    ParamWriteError, ParameterChanges, PluginAudio, PluginBus, PluginIo, PluginTail, Preset,
-    PresetId, ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples,
-    TransportChange, TransportInfo,
+    BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
+    ParameterChanges, PluginAudio, PluginBus, PluginIo, PluginTail, Preset, PresetId,
+    ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange,
+    TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_units::Normalized;
 
 use crate::spec::{self, Mode, Param};
 use crate::{

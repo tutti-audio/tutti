@@ -39,10 +39,10 @@ use tutti_graph::{OutPort, Source};
 use tutti_plugin::PluginClient;
 use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::Normalized;
 use tutti_plugin_types::PluginForkError;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 

@@ -24,8 +24,7 @@
 use super::PluginBridge;
 use crate::client::audio::BridgeThread;
 use crate::protocol::{
-    BridgeMessage, ChannelLayout, HostMessage, Normalized, PROTOCOL_VERSION, ParamId, SampleFormat,
-    SlabLayout,
+    BridgeMessage, ChannelLayout, HostMessage, PROTOCOL_VERSION, ParamId, SampleFormat, SlabLayout,
 };
 use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
@@ -35,6 +34,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
+use tutti_units::Normalized;
 use tutti_units::SampleRate;
 
 use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};

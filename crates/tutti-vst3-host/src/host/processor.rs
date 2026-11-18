@@ -9,11 +9,12 @@ use vst3::Steinberg::Vst::ProcessSetup;
 
 use tutti_buffers::InputOutput;
 use tutti_plugin_types::{
-    ChannelTable, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamWriteError, PluginAudio,
+    ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginAudio,
     PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::{DrainBeat, RtVec, Tally, TallyWriter, tally};
 use tutti_types::ChannelLayout;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 

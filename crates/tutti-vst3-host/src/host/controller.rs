@@ -9,10 +9,11 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_plugin_types::{
-    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamAccess,
-    ParamEdit, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request,
-    RestartRules, SampleFormat, Samples, Stuck, Wraps,
+    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, ParamAccess, ParamEdit,
+    PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request, RestartRules,
+    SampleFormat, Samples, Stuck, Wraps,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::types::{ProcessMode, Vst3Sample};

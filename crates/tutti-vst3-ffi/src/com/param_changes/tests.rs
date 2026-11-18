@@ -473,7 +473,7 @@ fn a_chunk_with_carried_values_refills_whole() {
             i,
             tutti_plugin_types::ParameterPoint {
                 sample_offset: 0,
-                value: tutti_plugin_types::Normalized::of(0.25),
+                value: tutti_units::Normalized::of(0.25),
             },
         ));
     }
