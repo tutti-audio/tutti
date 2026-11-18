@@ -530,6 +530,16 @@ impl<F: Loaded> Instance<F> {
         }
         match outcome {
             Some(trouble) => {
+                // A plugin that died on the way is lost, whatever its last
+                // reply said: the caller hears what the reports say.
+                let trouble = match trouble {
+                    Trouble::Refused { reason, .. } | Trouble::Stuck { reason }
+                        if self.lost.is_lost() =>
+                    {
+                        Trouble::Lost { reason }
+                    }
+                    trouble => trouble,
+                };
                 let reason = self.worded(rate, &trouble);
                 self.note(trouble);
                 Err(reason)
@@ -925,7 +935,10 @@ mod tests {
         let why = instance
             .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
             .expect_err("the plugin is lost");
-        assert!(why.contains("lost") || why.contains("refused"), "{why}");
+        assert!(
+            why.starts_with("plugin was lost changing to sample rate 96000"),
+            "{why}"
+        );
         let reports = instance.take_reports();
         assert!(
             matches!(reports.as_slice(), [PluginInvalidation::Crashed { .. }]),
