@@ -7,8 +7,9 @@
 /// error carrying the refused raw (derives `thiserror::Error`, so the calling
 /// crate depends on `thiserror`), and `new(raw) -> Option`, a const `of` that
 /// panics for a refused literal, `get`, `TryFrom<Raw>` agreeing with `new`, and
-/// `From<Self> for Raw`; over `f64` it also emits [`Quantity`](crate::Quantity). `$valid` is the range as a `const` expression over the
-/// raw named by `$raw`; a NaN or an infinity must fail it.
+/// `From<Self> for Raw`; over `f64` it also emits [`Quantity`](crate::Quantity).
+/// `$valid` is the range as a `const` expression over the raw named by `$raw`;
+/// a NaN or an infinity must fail it.
 ///
 /// It emits no serde. A type that is stored adds it among the attributes,
 /// through `try_from` so a document cannot hold a refused raw:
