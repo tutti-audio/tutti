@@ -144,7 +144,7 @@ fn one_pole_step_response_reaches_one_minus_inverse_e_after_tau() {
         let n = Seconds(tau).to_samples(SampleRate::of(rate)).get();
         let mut y = 0.0f64;
         for _ in 0..n {
-            y += f64::from(c) * (1.0 - y);
+            y += c * (1.0 - y);
         }
         assert!((y - want).abs() < 1e-4, "τ {tau} at {rate}: {y}");
     }
@@ -152,7 +152,7 @@ fn one_pole_step_response_reaches_one_minus_inverse_e_after_tau() {
     let c = Seconds(0.1).one_pole_coeff_over(Seconds(0.01));
     let mut y = 0.0f64;
     for _ in 0..10 {
-        y += f64::from(c) * (1.0 - y);
+        y += c * (1.0 - y);
     }
     assert!((y - want).abs() < 1e-5, "per block: {y}");
 }
@@ -177,7 +177,7 @@ fn one_pole_zero_time_is_instant_and_bad_input_is_defined() {
     }
     // 1000 s at 48 kHz: about 2.08e-8, not cancelled to 0.
     let long = Seconds(1_000.0).one_pole_coeff(sr);
-    assert!((f64::from(long) * 48e6 - 1.0).abs() < 1e-6, "{long}");
+    assert!((long * 48e6 - 1.0).abs() < 1e-6, "{long}");
     // Every finite positive input lands in [0, 1].
     for tau in [1e-9, 1e-3, 1.0, 1e6] {
         let c = Seconds(tau).one_pole_coeff(sr);
@@ -338,4 +338,33 @@ fn one_second_holds_the_rate_rounded_up_and_at_least_one_frame() {
     assert_eq!(SampleRate::SR_48K.one_second(), Samples(48_000));
     assert_eq!(SampleRate::of(44_100.5).one_second(), Samples(44_101));
     assert_eq!(SampleRate::of(0.2).one_second(), Samples(1));
+}
+
+/// `one_pole_coeff` is the closed form `1 - exp(-1 / (tau * rate))` to `1e-15` relative and
+/// `one_pole_coeff_over` is `1 - exp(-step / tau)` to `1e-12` relative, both in `f64`; narrowed
+/// once they are the closed form's `f32`.
+#[test]
+fn the_one_pole_coefficients_are_the_closed_form_in_f64() {
+    for (tau, rate) in [
+        (0.01_f64, 48_000.0_f64),
+        (0.1, 44_100.0),
+        (1_000.0, 96_000.0),
+        (1e-5, 8_000.0),
+    ] {
+        let closed = 1.0 - (-1.0 / (tau * rate)).exp();
+        let c = Seconds(tau).one_pole_coeff(SampleRate::of(rate));
+        assert!(
+            ((c - closed) / closed).abs() <= 1e-15,
+            "τ {tau}: {c} vs {closed}"
+        );
+        assert_eq!(c as f32, closed as f32);
+        let step = 1.0 / rate;
+        let closed_over = 1.0 - (-step / tau).exp();
+        let over = Seconds(tau).one_pole_coeff_over(Seconds(step));
+        assert!(
+            ((over - closed_over) / closed_over).abs() <= 1e-12,
+            "over, τ {tau}"
+        );
+        assert_eq!(over as f32, closed_over as f32);
+    }
 }

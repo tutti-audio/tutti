@@ -165,7 +165,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
     let m = Design::of(&controls(-12.0, -3.0, 0.0002), RATE);
     assert_eq!(
         m.release,
-        Seconds(0.001).one_pole_coeff(RATE),
+        Seconds(0.001).one_pole_coeff(RATE) as f32,
         "a release under 1 ms reads as 1 ms"
     );
     assert_eq!((m.threshold, m.ceiling), (Db(-12.0), Db(-3.0)));
@@ -181,7 +181,11 @@ fn the_bank_holds_the_figures_of_its_definition() {
     );
     assert_eq!(
         (m.threshold, m.ceiling, m.release),
-        (d.threshold, d.ceiling, d.release.one_pole_coeff(RATE))
+        (
+            d.threshold,
+            d.ceiling,
+            d.release.one_pole_coeff(RATE) as f32
+        )
     );
     for inf in [f32::INFINITY, f32::NEG_INFINITY] {
         let m = Design::of(

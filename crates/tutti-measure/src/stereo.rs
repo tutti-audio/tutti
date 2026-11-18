@@ -212,7 +212,8 @@ impl StereoSmoother {
     /// smoothed correlation afterwards, so the two cannot disagree.
     pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
         let cfg = self.cfg;
-        let smooth = |old: f32, new: f32| Smoother::toward(old, new, cfg.coeff_over(new > old, dt));
+        let smooth =
+            |old: f32, new: f32| Smoother::toward(old, new, cfg.coeff_over(new > old, dt) as f32);
 
         let correlation = Correlation::new_clamped(smooth(
             self.current.correlation.get(),

@@ -104,7 +104,7 @@ pub struct DelayLanes<'a, S: Float = f32> {
 /// their size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
 pub struct DelayBank {
-    lines: Box<[DelayLine]>,
+    lines: Box<[DelayLine<f32>]>,
     /// Each channel's feedback tap of the frame, read before any line is written (the
     /// coupled loop's).
     taps: Box<[f32]>,

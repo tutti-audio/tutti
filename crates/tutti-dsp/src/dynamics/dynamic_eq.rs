@@ -130,7 +130,7 @@ struct Design {
     knee: Db,
     ratio: CompressionRatio,
     range: Db,
-    ballistics: Follower,
+    ballistics: Follower<f32>,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
     key_scale: f32,
     /// The one-pole coefficient of the detector's mean square.
@@ -163,7 +163,7 @@ impl Design {
             range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB)),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: 1.0 / q.get(),
-            mean: tau.one_pole_coeff(rate),
+            mean: tau.one_pole_coeff(rate) as f32,
         }
     }
 }

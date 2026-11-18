@@ -657,7 +657,7 @@ impl<S: Sample> SpectrumMeter<S> {
                         .sum::<f64>() as f32,
                 )
             };
-            let coefficient = smoothing.coeff_over(raw > self.power[i], dt);
+            let coefficient = smoothing.coeff_over(raw > self.power[i], dt) as f32;
             // A coefficient of 1 is no smoothing; assigning keeps the
             // reading exact where `old + (new - old)` would round against
             // a louder previous frame.

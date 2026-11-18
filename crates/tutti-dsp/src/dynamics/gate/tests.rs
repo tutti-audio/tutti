@@ -155,8 +155,8 @@ fn the_design_holds_the_figures_of_its_definition() {
     // One step from 0 toward 1 lands on the attack coefficient, and one from 1 toward 0 on
     // 1 less the release coefficient.
     let (attack, release) = (
-        Seconds(0.001).one_pole_coeff(RATE),
-        Seconds(0.1).one_pole_coeff(RATE),
+        Seconds(0.001).one_pole_coeff(RATE) as f32,
+        Seconds(0.1).one_pole_coeff(RATE) as f32,
     );
     assert_eq!(
         m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),

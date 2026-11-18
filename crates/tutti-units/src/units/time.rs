@@ -153,13 +153,12 @@ impl Seconds {
     /// decay length `τ · rate` that is not above zero (a zero, negative or
     /// NaN time constant) is instant: 1. An infinite one holds: 0.
     ///
-    /// Computed in `f64` and rounded once to `f32` (a coefficient is a DSP
-    /// `f32`), so a long time constant
-    /// keeps its own rate (`c` is small but representable, where an `f32`
-    /// `1 − exp(…)` would cancel to 0). `τ · rate` is a decay length, not a
-    /// frame count, so none of the `to_samples*` rounding applies.
+    /// Computed in `f64`, so a long time constant keeps its own rate (`c` is small
+    /// but representable, where an `f32` `1 − exp(…)` would cancel to 0). `τ · rate`
+    /// is a decay length, not a frame count, so none of the `to_samples*` rounding
+    /// applies. A design coefficient, in `f64`; a bank narrows it once.
     #[inline]
-    pub fn one_pole_coeff(self, rate: impl Into<SampleRate>) -> f32 {
+    pub fn one_pole_coeff(self, rate: impl Into<SampleRate>) -> f64 {
         Self::one_pole(self.0 * rate.into().get())
     }
 
@@ -171,10 +170,10 @@ impl Seconds {
     ///
     /// A time constant that is not above zero (or NaN) is instant: 1. A
     /// step that is not above zero (or NaN), with a positive time constant,
-    /// moves nothing: 0.
+    /// moves nothing: 0. A design coefficient, in `f64`; a bank narrows it once.
     #[inline]
     #[must_use]
-    pub fn one_pole_coeff_over(self, step: Seconds) -> f32 {
+    pub fn one_pole_coeff_over(self, step: Seconds) -> f64 {
         if self.0 > 0.0 {
             if step.0 > 0.0 {
                 Self::one_pole(self.0 / step.0)
@@ -191,9 +190,9 @@ impl Seconds {
     /// exponential is `libm`'s, so the coefficient is the same on every
     /// target.
     #[inline]
-    fn one_pole(n: f64) -> f32 {
+    fn one_pole(n: f64) -> f64 {
         if n > 0.0 {
-            (1.0 - libm::exp(-1.0 / n)) as f32
+            1.0 - libm::exp(-1.0 / n)
         } else {
             1.0
         }

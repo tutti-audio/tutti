@@ -63,3 +63,65 @@ fn the_ring_holds_its_length_and_clear_silences_it() {
     ring.clear();
     assert!((0..=4).all(|k| ring.back(k) == 0.0));
 }
+
+/// A ring in `f64` returns the 29-bit signal `len` frames later exactly, across several
+/// wraps: nothing is narrowed to `f32` on the way through.
+#[test]
+fn an_f64_ring_returns_a_wide_signal_len_frames_later_across_the_wrap() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    const LEN: usize = 5;
+    let signal = wide_signal(6 * LEN + 2);
+    let mut ring = DelayRing::<f64>::new(LEN);
+    let got: Vec<f64> = signal
+        .iter()
+        .map(|&x| {
+            let out = ring.oldest();
+            ring.push(x);
+            out
+        })
+        .collect();
+    let want: Vec<f64> = (0..signal.len())
+        .map(|i| if i >= LEN { signal[i - LEN] } else { 0.0 })
+        .collect();
+    assert_close_f64(&got, &want, 0.0);
+    assert_ne!(
+        signal[0] as f32 as f64, signal[0],
+        "the signal needs 29 bits"
+    );
+}
+
+/// A fractional read halfway between two wide `f64` slots is their mean to the rounding of
+/// one `f64` operation, which an `f32` lerp would miss by about `2^-25`.
+#[test]
+fn an_f64_fractional_read_is_the_mean_of_two_wide_slots_to_f64_rounding() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let signal = wide_signal(8);
+    let mut ring = DelayRing::<f64>::new(8);
+    signal.iter().for_each(|&x| ring.push(x));
+    let got: Vec<f64> = (1..7).map(|d| ring.at(d as f64 + 0.5)).collect();
+    let want: Vec<f64> = (1..7)
+        .map(|d| (signal[8 - d] + signal[8 - d - 1]) / 2.0)
+        .collect();
+    assert_close_f64(&got, &want, 2f64.powi(-50));
+}
+
+/// A read at `100000.3` frames on a long `f64` ring is the closed-form lerp of its two wide
+/// slots at the `f64` fraction `100000.3 - 100000`, to `2^-45`: an `f32` position (fraction
+/// error near `4e-3`) or an `f32` slot (error near `2^-25`) misses it.
+#[test]
+fn an_f64_read_at_a_position_needing_more_than_24_bits_is_the_lerp_of_the_wide_slots() {
+    use tutti_fixtures::signal::wide_signal;
+    const N: usize = 200_001;
+    let signal = wide_signal(N);
+    let mut ring = DelayRing::<f64>::new(N);
+    signal.iter().for_each(|&x| ring.push(x));
+    let pos = 100_000.3_f64;
+    let frac = pos - 100_000.0;
+    let (a, b) = (signal[N - 100_000], signal[N - 100_001]);
+    let want = a + frac * (b - a);
+    let got = ring.at(pos);
+    assert!(
+        (got - want).abs() <= 2f64.powi(-45),
+        "got {got} want {want}"
+    );
+}
