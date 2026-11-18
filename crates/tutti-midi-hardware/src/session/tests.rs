@@ -156,6 +156,28 @@ fn a_query_by_id_and_by_name_reach_the_same_device() {
     );
 }
 
+/// **A dead input's fault reaches the control side**: the session reads the
+/// cause the backend's reader died of, for that device only, and none while it
+/// delivers.
+#[test]
+fn a_dead_inputs_fault_is_read_through_the_session() {
+    let (backend, fake) = FakeBackend::build();
+    let mut s =
+        MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let keystep = input(&s, "Keystep Pro");
+    let iac = input(&s, "IAC Bus 1");
+    let _ = s.connect_input(&keystep).unwrap();
+    let _ = s.connect_input(&iac).unwrap();
+    assert_eq!(s.input_fault(&keystep), None);
+
+    let fault = InputFault::wait_failed(19);
+    fake.kill_input_reader(EndpointId::from_raw(1), fault);
+    assert_eq!(s.input_fault(&keystep), Some(fault));
+    assert!(!s.is_input_connected(&keystep));
+    assert_eq!(s.input_fault(&iac), None, "the other input delivers");
+    assert!(s.is_input_connected(&iac));
+}
+
 #[test]
 fn an_output_reaches_its_device() {
     let (s, sent, _) = session();
