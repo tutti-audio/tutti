@@ -65,6 +65,8 @@ tempfile = "3"
 tutti-vst2-test-plugin = { path = "../../testing/tutti-vst2-test-plugin" }
 # A VST2 file of two plugins, for the shell's enumeration and the choice of a sub-plugin.
 tutti-vst2-shell-plugin = { path = "../../testing/tutti-vst2-shell-plugin" }
+# The shell's ids and names.
+tutti-vst2-author = { path = "../../testing/tutti-vst2-author" }
 
 [package.metadata.docs.rs]
 all-features = true

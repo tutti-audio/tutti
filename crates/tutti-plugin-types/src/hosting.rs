@@ -131,7 +131,7 @@ pub trait InProcess: Loaded {
     fn main_work(&self) -> &MainWorkHandle;
 }
 
-/// The format can list the plugins a file holds without hosting any of them.
+/// The format lists the plugins of a file without activating any.
 ///
 /// The listing is the catalog's: identity, class and an editor flag, read as far
 /// as the format allows. A CLAP factory gives each plugin it lists, a VST3 factory
@@ -139,7 +139,7 @@ pub trait InProcess: Loaded {
 /// system has registered, a VST2 shell each sub-plugin. VST2 has no listing short
 /// of a load (the plugin's init runs, it is not resumed), so its listing loads.
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` cannot list the plugins of a file",
+    message = "`{Self}` cannot list the plugins of a file without activating any",
     note = "implement `Describe` only if the file can be read without activating a plugin"
 )]
 pub trait Describe: Loaded {

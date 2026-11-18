@@ -29,6 +29,7 @@ vst2 = ["dep:tutti-vst2-host"]
 au = ["dep:tutti-au-host"]
 
 [dependencies]
+thiserror = { workspace = true, features = ["std"] }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.

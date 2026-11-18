@@ -59,7 +59,10 @@ fn main() -> ExitCode {
             eprintln!("{USAGE}");
             return ExitCode::from(ProbeExit::ResultUnwritable.code());
         }
-        Err(Usage::Wrong { result }) => return usage(&result),
+        Err(Usage::Wrong { result, cause }) => {
+            eprintln!("plugin-probe: {cause}");
+            return usage(&result);
+        }
     };
     let Args {
         path,

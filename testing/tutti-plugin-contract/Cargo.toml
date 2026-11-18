@@ -63,6 +63,8 @@ tutti-plugin-ipc-ffi = { path = "../../crates/tutti-plugin-ipc-ffi" }
 # of them in one test binary do not link.
 tutti-clap-test-plugin = { path = "../tutti-clap-test-plugin" }
 tutti-vst2-shell-plugin = { path = "../tutti-vst2-shell-plugin" }
+# The shell's ids and names, which the plugin's own crate cannot give a test that links.
+tutti-vst2-author = { path = "../tutti-vst2-author" }
 
 # AU: the shared plugin's AU shell is registered in this process
 # (`tests/au.rs`), so the host is a macOS dependency only.

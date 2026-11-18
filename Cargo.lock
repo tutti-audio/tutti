@@ -3083,6 +3083,7 @@ dependencies = [
  "tutti-shared-plugin",
  "tutti-ump",
  "tutti-units",
+ "tutti-vst2-author",
  "tutti-vst2-host",
  "tutti-vst2-shell-plugin",
  "tutti-vst3-host",
@@ -3183,6 +3184,7 @@ name = "tutti-plugin-probe"
 version = "0.0.1"
 dependencies = [
  "tempfile",
+ "thiserror 2.0.21",
  "tutti-au-host",
  "tutti-buffers",
  "tutti-clap-host",
@@ -3586,6 +3588,7 @@ dependencies = [
  "tutti-types",
  "tutti-ump",
  "tutti-units",
+ "tutti-vst2-author",
  "tutti-vst2-ffi",
  "tutti-vst2-shell-plugin",
  "tutti-vst2-test-plugin",
