@@ -89,10 +89,7 @@ pub fn take(
     // The frames whose segment points are sent: up to each event's, then
     // the rest of the piece.
     let mut done = from;
-    loop {
-        let Some(next) = pick(events.get(ei), params_in.get(pi)) else {
-            break;
-        };
+    while let Some(next) = pick(events.get(ei), params_in.get(pi)) {
         let o = match next {
             Next::Event(e) => {
                 ei += 1;
