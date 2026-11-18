@@ -8,7 +8,7 @@ use crate::events::{InputEventList, InputRooms, OutputEventList, OutputRooms, Pa
 use crate::types::{ClapNoteExpression, ParameterChanges, RtNoteExpressions};
 use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_clap_ffi::PortScratch;
 use tutti_midi_protocol::Translator;
 use tutti_plugin_types::BusChannels;
@@ -86,7 +86,7 @@ pub(crate) struct AudioScratch {
 }
 
 impl AudioScratch {
-    pub fn new(format: SampleFormat, input_rooms: InputRooms, output_rooms: OutputRooms) -> Self {
+    pub fn new(format: FloatWidth, input_rooms: InputRooms, output_rooms: OutputRooms) -> Self {
         Self {
             process: PortScratch::new(format),
             input_events: InputEventList::new(input_rooms),

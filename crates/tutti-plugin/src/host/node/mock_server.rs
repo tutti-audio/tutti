@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_graph::Offset;
 use tutti_graph::contract::Direct;
 use tutti_plugin_host::client_over;
@@ -73,7 +73,7 @@ pub(super) struct Threads {
 fn layout() -> SlabLayout {
     SlabLayout {
         samples_per_channel: CHUNK,
-        format: SampleFormat::F32,
+        format: FloatWidth::F32,
         slots: RING_SLOTS as u32,
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
@@ -320,7 +320,7 @@ pub(super) fn new_node(
         guard: Arc::clone(&guard),
         descriptor: rig.descriptor,
         loaded: rig.loaded,
-        format: SampleFormat::F32,
+        format: FloatWidth::F32,
         ceiling: CHUNK,
         slab: rig.slab,
         rate: SR,

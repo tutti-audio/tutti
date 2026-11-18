@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
     Edit, EditDrain, EditSink, NoteExpressionChanges, PluginError, PluginIo, PluginResult,
@@ -183,14 +183,14 @@ impl ClapProcessor {
     /// The format this processor was activated at: a value, fixed at
     /// activation, that every block's buffers are matched against.
     #[must_use]
-    pub fn format(&self) -> SampleFormat {
+    pub fn format(&self) -> FloatWidth {
         self.scratch.process.format()
     }
 
     /// Whether this processor renders 64-bit audio.
     #[must_use]
     pub fn is_f64(&self) -> bool {
-        self.format() == SampleFormat::F64
+        self.format() == FloatWidth::F64
     }
 
     /// Renders one block, with the buffers, the context and the output taken

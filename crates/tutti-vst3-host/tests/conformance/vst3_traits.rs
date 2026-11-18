@@ -12,7 +12,7 @@ use tutti_fixtures::main_thread;
 use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
     ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleRate,
@@ -107,13 +107,13 @@ fn id(raw: u32) -> ParamId {
 /// the probe's buses are `[2, 1]` each way.
 fn render(
     processor: &mut ProcessorAny,
-    format: SampleFormat,
+    format: FloatWidth,
     ctx: &ProcessContext<'_>,
 ) -> Result<f64, PluginError> {
     const FRAMES: usize = 64;
     let mut out = ProcessOutput::default();
     match format {
-        SampleFormat::F32 => {
+        FloatWidth::F32 => {
             let input = [0.0f32; FRAMES];
             let mut o = [[1.0f32; FRAMES], [1.0; FRAMES], [1.0; FRAMES]];
             let inputs = [input.as_slice(), input.as_slice(), input.as_slice()];
@@ -155,7 +155,7 @@ fn render(
 }
 
 fn render_f32(processor: &mut ProcessorAny) -> f64 {
-    render(processor, SampleFormat::F32, &ProcessContext::new()).expect("a block renders")
+    render(processor, FloatWidth::F32, &ProcessContext::new()).expect("a block renders")
 }
 
 /// **`Loaded::activate` splits the plugin, and the Controller serves the
@@ -186,21 +186,20 @@ fn activation_splits_the_plugin_and_renders_at_the_prepared_width() {
     assert!(processor.is_processing());
 
     let mismatch =
-        render(&mut processor, SampleFormat::F64, &ProcessContext::new()).expect_err("wrong width");
+        render(&mut processor, FloatWidth::F64, &ProcessContext::new()).expect_err("wrong width");
     assert!(matches!(mismatch, PluginError::Block(_)), "{mismatch:?}");
 
     let loaded = Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
     assert!(!loaded.is_active());
 
-    let wide = prepare().with_format(SampleFormat::F64);
+    let wide = prepare().with_format(FloatWidth::F64);
     let (mut processor, controller) = loaded
         .activate(main_thread(), wide)
         .expect("activates at 64-bit");
     assert!(processor.is_f64());
-    render(&mut processor, SampleFormat::F64, &ProcessContext::new())
-        .expect("an f64 block renders");
+    render(&mut processor, FloatWidth::F64, &ProcessContext::new()).expect("an f64 block renders");
     let mismatch =
-        render(&mut processor, SampleFormat::F32, &ProcessContext::new()).expect_err("wrong width");
+        render(&mut processor, FloatWidth::F32, &ProcessContext::new()).expect_err("wrong width");
     assert!(matches!(mismatch, PluginError::Block(_)), "{mismatch:?}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
@@ -307,7 +306,7 @@ fn automation_in_the_block_overrides_a_queued_write() {
     automation.add_change(ParamId::new(PARAM_RAMP), 0, 0.75);
     let ctx = ProcessContext::new().params(&automation);
     assert_eq!(
-        render(&mut processor, SampleFormat::F32, &ctx).expect("renders"),
+        render(&mut processor, FloatWidth::F32, &ctx).expect("renders"),
         0.75
     );
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");

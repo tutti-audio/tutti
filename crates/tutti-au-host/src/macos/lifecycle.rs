@@ -37,6 +37,7 @@ impl Loaded for AuLoaded {
     fn widths(&self) -> Widths {
         Widths::F32
     }
+
     /// Initializes the unit so it can render.
     ///
     /// The stream is configured at `prepare`'s rate and block ceiling first

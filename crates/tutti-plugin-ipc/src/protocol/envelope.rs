@@ -18,7 +18,7 @@ use super::{
     LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
 };
 use dpi::Size;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
 use tutti_units::Normalized;
 use tutti_units::SampleRate;
@@ -30,8 +30,8 @@ use tutti_units::SampleRate;
 pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512;
 
 /// The format a message that names none asks for: 32-bit, which every plugin processes.
-pub(crate) fn default_format() -> SampleFormat {
-    SampleFormat::F32
+pub(crate) fn default_format() -> FloatWidth {
+    FloatWidth::F32
 }
 
 fn default_block_size() -> usize {
@@ -84,7 +84,7 @@ pub enum HostMessage {
         /// Sample format the host would rather exchange; the subprocess replies
         /// with what it actually negotiated.
         #[serde(default = "default_format")]
-        preferred_format: SampleFormat,
+        preferred_format: FloatWidth,
         /// Name of the shared-memory audio slab, empty if not yet set up.
         #[serde(default)]
         shm_name: String,
@@ -317,7 +317,7 @@ pub enum BridgeMessage {
         loaded: LoadedPlugin,
         /// The sample format actually agreed on, which may differ from the
         /// host's preference.
-        negotiated_format: SampleFormat,
+        negotiated_format: FloatWidth,
         /// The plugin refused the staged state
         /// ([`HostMessage::StageStateChunk`]): it loaded at its defaults. `None`
         /// when it took the state, and when none was staged.

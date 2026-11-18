@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     ParamAccess, ParamFlags, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
 };
@@ -102,7 +102,7 @@ pub struct Vst3Loaded {
 pub(super) struct Activation {
     /// The sample format of the current activation; `None` while `setActive(1)`
     /// has not run or `setActive(0)` has since.
-    pub(super) format: Option<SampleFormat>,
+    pub(super) format: Option<FloatWidth>,
 }
 
 impl Activation {
@@ -111,7 +111,7 @@ impl Activation {
     }
 
     pub(super) fn is_f64(self) -> bool {
-        self.format == Some(SampleFormat::F64)
+        self.format == Some(FloatWidth::F64)
     }
 }
 
@@ -157,7 +157,7 @@ impl std::fmt::Debug for Vst3Loaded {
 #[cfg(test)]
 mod activation_tests {
     use super::Activation;
-    use tutti_buffers::SampleFormat;
+    use tutti_buffers::FloatWidth;
 
     /// Inactive is the absence of a format; only a 64-bit activation is f64.
     #[test]
@@ -165,11 +165,11 @@ mod activation_tests {
         let off = Activation::default();
         assert!(!off.is_active() && !off.is_f64());
         let f32_ = Activation {
-            format: Some(SampleFormat::F32),
+            format: Some(FloatWidth::F32),
         };
         assert!(f32_.is_active() && !f32_.is_f64());
         let f64_ = Activation {
-            format: Some(SampleFormat::F64),
+            format: Some(FloatWidth::F64),
         };
         assert!(f64_.is_active() && f64_.is_f64());
     }

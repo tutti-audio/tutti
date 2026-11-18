@@ -16,7 +16,7 @@ use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
     ParameterChanges, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput,
@@ -200,7 +200,7 @@ impl Vst2Processor {
     /// makes [`process_planes`](Self::process_planes) enter `processReplacingF64`.
     #[must_use]
     pub fn is_double_precision(&self) -> bool {
-        self.scratch.format() == SampleFormat::F64
+        self.scratch.format() == FloatWidth::F64
     }
 
     /// Returns how many plugin-emitted MIDI events were **dropped** since the
@@ -449,7 +449,7 @@ impl Vst2Processor {
         };
         // The width is matched once per block against the activation's.
         match (self.scratch.format(), buffer.by_width()) {
-            (SampleFormat::F32, ByWidth::F32(_)) | (SampleFormat::F64, ByWidth::F64(_)) => {}
+            (FloatWidth::F32, ByWidth::F32(_)) | (FloatWidth::F64, ByWidth::F64(_)) => {}
             _ => {
                 return Err(PluginError::Block(
                     "the block's sample format is not the one the plugin was activated with",

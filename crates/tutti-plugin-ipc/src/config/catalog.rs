@@ -19,7 +19,7 @@
 use super::bridge::{BridgeConfig, RandomSourceError};
 use std::path::PathBuf;
 use std::time::Duration;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{Locator, Timeouts};
 
 /// Where the scanner keeps its crash sentinel and which directories to scan.
@@ -124,7 +124,7 @@ impl CatalogConfig {
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
     /// Preferred audio sample format.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
 
     /// Largest block, in **frames** per channel, that will cross the bridge.
     ///
@@ -139,7 +139,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            format: SampleFormat::F32,
+            format: FloatWidth::F32,
             buffer_size: 8192,
             timeouts: Timeouts::default(),
         }
@@ -158,7 +158,7 @@ impl AudioConfig {
 
     /// Sets the sample format to request from each plugin.
     #[must_use]
-    pub fn format(mut self, format: SampleFormat) -> Self {
+    pub fn format(mut self, format: FloatWidth) -> Self {
         self.format = format;
         self
     }

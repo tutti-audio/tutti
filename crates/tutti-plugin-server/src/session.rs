@@ -12,7 +12,7 @@ use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
 use crate::served::AnyServed;
 use crate::ties::Ties;
 use dpi::Size;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
 use tutti_plugin_ipc_ffi::Ready;
@@ -683,7 +683,7 @@ impl Session {
         load: &Load,
         sample_rate: SampleRate,
         block_size: usize,
-        preferred_format: SampleFormat,
+        preferred_format: FloatWidth,
         declared: Option<StagedState>,
         interim: &mut dyn FnMut(BridgeMessage),
     ) -> BridgeResult<Reaction> {
@@ -715,7 +715,6 @@ impl Session {
             }
         }
         let mut restoring = || interim(BridgeMessage::RestoringState);
-        let prefer_f64 = preferred_format == SampleFormat::F64;
         let (plugin, state_error, seat) = match AnyServed::load(
             main,
             &self.work_handle,
@@ -724,7 +723,7 @@ impl Session {
             load,
             sample_rate,
             block_size,
-            prefer_f64,
+            preferred_format,
             staged.as_deref().zip(declared.map(|d| d.state_use)),
             &mut restoring,
             self.render.ties().clone(),
@@ -734,7 +733,7 @@ impl Session {
         };
         let descriptor = plugin.plugin().descriptor().clone();
         let loaded = plugin.plugin().loaded().clone();
-        let negotiated = plugin.plugin().negotiated(prefer_f64);
+        let negotiated = plugin.plugin().negotiated(preferred_format);
         self.clock = Clock { format: negotiated };
         self.max_block = block_size;
         // The plugin's own parameter output is held in fixed storage
@@ -1144,7 +1143,7 @@ mod tests {
             1,
             0,
         );
-        let (mut s, mut shm) = load_clap(name, SampleFormat::F32);
+        let (mut s, mut shm) = load_clap(name, FloatWidth::F32);
         let before = save_state_bytes(&mut s);
 
         let side = Arc::clone(&s.side);
@@ -1295,7 +1294,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_with_no_blocks_sees_it() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("save_quiet", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("save_quiet", FloatWidth::F32);
         let before = save_state_bytes(&mut s);
         let r = s
             .handle(
@@ -1506,7 +1505,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_process_request_from_a_plugin_thread_rings_the_bell_and_tells_the_host_once() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("process_requested", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("process_requested", FloatWidth::F32);
         let main = main_thread();
         assert!(!s.ties().bell.rung(), "nothing asked yet");
         assert!(
@@ -1536,7 +1535,7 @@ mod tests {
         let mut s = Rig::new();
         let layout = tutti_plugin_ipc::SlabLayout::new(
             256,
-            SampleFormat::F32,
+            FloatWidth::F32,
             vec![tutti_plugin_types::ChannelLayout::STEREO],
             vec![tutti_plugin_types::ChannelLayout::STEREO],
         );
@@ -1566,7 +1565,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_session_reports_a_lost_clap_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("lost_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("lost_clap", FloatWidth::F32);
         assert!(!s.plugin_lost());
         s.lose_plugin();
         assert!(s.plugin_lost());
@@ -1608,7 +1607,7 @@ mod tests {
         #[test]
         fn a_window_number_that_means_nothing_here_is_refused_as_foreign() {
             let _lock = crate::test_utils::plugin_load_lock();
-            let (mut s, _shm) = load_clap("foreign_window", SampleFormat::F32);
+            let (mut s, _shm) = load_clap("foreign_window", FloatWidth::F32);
             let raw = 0x40_0001;
             let scale = tutti_plugin_types::ContentScale::IDENTITY;
             assert!(matches!(
@@ -1652,7 +1651,7 @@ mod tests {
                     load: tutti_plugin_types::Load::new(),
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
-                    preferred_format: SampleFormat::F32,
+                    preferred_format: FloatWidth::F32,
                     shm_name: "x".into(),
                     state: None,
                 },
@@ -1686,7 +1685,7 @@ mod tests {
     /// Returns (session, shm_guard). The guard keeps the creator-side mmap
     /// alive while the session holds its own mapping.
     #[cfg(feature = "clap")]
-    fn load_clap(name: &str, preferred_format: SampleFormat) -> (Rig, SlabWriter) {
+    fn load_clap(name: &str, preferred_format: FloatWidth) -> (Rig, SlabWriter) {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
@@ -1730,7 +1729,7 @@ mod tests {
                     load,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
-                    preferred_format: SampleFormat::F32,
+                    preferred_format: FloatWidth::F32,
                     shm_name: "choosing".to_string(),
                     state: None,
                 },
@@ -1814,8 +1813,8 @@ mod tests {
         let _render = crate::test_utils::clap_probe_render_mode(
             tutti_clap_test_plugin::RenderMode::TagPassthrough as u32,
         );
-        let (mut s, mut shm) = load_clap("rate_refusal_cycle", SampleFormat::F64);
-        assert_eq!(s.clock.format, SampleFormat::F64, "fixture");
+        let (mut s, mut shm) = load_clap("rate_refusal_cycle", FloatWidth::F64);
+        assert_eq!(s.clock.format, FloatWidth::F64, "fixture");
         let set = |s: &mut Rig, rate: f64| {
             s.handle(
                 main_thread(),
@@ -1892,10 +1891,10 @@ mod tests {
     #[cfg(feature = "clap")]
     fn load_clap_plugin_f64() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (s, _shm) = load_clap("load_clap_f64", SampleFormat::F64);
+        let (s, _shm) = load_clap("load_clap_f64", FloatWidth::F64);
         let loaded = s.plugin.as_ref().unwrap().plugin().loaded();
         assert!(!loaded.features.contains(Features::F64_AUDIO));
-        assert_eq!(s.clock.format, SampleFormat::F32);
+        assert_eq!(s.clock.format, FloatWidth::F32);
     }
 
     /// The frames each 64-bit round trip below renders.
@@ -1909,7 +1908,7 @@ mod tests {
     /// does. The render mode goes back to `Inert` when the guard drops, on a
     /// failed assertion too.
     #[cfg(feature = "clap")]
-    fn clap_round_trip<T>(name: &str, mask: u32, format: SampleFormat, input: T) -> RoundTrip<T>
+    fn clap_round_trip<T>(name: &str, mask: u32, format: FloatWidth, input: T) -> RoundTrip<T>
     where
         T: tutti_buffers::Float,
     {
@@ -1979,7 +1978,7 @@ mod tests {
         use tutti_clap_test_plugin::Site;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("reset_reaches_the_plugin", SampleFormat::F32);
+        let (mut s, mut shm) = load_clap("reset_reaches_the_plugin", FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let resets_at_load = visits(Site::Reset);
         let processes_at_load = visits(Site::Process);
@@ -2045,7 +2044,7 @@ mod tests {
         use tutti_clap_test_plugin::Site;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("block_bounds", SampleFormat::F32);
+        let (mut s, mut shm) = load_clap("block_bounds", FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let processes_at_load = visits(Site::Process);
 
@@ -2101,7 +2100,7 @@ mod tests {
         use tutti_plugin_types::ChannelLayout;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, matching) = load_clap("layout_gate", SampleFormat::F32);
+        let (mut s, matching) = load_clap("layout_gate", FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let processes_at_load = visits(Site::Process);
         let layout = tutti_plugin_ipc::SlabLayout {
@@ -2166,7 +2165,7 @@ mod tests {
     #[cfg(feature = "clap")]
     struct RoundTrip<T> {
         /// The session's negotiated format.
-        format: SampleFormat,
+        format: FloatWidth,
         /// The plugin's `F64_AUDIO` bit.
         f64_audio: bool,
         /// The node's graph-facing input bus widths, as the server reports them.
@@ -2190,8 +2189,8 @@ mod tests {
             f64_audio,
             out,
             ..
-        } = clap_round_trip("f32_session_64bit_clap", both, SampleFormat::F32, 0.5f32);
-        assert_eq!(format, SampleFormat::F32);
+        } = clap_round_trip("f32_session_64bit_clap", both, FloatWidth::F32, 0.5f32);
+        assert_eq!(format, FloatWidth::F32);
         assert!(!f64_audio, "activated f64 for an f32 session");
         for (ch, samples) in out.iter().enumerate() {
             let want = 0.5 + tutti_clap_test_plugin::probe_tag(0, ch as u32);
@@ -2221,8 +2220,8 @@ mod tests {
             f64_audio,
             out,
             ..
-        } = clap_round_trip("f64_session_64bit_clap", both, SampleFormat::F64, 0.1f64);
-        assert_eq!(format, SampleFormat::F64);
+        } = clap_round_trip("f64_session_64bit_clap", both, FloatWidth::F64, 0.1f64);
+        assert_eq!(format, FloatWidth::F64);
         assert!(f64_audio);
         for (ch, samples) in out.iter().enumerate() {
             let tag = tutti_clap_test_plugin::probe_tag(0, ch as u32);
@@ -2250,10 +2249,10 @@ mod tests {
         } = clap_round_trip(
             "f64_session_f32_inputs_clap",
             tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS,
-            SampleFormat::F64,
+            FloatWidth::F64,
             0.5f32,
         );
-        assert_eq!(format, SampleFormat::F32);
+        assert_eq!(format, FloatWidth::F32);
         assert!(!f64_audio);
         let want = 0.5 + tutti_clap_test_plugin::probe_tag(0, 0);
         assert!(out[0].iter().all(|&x| x == want));
@@ -2285,10 +2284,10 @@ mod tests {
         } = clap_round_trip(
             "f64_clap_instrument",
             tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS,
-            SampleFormat::F64,
+            FloatWidth::F64,
             0.1f64,
         );
-        assert_eq!(format, SampleFormat::F64);
+        assert_eq!(format, FloatWidth::F64);
         assert!(f64_audio, "an instrument with 64-bit outputs runs at f64");
         assert!(
             inputs.is_empty(),
@@ -2317,7 +2316,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn the_parameter_list_is_the_plugins_declared_table_in_its_order() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("get_param_list_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("get_param_list_clap", FloatWidth::F32);
         let reply = s
             .handle(main_thread(), HostMessage::GetParameterList)
             .unwrap()
@@ -2339,7 +2338,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_parameter_reads_as_its_declared_default_normalized() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("get_param_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("get_param_clap", FloatWidth::F32);
         let reply = s
             .handle(
                 main_thread(),
@@ -2363,7 +2362,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_parameter_write_reaches_the_plugin_and_reads_back() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("set_param_clap", SampleFormat::F32);
+        let (mut s, mut shm) = load_clap("set_param_clap", FloatWidth::F32);
         let param_id = ParamId::new(CUTOFF);
         let r = s
             .handle(
@@ -2494,7 +2493,7 @@ mod tests {
                     load: tutti_plugin_types::Load::new(),
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
-                    preferred_format: SampleFormat::F32,
+                    preferred_format: FloatWidth::F32,
                     shm_name: "staged".into(),
                     state: declared,
                 },
@@ -2516,7 +2515,7 @@ mod tests {
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
-                preferred_format: SampleFormat::F32,
+                preferred_format: FloatWidth::F32,
                 shm_name: "x".into(),
                 state: declared,
             },
@@ -2633,7 +2632,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_staged_state_is_restored_by_the_next_load() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut source, _shm) = load_clap("stage_source", SampleFormat::F32);
+        let (mut source, _shm) = load_clap("stage_source", FloatWidth::F32);
         let own = save_state_bytes(&mut source);
 
         let mut s = Rig::new();
@@ -2682,7 +2681,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_stateful_load_announces_the_restore() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut source, _shm) = load_clap("announce_source", SampleFormat::F32);
+        let (mut source, _shm) = load_clap("announce_source", FloatWidth::F32);
         let own = save_state_bytes(&mut source);
         let load = |s: &mut Rig, declared: Option<StagedState>| {
             let mut heard = Vec::new();
@@ -2695,7 +2694,7 @@ mod tests {
                         load: tutti_plugin_types::Load::new(),
                         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                         block_size: 512,
-                        preferred_format: SampleFormat::F32,
+                        preferred_format: FloatWidth::F32,
                         shm_name: "announce".into(),
                         state: declared,
                     },
@@ -2753,7 +2752,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn save_load_state() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("save_load_state_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("save_load_state_clap", FloatWidth::F32);
         let data = save_state_bytes(&mut s);
         let r = load_state_bytes(&mut s, &data);
         assert_state_loaded(r);
@@ -2767,7 +2766,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn save_load_state_round_trips_byte_exact() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("rt_state_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("rt_state_clap", FloatWidth::F32);
 
         let first = save_state_bytes(&mut s);
         assert_state_loaded(load_state_bytes(&mut s, &first));
@@ -2787,7 +2786,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn set_sample_rate_with_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("set_sr_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("set_sr_clap", FloatWidth::F32);
         let r = s
             .handle(
                 main_thread(),
@@ -2807,7 +2806,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn unload_loaded_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("unload_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("unload_clap", FloatWidth::F32);
         assert!(s.plugin.is_some());
         assert!(s.side().has_slab());
         let r = s.handle(main_thread(), HostMessage::UnloadPlugin).unwrap();
@@ -2820,7 +2819,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn process_audio_with_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("proc_audio_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("proc_audio_clap", FloatWidth::F32);
         let reply = s
             .handle(
                 main_thread(),
@@ -2862,7 +2861,7 @@ mod tests {
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
-                preferred_format: SampleFormat::F32,
+                preferred_format: FloatWidth::F32,
                 shm_name: name.to_string(),
                 state: None,
             },
@@ -2953,7 +2952,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_clap_block_the_plugin_fails_is_silence_and_the_server_goes_on() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("fails_clap", SampleFormat::F32);
+        let (mut s, mut shm) = load_clap("fails_clap", FloatWidth::F32);
         {
             let _error = crate::test_utils::clap_probe_status_mode(
                 tutti_clap_test_plugin::StatusMode::Error,
@@ -2990,7 +2989,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn an_idle_drain_does_not_allocate_clap() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("idle_clap", SampleFormat::F32);
+        let (mut s, _shm) = load_clap("idle_clap", FloatWidth::F32);
         assert!(s.drain_async_events(main_thread()).is_empty());
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..64 {
@@ -3030,7 +3029,7 @@ mod tests {
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
-                preferred_format: SampleFormat::F32,
+                preferred_format: FloatWidth::F32,
                 shm_name: "refit_vst3".to_string(),
                 state: None,
             },
@@ -3078,7 +3077,7 @@ mod tests {
     #[cfg(all(feature = "clap", feature = "vst3"))]
     fn the_parameter_count_agrees_with_the_list() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (s, _shm) = load_clap("count_clap", SampleFormat::F32);
+        let (s, _shm) = load_clap("count_clap", FloatWidth::F32);
         let clap = s.plugin.as_ref().unwrap().plugin();
         assert!(clap.parameter_count(main_thread()) > 0);
         assert_eq!(
@@ -3093,7 +3092,7 @@ mod tests {
             &Load::new(),
             SampleRate::SR_48K,
             128,
-            false,
+            FloatWidth::F32,
             None,
             &mut || {},
             tutti_plugin_types::Hand::local(),

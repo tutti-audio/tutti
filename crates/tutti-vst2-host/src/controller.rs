@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 use tutti_plugin_types::MainThreadMarker;
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Controller, Loaded, PluginError, PluginTail, Prepare, Processor, Refused, RestartRules,
     Samples, Stuck, Widths, Wraps,
@@ -120,11 +120,12 @@ impl Loaded for Vst2Loaded {
     fn widths(&self) -> Widths {
         Widths::new(self.metadata().supports_f64)
     }
+
     /// Tells the plugin its rate, block size and precision while it is
     /// suspended, resumes it, starts processing, and splits it.
     ///
     /// The precision is 64-bit only when the activation asks for
-    /// [`SampleFormat::F64`] and the plugin declared
+    /// [`FloatWidth::F64`] and the plugin declared
     /// `effFlagsCanDoubleReplacing`: the opcode states the width the host WILL
     /// call the plugin at, and a plugin told 64 that is then called at 32 may
     /// route `processReplacing` to a stub. The render mode needs no call: it
@@ -155,7 +156,7 @@ impl Loaded for Vst2Loaded {
         };
 
         let format = self.widths().negotiate(prepare.format());
-        let double_precision = format == SampleFormat::F64;
+        let double_precision = format == FloatWidth::F64;
         // Before each dispatch, so a plugin asking `audioMasterGetSampleRate` or
         // `GetBlockSize` from inside it reads the figure being set.
         self.host.set_sample_rate(rate);

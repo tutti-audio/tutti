@@ -100,7 +100,7 @@ pub(crate) use capability_view::is_declined;
 use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
 use std::sync::Arc;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     HostedNode, InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle,
@@ -189,7 +189,7 @@ pub struct PluginClient<S = Unbound> {
     bridge: Arc<PluginBridge>,
     descriptor: PluginDescriptor,
     loaded: LoadedPlugin,
-    format: SampleFormat,
+    format: FloatWidth,
     /// Total input ports (main + sidechain/aux) and output ports: the node's
     /// audio widths.
     inputs: usize,
@@ -636,7 +636,7 @@ impl<S> PluginClient<S> {
     }
 
     /// Returns the sample format negotiated with the plugin at load.
-    pub fn format(&self) -> SampleFormat {
+    pub fn format(&self) -> FloatWidth {
         self.format
     }
 

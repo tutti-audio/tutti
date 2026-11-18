@@ -12,7 +12,7 @@ use tutti_rt::LockExt;
 use crate::support::main_thread;
 
 use assert_no_alloc::assert_no_alloc;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_clap_host::{ClapLoaded, ClapProcessor, LoadOptions};
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{
@@ -127,12 +127,12 @@ fn set_activate_refusal(rate: f64) {
 }
 
 /// One block through `processor` as the trait takes it, returning the error.
-fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), PluginError> {
+fn render(processor: &mut ClapProcessor, format: FloatWidth) -> Result<(), PluginError> {
     const FRAMES: usize = 64;
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     match format {
-        SampleFormat::F32 => {
+        FloatWidth::F32 => {
             let input = [0.0f32; FRAMES];
             let mut left = [1.0f32; FRAMES];
             let mut right = [1.0f32; FRAMES];
@@ -191,13 +191,13 @@ fn activation_splits_the_plugin_and_renders_at_the_prepared_width() {
         controller.tail(main_thread()),
         PluginTail::Finite(_)
     ));
-    render(&mut processor, SampleFormat::F32).expect("an f32 block renders");
+    render(&mut processor, FloatWidth::F32).expect("an f32 block renders");
     assert!(
         processor.is_processing(),
         "the first block starts processing"
     );
 
-    let mismatch = render(&mut processor, SampleFormat::F64).expect_err("wrong width");
+    let mismatch = render(&mut processor, FloatWidth::F64).expect_err("wrong width");
     assert!(
         matches!(mismatch, PluginError::Block(why) if why.contains("sample format")),
         "{mismatch:?}"
@@ -210,13 +210,13 @@ fn activation_splits_the_plugin_and_renders_at_the_prepared_width() {
     // The same plugin, its ports flagged for 64-bit audio, activates at 64-bit
     // when the `Prepare` says so.
     set_ports_64bit(PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS);
-    let wide = prepare().with_format(SampleFormat::F64);
+    let wide = prepare().with_format(FloatWidth::F64);
     let (mut processor, controller) = loaded
         .activate(main_thread(), wide)
         .expect("activates at 64-bit");
     assert!(processor.is_f64());
-    render(&mut processor, SampleFormat::F64).expect("an f64 block renders");
-    let mismatch = render(&mut processor, SampleFormat::F32).expect_err("wrong width");
+    render(&mut processor, FloatWidth::F64).expect("an f64 block renders");
+    let mismatch = render(&mut processor, FloatWidth::F32).expect_err("wrong width");
     assert!(
         matches!(mismatch, PluginError::Block(why) if why.contains("sample format")),
         "{mismatch:?}"
@@ -227,7 +227,7 @@ fn activation_splits_the_plugin_and_renders_at_the_prepared_width() {
 
 /// **A 64-bit request negotiates down to 32-bit when the plugin lacks
 /// 64-bit ports, and stays 64-bit when it has them.** The fallback is
-/// `tutti_plugin_types::negotiate` fed this plugin's capability; the
+/// `Widths::negotiate` fed this plugin's capability; the
 /// negotiated format activates and renders, where the raw 64-bit request is
 /// refused.
 #[test]
@@ -237,11 +237,11 @@ fn a_64bit_request_negotiates_to_32bit_without_64bit_ports() {
     let mut loaded = probe.load();
     assert!(!loaded.supports_f64());
     let negotiated = loaded
-        .negotiate_format(main_thread(), SampleFormat::F64)
+        .negotiate_format(main_thread(), FloatWidth::F64)
         .expect("inactive");
-    assert_eq!(negotiated, SampleFormat::F32, "no 64-bit ports");
+    assert_eq!(negotiated, FloatWidth::F32, "no 64-bit ports");
 
-    let asked = prepare().with_format(SampleFormat::F64);
+    let asked = prepare().with_format(FloatWidth::F64);
     let refused = loaded
         .activate(main_thread(), asked)
         .expect_err("the raw request is refused");
@@ -251,23 +251,23 @@ fn a_64bit_request_negotiates_to_32bit_without_64bit_ports() {
     let (mut processor, controller) = loaded
         .activate(main_thread(), settled)
         .expect("the fallback activates");
-    assert_eq!(processor.format(), SampleFormat::F32);
-    render(&mut processor, SampleFormat::F32).expect("and renders");
+    assert_eq!(processor.format(), FloatWidth::F32);
+    render(&mut processor, FloatWidth::F32).expect("and renders");
     ClapLoaded::deactivate(main_thread(), processor, controller).expect("a pair");
 
     set_ports_64bit(PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS);
     let mut capable = probe.load();
     assert_eq!(
         capable
-            .negotiate_format(main_thread(), SampleFormat::F64)
+            .negotiate_format(main_thread(), FloatWidth::F64)
             .expect("inactive"),
-        SampleFormat::F64
+        FloatWidth::F64
     );
     assert_eq!(
         capable
-            .negotiate_format(main_thread(), SampleFormat::F32)
+            .negotiate_format(main_thread(), FloatWidth::F32)
             .expect("inactive"),
-        SampleFormat::F32,
+        FloatWidth::F32,
         "capability never raises a 32-bit request"
     );
     set_ports_64bit(0);
@@ -283,11 +283,8 @@ fn widths_follow_the_ports_precision() {
     set_ports_64bit(0);
     let narrow = probe.load();
     assert_eq!(narrow.widths(), Widths::F32);
-    assert!(!narrow.widths().accepts(SampleFormat::F64));
-    assert_eq!(
-        narrow.widths().negotiate(SampleFormat::F64),
-        SampleFormat::F32
-    );
+    assert!(!narrow.widths().accepts(FloatWidth::F64));
+    assert_eq!(narrow.widths().negotiate(FloatWidth::F64), FloatWidth::F32);
 
     set_ports_64bit(PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS);
     let wide = probe.load();
@@ -307,17 +304,17 @@ fn partly_64bit_ports_negotiate_to_32bit_and_the_ports_are_read_again() {
     let mut inputs_only = probe.load();
     assert_eq!(
         inputs_only
-            .negotiate_format(main_thread(), SampleFormat::F64)
+            .negotiate_format(main_thread(), FloatWidth::F64)
             .expect("inactive"),
-        SampleFormat::F32,
+        FloatWidth::F32,
         "inputs only"
     );
     set_ports_64bit(PORTS_64BIT_OUTPUTS);
     assert_eq!(
         inputs_only
-            .negotiate_format(main_thread(), SampleFormat::F64)
+            .negotiate_format(main_thread(), FloatWidth::F64)
             .expect("inactive"),
-        SampleFormat::F32,
+        FloatWidth::F32,
         "outputs only"
     );
 
@@ -327,9 +324,9 @@ fn partly_64bit_ports_negotiate_to_32bit_and_the_ports_are_read_again() {
     set_ports_64bit(0);
     assert_eq!(
         loaded
-            .negotiate_format(main_thread(), SampleFormat::F64)
+            .negotiate_format(main_thread(), FloatWidth::F64)
             .expect("inactive"),
-        SampleFormat::F32,
+        FloatWidth::F32,
         "the flags dropped after load"
     );
 }
@@ -391,7 +388,7 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
     let cutoff = &probe_params()[0];
     let id = ParamId::new(cutoff.id);
 
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
@@ -403,7 +400,7 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
         "nothing was sent while the Processor was not rendering"
     );
 
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     let cap = process_capture();
     let event = cap.events[..cap.event_count as usize]
         .iter()
@@ -426,7 +423,7 @@ fn a_state_load_makes_queued_writes_stale() {
     let cutoff = &probe_params()[0];
     let id = ParamId::new(cutoff.id);
 
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
@@ -440,7 +437,7 @@ fn a_state_load_makes_queued_writes_stale() {
         .set_parameter(main_thread(), id, Normalized::of(0.75))
         .expect("a declared, writable parameter");
 
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     let cap = process_capture();
     let writes: Vec<f64> = cap.events[..cap.event_count as usize]
         .iter()
@@ -476,9 +473,9 @@ fn a_full_ring_keeps_the_latest_value_and_retries_on_flush() {
     }
     assert!(controller.refused_edits() > 0, "the ring filled");
 
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     controller.flush_edits(main_thread());
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     let cap = process_capture();
     let last = cap.events[..cap.event_count as usize]
         .iter()
@@ -501,7 +498,7 @@ fn draining_edits_does_not_allocate() {
         .activate(main_thread(), prepare())
         .expect("activates");
     let id = ParamId::new(probe_params()[0].id);
-    render(&mut processor, SampleFormat::F32).expect("warm up");
+    render(&mut processor, FloatWidth::F32).expect("warm up");
     for step in 0..200 {
         controller
             .set_parameter(
@@ -512,7 +509,7 @@ fn draining_edits_does_not_allocate() {
             .expect("a declared, writable parameter");
     }
     assert_no_alloc(|| {
-        render(&mut processor, SampleFormat::F32).expect("block");
+        render(&mut processor, FloatWidth::F32).expect("block");
     });
 }
 
@@ -525,12 +522,12 @@ fn a_processor_that_outlives_its_controller_renders_nothing() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    render(&mut processor, SampleFormat::F32).expect("block");
+    render(&mut processor, FloatWidth::F32).expect("block");
     let visits = thread_capture().sites[Site::Process as usize].visits;
     assert_eq!(visits, 1);
 
     drop(controller);
-    let error = render(&mut processor, SampleFormat::F32).expect_err("retired");
+    let error = render(&mut processor, FloatWidth::F32).expect_err("retired");
     assert!(matches!(error, PluginError::Block(_)), "{error:?}");
     assert_eq!(
         thread_capture().sites[Site::Process as usize].visits,
@@ -555,12 +552,12 @@ fn the_controller_serves_reads_while_the_processor_renders() {
         .activate(main_thread(), prepare())
         .expect("activates");
     let id = ParamId::new(probe_params()[0].id);
-    render(&mut processor, SampleFormat::F32).expect("warm up");
+    render(&mut processor, FloatWidth::F32).expect("warm up");
 
     let render_thread = std::thread::spawn(move || {
         for _ in 0..400 {
             assert_no_alloc(|| {
-                render(&mut processor, SampleFormat::F32).expect("block");
+                render(&mut processor, FloatWidth::F32).expect("block");
             });
         }
         processor
@@ -584,7 +581,7 @@ fn the_controller_serves_reads_while_the_processor_renders() {
     let mut processor = render_thread
         .join()
         .expect("the render thread did not panic");
-    render(&mut processor, SampleFormat::F32).expect("and renders after");
+    render(&mut processor, FloatWidth::F32).expect("and renders after");
     let cap = thread_capture();
     let process = cap.sites[Site::Process as usize];
     assert!(process.observed && process.is_audio && !process.is_main);
@@ -649,7 +646,7 @@ fn an_errored_block_does_not_allocate() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    render(&mut processor, SampleFormat::F32).expect("warm up");
+    render(&mut processor, FloatWidth::F32).expect("warm up");
 
     // Longer than the activation's 256 frames.
     const FRAMES: usize = 512;

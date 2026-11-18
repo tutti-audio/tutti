@@ -12,7 +12,7 @@ use param_reads::ParamReads as _;
 mod param_list;
 use param_list::ParamList as _;
 use std::sync::Arc;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioSlab;
@@ -48,7 +48,7 @@ fn handle_over(
         guard,
         descriptor: descriptor.clone(),
         loaded: loaded.clone(),
-        format: SampleFormat::F32,
+        format: FloatWidth::F32,
         ceiling: 512,
         slab,
         rate: SampleRate::SR_48K,
@@ -156,7 +156,7 @@ fn handle_with_mock_server(
         SlabLayout {
             slots: tutti_plugin_ipc::RING_SLOTS as u32,
             samples_per_channel: 512,
-            format: SampleFormat::F32,
+            format: FloatWidth::F32,
             inputs: vec![ChannelLayout::STEREO],
             outputs: vec![ChannelLayout::STEREO],
         },
@@ -244,7 +244,7 @@ fn handle_with_multi_reply_server(
         SlabLayout {
             slots: tutti_plugin_ipc::RING_SLOTS as u32,
             samples_per_channel: 512,
-            format: SampleFormat::F32,
+            format: FloatWidth::F32,
             inputs: vec![ChannelLayout::STEREO],
             outputs: vec![ChannelLayout::STEREO],
         },

@@ -19,7 +19,7 @@ use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_clap_ffi::ActivateError;
 use tutti_plugin_types::{
     Control, Loaded, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
@@ -88,8 +88,8 @@ impl ClapLoaded {
     pub fn negotiate_format(
         &mut self,
         main: MainThreadMarker,
-        requested: SampleFormat,
-    ) -> crate::Result<SampleFormat> {
+        requested: FloatWidth,
+    ) -> crate::Result<FloatWidth> {
         self.rescan_audio_ports(main)?;
         Ok(self.widths().negotiate(requested))
     }
@@ -122,7 +122,7 @@ impl ClapLoaded {
         main: MainThreadMarker,
         prepare: Prepare,
     ) -> std::result::Result<(ClapProcessor, ClapController), Refused<Self>> {
-        let wide = prepare.format() == SampleFormat::F64;
+        let wide = prepare.format() == FloatWidth::F64;
         let refuse = |plugin: Self, error: ClapError| Refused {
             plugin: Some(plugin),
             reason: plugin_error(error),
@@ -409,7 +409,7 @@ mod tests {
                     claims: true,
                 };
                 let mut scratch = AudioScratch::new(
-                    SampleFormat::F32,
+                    FloatWidth::F32,
                     input_rooms(&table, frames),
                     output_rooms(&table, frames),
                 );
@@ -462,7 +462,7 @@ mod tests {
             claims: true,
         };
         let mut scratch = AudioScratch::new(
-            SampleFormat::F32,
+            FloatWidth::F32,
             input_rooms(&table, FRAMES),
             output_rooms(&table, FRAMES),
         );

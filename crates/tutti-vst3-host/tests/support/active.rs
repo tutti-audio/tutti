@@ -12,7 +12,7 @@ use std::path::Path;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::{Activation, main_thread};
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, MainThreadMarker, MaxBlock, PluginError, Prepare, RenderMode, SampleRate, Samples,
 };
@@ -56,11 +56,11 @@ impl<T: Vst3Sample> Activation for Typed<T> {
 /// The two halves of one activation.
 pub type Active<T = f32> = tutti_fixtures::Active<Typed<T>>;
 
-fn format_of<T: Vst3Sample>() -> SampleFormat {
+fn format_of<T: Vst3Sample>() -> FloatWidth {
     if std::mem::size_of::<T>() == 8 {
-        SampleFormat::F64
+        FloatWidth::F64
     } else {
-        SampleFormat::F32
+        FloatWidth::F32
     }
 }
 

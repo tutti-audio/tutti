@@ -150,7 +150,7 @@ impl<T: Vst3Sample> Staged<T> {
         // the live component afterward, since some plugins only finalise their
         // arrangement once active.
         let scratch = |counts: &[usize], layout| {
-            BusBuffers::new(T::WIDTH, counts, layout, block_size)
+            BusBuffers::new(T::ABI_WIDTH, counts, layout, block_size)
                 .map_err(|e| Vst3Error::NotSupported(e.to_string()))
         };
         let (in_scratch, out_scratch) =
@@ -262,7 +262,7 @@ impl<T: Vst3Sample> Staged<T> {
             return Err((instance.loaded, error));
         }
         instance.loaded.active = Activation {
-            format: Some(T::FORMAT),
+            format: Some(T::WIDTH),
         };
         // The spec requires reading latency after each `setActive(true)`: the
         // value is only valid once the plugin is active, and it is what a host
@@ -373,8 +373,8 @@ impl<T: Vst3Sample> Staged<T> {
         let num_in = bus_layout(in_counts.first().copied().unwrap_or(0));
         let num_out = bus_layout(out_counts.first().copied().unwrap_or(0));
         let (Ok(in_scratch), Ok(out_scratch)) = (
-            BusBuffers::new(T::WIDTH, in_counts, num_in, block_size),
-            BusBuffers::new(T::WIDTH, out_counts, num_out, block_size),
+            BusBuffers::new(T::ABI_WIDTH, in_counts, num_in, block_size),
+            BusBuffers::new(T::ABI_WIDTH, out_counts, num_out, block_size),
         ) else {
             // A count the ffi layer already bounds to a layout: keep the scratch
             // the last layout had.
@@ -462,9 +462,9 @@ impl<T: Vst3Sample> Staged<T> {
         let num_in = bus_layout(in_counts.first().copied().unwrap_or(0));
         let num_out = bus_layout(out_counts.first().copied().unwrap_or(0));
         let block_size = self.audio.config.block_size;
-        let in_scratch = BusBuffers::new(T::WIDTH, &in_counts, num_in, block_size)
+        let in_scratch = BusBuffers::new(T::ABI_WIDTH, &in_counts, num_in, block_size)
             .map_err(|e| Vst3Error::NotSupported(e.to_string()))?;
-        let out_scratch = BusBuffers::new(T::WIDTH, &out_counts, num_out, block_size)
+        let out_scratch = BusBuffers::new(T::ABI_WIDTH, &out_counts, num_out, block_size)
             .map_err(|e| Vst3Error::NotSupported(e.to_string()))?;
 
         self.audio.config.num_input_channels = num_in;

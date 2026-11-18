@@ -44,7 +44,7 @@ use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
 use std::borrow::Cow;
 use tutti_buffers::Float;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
@@ -302,7 +302,7 @@ pub(crate) struct RenderLink {
     /// What [`report_losses`](Self::report_losses) last logged.
     logged: Losses,
     /// The format blocks are rendered in, which scratch is built for.
-    format: SampleFormat,
+    format: FloatWidth,
     /// The layout of the attached slab, if one is: what scratch is built for.
     slab_layout: Option<SlabLayout>,
     /// The parameter queues and the points each holds that the plugin's output
@@ -336,7 +336,7 @@ impl RenderLink {
 
     /// Renders in `format` from the next block on: scratch of the slab's shape
     /// is rebuilt when it changed, and later slabs are sized in it.
-    pub(crate) fn set_format(&mut self, format: SampleFormat) {
+    pub(crate) fn set_format(&mut self, format: FloatWidth) {
         if format == self.format {
             return;
         }
@@ -994,7 +994,7 @@ mod tests {
     fn slab(name: &str, samples: usize) -> (impl Sized, SlabWriter) {
         let layout = SlabLayout::new(
             samples,
-            SampleFormat::F32,
+            FloatWidth::F32,
             vec![ChannelLayout::STEREO],
             vec![ChannelLayout::STEREO],
         );
@@ -1018,7 +1018,7 @@ mod tests {
         let (_second_host, second) = slab("drain_second", 4096);
         link.attach_slab(second);
         link.fit_params(300);
-        link.set_format(SampleFormat::F64);
+        link.set_format(FloatWidth::F64);
         assert_no_alloc::assert_no_alloc(|| side.drain());
         assert!(side.has_slab());
 

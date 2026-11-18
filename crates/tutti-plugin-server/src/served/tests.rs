@@ -1,7 +1,7 @@
 //! `Served<F>` against each format's reference plugin.
 
 use super::*;
-use tutti_buffers::Float;
+use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, Processor};
 
 #[cfg(served_au)]
@@ -19,7 +19,7 @@ impl<F: ServerSide> Served<F> {
         path: &Path,
         rate: f64,
         block: usize,
-        prefer_f64: bool,
+        requested: FloatWidth,
     ) -> PluginResult<Self> {
         Self::load(
             main,
@@ -28,7 +28,7 @@ impl<F: ServerSide> Served<F> {
             &Load::new(),
             SampleRate::of(rate),
             block,
-            prefer_f64,
+            requested,
             None,
             &mut || {},
             Hand::local(),
@@ -90,7 +90,7 @@ fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
         &Load::new(),
         SampleRate::SR_44K1,
         512,
-        false,
+        FloatWidth::F32,
         None,
         &mut || {},
         crate::ties::ties().expect("bells").0,

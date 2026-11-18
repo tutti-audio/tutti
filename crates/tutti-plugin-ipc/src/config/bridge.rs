@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{BridgeError, Timeouts};
 
 /// The operating system's random source could not be read, so no name that
@@ -138,7 +138,7 @@ pub struct BridgeConfig {
     pub timeouts: Timeouts,
     /// Sample format to request; the subprocess replies with what it negotiated.
     #[serde(default = "crate::protocol::default_format")]
-    pub preferred_format: SampleFormat,
+    pub preferred_format: FloatWidth,
 }
 
 impl BridgeConfig {
@@ -156,7 +156,7 @@ impl BridgeConfig {
             shm_prefix: "tutti_audio_".to_string(),
             max_buffer_size: 8192,
             timeouts: Timeouts::default(),
-            preferred_format: SampleFormat::F32,
+            preferred_format: FloatWidth::F32,
         }
     }
 }

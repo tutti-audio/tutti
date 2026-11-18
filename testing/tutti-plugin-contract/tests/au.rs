@@ -11,7 +11,7 @@ tutti_plugin_contract::contract!(
 
 mod ramped {
     use tutti_au_host::render_notify::{ParamEvent, ScheduleAddress};
-    use tutti_buffers::SampleFormat;
+    use tutti_buffers::FloatWidth;
     use tutti_plugin_contract::spec::{Mode, Param};
     use tutti_plugin_contract::{
         Active, Au, BLOCK, Format, Kind, RATE, Render, prepare, set_mode, transcript,
@@ -20,7 +20,7 @@ mod ramped {
     fn level_unit() -> Active<<Au as Format>::L> {
         let mut loaded = Au::load();
         set_mode::<Au, _>(&mut loaded, Mode::Level);
-        Active::activate(loaded, prepare(RATE, BLOCK, SampleFormat::F32))
+        Active::activate(loaded, prepare(RATE, BLOCK, FloatWidth::F32))
             .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"))
     }
 

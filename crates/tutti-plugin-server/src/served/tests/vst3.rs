@@ -139,7 +139,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
     let mut requests: Vec<Request> = Vec::with_capacity(16);
@@ -208,7 +208,7 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
         Path::new(vst3_plugin()),
         44_100.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
     assert_eq!(instance.wiring.latency_samples, Samples(44));
@@ -243,7 +243,7 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
     assert_eq!(
@@ -283,7 +283,7 @@ fn a_param_id_remap_is_reported_as_a_changed_list() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
 
@@ -311,7 +311,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
     assert!(instance.poll(main_thread()).is_empty());
@@ -349,7 +349,13 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
 #[test]
 fn a_load_with_no_block_is_refused() {
     let _lock = crate::test_utils::plugin_load_lock();
-    match Vst3Instance::load_first(main_thread(), Path::new(vst3_plugin()), 48_000.0, 0, false) {
+    match Vst3Instance::load_first(
+        main_thread(),
+        Path::new(vst3_plugin()),
+        48_000.0,
+        0,
+        FloatWidth::F32,
+    ) {
         Err(PluginError::Load {
             stage: LoadStage::Activation,
             reason,
@@ -362,7 +368,7 @@ fn a_load_with_no_block_is_refused() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("a real load");
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 1);
@@ -378,7 +384,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
         Path::new(vst3_plugin()),
         48_000.0,
         128,
-        false,
+        FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 1);
@@ -426,7 +432,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
         Path::new(multi_program_sample()),
         44_100.0,
         512,
-        false,
+        FloatWidth::F32,
     )
     .expect("the multiple-program-changes sample loads");
 
@@ -502,7 +508,7 @@ fn a_vst3_program_loads_and_reads_back() {
         Path::new(multi_program_sample()),
         44_100.0,
         512,
-        false,
+        FloatWidth::F32,
     )
     .expect("the multiple-program-changes sample loads");
 
@@ -560,7 +566,7 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
         Path::new(multi_program_sample()),
         44_100.0,
         512,
-        false,
+        FloatWidth::F32,
     )
     .expect("the multiple-program-changes sample loads");
 
@@ -584,7 +590,7 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
 fn test_vst3_load() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false);
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32);
     assert!(
         instance.is_ok(),
         "Failed to load VST3 plugin: {:?}",
@@ -601,7 +607,7 @@ fn test_vst3_load() {
 fn test_vst3_metadata() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
     let outputs = instance.loaded().total_outputs();
 
@@ -612,7 +618,7 @@ fn test_vst3_metadata() {
 fn test_vst3_parameter_count() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
 
     let count = instance.parameters(main_thread()).len();
@@ -627,7 +633,7 @@ fn test_vst3_parameter_count() {
 fn test_vst3_parameter_list() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
 
     let params = instance.parameters(main_thread());
@@ -649,7 +655,7 @@ fn test_vst3_parameter_list() {
 fn test_vst3_get_parameter() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
 
     let params = instance.parameters(main_thread());
@@ -668,7 +674,7 @@ fn test_vst3_get_parameter() {
 fn test_vst3_process_f32_silence() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
 
     let num_samples = 512;
@@ -700,7 +706,7 @@ fn test_vst3_process_f32_silence() {
 fn test_vst3_process_f32_with_note() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
 
     let num_samples = 512;

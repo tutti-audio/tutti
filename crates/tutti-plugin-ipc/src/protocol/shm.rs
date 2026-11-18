@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::BusChannels;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 
 /// Shared-memory slab descriptor: the shape both processes must agree on before
 /// either maps a byte.
@@ -34,7 +34,7 @@ pub struct SlabLayout {
     /// boundary, not the host's configured maximum buffer size.
     pub samples_per_channel: usize,
     /// Width of one sample in the rings, which fixes their stride.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
     /// Ring depth, per direction. Carried on the wire (rather than assumed) so
     /// the opening side can reject a peer built with a different depth instead
     /// of silently addressing the wrong slot.
@@ -48,10 +48,7 @@ pub struct SlabLayout {
 impl SlabLayout {
     /// Returns the size of one sample in bytes, per [`format`](Self::format).
     pub fn sample_size(&self) -> usize {
-        match self.format {
-            SampleFormat::F64 => std::mem::size_of::<f64>(),
-            _ => std::mem::size_of::<f32>(),
-        }
+        self.format.bytes()
     }
 
     /// Total flat channels the input direction occupies (sum across input buses).
@@ -114,7 +111,7 @@ mod tests {
     fn layout(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> SlabLayout {
         SlabLayout {
             samples_per_channel: 64,
-            format: SampleFormat::F32,
+            format: FloatWidth::F32,
             // Derived, not a literal: every other construction site uses
             // `RING_SLOTS`, and a helper that hardcodes the depth would keep
             // passing if the ring ever grew.
@@ -188,7 +185,7 @@ mod tests {
     fn f64_doubles_the_region() {
         let mut l = layout(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
         let f32_bytes = l.input_ring_bytes();
-        l.format = SampleFormat::F64;
+        l.format = FloatWidth::F64;
         assert_eq!(l.sample_size(), 8);
         assert_eq!(l.input_ring_bytes(), f32_bytes * 2);
         assert_eq!(l.input_channels(), 2, "format does not affect width");

@@ -50,7 +50,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tutti_rt::LockExt;
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
@@ -133,7 +133,7 @@ pub struct IpcParts {
     /// What the server reported at load.
     pub loaded: LoadedPlugin,
     /// The format the blocks travel in.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
     /// The slab's per-chunk size: the most a chunk can be.
     pub ceiling: usize,
     /// The slab's input writer.
@@ -277,7 +277,7 @@ pub(crate) struct Link {
     pub(crate) guard: Arc<ProcessGuard>,
     pub(crate) descriptor: PluginDescriptor,
     pub(crate) loaded: LoadedPlugin,
-    pub(crate) format: SampleFormat,
+    pub(crate) format: FloatWidth,
     pub(crate) ceiling: usize,
     pub(crate) parameters: usize,
     pub(crate) timeout: Duration,
@@ -685,7 +685,7 @@ impl Ipc {
     }
 
     /// The format the blocks travel in.
-    pub fn format(&self) -> SampleFormat {
+    pub fn format(&self) -> FloatWidth {
         self.link.format
     }
 
@@ -903,11 +903,17 @@ impl Loaded for Ipc {
         latency: false,
     };
 
-    /// The width the load settled on: the server's reply names it and not the
-    /// plugin's capability, so a load that asked for 32-bit reports 32-bit.
+    /// The width the load settled on. The slab and the server's pipeline run
+    /// that width and cannot run the other without a reload, and the load reply
+    /// names the settled width, not the plugin's capability, so a load that
+    /// asked for 32-bit reports 32-bit.
     fn widths(&self) -> Widths {
-        Widths::new(self.link.format == SampleFormat::F64)
+        match self.link.format {
+            FloatWidth::F32 => Widths::F32,
+            FloatWidth::F64 => Widths::BOTH,
+        }
     }
+
     /// Builds the pipeline for `prepare`'s block and the Processor over it.
     /// The server is told no rate here: it was launched at one, and a node
     /// that follows another tells it through [`Processor::retune`](tutti_plugin_types::Processor::retune).

@@ -10,7 +10,7 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::clap_event_transport;
 use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR, clap_process};
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Planes, PlanesMut};
 
 use crate::events::{EventSink, EventSource, with_input, with_output};
@@ -92,7 +92,7 @@ unsafe impl<T: Width> Send for Typed<T> {}
 
 /// A sample width CLAP carries: `f32` through `data32`, `f64` through
 /// `data64`. A fixed fact of each type; the width a scratch holds is the
-/// runtime [`SampleFormat`] in its [`Pool`].
+/// runtime [`FloatWidth`] in its [`Pool`].
 trait Width: tutti_buffers::Float {
     /// A port buffer over `channel_count` channel pointers at `ptrs`.
     fn port_buffer(ptrs: *mut *mut Self, channel_count: u32) -> clap_audio_buffer;
@@ -277,21 +277,21 @@ impl PortScratch {
     /// An empty scratch for `format`; [`resize_for`](Self::resize_for) before
     /// use.
     #[must_use]
-    pub fn new(format: SampleFormat) -> Self {
+    pub fn new(format: FloatWidth) -> Self {
         Self {
             pool: match format {
-                SampleFormat::F64 => Pool::F64(Typed::<f64>::new()),
-                _ => Pool::F32(Typed::<f32>::new()),
+                FloatWidth::F64 => Pool::F64(Typed::<f64>::new()),
+                FloatWidth::F32 => Pool::F32(Typed::<f32>::new()),
             },
         }
     }
 
     /// The format this scratch was made for.
     #[must_use]
-    pub fn format(&self) -> SampleFormat {
+    pub fn format(&self) -> FloatWidth {
         match self.pool {
-            Pool::F32(_) => SampleFormat::F32,
-            Pool::F64(_) => SampleFormat::F64,
+            Pool::F32(_) => FloatWidth::F32,
+            Pool::F64(_) => FloatWidth::F64,
         }
     }
 
@@ -325,10 +325,10 @@ pub enum Planar<'a, 'b> {
 }
 
 impl Planar<'_, '_> {
-    fn format(&self) -> SampleFormat {
+    fn format(&self) -> FloatWidth {
         match self {
-            Self::F32 { .. } => SampleFormat::F32,
-            Self::F64 { .. } => SampleFormat::F64,
+            Self::F32 { .. } => FloatWidth::F32,
+            Self::F64 { .. } => FloatWidth::F64,
         }
     }
 

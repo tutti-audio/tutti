@@ -122,10 +122,7 @@ pub(crate) mod wire;
 ///   a `Bpm`, a `Beat` for the playhead and the bar, a `LoopRange`), one position
 ///   for each of the quarter and beat pairs, and the cycle as an optional region
 ///   in place of the cycle-active flag.
-/// - **Version 46** writes a sample format as `tutti_buffers::SampleFormat`'s
-///   variant, where it was a plugin-types enum of two: `F32` and `F64` take the
-///   indices of the integer-and-float list.
-pub const PROTOCOL_VERSION: u32 = 46;
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -220,7 +217,7 @@ pub use tutti_units::ParamId;
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use tutti_buffers::SampleFormat;
+    use tutti_buffers::FloatWidth;
     use tutti_midi_protocol::{widen_value, widen_velocity};
     use tutti_plugin_types::{
         ChordValue, Load, NoteExpressionIntValue, NoteExpressionTextValue, ScaleValue, WireMidi,
@@ -353,7 +350,7 @@ mod tests {
             load: Load::new(),
             sample_rate: SampleRate::SR_48K,
             block_size: 64,
-            preferred_format: SampleFormat::F32,
+            preferred_format: FloatWidth::F32,
             shm_name: String::new(),
             state: None,
         })
@@ -824,7 +821,7 @@ mod tests {
             load: Load::new().plugin("vst3.00112233-44556677-8899AABB-CCDDEEFF"),
             sample_rate: SampleRate::SR_96K,
             block_size: 1024,
-            preferred_format: SampleFormat::F64,
+            preferred_format: FloatWidth::F64,
             shm_name: "test_shm".to_string(),
             state: None,
         };
@@ -855,9 +852,18 @@ mod tests {
                 );
                 assert_eq!(sample_rate, SampleRate::SR_96K);
                 assert_eq!(block_size, 1024);
-                assert_eq!(preferred_format, SampleFormat::F64);
+                assert_eq!(preferred_format, FloatWidth::F64);
             }
             _ => panic!("Wrong message type"),
+        }
+    }
+
+    /// A width travels as its variant index, 0 for `F32` and 1 for `F64`: the
+    /// bytes a version-45 peer wrote, so the width type did not change the wire.
+    #[test]
+    fn a_float_width_travels_as_its_index() {
+        for (width, index) in [(FloatWidth::F32, 0u8), (FloatWidth::F64, 1)] {
+            assert_eq!(postcard::to_allocvec(&width).expect("serialize"), [index]);
         }
     }
 

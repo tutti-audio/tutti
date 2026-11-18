@@ -32,7 +32,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
 use tutti_units::Normalized;
@@ -96,7 +96,7 @@ fn stereo_layout() -> SlabLayout {
     SlabLayout {
         slots: RING_SLOTS as u32,
         samples_per_channel: 512,
-        format: SampleFormat::F32,
+        format: FloatWidth::F32,
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     }

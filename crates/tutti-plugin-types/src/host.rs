@@ -371,6 +371,10 @@ pub trait Loaded: Control + Sized + Send {
     /// The float widths the plugin processes audio in, as of now. An
     /// activation at a width outside it is refused, and
     /// [`Widths::negotiate`] turns a request into the width one accepts.
+    ///
+    /// An out-of-process plugin answers the width its load settled on, not
+    /// every width the plugin could process: its slab runs one width until a
+    /// reload.
     fn widths(&self) -> Widths;
 
     /// Splits the plugin. On failure the whole plugin comes back in the error.

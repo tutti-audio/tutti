@@ -22,7 +22,7 @@
 //! the Processor lent runs once [`Event::Returned`] arrives.
 
 use arrayvec::ArrayVec;
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc_ffi::FdId;
 
 use crate::{
@@ -81,7 +81,7 @@ pub struct TimerId(pub u32);
 pub struct Prepare {
     rate: SampleRate,
     max_block: MaxBlock,
-    format: SampleFormat,
+    format: FloatWidth,
     mode: RenderMode,
 }
 
@@ -93,7 +93,7 @@ impl Prepare {
         Self {
             rate,
             max_block,
-            format: SampleFormat::F32,
+            format: FloatWidth::F32,
             mode: RenderMode::default(),
         }
     }
@@ -107,7 +107,7 @@ impl Prepare {
 
     /// This activation, exchanging audio in `format`.
     #[must_use]
-    pub const fn with_format(mut self, format: SampleFormat) -> Self {
+    pub const fn with_format(mut self, format: FloatWidth) -> Self {
         self.format = format;
         self
     }
@@ -133,7 +133,7 @@ impl Prepare {
 
     /// The sample width audio is exchanged in.
     #[must_use]
-    pub const fn format(&self) -> SampleFormat {
+    pub const fn format(&self) -> FloatWidth {
         self.format
     }
 

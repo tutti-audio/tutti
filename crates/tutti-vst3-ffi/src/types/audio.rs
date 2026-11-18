@@ -83,9 +83,9 @@ impl ProcessMode {
     }
 }
 
-/// The ABI side of a sample width, kept apart from `tutti_buffers::SampleFormat`: it is
+/// The ABI side of a sample width, kept apart from `tutti_buffers::FloatWidth`: it is
 /// the two widths `AudioBusBuffers` has a union member for, so a match over it is
-/// exhaustive, and `tutti-vst3-host` maps a `SampleFormat` to it once, in `Vst3Sample`.
+/// exhaustive, and `tutti-vst3-host` maps a `FloatWidth` to it once, in `Vst3Sample`.
 ///
 /// The sample width a plugin is activated with: which `AudioBusBuffers` union
 /// member carries the channel pointers, and which `symbolicSampleSize` the

@@ -13,7 +13,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use tutti_buffers::SampleFormat;
+use tutti_buffers::FloatWidth;
 use tutti_clap_test_plugin::{ClapSwitch, Site};
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
@@ -211,7 +211,7 @@ fn load_message() -> HostMessage {
         load: Load::new(),
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,
-        preferred_format: SampleFormat::F32,
+        preferred_format: FloatWidth::F32,
         shm_name: String::new(),
         state: None,
     }
@@ -222,7 +222,7 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let (mut session, side) = Session::new().expect("bells");
     let layout = tutti_plugin_ipc::SlabLayout {
         samples_per_channel: 512,
-        format: SampleFormat::F32,
+        format: FloatWidth::F32,
         slots: tutti_plugin_ipc::RING_SLOTS as u32,
         inputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
         outputs: vec![tutti_plugin_types::ChannelLayout::STEREO],

@@ -12,8 +12,8 @@ use crate::{
     HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
     ProcessOutput, Processor, RenderMode, Request, RequestWord, Samples, Stage, taken,
 };
+use tutti_buffers::FloatWidth;
 use tutti_buffers::InputOutput;
-use tutti_buffers::SampleFormat;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -25,7 +25,7 @@ fn main() -> MainThreadMarker {
 
 fn prepare(rate: f64) -> Prepare {
     Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(64)))
-        .with_format(SampleFormat::F32)
+        .with_format(FloatWidth::F32)
         .with_mode(RenderMode::Realtime)
 }
 

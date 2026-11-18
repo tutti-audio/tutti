@@ -46,7 +46,7 @@ pub type Active<T> = tutti_fixtures::Active<Clap<T>>;
 
 fn prepare_for<T: Float>(rate: f64, frames: u32) -> Prepare {
     let block = MaxBlock::new(Samples(frames as usize)).expect("a block of at least one frame");
-    Prepare::new(SampleRate::of(rate), block).with_format(T::FORMAT)
+    Prepare::new(SampleRate::of(rate), block).with_format(T::WIDTH)
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
