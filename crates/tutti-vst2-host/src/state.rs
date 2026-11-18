@@ -26,7 +26,7 @@
 //! does with a program chunk it is handed while another program is current; setting the
 //! program first is the only order the opcodes' wording allows.
 
-use tutti_plugin_types::{MainThreadMarker, Normalized, Request, RescanScope, StateFrame};
+use tutti_plugin_types::{MainThreadMarker, Normalized, StateFrame};
 
 use crate::error::{Result, Vst2Error};
 use crate::host::host_write;
@@ -219,11 +219,11 @@ impl Vst2Loaded {
     /// Restores a state blob previously produced by
     /// [`read_state`](Self::read_state).
     ///
-    /// A host write end to end: a plugin's `audioMasterAutomate` echo of what the restore
-    /// sets is not reported as its own edit. The program is selected inside
-    /// `effBeginSetProgram` / `effEndSetProgram` as [`set_program`](Self::set_program)
-    /// does, and the restore raises a rescan of the parameters' values, as a program
-    /// change does.
+    /// Each value of a parameter snapshot is a host write: a plugin's `audioMasterAutomate`
+    /// echo of it is not reported as its own edit. A chunk is the plugin's to apply, so what
+    /// it reports while loading one (a gesture of its own) is reported. The program is
+    /// selected inside `effBeginSetProgram` / `effEndSetProgram` as
+    /// [`set_program`](Self::set_program) does.
     ///
     /// # Errors
     ///
@@ -262,17 +262,15 @@ impl Vst2Loaded {
         if let Some(program) = *program
             && (0..self.instance.read_num_programs()).contains(&program)
         {
-            host_write(|| {
-                self.instance
-                    .with_preset_bracket(main, |instance| instance.change_preset(main, program));
-            });
+            self.instance
+                .with_preset_bracket(main, |instance| instance.change_preset(main, program));
         }
-        let written = match state {
+        match state {
             StateHeader::Chunk { payload, .. } => {
                 // `effSetChunk` has no return value in the header (aeffect.h documents
                 // none, and a JUCE plugin answers 0 after loading), so there is no refusal
                 // to read: the call returning is all that is known.
-                host_write(|| self.instance.load_preset_data(main, payload));
+                self.instance.load_preset_data(main, payload);
                 Ok(())
             }
             StateHeader::Params { count, values, .. } => (0..count).try_for_each(|index| {
@@ -287,11 +285,7 @@ impl Vst2Loaded {
                     Err(Vst2Error::NoSetParameter { index })
                 }
             }),
-        };
-        // What was written moved values the plugin does not report: the host reads
-        // them again, whatever part of the restore went in.
-        let _ = Request::RescanParams(RescanScope::Values).raise(self.host.requests());
-        written
+        }
     }
 }
 

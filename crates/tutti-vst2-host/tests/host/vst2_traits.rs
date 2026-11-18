@@ -15,8 +15,7 @@ use tutti_graph::Offset;
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
     MaxBlock, Normalized, Notice, ParameterChanges, PluginAudio, PluginError, PluginIo, Prepare,
-    ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleFormat,
-    SampleRate, Samples, Stage,
+    ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
 };
 use tutti_types::ParamId;
 use tutti_ump::{Address, MidiChannel, MidiGroup};
@@ -682,12 +681,11 @@ fn a_loss_between_activations_is_reported_once() {
     drop(rejoin(processor, controller));
 }
 
-/// **A restore is a host write inside a program bracket, and it raises a rescan**: the
-/// plugin's `audioMasterAutomate` echo of each value is not reported as its own edit, the
-/// program is selected between `effBeginSetProgram` and `effEndSetProgram`, and the host is
-/// asked to read the values again.
+/// **A snapshot's values are host writes, and its program is selected in a bracket**: the
+/// plugin's `audioMasterAutomate` echo of each value is not reported as its own edit, and
+/// the program is selected between `effBeginSetProgram` and `effEndSetProgram`.
 #[test]
-fn a_restore_is_a_host_write_in_a_program_bracket_and_raises_a_rescan() {
+fn a_snapshots_values_are_host_writes_and_its_program_is_bracketed() {
     let probe = Probe::acquire();
     let mut loaded = probe.load();
     let state = parameter_state(1, &[0.25, 0.75]);
@@ -712,9 +710,6 @@ fn a_restore_is_a_host_write_in_a_program_bracket_and_raises_a_rescan() {
     let mut edits = Vec::new();
     loaded.take_reported_edits(main_thread(), &mut edits);
     assert_eq!(edits, Vec::new(), "the echo is the host's own write");
-    let mut requests = Vec::new();
-    loaded.take_requests(main_thread(), &mut requests);
-    assert!(requests.contains(&Request::RescanParams(RescanScope::Values)));
 }
 
 /// **A saved value off `0..=1` refuses the whole restore**: NaN is not a value to clamp,
