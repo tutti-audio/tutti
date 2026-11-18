@@ -234,7 +234,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         let _hearing = handle.subscribe(move |notice| {
             if matches!(
                 notice,
-                tutti_plugin_host::Notice::Invalidate(
+                tutti_plugin_host::PluginSignal::Invalidate(
                     tutti_plugin_types::PluginInvalidation::Latency { .. }
                 )
             ) {

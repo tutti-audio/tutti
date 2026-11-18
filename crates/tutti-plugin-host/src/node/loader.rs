@@ -13,7 +13,7 @@ use super::control_backend::{ControlBackend, Reporting};
 use super::instance::Instance;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
     Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
     Prepare,
@@ -75,11 +75,11 @@ pub fn load_client_restoring<F>(
     path: &Path,
     load: &Load,
     sample_rate: impl Into<tutti_units::SampleRate>,
-    restore: Option<&mut dyn FnMut(&mut F) -> std::result::Result<(), String>>,
+    restore: Option<&mut dyn FnMut(&mut F) -> std::result::Result<(), StateError>>,
 ) -> BridgeResult<(
     InProcClient<F>,
     PluginHandle,
-    Option<std::result::Result<(), String>>,
+    Option<std::result::Result<(), StateError>>,
 )>
 where
     F: InProcess + 'static,
@@ -201,13 +201,10 @@ where
     // backend's drain end are the same cell: the audio thread parks a rate in
     // it, `editor_idle` dispatches from it.
     //
-    // **Limit:** `editor_idle` is the only main-thread tick an in-process
-    // plugin has, and a host calls it only while an editor is open. So a
-    // parked rate change, and the re-reads of latency, tail and pin counts
+    // A parked rate change, and the re-reads of latency, tail and pin counts
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
-    // `on_invalidate`), happen only while the editor pump runs. The session
-    // does not tick an in-process plugin's handle; a host that wants them
-    // without an editor calls `PluginHandle::editor_idle` on its own tick.
+    // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
+    // or the node's `Rebinder::tick`, which the session calls at each update.
     let pending_sample_rate = Arc::new(ParkedSampleRate::new());
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read

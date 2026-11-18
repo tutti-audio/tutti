@@ -30,7 +30,7 @@ use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{PluginRefresh, StateUse};
 
 use super::entry::{Hosted, PluginEntry};
-use super::{Notice, PluginRef, queue};
+use super::{PluginRef, PluginSignal, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
 use crate::{OtherPeer, PeerState, SavedPeer};
@@ -178,7 +178,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             ticket.complete(|| {
                 let applied = handle.load_state(main, state.bytes());
                 if applied.is_ok() {
-                    queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));
+                    queue(&notices, PluginSignal::Refresh(PluginRefresh::ParamValues));
                 }
                 applied.map_err(StateJobFailed::State)
             });

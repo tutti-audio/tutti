@@ -31,7 +31,7 @@ use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_host::{PluginNode, load_client};
+use tutti_plugin_host::{InProcNode, load_client};
 use tutti_units::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -106,7 +106,7 @@ fn read_capture(path: &PathBuf) -> ProcessCapture {
 /// The graph node plus the handle that keeps it alive, loaded against the
 /// reference probe with its capture zeroed.
 struct Loaded {
-    unit: PluginNode<Vst2Loaded>,
+    unit: InProcNode<Vst2Loaded>,
     handle: PluginHandle,
     path: PathBuf,
 }
@@ -130,7 +130,7 @@ fn load() -> Loaded {
 }
 
 /// `unit` prepared at `rate`, for blocks of up to [`BLOCK`].
-fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
+fn prepare_at(unit: &mut InProcNode<Vst2Loaded>, rate: SampleRate) {
     tutti_graph::Node::prepare(
         unit,
         &tutti_graph::Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
@@ -140,12 +140,12 @@ fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
 /// Render one block through the node, prepared as a graph prepares it
 /// (`Node::prepare`, which sizes its scratch and parks its rate), then
 /// `Node::process` by hand (`tutti_graph::contract::drive_input`).
-fn drive_block(unit: &mut PluginNode<Vst2Loaded>) {
+fn drive_block(unit: &mut InProcNode<Vst2Loaded>) {
     drive_blocks(unit, BLOCK, BLOCK);
 }
 
 /// One block of `frames` through `unit` prepared for blocks of up to `max`.
-fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
+fn drive_blocks(unit: &mut InProcNode<Vst2Loaded>, max: usize, frames: usize) {
     use tutti_graph::{Node, Prepare};
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
@@ -156,7 +156,7 @@ fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
 }
 
 /// One block of `frames` through `unit` as it is prepared now: no prepare.
-fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
+fn process_block(unit: &mut InProcNode<Vst2Loaded>, frames: usize) {
     use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
     let rate = SampleRate::of(SAMPLE_RATE);
     let silence = vec![0.0f32; frames];
@@ -246,7 +246,7 @@ fn blocks_past_64_frames_reach_the_plugin_after_a_prepare() {
 
 /// [`prepare_at`], on a thread that is not the main thread: where a graph's
 /// `prepare` runs when its commit is off the main thread.
-fn prepare_off_main_thread(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
+fn prepare_off_main_thread(unit: &mut InProcNode<Vst2Loaded>, rate: SampleRate) {
     std::thread::scope(|s| {
         s.spawn(|| prepare_at(unit, rate))
             .join()
@@ -587,7 +587,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
     let _subscription = loaded.handle.subscribe(move |n| {
-        if let tutti_plugin_host::Notice::Invalidate(e) = n {
+        if let tutti_plugin_host::PluginSignal::Invalidate(e) = n {
             sink.lock().unwrap().push(e);
         }
     });

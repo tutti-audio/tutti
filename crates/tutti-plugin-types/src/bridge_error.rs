@@ -288,15 +288,20 @@ pub enum PluginForkError {
     SaveState(#[source] StateError),
 
     /// A fresh instance of the same plugin did not load.
-    #[error("a fresh instance{} did not load", of_path(.path))]
+    #[error("a fresh instance at {} did not load", path.display())]
     Load {
-        /// The plugin file the live instance was loaded from; `None` when the
-        /// instance has no origin to name.
-        path: Option<PathBuf>,
+        /// The plugin file the live instance was loaded from.
+        path: PathBuf,
         /// Why the load failed.
         #[source]
         source: BridgeError,
     },
+
+    /// The live instance has no origin (it was not loaded from a file the
+    /// host can load again), so there is nothing to load a second instance
+    /// from. Answered before anything is loaded.
+    #[error("the live instance has no origin to load a fresh instance from")]
+    NoOrigin,
 
     /// The file at the live instance's path now holds a different plugin
     /// (replaced on disk since the live instance loaded). Its state is not
@@ -615,7 +620,7 @@ mod tests {
             ),
             (
                 Box::new(PluginForkError::Load {
-                    path: None,
+                    path: PathBuf::from("plugin.clap"),
                     source: BridgeError::ProcessCrashed,
                 }),
                 "bridge process crashed",

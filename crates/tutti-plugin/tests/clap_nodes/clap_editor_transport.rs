@@ -14,11 +14,11 @@ use tutti_fixtures::{StandInWindow, machine_lock, main_thread};
 use std::sync::{Arc, Mutex};
 
 use tutti_clap_test_plugin::{ClapProbe, GuiMode, HOSTEXT_CMD_START, HOSTEXT_CMD_STOP};
-use tutti_plugin_host::Notice;
+use tutti_plugin_host::PluginSignal;
 use tutti_plugin_types::{ContentScale, TransportRequest};
 
 /// **A request made in the served plugin's editor instance is a
-/// `Notice::Transport`, each one, in order.** The plugin asks for its
+/// `PluginSignal::Transport`, each one, in order.** The plugin asks for its
 /// `on_main_thread` and calls the host from it; the editor's idle serves the
 /// callback and then takes what it raised.
 /// Spec: clap.ext.transport_control.host.request_start, clap.ext.transport_control.host.request_stop
@@ -36,7 +36,7 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
     let _subscription = loaded.handle.subscribe({
         let heard = Arc::clone(&heard);
         move |notice| {
-            if let Notice::Transport(request) = notice {
+            if let PluginSignal::Transport(request) = notice {
                 heard.lock().expect("the list").push(request);
             }
         }
@@ -59,7 +59,7 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
     );
 }
 
-/// **In process, a request the plugin makes is a `Notice::Transport` too**,
+/// **In process, a request the plugin makes is a `PluginSignal::Transport` too**,
 /// through the same subscription: the instance that renders is the one that
 /// shows the editor, and its idle is the pass that takes the request.
 /// Spec: clap.ext.transport_control.host.request_start
@@ -87,7 +87,7 @@ fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
     let _subscription = handle.subscribe({
         let heard = Arc::clone(&heard);
         move |notice| {
-            if let Notice::Transport(request) = notice {
+            if let PluginSignal::Transport(request) = notice {
                 heard.lock().expect("the list").push(request);
             }
         }

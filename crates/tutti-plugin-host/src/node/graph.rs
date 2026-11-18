@@ -34,7 +34,7 @@ use tutti_graph::{
 };
 use tutti_units::{Latency, Samples, Tail};
 
-use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
+use super::client::{InProcClient, InProcNode, Inputs, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
@@ -53,7 +53,7 @@ fn channels_in<'s>(
     buses.iter().flat_map(|&bus| inputs.bus(bus).channels())
 }
 
-impl<F: Loaded + 'static> Node for PluginNode<F>
+impl<F: Loaded + 'static> Node for InProcNode<F>
 where
     F::Processor: 'static,
 {
@@ -656,11 +656,11 @@ fn push_harmony(
 /// parameter delivery's counters, as an out-of-process plugin's
 /// `PluginControls` are. Its [`ForkSource`] forks it **by state transfer**: a
 /// second instance of the plugin from the same library, restored from this
-/// one's saved state ([`PluginNode::fork_instance`]). So `Editor::fork` (an
+/// one's saved state ([`InProcNode::fork_instance`]). So `Editor::fork` (an
 /// offline export) renders a graph holding it.
 ///
 /// [`ForkSource`]: tutti_graph::ForkSource
-impl<F: InProcess + 'static> IntoNode for PluginNode<F>
+impl<F: InProcess + 'static> IntoNode for InProcNode<F>
 where
     F::Processor: 'static,
 {

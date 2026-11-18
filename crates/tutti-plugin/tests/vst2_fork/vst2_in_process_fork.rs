@@ -34,7 +34,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin::{PresetId, RenderMode};
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_host::{PluginNode, load_client};
+use tutti_plugin_host::{InProcNode, load_client};
 use tutti_plugin_types::PluginForkError;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -140,12 +140,12 @@ impl Drop for ProbeEnv {
     }
 }
 
-fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
+fn load() -> (InProcNode<Vst2Loaded>, PluginHandle) {
     load_with(tutti_transport::TempoReader::constant(Bpm::of(120.0)).expect("a tempo"))
 }
 
 /// The probe loaded in process and bound to `tempo`, the project's tempo map.
-fn load_with(tempo: tutti_transport::TempoReader) -> (PluginNode<Vst2Loaded>, PluginHandle) {
+fn load_with(tempo: tutti_transport::TempoReader) -> (InProcNode<Vst2Loaded>, PluginHandle) {
     let path = tutti_fixtures::vst2_probe();
     let (client, handle) = load_client::<Vst2Loaded>(
         main_thread(),

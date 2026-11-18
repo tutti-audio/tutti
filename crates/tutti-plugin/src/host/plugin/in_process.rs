@@ -6,7 +6,7 @@ use super::{BoundPlaced, BoundPlugin, Commit, PluginRebinder, Rebind, Rebuilt};
 /// nodes go in.
 struct InProcessRebind<F: tutti_plugin_types::InProcess> {
     rebinder: tutti_plugin_host::Rebinder<F>,
-    wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+    wrap: fn(Box<tutti_plugin_host::InProcNode<F>>) -> BoundPlaced,
 }
 
 impl<F> Rebind for InProcessRebind<F>
@@ -39,7 +39,7 @@ impl PluginRebinder {
     /// The rebinder of an in-process plugin, whose rebuilt nodes go in `wrap`.
     pub(super) fn in_process<F>(
         rebinder: tutti_plugin_host::Rebinder<F>,
-        wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+        wrap: fn(Box<tutti_plugin_host::InProcNode<F>>) -> BoundPlaced,
     ) -> Self
     where
         F: tutti_plugin_types::InProcess + 'static,

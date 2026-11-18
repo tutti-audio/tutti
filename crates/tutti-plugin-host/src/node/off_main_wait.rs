@@ -1,5 +1,6 @@
 //! The off-main deadline as a pure rule.
 
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 /// What an off-main call makes of its wait at an instant.
@@ -38,6 +39,26 @@ impl OffMainWait {
     }
 }
 
+/// The answer on `answer`, or `None` once `wait` has expired or the sender is
+/// gone. `now` is the clock: each pass asks it, so the rule runs on whatever
+/// instants it is given.
+pub(super) fn await_answer<R>(
+    answer: &Receiver<R>,
+    wait: OffMainWait,
+    mut now: impl FnMut() -> Instant,
+) -> Option<R> {
+    loop {
+        let Wait::For(left) = wait.at(now()) else {
+            return None;
+        };
+        match answer.recv_timeout(left) {
+            Ok(answer) => return Some(answer),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +91,37 @@ mod tests {
             OffMainWait::new(Duration::ZERO, began).at(began),
             Wait::Expired
         );
+    }
+
+    /// **A wait whose deadline has come answers "unavailable" with the work
+    /// still unanswered**, as a stalled main thread's caller does: the clock
+    /// reads the deadline and nothing is waited for.
+    #[test]
+    fn a_wait_past_its_deadline_gives_up_on_an_unanswered_call() {
+        let (_sender, answer) = std::sync::mpsc::sync_channel::<u8>(1);
+        let began = Instant::now();
+        let wait = OffMainWait::new(ms(2000), began);
+        assert_eq!(await_answer(&answer, wait, || began + ms(2000)), None);
+    }
+
+    /// **An answer that is there before the deadline is the call's answer.**
+    #[test]
+    fn an_answer_before_the_deadline_is_returned() {
+        let (sender, answer) = std::sync::mpsc::sync_channel(1);
+        sender.send(7_u8).expect("room for one answer");
+        let began = Instant::now();
+        let wait = OffMainWait::new(ms(2000), began);
+        assert_eq!(await_answer(&answer, wait, || began + ms(1)), Some(7));
+    }
+
+    /// **A work item dropped unrun ends the wait at once**, before the
+    /// deadline: the sender's end is gone, so no answer will come.
+    #[test]
+    fn a_dropped_sender_ends_the_wait() {
+        let (sender, answer) = std::sync::mpsc::sync_channel::<u8>(1);
+        drop(sender);
+        let began = Instant::now();
+        let wait = OffMainWait::new(ms(2000), began);
+        assert_eq!(await_answer(&answer, wait, || began), None);
     }
 }

@@ -67,7 +67,7 @@ use tutti_units::ParamId;
 /// A graph holding this node forks (`Editor::fork`, which an offline export
 /// takes) **by state transfer**: a second instance of the plugin, from the same
 /// library, restored from this one's saved state. See
-/// [`PluginNode::fork_instance`]. The client becomes a graph node by
+/// [`InProcNode::fork_instance`]. The client becomes a graph node by
 /// [`bind`](Self::bind)ing it to the project's tempo map.
 pub struct InProcClient<F: Loaded> {
     /// The plugin's control side. Control threads only: the audio thread
@@ -434,25 +434,25 @@ impl TransportFeed {
 /// [`Node`](tutti_graph::Node) and an [`IntoNode`](tutti_graph::IntoNode);
 /// the loaded client is neither. It derefs to the client for its control
 /// surface (`controls`, `set_meter`, ...).
-pub struct PluginNode<F: Loaded> {
+pub struct InProcNode<F: Loaded> {
     pub(super) client: InProcClient<F>,
     pub(super) tempo: TempoReader,
 }
 
-impl<F: Loaded> std::fmt::Debug for PluginNode<F> {
+impl<F: Loaded> std::fmt::Debug for InProcNode<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginNode").finish_non_exhaustive()
+        f.debug_struct("InProcNode").finish_non_exhaustive()
     }
 }
 
-impl<F: Loaded> std::ops::Deref for PluginNode<F> {
+impl<F: Loaded> std::ops::Deref for InProcNode<F> {
     type Target = InProcClient<F>;
     fn deref(&self) -> &InProcClient<F> {
         &self.client
     }
 }
 
-impl<F: Loaded> std::ops::DerefMut for PluginNode<F> {
+impl<F: Loaded> std::ops::DerefMut for InProcNode<F> {
     fn deref_mut(&mut self) -> &mut InProcClient<F> {
         &mut self.client
     }
@@ -607,8 +607,8 @@ impl<F: Loaded> InProcClient<F> {
     /// reader of its own; a host with no session builds one over a fixed map
     /// ([`TempoReader::fixed`]). A fork clones the reader. Control thread.
     #[must_use]
-    pub fn bind(self, tempo: TempoReader) -> PluginNode<F> {
-        PluginNode {
+    pub fn bind(self, tempo: TempoReader) -> InProcNode<F> {
+        InProcNode {
             client: self,
             tempo,
         }
@@ -716,12 +716,11 @@ impl<F: Loaded> InProcClient<F> {
     /// is a main-thread call on every format.
     pub(super) fn set_render_mode_from(&mut self, p: &tutti_graph::Prepare) {
         let mode = p.render_mode();
-        // Temporary: the guard keeps a mode the handle or `Phase::RenderMode`
-        // set from being undone by a re-prepare at the same mode, and from
-        // being undone by a first prepare in realtime (`prepared_mode` starts
-        // there). So a plugin set offline on its handle stays offline through
-        // a realtime prepare until a prepare carries a change. When `Prepare`
-        // is the only source of a plugin's mode, it goes.
+        // The guard keeps a mode the handle or `Phase::RenderMode` set from
+        // being undone by a re-prepare at the same mode, and by a first prepare
+        // in realtime (`prepared_mode` starts there): a plugin set offline on
+        // its handle stays offline through a realtime prepare until a prepare
+        // carries a change.
         if self.prepared_mode == mode {
             return;
         }

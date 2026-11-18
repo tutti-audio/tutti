@@ -416,7 +416,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     let _hearing = handle.subscribe(move |notice| {
         if matches!(
             notice,
-            tutti_plugin_host::Notice::Invalidate(
+            tutti_plugin_host::PluginSignal::Invalidate(
                 tutti_plugin_types::PluginInvalidation::Latency { .. }
             )
         ) {

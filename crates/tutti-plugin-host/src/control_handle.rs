@@ -5,7 +5,7 @@
 //! Audio never travels through here; this is the off-RT half.
 
 use crate::{
-    InvalidateSink, Notice, ParameterChangeSink, RefreshSink, Subscription, TransportSink,
+    InvalidateSink, ParameterChangeSink, PluginSignal, RefreshSink, Subscription, TransportSink,
 };
 use dpi::Size;
 use std::sync::Arc;
@@ -161,20 +161,22 @@ impl PluginStatus {
 /// [`status`](Self::status) and [`is_crashed`](Self::is_crashed) read an atomic.
 /// Call these per frame.
 ///
-/// **Fire-and-forget.** [`AnyThread::set_parameter_value`],
-/// [`AnyThread::set_render_mode`] and
-/// [`set_automation_mode`](Self::set_automation_mode) push onto a lock-free
-/// queue and return without waiting. A knob turn must never stall a UI, so
-/// these deliberately have no reply to wait for — and therefore no way to
-/// report that the plugin refused.
+/// **Fire-and-forget.** [`AnyThread::set_parameter_value`] and
+/// [`set_automation_mode`](Self::set_automation_mode) queue the write and
+/// return without waiting (a served plugin's goes onto its command queue, an
+/// in-process plugin's runs at once on the main thread or is posted to it).
+/// A knob turn must never stall a UI, so these deliberately have no reply to
+/// wait for — and therefore no way to report that the plugin refused.
 ///
 /// **Blocking round-trips.** [`AnyThread::save_state`],
 /// [`load_state`](Self::load_state), [`AnyThread::parameter_descriptors`],
 /// [`AnyThread::parameter_value`], [`presets`](Self::presets),
-/// [`load_preset`](Self::load_preset) and [`current_preset`](Self::current_preset) each send a
-/// command to the subprocess and **wait for the reply** — five seconds for the
-/// parameter and preset calls, ten for state. A wedged plugin spends the whole
-/// timeout before returning `None`.
+/// [`load_preset`](Self::load_preset) and [`current_preset`](Self::current_preset)
+/// wait for the reply. A served plugin's answer is bounded by five seconds
+/// for the parameter and preset calls and ten for state, a wedged plugin
+/// spending the whole timeout before returning `None`. An in-process plugin
+/// answers at once on the main thread; off it the call waits up to two
+/// seconds for the main thread's next tick.
 ///
 /// The last group is why this type is `Send + Sync + Clone`: clone the handle
 /// into whatever the host already uses for off-thread work and call it there.
@@ -768,11 +770,7 @@ impl PluginHandle {
         f: impl FnOnce(&mut dyn Control) -> tutti_plugin_types::PluginResult<R>,
     ) -> Result<R, EditorError> {
         lent(control, f)
-            .unwrap_or_else(|| {
-                Err(PluginError::Editor(EditorError::PluginError(
-                    "the plugin is lost".into(),
-                )))
-            })
+            .unwrap_or_else(|| Err(PluginError::Editor(EditorError::PluginCrashed)))
             .map_err(editor_error)
     }
 
@@ -860,7 +858,7 @@ impl PluginHandle {
 
     // ---- Notices (plugin -> host) -------------------------------------------
 
-    /// Calls `f` with everything the plugin reports (a [`Notice`]) until the
+    /// Calls `f` with everything the plugin reports (a [`PluginSignal`]) until the
     /// returned [`Subscription`] drops. Any number of subscribers may hear one
     /// plugin; nothing is replaced and nothing is cleared.
     ///
@@ -869,16 +867,18 @@ impl PluginHandle {
     /// in-process one. Move heavy work elsewhere before touching graph state.
     /// The session's `SessionEvent::Plugin` is built on this; a host that needs
     /// a push of its own subscribes through the session.
-    pub fn subscribe<F: Fn(Notice) + Send + Sync + 'static>(&self, f: F) -> Subscription {
+    pub fn subscribe<F: Fn(PluginSignal) + Send + Sync + 'static>(&self, f: F) -> Subscription {
         let f = Arc::new(f);
         let (a, b, c, d) = (f.clone(), f.clone(), f.clone(), f);
         Subscription::all([
-            self.param_sink.subscribe(move |e| a(Notice::Param(e))),
-            self.refresh_sink.subscribe(move |e| b(Notice::Refresh(e))),
+            self.param_sink
+                .subscribe(move |e| a(PluginSignal::Param(e))),
+            self.refresh_sink
+                .subscribe(move |e| b(PluginSignal::Refresh(e))),
             self.invalidate_sink
-                .subscribe(move |e| c(Notice::Invalidate(e))),
+                .subscribe(move |e| c(PluginSignal::Invalidate(e))),
             self.transport_sink
-                .subscribe(move |e| d(Notice::Transport(e))),
+                .subscribe(move |e| d(PluginSignal::Transport(e))),
         ])
     }
 }
