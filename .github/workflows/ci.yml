@@ -269,7 +269,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
 
-      # Every feature of every member at once: nothing in the workspace turns on `capture`, `audio-io`, `jack` or
+      # Every feature of every member at once: nothing in the workspace turns on `capture`, `jack` or
       # the codec and plugin-format features, so the clippy and test jobs never see them. The VST3 SDK is checked
       # out above, and the AU crates compile to nothing on Linux.
       - name: Lint

@@ -492,7 +492,7 @@ pub enum Error {
 
     /// A take could not be armed or did not end cleanly
     /// ([`Session::record`](crate::Session::record)).
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     #[error(transparent)]
     Take(#[from] crate::TakeError),
 

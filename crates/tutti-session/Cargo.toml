@@ -80,11 +80,12 @@ raw-window-handle = { version = "0.6", optional = true }
 # Every subsystem is a feature, as on every engine crate.
 default = []
 device = ["dep:tutti-cpal"]
-# `Recorder` and its pump loop: device-free, so a host that records files or
+# The `Recorder` and its pump loop, device-free: a host that records files or
 # taps without a microphone takes it alone.
 record = ["dep:tutti-dsp"]
-# The live I/O edge: `record`, and with `device`, the mic capture too.
-audio-io = ["record", "tutti-cpal?/capture", "encode-wav"]
+# Live audio input from the sound card: `Session::add_input`, takes, mic capture;
+# implies `device` and `record`.
+capture = ["device", "record", "tutti-cpal/capture", "encode-wav"]
 midi = [
     "dep:tutti-midi-protocol",
     "dep:tutti-midi-runtime",
