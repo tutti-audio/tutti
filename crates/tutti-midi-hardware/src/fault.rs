@@ -4,7 +4,7 @@ use core::num::NonZeroU32;
 use tutti_rt::Cause;
 
 /// The largest OS error number an [`Errno`] holds: 24 bits.
-const ERRNO_MAX: i32 = 0x00FF_FFFF;
+pub(crate) const ERRNO_MAX: i32 = 0x00FF_FFFF;
 
 tutti_units::ranged! {
     /// An OS error number as an input fault carries it: `1..=0xFF_FFFF`, the
@@ -14,17 +14,6 @@ tutti_units::ranged! {
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[cfg_attr(feature = "serde", serde(try_from = "i32", into = "i32"))]
     Errno(i32), ErrnoOutOfRange, "within 1..=0xFF_FFFF", |raw| raw >= 1 && raw <= ERRNO_MAX
-}
-
-impl Errno {
-    /// The number an OS call returned, **saturated** to the largest an `Errno`
-    /// holds (a number that large is no errno of any OS this crate runs on, and
-    /// keeping it reads as "out of range" rather than as another number);
-    /// `None` for a number that is not positive.
-    #[must_use]
-    pub fn clamped(raw: i32) -> Option<Self> {
-        Self::new(raw.min(ERRNO_MAX))
-    }
 }
 
 /// Why an open input stopped delivering, read through

@@ -4,8 +4,16 @@
 //! is empty, then wait on `tutti_alsa_ffi::Poller`.
 
 use crate::InputFault;
-use crate::fault::Errno;
+use crate::fault::{ERRNO_MAX, Errno};
 use tutti_alsa_ffi::Wait;
+
+/// The error number an ALSA call returned, **saturated** to the largest an
+/// [`Errno`] holds (no errno of a supported OS is that large, and keeping it
+/// reads as "out of range" rather than as another number); `None` for a number
+/// that is not positive.
+fn os_errno(raw: i32) -> Option<Errno> {
+    Errno::new(raw.min(ERRNO_MAX))
+}
 
 /// Read errors in a row a reader puts up with before it stops.
 pub(super) const MAX_DRAIN_ERRORS: usize = 8;
@@ -35,16 +43,14 @@ pub(super) fn wait_fault(waited: &std::io::Result<Wait>) -> Option<InputFault> {
     match waited {
         Ok(Wait::Ready | Wait::Stopped) => None,
         Ok(Wait::Broken) => Some(InputFault::PortBroken),
-        Err(e) => Some(InputFault::WaitFailed(
-            e.raw_os_error().and_then(Errno::clamped),
-        )),
+        Err(e) => Some(InputFault::WaitFailed(e.raw_os_error().and_then(os_errno))),
     }
 }
 
 /// The fault a reader ends with when its reads keep failing, the last with
 /// `errno`.
 pub(super) fn read_fault(errno: Option<i32>) -> InputFault {
-    InputFault::ReadFailed(errno.and_then(Errno::clamped))
+    InputFault::ReadFailed(errno.and_then(os_errno))
 }
 
 #[cfg(test)]

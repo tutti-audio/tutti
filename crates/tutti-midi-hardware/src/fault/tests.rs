@@ -3,8 +3,9 @@ use super::*;
 use tutti_fixtures::check_range_serde;
 use tutti_fixtures::{RangeContract, check_range_contract};
 
+/// An `Errno` from any raw number, saturated past 24 bits as the ALSA reader's is.
 fn errno(raw: i32) -> Option<Errno> {
-    Errno::clamped(raw)
+    Errno::new(raw.min(ERRNO_MAX))
 }
 
 fn every_variant(raw: i32) -> [InputFault; 7] {
