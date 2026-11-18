@@ -126,6 +126,7 @@ impl<U: Count> TallyWriter<U> {
             cell.fetch_add(*add, Ordering::Relaxed);
         }
     }
+
     /// The total counted so far, as [`Tally::get`] reads it: an owner that
     /// counts and reports through `&self` holds the writer alone.
     #[inline]
