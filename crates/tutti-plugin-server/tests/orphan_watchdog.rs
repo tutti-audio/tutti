@@ -275,72 +275,76 @@ fn a_host_that_ends_after_connecting_ends_the_server() {
     let _ = std::fs::remove_file(&socket);
 }
 
-/// (c) The subreaper case.
-///
-/// This test process calls `prctl(PR_SET_CHILD_SUBREAPER, 1)`, so when the
-/// throwaway shell dies the orphaned server is reparented to **this test
-/// process**, not to pid 1. A watch written as `getppid() == 1` sees a
-/// perfectly ordinary non-1 parent, concludes the host is alive, and waits
-/// forever. The host's own statement of its PID, watched by the OS, is what
-/// notices the host ended.
-///
-/// The server's post-orphan ppid is asserted to be this test process (proving
-/// the subreaper took effect and pid 1 is not involved), and *then* the server
-/// is required to exit anyway.
+/// The subreaper case needs `prctl` and `/proc`: Linux's.
 #[cfg(target_os = "linux")]
-#[test]
-fn a_subreaper_does_not_hide_the_hosts_death() {
-    // SAFETY: `prctl` with `PR_SET_CHILD_SUBREAPER` takes scalars and affects
-    // only this process's reparenting behaviour. Setting it is not undone, but
-    // it is harmless for the rest of the suite: it only means orphaned
-    // grandchildren of the test binary are adopted here rather than by init,
-    // and the test binary reaps nothing else.
-    let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) };
-    assert_eq!(rc, 0, "PR_SET_CHILD_SUBREAPER failed: this test needs it");
+mod subreaper {
+    use super::*;
 
-    let server = spawn_orphaned_server("subreaper");
-    let me = std::process::id() as i32;
+    /// (c) The subreaper case.
+    ///
+    /// This test process calls `prctl(PR_SET_CHILD_SUBREAPER, 1)`, so when the
+    /// throwaway shell dies the orphaned server is reparented to **this test
+    /// process**, not to pid 1. A watch written as `getppid() == 1` sees a
+    /// perfectly ordinary non-1 parent, concludes the host is alive, and waits
+    /// forever. The host's own statement of its PID, watched by the OS, is what
+    /// notices the host ended.
+    ///
+    /// The server's post-orphan ppid is asserted to be this test process (proving
+    /// the subreaper took effect and pid 1 is not involved), and *then* the server
+    /// is required to exit anyway.
+    #[test]
+    fn a_subreaper_does_not_hide_the_hosts_death() {
+        // SAFETY: `prctl` with `PR_SET_CHILD_SUBREAPER` takes scalars and affects
+        // only this process's reparenting behaviour. Setting it is not undone, but
+        // it is harmless for the rest of the suite: it only means orphaned
+        // grandchildren of the test binary are adopted here rather than by init,
+        // and the test binary reaps nothing else.
+        let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) };
+        assert_eq!(rc, 0, "PR_SET_CHILD_SUBREAPER failed: this test needs it");
 
-    // First: prove the premise. Once the shell is gone, the server must have
-    // been adopted by *us*. If this never becomes true the environment did not
-    // do what the test assumes, and the exit assertion below would prove
-    // nothing about the subreaper case.
-    tutti_fixtures::wait_until(
-        &format!(
-            "server {} to be reparented to this test process ({me}); \
-             PR_SET_CHILD_SUBREAPER did not take effect if it never is, so \
-             this run does not exercise the subreaper case at all",
-            server.0
-        ),
-        EXIT_DEADLINE,
-        || ppid_of(server.0) == Some(me),
-    );
+        let server = spawn_orphaned_server("subreaper");
+        let me = std::process::id() as i32;
 
-    // Then: the server must exit regardless. Its parent is a live, non-1
-    // process — the exact configuration in which `getppid() == 1` is silent.
-    tutti_fixtures::wait_until(
-        &format!(
-            "server {} to exit after being orphaned under a subreaper: its ppid became \
-             {me} rather than 1, so a watch comparing against pid 1 sees \
-             nothing wrong; the watch on the host's own PID is what must catch this",
-            server.0
-        ),
-        EXIT_DEADLINE,
-        || has_exited(server.0),
-    );
-}
+        // First: prove the premise. Once the shell is gone, the server must have
+        // been adopted by *us*. If this never becomes true the environment did not
+        // do what the test assumes, and the exit assertion below would prove
+        // nothing about the subreaper case.
+        tutti_fixtures::wait_until(
+            &format!(
+                "server {} to be reparented to this test process ({me}); \
+                 PR_SET_CHILD_SUBREAPER did not take effect if it never is, so \
+                 this run does not exercise the subreaper case at all",
+                server.0
+            ),
+            EXIT_DEADLINE,
+            || ppid_of(server.0) == Some(me),
+        );
 
-/// The parent PID of `pid`, from `/proc`. Linux-only, which matches the
-/// subreaper test's own gate.
-///
-/// Field 4 of `/proc/<pid>/stat` is the ppid, but field 2 is the executable
-/// name in parentheses and may itself contain spaces or parentheses — so the
-/// split starts after the final `)`, never at the first space.
-#[cfg(target_os = "linux")]
-fn ppid_of(pid: i32) -> Option<i32> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = &stat[stat.rfind(')')? + 1..];
-    after_comm.split_whitespace().nth(1)?.parse().ok()
+        // Then: the server must exit regardless. Its parent is a live, non-1
+        // process — the exact configuration in which `getppid() == 1` is silent.
+        tutti_fixtures::wait_until(
+            &format!(
+                "server {} to exit after being orphaned under a subreaper: its ppid became \
+                 {me} rather than 1, so a watch comparing against pid 1 sees \
+                 nothing wrong; the watch on the host's own PID is what must catch this",
+                server.0
+            ),
+            EXIT_DEADLINE,
+            || has_exited(server.0),
+        );
+    }
+
+    /// The parent PID of `pid`, from `/proc`. Linux-only, which matches the
+    /// subreaper test's own gate.
+    ///
+    /// Field 4 of `/proc/<pid>/stat` is the ppid, but field 2 is the executable
+    /// name in parentheses and may itself contain spaces or parentheses — so the
+    /// split starts after the final `)`, never at the first space.
+    fn ppid_of(pid: i32) -> Option<i32> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_comm = &stat[stat.rfind(')')? + 1..];
+        after_comm.split_whitespace().nth(1)?.parse().ok()
+    }
 }
 
 /// (d) The host watch ends nothing but its own process.

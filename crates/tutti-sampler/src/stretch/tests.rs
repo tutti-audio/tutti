@@ -9,9 +9,11 @@ use super::vocoder::*;
 use super::*;
 use tutti_fixtures::signal::rms;
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, Cents, Hz, Radians, ReadRate, SampleRate, Samples, StretchFactor};
+use tutti_units::{
+    Amplitude, Cents, Hz, Phase, PhaseIncrement, Radians, ReadRate, SampleRate, Samples,
+    StretchFactor,
+};
 
-use std::f32::consts::PI;
 use std::sync::Arc;
 use tutti_dsp::CosineWindow;
 
@@ -1045,8 +1047,8 @@ fn stretching_preserves_the_signals_level() {
         let size = 64;
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
-        let mut phase = 0.0f32;
-        let inc = 2.0 * PI * 440.0 / 44_100.0;
+        let mut phase = Phase::START;
+        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
@@ -1055,8 +1057,9 @@ fn stretching_preserves_the_signals_level() {
         const WARM: usize = 500;
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                let s = phase.sin() * 0.5;
-                phase += inc;
+                // The stretcher's input is `f32` samples: the tone narrows here.
+                let s = phase.sin() as f32 * 0.5;
+                phase = phase.advance(step);
                 *slot = s;
                 if blk >= WARM {
                     in_sq += (s as f64).powi(2);
@@ -1100,15 +1103,16 @@ fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
         let size = 64;
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
-        let mut phase = 0.0f32;
-        let inc = 2.0 * PI * 440.0 / 44_100.0;
+        let mut phase = Phase::START;
+        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                let s = phase.sin() * 0.5;
-                phase += inc;
+                // The stretcher's input is `f32` samples: the tone narrows here.
+                let s = phase.sin() as f32 * 0.5;
+                phase = phase.advance(step);
                 *slot = s;
                 if blk >= 500 {
                     in_sq += (s as f64).powi(2);

@@ -28,7 +28,7 @@
 //! The subprocess half. `tutti-plugin-server`'s AU loader installs one of these
 //! listeners and turns a raised flag into an `AsyncEvent` that crosses IPC; that
 //! wiring is pinned by
-//! `tutti_plugin_server::plugin::tests::an_au_property_change_reaches_the_event_list`,
+//! `tutti_plugin_server::served::tests::au::an_au_property_change_reaches_the_event_list`,
 //! in the crate that owns it. The split is deliberate — this file owns "the AU
 //! told us", that one owns "the host passed it on".
 //!

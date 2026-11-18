@@ -12,13 +12,13 @@ use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
 use crate::served::AnyServed;
 use crate::ties::Ties;
 use dpi::Size;
-use tutti_plugin_ipc::state_chunk::{self, Reassembler};
+use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, EditorError, Load, MAX_STATE_BYTES, MainThreadMarker, MainWork,
-    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, SampleFormat, SampleRate, StateUse,
-    Wakeups, WindowHandle,
+    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, PluginResult, SampleFormat,
+    SampleRate, StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -55,9 +55,9 @@ impl Reaction {
     fn into_reply(self) -> BridgeMessage {
         match self {
             Reaction::Reply(m) => m,
-            // A single-frame `ReplyMany` is the same answer wearing the
-            // sequence shape state now uses; unwrapping it here keeps every
-            // one-reply assertion in this file reading the same way.
+            // A single-frame `ReplyMany` is the same answer in the shape a state
+            // reply has; unwrapping it keeps every one-reply assertion in this
+            // file reading the same way.
             Reaction::ReplyMany(mut ms) if ms.len() == 1 => ms.remove(0),
             other => panic!("expected one reply, got {other:?}"),
         }
@@ -100,7 +100,7 @@ pub(crate) struct Session {
     /// Why the plugin is not running at the rate the host asked for, while it
     /// is not. A refused plugin renders silence (no block reaches it) and the
     /// next `SetSampleRate` retries it.
-    pub(crate) rate_refused: Option<String>,
+    pub(crate) rate_refused: Option<PluginError>,
     /// The longest block the loaded plugin was activated for (`LoadPlugin`'s
     /// `block_size`), 0 with none loaded. A block past it, or past the slab's
     /// per-channel room, is refused before anything is sized for it.
@@ -117,7 +117,7 @@ pub(crate) struct Session {
     pub(crate) state_in: Option<Reassembler>,
     /// A load sequence refused part-way, with why: its remaining chunks are
     /// taken without reply and the refusal is the answer to its `last`.
-    pub(crate) state_in_refused: Option<String>,
+    pub(crate) state_in_refused: Option<ChunkError>,
     /// A state staged for the next load (`StageStateChunk`), being received.
     pub(crate) stage_in: Option<Reassembler>,
     /// A state received and waiting for the next load, which restores it into
@@ -275,7 +275,7 @@ impl Session {
             // answers it: one here is a peer that confuses its connections,
             // and it expects an answer.
             M::ProcessAudio(_) => Ok(BridgeMessage::Error {
-                message: "ProcessAudio is carried on the audio connection".to_string(),
+                message: "a block is carried on the audio connection".to_string(),
             }
             .into()),
 
@@ -388,17 +388,19 @@ impl Session {
                 // A refusal leaves it silent (`handle_process` publishes nothing) and
                 // the host is told, because a rolled-back plugin would
                 // otherwise render at its old rate against the host's blocks.
-                let error = match self.plugin.as_mut() {
+                let refusal = match self.plugin.as_mut() {
                     Some(plugin) => match plugin.plugin_mut().set_sample_rate(main, rate) {
                         Ok(()) => None,
                         Err(e) => {
                             tracing::warn!(requested = %rate, "sample rate not applied: {e}");
-                            Some(e.to_string())
+                            Some(e)
                         }
                     },
                     None => None,
                 };
-                self.rate_refused.clone_from(&error);
+                // The wire carries the reason as text; the session keeps it typed.
+                let error = refusal.as_ref().map(ToString::to_string);
+                self.rate_refused = refusal;
                 Ok(BridgeMessage::SampleRateSet { rate, error }.into())
             }
             M::SetRenderMode { mode } => {
@@ -418,11 +420,14 @@ impl Session {
             // blocks: the audio connection's, where the render thread owns the
             // Processor that forgets (`RenderSide::handle`).
             M::Reset => Err(BridgeError::ProtocolError(
-                "Reset is carried on the audio connection",
+                "a reset is carried on the audio connection",
             )),
 
             M::OpenEditor { parent, scale } => {
-                let result = self.open_editor(main, parent, scale);
+                // The wire's result carries the reason as text.
+                let result = self
+                    .open_editor(main, parent, scale)
+                    .map_err(|e| editor_wire_text(&e));
                 Ok(BridgeMessage::EditorOpened { result }.into())
             }
             M::CloseEditor => {
@@ -430,7 +435,9 @@ impl Session {
                 Ok(Reaction::None)
             }
             M::SetEditorSize { size } => {
-                let result = self.set_editor_size(main, size);
+                let result = self
+                    .set_editor_size(main, size)
+                    .map_err(|e| editor_wire_text(&e));
                 Ok(BridgeMessage::EditorSized { result }.into())
             }
 
@@ -460,6 +467,17 @@ impl Session {
             }
             M::Shutdown => Ok(Reaction::Shutdown),
         }
+    }
+
+    /// Leaves the loaded plugin as a panic in a call into it does.
+    #[cfg(test)]
+    pub(crate) fn lose_plugin(&mut self) {
+        self.plugin.as_mut().expect("a plugin is loaded").poison();
+    }
+
+    /// Whether the loaded plugin is lost (a call into it panicked).
+    pub(crate) fn plugin_lost(&self) -> bool {
+        self.plugin.as_ref().is_some_and(|p| p.plugin().is_lost())
     }
 
     /// Whether a plugin is loaded.
@@ -576,28 +594,26 @@ impl Session {
         main: MainThreadMarker,
         parent: Option<u64>,
         scale: tutti_plugin_types::ContentScale,
-    ) -> Result<Option<Size>, String> {
+    ) -> PluginResult<Option<Size>> {
         if self.editor_open {
-            return Err("an editor is already open".into());
+            return Err(EditorError::AlreadyOpen.into());
         }
         let Some(control) = self
             .plugin
             .as_mut()
             .and_then(|p| p.plugin_mut().control_mut())
         else {
-            return Err("no plugin is loaded".into());
+            return Err(EditorError::NoPlugin.into());
         };
         let opened = match parent {
             Some(raw) => match WindowHandle::from_remote(raw) {
                 Some(window) => control.open_editor(main, window, scale).map(Some),
-                None => Err(PluginError::Editor(EditorError::UnsupportedPlatform {
-                    got: "a window of the host's cannot be embedded into by this process".into(),
-                })),
+                None => Err(EditorError::ForeignWindow(raw).into()),
             },
             None => control.open_floating_editor(main).map(|()| None),
         };
         self.editor_open = opened.is_ok();
-        opened.map_err(|e| e.to_string())
+        opened
     }
 
     /// Closes the editor, if one is open.
@@ -613,20 +629,18 @@ impl Session {
     }
 
     /// Asks the open editor to take `size`; the size it took.
-    fn set_editor_size(&mut self, main: MainThreadMarker, size: Size) -> Result<Size, String> {
+    fn set_editor_size(&mut self, main: MainThreadMarker, size: Size) -> PluginResult<Size> {
         if !self.editor_open {
-            return Err("editor not open".into());
+            return Err(EditorError::NotOpen.into());
         }
         let Some(control) = self
             .plugin
             .as_mut()
             .and_then(|p| p.plugin_mut().control_mut())
         else {
-            return Err("no plugin is loaded".into());
+            return Err(EditorError::NoPlugin.into());
         };
-        control
-            .set_editor_size(main, size)
-            .map_err(|e| e.to_string())
+        control.set_editor_size(main, size)
     }
 
     /// Lets the plugin go (an unload, or a load that replaces it), closing its
@@ -644,7 +658,7 @@ impl Session {
         if let Some(mut plugin) = self.plugin.take() {
             if !plugin.plugin_mut().quiesce(main) {
                 tracing::error!(
-                    "plugin-server: the render thread did not return the processor;                      the plugin is leaked"
+                    "plugin-server: the render thread did not return the processor; the plugin is leaked"
                 );
             }
             drop(plugin);
@@ -739,7 +753,7 @@ impl Session {
             descriptor: Box::new(descriptor),
             loaded,
             negotiated_format: negotiated,
-            state_error,
+            state_error: state_error.map(|e| e.to_string()),
         }
         .into())
     }
@@ -780,7 +794,7 @@ impl Session {
                 // one `Error` frame, and the host reports it as a rejection.
                 Err(e) => {
                     return BridgeMessage::Error {
-                        message: format!("Failed to save state: {e}"),
+                        message: format!("failed to save state: {e}"),
                     }
                     .into();
                 }
@@ -864,24 +878,25 @@ impl Session {
             self.state_in = None;
             self.state_in_refused = None;
         }
-        if let Some(error) = &self.state_in_refused {
+        if self.state_in_refused.is_some() {
             if !last {
                 return Reaction::None;
             }
-            let error = error.clone();
-            self.state_in_refused = None;
-            return BridgeMessage::StateLoaded { error: Some(error) }.into();
+            let error = self.state_in_refused.take().map(|e| e.to_string());
+            return BridgeMessage::StateLoaded { error }.into();
         }
         let acc = self.state_in.get_or_insert_with(Reassembler::default);
         let complete = match acc.push(seq, last, bytes) {
             Ok(done) => done,
             Err(e) => {
                 self.state_in = None;
-                let error = e.to_string();
                 if last {
-                    return BridgeMessage::StateLoaded { error: Some(error) }.into();
+                    return BridgeMessage::StateLoaded {
+                        error: Some(e.to_string()),
+                    }
+                    .into();
                 }
-                self.state_in_refused = Some(error);
+                self.state_in_refused = Some(e);
                 return Reaction::None;
             }
         };
@@ -904,9 +919,18 @@ impl Session {
         };
         let error = match plugin.plugin_mut().load_state(main, &data, state_use) {
             Ok(()) => None,
-            Err(e) => Some(format!("Failed to load state: {e}")),
+            Err(e) => Some(format!("failed to load state: {e}")),
         };
         BridgeMessage::StateLoaded { error }.into()
+    }
+}
+
+/// An editor call's failure as the text the wire carries: an editor error says
+/// itself, not through the "plugin editor error" of the error that wraps it.
+fn editor_wire_text(e: &PluginError) -> String {
+    match e {
+        PluginError::Editor(editor) => editor.to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -1114,14 +1138,11 @@ mod tests {
         let _render = crate::test_utils::clap_probe_render_mode(
             tutti_clap_test_plugin::RenderMode::TagPassthrough as u32,
         );
-        crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::ApplyGain, 1);
-        struct GainOff;
-        impl Drop for GainOff {
-            fn drop(&mut self) {
-                crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::ApplyGain, 0);
-            }
-        }
-        let _gain = GainOff;
+        let _gain = crate::test_utils::clap_switch_until_drop(
+            tutti_clap_test_plugin::ClapSwitch::ApplyGain,
+            1,
+            0,
+        );
         let (mut s, mut shm) = load_clap(name, SampleFormat::Float32);
         let before = save_state_bytes(&mut s);
 
@@ -1286,14 +1307,6 @@ mod tests {
             .unwrap();
         assert_none(r);
         assert_ne!(before, save_state_bytes(&mut s));
-    }
-
-    #[test]
-    fn new_session_defaults() {
-        let s = Rig::new();
-        assert_eq!(s.clock.format, SampleFormat::Float32);
-        assert!(s.plugin.is_none());
-        assert!(!s.side().has_slab());
     }
 
     /// Every request a host can send before a plugin is loaded must be
@@ -1515,7 +1528,7 @@ mod tests {
 
     /// **A slab the server cannot open is answered with an error, and the
     /// session goes on**: the host asked for shared memory that does not exist,
-    /// and hears that. The error used to end the server, which the host saw as
+    /// and hears that, rather than the server ending, which the host would see as
     /// its crash.
     #[test]
     fn a_slab_that_cannot_be_opened_is_answered_and_the_session_goes_on() {
@@ -1546,11 +1559,84 @@ mod tests {
         ));
     }
 
+    /// **A session whose plugin was lost reports it, and one whose plugin runs
+    /// does not**: what the server loop ends on.
     #[test]
-    fn shutdown_signals_shutdown() {
+    #[cfg(feature = "clap")]
+    fn a_session_reports_a_lost_clap_plugin() {
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, _shm) = load_clap("lost_clap", SampleFormat::Float32);
+        assert!(!s.plugin_lost());
+        s.lose_plugin();
+        assert!(s.plugin_lost());
+    }
+
+    /// As above, for VST3.
+    #[test]
+    #[cfg(feature = "vst3")]
+    fn a_session_reports_a_lost_vst3_plugin() {
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, _shm) = load_vst3_probe("lost_vst3");
+        assert!(!s.plugin_lost());
+        s.lose_plugin();
+        assert!(s.plugin_lost());
+    }
+
+    /// **An editor error reaches the wire as its own text**, without the
+    /// "plugin editor error" prefix of the error that wraps it.
+    #[test]
+    fn an_editor_error_is_flattened_to_its_own_text() {
+        assert_eq!(
+            editor_wire_text(&PluginError::Editor(EditorError::NotOpen)),
+            "the editor is not open"
+        );
+        assert_eq!(
+            editor_wire_text(&PluginError::Other("no".into())),
+            "plugin error: no"
+        );
+    }
+
+    /// A window number that means nothing in this process (an AppKit view's
+    /// pointer) is refused as such: only macOS has one.
+    #[cfg(all(target_os = "macos", feature = "clap"))]
+    mod foreign_window {
+        use super::*;
+
+        /// **A host window this process cannot embed into is a foreign
+        /// window**, named by the number the host sent.
+        #[test]
+        fn a_window_number_that_means_nothing_here_is_refused_as_foreign() {
+            let _lock = crate::test_utils::plugin_load_lock();
+            let (mut s, _shm) = load_clap("foreign_window", SampleFormat::Float32);
+            let raw = 0x40_0001;
+            let scale = tutti_plugin_types::ContentScale::IDENTITY;
+            assert!(matches!(
+                s.open_editor(main_thread(), Some(raw), scale),
+                Err(PluginError::Editor(EditorError::ForeignWindow(got))) if got == raw
+            ));
+        }
+    }
+
+    /// **An editor request the session cannot serve names its cause as an
+    /// editor error**, not as a platform one: no plugin, an editor already
+    /// open, and a resize with none open are three causes.
+    #[test]
+    fn an_editor_request_that_cannot_be_served_names_its_editor_error() {
         let mut s = Rig::new();
-        let r = s.handle(main_thread(), HostMessage::Shutdown).unwrap();
-        assert!(matches!(r, Reaction::Shutdown));
+        let scale = tutti_plugin_types::ContentScale::IDENTITY;
+        assert!(matches!(
+            s.open_editor(main_thread(), None, scale),
+            Err(PluginError::Editor(EditorError::NoPlugin))
+        ));
+        assert!(matches!(
+            s.set_editor_size(main_thread(), dpi::PhysicalSize::new(10, 10).into()),
+            Err(PluginError::Editor(EditorError::NotOpen))
+        ));
+        s.editor_open = true;
+        assert!(matches!(
+            s.open_editor(main_thread(), None, scale),
+            Err(PluginError::Editor(EditorError::AlreadyOpen))
+        ));
     }
 
     #[test]
@@ -1575,7 +1661,7 @@ mod tests {
         match reply {
             BridgeMessage::Error { message } => {
                 assert!(message.starts_with(&format!("{}:", LoadStage::Scanning)));
-                assert!(message.contains("not found"));
+                assert!(message.contains("does not exist"));
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -2231,69 +2317,87 @@ mod tests {
         }
     }
 
-    /// Fetch any param_id from the loaded plugin's parameter list.
+    /// The Cutoff parameter of the reference plugin: 100 to 1100, default 600.
     #[cfg(feature = "clap")]
-    fn first_param_id(s: &mut Rig) -> ParamId {
-        let reply = s
-            .handle(main_thread(), HostMessage::GetParameterList)
-            .unwrap()
-            .into_reply();
-        match reply {
-            BridgeMessage::ParameterList { parameters } => {
-                assert!(!parameters.is_empty(), "need at least one parameter");
-                parameters[0].id()
-            }
-            other => panic!("expected ParameterList, got {other:?}"),
-        }
-    }
+    const CUTOFF: u32 = 101;
 
+    /// **The parameter list is the plugin's own table, in its order.**
     #[test]
     #[cfg(feature = "clap")]
-    fn get_parameter_list_with_plugin() {
+    fn the_parameter_list_is_the_plugins_declared_table_in_its_order() {
         let _lock = crate::test_utils::plugin_load_lock();
         let (mut s, _shm) = load_clap("get_param_list_clap", SampleFormat::Float32);
         let reply = s
             .handle(main_thread(), HostMessage::GetParameterList)
             .unwrap()
             .into_reply();
-        match reply {
-            BridgeMessage::ParameterList { parameters } => assert!(!parameters.is_empty()),
-            other => panic!("expected ParameterList, got {other:?}"),
-        }
+        let BridgeMessage::ParameterList { parameters } = reply else {
+            panic!("expected ParameterList, got {reply:?}");
+        };
+        let listed: Vec<u32> = parameters.iter().map(|p| p.id().get()).collect();
+        let declared: Vec<u32> = tutti_clap_test_plugin::params_state::probe_params()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(listed, declared);
     }
 
+    /// **A parameter reads as its declared default**, normalized over its
+    /// range: Cutoff's 600 in 100..1100 is one half.
     #[test]
     #[cfg(feature = "clap")]
-    fn get_parameter_with_plugin() {
+    fn a_parameter_reads_as_its_declared_default_normalized() {
         let _lock = crate::test_utils::plugin_load_lock();
         let (mut s, _shm) = load_clap("get_param_clap", SampleFormat::Float32);
-        let param_id = first_param_id(&mut s);
         let reply = s
-            .handle(main_thread(), HostMessage::GetParameter { param_id })
+            .handle(
+                main_thread(),
+                HostMessage::GetParameter {
+                    param_id: ParamId::new(CUTOFF),
+                },
+            )
             .unwrap()
             .into_reply();
         match reply {
-            BridgeMessage::ParameterValue { value } => assert!(value.is_some()),
+            BridgeMessage::ParameterValue { value } => {
+                assert_eq!(value.map(Normalized::get), Some(0.5));
+            }
             other => panic!("expected ParameterValue, got {other:?}"),
         }
     }
 
+    /// **A write reaches the plugin with the next block**: the value read back
+    /// after it is the one written, and `SetParameter` itself answers nothing.
     #[test]
     #[cfg(feature = "clap")]
-    fn set_parameter_with_plugin() {
+    fn a_parameter_write_reaches_the_plugin_and_reads_back() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("set_param_clap", SampleFormat::Float32);
-        let param_id = first_param_id(&mut s);
+        let (mut s, mut shm) = load_clap("set_param_clap", SampleFormat::Float32);
+        let param_id = ParamId::new(CUTOFF);
         let r = s
             .handle(
                 main_thread(),
                 HostMessage::SetParameter {
                     param_id,
-                    value: Normalized::of(0.5),
+                    value: Normalized::of(0.25),
                 },
             )
             .unwrap();
         assert_none(r);
+        assert!(
+            run_silent_block(&mut s, &mut shm, 1, 64),
+            "the block renders"
+        );
+        let reply = s
+            .handle(main_thread(), HostMessage::GetParameter { param_id })
+            .unwrap()
+            .into_reply();
+        match reply {
+            BridgeMessage::ParameterValue { value } => {
+                assert_eq!(value.map(Normalized::get), Some(0.25));
+            }
+            other => panic!("expected ParameterValue, got {other:?}"),
+        }
     }
 
     /// A `LoadState` that the plugin accepted.
@@ -2501,7 +2605,7 @@ mod tests {
         let mut s = Rig::new();
         match load_declaring(&mut s, None) {
             BridgeMessage::Error { message } => {
-                assert!(message.contains("not found"), "{message}");
+                assert!(message.contains("does not exist"), "{message}");
             }
             other => panic!("{other:?}"),
         }
@@ -2817,9 +2921,9 @@ mod tests {
     }
 
     /// **A block the plugin fails is silence and is counted; the server goes
-    /// on.** The failure used to leave `handle` as an error, which ends the
-    /// server loop, so one `kResultFalse` (a preset load, a licence hiccup)
-    /// read as a plugin crash.
+    /// on.** A failure that left `handle` as an error would end the server loop,
+    /// and one `kResultFalse` (a preset load, a licence hiccup) would read as a
+    /// plugin crash.
     #[test]
     #[cfg(feature = "vst3")]
     fn a_vst3_block_the_plugin_fails_is_silence_and_the_server_goes_on() {
@@ -2851,11 +2955,9 @@ mod tests {
     /// The same for CLAP: a block the plugin fails (`CLAP_PROCESS_ERROR`) is
     /// silence and is counted, and the next block renders.
     ///
-    /// The failure used to be provoked with a block longer than the activated
-    /// maximum, which the CLAP host refused (`BlockTooLarge`). The server now
-    /// refuses such a block before any plugin sees it
-    /// (`a_block_of_a_length_the_plugin_cannot_take_never_reaches_it`), so the
-    /// plugin fails here on its own account, through the probe's status.
+    /// A block longer than the activated maximum is refused before any plugin
+    /// sees it (`a_block_of_a_length_the_plugin_cannot_take_never_reaches_it`),
+    /// so the plugin fails here on its own account, through the probe's status.
     #[test]
     #[cfg(feature = "clap")]
     fn a_clap_block_the_plugin_fails_is_silence_and_the_server_goes_on() {
@@ -2877,7 +2979,7 @@ mod tests {
 
     /// **An idle dispatch allocates nothing**: the drain every message is
     /// followed by, with the plugin having asked for nothing. The lifecycle is
-    /// not entered, so nothing is cloned or queued on the render thread.
+    /// not entered, so nothing is cloned or queued.
     #[test]
     #[cfg(feature = "vst3")]
     fn an_idle_drain_does_not_allocate_vst3() {

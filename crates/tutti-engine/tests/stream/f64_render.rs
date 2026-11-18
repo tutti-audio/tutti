@@ -60,6 +60,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
 /// manual stream exactly, in `f64`.
 #[test]
 fn an_f64_stream_renders_a_dc_figure_f32_cannot_hold() {
+    // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from(FINE as f32), FINE, "FINE is not an f32");
     let mut output = OutputStream::new(spec(2, SampleFormat::F64));
     let (driver, stream) = ManualStreamDriver::new();
@@ -109,8 +110,9 @@ fn an_f64_block_converts_to_the_device_format_by_the_sample_rule() {
 
 /// **A driver's own conversion maps each rendered `f64` and silences what the
 /// graph did not render.** An offset-binary `u16` device, the `Sample` rule on
-/// `i16` with the sign bit flipped: `0.5` is `32768 + 2^14`, and the samples of a callback that is not whole
-/// frames past the last frame are the format's silence (mid-scale).
+/// `i16` with the sign bit flipped: `0.5` is `32768 + 2^14`, and the samples of
+/// a callback that is not whole frames past the last frame are the format's
+/// silence (mid-scale).
 #[test]
 fn a_driver_conversion_maps_the_rendered_samples_and_silences_a_partial_frame() {
     let mut block = OutputBlock::new(dc_state(0.5, 2), ChannelLayout::STEREO);

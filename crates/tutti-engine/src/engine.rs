@@ -350,6 +350,7 @@ impl<F: Float> Mixing<'_, F> {
             } else {
                 (0.0, 1.0)
             };
+            // A fade law's gains are `f32` levels.
             (*go, *gn) = (F::from_f32(old), F::from_f32(new));
         }
         let new_planes = Planes::new(new.1)?;
@@ -1339,6 +1340,7 @@ impl Fader {
             if self.gain != 1.0 {
                 let at = (base + i) * channels;
                 for s in &mut output[at..at + channels] {
+                    // The master gain is an `f32` level (an `Amplitude`).
                     *s *= F::from_f32(self.gain);
                 }
             }

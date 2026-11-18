@@ -23,7 +23,7 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
-use tutti_units::{Azimuth, Elevation, SampleRate};
+use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
 const BLOCK: usize = 64;
 const RATE: u32 = 48_000;
@@ -159,16 +159,12 @@ fn bench(c: &mut Criterion) {
             for _ in 0..64 {
                 d.block();
             }
-            let mut bearing = 0.0f32;
+            let mut bearing = Azimuth::FRONT;
             g.bench_with_input(BenchmarkId::from_parameter(ir_len), &ir_len, |b, _| {
                 b.iter(|| {
                     if moving {
-                        bearing = if bearing > 170.0 {
-                            -170.0
-                        } else {
-                            bearing + 7.0
-                        };
-                        aim(&params, Azimuth(f64::from(bearing)), Elevation(10.0));
+                        bearing = bearing.rotate_by(ArcDegrees(7.0));
+                        aim(&params, bearing, Elevation(10.0));
                     }
                     d.block();
                     black_box(d.output().plane(0).samples()[BLOCK - 1]);
