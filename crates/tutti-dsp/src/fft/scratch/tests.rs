@@ -101,9 +101,8 @@ fn switching_sizes_replans() {
     let mut fft = FftScratch::new();
     for size in [64usize, 128, 64, 256, 64] {
         let input: Vec<f32> = (0..size).map(|i| i as f32 / size as f32).collect();
-        let window = vec![1.0f32; size];
         let mut out = vec![Complex32::default(); size / 2 + 1];
-        fft.forward(Mono::new(&input), &window, &mut out);
+        fft.forward_unwindowed(Mono::new(&input), &mut out);
 
         let mut back = vec![0.0f32; size];
         fft.inverse(&out, MonoMut::new(&mut back));
@@ -122,7 +121,7 @@ fn tone(size: usize, bin: f32, amp: f32, phase: f32) -> Vec<f32> {
 fn spectrum(input: &[f32]) -> Vec<Complex32> {
     let size = input.len();
     let mut out = vec![Complex32::default(); size / 2 + 1];
-    FftScratch::new().forward(Mono::new(input), &vec![1.0; size], &mut out);
+    FftScratch::new().forward_unwindowed(Mono::new(input), &mut out);
     out
 }
 
@@ -244,4 +243,21 @@ fn an_f64_scratch_finds_the_tone_and_round_trips_at_f64_precision() {
     for (a, b) in input.iter().zip(&back) {
         assert!((a - b).abs() < 1e-12);
     }
+}
+
+/// With no window the transform of a unit impulse is flat at 1, and that of a
+/// constant `c` is `c * N` at DC and zero elsewhere.
+#[test]
+fn an_unwindowed_impulse_is_flat_and_a_constant_is_all_dc() {
+    let size = 64;
+    let mut fft = FftScratch::new();
+    let mut impulse = vec![0.0f32; size];
+    impulse[0] = 1.0;
+    for bin in spectrum(&impulse) {
+        assert!((bin.re - 1.0).abs() < 1e-6 && bin.im.abs() < 1e-6);
+    }
+    let mut out = vec![Complex32::default(); size / 2 + 1];
+    fft.forward_unwindowed(Mono::new(&vec![0.5f32; size]), &mut out);
+    assert!((out[0].re - 32.0).abs() < 1e-4);
+    assert!(out[1..].iter().all(|b| b.norm() < 1e-4));
 }

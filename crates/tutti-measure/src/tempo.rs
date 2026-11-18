@@ -40,6 +40,7 @@ use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::parabolic_peak;
 use tutti_types::ranged;
 
 /// The default analysis window, in samples.
@@ -380,12 +381,15 @@ pub fn track_beats_from_novelty(
     Ok(BeatGrid { beats, bpm })
 }
 
-/// Frames per second of a curve with one value per `hop`.
+/// Frames per second of a curve with one value per `hop`: the grid of
+/// `hop`-long frames `hop` apart.
 fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<f64> {
     if hop.is_zero() {
         return Err(Error::ZeroHop);
     }
-    Ok(sample_rate.get() / hop.get() as f64)
+    Ok(f64::from(
+        StftGeometry::new(sample_rate, hop, hop)?.frame_rate().get(),
+    ))
 }
 
 /// The detection curve of `samples` at `rate` on the config's framing, with
@@ -523,12 +527,8 @@ impl Periodicity {
     /// The lag refined to a fraction of a frame by a parabola through its
     /// value and its neighbours', or `lag` when they do not bend down.
     fn refined(&self, lag: usize) -> f64 {
-        let (a, b, c) = (self.at(lag - 1), self.at(lag), self.at(lag + 1));
-        let curvature = a - 2.0 * b + c;
-        if curvature >= 0.0 {
-            return lag as f64;
-        }
-        lag as f64 + f64::from((0.5 * (a - c) / curvature).clamp(-0.5, 0.5))
+        let peak = parabolic_peak(self.at(lag - 1), self.at(lag), self.at(lag + 1));
+        lag as f64 + f64::from(peak.offset)
     }
 
     fn tempo(&self, cfg: &TempoConfig) -> Tempo {

@@ -61,6 +61,7 @@ use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::parabolic_peak;
 use tutti_dsp::{BinCount, FrameCount, Grid};
 use tutti_types::ranged;
 
@@ -348,7 +349,7 @@ impl ChromaPlan {
             return Err(empty);
         }
         check_nyquist(max, self.geometry.sample_rate())?;
-        let width = self.bin_width();
+        let width = f64::from(self.geometry.bin_width().get());
         let lo = ((f64::from(min.get()) / width).ceil() as usize).max(1);
         let hi = ((f64::from(max.get()) / width).floor() as usize)
             .min(self.geometry.window().get() / 2 - 1);
@@ -356,11 +357,6 @@ impl ChromaPlan {
             return Err(empty);
         }
         Ok((lo, hi))
-    }
-
-    /// The spacing of the bins, in hertz.
-    fn bin_width(&self) -> f64 {
-        self.geometry.sample_rate().get() / self.geometry.window().get() as f64
     }
 
     /// Calls `visit(frequency, energy)` for each peak of `magnitudes` that
@@ -377,7 +373,7 @@ impl ChromaPlan {
             return false;
         }
         let floor = top * self.peak_floor.get().to_amplitude().get();
-        let width = self.bin_width();
+        let width = f64::from(self.geometry.bin_width().get());
         for i in lo..=hi {
             let m = magnitudes[i];
             if !(m > magnitudes[i - 1] && m >= magnitudes[i + 1] && m >= floor) {
@@ -442,13 +438,8 @@ fn class_of(frequency: f64, tuning: Semitones) -> usize {
 /// `-0.5..=0.5`, and the magnitude there.
 fn interpolate(below: f32, mid: f32, above: f32) -> (f64, f32) {
     let ln = |m: f32| libm::log(f64::from(m).max(TINY));
-    let (a, b, c) = (ln(below), ln(mid), ln(above));
-    let curvature = a - 2.0 * b + c;
-    if curvature.is_nan() || curvature >= 0.0 {
-        return (0.0, mid);
-    }
-    let offset = (0.5 * (a - c) / curvature).clamp(-0.5, 0.5);
-    (offset, libm::exp(b - 0.25 * (a - c) * offset) as f32)
+    let peak = parabolic_peak(ln(below), ln(mid), ln(above));
+    (peak.offset, libm::exp(peak.value) as f32)
 }
 
 /// The energy-weighted circular mean of the peaks' off-grid distances, kept as

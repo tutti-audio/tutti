@@ -23,6 +23,7 @@ use crate::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
+use tutti_dsp::parabolic_peak;
 
 /// A bin whose cross-spectrum magnitude is below this fraction of the
 /// strongest in-band bin is damped rather than boosted to unit magnitude.
@@ -224,8 +225,7 @@ fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: Sa
 }
 
 /// The parabola's vertex through `lag - 1`, `lag`, `lag + 1`, relative to
-/// `lag`, clamped to half a sample. Zero unless the three points bend down
-/// (`curvature < 0`, which also rejects NaN).
+/// `lag`; zero when a neighbour is outside the overlap.
 fn parabolic_offset(correlation: &CrossCorrelation, lag: isize) -> f32 {
     let (Some(l), Some(c), Some(r)) = (
         correlation.at(lag - 1),
@@ -234,12 +234,7 @@ fn parabolic_offset(correlation: &CrossCorrelation, lag: isize) -> f32 {
     ) else {
         return 0.0;
     };
-    let curvature = l - 2.0 * c + r;
-    if curvature < 0.0 {
-        (0.5 * (l - r) / curvature).clamp(-0.5, 0.5)
-    } else {
-        0.0
-    }
+    parabolic_peak(l, c, r).offset
 }
 
 /// `1 - second / peak` for the strongest value in `lo..=hi` outside the peak's
@@ -380,7 +375,7 @@ mod tests {
     fn band_noise(len: usize, seed: u64, low: f32, high: f32) -> Vec<f32> {
         let mut fft = FftScratch::new();
         let mut bins = vec![Complex32::default(); len / 2 + 1];
-        fft.forward(Mono::new(&noise(len, seed)), &vec![1.0; len], &mut bins);
+        fft.forward_unwindowed(Mono::new(&noise(len, seed)), &mut bins);
         for (k, b) in bins.iter_mut().enumerate() {
             let f = k as f32 / len as f32;
             if f < low || f > high {
@@ -664,29 +659,6 @@ mod tests {
             let a = find(&noise(8192, seed), &noise(8192, seed + 100), 1000);
             assert!(a.confidence.get() < 0.3, "seed {seed}: {:?}", a.confidence);
         }
-    }
-
-    /// The parabola is used only where the three points bend down: a delta one
-    /// lag to the right of the fitted lag has `curvature > 0`, and NaN has
-    /// neither sign; both give zero rather than a clamped nonsense offset.
-    #[test]
-    fn the_parabola_is_used_only_where_it_bends_down() {
-        let mut fft = FftScratch::new();
-        let x = noise(8, 1);
-        let delta_at_one = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
-            let size = ((bins.len() - 1) * 2) as f32;
-            for (k, bin) in bins.iter_mut().enumerate() {
-                let w = -core::f32::consts::TAU * k as f32 / size;
-                *bin = Complex32::new(w.cos(), w.sin());
-            }
-        });
-        assert_eq!(delta_at_one.peak().unwrap().lag, 1);
-        assert_eq!(parabolic_offset(&delta_at_one, 0), 0.0);
-
-        let nan = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
-            bins.fill(Complex32::new(f32::NAN, 0.0));
-        });
-        assert_eq!(parabolic_offset(&nan, 0), 0.0);
     }
 
     /// Delay in samples and seconds, and the input checks.

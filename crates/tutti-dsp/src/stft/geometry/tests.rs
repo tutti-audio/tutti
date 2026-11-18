@@ -184,3 +184,20 @@ fn latency_is_exact() {
     let g = geo(2048, 512);
     assert_eq!(g.latency(), Seconds(2048.0 / 44_100.0));
 }
+
+/// A bin is `rate / window` wide: 48000 / 1024 = 46.875, exact in `f32`.
+#[test]
+fn the_bin_width_is_the_rate_over_the_window() {
+    let g = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
+    assert_eq!(g.bin_width(), Hz(46.875));
+    assert_eq!(g.bin_width(), g.bin_frequency(BinIndex(1)));
+}
+
+/// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s, and the frame
+/// rate is its reciprocal, 100 Hz.
+#[test]
+fn the_frame_interval_is_the_hop_over_the_rate_and_the_frame_rate_its_reciprocal() {
+    let g = StftGeometry::new(SampleRate::SR_48K, Samples(2048), Samples(480)).unwrap();
+    assert!((g.frame_interval().get() - 0.01).abs() < 1e-15);
+    assert_eq!(g.frame_rate(), Hz(100.0));
+}
