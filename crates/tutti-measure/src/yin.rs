@@ -4,8 +4,7 @@
 //! a DAW does with it: YIN has specific failure modes — octave errors on
 //! strong harmonics, and a buffer-length floor set by the lowest frequency it
 //! is asked to find — that a caller reaching for "pitch detection" would not
-//! know it was choosing. A second estimator later gets its own name instead of
-//! displacing this one.
+//! know it was choosing.
 //!
 //! The estimate is a pure function of its input: the underlying detector's
 //! scratch is fully overwritten on every call, so nothing carries between

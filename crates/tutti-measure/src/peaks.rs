@@ -34,6 +34,7 @@ use core::marker::PhantomData;
 
 use crate::convert::{Discard, for_blocks};
 use crate::{Error, Measure, Meter, Result};
+use tutti_dsp::rms;
 
 /// One block of a waveform summary, for one channel.
 ///
@@ -300,15 +301,16 @@ fn block_of(samples: &[f32]) -> PeakBlock {
         return PeakBlock::default();
     }
 
-    let (min, max, sum_sq) = samples.iter().fold(
-        (f32::INFINITY, f32::NEG_INFINITY, 0.0f32),
-        |(min, max, sum), &s| (min.min(s), max.max(s), sum + s * s),
-    );
+    let (min, max) = samples
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &s| {
+            (min.min(s), max.max(s))
+        });
 
     PeakBlock {
         min,
         max,
-        rms: Amplitude((sum_sq / samples.len() as f32).sqrt()),
+        rms: rms(Mono::new(samples)),
     }
 }
 
