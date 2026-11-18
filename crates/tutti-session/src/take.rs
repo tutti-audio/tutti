@@ -511,7 +511,8 @@ impl Recorded {
     /// The take as a clip, in the session's float, that starts where it
     /// belongs ([`Placement::start_beat`]): add it to the graph, in place of
     /// the input if you like (`graph.replace(input.node(), done.clip()?)`), and
-    /// a bounce can fork it.
+    /// a bounce can fork it. Present with the `sampler` feature and a
+    /// `tutti-codec` `decode-*` feature on.
     ///
     /// # Errors
     ///
@@ -520,7 +521,7 @@ impl Recorded {
     /// back (a format whose decoder is not built in);
     /// [`Error::Place`](crate::Error::Place) for a wave the sampler cannot
     /// place.
-    #[cfg(feature = "sampler")]
+    #[cfg(all(feature = "sampler", codec))]
     pub fn clip<F: tutti_rt::RingFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
         let path = self.path().ok_or(TakeError::NoFile)?;
         let wave = tutti_codec::read_wave::<F>(path)?;
