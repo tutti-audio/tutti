@@ -40,17 +40,17 @@
 //!
 //! The model in `tests/level_cell_loom.rs` runs this code.
 
-use sync::{Arc, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+use sync::{Arc, AtomicU64, AtomicUsize, Ordering, fence};
 
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::Arc;
     #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+    pub(super) use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
     #[cfg(not(loom))]
     pub(super) use std::sync::Arc;
     #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+    pub(super) use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
 }
 
 #[cfg(not(loom))]

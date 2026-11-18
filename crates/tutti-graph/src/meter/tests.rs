@@ -258,7 +258,7 @@ fn a_mebiframe_f32_block_reads_its_rms_within_a_length_free_bound() {
     // the chunks have, misses the figure by more than the bound.
     let whole: f64 = {
         let mut lanes = [0.0f32; WIDTH];
-        for pass in block.chunks_exact(WIDTH) {
+        for pass in block.as_chunks::<WIDTH>().0 {
             for (l, x) in lanes.iter_mut().zip(pass) {
                 *l += x * x;
             }

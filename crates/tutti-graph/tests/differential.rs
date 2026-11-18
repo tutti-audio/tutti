@@ -2356,6 +2356,7 @@ proptest! {
             let mut lanes = Rng::new(seed ^ 0x6D12_17E5);
             let mut desc = random_graph(seed);
             weigh(&mut desc, &mut gains);
+            drive_mixes(&mut desc, &mut lanes);
             let mut pair = Pair::<f64>::with_format(MAX_BLOCK);
             if workers > 1 {
                 pair.exec.set_pool(Some(common::test_pool(workers)));
