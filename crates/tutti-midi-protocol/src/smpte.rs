@@ -79,10 +79,19 @@ impl MtcRate {
         self.frame_rate().labels_per_second() as u8
     }
 
-    /// The rate the hours byte `0rrhhhhh` names: its bits 5 and 6.
+    /// The hours byte `0rrhhhhh` of `hours` at this rate (M1 p.53): the rate
+    /// code over the five hour bits. This pair is the one home of the layout.
     #[must_use]
-    pub const fn from_hours_byte(hours_byte: u8) -> Self {
-        Self::masked(hours_byte >> 5)
+    pub const fn hours_byte(self, hours: u8) -> u8 {
+        (self.code() << 5) | (hours & 0x1F)
+    }
+
+    /// The rate and the hours (0..=31 as written) of a hours byte `0rrhhhhh`:
+    /// the inverse of [`hours_byte`](Self::hours_byte). Bit 7 is not read; a
+    /// caller that reads a wire byte refuses it first.
+    #[must_use]
+    pub const fn from_hours_byte(hours_byte: u8) -> (Self, u8) {
+        (Self::masked(hours_byte >> 5), hours_byte & 0x1F)
     }
 
     /// The two-bit code on the wire.

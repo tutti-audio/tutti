@@ -152,7 +152,7 @@ pub(crate) fn info_field(field: &MmcInfoField, out: Out<'_>) -> Done {
         MmcInfoField::ResponseError(n) => counted(0x42, out, |b| names(&n, b)),
         MmcInfoField::CommandError(e) => counted(0x43, out, |b| command_error(e, b)),
         MmcInfoField::CommandErrorLevel(v) => one(0x44, out, v.get()),
-        MmcInfoField::TimeStandard(t) => one(0x45, out, t.code() << 5),
+        MmcInfoField::TimeStandard(t) => one(0x45, out, t.hours_byte(0)),
         MmcInfoField::TimeCodeSource(v) => one(0x46, out, v.wire()),
         MmcInfoField::TimeCodeUserBits(u) => counted(0x47, out, |b| user_bits(u, b)),
         MmcInfoField::MotionControlTally(t) => counted(0x48, out, |b| motion_tally(t, b)),

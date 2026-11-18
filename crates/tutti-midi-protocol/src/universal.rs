@@ -248,10 +248,13 @@ impl MtcTimeCode {
         }
     }
 
-    /// The position of `timecode` at `rate`, or `None` when its labels do not
-    /// fit `rate`.
+    /// The position of `timecode`, or `None` when its rate has no MTC code
+    /// (29.97 non-drop).
     #[must_use]
-    pub const fn from_timecode(rate: MtcRate, timecode: SmpteTimecode) -> Option<Self> {
+    pub const fn from_timecode(timecode: SmpteTimecode) -> Option<Self> {
+        let Some(rate) = timecode.frame_rate().mtc_rate() else {
+            return None;
+        };
         Self::new(
             rate,
             timecode.hours(),
@@ -311,25 +314,20 @@ impl MtcTimeCode {
     }
 
     /// The hours byte `0rrhhhhh` of a Full Message and of an MMC time code: the
-    /// rate code over the hours (M1 p.53). The last two Quarter Frame nibbles
-    /// are its halves.
+    /// rate code over the hours ([`MtcRate::hours_byte`]). The last two Quarter
+    /// Frame nibbles are its halves.
     #[must_use]
     pub const fn hours_byte(self) -> u8 {
-        (self.rate.code() << 5) | self.hours
-    }
-
-    /// The hours a hours byte `0rrhhhhh` holds: its low five bits.
-    #[must_use]
-    pub(crate) const fn hours_of(hours_byte: u8) -> u8 {
-        hours_byte & 0x1F
+        self.rate.hours_byte(self.hours)
     }
 
     /// The position the four bytes `hr mn sc fr` state, with `hr` as
-    /// `0rrhhhhh`: the inverse of [`hours_byte`](Self::hours_byte). Bit 7 of
-    /// `hr` is not read; a caller that reads a wire byte refuses it first.
+    /// `0rrhhhhh`: the inverse of [`hours_byte`](Self::hours_byte)
+    /// ([`MtcRate::from_hours_byte`]).
     #[must_use]
     pub(crate) const fn from_hours_byte(hr: u8, mn: u8, sc: u8, fr: u8) -> Option<Self> {
-        Self::new(MtcRate::from_hours_byte(hr), Self::hours_of(hr), mn, sc, fr)
+        let (rate, hours) = MtcRate::from_hours_byte(hr);
+        Self::new(rate, hours, mn, sc, fr)
     }
 
     /// The eight Quarter Frame nibbles that state this position (M1 p.53,

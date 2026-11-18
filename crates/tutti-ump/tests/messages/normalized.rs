@@ -77,7 +77,8 @@ fn the_bounds_of_the_unit_interval_are_the_bounds_of_the_wire() {
 }
 
 /// M2-115 section 3 pins the minimum, the center and the maximum of the
-/// 16-bit range to the unit velocity's silent, center and hardest strike.
+/// 16-bit range. Forward, the wire's `CENTER` (`0x8000`) reads `32768/65535`,
+/// a hair over 0.5; backward, the unit's `CENTER` (0.5) writes `0x8000`.
 #[test]
 fn the_unit_velocity_min_center_max_are_the_wire_min_center_max() {
     assert_eq!(

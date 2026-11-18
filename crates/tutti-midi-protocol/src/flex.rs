@@ -12,8 +12,8 @@ use tutti_units::{Bpm, Seconds};
 const TEN_NS_UNITS_PER_SECOND: f64 = 100_000_000.0;
 
 /// The tempo a Set Tempo field declares: the field is 10 ns units per quarter
-/// note (section 7.5.3), so a beat of `field / 1e8` seconds. `None` for `0`, no
-/// valid tempo. The slowest the field holds is 1.39698 bpm.
+/// note (section 7.5.3), so a beat lasts `field / 1e8` seconds. `None` for `0`,
+/// no valid tempo. The slowest the field holds is 1.39698 bpm.
 ///
 /// ```
 /// use tutti_midi_protocol::flex_tempo;

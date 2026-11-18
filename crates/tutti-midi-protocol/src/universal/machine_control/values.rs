@@ -168,8 +168,8 @@ impl MmcTimeLabel {
         if hr >= 0x80 || mn >= 0x80 || sc >= 0x80 || fr >= 0x80 {
             return None;
         }
-        let rate = MtcRate::from_hours_byte(hr);
-        let (h, m, s, f) = (MtcTimeCode::hours_of(hr), mn & 0x3F, sc & 0x3F, fr & 0x1F);
+        let (rate, h) = MtcRate::from_hours_byte(hr);
+        let (m, s, f) = (mn & 0x3F, sc & 0x3F, fr & 0x1F);
         let label = if sc & 0x40 != 0 {
             if h | m | s | f != 0 {
                 return None;
