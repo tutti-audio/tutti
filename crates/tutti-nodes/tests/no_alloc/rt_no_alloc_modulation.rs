@@ -718,7 +718,7 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
 /// range cell, with a knob of its own.
 fn lane_for(
     k: usize,
-    range: tutti_graph::ParamRangeReader,
+    range: tutti_graph::ParamRangeCell,
 ) -> tutti_nodes::automation::ControlLaneNode {
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
@@ -813,7 +813,7 @@ fn lane_moves(
                 param: PROBE8[k % 8].into(),
             };
             let hi = 800.0 + ((k + block) % 5) as f32 * 100.0;
-            ed.set_param_range(at, ParamRange::new(0.0, hi))
+            ed.set_param_range(at, ParamRange::new(0.0, f64::from(hi)))
                 .expect("a probe");
         }
     }

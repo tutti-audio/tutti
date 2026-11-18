@@ -10,7 +10,7 @@ use crate::NodeKey;
 use crate::bus_edge::{BusRef, BusSource};
 use crate::gain::{EdgeFade, EdgeGain, GainCell};
 use crate::mode::{MixError, ModeCell, ModeError, NodeMix, NodeMode};
-use crate::param::{ParamIn, ParamRange, ParamRangeReader};
+use crate::param::{ParamIn, ParamRange, ParamRangeCell};
 use crate::pass::Pass;
 use crate::spec::GraphInvalid;
 use crate::{Edge, EdgeId, Sink};
@@ -44,8 +44,10 @@ impl<F: Float> Editor<F> {
     ///   first frame, as it did when a range change was a commit. A host
     ///   that wants a range to glide moves it in steps, or drives the param
     ///   instead.
-    /// - **Cost.** Two stores and a map lookup on the control side; nothing
-    ///   on the audio thread but the per-block load it always makes.
+    /// - **Cost.** A publish and a map lookup on the control side (the
+    ///   publish allocates the new range; [`reclaim`](Self::reclaim) frees
+    ///   the old one once no block holds it); nothing
+    ///   on the audio thread but the per-block lend it always makes.
     /// - A port its node does not declare is recorded in the spec and
     ///   clamps nothing.
     ///
@@ -87,10 +89,10 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// A read-only view of `at`'s live range cell, the very cell its port
-    /// clamps to and [`set_param_range`](Self::set_param_range) stores into:
-    /// for a reader outside the graph (a control lane loads it once per
-    /// block). Control side. Writes go through
+    /// A read-only handle on `at`'s live range cell, the very cell its port
+    /// clamps to and [`set_param_range`](Self::set_param_range) publishes to:
+    /// for a reader outside the graph (a control lane registers a reader on
+    /// it and lends once per block). Control side. Writes go through
     /// `set_param_range`, which keeps the spec and the cell together (a
     /// commit rewrites every cell from the spec).
     ///
@@ -99,11 +101,20 @@ impl<F: Float> Editor<F> {
     /// key declare the same params; a commit that places one with another
     /// list gives the key fresh cells, and an old view then reads ranges
     /// nothing writes. Ask again after such a commit (a rebind).
-    pub fn param_range_cell(&self, at: ParamIn) -> Option<ParamRangeReader> {
+    pub fn param_range_cell(&self, at: ParamIn) -> Option<ParamRangeCell> {
         if at.param == NodeMix::ADDR {
-            return self.cells.modes.get(at.node).map(ModeCell::range_reader);
+            return self.cells.modes.get(at.node).map(ModeCell::range_cell);
         }
-        self.cells.ranges.reader(at)
+        self.cells.ranges.cell(at)
+    }
+
+    /// Frees the ranges [`set_param_range`](Self::set_param_range),
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range) and a commit
+    /// replaced, once no block holds them; how many are still held by one.
+    /// Control side, and cheap when nothing is retired: call it on a tick
+    /// the owner already has (the session's reclaim phase).
+    pub fn reclaim(&self) -> usize {
+        self.cells.reclaim()
     }
 
     /// Moves edge `id`'s weight to `base` from the next block on, without a
@@ -367,15 +378,15 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// A read-only view of edge `id`'s live range cell, the very cell its
+    /// A read-only handle on edge `id`'s live range cell, the very cell its
     /// driven lane clamps to and
-    /// [`set_edge_gain_range`](Self::set_edge_gain_range) stores into: the
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range) publishes to: the
     /// edge's counterpart of [`param_range_cell`](Self::param_range_cell), for
     /// a control lane. `None` until a commit has sent a plan with the edge's
     /// entry (and again once a commit drops the entry: the view then reads a
     /// range nothing writes).
-    pub fn edge_gain_range_cell(&self, id: EdgeId) -> Option<ParamRangeReader> {
-        self.cells.gains.get(id).map(GainCell::range_reader)
+    pub fn edge_gain_range_cell(&self, id: EdgeId) -> Option<ParamRangeCell> {
+        self.cells.gains.get(id).map(GainCell::range_cell)
     }
 
     /// Edge `id`'s live base: the very cell [`set_edge_gain`](Self::set_edge_gain)

@@ -215,9 +215,9 @@ impl RouteDecl {
 #[derive(Clone)]
 pub struct TargetDecl {
     /// The range's bottom.
-    pub min: f32,
+    pub min: f64,
     /// The range's top.
-    pub max: f32,
+    pub max: f64,
     /// Replaces the knob where it has a value. A curve that is not frozen
     /// (one whose [`Curve::frozen`] returns a copy) is refused: a program
     /// holds the curve itself, compared by identity.
