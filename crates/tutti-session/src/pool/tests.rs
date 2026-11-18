@@ -164,7 +164,7 @@ fn events<K: crate::AppKey, C: crate::Clock>(
         .collect()
 }
 
-fn state<K: crate::AppKey, C: crate::Clock>(
+fn state<K: crate::AppKey, C: crate::Clock<Float = f32>>(
     session: &Session<K, C>,
     key: &'static str,
 ) -> Option<String> {

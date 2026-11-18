@@ -152,3 +152,21 @@ fn mono_mut_split_yields_disjoint_writable_halves() {
     assert_eq!(m.as_mono().samples(), &[1.0, 2.0, 2.0, 3.0]);
     assert_eq!(m.reborrow().frames(), Samples(4));
 }
+
+/// **A frame is one value per channel**: wrapping `n` values makes one frame `n`
+/// channels wide, and no values is no width.
+#[test]
+fn a_frame_view_is_one_frame_as_wide_as_its_values() {
+    let data = [0.25f32, -0.5, 1.0];
+    let frame = Interleaved::one_frame(&data).unwrap();
+    assert_eq!(frame.layout(), ChannelLayout::from(3u16));
+    assert_eq!(frame.frames(), Samples(1));
+    let mut data = [0.0f64; 2];
+    let frame = InterleavedMut::one_frame(&mut data).unwrap();
+    assert_eq!(frame.layout(), ChannelLayout::STEREO);
+    assert_eq!(frame.frames(), Samples(1));
+    assert_eq!(
+        Interleaved::<f32>::one_frame(&[]).unwrap_err(),
+        BufferError::ZeroWidth
+    );
+}

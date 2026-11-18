@@ -22,7 +22,11 @@ impl Ports {
     }
 
     /// No output tap to reopen: the graph is not edited.
-    pub(crate) fn reopen(&mut self, _: &mut crate::graph::Graph, _: Option<&OutputTiming>) -> bool {
+    pub(crate) fn reopen<F: tutti_buffers::Float>(
+        &mut self,
+        _: &mut crate::graph::Graph<F>,
+        _: Option<&OutputTiming>,
+    ) -> bool {
         false
     }
 

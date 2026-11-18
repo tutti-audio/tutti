@@ -237,12 +237,14 @@ fn the_port_follows_the_block() {
         (1 << 20, 8_192),
     ] {
         let mut node = MidiClipNode::new([]);
-        node.prepare(&Prepare::new(
-            SampleRate::SR_48K,
-            MaxBlock::of(Samples(block)),
-        ));
+        tutti_graph::Node::<f32>::prepare(
+            &mut node,
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+        );
         assert_eq!(
-            node.shape().event_capacity.map(|n| n.get()),
+            tutti_graph::Node::<f32>::shape(&node)
+                .event_capacity
+                .map(|n| n.get()),
             Some(want),
             "block {block}"
         );
@@ -258,12 +260,14 @@ fn the_ingest_node_follows_the_block() {
 
     for (block, want) in [(64usize, 512u32), (4096, 512), (8192, 1024), (16_384, 2048)] {
         let mut node = MidiIngestNode::new();
-        node.prepare(&Prepare::new(
-            SampleRate::SR_48K,
-            MaxBlock::of(Samples(block)),
-        ));
+        tutti_graph::Node::<f32>::prepare(
+            &mut node,
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+        );
         assert_eq!(
-            node.shape().event_capacity.map(|n| n.get()),
+            tutti_graph::Node::<f32>::shape(&node)
+                .event_capacity
+                .map(|n| n.get()),
             Some(want),
             "block {block}"
         );
@@ -278,12 +282,14 @@ fn the_harmony_port_follows_the_block() {
     use tutti_midi_runtime::HarmonyNode;
     for (block, want) in [(64usize, 256u32), (1024, 2048), (16_384, 8_192)] {
         let mut node = HarmonyNode::new([]);
-        node.prepare(&Prepare::new(
-            SampleRate::SR_48K,
-            MaxBlock::of(Samples(block)),
-        ));
+        tutti_graph::Node::<f32>::prepare(
+            &mut node,
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+        );
         assert_eq!(
-            node.shape().event_capacity.map(|n| n.get()),
+            tutti_graph::Node::<f32>::shape(&node)
+                .event_capacity
+                .map(|n| n.get()),
             Some(want),
             "block {block}"
         );

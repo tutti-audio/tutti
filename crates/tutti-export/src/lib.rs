@@ -363,13 +363,13 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// [`Normalize::Lufs`], at the true-peak floor for [`Normalize::Peak`], or a
 /// width or rate the meter does not take); [`Error::Resample`];
 /// [`Error::Io`] and [`Error::NotCommitted`].
-pub fn render(
-    graph: &mut RenderGraph,
+pub fn render<F: FftFloat>(
+    graph: &mut RenderGraph<F>,
     job: &Job,
     clock: &dyn RenderClock,
-    outputs: Vec<Output>,
+    outputs: Vec<Output<F>>,
     control: &mut Control<'_>,
-) -> Result<Outcome<Vec<Produced>>> {
+) -> Result<Outcome<Vec<Produced<F>>>> {
     render::outputs::render_outputs(
         graph,
         job,
@@ -386,18 +386,18 @@ pub fn render(
 /// # Errors
 ///
 /// As [`render()`].
-pub fn render_one(
-    graph: &mut RenderGraph,
+pub fn render_one<F: FftFloat>(
+    graph: &mut RenderGraph<F>,
     job: &Job,
     clock: &dyn RenderClock,
-    output: Output,
+    output: Output<F>,
     control: &mut Control<'_>,
-) -> Result<Outcome<Produced>> {
+) -> Result<Outcome<Produced<F>>> {
     Ok(render(graph, job, clock, vec![output], control)?.map(the_one))
 }
 
 /// What a render of one output produced.
-fn the_one(mut produced: Vec<Produced>) -> Produced {
+fn the_one<F: FftFloat>(mut produced: Vec<Produced<F>>) -> Produced<F> {
     produced.pop().expect("one output produces one result")
 }
 

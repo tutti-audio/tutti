@@ -14,6 +14,7 @@
 //! `export_fork_plugin.rs`.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -640,19 +641,19 @@ fn live_playback_continues_unaffected_while_an_export_renders() {
     });
     session.graph().connect(node, Root).unwrap().hard();
     // Commit on this side, then hand the audio side to the "device".
-    session.render_frame(&mut [0.0, 0.0]);
+    session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
     let mut live = session.graph().take_audio_side();
 
     let done = AtomicBool::new(false);
     let (heard, rendered) = std::thread::scope(|s| {
         let device = s.spawn(|| {
             let mut heard = Vec::new();
-            let mut block = vec![Vec::new(), Vec::new()];
+            let mut block = vec![vec![0.0; 256]; 2];
             // At least a few blocks after the export reports, so the two
             // overlap from end to end.
             let mut after = 0;
             while after < 8 {
-                live.render(256, 256, &mut block);
+                live.render(256, PlanesMut::from_vecs(&mut block).unwrap());
                 heard.extend_from_slice(&block[0]);
                 if done.load(Ordering::Acquire) {
                     after += 1;

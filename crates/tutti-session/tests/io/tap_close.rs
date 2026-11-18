@@ -33,14 +33,14 @@ fn session() -> DetachedSession {
 fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
     let mut s = session();
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     let mut reader = s
         .graph()
         .taps()
         .open_output(Samples(64))
         .expect("the sources exist");
     for _ in 0..3 {
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     }
 
     let mut got = [f32::NAN; 8];
@@ -65,7 +65,7 @@ fn closing_the_tap_stops_the_copy() {
         .open_output(Samples(64))
         .expect("the sources exist");
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     let id = reader.id().expect("the session named it");
     s.graph().taps().close(id).unwrap();
     assert_eq!(
@@ -73,8 +73,8 @@ fn closing_the_tap_stops_the_copy() {
         Err(CloseError::Tap(id)),
         "a closed tap is not open"
     );
-    s.render_frame(&mut out);
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
 
     let mut got = [f32::NAN; 8];
     assert_eq!(
@@ -92,7 +92,7 @@ fn closing_the_tap_stops_the_copy() {
 fn a_session_without_a_tap_renders_untouched() {
     let mut s = session();
     let mut out = [0.0f32];
-    s.render_frame(&mut out);
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 0.25);
     let reader = s
         .graph()

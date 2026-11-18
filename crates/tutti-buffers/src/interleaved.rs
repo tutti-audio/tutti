@@ -66,6 +66,18 @@ impl<'a, S: Sample> Interleaved<'a, S> {
         Ok(Self { data, layout })
     }
 
+    /// Wraps `data` as one frame: a channel per value, so its width is
+    /// `data.len()`.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::ZeroWidth`] for no values, and [`BufferError::Layout`]
+    /// for more values than a layout holds.
+    pub fn one_frame(data: &'a [S]) -> Result<Self, BufferError> {
+        let layout = ChannelLayout::try_from(data.len()).map_err(BufferError::from)?;
+        Self::new(data, layout)
+    }
+
     /// Returns the width these frames carry.
     #[inline]
     #[must_use]
@@ -240,6 +252,17 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     pub fn new(data: &'a mut [S], layout: ChannelLayout) -> Result<Self, BufferError> {
         check(data.len(), layout)?;
         Ok(Self { data, layout })
+    }
+
+    /// Wraps `data` as one writable frame: a channel per value, so its width
+    /// is `data.len()`.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Interleaved::one_frame`].
+    pub fn one_frame(data: &'a mut [S]) -> Result<Self, BufferError> {
+        let layout = ChannelLayout::try_from(data.len()).map_err(BufferError::from)?;
+        Self::new(data, layout)
     }
 
     /// Returns the width these frames carry.

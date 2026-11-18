@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_export::{Error, RenderGraph, RtLogSink, Setup};
 use tutti_graph::{
     CommitError, Editor, Executor, ForkError, ForkMode, ForkRemains, ForkTarget, PendingFork, Pool,
@@ -34,8 +35,8 @@ fn fork_error(e: ForkError) -> Error {
 /// An export's fork, gathered on the main thread
 /// ([`Graph::gather_for_export`](crate::Graph)) and not yet built: `Send`,
 /// holding nothing of the live graph.
-pub(crate) struct PendingExport {
-    fork: PendingFork,
+pub(crate) struct PendingExport<F: Float> {
+    fork: PendingFork<F>,
     pool: Option<Arc<dyn Pool>>,
     /// The live root's declared topology, for an export of the master: the
     /// file is placed from it, as the device is.
@@ -45,7 +46,7 @@ pub(crate) struct PendingExport {
     rt_log: Arc<dyn RtLogSink>,
 }
 
-impl PendingExport {
+impl<F: Float> PendingExport<F> {
     /// `Editor::fork_gather` on `live` at the render's `Prepare`.
     ///
     /// # Errors
@@ -59,7 +60,7 @@ impl PendingExport {
     /// prepared (it is pinned, `ForkBuild::pinned`): call it on the **main
     /// thread**, and drop what it returns there.
     pub(crate) fn gather(
-        live: &Editor,
+        live: &Editor<F>,
         target: ForkTarget,
         rate: SampleRate,
         pool: Option<Arc<dyn Pool>>,
@@ -86,7 +87,7 @@ impl PendingExport {
     /// `ForkError::Source`, naming its node) or a fork that does not commit,
     /// with what was built, to drop where a pinned unit belongs (the main
     /// thread).
-    pub(crate) fn build(self) -> Result<ForkedPair, (Error, ForkRemains)> {
+    pub(crate) fn build(self) -> Result<ForkedPair<F>, (Error, ForkRemains<F>)> {
         let (editor, executor) = self.fork.build().map_err(|(e, r)| (fork_error(e), r))?;
         let mut setup = Setup::new().rt_log(self.rt_log);
         if let Some(pool) = self.pool {
@@ -106,15 +107,15 @@ impl PendingExport {
 /// A built fork, installed and not yet sealed: the editor is open to the
 /// export's edit hook.
 #[derive(Debug)]
-pub(crate) struct ForkedPair {
-    editor: Editor,
-    executor: Executor,
+pub(crate) struct ForkedPair<F: Float> {
+    editor: Editor<F>,
+    executor: Executor<F>,
     setup: Setup,
 }
 
-impl ForkedPair {
+impl<F: Float> ForkedPair<F> {
     /// The fork's editor, for the edit hook.
-    pub(crate) fn editor_mut(&mut self) -> &mut Editor {
+    pub(crate) fn editor_mut(&mut self) -> &mut Editor<F> {
         &mut self.editor
     }
 
@@ -144,7 +145,7 @@ impl ForkedPair {
     ///
     /// What `RenderGraph::assemble` refuses; ask [`is_paired`](Self::is_paired)
     /// first when the pair must be dropped where it was made.
-    pub(crate) fn assemble(self) -> tutti_export::Result<RenderGraph> {
+    pub(crate) fn assemble(self) -> tutti_export::Result<RenderGraph<F>> {
         RenderGraph::assemble(self.editor, self.executor, self.setup)
     }
 }

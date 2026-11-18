@@ -192,7 +192,7 @@ fn planes_no_allocator_can_give_are_render_too_large() {
         output_length: Samples(usize::MAX / 2),
         latency: Samples(0),
     };
-    let err = reserve_planes(&plan, ChannelLayout::STEREO).unwrap_err();
+    let err = reserve_planes::<f32>(&plan, ChannelLayout::STEREO).unwrap_err();
     assert!(
         matches!(err, Error::RenderTooLarge { channels, .. } if channels == ChannelLayout::STEREO),
         "{err:?}"

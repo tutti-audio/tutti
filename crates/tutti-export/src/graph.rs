@@ -5,6 +5,7 @@
 //! resample, dither and encoders downstream see only frames.
 
 use std::sync::Arc;
+use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
 use tutti_graph::GraphTail;
@@ -173,13 +174,13 @@ impl Setup {
 /// assert_eq!(out.frames().get(), 4_800);
 /// ```
 #[derive(Debug)]
-pub struct RenderGraph {
+pub struct RenderGraph<F: Float = f32> {
     /// The control side. Drained after every block, so what the executor
     /// retires is freed on the render thread.
-    editor: Editor,
+    editor: Editor<F>,
     /// The executor the render drives. Never handed out: the render is the
     /// only thing that runs it.
-    executor: Executor,
+    executor: Executor<F>,
     /// What the graph's output channels are, when the live graph declared it
     /// ([`Setup::root`]); `None` is the engine's order for the width.
     root: Option<ChannelTopology>,
@@ -194,6 +195,18 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
+    /// What a graph is prepared at to render at `sample_rate`: that
+    /// rate, [`GRAPH_MAX_BLOCK`], and [`RenderMode::Offline`], so a node
+    /// that waits for its inputs or spends more per block for quality does.
+    /// It names no sample format, so it is one function for every graph; it
+    /// lives on the `f32` default so that `RenderGraph::prepare` needs no
+    /// annotation.
+    pub fn prepare(sample_rate: SampleRate) -> Prepare {
+        Prepare::new(sample_rate, GRAPH_MAX_BLOCK).with_render_mode(RenderMode::Offline)
+    }
+}
+
+impl<F: Float> RenderGraph<F> {
     /// Assemble an installed editor/executor pair, with its [`Setup`], for a
     /// render. The one constructor.
     ///
@@ -209,7 +222,7 @@ impl RenderGraph {
     /// (`Editor::is_paired_with`): pass the pair built or forked together.
     /// That the pair's rate is the render's is checked at render, where the
     /// [`Job`](crate::Job) names it ([`ConfigError::RateMismatch`]).
-    pub fn assemble(editor: Editor, mut executor: Executor, setup: Setup) -> Result<Self> {
+    pub fn assemble(editor: Editor<F>, mut executor: Executor<F>, setup: Setup) -> Result<Self> {
         if !editor.is_paired_with(&executor) {
             return Err(ConfigError::UnpairedGraph.into());
         }
@@ -255,15 +268,8 @@ impl RenderGraph {
 
     /// Both halves, for the render. Crate-private: outside the crate the
     /// executor is never handed out.
-    pub(crate) fn parts_mut(&mut self) -> (&mut Editor, &mut Executor) {
+    pub(crate) fn parts_mut(&mut self) -> (&mut Editor<F>, &mut Executor<F>) {
         (&mut self.editor, &mut self.executor)
-    }
-
-    /// What a graph is prepared at to render at `sample_rate`: that
-    /// rate, [`GRAPH_MAX_BLOCK`], and [`RenderMode::Offline`], so a node
-    /// that waits for its inputs or spends more per block for quality does.
-    pub fn prepare(sample_rate: SampleRate) -> Prepare {
-        Prepare::new(sample_rate, GRAPH_MAX_BLOCK).with_render_mode(RenderMode::Offline)
     }
 
     /// The look-ahead latency the graph reports, as a frame count — the

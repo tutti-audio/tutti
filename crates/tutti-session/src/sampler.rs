@@ -81,7 +81,8 @@ pub enum SamplerError {
     Job(#[from] WorkerError),
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+/// `f32` because an opened stream lands through the session's jobs, which land on `f32` sessions.
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
     /// session's spawner. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later

@@ -7,6 +7,7 @@
 
 use crate::pooled::{LoadPlugin, Spec};
 use std::sync::Arc;
+use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
 use tutti_types::ChannelLayout;
 
@@ -83,7 +84,7 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
     let mut out = [0.0f32; 2];
     s.render_frame_at(
         &tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat(3.5), None),
-        &mut out,
+        InterleavedMut::one_frame(&mut out).unwrap(),
     );
     let cap = read_capture();
     assert!(cap.time_info_present, "the plugin was answered");

@@ -6,7 +6,7 @@ use tutti_ump::{U7, Utility};
 /// The node adopts the mode last asked for on its next block.
 #[test]
 fn the_node_adopts_the_mode_last_asked_for() {
-    let parts = MidiIngestNode::new().into_parts();
+    let parts = IntoNode::<f32>::into_parts(MidiIngestNode::new());
     let controls = parts.controls;
     let lower = tutti_fixtures::midi::lower_zone(15);
     let upper = tutti_fixtures::midi::upper_zone(7);
@@ -130,7 +130,7 @@ fn sent_at_arrival(reset: bool) -> usize {
     d.events(0, &[Event::midi(Offset::ZERO, on)]);
     d.block();
     if reset {
-        d.node.reset();
+        tutti_graph::Node::<f32>::reset(&mut *d.node);
     }
     d.events(0, &[]);
     writer.arrive();
