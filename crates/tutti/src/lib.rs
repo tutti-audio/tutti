@@ -253,8 +253,9 @@ pub mod nodes {
         CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
         CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls,
-        DynamicEqNode, DynamicMode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout,
-        FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
+        DynamicEqNode, DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls,
+        EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode,
+        FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
         InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
         ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
@@ -269,16 +270,16 @@ pub mod nodes {
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
         ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
-        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
-        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
-        LimiterKernel, ModDelayKernel, PhaserKernel, PlateKernel, ReconcileError, SvfKernel,
-        TiltFilterKernel, TransientShaperKernel,
+        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
+        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
+        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
-        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
-        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, PlateSet, SvfSet, TiltFilterSet,
-        TransientShaperSet,
+        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet,
+        PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
 }
 

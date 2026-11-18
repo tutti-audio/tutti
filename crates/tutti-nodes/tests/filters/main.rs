@@ -1,6 +1,7 @@
 //! Filters and dynamics: responses, block independence and non-finite input.
 
 mod delay_echoes;
+mod envelope_filter;
 mod filter_block_independence;
 mod filter_responses;
 mod ladder_crossover_node;
