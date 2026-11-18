@@ -18,7 +18,6 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, S
 /// assert_eq!(<f32 as Real>::sqrt(4.0), 2.0);
 /// assert_eq!(<f64 as Real>::exp(0.0), 1.0);
 /// assert_eq!(<f64 as Real>::MINUS_3_DB, core::f64::consts::FRAC_1_SQRT_2);
-/// assert_eq!(<f32 as Real>::BITS, 32);
 /// ```
 pub trait Real:
     Copy
@@ -42,8 +41,6 @@ pub trait Real:
     + MulAssign
     + DivAssign
 {
-    /// The bits one value occupies: 32 or 64.
-    const BITS: u32;
     /// The largest finite value.
     const MAX: Self;
     /// The significand digits in base 2: 24 for `f32`, 53 for `f64`.
@@ -154,14 +151,13 @@ pub trait Real:
 
 macro_rules! real_impl {
     (
-        $t:ident, $bits:literal,
+        $t:ident,
         $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident,
         $sqrt:ident, $exp:ident, $exp2:ident,
         $ln:ident, $log10:ident, $pow:ident, $sin:ident, $cos:ident, $tan:ident,
         $tanh:ident, $atan2:ident, $fma:ident, $min:ident, $max:ident, $copysign:ident
     ) => {
         impl Real for $t {
-            const BITS: u32 = $bits;
             const MAX: Self = $t::MAX;
             const MANTISSA_DIGITS: u32 = $t::MANTISSA_DIGITS;
             const ZERO: Self = 0.0;
@@ -283,23 +279,17 @@ macro_rules! real_impl {
 }
 
 real_impl!(
-    f32, 32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, exp2f, logf, log10f,
-    powf, sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
+    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, exp2f, logf, log10f, powf,
+    sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
 );
 real_impl!(
-    f64, 64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, exp2, log, log10, pow, sin, cos,
+    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, exp2, log, log10, pow, sin, cos,
     tan, tanh, atan2, fma, fmin, fmax, copysign
 );
 
 #[cfg(test)]
 mod tests {
     use super::Real;
-
-    #[test]
-    fn bits_are_the_ieee_widths() {
-        assert_eq!(<f32 as Real>::BITS, 32);
-        assert_eq!(<f64 as Real>::BITS, 64);
-    }
 
     #[test]
     fn mantissa_digits_are_the_ieee_significand_widths() {

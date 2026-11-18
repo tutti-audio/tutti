@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use tutti_buffers::Float;
 use tutti_rt::RwView;
-use tutti_units::Real;
 
 use crate::arena::{Arena, Line, Role, borrow_sorted};
 use crate::event::Event;
@@ -129,7 +128,7 @@ impl<F: Float> AudioSlots<F> for Arena<F> {
 /// time through a buffer on the stack. Allocates nothing.
 #[inline]
 pub(crate) fn for_f32<F: Float>(block: &[F], mut f: impl FnMut(&[f32])) {
-    if <F as Real>::BITS == 32
+    if F::BITS == 32
         && let Ok(same) = bytemuck::try_cast_slice::<F, f32>(block)
     {
         return f(same);
