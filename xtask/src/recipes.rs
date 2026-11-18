@@ -270,6 +270,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt, and a hand interleave loop or frame-times-width length in src only as a row of xtask/buffers-loops.txt",
     ),
     (
+        "check-width",
+        "",
+        "a quantity has one width and data is generic over the graph's float: a crossing is a named place, bar the rows of xtask/width-baseline.txt",
+    ),
+    (
         "check-session-api",
         "",
         "tutti-session's public API has no `run` or `*_blocking`, and only the rows of xtask/session-api-allow.txt hold a MainThreadMarker",
@@ -678,6 +683,7 @@ impl Planner<'_> {
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
+            "check-width" => self.out.push(Step::Gate(Gate::Width)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -799,7 +805,7 @@ impl Planner<'_> {
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
-                    "check-session-api", "check-values", "check-units-bare",
+                    "check-session-api", "check-values", "check-units-bare", "check-width",
                 ] {
                     self.dep(d)?;
                 }

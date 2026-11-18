@@ -13,11 +13,11 @@
 //! the `{` or `;`), a field's type, an enum variant's payload or a type
 //! alias's right side:
 //!
-//! - a raw audio container: `[f32]`, `[f64]`, `Vec<f32>` or `Vec<f64>` (this
-//!   covers `&mut [f32]`, `Vec<Vec<f32>>`, `Box<[f32]>` and `&[&[f32]]`);
+//! - a raw audio container: `[f64]` or `Vec<f64>` (this covers `&mut [f64]`,
+//!   `Vec<Vec<f64>>`, `Box<[f64]>` and `&[&[f64]]`);
 //! - a `tutti_buffers` view (`Interleaved`, `InterleavedMut`, `Planes`,
 //!   `PlanesMut`, `Mono`, `MonoMut`, `StereoPlanes`) or `Wave` whose last
-//!   generic argument is `f32` or `f64`;
+//!   generic argument is `f64`;
 //! - one of those views with no sample argument (`Planes<'_>`, or a bare name
 //!   not behind a path other than `tutti_buffers`), which relies on the `f32`
 //!   default, inside an item whose own text and enclosing `impl`, `trait`,
@@ -35,10 +35,12 @@
 //! field's member is its index). No line numbers. Items that share a key (an
 //! `impl Foo<f32>` and an `impl Foo<f64>` each with `new`) share one row.
 //!
+//! An `f32` in a public signature is `check-width`'s (`width-baseline.txt`).
+//!
 //! **List.** [`LIST`] holds `<key>  <reason>` lines, `#` lines and blank lines
-//! aside. The reason is `pending`, `ffi`, `not-audio: <why>` or `spec-f32: <why>`: a fixed `f32` on
-//! audio stays only where the item is not audio, the spec fixes `f32`, or the
-//! type is C ABI, IPC or wire. A free-text `measured:` row is refused.
+//! aside. The reason is `pending`, `ffi` or `not-audio: <why>`: a fixed sample
+//! format on audio stays only where the item is not audio or the type is C
+//! ABI, IPC or wire. A free-text `measured:` row is refused.
 //! The gate fails on a site with no row, a row with no site, a row whose
 //! reason is unknown or empty, and a key listed twice.
 //!
@@ -73,7 +75,7 @@ const VIEWS: [&str; 7] = [
 /// `f32`/`f64` argument names them fixed.
 const OWNED: [&str; 1] = ["Wave"];
 
-const RAW: [&str; 4] = ["[f32]", "[f64]", "Vec<f32>", "Vec<f64>"];
+const RAW: [&str; 2] = ["[f64]", "Vec<f64>"];
 
 fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git" | "tests" | "benches" | "examples")
@@ -85,9 +87,9 @@ fn word(b: u8) -> bool {
 
 /// A site: its key and what it names.
 #[derive(Debug, PartialEq, Eq)]
-struct Site {
-    key: String,
-    why: String,
+pub(super) struct Site {
+    pub(super) key: String,
+    pub(super) why: String,
 }
 
 /// Collapses whitespace: a run between two word characters is one space, any
@@ -131,8 +133,9 @@ pub(super) fn split_top(text: &str) -> Vec<&str> {
     parts
 }
 
-/// What `text` names that is fixed: a raw container, a view with `f32` or
-/// `f64` spelled, or (when `generic` is false) a view that takes the default.
+/// What `text` names that is fixed: a raw `f64` container, a view with `f64`
+/// spelled, or (when `generic` is false) a view that takes the default. An
+/// `f32` is `check-width`'s, not a site here.
 fn fixed(text: &str, generic: bool) -> Option<String> {
     let t = squash(text);
     if let Some(raw) = RAW.iter().find(|r| t.contains(**r)) {
@@ -155,7 +158,7 @@ fn fixed(text: &str, generic: bool) -> Option<String> {
                     .map(|close| &t[end + 1..close]);
                 let last = args.and_then(|a| split_top(a).last().copied());
                 match last {
-                    Some("f32" | "f64") => return Some(format!("{name}<_, {}>", last.unwrap())),
+                    Some("f64") => return Some(format!("{name}<_, f64>")),
                     Some(a) if !a.starts_with('\'') => {}
                     _ if owned || generic => {}
                     _ => return Some(format!("{name} with the default sample")),
@@ -324,8 +327,17 @@ pub(super) fn strip_attrs(mut text: &str) -> &str {
     }
 }
 
+/// How a gate judges a public item's text: what it names, or `None`. The
+/// flag is whether the item is generic over a sample.
+pub(super) type Judge<'a> = &'a dyn Fn(&str, bool) -> Option<String>;
+
 /// The public sites of one file's text.
 fn scan(path: &str, src: &str) -> Vec<Site> {
+    scan_with(path, src, &fixed)
+}
+
+/// The public items of one file's text that `judge` names, keyed as the list is.
+pub(super) fn scan_with(path: &str, src: &str, judge: Judge) -> Vec<Site> {
     let code = blank(src);
     let tests = test_ranges(&code);
     let in_test = |p: usize| tests.iter().any(|&(a, z)| a <= p && p <= z);
@@ -354,7 +366,7 @@ fn scan(path: &str, src: &str) -> Vec<Site> {
             Some(b) => format!("{}::{name}", b.owner),
             None => name.to_owned(),
         };
-        (key, fixed(&code[p..end], generic), end)
+        (key, judge(&code[p..end], generic), end)
     };
 
     let mut from = 0;
@@ -391,7 +403,7 @@ fn scan(path: &str, src: &str) -> Vec<Site> {
                 let (name, _) = ident_at(&code, end);
                 let stop = item_end(&code, end);
                 let generic = names_sample(&code[p..stop]);
-                add(name.to_owned(), fixed(&code[p..stop], generic));
+                add(name.to_owned(), judge(&code[p..stop], generic));
                 from = stop;
             }
             "struct" | "enum" => {
@@ -412,7 +424,7 @@ fn scan(path: &str, src: &str) -> Vec<Site> {
                     if is_enum {
                         let (var, vend) = ident_at(seg, 0);
                         if !var.is_empty() {
-                            add(format!("{name}.{var}"), fixed(&seg[vend..], generic));
+                            add(format!("{name}.{var}"), judge(&seg[vend..], generic));
                         }
                         continue;
                     }
@@ -432,7 +444,7 @@ fn scan(path: &str, src: &str) -> Vec<Site> {
                     } else {
                         (i.to_string(), rest)
                     };
-                    add(format!("{name}.{member}"), fixed(ty, generic));
+                    add(format!("{name}.{member}"), judge(ty, generic));
                 }
                 from = close;
             }
@@ -457,7 +469,7 @@ fn scan(path: &str, src: &str) -> Vec<Site> {
                         let generic = names_sample(&code[i..stop]) || b.generic;
                         add(
                             format!("{}::{name}", b.owner),
-                            fixed(&code[i..stop], generic),
+                            judge(&code[i..stop], generic),
                         );
                         i = stop;
                         continue;
@@ -487,10 +499,10 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 }
 
 /// Why `reason` is refused, or `None` when it is one of `allowed`: a bare kind
-/// (`pending`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
+/// (`pending`, `ffi`) or `not-audio` with a `: <why>`.
 /// The reason kinds that carry a judgement, written `<kind>: <why>` with a
 /// non-empty why.
-const JUDGED: [&str; 3] = ["not-audio", "spec-f32", "not-interleave"];
+const JUDGED: [&str; 2] = ["not-audio", "not-interleave"];
 
 pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
     let (kind, why) = match reason.split_once(':') {
@@ -519,14 +531,16 @@ pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
         .collect::<Vec<_>>()
         .join(", ");
     Some(if kind == "measured" {
-        format!("`measured:` is not a reason; a fixed f32 on audio stays only as one of {allowed}")
+        format!(
+            "`measured:` is not a reason; a fixed sample format on audio stays only as one of {allowed}"
+        )
     } else {
         format!("`{reason}` is not a reason; a reason is one of {allowed}")
     })
 }
 
 /// The reasons `LIST` accepts.
-const KINDS: [&str; 4] = ["pending", "ffi", "not-audio", "spec-f32"];
+const KINDS: [&str; 3] = ["pending", "ffi", "not-audio"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -641,10 +655,10 @@ mod tests {
 
     #[test]
     fn a_site_with_no_row_fails_and_names_what_it_holds() {
-        let r = run("", "pub fn gain(x: &mut [f32]) {}\n");
+        let r = run("", "pub fn gain(x: &mut [f64]) {}\n");
         assert_eq!(
             r.findings[1..],
-            ["  crates/a/src/lib.rs::gain: names [f32]"]
+            ["  crates/a/src/lib.rs::gain: names [f64]"]
         );
     }
 
@@ -652,7 +666,7 @@ mod tests {
     fn a_listed_site_passes_with_its_count() {
         let r = run(
             "crates/a/src/lib.rs::gain  pending\n",
-            "pub fn gain(x: &mut [f32]) {}\n",
+            "pub fn gain(x: &mut [f64]) {}\n",
         );
         assert!(r.passed());
         assert_eq!(
@@ -673,8 +687,8 @@ mod tests {
         for reason in [
             "",
             "later",
-            "session-f32",
-            "measured: the spec fixes f32",
+            "session-f64",
+            "measured: the spec fixes f64",
             "measured:",
             "not-audio",
             "not-audio:  ",
@@ -684,25 +698,20 @@ mod tests {
             "not-audio :x",
         ] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
-            let r = run(&list, "pub fn gain(x: &[f32]) {}\n");
+            let r = run(&list, "pub fn gain(x: &[f64]) {}\n");
             assert!(!r.passed(), "reason {reason:?}");
             assert!(r.findings[0].contains("malformed"));
         }
-        for reason in [
-            "pending",
-            "ffi",
-            "not-audio: a magnitude spectrum",
-            "spec-f32: control values",
-        ] {
+        for reason in ["pending", "ffi", "not-audio: a magnitude spectrum"] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
             assert!(
-                run(&list, "pub fn gain(x: &[f32]) {}\n").passed(),
+                run(&list, "pub fn gain(x: &[f64]) {}\n").passed(),
                 "{reason}"
             );
         }
         let r = run(
             "crates/a/src/lib.rs::gain  measured: x\n",
-            "pub fn gain(x: &[f32]) {}\n",
+            "pub fn gain(x: &[f64]) {}\n",
         );
         assert!(r.findings[1].contains("not-audio"), "{:?}", r.findings);
     }
@@ -711,9 +720,16 @@ mod tests {
     fn a_row_listed_twice_fails() {
         let r = run(
             "crates/a/src/lib.rs::g  ffi\ncrates/a/src/lib.rs::g  pending\n",
-            "pub fn g(x: &[f32]) {}\n",
+            "pub fn g(x: &[f64]) {}\n",
         );
         assert!(r.findings[1].ends_with("is listed twice"));
+    }
+
+    #[test]
+    fn an_f32_is_width_s_not_a_site() {
+        let src = "pub fn a(x: &mut [f32]) {}\npub fn b(x: Interleaved<'_, f32>) {}\n\
+                   pub struct S { pub v: Vec<f32> }\npub fn c() -> Wave<f32> { todo!() }\n";
+        assert!(keys(src).is_empty());
     }
 
     #[test]
@@ -738,11 +754,11 @@ mod tests {
     }
 
     #[test]
-    fn a_view_with_the_sample_spelled_f32_or_f64_is_a_site_even_when_generic() {
-        let src = "pub fn a(x: Interleaved<'_, f32>) {}\n\
+    fn a_view_with_the_sample_spelled_f64_or_f64_is_a_site_even_when_generic() {
+        let src = "pub fn a(x: Interleaved<'_, f64>) {}\n\
                    pub fn b<S: Sample>(x: Mono<'a, f64>) {}\n\
-                   pub fn c(x: tutti_buffers::Planes<'_, f32>) {}\n\
-                   pub fn d() -> Wave<f32> { todo!() }\n";
+                   pub fn c(x: tutti_buffers::Planes<'_, f64>) {}\n\
+                   pub fn d() -> Wave<f64> { todo!() }\n";
         assert_eq!(keys(src), ["a", "b", "c", "d"].map(|n| format!("{F}::{n}")));
     }
 
@@ -759,11 +775,11 @@ mod tests {
 
     #[test]
     fn every_raw_audio_container_is_a_site() {
-        let src = "pub fn a(x: &[f32]) {}\npub fn b(x: &mut [f64]) {}\n\
-                   pub fn c() -> Vec<f32> {}\npub fn d(x: Vec<Vec<f64>>) {}\n\
-                   pub fn e(x: &[&[f32]]) {}\npub fn f(x: &mut [&mut [f32]]) {}\n\
-                   pub fn g(x: Box<[f32]>) {}\npub fn h(x: &[ f32 ]) {}\n\
-                   pub fn i(x: &[u8], y: [f32; 4]) {}\n";
+        let src = "pub fn a(x: &[f64]) {}\npub fn b(x: &mut [f64]) {}\n\
+                   pub fn c() -> Vec<f64> {}\npub fn d(x: Vec<Vec<f64>>) {}\n\
+                   pub fn e(x: &[&[f64]]) {}\npub fn f(x: &mut [&mut [f64]]) {}\n\
+                   pub fn g(x: Box<[f64]>) {}\npub fn h(x: &[ f64 ]) {}\n\
+                   pub fn i(x: &[u8], y: [f64; 4]) {}\n";
         assert_eq!(
             keys(src),
             ["a", "b", "c", "d", "e", "f", "g", "h"].map(|n| format!("{F}::{n}"))
@@ -772,11 +788,11 @@ mod tests {
 
     #[test]
     fn a_non_public_item_is_not_a_site() {
-        let src = "pub(crate) fn a(x: &[f32]) {}\npub(super) fn b(x: &[f32]) {}\n\
-                   fn c(x: &[f32]) {}\npub(in crate::m) fn d(x: &[f32]) {}\n\
-                   pub struct S { pub(crate) x: Vec<f32>, y: Vec<f32> }\n\
-                   pub(crate) trait T { fn t(&self, x: &[f32]); }\n\
-                   impl Tr for S { fn p(&self, x: &[f32]) {} }\n";
+        let src = "pub(crate) fn a(x: &[f64]) {}\npub(super) fn b(x: &[f64]) {}\n\
+                   fn c(x: &[f64]) {}\npub(in crate::m) fn d(x: &[f64]) {}\n\
+                   pub struct S { pub(crate) x: Vec<f64>, y: Vec<f64> }\n\
+                   pub(crate) trait T { fn t(&self, x: &[f64]); }\n\
+                   impl Tr for S { fn p(&self, x: &[f64]) {} }\n";
         assert!(keys(src).is_empty());
     }
 
@@ -786,37 +802,37 @@ mod tests {
             (LIST, ""),
             (
                 F,
-                "#[cfg(test)]\nmod tests { pub fn t(x: &[f32]) {} }\n#[cfg(test)]\nuse x::*;\n",
+                "#[cfg(test)]\nmod tests { pub fn t(x: &[f64]) {} }\n#[cfg(test)]\nuse x::*;\n",
             ),
-            ("crates/a/src/tests.rs", "pub fn t(x: &[f32]) {}\n"),
-            ("crates/a/src/m/tests/x.rs", "pub fn t(x: &[f32]) {}\n"),
-            ("crates/a/tests/x.rs", "pub fn t(x: &[f32]) {}\n"),
-            ("crates/a/benches/x.rs", "pub fn t(x: &[f32]) {}\n"),
-            ("crates/a-ffi/src/lib.rs", "pub fn t(x: &[f32]) {}\n"),
-            ("testing/b/src/lib.rs", "pub fn t(x: &[f32]) {}\n"),
+            ("crates/a/src/tests.rs", "pub fn t(x: &[f64]) {}\n"),
+            ("crates/a/src/m/tests/x.rs", "pub fn t(x: &[f64]) {}\n"),
+            ("crates/a/tests/x.rs", "pub fn t(x: &[f64]) {}\n"),
+            ("crates/a/benches/x.rs", "pub fn t(x: &[f64]) {}\n"),
+            ("crates/a-ffi/src/lib.rs", "pub fn t(x: &[f64]) {}\n"),
+            ("testing/b/src/lib.rs", "pub fn t(x: &[f64]) {}\n"),
         ]);
         assert!(check(&mem, 0).passed());
     }
 
     #[test]
     fn a_signature_over_several_lines_is_one_site() {
-        let src = "pub fn process(\n    &mut self,\n    // the block\n    input: &[f32],\n    out: &mut [f32],\n) -> usize {\n    0\n}\n";
+        let src = "pub fn process(\n    &mut self,\n    // the block\n    input: &[f64],\n    out: &mut [f64],\n) -> usize {\n    0\n}\n";
         assert_eq!(keys(src), [format!("{F}::process")]);
     }
 
     #[test]
     fn a_word_in_a_comment_or_string_is_not_a_site() {
-        let src = "/// Takes `&[f32]`.\npub fn f() { let s = \"pub fn g(x: &[f32]) {}\"; }\n";
+        let src = "/// Takes `&[f64]`.\npub fn f() { let s = \"pub fn g(x: &[f64]) {}\"; }\n";
         assert!(keys(src).is_empty());
     }
 
     #[test]
     fn a_method_is_keyed_by_its_impl_type_and_a_trait_method_by_its_trait() {
-        let src = "impl<T> Engine<T> { pub fn process(&self, x: &[f32]) {} }\n\
-                   impl Source for Engine { fn pull(&mut self, x: &mut [f32]) {} }\n\
-                   impl dyn Node { pub fn raw(&self, x: &[f32]) {} }\n\
-                   pub trait Sink {\n    fn push(&mut self, x: &[f32]);\n    fn ok(&self);\n    \
-                   fn dflt(&self, x: &[f32]) { let f: fn(f32) = g; }\n}\n";
+        let src = "impl<T> Engine<T> { pub fn process(&self, x: &[f64]) {} }\n\
+                   impl Source for Engine { fn pull(&mut self, x: &mut [f64]) {} }\n\
+                   impl dyn Node { pub fn raw(&self, x: &[f64]) {} }\n\
+                   pub trait Sink {\n    fn push(&mut self, x: &[f64]);\n    fn ok(&self);\n    \
+                   fn dflt(&self, x: &[f64]) { let f: fn(f64) = g; }\n}\n";
         assert_eq!(
             keys(src),
             ["Engine::process", "Node::raw", "Sink::push", "Sink::dflt"]
@@ -826,10 +842,10 @@ mod tests {
 
     #[test]
     fn a_public_field_variant_and_alias_are_sites_and_a_private_one_is_not() {
-        let src = "pub struct S { pub a: Vec<f32>, b: Vec<f32>, pub c: u8 }\n\
+        let src = "pub struct S { pub a: Vec<f64>, b: Vec<f64>, pub c: u8 }\n\
                    pub struct T(pub Vec<f64>, Vec<f64>);\n\
-                   pub enum E { A(Vec<f32>), B { x: &'static [f64] }, C }\n\
-                   pub type P = Vec<Vec<f32>>;\n\
+                   pub enum E { A(Vec<f64>), B { x: &'static [f64] }, C }\n\
+                   pub type P = Vec<Vec<f64>>;\n\
                    pub type Q = u8;\n";
         assert_eq!(
             keys(src),
@@ -839,7 +855,7 @@ mod tests {
 
     #[test]
     fn items_that_share_a_key_share_one_row() {
-        let src = "impl Foo<f32> { pub fn new(x: &[f32]) {} }\nimpl Foo<f64> { pub fn new(x: &[f64]) {} }\n";
+        let src = "impl Foo<f64> { pub fn new(x: &[f64]) {} }\nimpl Foo<f64> { pub fn new(x: &[f64]) {} }\n";
         let r = run("crates/a/src/lib.rs::Foo::new  pending\n", src);
         assert!(r.passed());
     }

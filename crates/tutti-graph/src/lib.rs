@@ -145,6 +145,39 @@
 //! `ForkByClone` says the clone shares nothing with the original, so an
 //! export can fork the node; a node that cannot be copied is `Unforkable`.
 //!
+//! The same gain for any sample format: `impl<F: Float> Node<F>`, with a
+//! literal crossing into `F` through `F::lit`.
+//!
+//! ```
+//! # use tutti_buffers::{Float, Planes};
+//! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::{ChannelLayout, MaxBlock};
+//!
+//! #[derive(Clone)]
+//! struct Half;
+//!
+//! impl<F: Float> Node<F> for Half {
+//!     fn shape(&self) -> Shape {
+//!         Shape::through_unassigned(ChannelLayout::MONO)
+//!     }
+//!     fn prepare(&mut self, _: &Prepare) {}
+//!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+//!         io.channel(0).map(|x| x * F::lit(0.5));
+//!         Status::Modified
+//!     }
+//!     fn reset(&mut self) {}
+//! }
+//!
+//! let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::MONO, ChannelLayout::MONO);
+//! let half = g.add(ForkByClone(Half));
+//! g.pipe_input(half).pipe_output(half);
+//! let mut r = g
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .expect("builds");
+//! assert_eq!(r.render_input(Planes::new(&[&[1.0f64; 8]]).unwrap())[0], [0.5; 8]);
+//! ```
+//!
 //! ## Shape
 //!
 //! [`Shape`] is everything the compiler needs to know about a node before it

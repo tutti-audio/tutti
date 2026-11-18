@@ -53,6 +53,7 @@ mod use_tree;
 mod value_traits;
 mod values;
 mod vst3_sdk;
+mod width;
 
 pub(crate) use umbrella_api::collect;
 
@@ -165,6 +166,8 @@ pub(crate) enum Gate {
     TestTime,
     /// `tutti-units` names no allocation and no atomic.
     UnitsBare,
+    /// A quantity has one width and data is generic over `F`, bar the rows of the baseline.
+    Width,
 }
 
 impl Gate {
@@ -198,6 +201,7 @@ impl Gate {
             Gate::Logging => "gate check-logging".to_owned(),
             Gate::TestTime => "gate check-test-time".to_owned(),
             Gate::UnitsBare => "gate check-units-bare".to_owned(),
+            Gate::Width => "gate check-width".to_owned(),
         }
     }
 
@@ -240,6 +244,7 @@ impl Gate {
             Gate::Logging => logging::check(&tree, logging::ALLOW),
             Gate::TestTime => test_time::check(&tree),
             Gate::UnitsBare => units_bare::check(&tree, units_bare::MIN_FILES),
+            Gate::Width => width::check(&tree, width::EDGES, width::MIN_FILES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {
