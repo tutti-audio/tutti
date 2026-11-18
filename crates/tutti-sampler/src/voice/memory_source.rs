@@ -1420,9 +1420,9 @@ impl<F: Float> Node<F> for MemorySource<F> {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.driven_gain = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
-            .map(|v| Amplitude(f64::from(v).max(0.0)));
+            .map(|v| Amplitude(v.to_f64().max(0.0)));
         // Lent for the block and given back after it: the render borrows the
         // whole source.
         let mut reader = self.tempo.take();

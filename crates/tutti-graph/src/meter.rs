@@ -14,8 +14,11 @@
 //! # What a lane holds
 //!
 //! A lane is a [`tutti_rt::level_cell`]: the peak, the frame count and the
-//! energy (a sum of squares, an `f64`, so an hour unread stays exact) since
-//! the reader last read. The op folds each block into it and a read takes it
+//! energy (a sum of squares; both readings `f64`, so an hour unread stays
+//! exact) since the reader last read. A block's figures accumulate in the
+//! graph's float over chunks of at most 256 frames, each chunk folded into
+//! `f64`: the rounding bound does not depend on the block's length, and no
+//! sample narrows before it is measured. The op folds each block into it and a read takes it
 //! whole, so **a block lands in one read, peak and energy together**: a read
 //! with no frames has no peak and no energy. The cell is `tutti-rt`'s, with a
 //! loom model; the two ends are wait-free for the op and wait for a block in
@@ -47,7 +50,7 @@ use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_units::{Amplitude, Samples};
 
 use crate::exec::SILENT;
-use crate::slots::{AudioSlots, SlotFlags, for_f32};
+use crate::slots::{AudioSlots, SlotFlags};
 use tutti_buffers::Float;
 
 /// What one lane measured since it was last read.
@@ -72,8 +75,7 @@ impl From<LevelSpan> for Level {
             (span.sum_sq / span.frames as f64).sqrt()
         };
         Self {
-            // The level cell is an `f32` lane: its peak widens.
-            peak: Amplitude(f64::from(span.peak)),
+            peak: Amplitude(span.peak),
             rms: Amplitude(rms),
             frames: Samples(usize::try_from(span.frames).unwrap_or(usize::MAX)),
         }
@@ -88,41 +90,57 @@ struct Shared {
     enabled: AtomicBool,
 }
 
-/// One block's figures for one lane.
-#[derive(Clone, Copy)]
+/// One block's figures for one lane: the readings, in `f64`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct BlockStats {
-    peak: f32,
-    sum_sq: f32,
+    peak: f64,
+    sum_sq: f64,
 }
 
 /// Samples a pass folds at once. The partial sums are a fixed shape, so the
 /// result is the same on every executor and the loop vectorizes (a plain
-/// left-to-right `f32` sum cannot).
+/// left-to-right sum cannot).
 const WIDTH: usize = 8;
 
-/// Peak and sum of squares of `block`: `WIDTH` running figures per pass,
-/// combined in lane order at the end, then the tail in order. NaN is ignored
-/// by the peak (`f32::max`) and poisons the sum.
+/// Frames one accumulation covers in the graph's float before it folds into an
+/// `f64`: a partial sum holds at most `CHUNK / WIDTH` terms, so its rounding
+/// bound is the same for a 64-frame block and a 1 Mi-frame one.
+const CHUNK: usize = 256;
+
+/// Peak and sum of squares of `block`, accumulated in `F` over chunks of at
+/// most [`CHUNK`] frames and each chunk folded into `f64`. NaN is ignored by
+/// the peak and poisons the sum.
 #[inline]
-fn block_stats(block: &[f32]) -> BlockStats {
-    let (chunks, tail) = block.as_chunks::<WIDTH>();
-    let mut peak = [0.0f32; WIDTH];
-    let mut sum = [0.0f32; WIDTH];
-    for chunk in chunks {
-        for i in 0..WIDTH {
-            peak[i] = peak[i].max(chunk[i].abs());
-            sum[i] += chunk[i] * chunk[i];
-        }
-    }
-    let mut stats = BlockStats {
-        peak: peak.iter().fold(0.0, |a, &p| a.max(p)),
-        sum_sq: sum.iter().sum(),
-    };
-    for &s in tail {
-        stats.peak = stats.peak.max(s.abs());
-        stats.sum_sq += s * s;
+fn block_stats<F: Float>(block: &[F]) -> BlockStats {
+    let mut stats = BlockStats::default();
+    for chunk in block.chunks(CHUNK) {
+        let (peak, sum_sq) = chunk_stats(chunk);
+        stats.peak = stats.peak.max(peak.to_f64());
+        stats.sum_sq += sum_sq.to_f64();
     }
     stats
+}
+
+/// Peak and sum of squares of one chunk in `F`: `WIDTH` running figures per
+/// pass, combined in lane order at the end, then the tail in order.
+#[inline]
+fn chunk_stats<F: Float>(chunk: &[F]) -> (F, F) {
+    let (passes, tail) = chunk.as_chunks::<WIDTH>();
+    let mut peak = [F::ZERO; WIDTH];
+    let mut sum = [F::ZERO; WIDTH];
+    for pass in passes {
+        for i in 0..WIDTH {
+            peak[i] = peak[i].max(pass[i].abs());
+            sum[i] += pass[i] * pass[i];
+        }
+    }
+    let mut peak = peak.iter().fold(F::ZERO, |a, &p| a.max(p));
+    let mut sum_sq = sum.iter().fold(F::ZERO, |a, &x| a + x);
+    for &s in tail {
+        peak = peak.max(s.abs());
+        sum_sq += s * s;
+    }
+    (peak, sum_sq)
 }
 
 /// The executor's end of a meter: a writer per lane and the switch. Not
@@ -155,23 +173,11 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
     };
     for (lane, &src) in meter.lanes.iter_mut().zip(srcs) {
         let stats = if flags.get(src) & SILENT != 0 {
-            BlockStats {
-                peak: 0.0,
-                sum_sq: 0.0,
-            }
+            BlockStats::default()
         } else {
-            let mut stats = BlockStats {
-                peak: 0.0,
-                sum_sq: 0.0,
-            };
-            for_f32(arena.slot(src, frames), |chunk| {
-                let part = block_stats(chunk);
-                stats.peak = stats.peak.max(part.peak);
-                stats.sum_sq += part.sum_sq;
-            });
-            stats
+            block_stats(arena.slot(src, frames))
         };
-        lane.fold(stats.peak, f64::from(stats.sum_sq), n);
+        lane.fold(stats.peak, stats.sum_sq, n);
     }
 }
 

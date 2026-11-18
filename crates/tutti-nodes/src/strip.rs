@@ -438,9 +438,9 @@ impl Node for BusStripNode {
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let size = io.frames();
         let (volume, balance) = (
-            self.declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
                 .frames(),
-            self.declared_param::<{ UnitParam::Balance as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Balance as u16 }, _>(&io)
                 .frames(),
         );
         let (inputs, mut outputs) = io.split();

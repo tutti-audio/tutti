@@ -834,7 +834,7 @@ impl Node for ConvolverNode {
             return Status::Silent;
         }
         let driven = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         let (inputs, mut outputs) = io.split();
         // Walk the block's silent runs: cut the output where a run stops sounding and restart

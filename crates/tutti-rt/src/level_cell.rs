@@ -40,17 +40,17 @@
 //!
 //! The model in `tests/level_cell_loom.rs` runs this code.
 
-use sync::{Arc, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+use sync::{Arc, AtomicU64, AtomicUsize, Ordering, fence};
 
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::Arc;
     #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+    pub(super) use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
     #[cfg(not(loom))]
     pub(super) use std::sync::Arc;
     #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
+    pub(super) use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
 }
 
 #[cfg(not(loom))]
@@ -63,7 +63,7 @@ use loom::thread::yield_now;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LevelSpan {
     /// The largest peak folded in (a non-negative figure, or 0).
-    pub peak: f32,
+    pub peak: f64,
     /// The sum of squares folded in.
     pub sum_sq: f64,
     /// The frames folded in. Zero means no block: then `peak` and `sum_sq`
@@ -74,8 +74,8 @@ pub struct LevelSpan {
 /// One slot: the words a block is folded into.
 #[derive(Debug, Default)]
 struct Slot {
-    /// The bits of a non-negative `f32`.
-    peak: AtomicU32,
+    /// The bits of a non-negative `f64`.
+    peak: AtomicU64,
     frames: AtomicU64,
     /// The bits of an `f64`.
     sum_sq: AtomicU64,
@@ -124,7 +124,7 @@ impl LevelWriter {
     /// read-modify-written, so the one writer is held by the borrow. An
     /// executor that runs the op on any worker claims the writer first.
     #[inline]
-    pub fn fold(&mut self, peak: f32, sum_sq: f64, frames: u32) {
+    pub fn fold(&mut self, peak: f64, sum_sq: f64, frames: u32) {
         let s = &*self.shared;
         let i = loop {
             let i = s.active.load(Ordering::Acquire);
@@ -135,7 +135,7 @@ impl LevelWriter {
             }
         };
         let slot = &s.slots[i];
-        let held = f32::from_bits(slot.peak.load(Ordering::Relaxed));
+        let held = f64::from_bits(slot.peak.load(Ordering::Relaxed));
         slot.peak.store(held.max(peak).to_bits(), Ordering::Relaxed);
         let n = slot.frames.load(Ordering::Relaxed);
         slot.frames
@@ -162,7 +162,7 @@ impl LevelReader {
         // Cleared here, ordered before the writer's next entry to this slot
         // by the `Release` store to `active` of the next take.
         LevelSpan {
-            peak: f32::from_bits(slot.peak.swap(0, Ordering::Relaxed)),
+            peak: f64::from_bits(slot.peak.swap(0, Ordering::Relaxed)),
             sum_sq: f64::from_bits(slot.sum_sq.swap(0, Ordering::Relaxed)),
             frames: slot.frames.swap(0, Ordering::Relaxed),
         }

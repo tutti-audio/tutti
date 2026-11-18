@@ -40,7 +40,7 @@ pub(crate) struct Unit<F: Float = f32> {
     /// A crossfade waiting for `fade` to end.
     pub(super) queued: Option<Box<Crossfade<F>>>,
     /// Its declared params' modulation state and per-frame buffers.
-    pub(super) params: ParamState,
+    pub(super) params: ParamState<F>,
     /// The keys its event outputs hold or owe (`held.rs`).
     pub(super) keys: Keys,
     /// Its mode and the state that applies it (`mode.rs`).
@@ -51,7 +51,7 @@ impl<F: Float> Unit<F> {
     pub(super) fn new(
         generation: u32,
         node: NodeBox<F>,
-        params: ParamState,
+        params: ParamState<F>,
         mode: ModeState<F>,
         keys: Keys,
     ) -> Self {
@@ -218,7 +218,7 @@ pub(super) struct State<F: Float = f32> {
     pub(super) meters: Vec<Option<MeterWriter>>,
     /// One state per entry of `Plan::sum_lanes`: a weighted lane's weight
     /// across blocks, or a plain addend's none.
-    pub(super) lanes: Vec<SumLane>,
+    pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,
     pub(super) has_inject: Vec<bool>,
     /// Plan units with a scheduled command landing this block.

@@ -6,6 +6,7 @@ mod declared_settings;
 mod edge_fade;
 mod edge_gain;
 mod edge_gain_driven;
+mod f64_lanes;
 mod fan_in;
 mod fan_in_views;
 mod indexed_params;

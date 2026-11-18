@@ -126,11 +126,11 @@ pub(super) struct Staged<F: Float = f32> {
     pub(super) queued: Vec<u32>,
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
-    pub(super) drives: Vec<(u32, ParamState)>,
+    pub(super) drives: Vec<(u32, ParamState<F>)>,
     pub(super) spare_rings: Vec<Ring<F>>,
     /// Tables of owed closes merged away, to be freed on the control side.
     pub(super) spare_tables: Vec<Held>,
-    pub(super) spare_drives: Vec<ParamState>,
+    pub(super) spare_drives: Vec<ParamState<F>>,
     /// The parallel state a pool set since this was staged left unused.
     pub(super) spare_par: Option<Par>,
     /// The executor's chase buffer from this plan on.
@@ -172,7 +172,7 @@ struct Shell {
 }
 
 /// What [`Stager::stage`] needs from the commit's editor.
-pub(crate) struct StageIn<'a> {
+pub(crate) struct StageIn<'a, F: Float> {
     /// The plan the executor runs before this commit.
     pub(crate) old: Option<&'a Plan>,
     /// Whether time-based state carries: false for the resume of a re-prepare
@@ -182,7 +182,7 @@ pub(crate) struct StageIn<'a> {
     /// held-key tables of those the plan keeps go back to them.
     pub(crate) resumed: bool,
     /// The lane state for the mix of the unit at a key.
-    pub(crate) mix_lane: &'a dyn Fn(NodeKey) -> Option<ParamState>,
+    pub(crate) mix_lane: &'a dyn Fn(NodeKey) -> Option<ParamState<F>>,
 }
 
 /// What every step of staging reads.
@@ -314,7 +314,7 @@ impl Stager {
     }
 
     /// Builds what applying `c` needs, and puts it in `c`.
-    pub(crate) fn stage<F: Float>(&mut self, c: &mut Commit<F>, input: StageIn<'_>) {
+    pub(crate) fn stage<F: Float>(&mut self, c: &mut Commit<F>, input: StageIn<'_, F>) {
         let plan = Arc::clone(
             c.plan
                 .as_ref()
@@ -992,7 +992,7 @@ fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets<F> {
 /// keeps the edge (not a sample-rate change's reset: a weight is not time),
 /// and a new edge starts at its value. A lane a source drives has its state
 /// built here.
-fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>>) {
+fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane<F>>, Vec<Option<u32>>) {
     let plan = cx.plan;
     let old_lanes: BTreeMap<crate::EdgeId, usize> = cx
         .old
@@ -1042,8 +1042,8 @@ fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>
 fn drives<F: Float>(
     c: &Commit<F>,
     cx: &Cx<'_>,
-    mix_lane: &dyn Fn(NodeKey) -> Option<ParamState>,
-) -> Vec<(u32, ParamState)> {
+    mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
+) -> Vec<(u32, ParamState<F>)> {
     let driven_of = |p: &Plan, rec: &crate::plan::NodeRec| {
         p.param_ports[rec.params.range()]
             .last()

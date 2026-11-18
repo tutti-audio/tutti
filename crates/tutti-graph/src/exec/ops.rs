@@ -95,7 +95,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     flags: &mut Fl,
     events: &E,
     list: &[u32],
-    lanes: &mut [SumLane],
+    lanes: &mut [SumLane<F>],
     gains: &[GainPortOp],
     dst: u32,
     frames: usize,

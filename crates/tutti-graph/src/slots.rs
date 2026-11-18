@@ -122,26 +122,6 @@ impl<F: Float> AudioSlots<F> for Arena<F> {
     }
 }
 
-/// `block` as `f32`, in one piece or in chunks, to `f`: what a tap or a meter
-/// reads, whose readers speak `f32` whatever format the graph renders in. An
-/// `f32` block is lent as it is; any other format is converted a chunk at a
-/// time through a buffer on the stack. Allocates nothing.
-#[inline]
-pub(crate) fn for_f32<F: Float>(block: &[F], mut f: impl FnMut(&[f32])) {
-    if F::BITS == 32
-        && let Ok(same) = bytemuck::try_cast_slice::<F, f32>(block)
-    {
-        return f(same);
-    }
-    let mut buf = [0.0f32; 256];
-    for chunk in block.chunks(buf.len()) {
-        for (b, &x) in buf.iter_mut().zip(chunk) {
-            *b = x.to_f32();
-        }
-        f(&buf[..chunk.len()]);
-    }
-}
-
 /// The event slots an op borrows.
 pub(crate) trait EventSlots {
     /// Slot `s`.

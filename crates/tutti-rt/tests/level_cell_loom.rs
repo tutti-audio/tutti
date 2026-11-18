@@ -39,7 +39,7 @@ fn a_block_lands_whole_in_one_take() {
         let (mut writer, mut reader) = level_cell();
         let w = thread::spawn(move || {
             for frames in [1u32, 2, 4] {
-                writer.fold(frames as f32, f64::from(frames), frames);
+                writer.fold(f64::from(frames), f64::from(frames), frames);
             }
         });
         let mut spans = vec![reader.take(), reader.take()];

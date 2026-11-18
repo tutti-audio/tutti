@@ -1748,7 +1748,7 @@ pub fn drive<F: Float>(
     node: &mut dyn Node<F>,
     rate: SampleRate,
     inputs: Planes<'_, F>,
-    params: &[Option<&[f32]>],
+    params: &[Option<&[F]>],
 ) -> Vec<Vec<F>> {
     let frames = (inputs.channels() > 0)
         .then(|| inputs.frames().get())
@@ -1802,7 +1802,7 @@ pub fn drive_input<F: Float>(
     node: &mut dyn Node<F>,
     env: &Env,
     inputs: Planes<'_, F>,
-    params: &[Option<&[f32]>],
+    params: &[Option<&[F]>],
     events: &[&[Event]],
 ) -> Driven<F> {
     let shape = node.shape();
@@ -1821,7 +1821,7 @@ pub fn drive_input<F: Float>(
     let ins: Vec<&[F]> = inputs.iter().map(|c| c.samples()).collect();
     let mut out = vec![vec![F::ZERO; frames]; usize::from(shape.audio_out().count())];
     let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    let params: Vec<ParamInput<'_>> = params
+    let params: Vec<ParamInput<'_, F>> = params
         .iter()
         .map(|p| {
             p.map_or(ParamInput::Base, |values| ParamInput::Frames {
@@ -2187,7 +2187,7 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     frame: Frame,
     transport: TransportPosition,
     inputs: Vec<Vec<F>>,
-    params: Vec<Option<Vec<f32>>>,
+    params: Vec<Option<Vec<F>>>,
     outputs: Vec<Vec<F>>,
     events_in: Vec<Vec<Event>>,
     events_out: Vec<Vec<Event>>,
@@ -2343,11 +2343,11 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// # Panics
     ///
     /// If `values` is not one block long.
-    pub fn feed(&mut self, k: usize, values: Option<&[f32]>) {
+    pub fn feed(&mut self, k: usize, values: Option<&[F]>) {
         if let Some(v) = values {
             assert_eq!(v.len(), self.frames, "one value per frame");
         }
-        self.params[k] = values.map(<[f32]>::to_vec);
+        self.params[k] = values.map(<[F]>::to_vec);
     }
 
     /// Play `events` on event input `port` in the **next** block only (each

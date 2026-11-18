@@ -91,7 +91,7 @@ impl Node for Knob {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         match self
-            .declared_param::<{ UnitParam::Drive as u16 }>(&io)
+            .declared_param::<{ UnitParam::Drive as u16 }, _>(&io)
             .frames()
         {
             Some(v) => {

@@ -2338,6 +2338,54 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
+
+    /// The same at `f64`, with the control lanes moving: edge weights moved
+    /// between blocks (ramps of every block length), nodes' mixes moved and
+    /// driven by lanes, serial and parallel. `Executor<f64>` renders every
+    /// ramp and lane as `Reference<f64>` does, bit for bit.
+    #[test]
+    fn the_f64_executor_with_moving_weights_and_mixes_is_the_f64_reference(
+        seed in any::<u64>(),
+        which in 0usize..5,
+    ) {
+        for workers in modes(seed) {
+            let mut gains = Rng::new(seed ^ 0x6A14_ED6E);
+            let mut draws = Rng::new(seed ^ 0x31D5_0F17);
+            let mut lanes = Rng::new(seed ^ 0x6D12_17E5);
+            let mut desc = random_graph(seed);
+            weigh(&mut desc, &mut gains);
+            drive_mixes(&mut desc, &mut lanes);
+            let mut pair = Pair::<f64>::with_format(MAX_BLOCK);
+            if workers > 1 {
+                pair.exec.set_pool(Some(common::test_pool(workers)));
+            }
+            pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
+            let mut frame = 0u64;
+            for &n in &schedule(which, seed, 900) {
+                if gains.chance(40)
+                    && let Some(id) = gains.pick(&desc.spec.gains.keys().copied().collect::<Vec<_>>())
+                {
+                    let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
+                    pair.set_edge_gain(id, w);
+                    desc.spec.gains.get_mut(&id).expect("picked").base = w;
+                }
+                if draws.chance(20)
+                    && let Some((key, mix)) = pick_mix(&desc, &mut draws)
+                {
+                    pair.set_mix(key, mix);
+                    desc.spec.set_mix(key, mix);
+                }
+                let input = input_signal::<f64>(frame, n);
+                let (a, b) = pair.block(n, &input);
+                prop_assert_eq!(bits(&a), bits(&b), "diverged at frame {} ({} frames)", frame, n);
+                frame += n as u64;
+            }
+        }
+    }
+}
+
 /// The weighted property is not vacuous: over the seeds a good share of the
 /// graphs carry entries, and the plans hold weighted sums of one addend, of
 /// several, and in chains' company, so the edge cases are drawn.
