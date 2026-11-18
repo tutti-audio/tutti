@@ -2,8 +2,8 @@
 //!
 //! Both inputs are zero-padded to a power of two that holds the whole linear
 //! result and correlated by [`Correlator`], `O(n log n)` rather than the
-//! `O(n * lags)` of the direct sum. A caller that wants a weighted variant (phase transform)
-//! reshapes the cross-spectrum through [`cross_correlate_shaped`].
+//! `O(n * lags)` of the direct sum. A caller that wants a weighted variant
+//! (phase transform) reshapes the cross-spectrum through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_types::Samples;

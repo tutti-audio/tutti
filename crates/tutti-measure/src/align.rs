@@ -661,6 +661,31 @@ mod tests {
         }
     }
 
+    /// The offset is the parabola's only where the three points bend down and
+    /// sit inside the overlap: a delta one lag right of the fitted lag, a NaN
+    /// and a lag at the edge of the overlap (a neighbour missing) all give zero.
+    #[test]
+    fn the_offset_is_zero_unless_three_points_bend_down_inside_the_overlap() {
+        let mut fft = FftScratch::new();
+        let x = noise(8, 1);
+        let delta_at_one = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
+            let size = ((bins.len() - 1) * 2) as f32;
+            for (k, bin) in bins.iter_mut().enumerate() {
+                let w = -core::f32::consts::TAU * k as f32 / size;
+                *bin = Complex32::new(w.cos(), w.sin());
+            }
+        });
+        assert_eq!(delta_at_one.peak().unwrap().lag, 1);
+        assert_eq!(parabolic_offset(&delta_at_one, 0), 0.0);
+        assert_eq!(parabolic_offset(&delta_at_one, delta_at_one.min_lag()), 0.0);
+        assert_eq!(parabolic_offset(&delta_at_one, delta_at_one.max_lag()), 0.0);
+
+        let nan = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
+            bins.fill(Complex32::new(f32::NAN, 0.0));
+        });
+        assert_eq!(parabolic_offset(&nan, 0), 0.0);
+    }
+
     /// Delay in samples and seconds, and the input checks.
     #[test]
     fn delay_converts_and_bad_input_is_refused() {

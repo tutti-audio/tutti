@@ -220,11 +220,21 @@ impl StftGeometry {
         Hz((bin.get() as f64 * self.sample_rate.get() / self.window.get() as f64) as f32)
     }
 
-    /// The spacing of the bins, `sample_rate / window`.
+    /// The fractional bin `frequency` falls on, `frequency * window / sample_rate`,
+    /// computed in `f64`: bin `k` is centred on `bin_of(bin_frequency(k)) == k`,
+    /// and a frequency on a bin boundary gives a whole number.
     #[inline]
     #[must_use]
-    pub fn bin_width(self) -> Hz {
-        self.bin_frequency(BinIndex(1))
+    pub fn bin_of(self, frequency: Hz) -> f64 {
+        f64::from(frequency.get()) * self.window.get() as f64 / self.sample_rate.get()
+    }
+
+    /// The frequency of a fractional bin, the inverse of [`bin_of`](Self::bin_of):
+    /// computed in `f64` and narrowed once.
+    #[inline]
+    #[must_use]
+    pub fn frequency_of(self, bin: f64) -> Hz {
+        Hz((bin * self.sample_rate.get() / self.window.get() as f64) as f32)
     }
 
     /// The time between frames, `hop / sample_rate`.
@@ -232,13 +242,6 @@ impl StftGeometry {
     #[must_use]
     pub fn frame_interval(self) -> Seconds {
         Seconds(self.hop.get() as f64 / self.sample_rate.get())
-    }
-
-    /// Frames per second, `sample_rate / hop`.
-    #[inline]
-    #[must_use]
-    pub fn frame_rate(self) -> Hz {
-        Hz((self.sample_rate.get() / self.hop.get() as f64) as f32)
     }
 
     /// How many whole frames fit over `len` samples.

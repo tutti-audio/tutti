@@ -396,13 +396,13 @@ impl SpectrumPlan {
 
     /// Whole frames a peak is held for: the hold rounded up to the hop.
     ///
-    /// The `f32` frame interval would turn an exact multiple into one frame too
-    /// many, so this multiplies by the frame rate. The hold and the rate are
-    /// `f32`s with a relative error of at most 2^-24 (6e-8) each, so a millionth
-    /// of slack keeps 0.1 s at a hop of 480 samples and 48 kHz at 10 frames.
+    /// Worked in `f64` from the frame interval, since an `f32` one would turn an
+    /// exact multiple into one frame too many. The hold itself is an `f32` with
+    /// a relative error of at most 2^-24 (6e-8), so a millionth of slack keeps
+    /// 0.1 s at a hop of 480 samples and 48 kHz at 10 frames.
     #[must_use]
     pub(crate) fn peak_hold_frames(&self) -> FrameCount {
-        let frames = self.peak_hold.get().get() * f64::from(self.geometry.frame_rate().get());
+        let frames = self.peak_hold.get().get() / self.geometry.frame_interval().get();
         FrameCount((frames * (1.0 - 1e-6)).ceil() as usize)
     }
 
@@ -462,11 +462,10 @@ impl SpectrumPlan {
                 max: MAX_BANDS,
             });
         }
-        let width = f64::from(self.geometry.bin_width().get());
         let bins = self.bins();
         let first: Vec<usize> = edges
             .iter()
-            .map(|&e| ((e / width).ceil() as usize).min(bins))
+            .map(|&e| (self.geometry.bin_of(Hz(e as f32)).ceil() as usize).min(bins))
             .collect();
         if let Some(band) = first.windows(2).position(|w| w[0] >= w[1]) {
             // A band `w` Hz wide holds a bin once the bin spacing is within `w`.

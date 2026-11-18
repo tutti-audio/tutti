@@ -349,10 +349,9 @@ impl ChromaPlan {
             return Err(empty);
         }
         check_nyquist(max, self.geometry.sample_rate())?;
-        let width = f64::from(self.geometry.bin_width().get());
-        let lo = ((f64::from(min.get()) / width).ceil() as usize).max(1);
-        let hi = ((f64::from(max.get()) / width).floor() as usize)
-            .min(self.geometry.window().get() / 2 - 1);
+        let lo = (self.geometry.bin_of(min).ceil() as usize).max(1);
+        let hi =
+            (self.geometry.bin_of(max).floor() as usize).min(self.geometry.window().get() / 2 - 1);
         if hi < lo + 2 {
             return Err(empty);
         }
@@ -373,18 +372,15 @@ impl ChromaPlan {
             return false;
         }
         let floor = top * self.peak_floor.get().to_amplitude().get();
-        let width = f64::from(self.geometry.bin_width().get());
         for i in lo..=hi {
             let m = magnitudes[i];
             if !(m > magnitudes[i - 1] && m >= magnitudes[i + 1] && m >= floor) {
                 continue;
             }
             let (offset, peak) = interpolate(magnitudes[i - 1], m, magnitudes[i + 1]);
-            let frequency = (i as f64 + offset) * width;
-            if frequency >= f64::from(self.min_freq.get())
-                && frequency <= f64::from(self.max_freq.get())
-            {
-                visit(frequency, peak * peak);
+            let frequency = self.geometry.frequency_of(i as f64 + offset);
+            if frequency >= self.min_freq && frequency <= self.max_freq {
+                visit(f64::from(frequency.get()), peak * peak);
             }
         }
         true

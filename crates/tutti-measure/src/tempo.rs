@@ -381,15 +381,12 @@ pub fn track_beats_from_novelty(
     Ok(BeatGrid { beats, bpm })
 }
 
-/// Frames per second of a curve with one value per `hop`: the grid of
-/// `hop`-long frames `hop` apart.
+/// Frames per second of a curve with one value per `hop`.
 fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<f64> {
     if hop.is_zero() {
         return Err(Error::ZeroHop);
     }
-    Ok(f64::from(
-        StftGeometry::new(sample_rate, hop, hop)?.frame_rate().get(),
-    ))
+    Ok(sample_rate.get() / hop.get() as f64)
 }
 
 /// The detection curve of `samples` at `rate` on the config's framing, with

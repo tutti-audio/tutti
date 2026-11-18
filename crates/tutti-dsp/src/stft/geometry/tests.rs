@@ -185,19 +185,22 @@ fn latency_is_exact() {
     assert_eq!(g.latency(), Seconds(2048.0 / 44_100.0));
 }
 
-/// A bin is `rate / window` wide: 48000 / 1024 = 46.875, exact in `f32`.
+/// 441 Hz at 44100 Hz on 1000 points is exactly bin 10, which an `f32` bin
+/// width (44.09999847) would put past it; the frequency of bin 10.5 is 463.05 Hz.
 #[test]
-fn the_bin_width_is_the_rate_over_the_window() {
+fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
+    let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
+    assert_eq!(g.bin_of(Hz(441.0)), 10.0);
+    assert_eq!(g.bin_of(Hz(441.0)).ceil(), 10.0);
+    assert_eq!(g.frequency_of(10.5), Hz(463.05));
     let g = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
-    assert_eq!(g.bin_width(), Hz(46.875));
-    assert_eq!(g.bin_width(), g.bin_frequency(BinIndex(1)));
+    assert_eq!(g.bin_of(Hz(46.875)), 1.0);
+    assert_eq!(g.frequency_of(3.0), Hz(140.625));
 }
 
-/// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s, and the frame
-/// rate is its reciprocal, 100 Hz.
+/// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s.
 #[test]
-fn the_frame_interval_is_the_hop_over_the_rate_and_the_frame_rate_its_reciprocal() {
+fn the_frame_interval_is_the_hop_over_the_rate() {
     let g = StftGeometry::new(SampleRate::SR_48K, Samples(2048), Samples(480)).unwrap();
     assert!((g.frame_interval().get() - 0.01).abs() < 1e-15);
-    assert_eq!(g.frame_rate(), Hz(100.0));
 }
