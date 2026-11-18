@@ -53,14 +53,13 @@
 //! that belongs to no note-on is written as it comes, and ends whatever note
 //! holds its key.
 //!
-//! The clip itself is published to the node with [`Publisher`]
-//! ([`MidiClipControls::set`]); the node reads it once per block.
+//! The clip itself is a [`ClipEvents`] published to the node with
+//! [`Publisher`] ([`MidiClipControls::events`]); the node reads it once per
+//! block.
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
@@ -104,8 +103,16 @@ const LEDGER_CAPACITY: usize = 2048;
 /// capacity ([`note_off_room`](tutti_graph::note_off_room)).
 pub const CLIP_EVENT_DENSITY: EventDensity = EventDensity::per_frame(1);
 
-/// A published clip: its events sorted by beat and its chase table.
-struct ClipEvents {
+/// A clip as it is published: its events sorted by beat with each note-off
+/// paired to its note-on, and the chase table that makes a jump to a beat
+/// a binary search.
+///
+/// Collect a clip from [`TimedMidiEvent`]s in any order; the sorting, the
+/// translation of MIDI 1.0 events to MIDI 2.0 and the pairing are done there,
+/// so the thread that publishes it does none of it. Two clips are equal when
+/// their events and pairing are.
+#[derive(Debug, Default)]
+pub struct ClipEvents {
     events: Box<[ClipEvent]>,
     /// For each state a channel holds (a program, a controller, a registered
     /// or assignable controller, pressure, bend), the messages that set it,
@@ -119,6 +126,31 @@ impl ClipEvents {
     fn new(events: Box<[ClipEvent]>) -> Self {
         let chase = chase_table(&events);
         Self { events, chase }
+    }
+
+    /// How many events the clip holds.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Whether the clip holds no event.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+}
+
+impl FromIterator<TimedMidiEvent> for ClipEvents {
+    fn from_iter<I: IntoIterator<Item = TimedMidiEvent>>(events: I) -> Self {
+        Self::new(sorted(translated(events)))
+    }
+}
+
+/// Equal by events and pairing: the chase table is a function of them.
+impl PartialEq for ClipEvents {
+    fn eq(&self, other: &Self) -> bool {
+        self.events == other.events
     }
 }
 
@@ -237,29 +269,6 @@ impl ClipNote {
 
     fn index(self) -> u32 {
         self.0.get() - 1
-    }
-}
-
-/// What the node and its controls share.
-struct Shared {
-    /// What the audio thread reads, once per block, through the node's
-    /// reader.
-    cell: Publisher<ClipEvents>,
-    /// Serializes `set`'s compare and publish (`Publisher` has no compare-and-publish), so two control threads cannot each publish against a stale read. The value is the cell's own: the control side reads it with `Publisher::current`. The node never takes it.
-    publish: Mutex<()>,
-}
-
-impl Shared {
-    fn new(events: Box<[ClipEvent]>) -> Arc<Self> {
-        let first = Arc::new(ClipEvents::new(events));
-        Arc::new(Self {
-            cell: Publisher::from_arc(Arc::clone(&first)),
-            publish: Mutex::new(()),
-        })
-    }
-
-    fn current(&self) -> Arc<ClipEvents> {
-        self.cell.current()
     }
 }
 
@@ -391,11 +400,12 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
         .collect()
 }
 
-/// The handle a host keeps on an inserted [`MidiClipNode`]: replace or clear
-/// the clip it plays. Control thread.
+/// The handle a host keeps on an inserted [`MidiClipNode`]: the cell its
+/// clip is published through. Cheap to clone; every clone reaches the same
+/// node. Control thread.
 #[derive(Clone)]
 pub struct MidiClipControls {
-    shared: Arc<Shared>,
+    cell: Publisher<ClipEvents>,
 }
 
 impl std::fmt::Debug for MidiClipControls {
@@ -405,30 +415,21 @@ impl std::fmt::Debug for MidiClipControls {
 }
 
 impl MidiClipControls {
-    /// Play `events` from the next block on. The node ends every note the
-    /// previous clip left sounding, on that block's first frame. Events equal
-    /// to the clip's (in beat order, each note-off paired to the same
-    /// note-on) change nothing: no note is cut.
-    pub fn set(&self, events: impl IntoIterator<Item = TimedMidiEvent>) {
-        let events = sorted(translated(events));
-        let _serial = self.shared.publish.lock_recover();
-        let current = self.shared.current();
-        if current.events == events {
-            return;
-        }
-        let clip = Arc::new(ClipEvents::new(events));
-        self.shared.cell.publish(clip);
-    }
-
-    /// Play nothing (and end what is sounding).
-    pub fn clear(&self) {
-        self.set([]);
+    /// The cell the node reads its clip from, once per block. A publish
+    /// replaces the clip from the next block on: the node ends every note the
+    /// previous clip left sounding, on that block's first frame, so publish
+    /// only a clip that differs from [`current`](Publisher::current). The
+    /// one publisher is the control side's; free what it retires with
+    /// [`reclaim`](tutti_rt::Reclaim::reclaim).
+    #[must_use]
+    pub fn events(&self) -> Publisher<ClipEvents> {
+        self.cell.clone()
     }
 
     /// How many events the clip holds.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.shared.current().events.len()
+        self.cell.current().len()
     }
 
     /// Whether the clip holds no event.
@@ -457,9 +458,11 @@ impl MidiClipControls {
 /// assert_eq!(controls.len(), 1);
 /// ```
 pub struct MidiClipNode {
-    shared: Arc<Shared>,
-    /// A reader of `shared.cell`, registered in [`over`](Self::over): a
-    /// fork's node is built over its own cell and registers there.
+    /// The cell `clip` reads, which the controls publish to; the node never
+    /// touches it.
+    cell: Publisher<ClipEvents>,
+    /// A reader of `cell`, registered in [`over`](Self::over): a fork's node
+    /// is built over its own cell and registers there.
     clip: Reader<ClipEvents>,
     /// The publish number of the clip this node last played. A lend may return
     /// number `N` while the value is already `N + 1`, so a replacement can be
@@ -490,16 +493,16 @@ struct Play {
 impl MidiClipNode {
     /// A node playing `events` (in any order: they are sorted by beat).
     pub fn new(events: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
-        Self::over(Shared::new(sorted(translated(events))))
+        Self::over(Publisher::new(events.into_iter().collect::<ClipEvents>()))
     }
 
-    /// A node over `shared`, reading it through a reader registered here.
+    /// A node over `cell`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
-    fn over(shared: Arc<Shared>) -> Self {
+    fn over(cell: Publisher<ClipEvents>) -> Self {
         Self {
-            clip: shared.cell.reader(),
-            last_seq: shared.cell.seq(),
-            shared,
+            clip: cell.reader(),
+            last_seq: cell.seq(),
+            cell,
             play: Play {
                 walk: Walk::default(),
                 held: NoteLedger::new(LEDGER_CAPACITY),
@@ -610,10 +613,10 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
 
     fn into_parts(self) -> NodeParts<MidiClipControls, F> {
         let controls = MidiClipControls {
-            shared: Arc::clone(&self.shared),
+            cell: self.cell.clone(),
         };
         let fork = ClipFork {
-            shared: Arc::clone(&self.shared),
+            cell: self.cell.clone(),
         };
         NodeParts {
             node: Box::new(self),
@@ -627,17 +630,13 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
 /// taken, so an export plays what was there at its start while the live clip
 /// is edited. The fork reads its render's `Env`.
 struct ClipFork {
-    shared: Arc<Shared>,
+    cell: Publisher<ClipEvents>,
 }
 
 impl<F: Float> ForkSource<F> for ClipFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
-        let clip = self.shared.current();
-        let shared = Arc::new(Shared {
-            cell: Publisher::from_arc(Arc::clone(&clip)),
-            publish: Mutex::new(()),
-        });
-        Ok(Forked::new(Box::new(MidiClipNode::over(shared))))
+        let cell = Publisher::from_arc(self.cell.current());
+        Ok(Forked::new(Box::new(MidiClipNode::over(cell))))
     }
 }
 
@@ -645,7 +644,7 @@ impl<F: Float> ForkSource<F> for ClipFork {
 /// (the clips a replacement left behind); control thread, from the owner's tick.
 impl tutti_rt::Reclaim for MidiClipControls {
     fn reclaim(&self) -> usize {
-        self.shared.cell.reclaim()
+        self.cell.reclaim()
     }
 }
 

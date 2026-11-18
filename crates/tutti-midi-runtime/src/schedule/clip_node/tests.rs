@@ -1,23 +1,25 @@
 use super::*;
 
+use std::sync::Arc;
+
 use tutti_fixtures::midi;
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7};
 use tutti_units::Beat;
 
-/// **A clip a block still held when `set` replaced it is freed by
+/// **A clip a block still held when a publish replaced it is freed by
 /// the next `reclaim`**, with no further publish.
 #[test]
 fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     let mut node = MidiClipNode::new([TimedMidiEvent::new(Beat(1.0), on).unwrap()]);
     let controls = MidiClipControls {
-        shared: Arc::clone(&node.shared),
+        cell: node.cell.clone(),
     };
-    let gone = Arc::downgrade(&node.shared.current());
+    let gone = Arc::downgrade(&node.cell.current());
     {
         // A block in progress across the replacement.
         let _held = node.clip.lend();
-        controls.clear();
+        controls.events().publish(ClipEvents::default());
     }
     assert!(gone.upgrade().is_some(), "retired, pinned until a scan");
     assert_eq!(tutti_rt::Reclaim::reclaim(&controls), 0);

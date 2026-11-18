@@ -177,8 +177,6 @@ pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::MidiPolicyTarget;
-#[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::OutputLatencyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -207,6 +205,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
 };
+#[cfg(all(feature = "session", feature = "midi"))]
+pub use tutti_session::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "capture"))]
@@ -724,9 +724,9 @@ pub mod midi {
         SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
-        SyncOutControls,
+        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyNode, MidiClipControls,
+        MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms,
+        SegmentFault, SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{

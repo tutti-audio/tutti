@@ -19,13 +19,11 @@
 //! by [`HARMONY_EVENT_DENSITY`] (a loop of a few frames with a change in it
 //! sends one a pass); past it the port refuses, and the executor counts it.
 //!
-//! The lanes are published to the node with [`Publisher`]
-//! ([`HarmonyControls::set`]); the node reads them once per block.
+//! The lanes are [`HarmonyChanges`] published to the node with [`Publisher`]
+//! ([`HarmonyControls::changes`]); the node reads them once per block.
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
@@ -70,43 +68,46 @@ impl Beated for TimedHarmony {
     }
 }
 
-/// Published lanes: the changes sorted by beat (non-finite beats dropped).
-struct Lanes {
+/// A sequencer's chord and scale lanes as they are published: the changes
+/// sorted by beat (non-finite beats dropped; two changes at one beat keep
+/// their order, the later winning). Collect them from [`TimedHarmony`]s in any
+/// order. Two are equal when their changes are.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HarmonyChanges {
     changes: Box<[TimedHarmony]>,
 }
 
-fn lanes(changes: impl IntoIterator<Item = TimedHarmony>) -> Lanes {
-    let mut v: Vec<TimedHarmony> = changes
-        .into_iter()
-        .filter(|c| c.beat.get().is_finite())
-        .collect();
-    // Stable: two changes at one beat keep their order, the later winning.
-    v.sort_by(|a, b| a.beat.get().total_cmp(&b.beat.get()));
-    Lanes {
-        changes: v.into_boxed_slice(),
+impl HarmonyChanges {
+    /// The changes, in beat order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[TimedHarmony] {
+        &self.changes
+    }
+
+    /// How many changes the lanes hold.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.changes.len()
+    }
+
+    /// Whether the lanes hold no change.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
     }
 }
 
-/// What the node and its controls share.
-struct Shared {
-    /// What the audio thread reads, once per block, through the node's
-    /// reader.
-    cell: Publisher<Lanes>,
-    /// Serializes `set`'s compare and publish (`Publisher` has no compare-and-publish), so two control threads cannot each publish against a stale read. The value is the cell's own: the control side reads it with `Publisher::current`. The node never takes it.
-    publish: Mutex<()>,
-}
-
-impl Shared {
-    fn new(changes: impl IntoIterator<Item = TimedHarmony>) -> Arc<Self> {
-        let first = Arc::new(lanes(changes));
-        Arc::new(Self {
-            cell: Publisher::from_arc(Arc::clone(&first)),
-            publish: Mutex::new(()),
-        })
-    }
-
-    fn current(&self) -> Arc<Lanes> {
-        self.cell.current()
+impl FromIterator<TimedHarmony> for HarmonyChanges {
+    fn from_iter<I: IntoIterator<Item = TimedHarmony>>(changes: I) -> Self {
+        let mut v: Vec<TimedHarmony> = changes
+            .into_iter()
+            .filter(|c| c.beat.get().is_finite())
+            .collect();
+        // Stable: two changes at one beat keep their order, the later winning.
+        v.sort_by(|a, b| a.beat.get().total_cmp(&b.beat.get()));
+        Self {
+            changes: v.into_boxed_slice(),
+        }
     }
 }
 
@@ -127,10 +128,12 @@ impl Shared {
 /// assert_eq!(controls.len(), 1);
 /// ```
 pub struct HarmonyNode {
-    shared: Arc<Shared>,
-    /// A reader of `shared.cell`, registered in [`over`](Self::over): a
-    /// fork's node is built over its own cell and registers there.
-    lanes: Reader<Lanes>,
+    /// The cell `lanes` reads, which the controls publish to; the node never
+    /// touches it.
+    cell: Publisher<HarmonyChanges>,
+    /// A reader of `cell`, registered in [`over`](Self::over): a fork's node
+    /// is built over its own cell and registers there.
+    lanes: Reader<HarmonyChanges>,
     /// The publish number of the lanes this node last walked. A lend may return
     /// number `N` while the value is already `N + 1`, so a replacement can be
     /// seen one block late, never missed and never seen twice.
@@ -157,16 +160,18 @@ impl std::fmt::Debug for HarmonyNode {
 impl HarmonyNode {
     /// A node sending `changes` (in any order: they are sorted by beat).
     pub fn new(changes: impl IntoIterator<Item = TimedHarmony>) -> Self {
-        Self::over(Shared::new(changes))
+        Self::over(Publisher::new(
+            changes.into_iter().collect::<HarmonyChanges>(),
+        ))
     }
 
-    /// A node over `shared`, reading it through a reader registered here.
+    /// A node over `cell`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
-    fn over(shared: Arc<Shared>) -> Self {
+    fn over(cell: Publisher<HarmonyChanges>) -> Self {
         Self {
-            lanes: shared.cell.reader(),
-            last_seq: shared.cell.seq(),
-            shared,
+            lanes: cell.reader(),
+            last_seq: cell.seq(),
+            cell,
             walk: Walk::default(),
             sent: Sent::default(),
             capacity: MIN_EVENT_PORT_CAPACITY,
@@ -174,11 +179,11 @@ impl HarmonyNode {
     }
 }
 
-/// The host's handle on a [`HarmonyNode`] in a graph. Cheap to clone; every
-/// clone reaches the same node.
+/// The host's handle on a [`HarmonyNode`] in a graph: the cell its lanes are
+/// published through. Cheap to clone; every clone reaches the same node.
 #[derive(Clone)]
 pub struct HarmonyControls {
-    shared: Arc<Shared>,
+    cell: Publisher<HarmonyChanges>,
 }
 
 impl std::fmt::Debug for HarmonyControls {
@@ -188,28 +193,21 @@ impl std::fmt::Debug for HarmonyControls {
 }
 
 impl HarmonyControls {
-    /// Sends `changes` from the next block on, the node re-stating the context
-    /// in force on that block's first frame. Changes equal to the lanes' (in
-    /// beat order) change nothing. Control thread.
-    pub fn set(&self, changes: impl IntoIterator<Item = TimedHarmony>) {
-        let next = lanes(changes);
-        let _serial = self.shared.publish.lock_recover();
-        let current = self.shared.current();
-        if current.changes == next.changes {
-            return;
-        }
-        self.shared.cell.publish(next);
-    }
-
-    /// Sends nothing from the next block on. Control thread.
-    pub fn clear(&self) {
-        self.set([]);
+    /// The cell the node reads its lanes from, once per block. A publish
+    /// sends the new changes from the next block on, the node re-stating the
+    /// context in force on that block's first frame, so publish only lanes
+    /// that differ from [`current`](Publisher::current). The one publisher is
+    /// the control side's; free what it retires with
+    /// [`reclaim`](tutti_rt::Reclaim::reclaim). Control thread.
+    #[must_use]
+    pub fn changes(&self) -> Publisher<HarmonyChanges> {
+        self.cell.clone()
     }
 
     /// How many changes the lanes hold.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.shared.current().changes.len()
+        self.cell.current().len()
     }
 
     /// Whether the lanes hold no change.
@@ -357,14 +355,13 @@ impl<F: Float> Node<F> for HarmonyNode {
 
 /// A fork of a [`HarmonyNode`]: its lanes as they stand, its own cell.
 struct HarmonyFork {
-    shared: Arc<Shared>,
+    cell: Publisher<HarmonyChanges>,
 }
 
 impl<F: Float> ForkSource<F> for HarmonyFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
-        let lanes = self.shared.current();
-        let node = HarmonyNode::new(lanes.changes.iter().copied());
-        Ok(Forked::new(Box::new(node)))
+        let cell = Publisher::from_arc(self.cell.current());
+        Ok(Forked::new(Box::new(HarmonyNode::over(cell))))
     }
 }
 
@@ -373,10 +370,10 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
 
     fn into_parts(self) -> NodeParts<HarmonyControls, F> {
         let controls = HarmonyControls {
-            shared: Arc::clone(&self.shared),
+            cell: self.cell.clone(),
         };
         let fork = HarmonyFork {
-            shared: Arc::clone(&self.shared),
+            cell: self.cell.clone(),
         };
         NodeParts {
             node: Box::new(self),
@@ -390,7 +387,7 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
 /// (the lanes a replacement left behind); control thread, from the owner's tick.
 impl tutti_rt::Reclaim for HarmonyControls {
     fn reclaim(&self) -> usize {
-        self.shared.cell.reclaim()
+        self.cell.reclaim()
     }
 }
 

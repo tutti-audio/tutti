@@ -15,7 +15,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, MidiClipControls, MidiClipNode, TimedMidiEvent};
 use tutti_music::LoopRange;
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
@@ -25,6 +25,13 @@ use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 const RATE: f64 = 48_000.0;
 
 /// A clip at key 1 feeding the sink at key 2, blocks of at most `max`.
+/// Replaces the clip `controls` publishes with `events`.
+fn publish(controls: &MidiClipControls, events: impl IntoIterator<Item = TimedMidiEvent>) {
+    controls
+        .events()
+        .publish(events.into_iter().collect::<ClipEvents>());
+}
+
 fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
     rig_with(clip, max)
 }
@@ -135,7 +142,7 @@ fn a_new_clip_ends_the_old_clips_notes() {
     let clip = MidiClipNode::new([at(10, on(60)), at(1_000, off(60))]);
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
-    controls.set([at(100, on(72))]);
+    publish(&controls, [at(100, on(72))]);
     assert_eq!(controls.len(), 1);
     exec.process(64, &rolling(64), &[], &mut []);
     assert_eq!(
@@ -156,7 +163,7 @@ fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
         exec.process(64, &rolling(f), &[], &mut []);
     }
     assert_eq!(heard(&seen), vec![(10, on(60))], "no publish, no release");
-    controls.set([at(5_000, on(72))]);
+    publish(&controls, [at(5_000, on(72))]);
     for f in [192, 256, 320] {
         exec.process(64, &rolling(f), &[], &mut []);
     }
@@ -171,8 +178,8 @@ fn two_publishes_between_blocks_release_each_held_note_once() {
     let clip = MidiClipNode::new([at(10, on(60)), at(20, on(62)), at(100_000, off(60))]);
     let (_ed, mut exec, controls, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
-    controls.set([at(5_000, on(72))]);
-    controls.set([at(5_000, on(73))]);
+    publish(&controls, [at(5_000, on(72))]);
+    publish(&controls, [at(5_000, on(73))]);
     exec.process(64, &rolling(64), &[], &mut []);
     exec.process(64, &rolling(128), &[], &mut []);
     let offs: Vec<_> = heard(&seen)
@@ -193,7 +200,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
         .expect("a clip is forkable")
         .fork(ForkMode::Live)
         .expect("a clip forks");
-    controls.set([at(100, on(72))]);
+    publish(&controls, [at(100, on(72))]);
     let (_ed, mut exec, (), seen) = rig_with(Unforkable(forked.node), 256);
     roll(&mut exec, 512, 256);
     assert_eq!(heard(&seen), vec![(300, on(60))]);
@@ -267,18 +274,6 @@ fn refused_note_offs_are_retried_until_none_is_held() {
     assert_eq!(room, 296);
     assert_eq!(offs.iter().filter(|&&f| f == 512).count(), room);
     assert_eq!(offs.iter().filter(|&&f| f == 768).count(), 400 - room);
-}
-
-/// **Setting the events the clip already holds cuts nothing.** Note 60 is
-/// sounding; the same events (in another order) are set again; no note-off.
-#[test]
-fn setting_the_same_events_cuts_nothing() {
-    let events = [at(10, on(60)), at(1_000, off(60))];
-    let (_ed, mut exec, controls, seen) = rig(MidiClipNode::new(events), 64);
-    exec.process(64, &rolling(0), &[], &mut []);
-    controls.set([events[1], events[0]]);
-    exec.process(64, &rolling(64), &[], &mut []);
-    assert_eq!(heard(&seen), vec![(10, on(60))]);
 }
 
 /// **A note lands on its frame where the beat is not a whole number of

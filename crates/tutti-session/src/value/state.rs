@@ -16,7 +16,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
 use super::error::{ValueError, ValueErrorKind};
-use super::slot::{self, SlotCell, SlotId};
+use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
 use crate::AppKey;
 
@@ -145,10 +145,40 @@ impl ValueTable {
             .insert(id, slot::erase(slot));
     }
 
-    /// Forgets `node`'s params: its targets are gone.
+    /// Registers the values of a node, from its [`NodeSlots`]. Control
+    /// thread.
+    pub(crate) fn provide_node(&self, slots: NodeSlots) {
+        self.params.lock_recover().slots.extend(slots.0);
+    }
+
+    /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
+    /// session's own wiring (a clip `Midi` plays).
+    pub(crate) fn write<A: Stageable>(&self, assign: A) -> Result<(), ValueErrorKind> {
+        let held = self.enter().ok_or(ValueErrorKind::Reentrant)?;
+        let mut batch = Batch::new(held.params());
+        assign.stage(&mut batch).map_err(|fail| fail.kind)?;
+        batch.land();
+        Ok(())
+    }
+
+    /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
-        let gone = self.params.lock_recover().nodes.remove(&node);
-        drop(gone);
+        let (gone, slots) = {
+            let mut params = self.params.lock_recover();
+            let gone = params.nodes.remove(&node);
+            let ids: Vec<SlotId> = params
+                .slots
+                .keys()
+                .filter(|id| id.node() == Some(node))
+                .copied()
+                .collect();
+            let slots: Vec<_> = ids
+                .iter()
+                .filter_map(|id| params.slots.remove(id))
+                .collect();
+            (gone, slots)
+        };
+        drop((gone, slots));
     }
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.

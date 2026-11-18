@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClockMap, MidiClipControls, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformControls,
+    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformControls,
     MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule,
     SendAt, TimedMidiEvent, compile_routes,
 };
@@ -677,12 +677,10 @@ impl<T> MidiRouteRule<T> {
     }
 }
 
-/// One clip: its controls, the MPE transform between it and its target, and
-/// the target it feeds. The target is fed by the transform, which the clip
-/// feeds.
+/// One clip: the MPE transform between it and its target, and the target it
+/// feeds. The target is fed by the transform, which the clip feeds.
 #[derive(Debug)]
 struct Clip {
-    controls: MidiClipControls,
     /// The transform node, which is part of the clip's wiring: it goes with
     /// the clip.
     transform: NodeKey,
@@ -1313,11 +1311,11 @@ impl<F: Float> Midi<'_, F> {
             .collect::<Result<Vec<_>>>()?;
         let clip = match self.clip(target) {
             Some(clip) => {
-                self.state.clips[&clip.erase()].controls.set(events);
+                self.publish_clip(clip, events.into_iter().collect());
                 clip.erase()
             }
             None => {
-                let (clip, controls) = self.graph.add(MidiClipNode::new(events));
+                let (clip, _) = self.graph.add(MidiClipNode::new(events));
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.
@@ -1331,7 +1329,6 @@ impl<F: Float> Midi<'_, F> {
                 self.state.clips.insert(
                     clip,
                     Clip {
-                        controls,
                         transform,
                         mpe,
                         target,
@@ -1399,11 +1396,19 @@ impl<F: Float> Midi<'_, F> {
         let target = target.into();
         match self.clip(target) {
             Some(clip) => {
-                self.state.clips[&clip.erase()].controls.clear();
+                self.publish_clip(clip, ClipEvents::default());
                 Ok(())
             }
             None => Err(MidiError::NoClip(target)),
         }
+    }
+
+    /// Writes `events` as the events of `clip`, through the clip's target.
+    fn publish_clip(&self, clip: Key<MidiClipNode>, events: ClipEvents) {
+        self.graph
+            .value_table()
+            .write(clip.events().to(events))
+            .expect("a clip's events are registered with its node");
     }
 
     /// Returns `target`'s clip node, if it has one.
