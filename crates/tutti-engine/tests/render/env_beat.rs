@@ -300,7 +300,8 @@ fn the_env_walk_is_the_env_beat() {
 
 /// Frames on which the click starts: two silent frames (or the start), then sounding.
 /// One zero frame is not silence: a click's sine reads an exact zero where its phase
-/// wraps to a whole cycle.
+/// wraps to a whole cycle. A sine below a quarter of the rate never reads two exact
+/// zeros in a row, so two silent frames are silence.
 fn onsets(stereo: &[f32]) -> Vec<usize> {
     let left: Vec<f32> = stereo.iter().step_by(2).copied().collect();
     (1..left.len())
