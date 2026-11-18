@@ -43,9 +43,9 @@ use crate::BlockConfig;
 ///
 /// The graph, its taps, meters and inlets, the transport, the metronome, MIDI,
 /// the offline, system and device clocks, a bounce, the session's jobs (the
-/// pool, a sampler stream, an analysis) and modulation work in either. What is
-/// `f32` by its FFI or its nodes (plugins, the instruments, a take, the capture
-/// inputs) is hosted by an `f32` session alone: each is an `impl` on
+/// pool, a sampler stream, an analysis), modulation, the capture inputs and the
+/// takes work in either. What is `f32` by its FFI or its nodes (plugins, the
+/// instruments) is hosted by an `f32` session alone: each is an `impl` on
 /// `Session<K, C>` where `C: Clock<Float = f32>`, and the trait is the seam where
 /// an `f64` session has nothing to do.
 pub trait SessionFloat: Float + crate::format::Sealed {}

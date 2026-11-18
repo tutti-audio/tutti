@@ -10,7 +10,7 @@ use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 #[path = "../support/f64_nodes.rs"]
-mod f64_nodes;
+pub(super) mod f64_nodes;
 use f64_nodes::{Dc, FINE, Gain};
 
 /// **The device callback of an `f64` session hands the stream `0.75 * FINE`

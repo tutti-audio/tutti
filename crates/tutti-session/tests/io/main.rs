@@ -14,6 +14,9 @@ mod device_input;
 mod device_listing;
 #[cfg(feature = "device")]
 mod f64_device;
+// An `f64` session's take.
+#[cfg(all(feature = "device", feature = "audio-io", feature = "sampler"))]
+mod f64_takes;
 // A restart onto another rate, width or block, and the MIDI clock's re-rate.
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_clock;

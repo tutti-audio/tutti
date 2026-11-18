@@ -430,12 +430,11 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
             return Err(ClockError::new(self, after_stop(switch, undone)));
         }
         #[cfg(feature = "audio-io")]
-        events.extend(
-            self.inputs
-                .close_all()
-                .into_iter()
-                .map(|input| SessionEvent::Device(crate::DeviceEvent::InputClosed { input })),
-        );
+        events.extend(self.inputs.close_all().into_iter().map(|input| {
+            SessionEvent::Device(crate::DeviceEvent::InputClosed {
+                input: input.node().erase(),
+            })
+        }));
         let audio_host = self.running.audio_host;
         let (mut system, mut handle) = self.with_clock::<SystemClock>(SystemEngine {
             host: None,

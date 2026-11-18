@@ -12,7 +12,7 @@ fn range(min: u32, max: u32, format: cpal::SampleFormat) -> cpal::SupportedStrea
 }
 
 /// One pull into `buf`, viewed at the mic's own width.
-fn pull_into(mic: &mut MicIn, buf: &mut [f32]) -> Pull {
+fn pull_into<F: Float>(mic: &mut MicIn<F>, buf: &mut [F]) -> Pull {
     let out = InterleavedMut::new(buf, Source::layout(mic)).unwrap();
     mic.pull(out)
 }
@@ -48,7 +48,7 @@ fn a_device_covering_the_graph_rate_is_opened_at_it() {
 /// **F32 wins when several supported ranges cover the rate.**
 ///
 /// Not cosmetic: `build_input` converts every other format per sample, and
-/// F32 is already the graph's type.
+/// F32 is a float device format and needs no integer scaling.
 #[test]
 fn f32_is_preferred_over_an_integer_format_at_the_same_rate() {
     let chosen = choose_input_config(
@@ -158,7 +158,11 @@ fn a_full_ring_counts_the_frames_the_callback_dropped() {
 
 /// A capture of `device` inputs, selecting `inputs`, over rings of room for
 /// `frames` frames; the mic end and the monitor's.
-fn capture(device: u16, inputs: &[usize], frames: usize) -> (Capture, MicIn, TapReader) {
+fn capture<F: Float>(
+    device: u16,
+    inputs: &[usize],
+    frames: usize,
+) -> (Capture<F>, MicIn<F>, TapReader<F>) {
     let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
     let width = select.dst_layout();
     let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples(frames));
@@ -187,7 +191,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     let data: Vec<f32> = (0..3)
         .flat_map(|f| (0..16).map(move |c| (100 * f + c) as f32))
         .collect();
-    cap.block(&data, edge::from_native::<f32>);
+    cap.block(&data, edge::from_native::<f32, f32>);
     assert_eq!(Source::layout(&mic), ChannelLayout::STEREO);
     assert_eq!(
         mic.topology().positions().unwrap(),
@@ -221,13 +225,16 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
 #[test]
 fn a_six_input_interface_is_six_inputs_not_five_point_one() {
     let (mut cap, mut mic, _ring) = capture(6, &[0, 1, 2, 3, 4, 5], 64);
-    cap.block(&[0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6], edge::from_native::<f32>);
+    cap.block(
+        &[0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6],
+        edge::from_native::<f32, f32>,
+    );
     let mut out = [0.0f32; 6];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(1)));
     assert_eq!(out, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
 
     let (mut cap, mut mic, _ring) = capture(1, &[0, 0], 64);
-    cap.block(&[0.25f32, -0.5], edge::from_native::<f32>);
+    cap.block(&[0.25f32, -0.5], edge::from_native::<f32, f32>);
     let mut out = [0.0f32; 4];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(2)));
     assert_eq!(out, [0.25, 0.25, -0.5, -0.5]);
@@ -242,13 +249,14 @@ fn a_six_input_interface_is_six_inputs_not_five_point_one() {
 fn a_big_callback_runs_in_chunks_and_integers_convert() {
     let (mut cap, mut mic, _ring) = capture(2, &[1], 512);
     let data: Vec<i16> = (0..150).flat_map(|f| [0, f as i16 * 100]).collect();
-    cap.block(&data, edge::from_native::<i16>);
+    cap.block(&data, edge::from_native::<i16, f32>);
     let mut out = vec![0.0f32; 200];
     let n = pull_into(&mut mic, &mut out);
     assert_eq!(n, Pull::Frames(Samples(150)));
     for (f, &s) in out[..150].iter().enumerate() {
+        // An `i16` over 2^15 is exact in `f32`.
         let want = f32::from(f as i16 * 100) / 32768.0;
-        assert!((s - want).abs() < 1e-6, "frame {f}: {s} vs {want}");
+        assert_eq!(s, want, "frame {f}");
     }
 }
 
@@ -382,12 +390,12 @@ fn the_capture_callback_does_not_allocate() {
     let f32s = vec![0.25f32; 8 * 150];
     let i16s = vec![1000i16; 8 * 150];
     // Warm both conversions, outside the gate.
-    cap.block(&f32s, edge::from_native::<f32>);
-    cap.block(&i16s, edge::from_native::<i16>);
+    cap.block(&f32s, edge::from_native::<f32, f32>);
+    cap.block(&i16s, edge::from_native::<i16, f32>);
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..8 {
-            cap.block(&f32s, edge::from_native::<f32>);
-            cap.block(&i16s, edge::from_native::<i16>);
+            cap.block(&f32s, edge::from_native::<f32, f32>);
+            cap.block(&i16s, edge::from_native::<i16, f32>);
         }
     });
     // The rings filled and refused whole frames; nothing was lost silently.
@@ -413,10 +421,78 @@ fn ring_depths_follow_the_stream_rate() {
 #[test]
 fn an_offset_binary_input_reads_mid_scale_as_silence() {
     let (mut cap, mut mic, _ring) = capture(1, &[0], 64);
-    cap.block(&[32768u16, 49152, 0], edge::from_offset::<u16>);
+    cap.block(&[32768u16, 49152, 0], edge::from_offset::<u16, f32>);
     let mut out = vec![9.0f32; 8];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
     assert_eq!(out[..3], [0.0, 0.5, -1.0]);
-    assert_eq!(edge::from_offset::<u8>(128), 0.0);
-    assert_eq!(edge::from_offset::<u32>(2_147_483_648), 0.0);
+    assert_eq!(edge::from_offset::<u8, f32>(128), 0.0);
+    assert_eq!(edge::from_offset::<u32, f32>(2_147_483_648), 0.0);
+}
+
+/// An `i32` device keeps its 31 bits in an `f64` graph: `0x4000_0001` is
+/// `(2^30 + 1) / 2^31` exactly, a value an `f32` cannot hold (24 bits).
+#[test]
+fn an_i32_capture_in_an_f64_graph_keeps_more_than_24_bits() {
+    let want = f64::from((1u32 << 30) + 1) / f64::from(1u32 << 31);
+    assert_ne!(
+        f64::from(edge::from_native::<i32, f32>(0x4000_0001)),
+        want,
+        "setup: an f32 loses the last bit"
+    );
+    let (mut cap, mut mic, _ring) = capture::<f64>(1, &[0], 8);
+    cap.block(
+        &[0x4000_0001i32, i32::MIN, 0],
+        edge::from_native::<i32, f64>,
+    );
+    let mut out = [9.0f64; 4];
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
+    assert_eq!(out[..3], [want, -1.0, 0.0]);
+}
+
+/// Offset-binary `u8`, `u16` and `u32` read by the rule in `Sample` on the
+/// signed format of their width, in either float: mid-scale is silence, the
+/// top code is `(2^(n-1) - 1) / 2^(n-1)` and zero is -1.
+fn offset_binary_reads_by_the_sample_rule<F: Float + PartialEq + std::fmt::Debug>() {
+    let f = |x: f64| F::from_f64(x);
+    assert_eq!(edge::from_offset::<u8, F>(128), f(0.0));
+    assert_eq!(edge::from_offset::<u8, F>(255), f(127.0 / 128.0));
+    assert_eq!(edge::from_offset::<u8, F>(0), f(-1.0));
+    assert_eq!(edge::from_offset::<u16, F>(32768), f(0.0));
+    assert_eq!(edge::from_offset::<u16, F>(49152), f(0.5));
+    assert_eq!(edge::from_offset::<u16, F>(65535), f(32767.0 / 32768.0));
+    assert_eq!(edge::from_offset::<u32, F>(2_147_483_648), f(0.0));
+    assert_eq!(edge::from_offset::<u32, F>(0), f(-1.0));
+}
+
+#[test]
+fn offset_binary_reads_by_the_sample_rule_in_f32() {
+    offset_binary_reads_by_the_sample_rule::<f32>();
+}
+
+/// In `f64` the `u32` code `0xC000_0001` (signed `0x4000_0001`) keeps its last
+/// bit, which `f32` rounds away.
+#[test]
+fn offset_binary_reads_by_the_sample_rule_in_f64() {
+    offset_binary_reads_by_the_sample_rule::<f64>();
+    let want = f64::from((1u32 << 30) + 1) / f64::from(1u32 << 31);
+    assert_eq!(edge::from_offset::<u32, f64>(0xC000_0001), want);
+    assert_ne!(f64::from(edge::from_offset::<u32, f32>(0xC000_0001)), want);
+}
+
+/// The capture callback of an `f64` graph does not allocate either: `i32` and
+/// `f64` blocks wider than a chunk fill both rings and then overrun them.
+#[test]
+fn the_f64_capture_callback_does_not_allocate() {
+    let (mut cap, mut mic, _ring) = capture::<f64>(8, &[2, 3], 256);
+    let i32s = vec![1 << 20; 8 * 150];
+    let f64s = vec![0.25f64; 8 * 150];
+    cap.block(&i32s, edge::from_native::<i32, f64>);
+    cap.block(&f64s, edge::from_native::<f64, f64>);
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..8 {
+            cap.block(&i32s, edge::from_native::<i32, f64>);
+            cap.block(&f64s, edge::from_native::<f64, f64>);
+        }
+    });
+    assert!(Source::take_lost(&mut mic).get() > 0);
 }
