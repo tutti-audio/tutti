@@ -31,11 +31,9 @@ fn an_azimuth_piece_across_the_seam_passes_through_180_never_0() {
     let p = Piece::new(170.0, -170.0, Law::Linear);
     let az = UnitParam::Azimuth;
     for t in [0.0f64, 0.125, 0.25, 0.5, 0.75, 0.875] {
-        let want = az.wrap(170.0 + 20.0 * t as f32);
+        let want = az.wrap(170.0 + 20.0 * t);
         let got = p.value(Some(az), at(t));
-        // The endpoints and the result are `f32` words: the tolerance is a few `f32`
-        // ulps at 170.
-        assert!((got - want).abs() < 1e-4, "t {t}: {got} vs {want}");
+        assert!((got - want).abs() < 1e-12, "t {t}: {got} vs {want}");
         assert!(got.abs() > 169.0, "t {t}: {got} is nowhere near 0");
     }
     assert_eq!(
@@ -45,7 +43,7 @@ fn an_azimuth_piece_across_the_seam_passes_through_180_never_0() {
     );
     let eased = Piece::new(170.0, -170.0, Law::PowerIn(Exponent::of(2.0)));
     let want = az.wrap(170.0 + 20.0 * 0.25);
-    assert!((eased.value(Some(az), at(0.5)) - want).abs() < 1e-4);
+    assert!((eased.value(Some(az), at(0.5)) - want).abs() < 1e-12);
 }
 
 /// A param that is a line interpolates as `value` does, across the same ends:
@@ -74,7 +72,7 @@ fn a_linear_param_piece_is_unchanged_by_the_circular_rule() {
 fn an_azimuth_ramp_takes_the_short_arc_and_lands_on_its_target() {
     let az = UnitParam::Azimuth;
     let n = 4;
-    let got: Vec<f32> = (0..n)
+    let got: Vec<f64> = (0..n)
         .map(|k| Piece::ramp_at(Some(az), 170.0, -170.0, Samples(k), Samples(n)))
         .collect();
     assert_eq!(got[3], -170.0);

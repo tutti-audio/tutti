@@ -52,7 +52,7 @@ pub struct NoteAdsr {
     attack: Samples,
     decay: Samples,
     release: Samples,
-    sustain: f32,
+    sustain: f64,
     held: [u64; NOTE_WORDS],
     holding: u32,
     stage: Stage,
@@ -72,8 +72,7 @@ impl NoteAdsr {
             decay: Samples(0),
             release: Samples(0),
             // A NaN sustain is 0: the envelope never sends a NaN.
-            // The envelope's legs are `f32` lane levels: the sustain narrows once here.
-            sustain: if s >= 0.0 { s.min(1.0) as f32 } else { 0.0 },
+            sustain: if s >= 0.0 { s.min(1.0) } else { 0.0 },
             held: [0; NOTE_WORDS],
             holding: 0,
             stage: Stage::Idle,
@@ -83,7 +82,7 @@ impl NoteAdsr {
 
     /// Enters `stage` on play frame `at` from level `from`, through any
     /// zero-length stage: its leg.
-    fn enter(&mut self, mut stage: Stage, at: Frame, mut from: f32) -> Leg {
+    fn enter(&mut self, mut stage: Stage, at: Frame, mut from: f64) -> Leg {
         loop {
             let (to, length, next) = match stage {
                 Stage::Attack => (1.0, self.attack, Stage::Decay),
@@ -149,7 +148,7 @@ impl ControlSource for NoteAdsr {
         }
     }
 
-    fn heard(&mut self, t: Frame, level: f32, ump: Ump) -> Option<Leg> {
+    fn heard(&mut self, t: Frame, level: f64, ump: Ump) -> Option<Leg> {
         let (on, key) = match ump.note_key_event()? {
             NoteKeyEvent::On(key) => (true, key),
             NoteKeyEvent::Off(key) => (false, key),

@@ -478,7 +478,7 @@ pub struct FirSummary {
     /// A Schroeder-integrated RT60 per band, lowest first.
     pub rt60: [Seconds; 3],
     /// Its energy.
-    pub energy: f32,
+    pub energy: f64,
 }
 
 #[cfg(test)]

@@ -87,7 +87,7 @@ impl ControlSource for LevelFollower {
     }
 
     fn grid(&mut self, _t: Frame, frames: Samples) -> Option<Leg> {
-        let leg = Leg::linear(self.from as f32, self.env as f32, frames);
+        let leg = Leg::linear(self.from, self.env, frames);
         self.from = self.env;
         Some(leg)
     }

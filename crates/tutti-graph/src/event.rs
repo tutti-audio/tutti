@@ -5,11 +5,13 @@
 //! port may have several sources, merged deterministically by `(offset,
 //! source order)`, where source order is the source port's `(NodeKey, port)`
 //! — layering a keyboard and a clip is the normal case, not an edge case.
-//! Automation is carried as **ramp** events ([`ParamRamp`]: relative, from
-//! wherever the param stands) and as **curve segments** ([`ParamSegment`]:
-//! absolute, between their own endpoints), both moving along a closed set of
-//! shapes ([`Law`]) a param port evaluates per frame.
-//!
+//! Automation is carried as **ramp** events ([`ParamRamp`](crate::ParamRamp):
+//! relative, from wherever the param stands) and as **curve segments**
+//! ([`ParamSegment`](crate::ParamSegment): absolute, between their own
+//! endpoints), both moving along a closed set of shapes
+//! ([`Law`](tutti_curve::Law)) a param port evaluates per frame. They are
+//! [`ParamEvent`]s, and travel in a buffer of their own beside the port's
+//! events, merged and delayed with them, so a MIDI event stays 32 bytes.
 //!
 //! A MIDI event carries a [`tutti_ump::Ump`]. The graph reads one fact of it,
 //! [`Event::is_note_off`], which the delay FIFO's overflow policy needs, and
@@ -18,537 +20,17 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 
-use tutti_curve::{Curvature, Exponent, Law, Piece};
 use tutti_ump::Ump;
-use tutti_units::{
-    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam,
-};
+use tutti_units::Samples;
 
-use crate::declare::Scalar;
-use crate::param::control_word;
+use crate::param_event::ParamEvent;
 use crate::time::Offset;
-
-/// A ramp of one parameter from the value it has at the event's frame to a
-/// target, starting there: linear, or along a [`Law`]
-/// ([`with_shape`](Self::with_shape)).
-///
-/// **Relative, unlike a [`ParamSegment`].** Its start value is whatever the
-/// receiving port's source holds on the event's frame, so the shape is
-/// evaluated exactly as a segment's is, with that value as `from`: frame `j`
-/// after the event (`j = 0` its own) reads
-/// [`Piece::value`] at `(j + 1) / duration` (`from + (target - from) · shape.eval(t)`), and `target`
-/// from frame `duration - 1` on. Re-sending one restarts it from where the
-/// source stands.
-///
-/// A shape that needs `from` to be chosen ([`Law::Exp`]'s
-/// geometric `k = ln(to / from)`) wants a [`ParamSegment`], which names its
-/// start value: a shape is a function of progress alone.
-///
-/// Addressed by [`ParamAddr`], so it reaches both tutti's own parameters and a
-/// foreign unit's (a hosted plugin's numeric id) without a later breaking
-/// change:
-///
-/// - **Built-in params** are built from a typed [`ParamKey<U>`] and a `U`,
-///   and read back the same way, so the unit is checked at both ends. In
-///   between the value travels type-erased (the stable [`UnitAddr`] id and
-///   the raw `f32`), because one event port carries ramps for parameters of
-///   different units and an `Event` has to be one `Copy` type. The raw value
-///   is private: nothing reads a built-in ramp without naming its key.
-/// - **Foreign params** ([`ParamRamp::foreign`]) carry a [`ParamId`] and
-///   a raw value in the foreign unit's own normalisation. That is the C ABI
-///   boundary the units rule stops at: tutti does not know the unit.
-///
-/// ```
-/// use tutti_graph::{Exponent, Law, ParamRamp};
-/// use tutti_units::{Db, Hz, ParamId, ParamKey, Samples};
-/// let r = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(800.0), Samples(64));
-/// assert_eq!(r.target(ParamKey::<Hz>::CUTOFF), Some(Hz(800.0)));
-/// assert_eq!(r.target(ParamKey::<Db>::THRESHOLD), None); // another param
-/// assert_eq!(r.foreign_target(ParamId::new(7)), None); // not a foreign param at all
-/// assert_eq!(r.shape(), Law::Linear);
-/// let eased = r.with_shape(Law::PowerIn(Exponent::of(2.0)));
-/// assert_eq!(eased.shape(), Law::PowerIn(Exponent::of(2.0)));
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ParamRamp {
-    addr: ParamAddr,
-    target: f32,
-    // Frames, saturated to `u32` (what the param port counts in anyway):
-    // a `usize` would align the whole event to 8 and push it past 32
-    // bytes.
-    duration: u32,
-    // The shape, packed as a segment packs it (a tag byte and an `f32`),
-    // so an `Event` stays 32 bytes.
-    shape_param: f32,
-    shape: ShapeTag,
-}
-
-/// A unit's value as the `f32` word a param event carries (B3 widens it).
-fn word<U: Scalar>(value: U) -> f32 {
-    control_word(value.to_cell())
-}
-
-impl ParamRamp {
-    /// Ramp built-in parameter `key` linearly to `target` over `duration`
-    /// (zero is a step).
-    pub fn new<U: Scalar>(key: ParamKey<U>, target: U, duration: Samples) -> Self {
-        // B3: the event carries `f32`; the target narrows once here.
-        Self::packed(ParamAddr::unit(key.addr()), word(target), duration)
-    }
-
-    /// Ramp a foreign unit's parameter `id` linearly to the raw `target`
-    /// over `duration`. The value is in the foreign unit's own terms (see the
-    /// type docs).
-    ///
-    /// A hosted plugin's node starts the ramp from where the parameter
-    /// stood at the end of the frame before the ramp's (the segment it was
-    /// on, else the value the node last gave it). On a parameter the node has
-    /// never given a value it knows no start, and the ramp is a jump to
-    /// `target` on its frame, whatever its duration and shape.
-    pub fn foreign(id: ParamId, target: f32, duration: Samples) -> Self {
-        Self::packed(ParamAddr::Id(id), target, duration)
-    }
-
-    fn packed(addr: ParamAddr, target: f32, duration: Samples) -> Self {
-        let (shape, shape_param) = ShapeTag::pack(Law::Linear);
-        Self {
-            addr,
-            target,
-            duration: saturate(duration),
-            shape_param,
-            shape,
-        }
-    }
-
-    /// This ramp along `shape` instead of a straight line: a glide that
-    /// eases in or out from wherever the parameter stands. A zero duration
-    /// is still a step.
-    #[must_use]
-    pub fn with_shape(mut self, shape: Law) -> Self {
-        (self.shape, self.shape_param) = ShapeTag::pack(shape);
-        self
-    }
-
-    /// The shape it moves along ([`Law::Linear`] unless
-    /// [`with_shape`](Self::with_shape) set one).
-    pub fn shape(&self) -> Law {
-        self.shape.unpack(self.shape_param)
-    }
-
-    /// Which parameter this ramps — for routing on the address.
-    pub fn addr(&self) -> ParamAddr {
-        self.addr
-    }
-
-    /// The target, in `key`'s unit, if this ramp is for `key`.
-    pub fn target<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
-        (self.addr == ParamAddr::unit(key.addr())).then(|| U::from_cell(f64::from(self.target)))
-    }
-
-    /// The raw target, if this ramp is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: ParamId) -> Option<f32> {
-        (self.addr == ParamAddr::Id(id)).then_some(self.target)
-    }
-
-    /// The target as the wire carries it, whatever the unit: for the
-    /// graph's own param modulation, which is erased over the unit as the
-    /// port it drives is.
-    pub(crate) fn raw_target(&self) -> f32 {
-        self.target
-    }
-
-    /// How long the ramp takes (saturated at `u32::MAX` frames, about a
-    /// day at 48 kHz).
-    pub fn duration(&self) -> Samples {
-        Samples(self.duration as usize)
-    }
-}
-
-/// A frame count as a `u32`, saturating.
-fn saturate(n: Samples) -> u32 {
-    u32::try_from(n.get()).unwrap_or(u32::MAX)
-}
-
-/// A [`Law`]'s variant, as a byte: a segment or a ramp stores its law as this
-/// and an `f32`, so an [`Event`] stays 32 bytes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum ShapeTag {
-    Linear,
-    Hold,
-    PowerIn,
-    PowerOut,
-    PowerInOut,
-    Exp,
-    Smootherstep,
-}
-
-/// An exponent as the event's `f32` parameter word, saturated onto the finite
-/// positive `f32`s so the word is always a valid exponent again.
-fn exponent_word(p: Exponent) -> f32 {
-    (p.get() as f32).clamp(f32::MIN_POSITIVE, f32::MAX)
-}
-
-impl ShapeTag {
-    /// The law as its tag and parameter: how a segment and a ramp store it.
-    fn pack(law: Law) -> (Self, f32) {
-        match law {
-            Law::Linear => (Self::Linear, 0.0),
-            Law::Hold => (Self::Hold, 0.0),
-            Law::PowerIn(p) => (Self::PowerIn, exponent_word(p)),
-            Law::PowerOut(p) => (Self::PowerOut, exponent_word(p)),
-            Law::PowerInOut(p) => (Self::PowerInOut, exponent_word(p)),
-            Law::Exp(k) => (Self::Exp, k.get() as f32),
-            Law::Smootherstep => (Self::Smootherstep, 0.0),
-        }
-    }
-
-    /// The inverse of [`pack`](Self::pack). The parameter is only ever written
-    /// by `pack`, from a checked [`Exponent`] or [`Curvature`], so the
-    /// fallbacks below are never taken: they are the neutral parameter, not a
-    /// repair of a caller's value.
-    fn unpack(self, param: f32) -> Law {
-        let exponent = Exponent::new(f64::from(param)).unwrap_or(Exponent::ONE);
-        let curvature = Curvature::new(f64::from(param)).unwrap_or(Curvature::ZERO);
-        match self {
-            Self::Linear => Law::Linear,
-            Self::Hold => Law::Hold,
-            Self::PowerIn => Law::PowerIn(exponent),
-            Self::PowerOut => Law::PowerOut(exponent),
-            Self::PowerInOut => Law::PowerInOut(exponent),
-            Self::Exp => Law::Exp(curvature),
-            Self::Smootherstep => Law::Smootherstep,
-        }
-    }
-}
-
-/// A curve segment of one parameter: from a start value to an end value
-/// along a [`Law`], over a length in frames, evaluated by the param
-/// port **per frame inside the block** — sample-accurate non-linear
-/// automation, with no sub-chunking at breakpoints (doc 013, decision 7).
-///
-/// **Absolute, unlike a [`ParamRamp`].** A ramp moves from wherever its
-/// source's value stands; a segment says both its endpoints and where along
-/// itself it is at the event's frame. Re-sending the segment a producer is
-/// on (each block, after a seek, a loop wrap, a tempo change) is therefore
-/// idempotent: a producer can be a pure function of the transport, and a
-/// segment entered part-way renders what one started at its beginning
-/// would have there. The value at frame `j` after the event (`j = 0` is the
-/// event's own frame) is
-///
-/// ```text
-/// t = (position + j) / length
-/// t < 1:  Piece { from, to, shape }.value(t)   (from + (to - from) · shape.eval(t))
-/// t >= 1: to, held until the source's next event
-/// ```
-///
-/// A segment of a circular param ([`UnitParam::is_circular`], `Azimuth`) takes
-/// the short arc: the value for `t < 1` is `wrap(from + arc(from, to) ·
-/// shape.eval(t))`, so one from 170 to -170 passes through 180, never 0. The
-/// param's unit decides, not the segment.
-///
-/// [`new`](Self::new) builds the ramp convention (`position = 1`: the
-/// event's frame is one step in, `to` lands on frame `duration - 1`);
-/// [`resumed`](Self::resumed) sets a fractional position and length, for a
-/// producer whose breakpoints fall between frames. A **negative position**
-/// is a delayed start: the source holds `from` until `position + j` reaches
-/// 0, then moves. A length that is not finite and above zero (zero,
-/// negative, infinite, NaN) is a step to `to` on the event's frame.
-///
-/// **Interrupted** by any later ramp or segment event for the same
-/// parameter on the same source, from that event's frame: a segment jumps to
-/// its own value there (it is absolute), a ramp moves on from the value the
-/// interrupted segment had reached.
-///
-/// Addressed and typed as [`ParamRamp`] is (built-in params by
-/// [`ParamKey<U>`], foreign ones by a `ParamId`). A param port's range
-/// is applied when the port reads the value, never to the endpoints.
-///
-/// ```
-/// use tutti_graph::{Exponent, Law, ParamSegment};
-/// use tutti_units::{Hz, ParamKey, Samples};
-/// let s = ParamSegment::new(
-///     ParamKey::<Hz>::CUTOFF,
-///     Hz(200.0),
-///     Hz(800.0),
-///     Samples(480),
-///     Law::PowerIn(Exponent::of(2.0)),
-/// );
-/// assert_eq!(s.target(ParamKey::<Hz>::CUTOFF), Some(Hz(800.0)));
-/// assert_eq!(s.start(ParamKey::<Hz>::CUTOFF), Some(Hz(200.0)));
-/// assert_eq!(s.shape(), Law::PowerIn(Exponent::of(2.0)));
-/// // Frame 239 is 240/480 of the way: a quadratic ease-in is a quarter up.
-/// assert_eq!(s.raw_value_after(Samples(239)), 200.0 + 600.0 * 0.25);
-/// assert_eq!(s.raw_value_after(Samples(479)), 800.0);
-/// assert_eq!(s.arrives_after(), Some(Samples(479)));
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ParamSegment {
-    // The address, packed (a `ParamAddr` takes 8 bytes and would push an
-    // `Event` past 32): a built-in param's packed `UnitAddr` (index in the
-    // high byte of its `u16`, the `UnitParam` discriminant in the low), or the
-    // foreign id, told apart by `foreign`.
-    id: u32,
-    from: f32,
-    to: f32,
-    // Position and length in frames. `f32`, not `SamplePosition`'s `f64`:
-    // this is where the types stop, because the event must stay 32 bytes.
-    // An `f32` frame count is exact to 2^24 frames (≈ 5.8 minutes at
-    // 48 kHz); past that a segment's progress rounds to a few frames.
-    position: f32,
-    length: f32,
-    shape_param: f32,
-    shape: ShapeTag,
-    foreign: bool,
-}
-
-impl ParamSegment {
-    /// A segment of built-in parameter `key` from `from` to `to` along
-    /// `shape` over `duration` frames, in the ramp convention: the event's
-    /// frame is one step in, and `to` lands on its last frame (a zero
-    /// duration is a step to `to`).
-    pub fn new<U: Scalar>(key: ParamKey<U>, from: U, to: U, duration: Samples, shape: Law) -> Self {
-        // B3: the event carries `f32`; the ends narrow once here.
-        Self::unit(key.addr(), word(from), word(to), duration, shape)
-    }
-
-    /// A segment of built-in parameter `param` (a [`UnitParam`],
-    /// which is its index-0 address, or a [`UnitAddr`]) in its raw `f32` domain, as
-    /// [`new`](Self::new) otherwise: for a producer that is erased over the
-    /// unit (a control lane built from a `ParamAddr`, doc 014 §4.1), and for
-    /// a param with no [`ParamKey`] yet. The raw value is exactly what
-    /// [`new`](Self::new) sends for a key with this id: a unit's raw value is
-    /// its bits.
-    pub fn unit(
-        param: impl Into<UnitAddr>,
-        from: f32,
-        to: f32,
-        duration: Samples,
-        shape: Law,
-    ) -> Self {
-        Self::packed(
-            u32::from(param.into().to_u16()),
-            false,
-            from,
-            to,
-            duration,
-            shape,
-        )
-    }
-
-    /// A segment of a foreign unit's parameter `id`, in its own
-    /// normalisation, as [`new`](Self::new) otherwise.
-    pub fn foreign(id: ParamId, from: f32, to: f32, duration: Samples, shape: Law) -> Self {
-        Self::packed(id.get(), true, from, to, duration, shape)
-    }
-
-    fn packed(id: u32, foreign: bool, from: f32, to: f32, duration: Samples, shape: Law) -> Self {
-        let (tag, shape_param) = ShapeTag::pack(shape);
-        Self {
-            id,
-            from,
-            to,
-            position: 1.0,
-            length: duration.get() as f32,
-            shape_param,
-            shape: tag,
-            foreign,
-        }
-    }
-
-    /// This segment, `position` frames along a `length`-frame span at the
-    /// event's frame: for a producer whose breakpoints fall between frames,
-    /// or that enters a segment part-way (a seek, a loop wrap, each block's
-    /// re-send). Both are fractional; see the type docs for the value each
-    /// frame gets. A length that is not finite and above zero is a step to
-    /// `to`; a negative position holds `from` until it reaches 0.
-    #[must_use]
-    pub fn resumed(mut self, position: SamplePosition, length: SamplePosition) -> Self {
-        self.position = position.get() as f32;
-        self.length = length.get() as f32;
-        self
-    }
-
-    /// Which parameter this moves — for routing on the address.
-    pub fn addr(&self) -> ParamAddr {
-        if self.foreign {
-            return ParamAddr::Id(ParamId::new(self.id));
-        }
-        // Built from a `UnitAddr` by `new`, so it converts back.
-        u16::try_from(self.id)
-            .ok()
-            .and_then(|id| UnitAddr::try_from(id).ok())
-            .map_or(ParamAddr::Id(ParamId::new(self.id)), ParamAddr::unit)
-    }
-
-    /// Whether this segment is for `addr`. No conversion: what the param
-    /// port asks of every event, per event.
-    #[inline]
-    pub(crate) fn is_for(&self, addr: ParamAddr) -> bool {
-        match addr.as_unit() {
-            Some(a) => !self.foreign && self.id == u32::from(a.to_u16()),
-            None => matches!(addr, ParamAddr::Id(id) if self.foreign && self.id == id.get()),
-        }
-    }
-
-    /// The end value, in `key`'s unit, if this segment is for `key`.
-    pub fn target<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
-        self.is_for(ParamAddr::unit(key.addr()))
-            .then(|| U::from_cell(f64::from(self.to)))
-    }
-
-    /// The start value, in `key`'s unit, if this segment is for `key`.
-    pub fn start<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
-        self.is_for(ParamAddr::unit(key.addr()))
-            .then(|| U::from_cell(f64::from(self.from)))
-    }
-
-    /// The raw end value, if this segment is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: ParamId) -> Option<f32> {
-        self.is_for(ParamAddr::Id(id)).then_some(self.to)
-    }
-
-    /// The raw start value, if this segment is for foreign parameter `id`.
-    pub fn foreign_start(&self, id: ParamId) -> Option<f32> {
-        self.is_for(ParamAddr::Id(id)).then_some(self.from)
-    }
-
-    /// The shape it moves along.
-    pub fn shape(&self) -> Law {
-        self.shape.unpack(self.shape_param)
-    }
-
-    /// Its position along itself at the event's frame, in frames.
-    pub fn position(&self) -> SamplePosition {
-        SamplePosition(f64::from(self.position))
-    }
-
-    /// Its length, in frames.
-    pub fn length(&self) -> SamplePosition {
-        SamplePosition(f64::from(self.length))
-    }
-
-    /// The raw value `j` frames after the event's frame (`Samples(0)`: its
-    /// own), whatever the unit: the value a param port gives this source
-    /// there, for a node that takes point values (a hosted plugin's
-    /// parameter) or a test. Past `u32::MAX` frames it reads the value
-    /// there.
-    pub fn raw_value_after(&self, j: Samples) -> f32 {
-        segment_value(
-            self.unit_param(),
-            self.piece(),
-            self.position,
-            self.length,
-            saturate(j),
-        )
-    }
-
-    /// How many frames after the event's frame the segment arrives: the
-    /// first `j` at which [`raw_value_after`](Self::raw_value_after) is the
-    /// end value (`Samples(0)` for a step). `None` when it never arrives
-    /// within `u32::MAX` frames. For a node that takes point values and
-    /// must land the end value on its frame.
-    pub fn arrives_after(&self) -> Option<Samples> {
-        arrival(self.position, self.length).map(|j| Samples(j as usize))
-    }
-
-    /// The pure part of the segment: its endpoints and its law, as a
-    /// [`Piece`]. A segment is this plus an address and a position
-    /// ([`position`](Self::position), [`length`](Self::length)).
-    pub fn piece(&self) -> Piece {
-        Piece::new(self.from, self.to, self.shape())
-    }
-
-    /// The built-in param this moves, `None` for a foreign one: what decides
-    /// whether it turns the short arc ([`UnitParam::is_circular`]). The
-    /// reading of a segment between frames (`Piece::value(param, t)` at its
-    /// progress) takes it; a reader of many frames takes it once.
-    pub fn unit_param(&self) -> Option<UnitParam> {
-        if self.foreign {
-            return None;
-        }
-        u16::try_from(self.id)
-            .ok()
-            .and_then(|id| UnitParam::try_from(id & 0xFF).ok())
-    }
-
-    /// The raw position and length, for the graph's own param port, which is
-    /// erased over the unit as the port it drives is.
-    pub(crate) fn timing(&self) -> (f32, f32) {
-        (self.position, self.length)
-    }
-}
-
-/// A segment's value `j` frames after its event: `to` exactly once it
-/// has arrived (see [`segment_progress`]), so a segment always lands
-/// on its end value. The one definition the param port, the reference
-/// interpreter and [`ParamSegment::raw_value_after`] share, as they share a
-/// shaping LUT.
-#[inline]
-pub(crate) fn segment_value(
-    param: Option<UnitParam>,
-    piece: Piece,
-    position: f32,
-    length: f32,
-    j: u32,
-) -> f32 {
-    match segment_progress(position, length, j) {
-        Some(t) => piece.value(param, t),
-        None => piece.to,
-    }
-}
-
-/// How many frames after its event a segment of `position` and `length`
-/// arrives: the first `j` at which [`segment_progress`] is `None` (0 for a
-/// step). `None` when it never arrives within `u32::MAX` frames. The one
-/// count the port's corners, the reference interpreter's and
-/// [`ParamSegment::arrives_after`] share.
-pub(crate) fn arrival(position: f32, length: f32) -> Option<u32> {
-    let (p, l) = (position, length);
-    if segment_progress(p, l, 0).is_none() {
-        return Some(0);
-    }
-    // Finite here. The guess is within a frame or two of the predicate's
-    // answer, which decides.
-    let guess = (l - p).ceil().max(0.0);
-    if guess >= u32::MAX as f32 {
-        return None;
-    }
-    let mut j = guess as u32;
-    while j > 0 && segment_progress(p, l, j - 1).is_none() {
-        j -= 1;
-    }
-    while segment_progress(p, l, j).is_some() {
-        j = j.checked_add(1)?;
-    }
-    Some(j)
-}
-
-/// A segment's progress `j` frames after its event, `None` once it has
-/// arrived: at 1 or past, NaN (a NaN position), or a length that is not
-/// finite and above zero (a step). A negative progress (a delayed start) is
-/// pinned to 0.
-#[inline]
-pub(crate) fn segment_progress(position: f32, length: f32, j: u32) -> Option<Normalized> {
-    if !(length > 0.0 && length.is_finite()) {
-        return None;
-    }
-    // `position` and `length` are the event's `f32` words, so the quotient is
-    // too; it widens once into the law's `f64` progress.
-    let t = (position + j as f32) / length;
-    (t < 1.0).then(|| Normalized::clamped(f64::from(t)))
-}
 
 /// What an [`Event`] says.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EventKind {
     /// A MIDI message, as UMP words.
     Midi(Ump),
-    /// A parameter automation ramp.
-    Ramp(ParamRamp),
-    /// A parameter curve segment: a shaped, absolute move a param port
-    /// evaluates per frame (see [`ParamSegment`]).
-    Segment(ParamSegment),
     /// A chord or scale taking effect.
     Harmony(Harmony),
     /// A request to an **event source**: re-send where it stands, from this
@@ -689,22 +171,6 @@ impl Event {
         matches!(self.kind, EventKind::Midi(u) if u.is_note_off())
     }
 
-    /// A parameter ramp starting at `offset`.
-    pub const fn ramp(offset: Offset, ramp: ParamRamp) -> Self {
-        Self {
-            offset,
-            kind: EventKind::Ramp(ramp),
-        }
-    }
-
-    /// A parameter curve segment, its event frame at `offset`.
-    pub const fn segment(offset: Offset, segment: ParamSegment) -> Self {
-        Self {
-            offset,
-            kind: EventKind::Segment(segment),
-        }
-    }
-
     /// A [`Resync`](EventKind::Resync) request at `offset`.
     pub const fn resync(offset: Offset) -> Self {
         Self {
@@ -743,6 +209,11 @@ pub enum EventOrderError {
 /// A block's events for one port: **sorted by offset, every offset inside the
 /// block** — by construction.
 ///
+/// It holds the port's [`Event`]s (MIDI and the rest: what iterating it, its
+/// `len` and `is_empty` and its deref to a slice are about) and, beside them,
+/// its [`ParamEvent`]s ([`params`](Self::params)), each list sorted
+/// separately. [`sub_blocks`](crate::Io::sub_blocks) cuts the block at both.
+///
 /// The only ways to get one are [`new`](Self::new), which checks,
 /// [`sort`](Self::sort), which sorts (stably, so equal offsets keep their
 /// order; control side — the sort may allocate), and the executor, whose event
@@ -751,11 +222,15 @@ pub enum EventOrderError {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SortedEvents<'a> {
     events: &'a [Event],
+    params: &'a [ParamEvent],
 }
 
 impl<'a> SortedEvents<'a> {
     /// No events.
-    pub const EMPTY: SortedEvents<'static> = SortedEvents { events: &[] };
+    pub const EMPTY: SortedEvents<'static> = SortedEvents {
+        events: &[],
+        params: &[],
+    };
 
     /// `events`, if they are sorted by offset and every offset is below
     /// `frames`.
@@ -773,7 +248,35 @@ impl<'a> SortedEvents<'a> {
                 return Err(EventOrderError::Unsorted { at: i });
             }
         }
-        Ok(Self { events })
+        Ok(Self {
+            events,
+            params: &[],
+        })
+    }
+
+    /// `events` with the param events `params` beside them, if each list is
+    /// sorted by offset and every offset is below `frames`.
+    ///
+    /// # Errors
+    ///
+    /// [`EventOrderError::OutOfBlock`] or [`EventOrderError::Unsorted`],
+    /// naming the first offending index of the list at fault (the events
+    /// first).
+    pub fn with_both(
+        events: &'a [Event],
+        params: &'a [ParamEvent],
+        frames: usize,
+    ) -> Result<Self, EventOrderError> {
+        let this = Self::new(events, frames)?;
+        for (i, e) in params.iter().enumerate() {
+            if e.offset.index() >= frames {
+                return Err(EventOrderError::OutOfBlock { at: i });
+            }
+            if i > 0 && params[i - 1].offset > e.offset {
+                return Err(EventOrderError::Unsorted { at: i });
+            }
+        }
+        Ok(Self { params, ..this })
     }
 
     /// Sorts `events` in place by offset (stably), then views them. Fails only
@@ -788,14 +291,30 @@ impl<'a> SortedEvents<'a> {
             return Err(EventOrderError::OutOfBlock { at });
         }
         events.sort_by_key(|e| e.offset);
-        Ok(Self { events })
+        Ok(Self {
+            events,
+            params: &[],
+        })
     }
 
-    /// Wrap a slice the executor's own rules keep sorted and in-block.
+    /// Wrap slices the executor's own rules keep sorted and in-block.
     /// Checked in debug builds.
     pub(crate) fn trusted(events: &'a [Event], frames: usize) -> Self {
         debug_assert_eq!(Self::new(events, frames).map(|_| ()), Ok(()));
-        Self { events }
+        Self {
+            events,
+            params: &[],
+        }
+    }
+
+    /// These events with `params` beside them, which the executor's own rules
+    /// keep sorted and in-block. Checked in debug builds.
+    pub(crate) fn trusted_params(self, params: &'a [ParamEvent], frames: usize) -> Self {
+        debug_assert_eq!(
+            Self::with_both(self.events, params, frames).map(|_| ()),
+            Ok(())
+        );
+        Self { params, ..self }
     }
 
     /// The events.
@@ -804,13 +323,20 @@ impl<'a> SortedEvents<'a> {
         self.events
     }
 
-    /// Number of events.
+    /// The param events (ramps and segments) of the port, sorted by offset.
+    #[must_use]
+    pub fn params(&self) -> &'a [ParamEvent] {
+        self.params
+    }
+
+    /// Number of events, the param events not counted.
     #[must_use]
     pub fn len(&self) -> usize {
         self.events.len()
     }
 
-    /// Whether there are none.
+    /// Whether there are no events. The param events are
+    /// [`params`](Self::params), and not counted.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
@@ -827,15 +353,17 @@ impl<'a> SortedEvents<'a> {
 ///
 /// Yields `(range, events)` pairs that tile the block in order: `range` is a
 /// run of frames (slice indices into the block's buffers), and `events` are
-/// exactly the events at `range.start` — so a node that applies `events`,
-/// then renders `range`, applies every event on its own frame. A block with
-/// no events is one chunk; several events on one offset arrive together, in
-/// their delivered order; an event on the last frame gets a one-frame chunk.
+/// exactly the events, and the param events, at `range.start` — so a node that
+/// applies `events`, then renders `range`, applies every event on its own
+/// frame. A block with no events is one chunk; several events on one offset
+/// arrive together, in their delivered order; an event on the last frame gets
+/// a one-frame chunk.
 ///
-/// Zero allocation: it walks the event slice it was built from.
+/// Zero allocation: it walks the event slices it was built from.
 #[derive(Clone, Debug)]
 pub struct SubBlocks<'a> {
     events: &'a [Event],
+    params: &'a [ParamEvent],
     pos: usize,
     frames: usize,
 }
@@ -846,6 +374,7 @@ impl<'a> SortedEvents<'a> {
     pub(crate) fn sub_blocks(self, frames: Samples) -> SubBlocks<'a> {
         SubBlocks {
             events: self.events,
+            params: self.params,
             pos: 0,
             frames: frames.0,
         }
@@ -867,15 +396,32 @@ impl<'a> Iterator for SubBlocks<'a> {
             .iter()
             .take_while(|e| e.offset.index() <= self.pos)
             .count();
+        let here_params = self
+            .params
+            .iter()
+            .take_while(|e| e.offset.index() <= self.pos)
+            .count();
         let (now, rest) = self.events.split_at(here);
-        let end = rest
-            .first()
-            .map_or(self.frames, |e| e.offset.index())
-            .min(self.frames);
+        let (now_params, rest_params) = self.params.split_at(here_params);
+        let next = [
+            rest.first().map(|e| e.offset.index()),
+            rest_params.first().map(|e| e.offset.index()),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        let end = next.unwrap_or(self.frames).min(self.frames);
         let range = self.pos..end;
         self.events = rest;
+        self.params = rest_params;
         self.pos = end;
-        Some((range, SortedEvents { events: now }))
+        Some((
+            range,
+            SortedEvents {
+                events: now,
+                params: now_params,
+            },
+        ))
     }
 }
 
@@ -1034,6 +580,10 @@ pub struct EventWriter<'a> {
     // `None` only for a detached writer, which the executor uses to fill the
     // unused tail of its fixed-size port table and never hands to a node.
     buf: Option<&'a mut Vec<Event>>,
+    // The port's param events: the preallocated buffer beside `buf`, empty
+    // of room when no node upstream of it writes any
+    // ([`Shape::with_param_events`](crate::Shape::with_param_events)).
+    params: Option<&'a mut Vec<ParamEvent>>,
     cap: usize,
     // `note_off_room(cap)`, computed once.
     room: usize,
@@ -1060,13 +610,15 @@ impl<'a> EventWriter<'a> {
     /// at offsets `< frames`.
     pub(crate) fn new(
         buf: &'a mut Vec<Event>,
+        params: &'a mut Vec<ParamEvent>,
         cap: usize,
         frames: u32,
         dropped: &'a PortCount,
     ) -> Self {
-        debug_assert!(buf.is_empty());
+        debug_assert!(buf.is_empty() && params.is_empty());
         Self {
             buf: Some(buf),
+            params: Some(params),
             cap,
             room: note_off_room(cap),
             frames,
@@ -1078,6 +630,7 @@ impl<'a> EventWriter<'a> {
     pub(crate) const fn detached() -> Self {
         Self {
             buf: None,
+            params: None,
             cap: 0,
             room: 0,
             frames: 0,
@@ -1119,6 +672,37 @@ impl<'a> EventWriter<'a> {
         let Some(buf) = self.buf.as_deref_mut() else {
             return self.reject(EventRejected::Full);
         };
+        if buf.last().is_some_and(|e| e.offset > event.offset) {
+            return self.reject(EventRejected::OutOfOrder);
+        }
+        buf.push(event);
+        Ok(())
+    }
+
+    /// Appends the param event `event`. Offsets must be non-decreasing and
+    /// inside the block, among the param events: they are sorted apart from
+    /// [`push`](Self::push)'s events. Audio thread: never allocates.
+    ///
+    /// A port holds at most its declared capacity of param events, and none
+    /// unless the node declares it writes them
+    /// ([`Shape::with_param_events`](crate::Shape::with_param_events)).
+    ///
+    /// # Errors
+    ///
+    /// [`EventRejected::OutOfBlock`], [`EventRejected::OutOfOrder`], or
+    /// [`EventRejected::Full`] at the port's capacity. A refused event is
+    /// dropped and counted as an event is.
+    pub fn push_param(&mut self, event: ParamEvent) -> Result<(), EventRejected> {
+        if event.offset.get() >= self.frames {
+            return self.reject(EventRejected::OutOfBlock);
+        }
+        let cap = self.cap;
+        let Some(buf) = self.params.as_deref_mut() else {
+            return self.reject(EventRejected::Full);
+        };
+        if buf.len() >= cap.min(buf.capacity()) {
+            return self.reject(EventRejected::Full);
+        }
         if buf.last().is_some_and(|e| e.offset > event.offset) {
             return self.reject(EventRejected::OutOfOrder);
         }
@@ -1172,6 +756,42 @@ impl<'a> EventWriter<'a> {
 pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize) -> u32 {
     let room = cap.saturating_sub(out.len());
     merge_walk(sources, room, |_, e| out.push(e))
+}
+
+/// Merge the param events of `sources` (each sorted by offset) into `out`,
+/// ordered by `(offset, source index)`: the merge of [`merge_into`] with no
+/// note-off to keep. At most `cap` land; the rest are counted, the later
+/// ones first.
+pub(crate) fn merge_params(
+    sources: &[&[ParamEvent]],
+    out: &mut Vec<ParamEvent>,
+    cap: usize,
+) -> u32 {
+    let room = cap.saturating_sub(out.len());
+    let mut heads = [0usize; 2 * crate::MAX_PORTS];
+    let heads = &mut heads[..sources.len()];
+    let (mut kept, mut dropped) = (0usize, 0u32);
+    loop {
+        let mut best: Option<(Offset, usize)> = None;
+        for (i, src) in sources.iter().enumerate() {
+            if let Some(e) = src.get(heads[i]) {
+                // Strict `<`: on a tie the lower source index keeps it.
+                if best.is_none_or(|(o, _)| e.offset < o) {
+                    best = Some((e.offset, i));
+                }
+            }
+        }
+        let Some((_, i)) = best else { break };
+        let e = sources[i][heads[i]];
+        heads[i] += 1;
+        if kept < room {
+            kept += 1;
+            out.push(e);
+        } else {
+            dropped += 1;
+        }
+    }
+    dropped
 }
 
 /// Walks `sources` (each sorted by offset) in `(offset, source index)` order
@@ -1305,7 +925,8 @@ mod tests {
     fn writer_rejects_out_of_order_out_of_block_and_overflow() {
         let mut buf = Vec::with_capacity(4);
         let dropped = PortCount::default();
-        let mut w = EventWriter::new(&mut buf, 2, 16, &dropped);
+        let mut params = Vec::new();
+        let mut w = EventWriter::new(&mut buf, &mut params, 2, 16, &dropped);
         assert_eq!(w.push(ev(5, 0)), Ok(()));
         assert_eq!(w.push(ev(4, 0)), Err(EventRejected::OutOfOrder));
         assert_eq!(w.push(ev(16, 0)), Err(EventRejected::OutOfBlock));
@@ -1412,97 +1033,14 @@ mod tests {
         }
     }
 
-    /// A foreign ramp and a built-in ramp never answer for each other, even
-    /// when the foreign id equals the built-in's discriminant.
-    #[test]
-    fn foreign_and_builtin_ramps_are_distinct_addresses() {
-        use tutti_units::{Hz, ParamKey};
-        let foreign = ParamRamp::foreign(
-            ParamId::new(ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32),
-            0.5,
-            Samples(0),
-        );
-        assert_eq!(foreign.target(ParamKey::<Hz>::CUTOFF), None);
-        assert_eq!(foreign.foreign_target(ParamId::new(0)), Some(0.5));
-        let builtin = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(100.0), Samples(0));
-        assert_eq!(builtin.foreign_target(ParamId::new(0)), None);
-    }
-
     /// An event is a note-off when its packet is (`Ump::is_note_off` pins the
-    /// spellings); a ramp is not one.
+    /// spellings); a note-on and a resync are not.
     #[test]
     fn only_a_midi_note_off_event_is_a_note_off() {
         let (c, n, v) = (MidiChannel::FIRST, NoteNumber::of(60), U7::of(0x40));
         assert!(Event::midi(Offset::ZERO, Message::midi1(c, Voice1::note_off(n, v))).is_note_off());
         assert!(!Event::midi(Offset::ZERO, Message::midi1(c, Voice1::note_on(n, v))).is_note_off());
-        assert!(
-            !Event::ramp(
-                Offset::ZERO,
-                ParamRamp::foreign(ParamId::new(1), 0.0, Samples(0))
-            )
-            .is_note_off()
-        );
-    }
-
-    /// A segment's address round-trips, built-in and foreign never answer
-    /// for each other, and its shape and timing read back as built.
-    #[test]
-    fn a_segment_reads_back_as_built() {
-        use tutti_units::{Hz, ParamKey};
-        let key = ParamKey::<Hz>::CUTOFF;
-        let id = ParamId::new(u32::from(key.addr().to_u16()));
-        let foreign =
-            ParamSegment::foreign(id, 0.25, 0.75, Samples(8), Law::Exp(Curvature::of(2.0)));
-        assert_eq!(foreign.target(key), None);
-        assert_eq!(foreign.foreign_target(id), Some(0.75));
-        assert_eq!(foreign.foreign_start(id), Some(0.25));
-        assert_eq!(foreign.addr(), ParamAddr::Id(id));
-        let s = ParamSegment::new(
-            key,
-            Hz(1.0),
-            Hz(2.0),
-            Samples(8),
-            Law::PowerOut(Exponent::of(3.0)),
-        )
-        .resumed(SamplePosition(2.5), SamplePosition(10.0));
-        assert_eq!(s.addr(), ParamAddr::unit(key.addr()));
-        assert_eq!(s.foreign_target(id), None);
-        assert_eq!(s.start(key), Some(Hz(1.0)));
-        assert_eq!(s.shape(), Law::PowerOut(Exponent::of(3.0)));
-        assert_eq!(s.position(), SamplePosition(2.5));
-        assert_eq!(s.length(), SamplePosition(10.0));
-        // 2.5 frames along at its event, 7.5 more to go: the end value
-        // lands on frame 8, held after.
-        assert!(s.raw_value_after(Samples(7)) < 2.0);
-        assert_eq!(s.raw_value_after(Samples(8)), 2.0);
-        assert_eq!(s.raw_value_after(Samples(1_000)), 2.0);
-        assert_eq!(s.arrives_after(), Some(Samples(8)));
-        // A zero length is a step.
-        let step = ParamSegment::new(key, Hz(1.0), Hz(2.0), Samples(0), Law::Hold);
-        assert_eq!(step.raw_value_after(Samples(0)), 2.0);
-        assert_eq!(step.arrives_after(), Some(Samples(0)));
-        // A length that is not above zero and finite is a step too, never a
-        // segment held at its start.
-        for l in [-4.0, f64::INFINITY, f64::NAN] {
-            let s = step.resumed(SamplePosition(1.0), SamplePosition(l));
-            assert_eq!(s.raw_value_after(Samples(0)), 2.0, "length {l}");
-            assert_eq!(s.arrives_after(), Some(Samples(0)), "length {l}");
-        }
-        // The pure part: endpoints and law, the packed storage unpacked
-        // (a law with no parameter, `Smootherstep`, among them).
-        let smooth = ParamSegment::new(key, Hz(1.0), Hz(2.0), Samples(8), Law::Smootherstep);
-        assert_eq!(smooth.piece(), Piece::new(1.0, 2.0, Law::Smootherstep));
-        assert_eq!(
-            s.piece(),
-            Piece::new(1.0, 2.0, Law::PowerOut(Exponent::of(3.0)))
-        );
-        // A negative position holds `from` until it reaches 0, then moves.
-        let late = ParamSegment::new(key, Hz(1.0), Hz(2.0), Samples(0), Law::Linear)
-            .resumed(SamplePosition(-3.0), SamplePosition(4.0));
-        assert_eq!(late.raw_value_after(Samples(2)), 1.0);
-        assert_eq!(late.raw_value_after(Samples(3)), 1.0);
-        assert_eq!(late.raw_value_after(Samples(5)), 1.5);
-        assert_eq!(late.arrives_after(), Some(Samples(7)));
+        assert!(!Event::resync(Offset::ZERO).is_note_off());
     }
 
     fn off(offset: u32) -> Event {
@@ -1547,7 +1085,8 @@ mod tests {
     fn a_writer_at_capacity_takes_note_offs_to_its_room() {
         let mut buf = Vec::with_capacity(16);
         let dropped = PortCount::default();
-        let mut w = EventWriter::new(&mut buf, 2, 16, &dropped);
+        let mut params = Vec::new();
+        let mut w = EventWriter::new(&mut buf, &mut params, 2, 16, &dropped);
         w.push(ev(0, 1)).unwrap();
         w.push(ev(1, 2)).unwrap();
         assert_eq!(w.push(ev(2, 3)), Err(EventRejected::Full));

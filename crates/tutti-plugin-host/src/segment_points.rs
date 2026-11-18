@@ -110,7 +110,7 @@ impl SegmentPoints {
 
     /// The value the segment in flight on `address` gives absolute frame
     /// `frame`, if one is on it there.
-    pub(super) fn value_at(&self, address: ParamId, frame: u64) -> Option<f32> {
+    pub(super) fn value_at(&self, address: ParamId, frame: u64) -> Option<f64> {
         let t = self.tracks.iter().find(|t| t.address == address)?;
         let j = frame.checked_sub(t.start)?;
         Some(
@@ -140,7 +140,7 @@ impl SegmentPoints {
         }
         self.interrupt(address);
         let arrives = segment.arrives_after();
-        if arrives == Some(Samples(0)) {
+        if arrives == Samples(0) {
             point(changes, address, at, segment.raw_value_after(Samples(0)));
             return;
         }
@@ -167,7 +167,7 @@ impl SegmentPoints {
             segment,
             start: frame,
             next: frame + 1,
-            end: arrives.map(|j| frame + j.get() as u64),
+            end: Some(frame + arrives.get() as u64),
         });
     }
 
@@ -218,7 +218,7 @@ impl SegmentPoints {
 }
 
 /// A point at chunk frame `at`. The address has a slot (`start` checked).
-fn point(changes: &mut ParamDelivery, address: ParamId, at: usize, value: f32) {
+fn point(changes: &mut ParamDelivery, address: ParamId, at: usize, value: f64) {
     let offset = i32::try_from(at).unwrap_or(i32::MAX);
     changes.point(address, offset, value);
 }
@@ -244,7 +244,7 @@ mod tests {
     }
 
     /// `(chunk frame, value)` of `address`'s queue in the chunk being filled.
-    fn queue(d: &mut ParamDelivery, address: ParamId) -> Vec<(i32, f32)> {
+    fn queue(d: &mut ParamDelivery, address: ParamId) -> Vec<(i32, f64)> {
         d.changes()
             .queues
             .iter()
@@ -252,7 +252,7 @@ mod tests {
             .map(|q| {
                 q.points
                     .iter()
-                    .map(|p| (p.sample_offset, p.value.get() as f32))
+                    .map(|p| (p.sample_offset, p.value.get()))
                     .collect()
             })
             .unwrap_or_default()
@@ -399,7 +399,7 @@ mod tests {
         let mut d = delivery((0..n).map(|k| 100 + k));
         sp.prepare(d.room());
         let mut landed_at = vec![None; n as usize];
-        let mut latest = vec![f32::NAN; n as usize];
+        let mut latest = vec![f64::NAN; n as usize];
         for chunk in 0..8u64 {
             d.begin();
             sp.begin(64);
@@ -438,7 +438,7 @@ mod tests {
         }
         for k in 0..n {
             assert_eq!(latest[k as usize], 1.0, "address {k} reached its end value");
-            let arrival = seg(k).arrives_after().expect("arrives").get() as u64;
+            let arrival = seg(k).arrives_after().get() as u64;
             assert_eq!(
                 landed_at[k as usize],
                 Some(arrival),

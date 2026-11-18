@@ -236,6 +236,8 @@ struct Level<F: FftFloat> {
     segments: Vec<Vec<Complex<F>>>,
     /// Both directions, `2 × part` points, in steps.
     fft: StagedRealFft<F>,
+    /// `1 / (2 part)`: the inverse transform is unnormalised. A power of two, so exact.
+    norm: F,
 }
 
 /// An impulse response, transformed: its levels, built once and
@@ -346,6 +348,7 @@ impl<F: FftFloat> IrSpectra<F> {
                     forward_steps,
                     segments,
                     fft,
+                    norm: F::from_design(0.5 / l.part as f64),
                 }
             })
             .collect();
@@ -560,9 +563,8 @@ impl<F: FftFloat> LevelState<F> {
             return;
         }
         // The inverse is unnormalised.
-        let len = <F as Float>::from_f32(self.buffer.len() as f32);
         for x in &mut self.buffer {
-            *x /= len;
+            *x *= lv.norm;
         }
         let mask = output.len() - 1;
         let due = (self.base as usize).wrapping_add(lv.delay);

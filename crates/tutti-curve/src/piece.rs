@@ -8,9 +8,9 @@ use crate::Law;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Piece {
     /// The value at progress 0.
-    pub from: f32,
+    pub from: f64,
     /// The value at progress 1.
-    pub to: f32,
+    pub to: f64,
     /// How the value moves between them.
     pub law: Law,
 }
@@ -18,7 +18,7 @@ pub struct Piece {
 impl Piece {
     /// A piece from `from` to `to` along `law`.
     #[must_use]
-    pub const fn new(from: f32, to: f32, law: Law) -> Self {
+    pub const fn new(from: f64, to: f64, law: Law) -> Self {
         Self { from, to, law }
     }
 
@@ -31,9 +31,8 @@ impl Piece {
     /// a piece the graph, the lanes and the editor share.
     #[inline]
     #[must_use]
-    pub fn value(self, param: Option<UnitParam>, t: Normalized) -> f32 {
-        // The law's `f64` result narrows once to the `f32` endpoint words.
-        let g = self.law.eval(t).get() as f32;
+    pub fn value(self, param: Option<UnitParam>, t: Normalized) -> f64 {
+        let g = self.law.eval(t).get();
         match param {
             Some(p) if p.is_circular() => p.wrap(self.from + p.arc(self.from, self.to) * g),
             _ => self.from + (self.to - self.from) * g,
@@ -48,7 +47,7 @@ impl Piece {
     /// one-off move between two states is a [`FadeLaw`](crate::FadeLaw).
     #[inline]
     #[must_use]
-    pub fn ramp_at(param: Option<UnitParam>, from: f32, to: f32, k: Samples, n: Samples) -> f32 {
+    pub fn ramp_at(param: Option<UnitParam>, from: f64, to: f64, k: Samples, n: Samples) -> f64 {
         let (k, n) = (k.get(), n.get());
         if k + 1 >= n {
             to
