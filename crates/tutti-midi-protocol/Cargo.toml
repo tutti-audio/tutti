@@ -15,8 +15,10 @@ workspace = true
 
 [features]
 default = []
-# serde for the values a project saves: `PitchBendSensitivity` (which `MpeZoneConfig`
-# persists), the MPE values, `MtcRate` and `SmpteFrameRate`.
+# serde for the values a project saves: `PitchBendSensitivity`, the MPE values, the
+# time codes and frame rates, the translation modes and policies, and the tuning
+# values. `Universal` and `MmcCommand` are wire data (a SysEx message is read from
+# and written to bytes, never stored as a value), so they have no serde.
 serde = ["dep:serde", "tutti-ump/serde"]
 
 [dependencies]
