@@ -731,6 +731,10 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Opens the session's inputs ([`Session::add_input`]) through `opener`
     /// instead of the sound card: a test's own capture, with no device.
+    ///
+    /// The opener serves both widths, so it carries over
+    /// [`float`](SessionBuilder::float); the session opens its inputs at its own
+    /// width, and an opener that refuses that width fails [`Session::add_input`].
     #[cfg(all(feature = "capture", feature = "testing"))]
     #[must_use]
     pub fn input_opener(
