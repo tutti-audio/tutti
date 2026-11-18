@@ -5,7 +5,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::poll::ErrorRun;
+use super::poll::{ErrorRun, read_fault, wait_fault};
 use crate::InputFault;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
@@ -203,20 +203,22 @@ pub(super) fn pump(
         let received = match seq.client().read_event() {
             Ok(Read::Event(event)) => event,
             // Empty queue is the common case, not a failure.
-            Ok(Read::Empty) => match seq.wait() {
-                Ok(Wait::Ready) => continue,
-                Ok(Wait::Stopped) => return,
-                // The descriptor failed: the port is silent from here.
-                Ok(Wait::Broken) => return died.raise(InputFault::PortBroken),
-                Err(e) => {
-                    return died.raise(InputFault::wait_failed(e.raw_os_error().unwrap_or(0)));
+            Ok(Read::Empty) => {
+                let waited = seq.wait();
+                // The wait failed: the port is silent from here.
+                if let Some(fault) = wait_fault(&waited) {
+                    return died.raise(fault);
                 }
-            },
+                if matches!(waited, Ok(Wait::Stopped)) {
+                    return;
+                }
+                continue;
+            }
             Err(e) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
                 if errors.failed() {
-                    return died.raise(InputFault::read_failed(e.errno()));
+                    return died.raise(read_fault(e.errno()));
                 }
                 continue;
             }

@@ -799,7 +799,7 @@ fn a_pump_whose_reads_fail_ends_and_raises_its_latch() {
     super::input::pump(poller, clock, &died, producer);
     assert_eq!(
         died.cause(),
-        Some(crate::InputFault::read_failed(Some(EIO))),
+        Some(crate::InputFault::ReadFailed(crate::fault::Errno::new(EIO))),
         "a pump that gave up raises the latch, for the read's errno"
     );
 }

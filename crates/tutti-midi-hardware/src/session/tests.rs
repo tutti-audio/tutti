@@ -170,12 +170,26 @@ fn a_dead_inputs_fault_is_read_through_the_session() {
     let _ = s.connect_input(&iac).unwrap();
     assert_eq!(s.input_fault(&keystep), None);
 
-    let fault = InputFault::wait_failed(19);
+    let fault = InputFault::WaitFailed(crate::fault::Errno::new(19));
     fake.kill_input_reader(EndpointId::from_raw(1), fault);
     assert_eq!(s.input_fault(&keystep), Some(fault));
     assert!(!s.is_input_connected(&keystep));
     assert_eq!(s.input_fault(&iac), None, "the other input delivers");
     assert!(s.is_input_connected(&iac));
+}
+
+/// **An input that is not held reads no fault**, before it is opened and after
+/// it is closed; it is not connected either, so the two differ only in the
+/// cause.
+#[test]
+fn an_input_that_is_not_held_reads_no_fault() {
+    let (mut s, _, _) = session();
+    let keystep = input(&s, "Keystep Pro");
+    assert_eq!(s.input_fault(&keystep), None);
+    assert!(!s.is_input_connected(&keystep));
+    let _ = s.connect_input(&keystep).unwrap();
+    assert!(s.disconnect_input(&keystep));
+    assert_eq!(s.input_fault(&keystep), None);
 }
 
 #[test]

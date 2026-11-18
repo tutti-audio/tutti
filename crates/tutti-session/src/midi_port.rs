@@ -45,6 +45,13 @@ use crate::{
     ResourceId, Session, SessionEvent,
 };
 
+/// Why a port whose input could not be reopened is lost: the fault the reader
+/// died of, or [`PortCause::ReopenFailed`] when the input was not held and read
+/// none.
+fn reader_loss(fault: Option<InputFault>) -> PortCause {
+    fault.map_or(PortCause::ReopenFailed, PortCause::ReaderFailed)
+}
+
 // --- Vocabulary ---
 
 /// Why a MIDI port is not live.
@@ -1412,7 +1419,7 @@ impl Ports {
                 set_presence(
                     &shared.cell,
                     shared.id,
-                    Presence::Lost(fault.map_or(PortCause::ReopenFailed, PortCause::ReaderFailed)),
+                    Presence::Lost(reader_loss(fault)),
                     out,
                 );
             }

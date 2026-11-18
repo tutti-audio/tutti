@@ -22,9 +22,12 @@ pub struct WinMmInput {
 
 impl InputConnection for WinMmInput {
     fn fault(&self) -> Option<InputFault> {
+        // The latch holds what the callback raised. The port's own flag, which
+        // its worker sets when it cannot return a buffer, is read each time and
+        // not latched.
         self.died
             .cause()
-            .or_else(|| (!self.port.is_alive()).then_some(InputFault::DriverClosed))
+            .or_else(|| (!self.port.is_alive()).then_some(InputFault::BufferLost))
     }
 }
 
