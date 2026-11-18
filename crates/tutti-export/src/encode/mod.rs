@@ -294,7 +294,7 @@ pub(crate) fn resampler_for(
 ///
 /// `F` is the format the blocks arrive in. The converter works on `f32` planes
 /// (it is not yet generic), so a block resampled is converted to them and back.
-pub(crate) struct Chain<F: Float = f32> {
+pub(crate) struct Chain<F: Float> {
     layout: ChannelLayout,
     sink: Quantized<F>,
     /// Interleaved, so it is a flat sample buffer with `ch` samples per frame.
@@ -420,9 +420,9 @@ fn emit_planes<F: Float>(
 /// frames of `stage` were already spent in the pass (by the outputs before
 /// this one). The token is checked before every block. A cancelled pass is
 /// [`Outcome::Cancelled`].
-pub(crate) fn replay_through(
-    replay: &mut dyn Replay,
-    chain: &mut Chain,
+pub(crate) fn replay_through<F: Float>(
+    replay: &mut dyn Replay<F>,
+    chain: &mut Chain<F>,
     block_frames: usize,
     stage: Stage,
     done: Samples,
@@ -430,7 +430,7 @@ pub(crate) fn replay_through(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Samples>> {
     let layout = chain.layout;
-    let mut block = vec![0.0f32; layout.interleaved_len(Samples(block_frames.max(1)))];
+    let mut block = vec![F::ZERO; layout.interleaved_len(Samples(block_frames.max(1)))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     let mut at = done.get();
     loop {
@@ -455,11 +455,11 @@ pub(crate) fn replay_through(
 /// never a dropped channel.
 ///
 /// Returns the chain with every frame written, for the finalize.
-pub(crate) fn write_planes(
-    rendered: &crate::Rendered,
+pub(crate) fn write_planes<F: Float>(
+    rendered: &crate::Rendered<F>,
     target: &FileTarget,
     control: &mut Control<'_>,
-) -> Result<Outcome<Chain>> {
+) -> Result<Outcome<Chain<F>>> {
     let frames = rendered.frames();
     let fold = if rendered.planes().is_empty() || rendered.layout() == target.channels() {
         None

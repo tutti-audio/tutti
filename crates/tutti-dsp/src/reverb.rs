@@ -16,7 +16,7 @@ pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
 
-use tutti_units::{Hz, SampleRate, Seconds, Tail};
+use tutti_units::{SampleRate, Seconds, Tail};
 
 use crate::{Ring, Steps};
 
@@ -31,26 +31,6 @@ const RAMP: Seconds = Seconds(0.020);
 pub(crate) fn ramp(rate: SampleRate) -> Steps {
     let chunks = RAMP.to_samples_ceil(rate).get().div_ceil(CHUNK);
     Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
-}
-
-/// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
-pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
-    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
-}
-
-/// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:
-/// `w` is the slot of the current frame, so delay 0 is the frame just written.
-#[inline]
-pub(crate) fn read(buf: &[f32], w: usize, delay: f32) -> f32 {
-    let cap = buf.len();
-    let whole = delay as usize;
-    let frac = delay - whole as f32;
-    let a = buf[(w + cap - whole) % cap];
-    if frac == 0.0 {
-        return a;
-    }
-    let b = buf[(w + cap - whole - 1) % cap];
-    crate::lerp(a, b, frac)
 }
 
 /// The tail a ring is, in whole frames at `rate`: unbounded when it never ends or is not a

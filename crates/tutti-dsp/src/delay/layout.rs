@@ -55,7 +55,7 @@ pub struct DelayControls {
 impl DelayControls {
     /// No delay, no recirculation: what a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        time: Seconds(0.0),
+        time: Seconds::ZERO,
         feedback: Feedback::NONE,
         cross_feedback: Feedback::NONE,
     };

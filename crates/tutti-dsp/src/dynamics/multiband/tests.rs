@@ -19,7 +19,7 @@ fn bank(width: u16, bands: usize) -> MultibandBank {
 }
 
 fn hz(freqs: &[f32]) -> CrossoverControls {
-    let mut frequencies = [Hz(0.0); 5];
+    let mut frequencies = [Hz::ZERO; 5];
     for (f, &x) in frequencies.iter_mut().zip(freqs) {
         *f = Hz(x);
     }

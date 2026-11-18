@@ -202,6 +202,34 @@ fn a_dead_plugin_reports_the_engines_cause_not_a_placeholder() {
     );
 }
 
+/// **A plugin that runs in this process and panicked is reported `Died` with
+/// the `Panicked` cause its lifecycle latched.** The handle half (a panic
+/// out of a call makes the in-process handle read `Dead { Panicked }`) is
+/// `tutti-plugin-host`'s `a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause`;
+/// this is the session's half, with a backend that reads dead the way that
+/// handle does: the phase reports the death once, carrying the cause as it is.
+#[test]
+fn a_panicked_in_process_plugin_is_reported_died_with_its_panicked_cause() {
+    let latched = PluginFailure::Panicked {
+        source: Arc::new(tutti_plugin_types::PluginError::Other(
+            "a call into the plugin panicked".into(),
+        )),
+    };
+    let (mut s, node) = session_with(Some(latched));
+    let died = observe(&mut s, Liveness::DEATHS as usize);
+    assert_eq!(died.len(), 1, "{died:?}");
+    assert_eq!(died[0].0, node);
+    assert!(
+        matches!(died[0].1, PluginFailure::Panicked { .. }),
+        "{:?}",
+        died[0].1
+    );
+    assert!(
+        std::error::Error::source(&died[0].1).is_some(),
+        "the lifecycle's reason is the source"
+    );
+}
+
 /// **A plugin is not written off on the first bad observation.** Pinned at
 /// every count below the threshold, because an off-by-one here would unwire a
 /// live plugin: it reads Died (not yet written off), and

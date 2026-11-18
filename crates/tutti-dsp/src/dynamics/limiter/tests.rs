@@ -52,7 +52,7 @@ fn hostile() -> Vec<LimiterControls> {
             ..base
         },
         LimiterControls {
-            release: Seconds(0.0),
+            release: Seconds::ZERO,
             ..base
         },
     ];
@@ -138,8 +138,7 @@ fn amplitude(db: f64) -> f64 {
 
 /// How many ulps (`f32::EPSILON`) over its ceiling a limiter's sample peak may land: the
 /// ceiling's amplitude, the curve's divide and the gain's product each round, so the bound
-/// is a few ulps, not an exact one. The node sweep (`tutti-nodes`, `rt_no_alloc_dynamics`)
-/// states the same four.
+/// is a few ulps, not an exact one.
 const CEILING_ULPS: f32 = 4.0;
 
 /// The most a sample may reach under a ceiling of `db`: the ceiling's amplitude plus
@@ -642,7 +641,7 @@ fn a_lookahead_keeps_the_range_checked_shape() {
         of: Some(Lookahead::of),
         valid: &[Seconds(1e-9), Seconds(0.005), Seconds(0.1), Lookahead::CAP],
         invalid: &[
-            Seconds(0.0),
+            Seconds::ZERO,
             Seconds(-0.005),
             Seconds(1.000_001),
             Seconds(f64::NAN),

@@ -413,7 +413,7 @@ fn the_bands_stay_within_the_models_bound() {
     use crate::Lti;
     for set in [[20.0f32, 21.0], [23_000.0, 23_900.0], [100.0, 20_000.0]] {
         let controls = CrossoverControls {
-            frequencies: [Hz(set[0]), Hz(set[1]), Hz(0.0), Hz(0.0), Hz(0.0)],
+            frequencies: [Hz(set[0]), Hz(set[1]), Hz::ZERO, Hz::ZERO, Hz::ZERO],
         };
         let m = CrossoverModel::designed(3, &controls, RATE).unwrap();
         let noise: Vec<f32> = (0..20_000)

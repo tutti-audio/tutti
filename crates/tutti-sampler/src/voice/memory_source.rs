@@ -24,7 +24,7 @@ use tutti_units::{
 
 use super::clock::{BlockClock, Clock};
 use super::interp::{
-    Gate, Place, hermite_lanes, place, place_tail, read_looped_frame, split_position, tap,
+    Gate, Place, hermite_lanes, mirrored, place, place_tail, read_looped_frame, split_position, tap,
 };
 use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
@@ -238,7 +238,7 @@ pub struct MemorySource<F: Float = f32> {
 
     /// The lanes a wrap crossfade's tail is read into, one per output
     /// channel, sized beside [`positions`](Self::positions).
-    tail: Vec<Lane>,
+    tail: Vec<Lane<F>>,
 }
 
 // Hand-rolled: `wave` is a non-`Debug` `Arc<Wave<F>>`. Print the wave length +
@@ -681,7 +681,7 @@ impl<F: Float> MemorySource<F> {
                     out.fill(F::ZERO);
                     return;
                 }
-                self.sample_raw_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), out);
+                self.sample_raw_into(mirrored(self.wave.len(), pos), out);
             }
             Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
                 Some(span) => {
@@ -864,7 +864,7 @@ impl<F: Float> MemorySource<F> {
                 // `read_placed_into`.
                 let p = match (direction, &span) {
                     (Direction::Reverse, _) if p >= flen => return None,
-                    (Direction::Reverse, _) => (flen - 1.0 - p).max(0.0),
+                    (Direction::Reverse, _) => mirrored(Samples::new(len), SamplePosition(p)).get(),
                     (Direction::Forward, Some(span)) => span.place(p).0,
                     (Direction::Forward, None) => p,
                 };
@@ -1381,7 +1381,7 @@ impl<F: Float> MemorySource<F> {
     }
 }
 
-impl Node for MemorySource<f32> {
+impl<F: Float> Node<F> for MemorySource<F> {
     /// No inputs, [`channels`](Self::channels) outputs; a source, never
     /// skipped. Its tail is `ring_out`: none when placed.
     fn shape(&self) -> Shape {
@@ -1412,12 +1412,12 @@ impl Node for MemorySource<f32> {
         self.tail.resize_with(width, Vec::new);
         for lane in &mut self.tail {
             lane.clear();
-            lane.resize(frames, 0.0);
+            lane.resize(frames, F::ZERO);
             lane.shrink_to_fit();
         }
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.driven_gain = self
             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
             .last_frame()
@@ -1433,9 +1433,9 @@ impl Node for MemorySource<f32> {
         let n = width.min(MAX_CHANNELS);
         // A node wider than the sampler reads leaves the rest silent.
         for c in n..width {
-            outs.get(c).fill(0.0);
+            outs.get(c).fill(F::ZERO);
         }
-        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [F]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }
@@ -1475,11 +1475,11 @@ impl Node for MemorySource<f32> {
 }
 
 // Its gain, as `UnitParam::Volume`.
-tutti_graph::declare_params!([] MemorySource<f32>, n {
+tutti_graph::declare_params!([F: Float] MemorySource<F>, n {
     Volume => Amplitude = &n.gain,
 });
 
-impl ParamNode for MemorySource<f32> {
+impl<F: Float> ParamNode<F> for MemorySource<F> {
     /// Its gain, as [`UnitParam::Volume`].
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -1495,10 +1495,10 @@ impl ParamNode for MemorySource<f32> {
     }
 }
 
-impl IntoNode for MemorySource<f32> {
+impl<F: Float> IntoNode<F> for MemorySource<F> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         param_parts(self)
     }
 }

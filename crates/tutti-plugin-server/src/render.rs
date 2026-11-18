@@ -20,12 +20,19 @@
 //!   and every [`RENDER_WAIT`] while the host is quiet, so a recall is never
 //!   left waiting for a block).
 //! - **Commands** ([`ToRender`]) travel one way, main to render, through a
-//!   `tutti_rt` ring: the slab, the sizes the pipeline reserves at a load, the
-//!   figures a block reads ([`RenderConfig`]) and the seat the Processor
-//!   arrives in. What the render thread has finished with goes back through a
-//!   second queue ([`Back`]) to be dropped on the main thread: a plugin's
-//!   objects are freed on the render thread only when that queue refuses
-//!   them, which only an abandoned session reaches.
+//!   `tutti_rt` ring: the slab with the scratch sized for it, the plugin's
+//!   parameter output, the figures a block reads ([`RenderConfig`]) and the seat the Processor
+//!   arrives in. A command carries a finished value: the main thread builds
+//!   the scratch, the parameter output and the slab's room, and the render
+//!   thread only swaps them in. What the render thread has finished with goes
+//!   back through a second queue ([`Back`]) to be dropped on the main thread.
+//!   A hand-back the queue refuses is dropped where it is and counted
+//!   ([`Losses::back_refused`]), which only an abandoned session reaches. A
+//!   block's failure is a constant ([`BlockFault`]), so losing one frees
+//!   nothing.
+//! - **Losses** ([`Losses`]) are `tutti_rt` tallies the render thread adds to
+//!   and the main thread reads and logs ([`RenderLink::report_losses`]): the
+//!   render thread never calls `tracing`.
 //!
 //! Commands are applied before the request that follows them is served, so a
 //! command the main thread pushed before it answered the host is in effect for
@@ -35,14 +42,20 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tutti_rt::{StopToken, ThreadHandle};
 
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabWriter};
+use std::borrow::Cow;
+use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
+use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginAudio, PluginResult,
     ProcessContext, ProcessOutput, Processor, SampleFormat,
 };
-use tutti_rt::{Overflow, PushError, Returned, RingReader, RingWriter, Rt, ring};
+use tutti_rt::{
+    Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
+};
 
-use crate::audio_pipeline::{AudioBlock, AudioPipeline, Clock, ProcessExtras};
+use crate::audio_pipeline::{
+    AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
+};
 use crate::served::Render;
 use crate::transport::Transport;
 
@@ -169,20 +182,26 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     }
 }
 
-/// What the main thread asks of the render thread.
+/// What the main thread asks of the render thread. Every value a command
+/// carries is finished: the render thread swaps it in and hands the value it
+/// replaces back ([`Back`]).
 #[allow(clippy::large_enum_variant)] // sent a few times per session, never per block
 pub(crate) enum ToRender {
-    /// The shared-memory slab the host set up; the scratch is sized to it.
-    Slab(SlabWriter),
+    /// The shared-memory slab the host set up, with the scratch sized to it.
+    Slab {
+        /// The slab blocks are read from and published into.
+        slab: SlabWriter,
+        /// Scratch for the slab's widest direction at its per-channel room, in
+        /// the sample format blocks are rendered in.
+        scratch: Box<AudioScratch>,
+    },
     /// The slab is gone (an unload).
     DropSlab,
-    /// A plugin loaded: the sample format blocks are rendered in.
-    Format(SampleFormat),
-    /// A plugin loaded: its parameter output is held in fixed storage, a queue
-    /// per parameter of `points` each.
-    Params { queues: usize, points: usize },
-    /// The parameter list may have grown past what was reserved.
-    FitParams(usize),
+    /// The sample format changed: scratch of the slab's shape in the new one.
+    Scratch(Box<AudioScratch>),
+    /// The plugin's parameter output, held in fixed storage: a queue per
+    /// parameter, each of room for a block's points.
+    Output(Box<ProcessOutput>),
     /// New figures for the blocks that follow.
     Config(RenderConfig),
     /// The plugin's end: its Processor arrives in it.
@@ -198,29 +217,186 @@ pub(crate) enum ToRender {
 }
 
 /// What the render thread hands back to be dropped on the main thread.
-// The fields are never read: a value is handed back only to be dropped by the
-// thread that may free it.
-#[allow(dead_code)]
+///
+/// The variants that own memory are never read: a value is handed back only
+/// to be dropped by the thread that may free it.
 pub(crate) enum Back {
     /// The seat of a plugin that is gone.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
     Seat(Box<dyn RenderEnd>),
     /// The slab.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
     Slab(SlabWriter),
+    /// The scratch a new one replaced.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
+    Scratch(Box<AudioScratch>),
+    /// The parameter output a new one replaced.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
+    Output(Box<ProcessOutput>),
+    /// Why the plugin failed a block, for the main thread to log.
+    Failure(BlockFault),
     /// A block that reached the plugin after the [`ToRender::Barrier`] of this
     /// number was taken.
     Ack(u64),
+}
+
+/// What the render thread lost, counted since the session began.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Losses {
+    /// Blocks refused: with no plugin seated, for their length (empty, or past
+    /// the activated length or the slab's room), for a slab laid out unlike
+    /// the plugin's ports, or for a rate the plugin refused. Each reads back as
+    /// silence.
+    pub refused_blocks: u64,
+    /// Blocks the plugin failed. Each publishes nothing and reads as silence.
+    pub failed_blocks: u64,
+    /// MIDI events a plugin emitted past the reply's cap.
+    pub midi_dropped: u64,
+    /// Hand-backs the main thread's queue refused, so the render thread
+    /// dropped them itself (an abandoned session).
+    pub back_refused: u64,
+}
+
+impl Losses {
+    /// Whether some count is now at least twice what `logged` held (or was
+    /// zero and is not): the rule that logs a plugin failing every block a
+    /// handful of times instead of on every tick.
+    fn worsened_since(self, logged: Self) -> bool {
+        let grew = |now: u64, then: u64| now > 0 && (then == 0 || now >= then.saturating_mul(2));
+        grew(self.refused_blocks, logged.refused_blocks)
+            || grew(self.failed_blocks, logged.failed_blocks)
+            || grew(self.midi_dropped, logged.midi_dropped)
+            || grew(self.back_refused, logged.back_refused)
+    }
+}
+
+/// The reading ends of the render thread's loss tallies, held by the main
+/// thread.
+struct LossReaders {
+    refused_blocks: Tally<u64>,
+    failed_blocks: Tally<u64>,
+    midi_dropped: Tally<u64>,
+    back_refused: Tally<u64>,
+}
+
+/// The writing ends of the loss tallies, held by the render side.
+struct LossWriters {
+    refused_blocks: TallyWriter<u64>,
+    midi_dropped: TallyWriter<u64>,
+    back_refused: TallyWriter<u64>,
 }
 
 /// The main thread's end of the render thread's queues.
 pub(crate) struct RenderLink {
     to: RingWriter<ToRender>,
     back: RingReader<Back>,
+    losses: LossReaders,
+    /// What [`report_losses`](Self::report_losses) last logged.
+    logged: Losses,
+    /// The format blocks are rendered in, which scratch is built for.
+    format: SampleFormat,
+    /// The layout of the attached slab, if one is: what scratch is built for.
+    slab_layout: Option<SlabLayout>,
+    /// The parameter queues and the points each holds that the plugin's output
+    /// was last built for.
+    params: (usize, usize),
     /// The number of the last barrier sent, and of the last one acknowledged.
     barrier_sent: u64,
     barrier_acked: u64,
 }
 
 impl RenderLink {
+    /// Attaches `slab`: the render thread takes it with scratch sized to its
+    /// layout, in the format blocks are rendered in.
+    pub(crate) fn attach_slab(&mut self, slab: SlabWriter) {
+        let layout = slab.layout_ref().clone();
+        let scratch = Box::new(AudioScratch::for_layout(self.format, &layout));
+        self.slab_layout = Some(layout);
+        self.send(ToRender::Slab { slab, scratch });
+    }
+
+    /// Detaches the slab (an unload).
+    pub(crate) fn detach_slab(&mut self) {
+        self.slab_layout = None;
+        self.send(ToRender::DropSlab);
+    }
+
+    /// Renders in `format` from the next block on: scratch of the slab's shape
+    /// is rebuilt when it changed, and later slabs are sized in it.
+    pub(crate) fn set_format(&mut self, format: SampleFormat) {
+        if format == self.format {
+            return;
+        }
+        self.format = format;
+        if let Some(layout) = &self.slab_layout {
+            let scratch = Box::new(AudioScratch::for_layout(format, layout));
+            self.send(ToRender::Scratch(scratch));
+        }
+    }
+
+    /// Holds the plugin's parameter output in fixed storage: a queue per
+    /// parameter, each with room for `points` points.
+    pub(crate) fn reserve_params(&mut self, queues: usize, points: usize) {
+        self.params = (queues, points);
+        let mut output = ProcessOutput::default();
+        output.reserve_params(queues, points);
+        self.send(ToRender::Output(Box::new(output)));
+    }
+
+    /// Re-reserves the plugin's parameter output for `queues` parameters, at
+    /// the room it was reserved with, when it holds fewer queues: a plugin
+    /// whose parameter list grew after load.
+    pub(crate) fn fit_params(&mut self, queues: usize) {
+        let (held, points) = self.params;
+        if queues > held {
+            self.reserve_params(queues, points);
+        }
+    }
+
+    /// What the render thread has lost so far.
+    pub(crate) fn losses(&self) -> Losses {
+        Losses {
+            refused_blocks: self.losses.refused_blocks.get(),
+            failed_blocks: self.losses.failed_blocks.get(),
+            midi_dropped: self.losses.midi_dropped.get(),
+            back_refused: self.losses.back_refused.get(),
+        }
+    }
+
+    /// Reaps what the render thread handed back, and logs what it has lost
+    /// when a count has first become nonzero or doubled since it was last
+    /// logged ([`Losses::worsened_since`]): the render thread counts and never
+    /// logs.
+    pub(crate) fn report_losses(&mut self) {
+        self.reap();
+        let now = self.losses();
+        if now.worsened_since(self.logged) {
+            self.log_losses(now);
+        }
+    }
+
+    /// Reaps, and logs the final counts when they differ from what was last
+    /// logged: a run that stops at 3 reports 3.
+    pub(crate) fn report_final_losses(&mut self) {
+        self.reap();
+        let now = self.losses();
+        if now != self.logged {
+            self.log_losses(now);
+        }
+    }
+
+    fn log_losses(&mut self, now: Losses) {
+        self.logged = now;
+        tracing::warn!(
+            "plugin-server: the render thread lost {} block(s) refused, {} block(s) the plugin \
+             failed, {} MIDI event(s) past the cap, {} hand-back(s) the main thread did not take",
+            now.refused_blocks,
+            now.failed_blocks,
+            now.midi_dropped,
+            now.back_refused,
+        );
+    }
+
     /// Queues `command`, waiting a little for room if the queue is full.
     /// A command the render thread does not take within [`SEND_PATIENCE`] is
     /// dropped and logged: the render thread has stopped.
@@ -252,8 +428,12 @@ impl RenderLink {
     /// acknowledged.
     pub(crate) fn reap(&mut self) {
         while let Some(back) = self.back.pop() {
-            if let Back::Ack(id) = back {
-                self.barrier_acked = self.barrier_acked.max(id);
+            match back {
+                Back::Ack(id) => self.barrier_acked = self.barrier_acked.max(id),
+                Back::Failure(BlockFault(reason)) => {
+                    tracing::warn!("the plugin failed a block: {reason}");
+                }
+                _ => {}
             }
         }
     }
@@ -304,18 +484,10 @@ pub(crate) struct RenderSide {
     seat: Option<Box<dyn RenderEnd>>,
     /// The barrier the next block that reaches the plugin acknowledges.
     barrier: Option<u64>,
-    /// Blocks refused for their length (empty, or past the activated length or
-    /// the slab's room) or for a slab laid out unlike the plugin's ports, since
-    /// the session began.
-    refused_blocks: u64,
-}
-
-/// Logs a hand-back the queue to the main thread refused.
-fn unreaped(error: PushError) {
-    match error {
-        PushError::Full => tracing::error!("plugin-server: the main thread reaps nothing"),
-        PushError::Disconnected => tracing::error!("plugin-server: the main thread's end is gone"),
-    }
+    losses: LossWriters,
+    /// Blocks the plugin has failed: the cause of the first, and of each
+    /// that makes a power of two, goes home ([`Back::Failure`]).
+    failures: u64,
 }
 
 /// A session's two halves: the control side the main thread drives, and the
@@ -325,10 +497,28 @@ pub(crate) fn link() -> (RenderLink, RenderSide) {
     let (to, commands) = ring::<ToRender>(COMMANDS, Overflow::Refuse);
     let (back_tx, back) = ring::<Back>(COMMANDS, Overflow::Refuse);
     let config = RenderConfig::new();
+    let (refused_blocks, failed_blocks, midi_dropped, back_refused) =
+        (tally(), tally(), tally(), tally());
+    let writers = LossWriters {
+        refused_blocks: refused_blocks.writer(),
+        midi_dropped: midi_dropped.writer(),
+        back_refused: back_refused.writer(),
+    };
+    let pipeline = AudioPipeline::new(failed_blocks.writer());
     (
         RenderLink {
             to,
             back,
+            losses: LossReaders {
+                refused_blocks,
+                failed_blocks,
+                midi_dropped,
+                back_refused,
+            },
+            logged: Losses::default(),
+            format: config.clock.format,
+            slab_layout: None,
+            params: (0, 0),
             barrier_sent: 0,
             barrier_acked: 0,
         },
@@ -336,36 +526,26 @@ pub(crate) fn link() -> (RenderLink, RenderSide) {
             commands,
             back: back_tx,
             slab: None,
-            pipeline: AudioPipeline::new(config.clock.format),
+            pipeline,
             config,
             seat: None,
             barrier: None,
-            refused_blocks: 0,
+            losses: writers,
+            failures: 0,
         },
     )
 }
 
 impl RenderSide {
-    /// Applies what the main thread queued.
+    /// Applies what the main thread queued. Allocates and frees nothing: a
+    /// command carries finished values, and what a swap replaces goes back to
+    /// the main thread.
     pub(crate) fn drain(&mut self) {
         while let Some(command) = self.commands.pop() {
             match command {
-                ToRender::Slab(slab) => {
-                    // A slab arrives only between the host's activations: the
-                    // host sets one up in an activation, with no Processor and so
-                    // no block in flight, and sends none until the setup is
-                    // answered (the command is queued before the `Ready` reply). So
-                    // the `reserve` below may allocate and the slab it replaces
-                    // may be dropped here (an unreaped `give_back` unmaps it on
-                    // this thread) without a block waiting on it.
-                    //
-                    // The scratch is sized here, between blocks, to the most a
-                    // block may carry; `handle_process` refuses any longer.
-                    let layout = slab.layout_ref();
-                    self.pipeline.reserve(
-                        layout.input_channels().max(layout.output_channels()),
-                        layout.samples_per_channel,
-                    );
+                ToRender::Slab { slab, scratch } => {
+                    let old_scratch = self.pipeline.install_scratch(scratch);
+                    self.give_back(Back::Scratch(old_scratch));
                     if let Some(old) = self.slab.replace(slab) {
                         self.give_back(Back::Slab(old));
                     }
@@ -375,11 +555,14 @@ impl RenderSide {
                         self.give_back(Back::Slab(old));
                     }
                 }
-                ToRender::Format(format) => self.pipeline.set_format(format),
-                ToRender::Params { queues, points } => {
-                    self.pipeline.reserve_params(queues, points);
+                ToRender::Scratch(scratch) => {
+                    let old = self.pipeline.install_scratch(scratch);
+                    self.give_back(Back::Scratch(old));
                 }
-                ToRender::FitParams(queues) => self.pipeline.fit_params(queues),
+                ToRender::Output(output) => {
+                    let old = self.pipeline.install_output(output);
+                    self.give_back(Back::Output(old));
+                }
                 ToRender::Config(config) => {
                     self.config = config;
                     if let Some(seat) = self.seat.as_mut() {
@@ -403,11 +586,12 @@ impl RenderSide {
     }
 
     /// Hands something back to the main thread. A full queue, or one whose
-    /// main-thread end is gone, drops it here, which only an abandoned session
-    /// reaches: the main thread reaps on every command it sends.
+    /// main-thread end is gone, drops it here and counts it, which only an
+    /// abandoned session reaches: the main thread reaps on every command it
+    /// sends.
     fn give_back(&mut self, back: Back) {
-        if let Err(refused) = self.back.push(back) {
-            unreaped(refused.error);
+        if self.back.push(back).is_err() {
+            self.losses.back_refused.add(1);
         }
     }
 
@@ -494,9 +678,12 @@ impl RenderSide {
                 }
                 Ok(None)
             }
-            other => Err(BridgeError::UnexpectedMessage {
+            // The control connection's messages: a peer that confuses its two
+            // connections. Named, not formatted: the render thread builds no
+            // text.
+            _ => Err(BridgeError::UnexpectedMessage {
                 expected: "a message the audio connection carries",
-                got: format!("{other:?}"),
+                got: Cow::Borrowed("a control connection message"),
             }),
         }
     }
@@ -507,21 +694,28 @@ impl RenderSide {
     /// The length is the peer's to choose, so it is checked here, once, for
     /// every format: unchecked, a long one sized the scratch to it on the audio
     /// thread, and the formats disagreed past the activated length (CLAP
-    /// refused it, VST2 split it, VST3 passed it to the plugin). A plugin that changed its ports before the host set up a slab
-    /// for them is read and written as the other layout otherwise. A refused
-    /// block is counted and reads back as silence.
-    fn block_fits(&mut self, frames: usize) -> bool {
-        let (room, matches) = self.slab.as_ref().map_or((0, false), |slab| {
+    /// refused it, VST2 split it, VST3 passed it to the plugin). A plugin that
+    /// changed its ports before the host set up a slab for them is read and
+    /// written as the other layout otherwise. A refused block is counted and
+    /// reads back as silence.
+    fn block_fits(&mut self, frames: Samples) -> bool {
+        let (room, matches) = self.slab.as_ref().map_or((Samples::ZERO, false), |slab| {
             let layout = slab.layout_ref();
             (
-                layout.samples_per_channel,
+                Samples(layout.samples_per_channel),
                 layout.input_channels() == self.config.inputs
                     && layout.output_channels() == self.config.outputs,
             )
         });
-        let fits = matches && frames > 0 && frames <= self.config.max_block && frames <= room;
+        let fits = matches
+            && frames > Samples::ZERO
+            && frames <= Samples(self.config.max_block)
+            && frames <= room
+            && self
+                .pipeline
+                .fits(self.config.inputs.max(self.config.outputs), frames);
         if !fits {
-            self.refused_blocks += 1;
+            self.losses.refused_blocks.add(1);
         }
         fits
     }
@@ -539,7 +733,7 @@ impl RenderSide {
             refused: true,
         };
 
-        // NOTE: both early returns below reply WITHOUT publishing to the slab,
+        // NOTE: every early return below replies WITHOUT publishing to the slab,
         // and that is deliberate. The host's read is gated on the output
         // sequence, so an unpublished block reads back as silence; there is no
         // separate "this block failed" signal to send, and none is wanted.
@@ -547,16 +741,20 @@ impl RenderSide {
         // wrong: it would hand the host a slot full of whatever the previous
         // block left, marked valid.
         if self.seat.is_none() {
-            return Ok(BridgeMessage::Error {
-                message: "No plugin loaded".to_string(),
-            });
+            // No plugin: nothing is published, and the reply is the refusal.
+            self.losses.refused_blocks.add(1);
+            return Ok(silent());
         }
         // A plugin that refused the rate renders silence: no block reaches it
         // and nothing is published (the host reads an unpublished block as
         // silence). Its MIDI is dropped; the host cut any open SysEx when it
         // re-prepared. A block of a length the plugin was not activated for,
         // or the slab cannot hold, is refused the same way (`block_fits`).
-        if self.config.rate_refused || !self.block_fits(block.num_samples) {
+        if self.config.rate_refused {
+            self.losses.refused_blocks.add(1);
+            return Ok(silent());
+        }
+        if !self.block_fits(Samples(block.num_samples)) {
             return Ok(silent());
         }
         // Neither the no-slab return just below nor a block the plugin's host
@@ -572,52 +770,52 @@ impl RenderSide {
             seat,
             barrier,
             back,
+            losses,
+            failures,
             ..
         } = self;
         let (Some(seat), Some(slab)) = (seat.as_mut(), slab.as_mut()) else {
-            // The process path only ever ran under the full `plugin + slab`
-            // pair. Reply so the host's queue stays in step; no publish, so it
-            // hears silence.
+            // Both were checked above: a refusal all the same, counted, so the
+            // host's queue stays in step and it hears silence.
+            losses.refused_blocks.add(1);
             return Ok(silent());
         };
 
         let reaches = seat.has_processor();
-        let output = pipeline.process(seat.as_mut(), slab, block)?;
+        let mut output = pipeline.process(seat.as_mut(), slab, block)?;
+        if let Some(fault) = output.failure.take() {
+            *failures += 1;
+            // A plugin failing every block is logged on a doubling schedule,
+            // not on every block; the others are counted only.
+            if failures.is_power_of_two() && back.push(Back::Failure(fault)).is_err() {
+                losses.back_refused.add(1);
+            }
+        }
         if reaches && let Some(id) = barrier.take() {
             // This block ran the Processor after the barrier was taken.
-            if let Err(refused) = back.push(Back::Ack(id)) {
-                unreaped(refused.error);
+            if back.push(Back::Ack(id)).is_err() {
+                losses.back_refused.add(1);
             }
         }
         Ok(BridgeMessage::AudioProcessed {
             latency_us: output.latency_us,
             seq,
-            // Borrowed from the pipeline's reusable buffer rather than moved
-            // out of the result: moving it would take the buffer's heap
-            // capacity with it and put the reallocation back on the audio
-            // thread. See [`AudioOutput`](crate::audio_pipeline::AudioOutput).
-            midi_out: encode_midi_out(pipeline.midi_out(), pipeline.midi_dropped()),
+            // An allocation-free copy of the inline list, which stays in the
+            // pipeline's output for the next block to clear.
+            midi_out: {
+                let dropped = u64::try_from(pipeline.midi_dropped()).unwrap_or(u64::MAX);
+                losses.midi_dropped.add(dropped);
+                pipeline.midi_out().clone()
+            },
             status: pipeline.status(),
             refused: output.refused,
         })
     }
 
-    /// The pipeline, for the tests that read what it counted.
-    #[cfg(all(test, any(feature = "clap", feature = "vst3")))]
+    /// The pipeline, for the tests that read what it holds.
+    #[cfg(test)]
     pub(crate) fn pipeline(&self) -> &AudioPipeline {
         &self.pipeline
-    }
-
-    /// The pipeline, mutably, for the test that undersizes it.
-    #[cfg(all(test, feature = "vst3"))]
-    pub(crate) fn pipeline_mut(&mut self) -> &mut AudioPipeline {
-        &mut self.pipeline
-    }
-
-    /// Blocks refused for their length so far.
-    #[cfg(all(test, feature = "clap"))]
-    pub(crate) fn refused_blocks(&self) -> u64 {
-        self.refused_blocks
     }
 
     /// Whether a slab is attached.
@@ -625,20 +823,6 @@ impl RenderSide {
     pub(crate) fn has_slab(&self) -> bool {
         self.slab.is_some()
     }
-}
-
-/// A block's plugin MIDI-out for the wire. Already capped at
-/// `MIDI_STACK_CAPACITY` (the pipeline's list cannot hold more), so the reply
-/// carries at most that many; `dropped` is what the cap cost this block, from
-/// a pathological plugin, and is logged.
-fn encode_midi_out(events: &MidiEventVec, dropped: usize) -> MidiEventVec {
-    if dropped > 0 {
-        tracing::warn!(
-            "plugin emitted {} MIDI events this block; dropped {dropped} past the cap",
-            events.len() + dropped,
-        );
-    }
-    events.clone()
 }
 
 /// The thread that renders: owns the [`RenderSide`] and the host's audio
@@ -713,4 +897,503 @@ fn run(
         }
     }
     side
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transport::AUDIO_REPLY_BYTES;
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tutti_plugin_ipc::{AudioSlab, FrameBuf, ProcessAudioData, SlabLayout, write_frame};
+    use tutti_plugin_types::{
+        ChannelLayout, MIDI_STACK_CAPACITY, NoteExpressionIntValue, PluginError, SampleRate,
+        TransportChange, TransportInfo, WireMidi,
+    };
+    use tutti_ump::Ump;
+
+    /// A slab of `samples` frames, stereo each way, and the host's end that
+    /// keeps its memory alive.
+    fn slab(name: &str, samples: usize) -> (impl Sized, SlabWriter) {
+        let layout = SlabLayout::new(
+            samples,
+            SampleFormat::Float32,
+            vec![ChannelLayout::STEREO],
+            vec![ChannelLayout::STEREO],
+        );
+        let name = format!("tutti_render_{name}_{}", std::process::id());
+        let host = AudioSlab::create(name.clone(), layout.clone()).expect("slab");
+        (host, AudioSlab::open(name, layout).expect("slab"))
+    }
+
+    /// **A drain never allocates or frees**, whatever it applies: a second slab
+    /// of another size over the first, a parameter list that grew, and a
+    /// sample format that changed. The control side builds every value a
+    /// command carries, and the values the render side replaces go back to it.
+    #[test]
+    fn a_drain_that_replaces_the_slab_refits_the_params_and_changes_format_never_allocates() {
+        let (mut link, mut side) = link();
+        let (_first_host, first) = slab("drain_first", 256);
+        link.attach_slab(first);
+        link.reserve_params(4, 64);
+        side.drain();
+
+        let (_second_host, second) = slab("drain_second", 4096);
+        link.attach_slab(second);
+        link.fit_params(300);
+        link.set_format(SampleFormat::Float64);
+        assert_no_alloc::assert_no_alloc(|| side.drain());
+        assert!(side.has_slab());
+
+        // What the drain replaced is home, to be freed here.
+        link.reap();
+        assert_eq!(link.losses(), Losses::default());
+    }
+
+    /// **A parameter list that grows after load gets its output reserved
+    /// again, at the load's room; one that shrinks keeps it.** An output
+    /// reserved for 4 parameters at a room of 10, fitted to 8, holds 8 queues;
+    /// fitted to 2, it still does.
+    #[test]
+    fn a_grown_parameter_list_is_reserved_again_at_the_loads_room() {
+        let (mut link, mut side) = link();
+        link.reserve_params(4, 10);
+        side.drain();
+        assert_eq!(side.pipeline().param_queues(), 4);
+        link.fit_params(8);
+        side.drain();
+        assert_eq!(side.pipeline().param_queues(), 8);
+        link.fit_params(2);
+        side.drain();
+        assert_eq!(side.pipeline().param_queues(), 8);
+    }
+
+    /// A subscriber that counts the events it is told of.
+    struct CountEvents(Arc<AtomicUsize>);
+
+    impl tracing::Subscriber for CountEvents {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, _: &tracing::Event<'_>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// How a stand-in plugin behaves.
+    enum Mode {
+        /// Fails every block with a constant.
+        Fail,
+        /// Floods its MIDI output past the cap.
+        Flood,
+        /// Fails the odd blocks and floods the even.
+        Alternate,
+        /// Fails every block with the next of these, built beforehand: errors
+        /// that own memory, as a Processor breaking its contract returns.
+        Owned(Vec<PluginError>),
+    }
+
+    /// A stand-in plugin.
+    struct Faulty {
+        mode: Mode,
+        blocks: usize,
+    }
+
+    impl Faulty {
+        fn new(mode: Mode) -> Self {
+            Self { mode, blocks: 0 }
+        }
+    }
+
+    impl Render for Faulty {
+        fn features(&self) -> Features {
+            Features::empty()
+        }
+
+        fn render<'a>(
+            &mut self,
+            _buffer: PluginAudio<'a>,
+            _ctx: &'a ProcessContext<'a>,
+            out: &'a mut ProcessOutput,
+        ) -> PluginResult<()> {
+            self.blocks += 1;
+            let fails = match &mut self.mode {
+                Mode::Fail => true,
+                Mode::Flood => false,
+                Mode::Alternate => self.blocks % 2 == 1,
+                Mode::Owned(errors) => {
+                    return Err(errors.pop().expect("an error for every block"));
+                }
+            };
+            if fails {
+                return Err(PluginError::Block("the stand-in fails"));
+            }
+            let event = WireMidi {
+                offset: 0,
+                ump: Ump([0x2090_3C40, 0, 0, 0]),
+            };
+            out.emit_midi(std::iter::repeat_n(event, FLOOD));
+            Ok(())
+        }
+    }
+
+    impl RenderEnd for Faulty {
+        fn poll(&mut self) {}
+        fn reset(&mut self) {}
+        fn set_features(&mut self, _: Features) {}
+        fn has_processor(&mut self) -> bool {
+            true
+        }
+    }
+
+    /// The MIDI events a flooding plugin emits in a block: past the cap.
+    const FLOOD: usize = MIDI_STACK_CAPACITY + 7;
+    const FRAMES: usize = 64;
+
+    /// A render side with a stereo slab and `plugin` seated, and the host's
+    /// end of the slab.
+    fn seated(name: &str, plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
+        let (mut link, mut side) = link();
+        let (host, writer) = slab(name, FRAMES);
+        link.attach_slab(writer);
+        link.send(ToRender::Config(RenderConfig {
+            max_block: FRAMES,
+            inputs: 2,
+            outputs: 2,
+            ..RenderConfig::new()
+        }));
+        link.send(ToRender::Seat(Box::new(plugin)));
+        side.drain();
+        (link, side, host)
+    }
+
+    fn block(seq: u64) -> HostMessage {
+        HostMessage::ProcessAudio(ProcessAudioData {
+            seq,
+            num_samples: FRAMES,
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        })
+    }
+
+    /// Fills the render side's queue to the main thread until it refuses, and
+    /// returns what it refused doing so.
+    fn fill_back_queue(side: &mut RenderSide, link: &RenderLink) -> u64 {
+        for _ in 0..=COMMANDS {
+            side.give_back(Back::Ack(0));
+        }
+        let refused = link.losses().back_refused;
+        assert!(refused > 0, "the queue took more than it holds");
+        refused
+    }
+
+    /// **The render thread never calls `tracing`**, whatever goes wrong: a
+    /// plugin that fails a block, a block refused for its length, for a rate
+    /// or for want of a plugin, a MIDI flood past the cap, a hand-back the
+    /// full queue to the main thread refuses (from `give_back`, from a failure
+    /// and from a replaced seat). What was lost is counted, and the main
+    /// thread logs it.
+    #[test]
+    fn nothing_that_goes_wrong_in_a_block_logs_on_the_render_thread() {
+        let events = Arc::new(AtomicUsize::new(0));
+        let on_render_thread = |f: &mut dyn FnMut()| {
+            let before = events.load(Ordering::Relaxed);
+            f();
+            assert_eq!(
+                events.load(Ordering::Relaxed),
+                before,
+                "the render thread logged"
+            );
+        };
+        tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
+            let (mut link, mut side, _host) = seated("quiet", Faulty::new(Mode::Fail));
+            let mut filled = 0;
+            on_render_thread(&mut || filled = fill_back_queue(&mut side, &link));
+            // A plugin that fails: each failure's cause would go home, and
+            // the queue refuses it (failures 1, 2 and 4).
+            for seq in 1..=5 {
+                on_render_thread(&mut || {
+                    side.handle(block(seq)).expect("a failed block is answered");
+                });
+            }
+            // Past the activated length: refused.
+            on_render_thread(&mut || {
+                side.handle(HostMessage::ProcessAudio(ProcessAudioData {
+                    seq: 6,
+                    num_samples: FRAMES + 1,
+                    ..ProcessAudioData::empty(SampleRate::SR_48K)
+                }))
+                .expect("a refused block is answered");
+            });
+            // A plugin that floods, in place of the one that failed: the
+            // replaced seat goes home, and the queue refuses it.
+            assert!(
+                link.to
+                    .push(ToRender::Seat(Box::new(Faulty::new(Mode::Flood))))
+                    .is_ok()
+            );
+            on_render_thread(&mut || side.drain());
+            on_render_thread(&mut || {
+                let reply = side.handle(block(7)).expect("answered").expect("a reply");
+                assert!(matches!(
+                    reply,
+                    BridgeMessage::AudioProcessed { ref midi_out, .. } if midi_out.len() == MIDI_STACK_CAPACITY
+                ));
+            });
+            // A rate the plugin refused.
+            assert!(
+                link.to
+                    .push(ToRender::Config(RenderConfig {
+                        max_block: FRAMES,
+                        inputs: 2,
+                        outputs: 2,
+                        rate_refused: true,
+                        ..RenderConfig::new()
+                    }))
+                    .is_ok()
+            );
+            on_render_thread(&mut || side.drain());
+            on_render_thread(&mut || {
+                side.handle(block(8)).expect("answered");
+            });
+            // No plugin at all.
+            let (link_none, mut none) = super::link();
+            on_render_thread(&mut || {
+                none.handle(block(1)).expect("answered");
+            });
+            assert_eq!(
+                link_none.losses().refused_blocks,
+                1,
+                "no plugin is a refusal"
+            );
+
+            assert_eq!(
+                link.losses(),
+                Losses {
+                    refused_blocks: 2,
+                    failed_blocks: 5,
+                    midi_dropped: 7,
+                    back_refused: filled + 3 + 1,
+                }
+            );
+            // The main thread says it once, with the totals.
+            let before = events.load(Ordering::Relaxed);
+            link.report_losses();
+            assert_eq!(events.load(Ordering::Relaxed), before + 1);
+            link.report_losses();
+            assert_eq!(
+                events.load(Ordering::Relaxed),
+                before + 1,
+                "once per change"
+            );
+        });
+    }
+
+    /// **A plugin whose error owns memory frees nothing on the render thread**:
+    /// each of its blocks fails with `PluginError::Other(String)`, on blocks
+    /// whose cause is not sent home and on blocks whose cause the full queue
+    /// refuses, all under the allocation gate (which aborts on a free).
+    #[test]
+    fn a_failure_that_owns_memory_is_not_freed_on_the_render_thread() {
+        const BLOCKS: usize = 12;
+        let errors = (0..BLOCKS)
+            .map(|i| PluginError::Other(format!("the plugin failed block {i}")))
+            .collect();
+        let (link, mut side, _host) = seated("owned_errors", Faulty::new(Mode::Owned(errors)));
+        let filled = fill_back_queue(&mut side, &link);
+        assert_no_alloc::assert_no_alloc(|| {
+            for seq in 1..=BLOCKS as u64 {
+                let reply = side.handle(block(seq));
+                assert!(reply.is_ok(), "a failed block is answered");
+            }
+        });
+        let losses = link.losses();
+        assert_eq!(losses.failed_blocks, BLOCKS as u64);
+        // Failures 1, 2, 4 and 8 are due home, and the queue is full.
+        assert_eq!(losses.back_refused, filled + 4);
+    }
+
+    /// **The cause of the first block a plugin fails, and of each that makes a
+    /// power of two, goes home to be logged**; the others are counted only, so
+    /// a plugin failing every block is not a flood of hand-backs.
+    #[test]
+    fn a_failed_blocks_cause_goes_home_on_a_doubling_schedule() {
+        let (mut link, mut side, _host) = seated("failing_causes", Faulty::new(Mode::Fail));
+        // The seat and slab hand-backs of the setup are home already.
+        while link.back.pop().is_some() {}
+        for seq in 1..=9 {
+            side.handle(block(seq)).expect("answered");
+        }
+        let mut causes = 0;
+        while let Some(back) = link.back.pop() {
+            assert!(matches!(back, Back::Failure(BlockFault(_))));
+            causes += 1;
+        }
+        // Failures 1, 2, 4 and 8.
+        assert_eq!(causes, 4);
+        assert_eq!(link.losses().failed_blocks, 9);
+    }
+
+    /// **A run that stops at 3 reports 3**: the tick logs the counts when they
+    /// first appear and each time they double, and the teardown logs the final
+    /// counts if they are not what was last logged.
+    #[test]
+    fn the_final_counts_are_reported_when_they_differ_from_the_last_report() {
+        let events = Arc::new(AtomicUsize::new(0));
+        tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
+            let (mut link, mut side, _host) = seated("final", Faulty::new(Mode::Fail));
+            for seq in 1..=2 {
+                side.handle(block(seq)).expect("answered");
+            }
+            // The causes of failures 1 and 2, and the counts at 2.
+            link.report_losses();
+            let after_two = events.load(Ordering::Relaxed);
+            assert_eq!(after_two, 3);
+            side.handle(block(3)).expect("answered");
+            // 3 is not twice 2, and failure 3's cause is not sent home.
+            link.report_losses();
+            assert_eq!(events.load(Ordering::Relaxed), after_two);
+            link.report_final_losses();
+            assert_eq!(
+                events.load(Ordering::Relaxed),
+                after_two + 1,
+                "the final 3 is reported"
+            );
+            link.report_final_losses();
+            assert_eq!(events.load(Ordering::Relaxed), after_two + 1, "once");
+        });
+    }
+
+    /// **A count is logged when it first appears and each time it doubles.**
+    #[test]
+    fn losses_are_reported_when_first_nonzero_and_each_doubling() {
+        let none = Losses::default();
+        let one = Losses {
+            failed_blocks: 1,
+            ..none
+        };
+        assert!(!none.worsened_since(none));
+        assert!(one.worsened_since(none));
+        assert!(!one.worsened_since(one));
+        let three = Losses {
+            failed_blocks: 3,
+            ..none
+        };
+        assert!(!three.worsened_since(Losses {
+            failed_blocks: 2,
+            ..none
+        }));
+        assert!(
+            Losses {
+                failed_blocks: 4,
+                ..none
+            }
+            .worsened_since(Losses {
+                failed_blocks: 2,
+                ..none
+            })
+        );
+        // Another count appearing is news too.
+        assert!(
+            Losses {
+                failed_blocks: 1,
+                midi_dropped: 1,
+                ..none
+            }
+            .worsened_since(one)
+        );
+    }
+
+    /// The server's end of an audio connection in memory: it reads the same
+    /// request frame every time, through the buffers the real connection reads
+    /// through, and counts the replies it writes into a fixed sink.
+    struct Replay {
+        frames: FrameBuf,
+        request: Vec<u8>,
+        sink: Box<[u8]>,
+        replies: usize,
+    }
+
+    impl Transport for Replay {
+        fn recv(&mut self) -> BridgeResult<HostMessage> {
+            self.frames.read(&mut self.request.as_slice())
+        }
+
+        fn wait_readable(&mut self, _: Duration) -> BridgeResult<bool> {
+            Ok(true)
+        }
+
+        fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+            let mut sink: &mut [u8] = &mut self.sink;
+            self.frames.write(&mut sink, msg)?;
+            sink.flush()?;
+            self.replies += 1;
+            Ok(())
+        }
+    }
+
+    /// **A block served the way production serves it allocates nothing**, from
+    /// the first one: `step` reads the request through the connection's fixed
+    /// buffers, decodes it with its extras (MIDI, transport changes and
+    /// per-note integer expression, as a host sends them), renders it, and
+    /// answers with the plugin's MIDI-out past its cap, which is counted and
+    /// not logged. The block's automation and note expression are empty here:
+    /// a decode of points still allocates (see `PointBuf`'s `Deserialize`).
+    #[test]
+    fn a_step_with_extras_reads_decodes_renders_and_answers_without_allocating() {
+        let (mut link, mut side, _host) = seated("step_alloc", Faulty::new(Mode::Alternate));
+        let mut block = ProcessAudioData {
+            seq: 1,
+            num_samples: FRAMES,
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        };
+        for offset in 0..3 {
+            block.midi_events.push(WireMidi {
+                offset,
+                ump: Ump([0x2090_3C40, 0, 0, 0]),
+            });
+        }
+        block.transport_changes.push(TransportChange {
+            offset: 8,
+            transport: TransportInfo::new(SampleRate::SR_48K),
+        });
+        block.expr_ints.changes.push(NoteExpressionIntValue {
+            sample_offset: 0,
+            note_id: 1,
+            type_id: 2,
+            value: 3,
+        });
+        let mut request = Vec::new();
+        write_frame(&mut request, &HostMessage::ProcessAudio(block)).unwrap();
+        let mut io: Box<dyn Transport> = Box::new(Replay {
+            frames: FrameBuf::new(request.len(), AUDIO_REPLY_BYTES),
+            request,
+            sink: vec![0; AUDIO_REPLY_BYTES + 4].into_boxed_slice(),
+            replies: 0,
+        });
+        // Half the blocks fail and half flood, so the failure causes and the
+        // barrier's acknowledgement are pushed home inside the gate too.
+        const STEPS: usize = 16;
+        let barrier = link.barrier();
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..STEPS {
+                side.step(Some(&mut io), Duration::ZERO).unwrap();
+            }
+        });
+        assert!(
+            link.wait_applied(barrier, Duration::ZERO),
+            "the ack came home"
+        );
+        let losses = link.losses();
+        assert_eq!(losses.midi_dropped, 7 * (STEPS as u64 / 2));
+        assert_eq!(losses.failed_blocks, STEPS as u64 / 2);
+        assert_eq!(losses.refused_blocks, 0);
+        assert_eq!(losses.back_refused, 0);
+    }
 }

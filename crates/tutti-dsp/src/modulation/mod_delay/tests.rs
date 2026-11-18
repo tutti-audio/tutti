@@ -25,7 +25,7 @@ fn short_base() -> Sweep {
     Sweep::of(
         Seconds(0.001),
         MaxDelay::of(Seconds(0.02)),
-        Seconds(0.0),
+        Seconds::ZERO,
         Seconds(0.01),
         Feedback::MAX_STABLE,
     )
@@ -36,7 +36,7 @@ fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank {
     let sweep = Sweep::of(
         Seconds(frames / rate.get()),
         MaxDelay::of(Seconds(0.02)),
-        Seconds(0.0),
+        Seconds::ZERO,
         Seconds(0.01),
         Feedback::MAX_STABLE,
     );

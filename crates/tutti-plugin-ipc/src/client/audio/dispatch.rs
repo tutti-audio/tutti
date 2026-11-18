@@ -626,7 +626,7 @@ pub(super) fn handle(
                     other => {
                         return Err(BridgeError::UnexpectedMessage {
                             expected: "SampleRateSet",
-                            got: format!("{other:?}"),
+                            got: format!("{other:?}").into(),
                         });
                     }
                 }

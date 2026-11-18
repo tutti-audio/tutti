@@ -2133,7 +2133,7 @@ fn indexed_wave(channels: usize, len: usize) -> Arc<Wave> {
 
 #[test]
 fn reader_and_voice_node_default_to_stereo() {
-    let (unit, _h) = VoicePool::new().with_handle();
+    let (unit, _h) = VoicePool::<f32>::new().with_handle();
     assert_eq!(unit.channels(), ChannelLayout::STEREO);
     assert_eq!(unit.shape().audio_out(), ChannelLayout::STEREO);
 }
@@ -2145,10 +2145,12 @@ fn reader_and_voice_node_default_to_stereo() {
 fn a_pool_wider_than_the_sampler_reads_is_refused() {
     let ceiling = tutti_types::MAX_CHANNELS;
     assert!(
-        VoicePool::with_channels(ChannelLayout::try_from(ceiling).expect("a test width is small"))
-            .is_ok()
+        VoicePool::<f32>::with_channels(
+            ChannelLayout::try_from(ceiling).expect("a test width is small")
+        )
+        .is_ok()
     );
-    let err = VoicePool::with_channels(
+    let err = VoicePool::<f32>::with_channels(
         ChannelLayout::try_from(ceiling + 1).expect("a test width is small"),
     )
     .expect_err("a pool past the ceiling must be refused");
@@ -2201,9 +2203,10 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
 #[test]
 fn both_nodes_declare_their_width() {
     for w in [1usize, 2, 6, 8] {
-        let unit =
-            VoicePool::with_channels(ChannelLayout::try_from(w).expect("a test width is small"))
-                .expect("a width the sampler reads");
+        let unit = VoicePool::<f32>::with_channels(
+            ChannelLayout::try_from(w).expect("a test width is small"),
+        )
+        .expect("a width the sampler reads");
         let sampler = MemorySource::with_config(
             indexed_wave(6, 64),
             MemorySourceConfig {

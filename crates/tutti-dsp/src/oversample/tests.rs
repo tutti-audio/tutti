@@ -277,7 +277,7 @@ fn a_block_round_trips_in_either_format() {
 /// A design the half-band cannot make is the FIR design's refusal.
 #[test]
 fn a_bad_attenuation_is_the_designs_refusal() {
-    let bad = Oversampling::new(OversamplingFactor::X2).attenuation(Db(0.0));
+    let bad = Oversampling::new(OversamplingFactor::X2).attenuation(Db::UNITY);
     assert!(matches!(
         bad.plan(RATE),
         Err(FirError::NonPositiveAttenuation(_))

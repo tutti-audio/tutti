@@ -40,7 +40,7 @@ use tutti_units::{
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
-use crate::delay::finite_or;
+use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
@@ -75,7 +75,7 @@ impl ModDelayControls {
     /// No sweep, no recirculation, at 1 Hz: what a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
         rate: Hz(1.0),
-        depth: Seconds(0.0),
+        depth: Seconds::ZERO,
         feedback: Feedback::NONE,
     };
 
@@ -211,7 +211,11 @@ impl ModDelayLayout {
     #[must_use]
     pub fn offsets(&self) -> [PhaseIncrement; MAX_MOD_DELAY_CHANNELS] {
         let mut offsets = [PhaseIncrement(0.0); MAX_MOD_DELAY_CHANNELS];
-        for (c, o) in offsets.iter_mut().enumerate().take(self.width()) {
+        let layout = self.input.layout();
+        for (c, o) in (0..self.width())
+            .filter_map(|c| layout.index(c))
+            .zip(&mut offsets)
+        {
             *o = self.stagger.offset(c);
         }
         offsets

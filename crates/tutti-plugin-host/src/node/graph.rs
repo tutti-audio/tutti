@@ -16,10 +16,10 @@
 //! out-of-process VST2 loader sets a chunk's). The two hosts differ only in
 //! that the out-of-process one's chunk is the pipeline's, this one's the
 //! graph's block. A block with no Processor in hand (silence, counted in
-//! [`unlent_blocks`](InProcClient::unlent_blocks)) or one the Processor
-//! failed ([`failed_blocks`](InProcClient::failed_blocks)) delivers nothing,
-//! and its values are owed to the next block. Counted in
-//! [`NodeControls::param_delivery`].
+//! [`BlockLosses::unlent`](crate::BlockLosses::unlent)) or one the Processor
+//! failed ([`BlockLosses::failed`](crate::BlockLosses::failed), its cause
+//! logged through [`Io::log_plugin`]) delivers nothing, and its values are
+//! owed to the next block. Counted in [`NodeControls::param_delivery`].
 //!
 //! Forkable by state transfer (see its `IntoNode` below, and `fork.rs`). The
 //! live node and its fork read the transport the same way: from the block's
@@ -30,7 +30,7 @@ use std::num::NonZeroUsize;
 use arrayvec::ArrayVec;
 use tutti_graph::{
     BusOut, Cx, Event, EventKind, Harmony, HarmonyKind, InBus, IntoNode, Io, MAX_BUSES, Node,
-    NodeParts, Offset, OutBus, Prepare, Shape, SortedEvents, Status,
+    NodeParts, Offset, OutBus, Prepare, RtLevel, Shape, SortedEvents, Status,
 };
 use tutti_units::{Latency, Samples, Tail};
 
@@ -65,16 +65,15 @@ where
         let this = &self.client;
         let rate = this.sample_rate;
         let midi_out = u16::from(this.features.contains(Features::MIDI_OUT));
-        // The plugin's figures as the control side last re-read them
-        // (`poll_changes` keeps them current; nothing is dispatched to the
-        // plugin here), falling back to this node's copy while the control
-        // thread holds the instance.
-        let (latency, tail) = match (&this.controls, this.inner.try_lock()) {
+        // The plugin's figures as the control side last re-read them, whether
+        // or not it holds the instance now: nothing is dispatched to the
+        // plugin here.
+        let (latency, tail) = match &this.controls {
             // A served plugin's, re-reported by the bridge's thread into the
             // controls' cells, which also hold the pipeline's chunk.
-            (Some(controls), _) => (controls.latency(), controls.tail()),
-            (None, Some(instance)) => instance.figures(),
-            (None, None) => (this.declared.latency, this.declared.tail),
+            Some(controls) => (controls.latency(), controls.tail()),
+            // An in-process plugin's, published by its instance at every step.
+            None => this.figures.get(),
         };
         // The plugin's own latency, and what the Processor adds to it (the
         // served pipeline's chunk).
@@ -82,6 +81,7 @@ where
         this.declared
             .ports
             .with_events(1, midi_out)
+            .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
@@ -96,6 +96,11 @@ where
     /// over); what was delivered to the plugin is kept.
     fn prepare(&mut self, p: &Prepare) {
         let this = &mut self.client;
+        // What the event input is declared to take in a block: the node's own
+        // intake, at most the Processor's input room (`Processor::event_input`;
+        // the last one seen while it is away). A served plugin has a second cut
+        // at its chunk (`Processor::event_input`).
+        this.event_input = this.event_bound();
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.
@@ -195,6 +200,10 @@ where
             this.out_events.clear();
             let mut block = this.transport.lend(features);
             let (inputs, mut outputs) = io.split();
+            // The cause of the last piece the Processor failed, for the log.
+            let mut failure = None;
+            let mut harmony_dropped = 0u64;
+            let mut out_dropped = 0u64;
             // Whether every piece of the block was asleep (`asleep`): one that
             // was not, or did not run, keeps the node called.
             let mut slept = true;
@@ -231,7 +240,8 @@ where
                             midi_dropped += intake.push_displacing(midi, event);
                         }
                         EventKind::Harmony(h) => {
-                            push_harmony(chords, scales, features, h, frame - phase);
+                            harmony_dropped +=
+                                push_harmony(chords, scales, features, h, frame - phase);
                         }
                         EventKind::Ramp(_) | EventKind::Segment(_) | EventKind::Resync => {}
                     },
@@ -298,7 +308,7 @@ where
                     .collect();
                 let rendered = render_with(
                     processor.as_deref_mut(),
-                    (&this.unlent_writer, &this.failed_writer),
+                    this.params.losses(),
                     &this.params,
                     &mut this.midi,
                     &mut this.out,
@@ -314,14 +324,19 @@ where
                 if rendered != Rendered::Ran {
                     silence(&mut outs, n);
                 }
+                if let Rendered::Failed(why) = rendered {
+                    failure = Some(why);
+                }
                 slept &= rendered == Rendered::Ran && asleep(&this.out, &outs);
                 if rendered == Rendered::Ran {
                     // In the chunk the Processor holds until it ships it.
                     this.chunk_midi += piece_midi as u64;
                     this.params.refused(this.out.params_refused() as u64);
-                    this.refused_writer.add(this.out.entries_refused() as u64);
-                    this.input_refused_writer
-                        .add(this.out.input_refused() as u64);
+                    let losses = this.params.losses();
+                    losses
+                        .entries_refused
+                        .add(this.out.entries_refused() as u64);
+                    losses.inputs_refused.add(this.out.input_refused() as u64);
                     // What the Processor shipped in this call, and lost.
                     let reported = this.out.midi_lost() as u64;
                     if reported > 0 {
@@ -337,10 +352,15 @@ where
                         tutti_plugin_types::insertion_sort_by_key(out_events, |e| e.offset);
                         for e in out_events.iter() {
                             let frame = (at + e.offset as usize).min(size - 1);
-                            let _ = this.out_events.try_push(WireMidi {
-                                offset: frame as u32,
-                                ump: e.ump,
-                            });
+                            // Past the block's room the event is lost, and counted.
+                            let fits = this
+                                .out_events
+                                .try_push(WireMidi {
+                                    offset: frame as u32,
+                                    ump: e.ump,
+                                })
+                                .is_ok();
+                            out_dropped += u64::from(!fits);
                         }
                     }
                 } else {
@@ -362,6 +382,12 @@ where
             drop(block);
             this.transport.advance(size);
             io.count_lost(lost);
+            let losses = this.params.losses();
+            losses.harmony.add(harmony_dropped);
+            losses.midi_out.add(out_dropped);
+            if let Some(why) = failure {
+                io.log_plugin(RtLevel::Warn, why, Offset::ZERO, &[]);
+            }
             if sends {
                 let writer = io.event_out(0);
                 let block = Samples(size);
@@ -393,6 +419,7 @@ where
         let (chords, scales) = (&mut this.chords, &mut this.scales);
         intake.new_chunk();
         let mut midi_dropped = 0u64;
+        let mut harmony_dropped = 0u64;
         param_input::take(
             events.as_slice(),
             0,
@@ -408,13 +435,16 @@ where
                 }
                 // A chord or scale, for a plugin that takes sequencer context
                 // (VST 2.4 has no such event, and declares none).
-                EventKind::Harmony(h) => push_harmony(chords, scales, features, h, frame),
+                EventKind::Harmony(h) => {
+                    harmony_dropped += push_harmony(chords, scales, features, h, frame);
+                }
                 // The walk keeps parameter events for itself; a plugin
                 // re-sends nothing.
                 EventKind::Ramp(_) | EventKind::Segment(_) | EventKind::Resync => {}
             },
         );
         this.params.count_midi_dropped(midi_dropped);
+        this.params.losses().harmony.add(harmony_dropped);
         io.count_lost(midi_dropped);
         // Built before the plugin is entered: `drive_f32` publishes it to the
         // cell `audioMasterGetTime` reads, then calls `process`.
@@ -437,7 +467,7 @@ where
                 .collect();
             let rendered = render_with(
                 processor,
-                (&this.unlent_writer, &this.failed_writer),
+                this.params.losses(),
                 &this.params,
                 &mut this.midi,
                 &mut this.out,
@@ -459,12 +489,17 @@ where
         };
         let (rendered, slept) = rendered;
         let processed = rendered == Rendered::Ran;
+        if let Rendered::Failed(why) = rendered {
+            io.log_plugin(RtLevel::Warn, why, Offset::ZERO, &[]);
+        }
         if processed {
             // The writes the plugin refused, counted dropped.
             this.params.refused(this.out.params_refused() as u64);
-            this.refused_writer.add(this.out.entries_refused() as u64);
-            this.input_refused_writer
-                .add(this.out.input_refused() as u64);
+            let losses = this.params.losses();
+            losses
+                .entries_refused
+                .add(this.out.entries_refused() as u64);
+            losses.inputs_refused.add(this.out.input_refused() as u64);
             // What a Processor says it lost (none that is not chunked does).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
@@ -578,7 +613,8 @@ fn expressive<'a>(
 
 /// A chord or scale into the piece's harmony at its frame `frame`, for a plugin
 /// that takes sequencer context; nothing for one that does not. Past the cap
-/// ([`HARMONY_CAPACITY`](tutti_plugin_types::HARMONY_CAPACITY)) it is dropped.
+/// ([`HARMONY_CAPACITY`](tutti_plugin_types::HARMONY_CAPACITY)) it is dropped:
+/// returns how many were (one or none), for the node to count.
 /// No display text: the degrees are what a plugin acts on.
 fn push_harmony(
     chords: &mut ChordChanges,
@@ -586,9 +622,9 @@ fn push_harmony(
     features: Features,
     h: Harmony,
     frame: usize,
-) {
+) -> u64 {
     if !features.contains(Features::SEQUENCER_CONTEXT) {
-        return;
+        return 0;
     }
     let sample_offset = i32::try_from(frame).unwrap_or(i32::MAX);
     let (root, bass, mask) = (
@@ -596,25 +632,22 @@ fn push_harmony(
         i16::from(h.bass()),
         i16::try_from(h.degrees()).unwrap_or(0),
     );
-    match h.kind() {
-        HarmonyKind::Chord => {
-            let _ = chords.add_change(ChordValue {
-                sample_offset,
-                root,
-                bass_note: bass,
-                mask,
-                text: String::new(),
-            });
-        }
-        HarmonyKind::Scale => {
-            let _ = scales.add_change(ScaleValue {
-                sample_offset,
-                root,
-                mask,
-                text: String::new(),
-            });
-        }
-    }
+    let kept = match h.kind() {
+        HarmonyKind::Chord => chords.add_change(ChordValue {
+            sample_offset,
+            root,
+            bass_note: bass,
+            mask,
+            text: String::new(),
+        }),
+        HarmonyKind::Scale => scales.add_change(ScaleValue {
+            sample_offset,
+            root,
+            mask,
+            text: String::new(),
+        }),
+    };
+    u64::from(!kept)
 }
 
 /// The plugin, inserted as a graph node. Its controls ([`NodeControls`]) are
@@ -651,7 +684,7 @@ impl<F: InProcess> InProcClient<F> {
     /// is the out-of-process node's chunk: a block's points all count as sent,
     /// though a format may take only each parameter's last one, and a block
     /// the plugin did not run (no Processor in hand, or one that failed it;
-    /// see `unlent_blocks` and `failed_blocks`) loses its MIDI, counted.
+    /// see [`BlockLosses`](crate::BlockLosses)) loses its MIDI, counted.
     pub fn controls(&self) -> NodeControls {
         NodeControls::new(self.transport.meter(), self.params.counters())
     }
@@ -770,7 +803,6 @@ mod owed_tests {
             )
         });
         let inner = std::sync::Arc::clone(&client.inner);
-        let unlent = client.unlent.clone();
         let controls = client.controls();
         let mut unit = Direct::new(
             client.bind(tutti_fixtures::tempo()),
@@ -791,7 +823,11 @@ mod owed_tests {
         );
         unit.block();
         pump(&inner);
-        assert_eq!(unlent.get(), 1, "the block had no Processor");
+        assert_eq!(
+            controls.block_losses().unlent,
+            1,
+            "the block had no Processor"
+        );
         assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "not yet delivered");
         let stats = controls.param_delivery();
         assert_eq!(stats.chunks_deferred, 1);
@@ -907,7 +943,7 @@ mod owed_tests {
         assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
         assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
         assert_eq!(
-            unit.node.refused_inputs(),
+            unit.node.controls().block_losses().inputs_refused,
             1,
             "the dump the plugin's host dropped whole, counted in its own unit"
         );
@@ -954,7 +990,11 @@ mod owed_tests {
             lost,
             "the new dump's END was not skipped for the host's drop"
         );
-        assert_eq!(unit.node.refused_inputs(), 1, "the cut dump, whole");
+        assert_eq!(
+            unit.node.controls().block_losses().inputs_refused,
+            1,
+            "the cut dump, whole"
+        );
         assert_eq!(
             unit.node.rt.held().expect("lent").dropped_sysex().get(),
             1,

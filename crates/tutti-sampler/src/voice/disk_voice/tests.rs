@@ -83,7 +83,10 @@ fn process_reads_one_file_frame_per_output_frame_at_unity_rate() {
             assert_eq!(got, samples[frame].0, "output frame {frame}");
         }
     }
-    assert_eq!(voice.inner.read.read_to(), (BLOCK * BLOCKS - 1) as f64);
+    assert_eq!(
+        voice.inner.read.read_to(),
+        SamplePosition((BLOCK * BLOCKS - 1) as f64)
+    );
 }
 
 // --- DiskVoice: placement gate ---
@@ -1479,7 +1482,7 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
     t.set_rolling(true);
     assert!(run(&mut voice, &mut scratch), "a rolling transport sounds");
     assert!(scratch.out.lanes()[0][..BLOCK].iter().all(|&s| s != 7.0));
-    assert!(voice.inner.read.read_to() > 22_000.0);
+    assert!(voice.inner.read.read_to() > SamplePosition(22_000.0));
 }
 
 /// A skipped block forgets a crossfade in progress, as the rendered

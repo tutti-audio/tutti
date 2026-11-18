@@ -75,7 +75,7 @@ impl Driver {
             Self::Threaded(DiskStreamer::build(rate, config, seams).expect("the thread starts"))
         } else {
             Self::Hand(Box::new(
-                DiskStreamer::manual_with(rate, config, seams).expect("builds"),
+                DiskStreamer::<ByHand, f32>::manual_with(rate, config, seams).expect("builds"),
             ))
         }
     }
@@ -408,7 +408,7 @@ fn a_refused_spawn_is_an_error() {
         spawn: refuse,
         ..Seams::default()
     };
-    let built = DiskStreamer::build(
+    let built = DiskStreamer::<Running, f32>::build(
         tutti_units::SampleRate::SR_48K,
         DiskStreamerConfig::default(),
         seams,
@@ -527,9 +527,12 @@ fn a_refused_decode_thread_fails_the_open() {
         spawn: refuse,
         ..Seams::default()
     };
-    let mut sampler =
-        DiskStreamer::manual_with(tutti_units::SampleRate::SR_44K1, Default::default(), seams)
-            .expect("builds");
+    let mut sampler = DiskStreamer::<ByHand, f32>::manual_with(
+        tutti_units::SampleRate::SR_44K1,
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
     let opening = sampler.open(&mp3(dir.path()), Placement::HEAD);
     let answer = settle(&mut sampler, opening);
@@ -556,9 +559,12 @@ fn a_panicking_decode_fails_that_open_only() {
         })),
         ..Seams::default()
     };
-    let mut sampler =
-        DiskStreamer::manual_with(tutti_units::SampleRate::SR_44K1, Default::default(), seams)
-            .expect("builds");
+    let mut sampler = DiskStreamer::<ByHand, f32>::manual_with(
+        tutti_units::SampleRate::SR_44K1,
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
     let answer = settle(&mut sampler, opening);
     assert!(

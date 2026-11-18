@@ -69,7 +69,7 @@ pub(crate) fn unexpected_message(
 ) -> BridgeError {
     BridgeError::UnexpectedMessage {
         expected,
-        got: format!("{got:?}"),
+        got: format!("{got:?}").into(),
     }
 }
 

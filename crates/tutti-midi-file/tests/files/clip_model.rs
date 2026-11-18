@@ -2,15 +2,15 @@
 //! laid out by hand from M2-116 (the structure rules are about *order*, which
 //! only a hand-built stream can get wrong on purpose).
 
-use crate::common::{metrical, track};
+use crate::common::{self, metrical, track};
 
 use tutti_fixtures::midi;
 use tutti_midi_device::{
     NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
 };
 use tutti_midi_file::{
-    ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfFormat,
-    Tick, Track, TracksError,
+    ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick, Track,
+    TracksError,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
@@ -398,7 +398,7 @@ fn no_prefix_of_a_valid_clip_is_accepted() {
 fn what_a_clip_cannot_hold_is_refused() {
     let one = |event| MidiFile::clip(DIVISION, track(vec![(0, event)]));
     assert!(matches!(
-        one(FileEvent::SysEx(vec![1].into())),
+        one(FileEvent::SysEx(common::complete(&[1]))),
         Err(TracksError::Refused { .. })
     ));
     assert!(matches!(
@@ -499,7 +499,7 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
         )
     };
     let events = || vec![(0, packet(message(true))), (96, packet(message(false)))];
-    let smf = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track(events())]).unwrap();
+    let smf = crate::common::format0(SMF_DIVISION, track(events())).unwrap();
     let clip = MidiFile::clip(DIVISION, track(events())).unwrap();
     let read = |f: &MidiFile| MidiFile::from_bytes(&f.to_bytes()).unwrap();
     let (a, b) = (read(&smf), read(&clip));
@@ -766,7 +766,7 @@ fn an_smf_holds_no_header() {
         profile: ProfileId::MPE,
     });
     assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![with_profile]),
+        crate::common::format0(SMF_DIVISION, with_profile),
         Err(TracksError::HeaderInSmf { track: 0 })
     ));
 }

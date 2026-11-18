@@ -220,7 +220,7 @@ fn an_aimed_amount_glides_along_the_linear_ramp() {
     let mut y = run(&mut bank, &[&x[..cut]], 64).remove(0);
     bank.aim(&TransientControls {
         attack: Db(a1 as f32),
-        sustain: Db(0.0),
+        sustain: Db::UNITY,
     });
     y.extend(run(&mut bank, &[&x[cut..]], 64).remove(0));
     let (af, asl) = (pole(FAST), pole(SLOW));

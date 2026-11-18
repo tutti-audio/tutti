@@ -28,57 +28,27 @@ use tutti_types::MAX_CHANNELS;
 use tutti_units::{Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
+use crate::delay::DelayRing;
+use crate::onepole::{cutoff_pole, ring_frames};
 use crate::reverb::network::{Absorption, Network, Stage};
-use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
+use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
 
-/// One delay line: `put` writes the current frame and `read` takes it back `delay` frames;
-/// `advance` moves to the next frame.
-#[derive(Clone, Debug)]
-struct Line {
-    buf: Vec<f32>,
-    w: usize,
+/// A delay line of `frames` and the slack that keeps a modulated read inside it.
+fn line(frames: Samples) -> DelayRing {
+    DelayRing::new(frames.get() + SLACK)
 }
 
-impl Line {
-    fn new(frames: Samples) -> Self {
-        Self {
-            buf: vec![0.0; frames.get() + SLACK],
-            w: 0,
-        }
-    }
-
-    fn clear(&mut self) {
-        self.buf.fill(0.0);
-        self.w = 0;
-    }
-
-    #[inline]
-    fn put(&mut self, x: f32) {
-        self.buf[self.w] = x;
-    }
-
-    #[inline]
-    fn read(&self, delay: f32) -> f32 {
-        read(&self.buf, self.w, delay)
-    }
-
-    #[inline]
-    fn advance(&mut self) {
-        self.w = (self.w + 1) % self.buf.len();
-    }
-
-    /// A lattice of coefficient `g` over this line at `delay` frames: `x` in, `y` out.
-    #[inline]
-    fn lattice(&mut self, x: f32, g: f32, delay: f32) -> f32 {
-        let z = self.read(delay);
-        let v = x + g * z;
-        self.put(v);
-        z - g * v
-    }
+/// A lattice of coefficient `g` over `line` at `delay` frames: `x` in, `y` out.
+#[inline]
+fn lattice(line: &mut DelayRing, x: f32, g: f32, delay: f32) -> f32 {
+    let z = line.at(delay);
+    let v = x + g * z;
+    line.put(v);
+    z - g * v
 }
 
 /// The lengths and fixed coefficients the bank was built to, read from a design.
@@ -199,10 +169,10 @@ struct TapAt {
 /// The state of one tank half.
 #[derive(Clone, Debug)]
 struct Half {
-    modulated: Line,
-    delay1: Line,
-    lattice2: Line,
-    delay2: Line,
+    modulated: DelayRing,
+    delay1: DelayRing,
+    lattice2: DelayRing,
+    delay2: DelayRing,
     /// The damping low-pass's output.
     damped: f32,
 }
@@ -230,10 +200,10 @@ pub struct PlateBank {
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: Samples,
-    pre: Line,
+    pre: DelayRing,
     /// The bandwidth low-pass's output.
     bandwidth: f32,
-    input: [Line; 4],
+    input: [DelayRing; 4],
     halves: [Half; 2],
     /// The phase of the modulation, in turns.
     phase: f64,
@@ -263,10 +233,10 @@ impl PlateBank {
         worst.design_into(rate, &mut network);
         let shape = shape_of(&network);
         let half = |h: &[Samples; 4]| Half {
-            modulated: Line::new(h[0] + shape.excursion + Samples(1)),
-            delay1: Line::new(h[1]),
-            lattice2: Line::new(h[2]),
-            delay2: Line::new(h[3]),
+            modulated: line(h[0] + shape.excursion + Samples(1)),
+            delay1: line(h[1]),
+            lattice2: line(h[2]),
+            delay2: line(h[3]),
             damped: 0.0,
         };
         let mut bank = Self {
@@ -289,9 +259,9 @@ impl PlateBank {
                 rate,
             ),
             into: Samples::ZERO,
-            pre: Line::new(shape.pre),
+            pre: line(shape.pre),
             bandwidth: 0.0,
-            input: shape.input.map(Line::new),
+            input: shape.input.map(line),
             halves: [half(&shape.halves[0]), half(&shape.halves[1])],
             phase: 0.0,
             fresh: true,
@@ -358,7 +328,7 @@ impl PlateBank {
     pub fn reset(&mut self) {
         self.pre.clear();
         self.bandwidth = 0.0;
-        self.input.iter_mut().for_each(Line::clear);
+        self.input.iter_mut().for_each(DelayRing::clear);
         for h in &mut self.halves {
             h.modulated.clear();
             h.delay1.clear();
@@ -464,12 +434,12 @@ impl PlateBank {
         let c = self.chunk;
         let k = c.k;
         self.pre.put(x);
-        let delayed = self.pre.read(k.pre);
+        let delayed = self.pre.at(k.pre);
         self.pre.advance();
         self.bandwidth += (1.0 - k.bandwidth) * (delayed - self.bandwidth);
         let mut u = self.bandwidth;
         for ((line, &n), &g) in self.input.iter_mut().zip(&self.shape.input).zip(&k.input) {
-            u = line.lattice(u, g, n.get() as f32);
+            u = lattice(line, u, g, n.get() as f32);
             line.advance();
         }
 
@@ -477,20 +447,23 @@ impl PlateBank {
         let ends = [0, 1].map(|h| {
             self.halves[h]
                 .delay2
-                .read(self.shape.halves[h][3].get() as f32)
+                .at(self.shape.halves[h][3].get() as f32)
         });
         for h in 0..2 {
             let [d1, l1, d2, _] = self.shape.halves[h].map(|n| n.get() as f32);
             let half = &mut self.halves[h];
             let input = u + k.decay * ends[1 - h];
             let sweep = crate::lerp(c.prev[h], c.next[h], t);
-            let y = half
-                .modulated
-                .lattice(input, k.lattice1, (d1 + sweep).max(1.0));
+            let y = lattice(
+                &mut half.modulated,
+                input,
+                k.lattice1,
+                (d1 + sweep).max(1.0),
+            );
             half.delay1.put(y);
-            let q = half.delay1.read(l1);
+            let q = half.delay1.at(l1);
             half.damped += (1.0 - k.damping) * (q - half.damped);
-            let y = half.lattice2.lattice(k.decay * half.damped, k.lattice2, d2);
+            let y = lattice(&mut half.lattice2, k.decay * half.damped, k.lattice2, d2);
             half.delay2.put(y);
         }
 
@@ -502,9 +475,9 @@ impl PlateBank {
                         let half = &self.halves[k.half];
                         k.sign.get()
                             * match k.point {
-                                Point::Delay1 => half.delay1.read(k.at),
-                                Point::Lattice2 => half.lattice2.read(k.at),
-                                Point::Delay2 => half.delay2.read(k.at),
+                                Point::Delay1 => half.delay1.at(k.at),
+                                Point::Lattice2 => half.lattice2.at(k.at),
+                                Point::Delay2 => half.delay2.at(k.at),
                             }
                     })
                     .sum::<f32>()
@@ -526,11 +499,7 @@ impl PlateBank {
 /// long after it stops.
 fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
     let pole = cutoff_pole(cutoff, rate);
-    let floor = f64::from(TAIL_FLOOR.to_amplitude().get());
-    if pole <= 0.0 {
-        return Seconds::ZERO;
-    }
-    Seconds(libm::log(floor) / libm::log(pole) / rate.get())
+    Seconds(ring_frames(pole, TAIL_FLOOR) / rate.get())
 }
 
 /// The lengths and fixed coefficients of the design in `network`.

@@ -151,6 +151,9 @@ fn an_all_pass_is_freeverbs_form() {
     );
 }
 
+const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+const ALL_PASSES: [usize; 4] = [556, 441, 341, 225];
+
 /// The tunings and the stereo spread are Freeverb's (combs 1116, 1188, 1277, 1356, 1422,
 /// 1491, 1557, 1617 and all-passes 556, 441, 341, 225 at 44.1 kHz), the right channel's
 /// lines 23 frames longer, and at another rate each is `round(rate / 44100 * tuning)` of
@@ -167,8 +170,7 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
                 .collect(),
         )
     };
-    let left = [1116usize, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
-    let aps = [556usize, 441, 341, 225];
+    let (left, aps) = (COMBS, ALL_PASSES);
     assert_eq!(lens(0), (left.to_vec(), aps.to_vec()));
     assert_eq!(
         lens(1),
@@ -487,13 +489,16 @@ fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
 fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
     for hz in [1.0f64, 50.0, 97.0] {
         let (mut bank, mut glides) = settled(SampleRate::of(hz), &FreeverbControls::GENERAL_MIDI);
-        assert!(bank.combs.iter().flatten().all(|c| !c.buffer.is_empty()));
-        assert!(
-            bank.all_passes
-                .iter()
-                .flatten()
-                .all(|a| !a.buffer.is_empty())
-        );
+        let whole = hz.round();
+        let scale = |t: usize| ((whole / 44_100.0 * t as f64).round() as usize).max(1);
+        for (side, spread) in [(0, 0), (1, 23)] {
+            for (c, t) in bank.combs[side].iter().zip(COMBS) {
+                assert_eq!(c.buffer.len(), scale(t + spread), "{hz} Hz comb");
+            }
+            for (a, t) in bank.all_passes[side].iter().zip(ALL_PASSES) {
+                assert_eq!(a.buffer.len(), scale(t + spread), "{hz} Hz all-pass");
+            }
+        }
         let (l, r) = run(&mut bank, &mut glides, &impulse(2_000), 64);
         assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");
         assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");

@@ -26,7 +26,7 @@ use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     RenderMode, Shape, Status,
 };
-use tutti_rt::{Overflow, RingReader, RingWriter, ring};
+use tutti_rt::{Overflow, RingFloat, RingReader, RingWriter, ring};
 use tutti_transport::TempoReader;
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Tail};
@@ -75,9 +75,9 @@ use tutti_units::{SampleRate, Tail};
     clippy::large_enum_variant,
     reason = "the payloads exist to be received and dropped on the control thread, never read; boxing the large variant would re-add the audio-thread free this type exists to avoid"
 )]
-pub(crate) enum Retired {
+pub(crate) enum Retired<F: RingFloat = f32> {
     /// A slot removed by `VoiceCommand::Remove`, filter and all.
-    Slot(PlaybackSlot),
+    Slot(PlaybackSlot<F>),
     /// A stretch filter the sender built for an `UpdateStretch` that turned out
     /// not to need it, because the slot already had one.
     ///
@@ -96,7 +96,7 @@ pub(crate) enum Retired {
     /// An `Arc`, so retiring it frees nothing unless this was the last
     /// reference, and then it frees the whole decoded buffer: the reason it
     /// is retired at all.
-    Wave(Arc<Wave>),
+    Wave(Arc<Wave<F>>),
     /// A voice an `AddVoice` brought to a pool already holding
     /// `MAX_RESIDENT_VOICES` slots, refused whole: its box, and the filter
     /// the sender built for it.
@@ -105,7 +105,7 @@ pub(crate) enum Retired {
     /// callback), and dropping it would free the box, the source and the
     /// filter there. Counted as [`PoolDrops::voices_refused`].
     Refused {
-        voice: Box<Voice>,
+        voice: Box<Voice<F>>,
         stretch: Option<stretch::Unit>,
     },
 }
@@ -207,7 +207,7 @@ pub(crate) enum LoopRoute {
     Stream(StreamId),
 }
 
-impl Voice {
+impl<F: RingFloat> Voice<F> {
     /// Where this voice's loop is applied.
     pub(crate) fn loop_route(&self) -> LoopRoute {
         match &self.source {
@@ -262,14 +262,14 @@ pub struct PoolTooWide {
 /// Both source tiers live here side by side, as the `Memory` / `Disk` arms of
 /// [`VoiceSource`]; the slot's read forks on that enum rather than on a trait,
 /// which is what keeps a per-tier difference visible at the call site.
-pub struct VoicePool {
+pub struct VoicePool<F: RingFloat = f32> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread
     /// `AddVoice` drain never grows it: an add for a new slot once it is full
     /// is refused and retired (`Retired::Refused`). Only a control-thread
     /// [`insert`](Self::insert) may grow it, and the drain then
     /// fills the larger capacity before refusing.
-    pub(crate) voices: Vec<PlaybackSlot>,
+    pub(crate) voices: Vec<PlaybackSlot<F>>,
     /// Commands from the control thread, drained at the top of every block.
     /// This pool's own: a dead one until [`into_parts`](IntoNode::into_parts)
     /// (or [`with_handle`](Self::with_handle)) hands out the sending end; a
@@ -279,7 +279,7 @@ pub struct VoicePool {
     /// side, with its graph unit (`tutti_rt::ring`'s contract), so a command
     /// still queued, or a retirement pushed as the handle dropped, is freed
     /// there.
-    pub(crate) rx: RingReader<Queued>,
+    pub(crate) rx: RingReader<Queued<F>>,
 
     /// Where removed slots go to be freed, off the audio thread.
     ///
@@ -293,7 +293,7 @@ pub struct VoicePool {
     /// if nobody ever does, the ring fills and the slot is dropped in the
     /// callback — a degraded free, never a leak, counted as
     /// [`PoolDrops::freed_in_callback`].
-    pub(crate) retired: RingWriter<Retired>,
+    pub(crate) retired: RingWriter<Retired<F>>,
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
@@ -333,7 +333,7 @@ pub struct VoicePool {
     /// The lanes every slot's block read renders through, one voice at a
     /// time (`PlaybackSlot::render_into`). Built with the pool and sized
     /// from `Prepare::max_block` in `prepare`, on the control thread.
-    scratch: BlockScratch,
+    scratch: BlockScratch<F>,
 
     /// Whether a handle still reaches the pool; a fork's is frozen. It
     /// decides how exactly the pool states its ring-out
@@ -343,7 +343,7 @@ pub struct VoicePool {
 
 // Hand-rolled: `voices` holds non-`Debug` `PlaybackSlot`s (each wraps a sampler +
 // stretch DSP). Print the slot count + scalars rather than the slot internals.
-impl std::fmt::Debug for VoicePool {
+impl<F: RingFloat> std::fmt::Debug for VoicePool<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VoicePool")
             .field("voices", &self.voices.len())
@@ -352,7 +352,7 @@ impl std::fmt::Debug for VoicePool {
     }
 }
 
-impl VoicePool {
+impl<F: RingFloat> VoicePool<F> {
     /// A pool with no command queue and no retirement ring yet (both
     /// dead): [`with_handle`](Self::with_handle) or
     /// [`into_parts`](IntoNode::into_parts) makes them.
@@ -448,7 +448,7 @@ impl VoicePool {
     /// added through it ([`add_streaming`](VoicePoolHandle::add_streaming)): a
     /// loop or a direction set for one is set on its stream.
     #[must_use]
-    pub fn with_handle(mut self) -> (Self, VoicePoolHandle) {
+    pub fn with_handle(mut self) -> (Self, VoicePoolHandle<F>) {
         let (tx, rx) = ring(COMMAND_CAPACITY, Overflow::Refuse);
         let (retired_tx, retired) = ring(MAX_RESIDENT_VOICES, Overflow::Refuse);
         self.rx = rx;
@@ -496,7 +496,7 @@ impl VoicePool {
         clock: &BlockClock<'_>,
         frames: usize,
         n: usize,
-        out: &mut [&mut [f32]],
+        out: &mut [&mut [F]],
     ) {
         let piece = self.scratch.frames();
         let mut from = 0;
@@ -530,7 +530,7 @@ impl VoicePool {
         self.voices.clear();
     }
 
-    fn slot_mut(&mut self, id: SlotId) -> Option<&mut PlaybackSlot> {
+    fn slot_mut(&mut self, id: SlotId) -> Option<&mut PlaybackSlot<F>> {
         self.voices.iter_mut().find(|s| s.id == id)
     }
 
@@ -627,7 +627,7 @@ impl VoicePool {
     ///
     /// Allocates (the filter, when the voice stretches, and the slot's box):
     /// control thread only.
-    pub fn insert(&mut self, id: SlotId, source: MemorySource, play: Playback) {
+    pub fn insert(&mut self, id: SlotId, source: MemorySource<F>, play: Playback) {
         self.insert_voice(
             id,
             Voice {
@@ -644,7 +644,7 @@ impl VoicePool {
     /// for the loop (in-memory primes it in-unit; a streaming loop is the
     /// stream's, set by the control thread first, then recorded). A streaming
     /// voice's direction is the stream's too, so it is only recorded.
-    pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice) {
+    pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
         let stretch = stretch_wanted(&voice.play).then(|| {
             let unit = stretch::Unit::with_channels(self.sample_rate, self.channels);
             unit.set_stretch_factor(voice.play.stretch);
@@ -662,7 +662,7 @@ impl VoicePool {
     pub(super) fn insert_voice_inner(
         &mut self,
         id: SlotId,
-        mut voice: Box<Voice>,
+        mut voice: Box<Voice<F>>,
         stretch: Option<stretch::Unit>,
     ) {
         if let Some(i) = self.voices.iter().position(|s| s.id == id) {
@@ -716,7 +716,7 @@ impl VoicePool {
     /// overflows it. Refused voices share the bound with every other
     /// retirement, so a host that floods a full pool with adds and never
     /// collects frees the 65th refusal in the callback, counted.
-    fn retire(&mut self, value: Retired) {
+    fn retire(&mut self, value: Retired<F>) {
         if self.retired.push(value).is_err() {
             DrainCounters::bump(&self.counters.freed_in_callback);
         }
@@ -839,7 +839,7 @@ impl VoicePool {
     }
 }
 
-impl Clone for VoicePool {
+impl<F: RingFloat> Clone for VoicePool<F> {
     /// A copy of the voices and settings, with no command ring and no
     /// retirement ring of its own: a copy draining the live handle's
     /// commands would steal edits from the audio thread (a ring's one reader
@@ -877,13 +877,13 @@ impl Clone for VoicePool {
     }
 }
 
-impl Default for VoicePool {
+impl<F: RingFloat> Default for VoicePool<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Node for VoicePool {
+impl<F: RingFloat> Node<F> for VoicePool<F> {
     /// No inputs, [`channels`](Self::channels) outputs; a source (fed out of
     /// band, through its queue), never skipped, with the ring-out of
     /// `ring_out`.
@@ -915,7 +915,7 @@ impl Node for VoicePool {
         }
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.drain_commands();
         // Lent for the block and given back after it: `render_in_pieces`
         // borrows the whole pool.
@@ -925,13 +925,13 @@ impl Node for VoicePool {
         let frames = io.frames();
         let (_, mut outs) = io.split();
         for ch in outs.iter_mut() {
-            ch.fill(0.0);
+            ch.fill(F::ZERO);
         }
         // Stride derived once per block, above the loops.
         let n = (self.channels.count() as usize)
             .min(outs.len())
             .min(MAX_CHANNELS);
-        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [F]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }
@@ -963,11 +963,11 @@ impl Node for VoicePool {
 
 /// A pool's fork: the voices it was built with, copied, while no command has
 /// reached it (see "As a graph node").
-struct PoolFork {
+struct PoolFork<F: RingFloat> {
     channels: ChannelLayout,
     tempo: Option<TempoReader>,
     /// The voices the pool held when it became a node, by slot.
-    voices: Vec<(SlotId, Voice)>,
+    voices: Vec<(SlotId, Voice<F>)>,
     /// Shared with the handle: whether a command has been queued since.
     counters: Arc<DrainCounters>,
 }
@@ -980,8 +980,8 @@ struct PoolFork {
 )]
 struct PoolCommanded;
 
-impl ForkSource for PoolFork {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: RingFloat> ForkSource<F> for PoolFork<F> {
+    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         if self.counters.commanded() {
             return Err(ForkCause::new(PoolCommanded));
         }
@@ -995,10 +995,10 @@ impl ForkSource for PoolFork {
     }
 }
 
-impl IntoNode for VoicePool {
-    type Controls = VoicePoolHandle;
+impl<F: RingFloat> IntoNode<F> for VoicePool<F> {
+    type Controls = VoicePoolHandle<F>;
 
-    fn into_parts(self) -> NodeParts<VoicePoolHandle> {
+    fn into_parts(self) -> NodeParts<VoicePoolHandle<F>, F> {
         let fork = PoolFork {
             channels: self.channels,
             tempo: self.tempo.clone(),

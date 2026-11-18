@@ -193,9 +193,9 @@ fn each_band_decays_at_its_designed_rt60() {
     let c = still(|c| {
         c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
         c.diffusion = Mix(0.0);
-        c.pre_delay = Seconds(0.0);
+        c.pre_delay = Seconds::ZERO;
         c.width = StereoWidth(1.0);
-        c.wet = Db(0.0);
+        c.wet = Db::UNITY;
     });
     let length = fdn_of(&design(&l, RATE, &c)).lines[0].length.get();
     assert_eq!(length.fract(), 0.0, "a whole number of frames");
@@ -305,7 +305,7 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
     let c = still(|c| {
         c.decay = [Seconds(2.0); 3];
         c.diffusion = Mix(0.0);
-        c.pre_delay = Seconds(0.0);
+        c.pre_delay = Seconds::ZERO;
         c.width = StereoWidth(1.0);
     });
     let net = design(&l, RATE, &c);
@@ -359,14 +359,14 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
         (left[at], right[at])
     };
     let unit = (1.0 / (n as f32).sqrt()) * (2.0 / n as f32).sqrt();
-    let (l0, r0) = echo(Db(0.0), 1.0);
+    let (l0, r0) = echo(Db::UNITY, 1.0);
     assert!(
         (l0 - unit).abs() < 1e-6 && r0 == 0.0,
         "{l0} {r0} against {unit}"
     );
     let (l6, _) = echo(Db(-6.0206), 1.0);
     assert!((l6 - 0.5 * unit).abs() < 1e-6, "-6 dB halves it: {l6}");
-    let (lw, rw) = echo(Db(0.0), 0.0);
+    let (lw, rw) = echo(Db::UNITY, 0.0);
     assert!(
         lw == rw && (lw - 0.5 * unit).abs() < 1e-6,
         "mono: {lw} {rw}"
@@ -694,4 +694,29 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
         );
         assert_eq!(glides.wet.now() == target, chunk == wanted, "chunk {chunk}");
     }
+}
+
+/// Every row of the lines moves on each frame, those past the lines in use too: a line idle
+/// for `m` frames reads, at delay `m + 1`, the value it held one frame back when it went idle,
+/// and the same after it is regrown. A cursor that stood still while idle reads another slot.
+#[test]
+fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
+    let c = still(|c| c.pre_delay = Seconds(0.0));
+    let (mut bank, mut glides) = landed(&layout(8, false), RATE, &c);
+    run(&mut bank, &mut glides, &impulse(1), 1);
+    let held = bank.state.lines[7].back(1);
+    assert_ne!(held, 0.0, "the impulse reached the last line");
+
+    let m = 100;
+    bank.layout = layout(4, false);
+    bank.designed = None;
+    bank.aim(&mut glides, &c);
+    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
+
+    bank.layout = layout(8, false);
+    bank.designed = None;
+    bank.aim(&mut glides, &c);
+    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    assert_eq!(bank.state.lines[7].back(2 * m + 1), held, "regrown");
 }

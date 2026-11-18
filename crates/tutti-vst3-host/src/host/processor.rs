@@ -910,6 +910,17 @@ impl ProcessorAny {
 }
 
 impl Processor for ProcessorAny {
+    /// The input list's MIDI share is [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY) events whatever
+    /// the other sources hold (`EVENT_CAPACITY` less the expression and
+    /// harmony rooms), the node's own intake size. A packet that encodes to
+    /// several VST3 events (a note with per-note values held, a bend
+    /// sensitivity change re-sending each live note's bend) is staged whole or
+    /// not at all and counted, so a block of such packets can overflow the
+    /// share inside this bound.
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)

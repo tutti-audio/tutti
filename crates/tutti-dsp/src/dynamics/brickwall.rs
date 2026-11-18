@@ -25,7 +25,7 @@ pub struct BrickwallControls {
 
 impl BrickwallControls {
     /// 0 dB: the full scale.
-    pub const DEFAULT: Self = Self { ceiling: Db(0.0) };
+    pub const DEFAULT: Self = Self { ceiling: Db::UNITY };
 }
 
 impl Default for BrickwallControls {

@@ -21,8 +21,8 @@ use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
     NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
-use tutti_types::ChannelLayout;
-use tutti_types::MAX_CHANNELS;
+use tutti_rt::RingFloat;
+use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
 use super::clock::{BlockClock, Clock};
@@ -32,7 +32,7 @@ use super::live_read::{LiveRead, Out};
 use super::memory_source::VoiceWindow;
 use super::offline_read::OfflineRead;
 use super::types::Direction;
-use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible};
+use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible_gain};
 use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamId, StreamReader};
 use tutti_transport::TempoReader;
 
@@ -45,10 +45,10 @@ use tutti_transport::TempoReader;
 ///
 /// It is not a graph node: it knows neither where on the timeline it plays
 /// nor its file. A [`DiskVoice`] is, and forks.
-pub struct DiskSource {
+pub struct DiskSource<F: RingFloat = f32> {
     /// Boxed: a voice in a pool should not carry the reader's jump state
     /// inline (it is built on the control thread, where the box is).
-    read: Box<LiveRead>,
+    read: Box<LiveRead<F>>,
 
     /// The stream's scalar cells (speed, stretch, gain, conversion ratio,
     /// underruns): `None` in a severed copy.
@@ -61,7 +61,7 @@ pub struct DiskSource {
 }
 
 // Hand-rolled: `read` holds the ring and `shared_state` an `Arc<Cells>`.
-impl std::fmt::Debug for DiskSource {
+impl<F: RingFloat> std::fmt::Debug for DiskSource<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskSource")
             .field("has_shared_state", &self.shared_state.is_some())
@@ -69,7 +69,7 @@ impl std::fmt::Debug for DiskSource {
     }
 }
 
-impl Clone for DiskSource {
+impl<F: RingFloat> Clone for DiskSource<F> {
     fn clone(&self) -> Self {
         Self {
             read: self.read.clone(),
@@ -80,13 +80,13 @@ impl Clone for DiskSource {
     }
 }
 
-impl DiskSource {
+impl<F: RingFloat> DiskSource<F> {
     /// A source over `consumer` through its one position `reader` (test rings),
     /// at the ring's own width.
     #[cfg(test)]
     pub(crate) fn new(
-        consumer: SharedReader,
-        reader: tutti_rt::PosReader,
+        consumer: SharedReader<F>,
+        reader: tutti_rt::PosReader<F>,
         shared_state: Arc<Cells>,
     ) -> Self {
         let width = crate::voice_width(consumer.channels());
@@ -109,11 +109,11 @@ impl DiskSource {
     /// ([`Place::for_topology`], built, and so refusing, when the stream was
     /// opened). The file's own width and order give the identity.
     pub(crate) fn with_reader(
-        consumer: SharedReader,
-        reader: Option<crate::streamer::RingReader>,
+        consumer: SharedReader<F>,
+        reader: Option<crate::streamer::RingReader<F>>,
         shared_state: Arc<Cells>,
         width: ChannelLayout,
-        place: Place,
+        place: Place<F>,
     ) -> Self {
         let channels = crate::voice_width(width);
         let stride = channels.count() as usize;
@@ -136,7 +136,7 @@ impl DiskSource {
     }
 }
 
-impl DiskSource {
+impl<F: RingFloat> DiskSource<F> {
     /// Let go of the live stream: the ring's reader, and
     /// the control cell. A copy severed so never touches the live stream.
     fn sever(&mut self) {
@@ -201,8 +201,8 @@ pub struct DiskVoiceConfig {
 /// (it reads its render's `Env`), read as the memory tier reads it; see
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
-pub struct DiskVoice {
-    inner: DiskSource,
+pub struct DiskVoice<F: RingFloat = f32> {
+    inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
     /// live; a private snapshot of it in a fork.
     shared_state: Arc<Cells>,
@@ -218,13 +218,13 @@ pub struct DiskVoice {
     /// plays and whether the stream is still served. `None` for a voice not
     /// built by [`DiskVoice::from_reader`] (a test's bare ring), whose fork
     /// then plays silence.
-    origin: Option<Origin>,
+    origin: Option<Origin<F>>,
 
     /// `Some` in a fork ([`fork_copy`](Self::fork_copy)): it never touches
     /// the ring or the streamer, and plays what this holds instead. Boxed: a
     /// live voice (every voice in a pool) should not carry the pages' room,
     /// and it is built on the control thread, where a fork is taken.
-    offline: Option<Box<Offline>>,
+    offline: Option<Box<Offline<F>>>,
 
     /// The rate `prepare` last gave this voice, `None` until one did: the
     /// rate the step converts to. A fork never told a rate renders nothing
@@ -262,20 +262,20 @@ pub struct DiskVoice {
 /// when the fork is taken (a loop set later on the stream is not a copy this
 /// would have missed).
 #[derive(Clone)]
-struct Origin {
-    file: Arc<StreamFile>,
+struct Origin<F: RingFloat> {
+    file: Arc<StreamFile<F>>,
     status: Arc<StatusCell>,
 }
 
 /// A forked disk voice's own playback: the file it reads, the direction it
 /// reads in, and where its failures go.
 #[derive(Clone, Debug, Default)]
-struct Offline {
+struct Offline<F: RingFloat> {
     /// The direction the stream played in when the fork was taken.
     direction: Direction,
     /// The file, from the streamer's record when the fork was taken. `None`
     /// when the stream was gone by then: silence.
-    read: Option<OfflineRead>,
+    read: Option<OfflineRead<F>>,
     /// The first failure since this copy was forked (its stream gone, its
     /// file unreadable, no render rate), what the fork's health probe
     /// reports ([`fault`](DiskVoice::fault)). Fresh at every fork, so a copy
@@ -323,7 +323,7 @@ impl ForkHealth for VoiceHealth {
     }
 }
 
-impl std::fmt::Debug for DiskVoice {
+impl<F: RingFloat> std::fmt::Debug for DiskVoice<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskVoice")
             .field("inner", &self.inner)
@@ -335,7 +335,7 @@ impl std::fmt::Debug for DiskVoice {
     }
 }
 
-impl Clone for DiskVoice {
+impl<F: RingFloat> Clone for DiskVoice<F> {
     /// A copy sharing the stream (the ring, without its reader: see
     /// `LiveRead`) and the control cell. Not a fork: see
     /// `fork_copy`.
@@ -359,7 +359,7 @@ impl Clone for DiskVoice {
     }
 }
 
-impl DiskVoice {
+impl<F: RingFloat> DiskVoice<F> {
     /// Places a `DiskSource`'s stream on the timeline.
     ///
     /// Construction (streamer stream registration, ring allocation) happens on
@@ -367,7 +367,7 @@ impl DiskVoice {
     /// timeline window. `shared_state` must be the same `Cells` the `inner`
     /// unit holds.
     pub(crate) fn new(
-        inner: DiskSource,
+        inner: DiskSource<F>,
         shared_state: Arc<Cells>,
         config: DiskVoiceConfig,
     ) -> Self {
@@ -406,7 +406,7 @@ impl DiskVoice {
     /// `DiskVoice::fork_copy`.
     ///
     /// Control thread; the returned voice is then moved into the graph.
-    pub fn from_reader(reader: StreamReader, window: VoiceWindow) -> Self {
+    pub fn from_reader(reader: StreamReader<F>, window: VoiceWindow) -> Self {
         let StreamReader {
             ring,
             reader,
@@ -621,10 +621,10 @@ impl DiskVoice {
         &mut self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
-        lanes: &mut Lanes,
+        lanes: &mut Lanes<F>,
         n: usize,
         positions: &mut [Option<SamplePosition>],
-        gather: &mut Gather,
+        gather: &mut Gather<F>,
     ) -> bool {
         let w = self.width().min(n);
         let frames = range.len();
@@ -639,7 +639,7 @@ impl DiskVoice {
             return false;
         }
         lanes.clear(n, frames);
-        let mut out: Out<'_, fn(usize, &[f32])> = Out::Lanes {
+        let mut out: Out<'_, fn(usize, &[F]), F> = Out::Lanes {
             lanes: &mut lanes.lanes_mut()[..w],
             gather,
         };
@@ -652,12 +652,12 @@ impl DiskVoice {
     /// the placed positions, read from the ring,
     /// one ring read per run (its generation the read's segment, so a jump
     /// is crossfaded). `positions` is scratch, at least `range.len()` long.
-    fn live_render<F: FnMut(usize, &[f32])>(
+    fn live_render<E: FnMut(usize, &[F])>(
         &mut self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
-        out: &mut Out<'_, F>,
+        out: &mut Out<'_, E, F>,
     ) {
         self.live_place(clock, range.clone(), positions);
         self.live_read(clock, range, positions, out);
@@ -678,16 +678,16 @@ impl DiskVoice {
 
     /// Read the ring at the positions [`live_place`](Self::live_place) left,
     /// one read per run of `range`.
-    fn live_read<F: FnMut(usize, &[f32])>(
+    fn live_read<E: FnMut(usize, &[F])>(
         &mut self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &[Option<SamplePosition>],
-        out: &mut Out<'_, F>,
+        out: &mut Out<'_, E, F>,
     ) {
         let rate = self.step_rate();
         let declick = self.declick;
-        let gain = audible(self.shared_state.gain().get());
+        let gain = self.shared_state.gain();
         // Borrowed beside `inner`, not cloned: `self` holds a strong
         // reference, so a clone only adds two atomic refcount updates.
         let state = &*self.shared_state;
@@ -697,7 +697,7 @@ impl DiskVoice {
             self.inner.read.render(
                 &positions[a - base..b - base],
                 run.generation,
-                rate.get(),
+                rate,
                 declick,
                 gain,
                 state,
@@ -719,14 +719,14 @@ impl DiskVoice {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
-        mut emit: impl FnMut(usize, &[f32]),
+        mut emit: impl FnMut(usize, &[F]),
     ) {
         let w = self.width().min(MAX_CHANNELS);
-        let silent = [0.0f32; MAX_CHANNELS];
+        let silent = [F::ZERO; MAX_CHANNELS];
         let frames = range.len();
         let gate = self.gate();
         let rate = self.step_rate();
-        let gain = audible(self.shared_state.gain().get());
+        let gain = audible_gain::<F>(self.shared_state.gain());
         let told_rate = self.sample_rate.is_some();
         place(clock, range.clone(), gate, rate, &mut positions[..frames]);
         let past = past_window(clock, range, gate);
@@ -735,7 +735,7 @@ impl DiskVoice {
             return;
         };
         let direction = offline.direction;
-        let mut frame = [0.0f32; MAX_CHANNELS];
+        let mut frame = [F::ZERO; MAX_CHANNELS];
         for (i, pos) in positions[..frames].iter().enumerate() {
             let Some(pos) = pos else {
                 emit(i, &silent[..w]);
@@ -757,7 +757,7 @@ impl DiskVoice {
                 Some(read) => {
                     read.read_into(*pos, direction, self.inner.read.place(), &mut frame[..w]);
                 }
-                None => frame[..w].fill(0.0),
+                None => frame[..w].fill(F::ZERO),
             }
             for s in frame[..w].iter_mut() {
                 *s *= gain;
@@ -791,10 +791,10 @@ impl DiskVoice {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
-        out: &mut [&mut [f32]],
+        out: &mut [&mut [F]],
     ) {
         let base = range.start;
-        let emit = |i: usize, f: &[f32]| {
+        let emit = |i: usize, f: &[F]| {
             for (ch, &s) in out.iter_mut().zip(f) {
                 ch[base + i] = s;
             }
@@ -812,7 +812,7 @@ impl DiskVoice {
     /// reaches this, so the prepared render never initialises the array.
     #[cold]
     #[inline(never)]
-    fn render_unprepared(&mut self, clock: &BlockClock<'_>, frames: usize, out: &mut [&mut [f32]]) {
+    fn render_unprepared(&mut self, clock: &BlockClock<'_>, frames: usize, out: &mut [&mut [F]]) {
         let mut positions = [None; UNPREPARED_FRAMES];
         let mut from = 0;
         while from < frames {
@@ -823,7 +823,7 @@ impl DiskVoice {
     }
 }
 
-impl DiskVoice {
+impl<F: RingFloat> DiskVoice<F> {
     /// This voice reading the project's tempo map through `tempo`
     /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
     /// Over a map whose tempo changes, how long a placed voice has played is
@@ -838,7 +838,7 @@ impl DiskVoice {
     }
 }
 
-impl Node for DiskVoice {
+impl<F: RingFloat> Node<F> for DiskVoice<F> {
     /// No inputs, the file's width out; a source, never skipped. It plays its
     /// window of the transport, as a placed memory voice does, so it has no
     /// ring-out.
@@ -863,7 +863,7 @@ impl Node for DiskVoice {
     /// The block in one piece through the positions `prepare` sized; a
     /// voice driven by hand unprepared (or past its `max_block`) through
     /// `render_unprepared`'s stack pieces.
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         // Lent for the block and given back after it: the render borrows the
         // whole voice.
         let mut reader = self.tempo.take();
@@ -873,9 +873,9 @@ impl Node for DiskVoice {
         let (_, mut outs) = io.split();
         let n = self.width().min(outs.len()).min(MAX_CHANNELS);
         for c in n..outs.len() {
-            outs.get(c).fill(0.0);
+            outs.get(c).fill(F::ZERO);
         }
-        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [F]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }
@@ -935,10 +935,10 @@ impl DiskVoiceControls {
 /// A disk voice's fork: [`DiskVoice::fork_copy`] of a template that shares
 /// the stream's file, status and cells with the live voice (never its ring
 /// reader), taken when the fork is.
-struct DiskVoiceFork(DiskVoice);
+struct DiskVoiceFork<F: RingFloat>(DiskVoice<F>);
 
-impl ForkSource for DiskVoiceFork {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: RingFloat> ForkSource<F> for DiskVoiceFork<F> {
+    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         if matches!(mode, ForkMode::Live) {
             return Err(ForkCause::new(LiveDiskFork));
         }
@@ -952,10 +952,10 @@ impl ForkSource for DiskVoiceFork {
     }
 }
 
-impl IntoNode for DiskVoice {
+impl<F: RingFloat> IntoNode<F> for DiskVoice<F> {
     type Controls = DiskVoiceControls;
 
-    fn into_parts(self) -> NodeParts<DiskVoiceControls> {
+    fn into_parts(self) -> NodeParts<DiskVoiceControls, F> {
         let controls = DiskVoiceControls {
             state: Arc::clone(&self.shared_state),
         };

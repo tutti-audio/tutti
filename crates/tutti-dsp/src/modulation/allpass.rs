@@ -1,7 +1,7 @@
 //! The pure pieces of the phaser's swept first-order all-pass chain: the centre frequency
 //! for a sweep position and the coefficient that tunes a stage to it.
 
-use tutti_units::{Depth, Hz};
+use tutti_units::{Depth, Hz, SampleRate};
 
 /// The all-pass centre frequency for one LFO value: the sweep range's `min`
 /// at the LFO's trough, its `max` at the peak, scaled toward `min` by `depth`.
@@ -19,7 +19,10 @@ pub fn sweep_hz(min: Hz, max: Hz, lfo: f32, depth: Depth) -> Hz {
 }
 
 /// The lowest frequency an all-pass stage is tuned to (see [`allpass_coeff`]).
-const SWEEP_FLOOR_HZ: f32 = 1.0;
+const SWEEP_FLOOR: Hz = Hz(1.0);
+
+/// The share of Nyquist an all-pass stage is tuned up to (see [`allpass_coeff`]).
+const SWEEP_CEILING: f32 = 0.98;
 
 /// One first-order all-pass coefficient for a sweep position.
 ///
@@ -27,7 +30,7 @@ const SWEEP_FLOOR_HZ: f32 = 1.0;
 /// only at the corners of a segment (every 16 frames of the stream) and glides between,
 /// rather than per sample and channel.
 ///
-/// The sweep is held inside `SWEEP_FLOOR_HZ..=0.49 · sr` first. Outside it
+/// The sweep is held inside `SWEEP_FLOOR..=0.98 ·` Nyquist first. Outside it
 /// `tan` of the normalised frequency is negative (a sweep below 0 Hz, which a
 /// negative `Depth` reaches: a depth is held in −1..=1) or past its
 /// pole (above Nyquist), `|c|` exceeds 1 and the all-pass diverges. Every
@@ -36,40 +39,16 @@ const SWEEP_FLOOR_HZ: f32 = 1.0;
 /// there.
 #[inline]
 #[must_use]
-pub fn allpass_coeff(sweep_hz: f32, sr: f32) -> f32 {
-    let sweep_hz = sweep_hz.max(SWEEP_FLOOR_HZ).min(0.49 * sr);
+pub fn allpass_coeff(sweep: Hz, rate: SampleRate) -> f32 {
+    let sweep_hz = sweep
+        .max(SWEEP_FLOOR)
+        .min(rate.nyquist_scaled(SWEEP_CEILING))
+        .get();
+    let sr = rate.get() as f32;
     let w = core::f32::consts::PI * sweep_hz / sr;
     let t = libm::tanf(w);
     (t - 1.0) / (t + 1.0)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The sweep at the LFO's trough, centre and peak, for depth 0, half and 1,
-    /// from the definition `min + (max - min) * (lfo + 1) / 2 * depth`.
-    #[test]
-    fn the_sweep_runs_from_min_to_max_by_lfo_and_depth() {
-        let (lo, hi) = (Hz(200.0), Hz(4_000.0));
-        let at = |lfo: f32, depth: f32| sweep_hz(lo, hi, lfo, Depth::of(depth)).get();
-        // Depth 1: the whole range.
-        assert_eq!(at(-1.0, 1.0), 200.0);
-        assert_eq!(at(0.0, 1.0), 2_100.0);
-        assert_eq!(at(1.0, 1.0), 4_000.0);
-        // Depth 0: parked at the floor whatever the LFO does.
-        for lfo in [-1.0, 0.0, 1.0] {
-            assert_eq!(at(lfo, 0.0), 200.0);
-        }
-        // Half depth: half the excursion.
-        assert_eq!(at(1.0, 0.5), 2_100.0);
-        assert_eq!(at(0.0, 0.5), 1_150.0);
-    }
-
-    /// A zero-width range does not move whatever the LFO and depth.
-    #[test]
-    fn an_empty_range_is_a_fixed_frequency() {
-        let f = Hz(440.0);
-        assert_eq!(sweep_hz(f, f, 0.7, Depth::of(1.0)).get(), 440.0);
-    }
-}
+mod tests;

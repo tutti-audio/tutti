@@ -14,6 +14,8 @@
 
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
+use crate::stft::window::KaiserWindow;
+
 /// The longest filter [`FirDesign::design`] builds, in taps.
 const MAX_LEN: usize = 1 << 20;
 
@@ -114,7 +116,8 @@ impl FirDesign {
     ///   taps cannot resolve.
     /// - [`FirError::TooLong`] when the filter would exceed `2^20` taps.
     pub fn design(&self, rate: SampleRate) -> Result<Fir, FirError> {
-        let nyquist = rate.get() / 2.0;
+        let nyquist_hz = rate.nyquist();
+        let nyquist = f64::from(nyquist_hz.get());
         let transition = f64::from(self.transition.get());
         let attenuation = f64::from(self.attenuation.get());
         if !(transition.is_finite() && transition > 0.0) {
@@ -139,7 +142,7 @@ impl FirDesign {
                 if !inside(cutoff) {
                     return Err(FirError::CutoffOutOfRange {
                         cutoff,
-                        nyquist: Hz(nyquist as f32),
+                        nyquist: nyquist_hz,
                     });
                 }
                 vec![f64::from(cutoff.get())]
@@ -149,7 +152,7 @@ impl FirDesign {
                     if !inside(cutoff) {
                         return Err(FirError::CutoffOutOfRange {
                             cutoff,
-                            nyquist: Hz(nyquist as f32),
+                            nyquist: nyquist_hz,
                         });
                     }
                 }
@@ -211,7 +214,7 @@ impl FirDesign {
             FirResponse::BandStop { .. } => vec![(0.0, omega[0]), (omega[1], PI)],
         };
         let half_band = matches!(self.response, FirResponse::HalfBand);
-        let i0_beta = bessel_i0(beta);
+        let kaiser = KaiserWindow::new(beta);
 
         // `right[k]` is the tap k samples from the centre; the left half is its
         // mirror, so the taps are symmetric bit for bit.
@@ -231,9 +234,7 @@ impl FirDesign {
                         }
                     })
                     .sum();
-                let r = kf / m as f64;
-                let window = bessel_i0(beta * libm::sqrt((1.0 - r * r).max(0.0))) / i0_beta;
-                ideal * window
+                ideal * kaiser.centred(kf / m as f64 / 2.0)
             })
             .collect();
 
@@ -391,20 +392,6 @@ fn kaiser_order(attenuation: f64, delta_omega: f64) -> usize {
 /// `len` if odd, else `len + 1`.
 fn odd_up(len: usize) -> usize {
     len | 1
-}
-
-/// The zeroth-order modified Bessel function of the first kind,
-/// `Σₖ ((x/2)ᵏ / k!)²`, summed until a term falls below `f64` precision.
-fn bessel_i0(x: f64) -> f64 {
-    let quarter = x * x / 4.0;
-    let (mut term, mut sum) = (1.0, 1.0);
-    let mut k = 1.0;
-    while term > sum * f64::EPSILON * 1e-2 {
-        term *= quarter / (k * k);
-        sum += term;
-        k += 1.0;
-    }
-    sum
 }
 
 #[cfg(test)]

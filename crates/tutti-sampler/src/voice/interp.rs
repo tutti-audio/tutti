@@ -446,6 +446,16 @@ pub(crate) fn tap_indices<F: Float>(len: usize, position: SamplePosition) -> ([u
     ([0, 1, 2, 3].map(|t| tap(idx, last, t)), frac)
 }
 
+/// Where a reversed read of a file `len` frames long finds the straight
+/// position `position`: the frame `len - 1 - position`, never before the first.
+///
+/// The one mirror every tier's reverse read goes through, so they cannot
+/// disagree about which frame a reversed position means.
+#[inline]
+pub(crate) fn mirrored(len: Samples, position: SamplePosition) -> SamplePosition {
+    SamplePosition((len.get() as f64 - 1.0 - position.get()).max(0.0))
+}
+
 /// Tap `t` (0..4) of [`tap_indices`]'s four for whole frame `idx` of a
 /// source whose last frame is `last`: `idx - 1 + t`, clamped. The block
 /// read keeps only `idx` per frame and derives each tap here, so the two

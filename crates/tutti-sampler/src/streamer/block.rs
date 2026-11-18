@@ -17,15 +17,16 @@ use super::bell::Bell;
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
 use crate::{Direction, Loop};
+use tutti_rt::RingFloat;
 
 /// The audio side's two handles on a ring: its position reader and the
 /// reader of its published control, registered together on the control side.
 /// A voice holds one, by value, and reads a block through it.
 #[derive(Debug)]
-pub(crate) struct RingReader {
-    pos: PosReader,
+pub(crate) struct RingReader<F: RingFloat = f32> {
+    pos: PosReader<F>,
     /// Registered on the control side (registering allocates).
-    control: Reader<RingControl>,
+    control: Reader<RingControl<F>>,
     /// Who to ring when the ring wants the streamer, and the ring's size in
     /// frames; `None` for a ring no streamer feeds (a test's bare ring).
     wake: Option<Wake>,
@@ -38,8 +39,8 @@ struct Wake {
     frames: usize,
 }
 
-impl RingReader {
-    pub(crate) fn new(pos: PosReader, control: Reader<RingControl>) -> Self {
+impl<F: RingFloat> RingReader<F> {
+    pub(crate) fn new(pos: PosReader<F>, control: Reader<RingControl<F>>) -> Self {
         Self {
             pos,
             control,
@@ -57,7 +58,7 @@ impl RingReader {
     /// Claim `reads` (up to two ranges, `0..0` for an unused one) and lend
     /// the control, for one block that plays at `play`.
     #[inline]
-    pub(crate) fn block(&mut self, play: Samples, reads: [Range<Samples>; 2]) -> Block<'_> {
+    pub(crate) fn block(&mut self, play: Samples, reads: [Range<Samples>; 2]) -> Block<'_, F> {
         let [a, b] = reads;
         let claim = self.pos.claim(
             play.get() as u64,
@@ -219,15 +220,15 @@ impl RingReader {
 /// ```
 #[derive(Debug)]
 #[must_use = "a block that is dropped unread claimed and lent for nothing"]
-pub struct Block<'r> {
-    claim: PosClaim<'r>,
-    control: Loan<'r, RingControl>,
+pub struct Block<'r, F: RingFloat = f32> {
+    claim: PosClaim<'r, F>,
+    control: Loan<'r, RingControl<F>>,
     /// The claim and the loan stay on the audio thread (`Loan` is `!Send`
     /// already; this says it where the rule is).
     _not_send: PhantomData<*const ()>,
 }
 
-impl Block<'_> {
+impl<F: RingFloat> Block<'_, F> {
     /// Whether position `pos` may be read this block: the ring's window holds
     /// it.
     #[inline]
@@ -238,7 +239,7 @@ impl Block<'_> {
     /// The frame at position `pos`, found once for all its channels. The
     /// caller keeps to the ranges it claimed.
     #[inline]
-    pub fn frame(&self, pos: u64) -> PosFrame<'_> {
+    pub fn frame(&self, pos: u64) -> PosFrame<'_, F> {
         self.claim.frame(pos)
     }
 
@@ -257,7 +258,7 @@ impl Block<'_> {
     /// What the streamer published about the ring: the map, the direction and
     /// the applied loop.
     #[inline]
-    pub(crate) fn control(&self) -> &RingControl {
+    pub(crate) fn control(&self) -> &RingControl<F> {
         &self.control
     }
 }

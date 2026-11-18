@@ -337,3 +337,111 @@ fn a_stopped_streams_handle_commands_nothing() {
         "the ghost's close found nothing to close"
     );
 }
+
+/// Frames of the 32-bit integer file the `f64` tests stream.
+const I32_FRAMES: usize = 3_000;
+
+/// The integer one full-scale unit is, in the file's 32 bits.
+const I32_FULL_SCALE: f64 = 2_147_483_648.0;
+
+/// Left sample `k` of frame `i`: odd, past 24 significant bits.
+fn i32_left(i: usize) -> i32 {
+    2_000_000_011 + 3 * i as i32
+}
+
+/// Right sample of frame `i`, never the left's.
+fn i32_right(i: usize) -> i32 {
+    -1_500_000_007 - 5 * i as i32
+}
+
+/// The stereo 32-bit integer WAV of [`I32_FRAMES`] frames, in a temp dir.
+fn i32_file() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("i32.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: RATE as u32,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).expect("a writable temp dir");
+    for i in 0..I32_FRAMES {
+        w.write_sample(i32_left(i)).expect("writes");
+        w.write_sample(i32_right(i)).expect("writes");
+    }
+    w.finalize().expect("writes");
+    (dir, path)
+}
+
+/// A hand-stepped `f64` streamer.
+fn manual_f64() -> DiskStreamer<crate::ByHand<f64>, f64> {
+    DiskStreamer::<crate::ByHand<f64>, f64>::by_hand(SampleRate::of(RATE), Default::default())
+        .expect("builds")
+}
+
+/// **An `f64` stream holds the file's values in `f64`**: the file's integer
+/// `k` is `k / 2^31` and its odd low bits survive in the ring, the figure an
+/// `f32` ring (24 significant bits) cannot hold. The two channels differ at
+/// every frame, so a swap or a narrowing is a wrong value.
+#[test]
+fn an_f64_stream_reads_back_the_files_values_exactly() {
+    let (_dir, path) = i32_file();
+    let mut streamer = manual_f64();
+    let opening = streamer.open(&path, Placement::HEAD);
+    let (_stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+
+    let whole = Samples::new(0)..Samples::new(I32_FRAMES);
+    let none = Samples::new(0)..Samples::new(0);
+    let block = reader.block(Samples::new(0), [whole, none]);
+    for i in 0..I32_FRAMES {
+        assert!(block.holds(i as u64), "frame {i} is in the window");
+        let frame = block.frame(i as u64);
+        assert_eq!(
+            frame.get(0),
+            f64::from(i32_left(i)) / I32_FULL_SCALE,
+            "left of frame {i}"
+        );
+        assert_eq!(
+            frame.get(1),
+            f64::from(i32_right(i)) / I32_FULL_SCALE,
+            "right of frame {i}"
+        );
+    }
+    let wide = f64::from(i32_left(1)) / I32_FULL_SCALE;
+    assert!(
+        wide != f64::from(wide as f32),
+        "setup: the value needs more than 24 significant bits"
+    );
+}
+
+/// **An `f64` ring writes a loop's repeats in `f64`**: with the loop
+/// `[1000, 1500)` set, straight position `1500 + k` holds file frame `1000 + k`,
+/// the file's exact value.
+#[test]
+fn an_f64_stream_writes_a_loop_by_position() {
+    let (_dir, path) = i32_file();
+    let mut streamer = manual_f64();
+    let opening = streamer.open(&path, Placement::HEAD);
+    let (mut stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+    stream
+        .set_loop(Some(loop_frames(1_000, 1_500, 0)))
+        .expect("the streamer is alive");
+    let _ = streamer.step_until_settled(1_000);
+
+    let play = 1_600usize;
+    let reads = [
+        Samples::new(play)..Samples::new(play + 100),
+        Samples::new(0)..Samples::new(0),
+    ];
+    let block = reader.block(Samples::new(play), reads);
+    for k in 0..100 {
+        let at = (play + k) as u64;
+        assert!(block.holds(at), "position {at} is in the window");
+        let file_frame = 1_000 + (play + k - 1_000) % 500;
+        assert_eq!(
+            block.frame(at).get(0),
+            f64::from(i32_left(file_frame)) / I32_FULL_SCALE,
+            "position {at}"
+        );
+    }
+}

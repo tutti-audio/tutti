@@ -24,7 +24,7 @@ use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{Fold, InterleavedMut, Planes, PlanesMut, interleave};
+use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample, interleave};
 use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology};
@@ -51,11 +51,11 @@ impl FileChannels<'_> {
     /// graph's channels, or the declared root is
     /// not as wide as the graph, or the graph has more channels than a layout
     /// holds ([`BufferError::Layout`](tutti_buffers::BufferError::Layout)).
-    pub(crate) fn fold_from(
+    pub(crate) fn fold_from<F: Float>(
         &self,
         outputs: usize,
         root: Option<&ChannelTopology>,
-    ) -> crate::Result<Fold> {
+    ) -> crate::Result<Fold<F>> {
         let graph = ChannelLayout::try_from(outputs)
             .map_err(|e| ConfigError::Placement(tutti_buffers::BufferError::from(e).into()))?;
         if let Some(root) = root
@@ -379,10 +379,10 @@ pub(crate) fn check_loss(policy: crate::EventLossPolicy, lost: u64) -> crate::Re
 
 /// Audio read back in blocks: planes a caller holds, or what a normalized
 /// output spilled while the graph rendered.
-pub(crate) trait Replay {
+pub(crate) trait Replay<F: Sample = f32> {
     /// Fills the leading frames of `out`, returning how many frames were
     /// written; `0` is the end.
-    fn fill(&mut self, out: InterleavedMut<'_>) -> crate::Result<usize>;
+    fn fill(&mut self, out: InterleavedMut<'_, F>) -> crate::Result<usize>;
 }
 
 /// Replays already-rendered planes.
@@ -392,17 +392,17 @@ pub(crate) trait Replay {
 /// ([`FileChannels::fold_from`]), the way the graph's outputs are: a wider
 /// render is placed by position and a narrower one by the engine's order,
 /// never truncated or zero-padded.
-pub(crate) struct PlaneSource<'a> {
-    planes: &'a [Vec<f32>],
-    fold: Option<Fold>,
+pub(crate) struct PlaneSource<'a, F: Float = f32> {
+    planes: &'a [Vec<F>],
+    fold: Option<Fold<F>>,
     /// The zeros a channel the planes lack reads: grown to a block, never
     /// shrunk.
-    silence: Vec<f32>,
+    silence: Vec<F>,
     pos: Samples,
 }
 
-impl<'a> PlaneSource<'a> {
-    pub(crate) fn new(planes: &'a [Vec<f32>], fold: Option<Fold>) -> Self {
+impl<'a, F: Float> PlaneSource<'a, F> {
+    pub(crate) fn new(planes: &'a [Vec<F>], fold: Option<Fold<F>>) -> Self {
         Self {
             planes,
             fold,
@@ -412,8 +412,8 @@ impl<'a> PlaneSource<'a> {
     }
 }
 
-impl Replay for PlaneSource<'_> {
-    fn fill(&mut self, mut out: InterleavedMut<'_>) -> crate::Result<usize> {
+impl<F: Float> Replay<F> for PlaneSource<'_, F> {
+    fn fill(&mut self, mut out: InterleavedMut<'_, F>) -> crate::Result<usize> {
         let available = self
             .planes
             .first()
@@ -443,11 +443,11 @@ impl Replay for PlaneSource<'_> {
             None => {
                 let width = block.channels();
                 if self.silence.len() < n {
-                    self.silence.resize(n, 0.0);
+                    self.silence.resize(n, F::ZERO);
                 }
-                self.silence[..n].fill(0.0);
+                self.silence[..n].fill(F::ZERO);
                 let silence = &self.silence[..n];
-                let table: Vec<&[f32]> = (0..width)
+                let table: Vec<&[F]> = (0..width)
                     .map(|c| self.planes.get(c).map_or(silence, |p| &p[pos..pos + n]))
                     .collect();
                 interleave(Planes::new(&table)?, block)?;

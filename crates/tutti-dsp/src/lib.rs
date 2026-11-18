@@ -1,173 +1,125 @@
 #![doc = include_str!("../README.md")]
-//! Pure DSP algorithms over `tutti_buffers` views for the Tutti audio engine: a
-//! CPU-independent real FFT and the algorithms behind the built-in effect nodes: filters, dynamics,
-//! the partitioned convolver, delay lines, reverb, waveshapers and the export
-//! resampler. The analyzers (loudness, pitch, onsets, spectra, ...) are `tutti-measure`,
-//! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `StftError`).
+//! Audio signal-processing algorithms over [`tutti_buffers`] views, with a real FFT whose
+//! arithmetic does not depend on the CPU.
 //!
-//! ## Effect algorithms
+//! Each algorithm is laid out as its controls (what a caller sets), its model (a [`System`],
+//! and an [`Lti`] where it is linear and time-invariant) and its bank (the per-frame math
+//! over buffers views). Values are `tutti_types` units.
 //!
-//! `tutti-nodes` wraps each of these in a graph node that owns the params, the
-//! ramps and the graph shape. Here they take plain typed values per call.
+//! ## Catalogue
 //!
-//! - **Filters** — `SvfCoeffs` and `SvfBank<F>` (Simper's trapezoidal
-//!   state-variable filter, eight responses by `SvfType`); `LadderCoeffs` and
-//!   `LadderBank<F>` (the Moog ladder, `tanh` feedback); `CrossoverModel` and
-//!   `CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split on trapezoidal
-//!   state-variable sections. Each bank is one filter per channel over buffers views,
-//!   its coefficients a `Glide` the caller aims. `F` is the `f32` or `f64` the state
-//!   runs in; its transcendentals call `libm`, so results do not depend on the
-//!   platform's C math library.
-//! - **Dynamics** — the curves
-//!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
-//!   `LimiterCurve`; the compressor and the noise gate over buffers views (`CompressorBank` and
-//!   `GateBank`, each on a typed `KeySource`, a side-chain bus or the signal itself, and
-//!   each able to hear that key through a `KeyFilter`, an SVF high-pass or band-pass; the
-//!   threshold a per-frame lane, the makeup and the range `Glide`s over `GAIN_GLIDE`); the
-//!   lookahead limiter (`LimiterBank`: threshold and ceiling per-frame lanes, every coefficient
-//!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); the
-//!   dynamic EQ band (`DynamicEqBank`: an SVF bell whose gain follows the level of a band-passed
-//!   key through the compressor's static curve, cutting or boosting by a `DynamicMode`); and
-//!   the multiband compressor (`MultibandBank`: a crossover tree per channel and a
-//!   `CompressorBank` per band, each band's makeup, bypass and solo gliding over
-//!   `GAIN_GLIDE`).
-//! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
-//!   convolution over an IR's shared, read-only `IrSpectra`.
-//! - **Bit crusher** (`bit_crush.rs`): [`BitCrusher`], a sample-and-hold every [`hold_frames`]
-//!   frames, then [`quantize`] to a `BitDepth`.
-//! - **DC blocker** (`dc_block.rs`): [`DcBlocker`], a first-order high-pass with its pole from
-//!   [`dc_pole`], reached along a line over [`COEFF_INTERVAL`] frames.
-//! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
-//!   `DelayBank`, the feedback delay over buffers views (a `DelayLayout` of a checked
-//!   `MaxDelay`, `Routing` and `ChannelTimes`; its time and feedback `Glide`s and per-frame
-//!   `DelayLanes`); `ModDelayBank`, the chorus and flanger over buffers views (a
-//!   `ModDelayLayout` of a checked `Sweep` and `Stagger`; one `Glide` per channel's delay and one
-//!   for the feedback, the LFO's corners solved by the caller every `COEFF_INTERVAL` frames of
-//!   the stream and interpolated between); and
-//!   `PhaserChain`, the phaser's swept all-pass chain over buffers views (a checked `Stages`,
-//!   `SweepRange` and `Stagger`; one `Glide` per channel's coefficient and one for the
-//!   feedback).
-//! - **Waveshaping** — `ShapeKind`, six memoryless curves, and `WaveshaperBank`, which runs
-//!   one over a block at a gliding or per-frame drive, with `Antialiasing` of the first or
-//!   second order.
-//! - **Reverb** — the reverb model, a `Network` with analytic queries
-//!   (RT60, tail, stability, densities), `FreeverbBank`, Freeverb's combs and
-//!   all-passes over buffers views, `FdnBank`, the feedback delay network, and `PlateBank`,
-//!   Dattorro's plate.
-//! - **Spatial** — vector base amplitude panning (`SpeakerLayout`, `VbapKernel`) and the
-//!   HRTF binaural convolver (`HrtfBinaural`).
-//! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
-//!   `DitherNoise` with `DitherSink`, the dither path export and recording share.
-//!
-//! Each algorithm is laid out as its design (controls to a model), its model (a `System`, and
-//! an `Lti` where it is linear and time-invariant) and its bank (the per-frame math over
-//! buffers views).
-//!
-//! FFT is `RealFft`, the engine's one real-input FFT: rustfft's
-//! *scalar* planner under realfft's even-length real passes (an odd size runs a
-//! full-length complex transform). Its arithmetic does not depend on the CPU, so
-//! a spectrum, a pitch or an onset is bit-identical on every CPU on the same OS,
-//! libm and rustfft version (the twiddles call the C library's `sin` and `cos`, so not across
-//! libms). `tutti-sampler`'s vocoder and `tutti-nodes`' convolver use the same
-//! transform, so values cross freely as `num_complex::Complex<f32>`. This crate
-//! plans lazily, per scratch, on the cold path.
-//!
-//! ## Scope
-//!
-//! - **No graph, no framework, no ECS.** Nothing here is a graph node or knows
-//!   about one.
-//! - **No threading and no scheduling.** A host that wants these results on a
-//!   background thread owns that plumbing itself.
-//!
-//! `tutti-nodes`, `tutti-sampler` and `tutti-export` use it.
-#![forbid(unsafe_code)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-//!
-//! ## Items
-//!
-//! By algorithm, as the source is laid out (each one's design, model and bank side
-//! by side):
-//!
-//! - **The model** (`model/`): a [`System`] is what every processor answers (its
+//! - **Model** (`model/`): a [`System`] is what every processor answers (its
 //!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`] to a floor,
 //!   [`TAIL_FLOOR`] by default), and [`Lti`] the class of a linear time-invariant one
 //!   ([`frequency_response`](Lti::frequency_response),
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay
 //!   a reverb is built to.
-//! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
-//!   ladder ([`LadderBank`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
-//!   crossover ([`CrossoverBank`], [`CrossoverModel`]), each one filter per channel over
-//!   buffers views, and the envelope filter ([`EnvelopeFilterBank`]: an SVF whose cutoff follows
-//!   the input's level); [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
-//!   section they share.
-//! - **Dynamics** (`dynamics/`): the
-//!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter over
-//!   buffers views ([`LimiterBank`], its threshold and ceiling [`LimiterLanes`], its lookahead
-//!   its latency, its delay a [`DelayLine`] read by whole frames); the brickwall clipper
-//!   ([`BrickwallBank`], its ceiling a per-frame lane); the compressor ([`CompressorBank`],
-//!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
-//!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
-//!   bus or the signal itself, through a [`KeyFilter`] if the bank is built with one. The
-//!   transient shaper ([`TransientBank`]) takes one gain from a fast and a slow
-//!   one-pole envelope. The multiband compressor ([`MultibandBank`]) is a crossover tree per
-//!   channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo gliding
-//!   over [`GAIN_GLIDE`].
-//! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
-//!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
-//!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
-//!   [`FreeverbBank`] (its comb feedback and damping [`Glide`]s in [`FreeverbGlides`]) and the
-//!   feedback delay network over buffers views ([`FdnBank`] over an [`FdnLayout`], its
-//!   parameters [`Glide`]s in [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
-//! - **FIR design** (`fir.rs`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
+//! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfCoeffs`], [`SvfModel`], [`SvfType`];
+//!   Simper's trapezoidal state-variable filter, eight responses), the Moog ladder
+//!   ([`LadderBank`], [`LadderCoeffs`], [`LadderModel`], [`LadderType`]) and the
+//!   Linkwitz-Riley crossover ([`CrossoverBank`], [`CrossoverModel`]; a 2 to 6 band
+//!   4th-order split), each one filter per channel over buffers views with its
+//!   coefficients a [`Glide`] the caller aims; the envelope filter ([`EnvelopeFilterBank`]:
+//!   an SVF whose cutoff follows the input's level); [`Lanes`], the arithmetic their steps
+//!   run in, and the [`Biquad`] section they share. The state runs in `f32` or `f64`, and
+//!   its transcendentals call `libm`, so results do not depend on the platform's C math
+//!   library.
+//! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
+//!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
+//!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
+//!   equalizer, the [`Tilt`] shelf and [`SosBank`], which runs one as state-variable
+//!   sections over [`SosCoefficients`].
+//! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
 //!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
-//! - **Cascaded sections** (`sos.rs`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose [`tail`](System::tail) is the whole cascade's; the closed-form
-//!   [`Butterworth`] and [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`]
-//!   peaking equalizer, the [`Tilt`] shelf and [`SosBank`], which
-//!   runs one as state-variable sections (`svf_form`) over [`SosCoefficients`].
-//! - **Oversampling** (`oversample.rs`): [`Oversampling`] describes a cascade of linear-phase
+//! - **Oversampling** (`oversample/`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
 //!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
-//!   [`state`](OversamplingPlan::state) is one channel's [`Oversampler`]. Its round trip is a
-//!   whole number of base frames, [`latency`](OversamplingPlan::latency).
-//! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
-//! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
-//!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
-//!   [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and feedback
-//!   [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger over buffers views ([`ModDelayBank`] over a [`ModDelayLayout`]: its
-//!   [`Sweep`] and [`Stagger`] checked, a [`Glide`] per channel's delay, the LFO the caller's on
-//!   the stream's clock); the phaser
+//!   [`state`](OversamplingPlan::state) is one channel's [`Oversampler`]. Its round trip is
+//!   a whole number of base frames, [`latency`](OversamplingPlan::latency).
+//! - **Dynamics** (`dynamics/`): the gain curves ([`LimiterCurve`] and the `compute_*`
+//!   functions, [`amplitude_to_db`]); the compressor ([`CompressorBank`], its threshold a
+//!   lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise gate ([`GateBank`], its
+//!   range gliding likewise), both reading a [`KeySource`] (a side-chain bus or the signal
+//!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
+//!   its threshold and ceiling [`LimiterLanes`], its lookahead its latency); the brickwall
+//!   clipper ([`BrickwallBank`], its ceiling a per-frame lane); the transient shaper
+//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the dynamic EQ
+//!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
+//!   through the compressor's static curve, by a [`DynamicMode`]); and the multiband
+//!   compressor ([`MultibandBank`]: a crossover tree per channel and a [`CompressorBank`]
+//!   per band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`]).
+//! - **Convolution** (`convolver/`): [`Convolver`], a uniform or non-uniform partitioned FFT
+//!   convolution over an IR's shared, read-only [`IrSpectra`], and [`MatrixConvolver`] for
+//!   a matrix of impulse responses.
+//! - **Delay and modulation** (`delay/`, `modulation/`): [`DelayLine`], a fractional-read
+//!   ring with an [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a
+//!   [`DelayLayout`]: a [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and
+//!   feedback [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger
+//!   ([`ModDelayBank`] over a [`ModDelayLayout`]: its [`Sweep`] and [`Stagger`] checked, a
+//!   [`Glide`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Glide`] per channel's
-//!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved from).
-//! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and
-//!   the gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and
-//!   [`VbapGains`], one direction's gains and one channel rendered along a glide between two) and the HRTF
-//!   convolver ([`HrtfBinaural`]).
-//! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on
-//!   the CPU (the convolver also runs it in steps); [`FftScratch`], reusable
-//!   plans and buffers.
+//!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved
+//!   from).
+//! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
+//!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
+//!   densities) and a [`NetworkCapacity`] worst case; [`FreeverbBank`] (Freeverb's combs and
+//!   all-passes), [`FdnBank`] (the feedback delay network, over an [`FdnLayout`]) and
+//!   [`PlateBank`] (Dattorro's plate), their parameters [`Glide`]s in [`FreeverbGlides`],
+//!   [`FdnGlides`] and [`PlateGlides`]. [`loop_gain`] and [`rt60_from_gain`] are the RT60
+//!   formula both ways.
+//! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], six memoryless curves, and
+//!   [`WaveshaperBank`], which runs one over a block at a gliding or per-frame drive, with
+//!   [`Antialiasing`] of the first or second order.
+//! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
+//!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
+//!   direction's gains and one channel rendered along a glide between two) and the HRTF
+//!   binaural convolver ([`HrtfBinaural`]).
+//! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on the
+//!   CPU (the convolver also runs it in steps), and [`FftScratch`], reusable plans and
+//!   buffers; [`Correlator`] cross-correlates through it. It is rustfft's *scalar* planner
+//!   under realfft's even-length real passes (an odd size runs a full-length complex
+//!   transform), planned lazily per scratch on the cold path. A spectrum, a pitch or an onset
+//!   is bit-identical on every CPU on the same OS, libm and rustfft version (the twiddles call
+//!   the C library's `sin` and `cos`, so not across libms). Values cross as
+//!   [`Complex32`] and [`Complex64`].
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
-//!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`]
-//!   with its typed indices; [`StftError`] is what they refuse with.
+//!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`] with
+//!   its typed indices; [`StftError`] is what they refuse with.
 //! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
 //!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
-//!   `tutti_buffers::Sink` adapter export and recording share.
-//! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or
-//!   triangle band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
-//! - **Stereo and utility** (`polarity.rs`, `stereo.rs`): [`Polarity`], the channels a block
-//!   inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
-//!   [`StereoWidth`](tutti_units::StereoWidth)).
-//! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`] and
-//!   [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
+//!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format.
+//! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
+//!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
+//!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
+//!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
+//! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`]
+//!   and [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
 //!   [`RingModulator`], the input times a sine carrier.
-//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`], [`Smoother`].
+//! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
+//!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
+//!   [`DcBlocker`], a first-order high-pass with its pole from [`dc_pole`].
+//! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
+//!   (with [`Lerp`] and [`Steps`]); [`Smoother`], a one-pole smoother; [`COEFF_INTERVAL`] and
+//!   [`LANES`], the solve interval and channel grouping of the filter banks; [`lerp`],
+//!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`]; [`Xorshift32`], a seeded noise
+//!   source.
+//!
+//! ## Scope
+//!
+//! - **No graph, no framework, no ECS.** Nothing here is a graph node or knows about one.
+//! - **No threading and no scheduling.** A host that wants these results on a background
+//!   thread owns that plumbing itself.
 //!
 //! ## Import paths
 //!
 //! Every public item is re-exported at the crate root; import from there
 //! (`tutti_dsp::RealFft`). No module is public.
+#![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod bit_crush;
 mod control;
@@ -179,10 +131,14 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
+mod finite;
 mod fir;
+mod follower;
 mod glide;
 mod interp;
+mod level;
 mod modulation;
+mod onepole;
 mod oscillator;
 mod oversample;
 mod pan;
@@ -233,6 +189,7 @@ pub use filter::{
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
+pub use level::rms;
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{

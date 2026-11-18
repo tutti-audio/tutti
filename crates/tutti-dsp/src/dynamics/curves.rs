@@ -1,26 +1,18 @@
 //! The gain curves and conversions the dynamics processors share.
 //!
-//! The gain-computation curves live here rather than in any one processor, so
-//! a compressor and a gate pin silence at the same floor.
+//! The gain-computation curves, shared by the compressor, the gate and the
+//! limiter, and the amplitude-to-decibel conversion that floors silence.
 
 use tutti_units::{Amplitude, CompressionRatio, Db};
 
-/// Amplitude as decibels, for the dynamics detectors.
+/// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
+/// (`-144`, about the 24-bit noise floor) rather than `-inf`.
 ///
-/// **This is where the dynamics floor is applied.** `Db::from_amplitude` gives
-/// silence `-inf`, because what to substitute for it is the consumer's choice;
-/// this is the consumer that chooses, so every detector pins at one floor:
-/// `Db::FLOOR` is `-144`, roughly the 24-bit noise floor. Per-site floors are
-/// what let this diverge — a detector at `-96` against `tutti-export`'s `-144`
-/// against a third site with none. The exact value is inaudible in a
-/// compressor, since anything near either floor is far below any usable
-/// threshold; the agreement is the point.
-///
-/// The guard buys agreement, not `NaN` containment: the gain curves tolerate
-/// `-inf` on their own ([`compute_compressor_gain_reduction`] sends it down the
-/// `input_db <= below` branch and returns `Db(0.0)`). What it does buy is a
-/// level every caller can compare, clamp and display without special-casing
-/// infinity.
+/// Every detector reads its level through this function, so they all pin silence
+/// at the one floor and a level can be compared, clamped and displayed without
+/// special-casing infinity. The gain curves also accept `-inf`:
+/// [`compute_compressor_gain_reduction`] sends it down the `input_db <= below`
+/// branch and returns `Db::UNITY`.
 #[inline]
 pub fn amplitude_to_db(amp: impl Into<Amplitude>) -> Db {
     let amp = amp.into();
@@ -52,7 +44,7 @@ pub fn compute_compressor_gain_reduction(
         let above = threshold + half_knee;
 
         if input_db <= below {
-            Db(0.0)
+            Db::UNITY
         } else if input_db >= above {
             let over_db = input_db - threshold;
             Db(over_db * (1.0 - 1.0 / ratio))
@@ -81,11 +73,12 @@ pub(super) fn compute_upward_gain_lift(
     compute_compressor_gain_reduction(mirrored, threshold, ratio, knee)
 }
 
-/// The gate's gain: `range_linear` closed (`gate_level` 0) to 1 open (`gate_level` 1),
-/// from the open fraction (unitless, 0..1) and the range already as an amplitude.
+/// The gate's gain: `range` closed (`gate_level` 0) to 1 open (`gate_level` 1),
+/// from the open fraction (unitless, 0..1) and the range as an amplitude.
 #[inline]
-pub(crate) fn gate_gain_at(gate_level: f32, range_linear: f32) -> Amplitude {
-    Amplitude(range_linear + gate_level * (1.0 - range_linear))
+pub(crate) fn gate_gain_at(gate_level: f32, range: Amplitude) -> Amplitude {
+    let range = range.get();
+    Amplitude(range + gate_level * (1.0 - range))
 }
 
 /// Pure limiter gain computation: the transfer curve of [`LimiterCurve`] in
@@ -147,11 +140,11 @@ pub fn compute_limiter_gain(
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LimiterCurve {
     /// The threshold as an amplitude.
-    threshold: f32,
+    threshold: Amplitude,
     /// The ceiling as an amplitude: the gain over the threshold is this over the peak.
-    over: f32,
+    over: Amplitude,
     /// The gain at or under the threshold.
-    below: f32,
+    below: Amplitude,
 }
 
 impl LimiterCurve {
@@ -176,9 +169,9 @@ impl LimiterCurve {
             .min(Self::MAX_OVER)
             .min(f32::MAX * threshold_lin);
         Self {
-            threshold: threshold_lin,
-            over,
-            below: Db(gap).to_amplitude().get().min(over / threshold_lin),
+            threshold: Amplitude(threshold_lin),
+            over: Amplitude(over),
+            below: Amplitude(Db(gap).to_amplitude().get().min(over / threshold_lin)),
         }
     }
 
@@ -189,10 +182,10 @@ impl LimiterCurve {
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
         let peak = peak.get();
-        Amplitude(if peak > self.threshold {
-            self.over / peak
+        Amplitude(if peak > self.threshold.get() {
+            self.over.get() / peak
         } else {
-            self.below
+            self.below.get()
         })
     }
 }

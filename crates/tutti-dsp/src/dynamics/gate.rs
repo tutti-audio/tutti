@@ -29,8 +29,8 @@ use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 use super::curves::{amplitude_to_db, gate_gain_at};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
-use crate::delay::finite_or;
-use crate::smoother::Smoother;
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{Glide, Steps};
 
 /// The controls of a [`GateBank`].
@@ -85,14 +85,13 @@ impl Default for GateControls {
 struct Design {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
-    threshold_linear: f32,
+    threshold: Amplitude,
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
-    /// The one-pole coefficient while the gate opens.
-    attack: f32,
-    /// The one-pole coefficient while it closes.
-    release: f32,
+    /// The one-pole coefficients: the attack while the gate opens, the release while it
+    /// closes.
+    ballistics: Follower,
     /// `floor(hold * rate)`.
     hold_samples: usize,
     /// The closed gain's level in dB, at most 0.
@@ -108,12 +107,11 @@ impl Design {
         // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
         // longest count. `floored` floors the attack and release.
         let hold = Seconds(c.hold.get().max(0.0));
-        let (attack, release) = floored(c.attack, c.release).coeffs(rate);
+        let ballistics = Follower::of(floored(c.attack, c.release), rate);
         Self {
-            threshold_linear: threshold.to_amplitude().get(),
+            threshold: threshold.to_amplitude(),
             silence_opens: Db::FLOOR >= threshold,
-            attack,
-            release,
+            ballistics,
             hold_samples: hold.to_samples_floor(rate).get(),
             range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
         }
@@ -125,8 +123,8 @@ impl Design {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens(level: f32, threshold_linear: f32, silence_opens: bool) -> bool {
-    level >= threshold_linear || (level <= 0.0 && silence_opens)
+fn opens(level: f32, threshold: Amplitude, silence_opens: bool) -> bool {
+    level >= threshold.get() || (level <= 0.0 && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -153,7 +151,7 @@ pub struct GateBank {
     steps: u32,
     rate: SampleRate,
     /// The smoothed open fraction, 0 closed to 1 open.
-    follower: f32,
+    follower: Amplitude,
     /// The frames of hold left.
     hold_counter: usize,
     /// The filter on the key, if the bank has one.
@@ -173,7 +171,7 @@ impl GateBank {
             design,
             steps,
             rate,
-            follower: 0.0,
+            follower: Amplitude::SILENT,
             hold_counter: 0,
             key: None,
         }
@@ -194,7 +192,7 @@ impl GateBank {
     /// Back to silence: the gate closed and no hold left, and the range landed on its
     /// target. No allocation.
     pub fn reset(&mut self) {
-        self.follower = 0.0;
+        self.follower = Amplitude::SILENT;
         self.hold_counter = 0;
         self.range.settle();
         if let Some(key) = &mut self.key {
@@ -253,7 +251,7 @@ impl GateBank {
         let d = self.design;
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
-        let held = Db(self.range.target()).to_amplitude().get();
+        let held = Db(self.range.target()).to_amplitude();
         let mut gains = [0.0f32; CHUNK];
         let mut start = 0;
         while start < frames {
@@ -275,25 +273,25 @@ impl GateBank {
                     .filter(|t| t.get().is_finite())
                 {
                     Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
-                    None => opens(level, d.threshold_linear, d.silence_opens),
+                    None => opens(level, d.threshold, d.silence_opens),
                 };
                 if open {
                     self.hold_counter = d.hold_samples;
-                    self.follower = Smoother::toward(self.follower, 1.0, d.attack);
+                    self.follower = d.ballistics.follow(self.follower, Amplitude::UNITY);
                 } else if self.hold_counter > 0 {
                     self.hold_counter -= 1;
                 } else {
-                    self.follower = Smoother::toward(self.follower, 0.0, d.release);
+                    self.follower = d.ballistics.follow(self.follower, Amplitude::SILENT);
                 }
                 let range = if i < blended {
                     let db = self
                         .range
                         .at(taken.saturating_add(1).saturating_add(i as u32));
-                    Db(db).to_amplitude().get()
+                    Db(db).to_amplitude()
                 } else {
                     held
                 };
-                *g = gate_gain_at(self.follower, range).get();
+                *g = gate_gain_at(self.follower.get(), range).get();
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];

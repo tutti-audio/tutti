@@ -70,6 +70,14 @@ struct Rig {
     unsent: AtomicBool,
     /// Declare a second input bus (one placed channel) beside the stereo main.
     key_bus: AtomicBool,
+    /// Fail every `process` call.
+    fail: AtomicBool,
+    /// MIDI events each `process` call sends out.
+    emit: AtomicUsize,
+    /// Write a NaN in the first output channel of every `process` call.
+    poison: AtomicBool,
+    /// Panic in the control side's idle flush.
+    panic_in_flush: AtomicBool,
 }
 
 impl Rig {
@@ -83,6 +91,10 @@ impl Rig {
             lose: AtomicUsize::new(0),
             unsent: AtomicBool::new(false),
             key_bus: AtomicBool::new(false),
+            fail: AtomicBool::new(false),
+            emit: AtomicUsize::new(0),
+            poison: AtomicBool::new(false),
+            panic_in_flush: AtomicBool::new(false),
         })
     }
 
@@ -190,6 +202,13 @@ macro_rules! rec_control {
             }
             fn dropped_reported_edits(&self) -> u64 {
                 0
+            }
+            /// The control side's idle flush, which a test makes panic.
+            fn flush_edits(&mut self, _: MainThreadMarker) {
+                assert!(
+                    !self.rig.panic_in_flush.load(Ordering::Relaxed),
+                    "scripted panic in the idle flush"
+                );
             }
         }
         impl EditorWindow for $ty {
@@ -319,14 +338,31 @@ impl InProcess for Rec {
 }
 
 impl Processor for RecProcessor {
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+        if self.rig.fail.load(Ordering::Relaxed) {
+            return Err(PluginError::Block("scripted failure"));
+        }
+        let emitted = self.rig.emit.load(Ordering::Relaxed);
+        io.out
+            .emit_midi((0..emitted).map(|_| tutti_plugin_types::WireMidi {
+                offset: 0,
+                ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
+            }));
         let PluginAudio::F32(buffer) = &mut io.buffer else {
             unreachable!("the graph is f32");
         };
         let frames = buffer.frames().0;
         let (input, mut output) = buffer.split();
-        for (mut out, input) in output.iter_mut().zip(input.iter()) {
+        let poison = self.rig.poison.load(Ordering::Relaxed);
+        for (i, (mut out, input)) in output.iter_mut().zip(input.iter()).enumerate() {
             out.samples_mut().copy_from_slice(input.samples());
+            if poison && i == 0 {
+                out.samples_mut()[0] = f32::NAN;
+            }
         }
         if self.rig.record {
             let ctx = io.ctx;
@@ -700,6 +736,201 @@ fn midi_and_harmony_arrive_on_the_frames_of_their_piece() {
             "declared: {declared}"
         );
     }
+}
+
+/// **The MIDI a chunked processor sends past the block's room is counted**, not
+/// lost silently: two 64-frame pieces each send 200 events into a block that
+/// holds `MIDI_STACK_CAPACITY` (256), so the 144 that do not fit are counted in
+/// `midi_out_dropped`, and the 256 that fit leave on the event output.
+#[test]
+fn chunked_midi_out_past_the_blocks_room_is_counted() {
+    let rig = Rig::new(Some(64), Features::TRANSPORT | Features::MIDI_OUT);
+    rig.emit.store(200, Ordering::Relaxed);
+    let (mut unit, controls) = node(&rig, 128, tempo(None));
+    run_block(&mut unit, 0, 128);
+    let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
+    assert_eq!(controls.midi_out_dropped(), (2 * 200 - room) as u64);
+    assert_eq!(unit.events_out(0).len(), room);
+}
+
+/// **Chords past the capacity of a piece are counted**, in the whole-block path
+/// and the chunked one alike: `HARMONY_CAPACITY` fit, each one more is dropped
+/// and counted in `harmony_dropped`.
+#[test]
+fn chords_past_the_capacity_of_a_piece_are_counted() {
+    let over = 3;
+    let chords: Vec<Event> = (0..tutti_plugin_types::HARMONY_CAPACITY + over)
+        .map(|i| Event::harmony(at(i, 64), Harmony::chord(0, 0, 0b1001_0001)))
+        .collect();
+    for chunk in [None, Some(64)] {
+        let rig = Rig::new(chunk, Features::TRANSPORT | Features::SEQUENCER_CONTEXT);
+        let (mut unit, controls) = node(&rig, 64, tempo(None));
+        unit.events(0, &chords);
+        run_block(&mut unit, 0, 64);
+        assert_eq!(controls.harmony_dropped(), over as u64, "chunk {chunk:?}");
+        let seen = rig.seen.lock().unwrap();
+        assert_eq!(
+            seen[0].chords.as_ref().map(Vec::len),
+            Some(tutti_plugin_types::HARMONY_CAPACITY),
+            "chunk {chunk:?}"
+        );
+    }
+}
+
+/// **A block the Processor fails is counted as failed** in the node's controls,
+/// where an app reads it, and its MIDI is counted lost with the rest.
+#[test]
+fn a_failed_block_is_counted_in_the_nodes_controls() {
+    let rig = Rig::new(None, Features::TRANSPORT);
+    let (mut unit, controls) = node(&rig, 64, tempo(None));
+    unit.events(0, &[note_on(3, 64)]);
+    rig.fail.store(true, Ordering::Relaxed);
+    run_block(&mut unit, 0, 64);
+    rig.fail.store(false, Ordering::Relaxed);
+    run_block(&mut unit, 64, 64);
+    let losses = controls.block_losses();
+    assert_eq!((losses.failed, losses.unlent), (1, 0));
+    assert_eq!(controls.dropped_midi_in(), 1, "the failed block's MIDI");
+}
+
+/// **A block the plugin writes a NaN in is counted once** in the node's
+/// `block_losses().nonfinite`, per piece on a chunked node (two 64-frame
+/// pieces make two), and the NaN does not reach the output.
+#[test]
+fn a_block_with_a_non_finite_sample_is_counted_in_the_nodes_controls() {
+    for (chunk, want) in [(None, 1), (Some(64), 2)] {
+        let rig = Rig::new(chunk, Features::TRANSPORT);
+        rig.poison.store(true, Ordering::Relaxed);
+        let (mut unit, controls) = node(&rig, 128, tempo(None));
+        run_block(&mut unit, 0, 128);
+        assert_eq!(controls.block_losses().nonfinite, want, "chunk {chunk:?}");
+        assert!(
+            unit.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .all(|s| s.is_finite())
+        );
+    }
+}
+
+/// **A panic out of an in-process plugin's call is observed as death**: the
+/// handle's status is `Dead` with a `PluginFailure::Panicked` cause, which is
+/// what the session turns into `PluginChange::Died`, and the listeners hear
+/// `Crashed` once.
+#[test]
+fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
+    use std::sync::atomic::AtomicU32;
+    use tutti_plugin_host::{Notice, PluginStatus};
+    use tutti_plugin_types::{PluginFailure, PluginInvalidation};
+
+    let rig = Rig::new(None, Features::TRANSPORT);
+    ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
+    let (_client, handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        Path::new("rec"),
+        &Load::new(),
+        SR,
+    )
+    .expect("the recording plugin loads");
+    let crashes = Arc::new(AtomicU32::new(0));
+    let seen = Arc::clone(&crashes);
+    let _hearing = handle.subscribe(move |notice| {
+        if matches!(
+            notice,
+            Notice::Invalidate(PluginInvalidation::Crashed {
+                cause: PluginFailure::Panicked { .. }
+            })
+        ) {
+            seen.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+    assert!(matches!(handle.status(), PluginStatus::Alive));
+    rig.panic_in_flush.store(true, Ordering::Relaxed);
+    handle.editor_idle(main_thread());
+    assert!(handle.is_crashed());
+    assert!(
+        matches!(
+            handle.status(),
+            PluginStatus::Dead {
+                cause: PluginFailure::Panicked { .. }
+            }
+        ),
+        "{:?}",
+        handle.status()
+    );
+    handle.editor_idle(main_thread());
+    assert_eq!(crashes.load(Ordering::Relaxed), 1, "heard once");
+}
+
+/// **A rebuilt node of a plugin with controls of its own counts into the same
+/// cells, once**: the second node's overflow of MIDI out and chords adds its
+/// own to the total, nothing is reset by the rebuild and nothing counted twice.
+#[test]
+fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
+    let rig = Rig::new(
+        Some(64),
+        Features::TRANSPORT | Features::MIDI_OUT | Features::SEQUENCER_CONTEXT,
+    );
+    rig.emit.store(200, Ordering::Relaxed);
+    ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
+    let main = main_thread();
+    let loaded = Rec::load_in_process(
+        main,
+        &tutti_fixtures::detached_work(),
+        Path::new("rec"),
+        &Load::new(),
+    )
+    .expect("loads");
+    let wiring = loaded.wiring(main);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples(128)).expect("a block"));
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the recording plugin activates");
+    };
+    let (controls, _reports) =
+        tutti_plugin_host::PluginControls::new(Samples(0), PluginTail::None, SR);
+    let client = tutti_plugin_host::client_over::<Rec>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        Some(controls.clone()),
+    )
+    .expect("narrow");
+    let rebinder = client.rebinder(tempo(None));
+    let mut first = Direct::new(client.bind(tempo(None)), SR, 128);
+
+    let over = 3;
+    let chords: Vec<Event> = (0..tutti_plugin_types::HARMONY_CAPACITY + over)
+        .map(|i| Event::harmony(at(i, 128), Harmony::chord(0, 0, 0b1001_0001)))
+        .collect();
+    let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
+    let midi_over = (2 * 200 - room) as u64;
+    first.events(0, &chords);
+    run_block(&mut first, 0, 128);
+    assert_eq!(controls.harmony_dropped(), over as u64);
+    assert_eq!(controls.midi_out_dropped(), midi_over);
+
+    let (second, pending) = rebinder.prepare().expect("a node");
+    pending.commit(main);
+    let mut frame = 128;
+    while rebinder.settled() == tutti_plugin_host::Settlement::Pending {
+        run_block(&mut first, frame, 128);
+        rebinder.tick(main);
+        frame += 128;
+        assert!(frame < 128 * 16, "the Processor never moved");
+    }
+    let (harmony, midi) = (controls.harmony_dropped(), controls.midi_out_dropped());
+    let mut second = Direct::new(second, SR, 128);
+    second.events(0, &chords);
+    run_block(&mut second, frame, 128);
+    assert_eq!(controls.harmony_dropped() - harmony, over as u64);
+    assert_eq!(controls.midi_out_dropped() - midi, midi_over);
 }
 
 /// **The chunked audio path allocates nothing** once warm: blocks of 100 over

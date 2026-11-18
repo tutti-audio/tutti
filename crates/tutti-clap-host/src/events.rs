@@ -27,6 +27,7 @@ use clap_sys::events::{
     clap_event_midi_sysex, clap_event_note, clap_event_note_expression, clap_event_param_gesture,
     clap_event_param_mod, clap_event_param_value, clap_event_transport,
 };
+use std::num::NonZeroU32;
 use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
@@ -870,20 +871,21 @@ impl InputRooms {
         }
     }
 
-    /// Room for the MIDI a note port holding `umps` UMPs a block can stage:
-    /// each UMP narrows to at most [`Narrower::MAX_MESSAGES`] MIDI 1.0
-    /// messages, one event each, so no block the port delivers is refused.
+    /// Room for the MIDI a node sent at most `event_input` events a block can
+    /// stage: each event is one UMP, and each UMP narrows to at most
+    /// [`Narrower::MAX_MESSAGES`] MIDI 1.0 messages, one event each, so no
+    /// block the graph sends is refused.
     ///
-    /// The cost is `umps * MAX_MESSAGES` events of 112 bytes
-    /// (`size_of::<ClapEvent>()`), plus the sort's scratch: for the largest
-    /// port, 9224 UMPs, 46120 events and about 5.2 MB per activation. The port's
-    /// capacity is the graph's (the executor's default, or what the editor
-    /// set), declared by no node's shape and not carried by `Prepare`, so
-    /// activation cannot see it and sizes from the largest port there is
-    /// (`MAX_EVENT_PORT_CAPACITY` and the note-off room behind it).
+    /// `event_input` is the bound the node is declared for
+    /// (`Shape::event_input_capacity`, at most the node's own intake of 256
+    /// events, `MIDI_STACK_BOUND`): the graph never sends more, a
+    /// note-off included, so no room is held past it. The cost at 256 is 1280
+    /// MIDI events of 112 bytes (`size_of::<ClapEvent>()`), 143 360 bytes,
+    /// and the sort's scratch for them (8 bytes an event) 10 240 more: about
+    /// 154 KB for the MIDI share, whatever the block.
     #[must_use]
-    pub const fn for_port(umps: usize) -> Self {
-        Self::new(umps.saturating_mul(Narrower::MAX_MESSAGES))
+    pub const fn for_port(event_input: NonZeroU32) -> Self {
+        Self::new((event_input.get() as usize).saturating_mul(Narrower::MAX_MESSAGES))
     }
 
     /// The parameter events one
@@ -1086,6 +1088,14 @@ impl InputEventList {
     /// are not counted.
     pub fn groups_dropped(&self) -> u64 {
         self.groups_dropped
+    }
+
+    /// The events one block's MIDI room holds: its messages over
+    /// [`Narrower::MAX_MESSAGES`], the bound [`InputRooms::for_port`] was
+    /// built from. `None` for a list with no MIDI room.
+    #[must_use]
+    pub fn event_input(&self) -> Option<NonZeroU32> {
+        NonZeroU32::new(u32::try_from(self.midi_room / Narrower::MAX_MESSAGES).unwrap_or(u32::MAX))
     }
 
     /// How many more MIDI events the block can stage: the MIDI room less
@@ -2634,7 +2644,7 @@ mod tests {
     #[test]
     fn a_ports_worth_of_banked_program_changes_fits_its_midi_room() {
         const UMPS: usize = 64;
-        let mut list = InputEventList::new(InputRooms::for_port(UMPS));
+        let mut list = InputEventList::new(InputRooms::for_port(NonZeroU32::new(64).unwrap()));
         let pc = (
             at(0),
             midi::program_change(
@@ -2652,6 +2662,25 @@ mod tests {
         assert_eq!(list.midi_dropped(), 0);
         assert_eq!(list.events().len(), UMPS * 3);
         assert!(list.events().len() <= UMPS * Narrower::MAX_MESSAGES);
+    }
+
+    /// **A list built from a declared bound of `n` events holds `n` x
+    /// `Narrower::MAX_MESSAGES` MIDI events**: that many note-ons stage with
+    /// none dropped, and one more is refused and counted.
+    #[test]
+    fn a_declared_bound_sizes_the_midi_room_to_exactly_its_messages() {
+        const N: u32 = 8;
+        let room = N as usize * Narrower::MAX_MESSAGES;
+        let mut list = InputEventList::new(InputRooms::for_port(NonZeroU32::new(N).unwrap()));
+        let note = (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000));
+        for _ in 0..room {
+            list.add_midi(&note);
+        }
+        assert_eq!(list.events().len(), room);
+        assert_eq!(list.midi_dropped(), 0, "no drop at exactly the room");
+        list.add_midi(&note);
+        assert_eq!(list.events().len(), room, "one past the room is not staged");
+        assert_eq!(list.midi_dropped(), 1, "and is counted");
     }
 
     /// A Program Change packet written from M2-104 Figure 64's words (bank MSB
@@ -2768,8 +2797,8 @@ mod tests {
     /// banked Program Change, the per-note bend sensitivity, System, Utility,
     /// SysEx7, SysEx8, Flex, Stream, and a packet `decode` cannot frame.
     /// The cost `InputRooms::for_port` documents: an event is 112 bytes, so
-    /// the production room (9224 UMPs x 5) is about 5.2 MB. It fails if the
-    /// event grows past that figure.
+    /// a 512-frame block's room (512 UMPs x 5 messages) is about 287 KB. It
+    /// fails if the event grows past that figure.
     #[test]
     fn a_clap_event_is_the_size_the_room_docs_price() {
         assert_eq!(std::mem::size_of::<ClapEvent>(), 112);

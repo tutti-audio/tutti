@@ -217,3 +217,30 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     assert_eq!(stats.points_merged, 0, "{stats:?}");
     drop(handle);
 }
+
+/// **An idle pump of an in-process plugin does not copy the lifecycle state**:
+/// the state holds the layout (two lists of buses), which a copy per step would
+/// allocate on the control thread every update. A warm pump with nothing to
+/// deliver allocates nothing.
+#[test]
+fn an_idle_pump_does_not_allocate() {
+    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(
+        main_thread(),
+        &tutti_fixtures::pumped_work(),
+        tutti_fixtures::vst2_probe(),
+        &Load::new(),
+        SampleRate::SR_48K,
+    )
+    .expect("load failed");
+    let main = main_thread();
+    for _ in 0..8 {
+        handle.editor_idle(main);
+    }
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            handle.editor_idle(main);
+        }
+    });
+    drop((unit, handle));
+}

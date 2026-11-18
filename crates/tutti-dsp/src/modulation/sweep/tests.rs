@@ -1,4 +1,4 @@
-use tutti_types::BusTopology;
+use tutti_types::{BusTopology, ChannelIndex};
 use tutti_units::{Feedback, PhaseIncrement, Seconds};
 
 use super::*;
@@ -89,7 +89,7 @@ fn a_sweep_of_a_transposed_base_panics_where_it_is_a_constant() {
     let _ = Sweep::of(
         Seconds(0.05),
         MaxDelay::of(Seconds(0.01)),
-        Seconds(0.0),
+        Seconds::ZERO,
         Seconds(0.001),
         Feedback::NONE,
     );
@@ -110,19 +110,27 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
         ));
     }
     let s = Stagger::step(PhaseIncrement(1.25)).unwrap();
-    assert_eq!(s.offset(0), PhaseIncrement(0.0));
-    assert_eq!(s.offset(1), PhaseIncrement(0.25));
-    assert_eq!(s.offset(2), PhaseIncrement(0.5));
-    assert_eq!(s.offset(4), PhaseIncrement(0.0), "a full cycle is none");
+    assert_eq!(s.offset(ChannelIndex::of(0)), PhaseIncrement(0.0));
+    assert_eq!(s.offset(ChannelIndex::of(1)), PhaseIncrement(0.25));
+    assert_eq!(s.offset(ChannelIndex::of(2)), PhaseIncrement(0.5));
+    assert_eq!(
+        s.offset(ChannelIndex::of(4)),
+        PhaseIncrement(0.0),
+        "a full cycle is none"
+    );
     let back = Stagger::step(PhaseIncrement(-0.25)).unwrap();
     assert_eq!(
-        back.offset(1),
+        back.offset(ChannelIndex::of(1)),
         PhaseIncrement(0.75),
         "behind is wrapped ahead"
     );
     let each = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(-0.25)]).unwrap();
-    assert_eq!(each.offset(1), PhaseIncrement(0.75));
-    assert_eq!(each.offset(7), PhaseIncrement(0.0), "past the named: none");
+    assert_eq!(each.offset(ChannelIndex::of(1)), PhaseIncrement(0.75));
+    assert_eq!(
+        each.offset(ChannelIndex::of(7)),
+        PhaseIncrement(0.0),
+        "past the named: none"
+    );
     assert_eq!((each.channels(), s.channels()), (Some(2), None));
     let too_many = [PhaseIncrement(0.0); MAX_CHANNELS + 1];
     assert_eq!(

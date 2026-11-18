@@ -16,7 +16,7 @@
 //! render.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::MAX_CHANNELS;
+use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Depth, Feedback, Hz};
 
 use crate::Glide;
@@ -204,7 +204,8 @@ impl PhaserChain {
     ///
     /// If `width` is past [`MAX_PHASER_CHANNELS`].
     #[must_use]
-    pub fn new(stages: Stages, width: usize) -> Self {
+    pub fn new(stages: Stages, width: ChannelLayout) -> Self {
+        let width = usize::from(width.count());
         assert!(
             width <= MAX_PHASER_CHANNELS,
             "a phaser has at most {MAX_PHASER_CHANNELS} channels"

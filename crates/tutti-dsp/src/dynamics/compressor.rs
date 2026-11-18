@@ -25,8 +25,9 @@ use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, Follower, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
-use crate::delay::finite_or;
+use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{Glide, Steps};
 
 /// The controls of a [`CompressorBank`].

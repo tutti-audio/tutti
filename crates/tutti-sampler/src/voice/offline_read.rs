@@ -49,7 +49,8 @@ use tutti_units::{SamplePosition, Samples};
 
 use super::Loop;
 use super::interp::{
-    MAX_WAVE_CHANNELS, Place, interpolate_taps, read_frame, read_looped_frame, tap_indices,
+    MAX_WAVE_CHANNELS, Place, interpolate_taps, mirrored, read_frame, read_looped_frame,
+    tap_indices,
 };
 use super::loop_span::LoopSpan;
 use super::types::Direction;
@@ -236,7 +237,7 @@ impl<F: Float> OfflineRead<F> {
                     out.fill(F::ZERO);
                     return;
                 }
-                open.read_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), place, out);
+                open.read_into(mirrored(Samples::new(open.len()), pos), place, out);
             }
             (Direction::Forward, Some(span)) => {
                 let (p, looped) = span.place(pos.get());

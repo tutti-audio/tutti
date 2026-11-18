@@ -31,14 +31,15 @@
 use std::sync::Arc;
 
 use super::prefetch::RegionOut;
-use tutti_buffers::{Interleaved, InterleavedMut};
+use tutti_buffers::{Float, Interleaved, InterleavedMut};
+use tutti_rt::RingFloat;
 use tutti_types::ChannelLayout;
-use tutti_units::{SamplePosition, SampleRate, Samples};
+use tutti_units::{ReadRate, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
-use crate::voice::interp::{split_position, tap_indices};
+use crate::voice::interp::{mirrored, split_position, tap_indices};
 use crate::voice::loop_span::LoopSpan;
 
 /// A loop at most this many frames long keeps its body (`[resume, end)`)
@@ -130,31 +131,31 @@ impl Arrangement {
     /// ulp no larger than `pos`, so representable; `rem_euclid` is exact; and
     /// `resume + r` is again such a multiple, no larger than `end ≤ pos`.
     #[inline]
-    pub(crate) fn taps(&self, pos: f64) -> Option<([u64; 4], f32)> {
+    pub(crate) fn taps<F: Float>(&self, pos: SamplePosition) -> Option<([u64; 4], F)> {
         if self.len == Some(Samples::new(0)) {
             return None;
         }
         if self.reverse {
             // A direction needs the length to mirror by.
             let len = self.len?.get();
-            if pos >= len as f64 {
+            if pos >= straight(len as u64) {
                 return None;
             }
-            let (taps, frac) = tap_indices(len, SamplePosition((len as f64 - 1.0 - pos).max(0.0)));
+            let (taps, frac) = tap_indices(len, mirrored(Samples::new(len), pos));
             return Some((taps.map(|f| (len - 1 - f) as u64), frac));
         }
         match self.span {
             None => {
                 // Unknown length: every position reads, nothing falls silent.
                 let len = self.len.map_or(usize::MAX, Samples::get);
-                if pos >= len as f64 {
+                if pos >= straight(len as u64) {
                     return None;
                 }
-                let (taps, frac) = tap_indices(len, SamplePosition(pos));
+                let (taps, frac) = tap_indices(len, pos);
                 Some((taps.map(|f| f as u64), frac))
             }
             Some(_) => {
-                let (idx, frac) = split_position(SamplePosition(pos));
+                let (idx, frac) = split_position(pos);
                 Some((
                     [
                         idx.saturating_sub(1),
@@ -170,17 +171,23 @@ impl Arrangement {
     }
 }
 
+/// The straight position of ring slot `slot`: the position that places on it.
+#[inline]
+pub(crate) fn straight(slot: u64) -> SamplePosition {
+    SamplePosition::new(slot as f64)
+}
+
 /// A switch the reader crosses: the old mapping's frames around it, so the
 /// reader can fade from what it would have played to what the ring now holds.
 #[derive(Clone, Debug)]
-pub(crate) struct FadeRecord {
+pub(crate) struct FadeRecord<F: Float = f32> {
     /// The straight position of `data`'s first frame.
     pub(crate) start: u64,
     /// Frames in `data`.
     pub(crate) frames: usize,
     /// The old mapping's frames for `[start, start + frames)`, flat interleaved
     /// at the ring's width.
-    pub(crate) data: Box<[f32]>,
+    pub(crate) data: Box<[F]>,
     /// Output frames the fade lasts; 0 cuts (after any gap the record covers).
     pub(crate) fade_frames: Samples,
 }
@@ -191,17 +198,17 @@ pub(crate) struct FadeRecord {
 /// What [`RingControl`] carries for the reader's taps; the streamer changes it
 /// only by publishing a new [`RingControl`].
 #[derive(Clone, Debug)]
-pub(crate) struct RingMap {
+pub(crate) struct RingMap<F: Float = f32> {
     pub(crate) before: Arrangement,
     pub(crate) after: Arrangement,
     /// The switch: positions from here read `after`.
     pub(crate) at: u64,
-    pub(crate) fade: Option<FadeRecord>,
+    pub(crate) fade: Option<FadeRecord<F>>,
     /// Bumped with every publish, so the reader starts a record's fade once.
     pub(crate) epoch: u64,
 }
 
-impl RingMap {
+impl<F: Float> RingMap<F> {
     /// One arrangement everywhere.
     pub(crate) fn plain(arrangement: Arrangement, epoch: u64) -> Self {
         Self {
@@ -215,8 +222,8 @@ impl RingMap {
 
     /// The arrangement position `pos` reads by.
     #[inline]
-    pub(crate) fn arrangement(&self, pos: f64) -> Arrangement {
-        if pos >= self.at as f64 {
+    pub(crate) fn arrangement(&self, pos: SamplePosition) -> Arrangement {
+        if pos >= straight(self.at) {
             self.after
         } else {
             self.before
@@ -240,19 +247,19 @@ impl RingMap {
 /// the one asked for (a lead-in that cannot be read downgrades it to a hard
 /// loop), and that is what a fork plays.
 #[derive(Clone, Debug)]
-pub(crate) struct RingControl {
+pub(crate) struct RingControl<F: Float = f32> {
     /// How to read the slots.
-    pub(crate) map: RingMap,
+    pub(crate) map: RingMap<F>,
     /// The direction the stream plays in.
     pub(crate) direction: Direction,
     /// The loop the stream runs, as applied.
     pub(crate) loop_: Option<Loop>,
 }
 
-impl RingControl {
+impl<F: Float> RingControl<F> {
     /// A control reading by `map`, running `loop_`; its direction is the
     /// map's newest arrangement's.
-    pub(crate) fn new(map: RingMap, loop_: Option<Loop>) -> Self {
+    pub(crate) fn new(map: RingMap<F>, loop_: Option<Loop>) -> Self {
         let direction = Direction::from(map.after.reverse());
         Self {
             map,
@@ -266,17 +273,17 @@ impl RingControl {
 /// blends toward, and — for a short loop — its body, captured once when the
 /// loop is set so no refill re-reads them.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RingLoop {
+pub(crate) struct RingLoop<F: Float = f32> {
     span: LoopSpan,
     /// The `span.fade()` frames leading into `span.resume()` (the fade's
     /// lead-in, `[resume - fade, resume)`), flat interleaved at the ring's
     /// width. Shared, so a clone (a parallel refill's work item) holds it
     /// without a copy.
-    lead_in: Arc<[f32]>,
+    lead_in: Arc<[F]>,
     /// `[resume, end)`, raw, when the loop is at most [`BODY_MAX_FRAMES`]: a
     /// streamed refill copies each wrap from here instead of seeking the
     /// decoder back once per wrap.
-    body: Option<Arc<[f32]>>,
+    body: Option<Arc<[F]>>,
 }
 
 /// Why a loop plays hard although a fade was asked for.
@@ -288,7 +295,7 @@ pub(crate) enum LeadIn {
     Unreadable,
 }
 
-impl RingLoop {
+impl<F: Float> RingLoop<F> {
     /// The loop `looped` with its fade, on a file
     /// `len` frames long (its end clamped to the file, as every tier clamps
     /// it), writing a ring `channels` wide, reading only the frames it needs
@@ -304,11 +311,11 @@ impl RingLoop {
         looped: Loop,
         len: usize,
         channels: impl Into<ChannelLayout>,
-        read: &mut dyn FnMut(usize, &mut [f32]) -> bool,
+        read: &mut dyn FnMut(usize, &mut [F]) -> bool,
     ) -> Option<(Self, LeadIn)> {
         let ch = nonempty(channels.into()).count() as usize;
         let mut span = looped.bound(len)?;
-        let mut lead_in = vec![0.0f32; span.fade() * ch];
+        let mut lead_in = vec![F::ZERO; span.fade() * ch];
         let mut outcome = LeadIn::Read;
         if span.fade() > 0 && !read(span.resume() - span.fade(), &mut lead_in) {
             span = looped.hard().bound(len)?;
@@ -318,7 +325,7 @@ impl RingLoop {
         let cycle = span.end() - span.resume();
         let body = (cycle <= BODY_MAX_FRAMES)
             .then(|| {
-                let mut body = vec![0.0f32; cycle * ch];
+                let mut body = vec![F::ZERO; cycle * ch];
                 read(span.resume(), &mut body).then(|| Arc::from(body))
             })
             .flatten();
@@ -341,7 +348,7 @@ impl RingLoop {
     /// Blend the frames of a run that fall in the fade toward their lead-in,
     /// as `interp::read_looped_frame` blends a tap: `run` holds file frames
     /// `from..`.
-    fn blend_run(&self, from: usize, mut run: InterleavedMut<'_>) {
+    fn blend_run(&self, from: usize, mut run: InterleavedMut<'_, F>) {
         let fade = self.span.fade();
         let fade_start = self.span.end() - fade;
         if fade == 0 || from + run.frames().get() <= fade_start {
@@ -364,7 +371,7 @@ impl RingLoop {
 
     /// Fill `run` (file frames `at..`, all inside the loop's repeating part)
     /// from the resident body, when there is one.
-    fn body_run(&self, at: usize, run: &mut InterleavedMut<'_>) -> bool {
+    fn body_run(&self, at: usize, run: &mut InterleavedMut<'_, F>) -> bool {
         let Some(body) = self.body.as_ref() else {
             return false;
         };
@@ -384,23 +391,23 @@ impl RingLoop {
 /// What a stream's straight positions hold: a direction, the file's length,
 /// and (going forward) a loop.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Mapping {
+pub(crate) struct Mapping<F: Float = f32> {
     pub(crate) reverse: bool,
     pub(crate) len: Option<Samples>,
-    pub(crate) ring_loop: Option<RingLoop>,
+    pub(crate) ring_loop: Option<RingLoop<F>>,
 }
 
 /// One slot's content, compared to find where two mappings part.
 #[derive(Debug, PartialEq)]
-enum Key {
-    /// A file frame, and inside a fade its lead-in and weight (as bits).
-    Frame(usize, Option<(usize, u32)>),
+enum Key<F> {
+    /// A file frame, and inside a fade its lead-in and weight.
+    Frame(usize, Option<(usize, F)>),
     /// Nothing is ever read here (past the end of an unlooped or reversed
     /// stream).
     Unread,
 }
 
-impl Mapping {
+impl<F: Float> Mapping<F> {
     /// The file straight on, forward, unlooped.
     pub(crate) fn plain(len: Samples) -> Self {
         Self {
@@ -420,7 +427,7 @@ impl Mapping {
     }
 
     /// The loop, where it applies (forward only).
-    fn active_loop(&self) -> Option<&RingLoop> {
+    fn active_loop(&self) -> Option<&RingLoop<F>> {
         self.ring_loop.as_ref().filter(|_| !self.reverse)
     }
 
@@ -441,16 +448,10 @@ impl Mapping {
         self.arrangement().end()
     }
 
-    fn key(&self, s: u64) -> Key {
+    fn key(&self, s: u64) -> Key<F> {
         if let Some(ring_loop) = self.active_loop() {
             let f = ring_loop.span.place_frame(s as usize);
-            return Key::Frame(
-                f,
-                ring_loop
-                    .span
-                    .fade_at::<f32>(f)
-                    .map(|(l, w)| (l, w.to_bits())),
-            );
+            return Key::Frame(f, ring_loop.span.fade_at::<F>(f));
         }
         let Some(len) = self.len.map(Samples::get) else {
             // Unknown length: forward reads the frame itself, a reversal has
@@ -492,7 +493,7 @@ impl Mapping {
     /// and `other` fill differently: compared a run at a time, so an edit's
     /// search over a 30 s ring costs a few comparisons per wrap and fade frame,
     /// not one per position.
-    fn parts_from(&self, other: &Mapping, from: u64, to: u64) -> Option<u64> {
+    fn parts_from(&self, other: &Mapping<F>, from: u64, to: u64) -> Option<u64> {
         let mut s = from;
         while s < to {
             if self.key(s) != other.key(s) {
@@ -515,14 +516,14 @@ impl Mapping {
     pub(crate) fn fill(
         &self,
         pos: u64,
-        mut out: InterleavedMut<'_>,
-        read: &mut dyn FnMut(usize, &mut [f32]),
+        mut out: InterleavedMut<'_, F>,
+        read: &mut dyn FnMut(usize, &mut [F]),
     ) {
         let frames = out.frames();
         let writable = self.end().map_or(frames, |end| {
             Samples((end.saturating_sub(pos) as usize).min(frames.get()))
         });
-        out.slice_mut(writable..frames).samples_mut().fill(0.0);
+        out.slice_mut(writable..frames).samples_mut().fill(F::ZERO);
         let mut out = out.slice_mut(Samples::ZERO..writable);
         if self.reverse {
             // Positions `pos..pos + n` hold file frames `len - 1 - pos` down.
@@ -560,17 +561,17 @@ impl Mapping {
 /// from it on (and for every later write). `None`: no switch, `current`
 /// everywhere.
 #[derive(Clone, Debug)]
-pub(crate) struct Content {
-    pub(crate) before: Mapping,
-    pub(crate) current: Mapping,
+pub(crate) struct Content<F: Float = f32> {
+    pub(crate) before: Mapping<F>,
+    pub(crate) current: Mapping<F>,
     pub(crate) switch_at: Option<u64>,
     /// The epoch of the last [`RingMap`] published.
     pub(crate) epoch: u64,
 }
 
-impl Content {
+impl<F: Float> Content<F> {
     /// One mapping everywhere.
-    pub(crate) fn new(mapping: Mapping) -> Self {
+    pub(crate) fn new(mapping: Mapping<F>) -> Self {
         Self {
             before: mapping.clone(),
             current: mapping,
@@ -580,7 +581,7 @@ impl Content {
     }
 
     /// The mapping position `s` holds.
-    fn at(&self, s: u64) -> &Mapping {
+    fn at(&self, s: u64) -> &Mapping<F> {
         if self.switch_at.is_some_and(|at| s < at) {
             &self.before
         } else {
@@ -589,7 +590,7 @@ impl Content {
     }
 
     /// The first position in `[from, to)` whose slot differs from `new`'s.
-    fn parts_from(&self, new: &Mapping, from: u64, to: u64) -> Option<u64> {
+    fn parts_from(&self, new: &Mapping<F>, from: u64, to: u64) -> Option<u64> {
         let split = self.switch_at.unwrap_or(0).clamp(from, to);
         self.before
             .parts_from(new, from, split)
@@ -612,11 +613,11 @@ pub(crate) enum Edit {
 /// `fade_frames` output frames at read rate `rate` where the switch is a jump.
 ///
 /// Streamer thread; reads the file only for a fade's record.
-pub(crate) fn apply_mapping(
-    writer: &mut RegionOut,
-    new: Mapping,
+pub(crate) fn apply_mapping<F: RingFloat>(
+    writer: &mut RegionOut<F>,
+    new: Mapping<F>,
     fade_frames: Samples,
-    rate: f64,
+    rate: ReadRate,
 ) -> Edit {
     let content = writer.content().clone();
     if content.switch_at.is_none() && content.current == new {
@@ -661,12 +662,12 @@ pub(crate) fn apply_mapping(
         }
         let at = at.min(to).max(busy.min(to)).max(lo);
         let fade = at > parts;
-        let record = fade.then(|| -> Option<FadeRecord> {
+        let record = fade.then(|| -> Option<FadeRecord<F>> {
             let layout = writer.channels();
             let start = at.saturating_sub(3);
-            let frames =
-                (fade_frames.get() as f64 * rate.max(1.0)).ceil() as usize + GAP_COVER_FRAMES + 8;
-            let mut data = vec![0.0f32; layout.interleaved_len(Samples(frames))];
+            let covered = ReadRate::new(rate.get().max(1.0)).advance(fade_frames);
+            let frames = covered.to_samples_ceil().get() + GAP_COVER_FRAMES + 8;
+            let mut data = vec![F::ZERO; layout.interleaved_len(Samples(frames))];
             // The old content piecewise, as the reader would have heard it.
             let split = (content
                 .switch_at
@@ -779,7 +780,9 @@ mod tests {
             to: tutti_rt::MAX_POS_RING_POSITION,
         };
         for pos in [f64::INFINITY, 1e30, 18_446_744_073_709_552_000.0] {
-            let (taps, _) = arrangement.taps(pos).expect("a looped position has taps");
+            let (taps, _) = arrangement
+                .taps::<f32>(SamplePosition(pos))
+                .expect("a looped position has taps");
             assert!(
                 taps.iter().all(|&t| t >= usize::MAX as u64 - 1),
                 "{pos}: {taps:?}"
@@ -869,7 +872,7 @@ mod tests {
         assert_eq!(ring_loop(&wave, (0, 9), 4).span().fade(), 4);
         assert_eq!(lead_in((0, 9), 4), [0.0, 1.0, 2.0, 3.0]);
         assert!(lead_in((0, 9), 0).is_empty());
-        let (blind, outcome) = RingLoop::capture(
+        let (blind, outcome) = RingLoop::<f32>::capture(
             crate::testing::loop_frames(5, 9, 2),
             10,
             1u16,
@@ -1058,13 +1061,14 @@ mod tests {
             let arrangement = mapping.arrangement();
             for k in 0..9_000u32 {
                 let pos = k as f64 * 1.318_359_375 * 0.91875;
+                let at = SamplePosition(pos);
                 let mut memory = [0.0f32];
                 if mapping.reverse {
                     if pos < len as f64 {
                         read_frame(
                             &wave,
                             &Place::FAN,
-                            SamplePosition((len as f64 - 1.0 - pos).max(0.0)),
+                            mirrored(Samples::new(len), SamplePosition(pos)),
                             &mut memory,
                         );
                     }
@@ -1082,7 +1086,7 @@ mod tests {
                     read_frame(&wave, &Place::FAN, SamplePosition(pos), &mut memory);
                 }
                 let mut live = [0.0f32];
-                if let Some((taps, frac)) = arrangement.taps(pos) {
+                if let Some((taps, frac)) = arrangement.taps(at) {
                     interpolate_taps(1, &Place::FAN, frac, &mut live, |_, t| {
                         slots[taps[t] as usize]
                     });
@@ -1117,7 +1121,7 @@ mod tests {
             a.parts_from(&loop_frames(&wave, (20, 60), 8), 0, 1_000),
             Some(52)
         );
-        let reversed = Mapping {
+        let reversed = Mapping::<f32> {
             reverse: true,
             ..Mapping::plain(Samples::new(100))
         };
@@ -1205,7 +1209,7 @@ mod tests {
             &mut writer,
             loop_frames(&wave, (1_000, 3_000), 0),
             Samples::new(64),
-            1.0,
+            ReadRate::UNITY,
         );
         assert_eq!(
             edit,
@@ -1236,7 +1240,7 @@ mod tests {
             &mut writer,
             loop_frames(&wave, (1_000, 3_000), 0),
             Samples::new(64),
-            1.0,
+            ReadRate::UNITY,
         );
         // Chosen at 3 000, then a guard past 4 000, 5 000 and 6 000.
         assert_eq!(

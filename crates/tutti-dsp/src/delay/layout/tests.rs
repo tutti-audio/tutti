@@ -26,7 +26,7 @@ fn a_max_delay_keeps_the_range_checked_shape() {
         of: Some(MaxDelay::of),
         valid: &[Seconds(1e-9), Seconds(0.1), Seconds(2.0), MaxDelay::CAP],
         invalid: &[
-            Seconds(0.0),
+            Seconds::ZERO,
             Seconds(-0.1),
             Seconds(10.000_001),
             Seconds(1e30),
@@ -211,7 +211,7 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
         );
     }
     assert!(matches!(
-        ChannelTimes::each(&[Seconds(0.0); 16]),
+        ChannelTimes::each(&[Seconds::ZERO; 16]),
         Err(ChannelTimesError::TooMany { count: 16, max: 15 })
     ));
     let times = ChannelTimes::each(&[Seconds(0.1), Seconds(0.2)]).unwrap();

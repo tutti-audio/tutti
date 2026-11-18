@@ -13,9 +13,8 @@
 //! makes sense to add.
 //!
 //! [`Grid`], the container those coordinates index, lives here too.
-//! Deliberately **not** called a "plane": `tutti-export` already uses that word
-//! for `[Vec<f32>; CH]` — one deinterleaved audio channel per plane, a 1-D
-//! time series per channel rather than a 2-D matrix.
+//! It is not called a "plane": a plane is one deinterleaved audio channel, a 1-D
+//! time series, and a grid is a 2-D matrix of frames by bins.
 
 use tutti_units::Samples;
 

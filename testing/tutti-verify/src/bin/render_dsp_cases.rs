@@ -217,8 +217,8 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
         for fc in [300.0f32, 2_000.0, 10_000.0] {
-            let c = allpass_coeff(fc, RATE as f32);
-            let mut chain = PhaserChain::new(Stages::of(stages), 1);
+            let c = allpass_coeff(Hz(fc), SampleRate::of(RATE));
+            let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];
             chain.process(

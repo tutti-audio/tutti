@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_units::{Db, SampleRate, Seconds};
+use tutti_units::{Amplitude, Db, SampleRate, Seconds};
 
 use super::*;
 use crate::testing::noise;
@@ -151,9 +151,21 @@ fn the_design_holds_the_figures_of_its_definition() {
     let m = Design::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
     // 0.0102 s at 48 kHz is 489.6 frames, floored.
     assert_eq!(m.hold_samples, 489);
-    assert_eq!(m.threshold_linear, Db(-20.0).to_amplitude().get());
-    assert_eq!(m.attack, Seconds(0.001).one_pole_coeff(RATE));
-    assert_eq!(m.release, Seconds(0.1).one_pole_coeff(RATE));
+    assert_eq!(m.threshold, Db(-20.0).to_amplitude());
+    // One step from 0 toward 1 lands on the attack coefficient, and one from 1 toward 0 on
+    // 1 less the release coefficient.
+    let (attack, release) = (
+        Seconds(0.001).one_pole_coeff(RATE),
+        Seconds(0.1).one_pole_coeff(RATE),
+    );
+    assert_eq!(
+        m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),
+        Amplitude(attack)
+    );
+    assert_eq!(
+        m.ballistics.follow(Amplitude(1.0), Amplitude::SILENT),
+        Amplitude(1.0 - release)
+    );
     assert_eq!(m.range, Db(-12.0));
 
     let m = Design::of(
@@ -167,12 +179,17 @@ fn the_design_holds_the_figures_of_its_definition() {
         RATE,
     );
     assert_eq!(
-        (m.attack, m.release),
-        (1.0, 1.0),
-        "a time under 0 is instant"
+        m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),
+        Amplitude(1.0),
+        "an attack under 0 is instant"
+    );
+    assert_eq!(
+        m.ballistics.follow(Amplitude(1.0), Amplitude::SILENT),
+        Amplitude::SILENT,
+        "a release under 0 is instant"
     );
     assert_eq!(m.hold_samples, 0);
-    assert_eq!(m.range, Db(0.0), "a range over 0 dB reads as 0");
+    assert_eq!(m.range, Db::UNITY, "a range over 0 dB reads as 0");
 
     let m = Design::of(
         &GateControls {
@@ -182,10 +199,7 @@ fn the_design_holds_the_figures_of_its_definition() {
         },
         RATE,
     );
-    assert_eq!(
-        m.threshold_linear,
-        GateControls::DEFAULT.threshold.to_amplitude().get()
-    );
+    assert_eq!(m.threshold, GateControls::DEFAULT.threshold.to_amplitude());
     assert_eq!(m.range, GateControls::DEFAULT.range);
 }
 

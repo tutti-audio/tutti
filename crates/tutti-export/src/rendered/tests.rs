@@ -10,7 +10,10 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// No planes is refused.
 #[test]
 fn no_planes_is_refused() {
-    assert_eq!(Rendered::new(vec![], RATE, 0), Err(RenderedError::NoPlanes));
+    assert_eq!(
+        Rendered::<f32>::new(vec![], RATE, 0),
+        Err(RenderedError::NoPlanes)
+    );
 }
 
 /// Planes of unequal length are refused, naming the first that differs.
@@ -44,7 +47,7 @@ fn the_getters_read_back_what_was_given() {
 /// `Wave` (and its own `layout`).
 #[test]
 fn more_planes_than_a_layout_holds_are_refused() {
-    let planes = vec![Vec::new(); usize::from(u16::MAX) + 1];
+    let planes: Vec<Vec<f32>> = vec![Vec::new(); usize::from(u16::MAX) + 1];
     assert_eq!(
         Rendered::new(planes, RATE, 0),
         Err(RenderedError::Layout(LayoutError::TooWide(

@@ -9,7 +9,7 @@ use tutti_types::ParkedSampleRate;
 use parking_lot::Mutex;
 
 use super::client::{Declared, InProcClient, Reload};
-use super::control_backend::ControlBackend;
+use super::control_backend::{ControlBackend, Reporting};
 use super::instance::Instance;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
@@ -100,7 +100,7 @@ where
         work: work.clone(),
     });
     let Wired {
-        client,
+        mut client,
         inner,
         pending_sample_rate,
         descriptor,
@@ -116,12 +116,19 @@ where
     let invalidate_sink = crate::InvalidateSink::new();
     let transport_sink = crate::TransportSink::new();
 
+    let reporting = Reporting {
+        invalidate: invalidate_sink.clone(),
+        transport: transport_sink.clone(),
+    };
+    // A pump the node's rebinder runs reports through the handle's listeners too.
+    client.reporting = Some(reporting.clone());
+    let lost = inner.lock().lost_latch();
     let backend = Arc::new(ControlBackend {
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
         pending_sample_rate: Arc::clone(&pending_sample_rate),
-        invalidate_sink: invalidate_sink.clone(),
-        transport_sink: transport_sink.clone(),
+        reporting,
+        lost,
         format: descriptor.class.format_name(),
         work: work.clone(),
     });
@@ -190,7 +197,6 @@ where
     // over it.
     let declared = Declared::of(&loaded).map_err(|e| (LoadStage::Activation, e.to_string()))?;
     let inner = Arc::new(Mutex::new(inner));
-    let unlent = tutti_rt::tally();
     // Built here rather than inside the node so the node's producer end and the
     // backend's drain end are the same cell: the audio thread parks a rate in
     // it, `editor_idle` dispatches from it.
@@ -216,9 +222,10 @@ where
         loaded.features,
         sample_rate,
         Arc::clone(&pending_sample_rate),
-        unlent,
+        None,
         ids.iter().copied(),
         spares,
+        None,
         None,
         None,
     );
@@ -274,10 +281,11 @@ where
         wiring.features,
         prepare.rate(),
         Arc::new(ParkedSampleRate::new()),
-        tutti_rt::tally(),
+        None,
         parameters,
         spares,
         controls,
+        None,
         None,
     ))
 }

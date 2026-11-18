@@ -147,7 +147,7 @@ fn bins_per_frame_counts_dc_through_nyquist() {
 #[test]
 fn bin_frequency_spans_dc_to_nyquist() {
     let g = geo(2048, 512);
-    assert_eq!(g.bin_frequency(BinIndex(0)), Hz(0.0));
+    assert_eq!(g.bin_frequency(BinIndex(0)), Hz::ZERO);
     // Bin `window/2` is Nyquist.
     assert!((g.bin_frequency(BinIndex(1024)).get() - 22050.0).abs() < 1e-3);
     // Resolution is rate / window.

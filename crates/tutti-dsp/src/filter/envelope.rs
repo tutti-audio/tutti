@@ -33,8 +33,9 @@ use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, Seconds, Semitones}
 
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
-use crate::delay::finite_or;
-use crate::dynamics::{Follower, floored, key_levels};
+use crate::dynamics::{floored, key_levels};
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{COEFF_INTERVAL, Glide, Lanes};
 
 /// The frames between designs: the grid period.
@@ -161,7 +162,10 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: Amplitude) -> Hz {
         let ratio = (self.controls.depth * env.get()).to_pitch_ratio();
-        (self.controls.base * ratio).clamp(Hz(1.0), self.rate.nyquist_scaled(0.998))
+        (self.controls.base * ratio).clamp(
+            Hz(1.0),
+            self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
+        )
     }
 
     /// The coefficients at the envelope `env`.

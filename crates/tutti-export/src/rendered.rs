@@ -1,7 +1,7 @@
 //! [`Rendered`]: planar audio held in memory, which only this crate builds
 //! unchecked.
 
-use tutti_buffers::{Planes, Wave};
+use tutti_buffers::{Float, Planes, Wave};
 use tutti_types::{ChannelLayout, LayoutError};
 use tutti_units::{SampleRate, Samples};
 
@@ -20,7 +20,7 @@ use tutti_units::{SampleRate, Samples};
 /// ```
 /// # use tutti_export::Rendered;
 /// # use tutti_units::SampleRate;
-/// let rendered = Rendered::new(vec![vec![0.0; 4], vec![0.0; 4]], SampleRate::SR_48K, 0)?;
+/// let rendered = Rendered::new(vec![vec![0.0f32; 4], vec![0.0; 4]], SampleRate::SR_48K, 0)?;
 /// assert_eq!(rendered.channels(), 2);
 /// assert_eq!(rendered.planes()[1].len(), 4);
 /// # Ok::<(), tutti_export::RenderedError>(())
@@ -35,7 +35,7 @@ use tutti_units::{SampleRate, Samples};
 /// # use tutti_export::Rendered;
 /// # use tutti_units::SampleRate;
 /// let _ = Rendered {
-///     planes: vec![vec![0.0; 4]],
+///     planes: vec![vec![0.0f32; 4]],
 ///     sample_rate: SampleRate::SR_48K,
 ///     dropped_events: 0,
 /// };
@@ -44,12 +44,12 @@ use tutti_units::{SampleRate, Samples};
 /// ```compile_fail,E0616
 /// # use tutti_export::Rendered;
 /// # use tutti_units::SampleRate;
-/// let mut rendered = Rendered::new(vec![vec![0.0; 4]], SampleRate::SR_48K, 0).unwrap();
-/// rendered.planes = vec![vec![0.0; 4], vec![0.0; 9]];
+/// let mut rendered = Rendered::new(vec![vec![0.0f32; 4]], SampleRate::SR_48K, 0).unwrap();
+/// rendered.planes = vec![vec![0.0f32; 4], vec![0.0; 9]];
 /// ```
 #[derive(Clone, PartialEq)]
-pub struct Rendered {
-    planes: Vec<Vec<f32>>,
+pub struct Rendered<F: Float = f32> {
+    planes: Vec<Vec<F>>,
     sample_rate: SampleRate,
     dropped_events: u64,
 }
@@ -76,7 +76,7 @@ pub enum RenderedError {
     Layout(#[from] LayoutError),
 }
 
-impl std::fmt::Debug for Rendered {
+impl<F: Float> std::fmt::Debug for Rendered<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Rendered")
             .field("channels", &self.channels())
@@ -87,7 +87,7 @@ impl std::fmt::Debug for Rendered {
     }
 }
 
-impl Rendered {
+impl<F: Float> Rendered<F> {
     /// Planes of audio at `sample_rate`, from a render that lost
     /// `dropped_events`.
     ///
@@ -97,7 +97,7 @@ impl Rendered {
     /// [`RenderedError::Layout`] for more planes than a layout holds,
     /// [`RenderedError::UnequalPlanes`] for planes of different lengths.
     pub fn new(
-        planes: Vec<Vec<f32>>,
+        planes: Vec<Vec<F>>,
         sample_rate: SampleRate,
         dropped_events: u64,
     ) -> Result<Self, RenderedError> {
@@ -127,7 +127,7 @@ impl Rendered {
     /// construction (`debug_assert`ed here, checked by [`new`](Self::new) for
     /// a caller).
     pub(crate) fn from_render(
-        planes: Vec<Vec<f32>>,
+        planes: Vec<Vec<F>>,
         sample_rate: SampleRate,
         dropped_events: u64,
     ) -> Self {
@@ -144,12 +144,12 @@ impl Rendered {
 
     /// The planes, one per channel, all the same length. Planar, not
     /// interleaved: [`interleaved`](Self::interleaved) is the conversion.
-    pub fn planes(&self) -> &[Vec<f32>] {
+    pub fn planes(&self) -> &[Vec<F>] {
         &self.planes
     }
 
     /// The planes, taken.
-    pub fn into_planes(self) -> Vec<Vec<f32>> {
+    pub fn into_planes(self) -> Vec<Vec<F>> {
         self.planes
     }
 
@@ -194,7 +194,7 @@ impl Rendered {
     /// Multiplies every sample by `gain` — the apply half of a
     /// measure-then-apply normalization.
     pub fn apply_gain(&mut self, gain: tutti_units::Db) {
-        let scale = gain.to_amplitude().get();
+        let scale = F::from_f32(gain.to_amplitude().get());
         for plane in self.planes.iter_mut() {
             for s in plane.iter_mut() {
                 *s *= scale;
@@ -209,7 +209,7 @@ impl Rendered {
     /// long export it is the largest single allocation in the crate. Prefer
     /// [`interleaved_into`](Self::interleaved_into) wherever the interleaved
     /// copy is read and dropped rather than kept.
-    pub fn interleaved(&self) -> Vec<f32> {
+    pub fn interleaved(&self) -> Vec<F> {
         let mut out = Vec::new();
         self.interleaved_into(&mut out);
         out
@@ -220,12 +220,12 @@ impl Rendered {
     /// `out` is cleared first, so it is a destination and not an accumulator.
     /// Prefer it over [`interleaved`](Self::interleaved) when interleaving more
     /// than once.
-    pub fn interleaved_into(&self, out: &mut Vec<f32>) {
+    pub fn interleaved_into(&self, out: &mut Vec<F>) {
         out.clear();
         if self.planes.is_empty() {
             return;
         }
-        out.resize(self.layout().interleaved_len(self.frames()), 0.0);
+        out.resize(self.layout().interleaved_len(self.frames()), F::ZERO);
         // At least one plane of one length, and `out` is whole frames of them:
         // the views always build and agree.
         let written = tutti_buffers::Planes::from_vecs(&self.planes).and_then(|planes| {
@@ -238,18 +238,18 @@ impl Rendered {
         );
         if written.is_err() {
             // Not interleaved: silent, never a partial write.
-            out.fill(0.0);
+            out.fill(F::ZERO);
         }
     }
 }
 
-impl From<Rendered> for Wave {
+impl<F: Float> From<Rendered<F>> for Wave<F> {
     /// The planes as a [`Wave`] at the render's rate, one channel per plane,
     /// in the engine's order for the width where it has one (unassigned
     /// channels where it has none: a render keeps no topology of its own).
     /// Infallible: a `Rendered` has at least one channel, no more than a
     /// layout holds, and planes of one length, which is what a `Wave` is.
-    fn from(rendered: Rendered) -> Self {
+    fn from(rendered: Rendered<F>) -> Self {
         let planes = Planes::from_vecs(&rendered.planes)
             .expect("a render has at least one plane, all of one length");
         Wave::from_planes(rendered.sample_rate, planes)

@@ -1,0 +1,401 @@
+use super::*;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+use tutti_dsp::{BinCount, FrameCount};
+use tutti_units::Cents;
+
+fn framing(window: usize, hop: usize) -> Framing {
+    Framing::new(Samples(window), Samples(hop))
+}
+
+fn cfg() -> ChordConfig {
+    ChordConfig::new()
+}
+
+/// A triad's chroma: the three notes at 1.
+fn triad(root: usize, minor: bool) -> [f32; CLASSES] {
+    let mut x = [0.0; CLASSES];
+    for n in if minor { MINOR } else { MAJOR } {
+        x[(root + n) % CLASSES] = 1.0;
+    }
+    x
+}
+
+fn grid(rows: &[[f32; CLASSES]]) -> Grid<f32> {
+    Grid::new(rows.concat(), FrameCount(rows.len()), BinCount(CLASSES)).unwrap()
+}
+
+fn run(rows: &[[f32; CLASSES]], cfg: &ChordConfig) -> Vec<ChordSpan> {
+    detect(&grid(rows), framing(4096, 1024), cfg).unwrap()
+}
+
+fn roots(spans: &[ChordSpan]) -> Vec<(PitchClass, ChordQuality)> {
+    spans.iter().map(|s| (s.root, s.quality)).collect()
+}
+
+/// Each of the 24 triads, as exact chroma, is its own chord, and the
+/// similarity of a frame to its own template is 1.
+#[test]
+fn every_triad_is_itself() {
+    for minor in [false, true] {
+        for root in 0..CLASSES {
+            let x = triad(root, minor);
+            let sims = similarities(&x);
+            let own = if minor { root + CLASSES } else { root };
+            assert!((sims[own] - 1.0).abs() < 1e-6);
+            let spans = run(&[x; 5], &cfg());
+            let quality = if minor {
+                ChordQuality::Minor
+            } else {
+                ChordQuality::Major
+            };
+            assert_eq!(
+                roots(&spans),
+                [(PitchClass::from_semitones_above_c(root as u8), quality)]
+            );
+        }
+    }
+}
+
+/// Silence is no chord, with similarity 1 for the "no chord" state only;
+/// a flat or noise-like chroma is no chord too.
+#[test]
+fn silence_and_noise_are_no_chord() {
+    let sims = similarities(&[0.0; CLASSES]);
+    assert_eq!(sims[NO_CHORD], 1.0);
+    assert!(sims[..NO_CHORD].iter().all(|&s| s == 0.0));
+    assert!(run(&[[0.0; CLASSES]; 8], &cfg()).is_empty());
+    assert!(run(&[[1.0; CLASSES]; 8], &cfg()).is_empty());
+    let mut rng = StdRng::seed_from_u64(7);
+    let noise: Vec<[f32; CLASSES]> = (0..200)
+        .map(|_| {
+            let mut x: [f32; CLASSES] = core::array::from_fn(|_| rng.random_range(0.3..1.0));
+            let max = x.iter().copied().fold(0.0, f32::max);
+            x.iter_mut().for_each(|v| *v /= max);
+            x
+        })
+        .collect();
+    assert!(run(&noise, &cfg()).is_empty());
+}
+
+/// A single pitch class, a bass line of them and a bare fifth are no chord:
+/// a single note matches each of its six triads at `1/sqrt(3) = 0.577` and
+/// a fifth matches two of them at `sqrt(2/3) = 0.816`, both under the 0.85
+/// of "no chord"; none names a root and mode.
+#[test]
+fn a_lone_note_a_bass_line_and_a_fifth_are_no_chord() {
+    let note = |class: usize| {
+        let mut x = [0.0; CLASSES];
+        x[class] = 1.0;
+        x
+    };
+    let best = |x: &[f32]| {
+        similarities(x)[..NO_CHORD]
+            .iter()
+            .copied()
+            .fold(0.0, f64::max)
+    };
+    assert!((best(&note(2)) - 1.0 / 3.0f64.sqrt()).abs() < 1e-12);
+    assert!(run(&[note(2); 6], &cfg()).is_empty());
+    let bass: Vec<_> = [0, 7, 9, 5, 0, 7, 5, 0]
+        .iter()
+        .flat_map(|&c| [note(c); 4])
+        .collect();
+    assert!(run(&bass, &cfg()).is_empty());
+    let mut fifth = [0.0; CLASSES];
+    (fifth[0], fifth[7]) = (1.0, 1.0);
+    assert!((best(&fifth) - (2.0f64 / 3.0).sqrt()).abs() < 1e-12);
+    assert!(run(&[fifth; 6], &cfg()).is_empty());
+    // A third at 0.15 of the others is still a triad.
+    let mut weak = triad(0, false);
+    weak[4] = 0.15;
+    assert_eq!(run(&[weak; 6], &cfg()).len(), 1);
+}
+
+/// A triad at 1 standing over a floor of 0.2 to 0.4 in every other column
+/// is that triad: the floor is removed before the templates are scored.
+/// Unremoved, a floor of 0.4 leaves the triad matching at 0.82, under the
+/// 0.85 of "no chord" (at a floor of 0.2 to 0.4 on average, 0.88 would
+/// still pass, so the constant 0.4 case is the one that pins it).
+#[test]
+fn a_triad_over_a_realistic_floor_is_still_the_triad() {
+    let mut rng = StdRng::seed_from_u64(5);
+    for (root, minor, constant) in [(0, false, None), (9, true, None), (7, false, Some(0.4))] {
+        let rows: Vec<[f32; CLASSES]> = (0..30)
+            .map(|_| {
+                let mut x = triad(root, minor);
+                for v in x.iter_mut().filter(|v| **v == 0.0) {
+                    *v = constant.unwrap_or_else(|| rng.random_range(0.2..0.4));
+                }
+                x
+            })
+            .collect();
+        let quality = if minor {
+            ChordQuality::Minor
+        } else {
+            ChordQuality::Major
+        };
+        assert_eq!(
+            roots(&run(&rows, &cfg())),
+            [(PitchClass::from_semitones_above_c(root as u8), quality)]
+        );
+    }
+}
+
+/// Scaling the chroma by 1e30 or 1e-30 changes nothing: the squares are
+/// held in `f64`, and the scores are cosines. The sequence has noise,
+/// where an unscaled score would turn it into chords or a triad into none.
+#[test]
+fn the_chords_do_not_depend_on_the_scale() {
+    let mut rng = StdRng::seed_from_u64(9);
+    let mut rows: Vec<[f32; CLASSES]> = (0..40)
+        .map(|_| core::array::from_fn(|_| rng.random_range(0.3..1.0)))
+        .collect();
+    rows.extend([triad(0, false); 10]);
+    rows.extend([triad(9, true); 10]);
+    let at = |scale: f32| -> Vec<ChordSpan> {
+        let scaled: Vec<_> = rows.iter().map(|r| r.map(|v| v * scale)).collect();
+        run(&scaled, &cfg())
+    };
+    let unit = at(1.0);
+    assert_eq!(unit.len(), 2);
+    assert_eq!(at(1e30), unit);
+    assert_eq!(at(1e-30), unit);
+}
+
+/// A stay is not a switch into oneself. At a self-transition of 0.02 a
+/// switch (`ln(0.98 / 24) = -3.20`) costs less than a stay (`ln 0.02 =
+/// -3.91`), so the best way into the leading state is from the runner-up.
+/// After a C triad, a frame that matches C at 0.90 (above "no chord" by
+/// 0.05, 0.4 of an emission) is best read as "no chord": it is worth
+/// `0.71` more to come into that state from C by a switch than into C by a
+/// stay, which a search that let C "switch" into itself would miss.
+#[test]
+fn a_state_cannot_switch_into_itself() {
+    let mut second = [0.0; CLASSES];
+    (second[0], second[4], second[7]) = (1.0, 0.4, 0.4);
+    let sim = similarities(&second)[0];
+    assert!(sim > 0.85 && sim < 0.939, "{sim}");
+    let config = cfg().self_transition(SelfTransition::of(0.02));
+    let path = viterbi(&grid(&[triad(0, false), second]), &config);
+    assert_eq!(path, [0, NO_CHORD as u8]);
+}
+
+/// Long input keeps the stay prior exact. At the highest self-transition an
+/// `f32` holds (`1 - 6e-8`) a switch costs 19.8 and a stay nothing, so one
+/// odd frame (an F triad among 300000 C triads, worth `sharpness * 2/3`
+/// over C) is kept exactly when `sharpness * 2/3 > 2 * 19.8`. At a
+/// sharpness within 0.3 of that either side, 300000 frames of unshifted
+/// scores near 2e7 have no resolution left (one unit in the last place of
+/// an `f32` there is 2) and a margin of 0.3 vanishes.
+#[test]
+fn a_long_input_keeps_the_stay_prior() {
+    let p = f32::from_bits(1.0f32.to_bits() - 1);
+    let (stay, switch) = (f64::from(p).ln(), ((1.0 - f64::from(p)) / 24.0).ln());
+    let cost = 2.0 * (stay - switch);
+    let (c, f) = (triad(0, false), triad(5, false));
+    let mut rows = vec![c; 300_000];
+    rows.push(f);
+    rows.extend([c; 100]);
+    let grid = grid(&rows);
+    for (offset, kept) in [(0.3, true), (-0.3, false)] {
+        // The F frame's margin over C is two thirds of the sharpness.
+        let sharpness = ((cost + offset) * 1.5) as f32;
+        let config = cfg()
+            .self_transition(SelfTransition::new(p).unwrap())
+            .sharpness(Sharpness::new(sharpness).unwrap());
+        let spans = detect(&grid, framing(4096, 1024), &config).unwrap();
+        assert_eq!(spans.len(), if kept { 3 } else { 1 }, "offset {offset}");
+    }
+}
+
+/// A one-frame flicker is gone under the default prior, and kept when the
+/// self-transition is 1/25, the even share, where every frame takes its own
+/// best state. A change that lasts is kept either way.
+#[test]
+fn smoothing_removes_a_flicker_that_argmax_keeps() {
+    let (c, f) = (triad(0, false), triad(5, false));
+    let flicker = [c, c, c, c, f, c, c, c, c];
+    let smoothed = run(&flicker, &cfg());
+    assert_eq!(roots(&smoothed), [(PitchClass::C, ChordQuality::Major)]);
+    let raw = cfg().self_transition(SelfTransition::of(1.0 / 25.0));
+    let per_frame = run(&flicker, &raw);
+    assert_eq!(
+        roots(&per_frame),
+        [
+            (PitchClass::C, ChordQuality::Major),
+            (PitchClass::F, ChordQuality::Major),
+            (PitchClass::C, ChordQuality::Major)
+        ]
+    );
+    let change = [c, c, c, c, f, f, f, f, f];
+    assert_eq!(run(&change, &cfg()).len(), 2);
+}
+
+/// The linear-time search finds the same best path as trying every path:
+/// all 25^4 over four random frames, at three self-transitions (one under
+/// the even share, where a state must not "switch" into itself).
+#[test]
+fn viterbi_is_the_best_path() {
+    let mut rng = StdRng::seed_from_u64(11);
+    for p in [0.9f32, 0.5, 0.02] {
+        let config = cfg().self_transition(SelfTransition::new(p).unwrap());
+        for _ in 0..3 {
+            let rows: Vec<[f32; CLASSES]> = (0..4)
+                .map(|_| core::array::from_fn(|_| rng.random_range(0.0..1.0)))
+                .collect();
+            let p = f64::from(p);
+            let (stay, switch) = (p.ln(), ((1.0 - p) / 24.0).ln());
+            let emit: Vec<[f64; STATES]> = rows
+                .iter()
+                .map(|r| similarities(r).map(|s| s * f64::from(config.sharpness.get())))
+                .collect();
+            let mut best = (f64::MIN, [0usize; 4]);
+            for code in 0..STATES.pow(4) {
+                let path: [usize; 4] =
+                    core::array::from_fn(|i| code / STATES.pow(i as u32) % STATES);
+                let mut score = emit[0][path[0]];
+                for t in 1..4 {
+                    score += if path[t] == path[t - 1] { stay } else { switch };
+                    score += emit[t][path[t]];
+                }
+                if score > best.0 {
+                    best = (score, path);
+                }
+            }
+            let found = viterbi(&grid(&rows), &config);
+            let found: Vec<usize> = found.iter().map(|&s| usize::from(s)).collect();
+            assert_eq!(found, best.1, "p {p}");
+        }
+    }
+}
+
+/// Span boundaries sit at the midpoints between frame centres, whatever
+/// the geometry, including a hop wider than the window: the change before
+/// frame `j` is half-way between centres `(j-1) hop + window/2` and
+/// `j hop + window/2`; the first span starts at 0 and the last ends at the
+/// end of the last window.
+#[test]
+fn spans_sit_between_frame_centres() {
+    let (c, f) = (triad(0, false), triad(5, false));
+    for (window, hop) in [
+        (2048, 512),
+        (4096, 1024),
+        (4096, 4096),
+        (1000, 333),
+        (512, 1500),
+    ] {
+        let g = framing(window, hop);
+        let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
+        let spans = detect(&grid(&rows), g, &cfg()).unwrap();
+        let centre = |i: usize| (i * hop + window / 2) as f64;
+        let boundary = (centre(6) + centre(7)) / 2.0;
+        assert_eq!(spans.len(), 2, "{window}/{hop}");
+        assert_eq!(spans[0].start, Samples(0));
+        assert!(
+            (spans[0].end.get() as f64 - boundary).abs() <= 1.0,
+            "{window}/{hop}"
+        );
+        assert_eq!(spans[1].start, spans[0].end);
+        assert_eq!(spans[1].end, Samples(11 * hop + window));
+    }
+}
+
+/// A gap where nothing is detected: spans are separated by it.
+#[test]
+fn no_chord_leaves_a_gap() {
+    let rows: Vec<_> = (0..24)
+        .map(|i| {
+            if (8..16).contains(&i) {
+                [0.0; CLASSES]
+            } else {
+                triad(7, true)
+            }
+        })
+        .collect();
+    let spans = run(&rows, &cfg());
+    assert_eq!(spans.len(), 2);
+    assert!(spans[0].end < spans[1].start);
+    assert_eq!(roots(&spans), [(PitchClass::G, ChordQuality::Minor); 2]);
+}
+
+/// The shape, values and sizes of the input are validated.
+#[test]
+fn inputs_are_validated() {
+    let invalid = |g: &Grid<f32>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
+    let wide = Grid::new(vec![0.0; 13], FrameCount(1), BinCount(13)).unwrap();
+    assert_eq!(invalid(&wide), Error::NotTwelveClasses { columns: 13 });
+    let mut x = [0.5; CLASSES];
+    x[4] = f32::NAN;
+    assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
+    x[4] = f32::NEG_INFINITY;
+    assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
+    x[4] = -0.5;
+    assert_eq!(invalid(&grid(&[x])), Error::NegativeInput);
+    let huge = Grid::new(
+        vec![0.0; (MAX_FRAMES.get() + 1) * CLASSES],
+        FrameCount(MAX_FRAMES.get() + 1),
+        BinCount(CLASSES),
+    )
+    .unwrap();
+    assert_eq!(
+        invalid(&huge),
+        Error::TooManyFrames {
+            frames: FrameCount(MAX_FRAMES.get() + 1),
+            max: MAX_FRAMES
+        }
+    );
+    let empty = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
+    assert!(
+        detect(&empty, framing(4096, 1024), &cfg())
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        detect(
+            &grid(&[triad(0, false); 3]),
+            framing(1024, usize::MAX),
+            &cfg()
+        ),
+        Err(Error::SpanBeyondSampleCount)
+    );
+    // A zero window or hop is refused, not placed.
+    for (zero, error) in [
+        (framing(0, 1024), Error::ZeroWindow),
+        (framing(4096, 0), Error::ZeroHop),
+    ] {
+        assert_eq!(
+            detect(&grid(&[triad(0, false); 3]), zero, &cfg()),
+            Err(error)
+        );
+    }
+    // The most frames still smooth, in one pass.
+    let max = Grid::new(
+        vec![0.0; MAX_FRAMES.get() * CLASSES],
+        MAX_FRAMES,
+        BinCount(CLASSES),
+    )
+    .unwrap();
+    assert!(
+        detect(&max, framing(4096, 1024), &cfg())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The spans sit at the samples of the framing the chroma was taken at:
+/// the same frames read as a chroma of 2048/512 and of 4096/1024 place the
+/// same change at different samples, each at its own frame centres.
+#[test]
+fn spans_follow_the_chromas_own_framing() {
+    let (c, f) = (triad(0, false), triad(5, false));
+    let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
+    for (window, hop) in [(2048, 512), (4096, 1024)] {
+        let chroma = Chroma::new(grid(&rows), Cents(0.0), framing(window, hop));
+        let spans = detect_chords(&chroma, &cfg()).unwrap();
+        let centre = |i: usize| (i * hop + window / 2) as f64;
+        let boundary = (centre(6) + centre(7)) / 2.0;
+        assert_eq!(spans.len(), 2, "{window}/{hop}");
+        assert!((spans[0].end.get() as f64 - boundary).abs() <= 1.0);
+        assert_eq!(spans[1].end, Samples(11 * hop + window));
+    }
+}

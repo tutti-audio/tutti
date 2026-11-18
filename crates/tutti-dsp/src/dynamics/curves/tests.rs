@@ -42,7 +42,7 @@ fn the_floor_keeps_a_detected_level_usable() {
     // And it stays ordered against a real threshold, so envelope
     // comparisons behave.
     assert!(level < Db(-60.0));
-    assert_eq!(level.clamp(Db(-90.0), Db(0.0)), Db(-90.0));
+    assert_eq!(level.clamp(Db(-90.0), Db::UNITY), Db(-90.0));
 }
 
 #[test]
@@ -120,11 +120,9 @@ fn test_compute_limiter_gain() {
     assert!(gain < 1.0);
 }
 
-/// The reviewer's measurement of the old curve at (-6, -0.3) dB, which
-/// went -60 -> -54.3, -7 -> -1.3, -6.1 -> -0.4, -5.9 -> -6.0, 0 -> -6.0:
-/// non-monotonic, with a 5.7 dB drop at the knee. With the threshold
-/// driving the input the output is `min(in + 5.7, -0.3)`, on both the
-/// dB form and the block's linear form.
+/// At (-6, -0.3) dB the output is monotonic: `min(in + 5.7, -0.3)`, with no drop at
+/// the knee (-60 -> -54.3, -7 -> -1.3, -6.1 -> -0.4, 0 -> -0.3), on both the dB form
+/// and the block's linear form.
 #[test]
 fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
     let (threshold, ceiling) = (Db(-6.0), Db(-0.3));
@@ -178,6 +176,6 @@ fn the_block_and_fed_forms_are_one_curve() {
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
     let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(Amplitude(f32::NAN)).get(), curve.below);
-    assert!(curve.below > 1.0);
+    assert_eq!(curve.gain(Amplitude(f32::NAN)), curve.below);
+    assert!(curve.below > Amplitude(1.0));
 }

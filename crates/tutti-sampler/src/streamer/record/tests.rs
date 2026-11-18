@@ -32,7 +32,7 @@ fn record_with_status(
     channels: impl Into<ChannelLayout>,
 ) -> (Record, SharedReader, tutti_rt::PosReader, Arc<StatusCell>) {
     let (out, ring, pos) = RegionBuffer::with_capacity(id, path.clone(), capacity, channels);
-    let cache = Arc::new(LruCache::new(4, 1 << 20));
+    let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
     let pin = cache.pin(&path);
     let status = Arc::new(StatusCell::new());
     let record = Record::new(
@@ -234,14 +234,14 @@ fn a_direction_asks_for_a_live_stream_only() {
 #[test]
 fn a_rate_event_re_derives_each_streams_own_ratio() {
     use tutti_units::SrcRatio;
-    let mut streams = Streams::new();
+    let mut streams = Streams::<f32>::new();
     let cells: Vec<_> = [44_100.0, 48_000.0]
         .into_iter()
         .zip(1..)
         .map(|(file_rate, id)| {
             let (out, _ring, _pos) =
                 RegionBuffer::with_capacity(StreamId::of(id), PathBuf::new(), 1024, 1u16);
-            let cache = Arc::new(LruCache::new(4, 1 << 20));
+            let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
             let cells = Arc::new(Cells::new());
             let record = Record::new(
                 out,

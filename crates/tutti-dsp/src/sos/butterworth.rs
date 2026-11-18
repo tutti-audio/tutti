@@ -59,6 +59,8 @@ pub const MAX_GAIN_MAGNITUDE: Db = Db(120.0);
 
 /// `cutoff` in hertz when it is inside `(0, Nyquist)` of `rate`.
 pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<f64, SosError> {
+    // The comparison is in f64: the cutoff is exact there, where the reported `Hz` is `f32`.
+    let nyquist_hz = rate.nyquist();
     let nyquist = rate.get() / 2.0;
     let fc = f64::from(cutoff.get());
     if fc > 0.0 && fc < nyquist {
@@ -66,7 +68,7 @@ pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<f64, SosError
     } else {
         Err(SosError::CutoffOutOfRange {
             cutoff,
-            nyquist: Hz(nyquist as f32),
+            nyquist: nyquist_hz,
         })
     }
 }

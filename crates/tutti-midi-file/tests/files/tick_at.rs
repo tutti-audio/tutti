@@ -2,7 +2,7 @@
 //! the tick grid of the division (a tick is `1/ticks_per_quarter` of a quarter note).
 
 use crate::common::{metrical, track};
-use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick};
+use tutti_midi_file::{MidiFile, SmfDivision, Tick};
 use tutti_ump::TicksPerQuarterNote;
 use tutti_units::Beat;
 
@@ -11,12 +11,7 @@ fn tpq(ticks: u16) -> TicksPerQuarterNote {
 }
 
 fn file(ticks_per_quarter: u16) -> MidiFile {
-    MidiFile::smf(
-        SmfFormat::SingleTrack,
-        SmfDivision::per_quarter(ticks_per_quarter),
-        vec![track(vec![])],
-    )
-    .unwrap()
+    crate::common::format0(SmfDivision::per_quarter(ticks_per_quarter), track(vec![])).unwrap()
 }
 
 #[test]

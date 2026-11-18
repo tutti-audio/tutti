@@ -25,7 +25,7 @@ use tutti_units::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
-use super::taps::finite_or;
+use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay in frames, and the two feedbacks, each
@@ -72,13 +72,13 @@ impl DelayGlides {
     }
 }
 
-/// `secs` as a delay in frames: clamped into `0..=max_secs` and into the line of `cap`
+/// `secs` as a delay in frames: clamped into `0..=max` and into the line of `cap`
 /// frames. The delay kernel reads an `f32` position per frame, so the span narrows here,
 /// once per frame, after the clamp.
 #[inline(always)]
-fn frames_of(secs: f32, max_secs: f32, rate: SampleRate, cap: usize) -> f32 {
-    let secs = Seconds::from_f32(secs.clamp(0.0, max_secs));
-    // The clamp leaves `0..=max_secs` (finite), so a span exists; a NaN time, which
+fn frames_of(secs: f32, max: Seconds, rate: SampleRate, cap: usize) -> f32 {
+    let secs = Seconds::from_f32(secs.clamp(0.0, max.to_f32()));
+    // The clamp leaves `0..=max` (finite), so a span exists; a NaN time, which
     // the callers never pass, is no delay.
     let Some(span) = SampleSpan::from_seconds(secs, rate) else {
         return 0.0;
@@ -114,10 +114,10 @@ pub struct DelayBank {
     rate: SampleRate,
     /// The line's capacity in frames: the delay is clamped into it.
     cap: usize,
-    /// The longest delay, in seconds, as a lane's `f32`.
-    max_secs: f32,
+    /// The longest delay.
+    max: Seconds,
     /// The times of the channels past the first that hold their own, in seconds.
-    own_secs: [f32; MAX_DELAY_CHANNELS],
+    own: [Seconds; MAX_DELAY_CHANNELS],
 }
 
 impl DelayBank {
@@ -127,9 +127,9 @@ impl DelayBank {
     pub fn new(layout: &DelayLayout, rate: SampleRate) -> Self {
         let width = layout.width();
         let cap = layout.max_delay().frames(rate);
-        let mut own_secs = [0.0; MAX_DELAY_CHANNELS];
-        for (slot, t) in own_secs.iter_mut().skip(1).zip(layout.times().fixed()) {
-            *slot = t.to_f32();
+        let mut own = [Seconds::ZERO; MAX_DELAY_CHANNELS];
+        for (slot, t) in own.iter_mut().skip(1).zip(layout.times().fixed()) {
+            *slot = *t;
         }
         Self {
             lines: (0..width).map(|_| DelayLine::new(cap)).collect(),
@@ -139,8 +139,8 @@ impl DelayBank {
             linked: layout.times().is_linked(),
             rate,
             cap: cap.get(),
-            max_secs: layout.max_delay().get().to_f32(),
-            own_secs,
+            max: layout.max_delay().get(),
+            own,
         }
     }
 
@@ -155,7 +155,7 @@ impl DelayBank {
     /// `secs` as a delay in frames: clamped into `0..=max_delay` and into the line. A time
     /// that is not finite is no delay.
     fn frames(&self, secs: f32) -> f32 {
-        frames_of(finite_or(secs, 0.0), self.max_secs, self.rate, self.cap)
+        frames_of(finite_or(secs, 0.0), self.max, self.rate, self.cap)
     }
 
     /// Aims `glides` at `controls`: a time past the longest reads as the longest and one that
@@ -168,7 +168,7 @@ impl DelayBank {
             *own = if c == 0 || self.linked {
                 first
             } else {
-                self.frames(self.own_secs[c])
+                self.frames(self.own[c].to_f32())
             };
         }
         let steps = Steps::Fixed(glides.steps);
@@ -234,8 +234,8 @@ impl DelayBank {
             glide.at(k)
         };
         let linked = self.linked;
-        let (rate, max_secs, cap) = (self.rate, self.max_secs, self.cap);
-        let lane_frames = |secs: f32| frames_of(secs, max_secs, rate, cap);
+        let (rate, max, cap) = (self.rate, self.max, self.cap);
+        let lane_frames = |secs: f32| frames_of(secs, max, rate, cap);
         let base = |c: usize, delay: f32| {
             if c == 0 || linked { delay } else { g.own[c] }
         };

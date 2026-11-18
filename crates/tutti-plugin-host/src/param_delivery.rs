@@ -120,8 +120,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use crate::node_losses::{Count, LossCounts};
 use tutti_plugin_types::{Normalized, ParameterChanges, ParameterQueue};
-use tutti_rt::{Tally, TallyWriter, tally};
+use tutti_rt::Tally;
 use tutti_units::ParamId;
 
 /// A slot with no queue in the chunk being filled.
@@ -182,26 +183,20 @@ pub struct ParamDeliveryStats {
 pub struct DeliveryCounters {
     sent: AtomicU64,
     deferred: AtomicU64,
-    dropped: Tally<u64>,
-    /// The audio thread's writer of `dropped`, minted with it in `default`.
-    dropped_writer: TallyWriter<u64>,
+    dropped: Count,
     merged: AtomicU64,
-    grid_dropped: Tally<u64>,
-    /// The audio thread's writer of `grid_dropped`.
-    grid_dropped_writer: TallyWriter<u64>,
+    grid_dropped: Count,
     /// MIDI events the node did not deliver (`midi_intake`).
-    pub(super) midi_dropped: Tally<u64>,
-    /// The audio thread's writer of `midi_dropped`.
-    midi_dropped_writer: TallyWriter<u64>,
+    pub(super) midi_dropped: Count,
     /// Transport changes past the chunk's room (`transport_walk`).
-    transport_dropped: Tally<u64>,
-    /// The audio thread's writer of `transport_dropped`.
-    transport_dropped_writer: TallyWriter<u64>,
+    transport_dropped: Count,
     /// The bridge thread's count of the MIDI events it did not send, set
     /// once at bind (an out-of-process node only).
     pub(super) bridge_midi_dropped: OnceLock<Tally<u64>>,
     /// Set once, at bind ([`ParamDelivery::new`]).
     record: OnceLock<Arc<DeliveredRecord>>,
+    /// What the node lost besides parameter points and MIDI input.
+    pub(crate) losses: LossCounts,
 }
 
 /// What the node last delivered for each parameter the plugin listed at
@@ -251,24 +246,17 @@ impl DeliveredRecord {
 
 impl Default for DeliveryCounters {
     fn default() -> Self {
-        let dropped = tally();
-        let grid_dropped = tally();
-        let midi_dropped = tally();
-        let transport_dropped = tally();
         Self {
             sent: AtomicU64::default(),
             deferred: AtomicU64::default(),
-            dropped_writer: dropped.writer(),
-            dropped,
+            dropped: Count::default(),
             merged: AtomicU64::default(),
-            grid_dropped_writer: grid_dropped.writer(),
-            grid_dropped,
-            midi_dropped_writer: midi_dropped.writer(),
-            midi_dropped,
-            transport_dropped_writer: transport_dropped.writer(),
-            transport_dropped,
+            grid_dropped: Count::default(),
+            midi_dropped: Count::default(),
+            transport_dropped: Count::default(),
             bridge_midi_dropped: OnceLock::new(),
             record: OnceLock::new(),
+            losses: LossCounts::default(),
         }
     }
 }
@@ -616,6 +604,12 @@ impl ParamDelivery {
         self.counters.count_transport_dropped(n);
     }
 
+    /// What the node lost besides parameter points and MIDI input, counted by
+    /// the audio thread.
+    pub(crate) fn losses(&self) -> &LossCounts {
+        &self.counters.losses
+    }
+
     /// The counters and record this delivery writes, for the node's
     /// controls.
     pub(crate) fn counters(&self) -> Arc<DeliveryCounters> {
@@ -644,7 +638,7 @@ impl ParamDelivery {
     /// counted dropped. Allocation-free.
     pub(crate) fn refused(&self, n: u64) {
         if n > 0 {
-            self.counters.dropped_writer.add(n);
+            self.counters.dropped.add(n);
         }
     }
 
@@ -673,7 +667,7 @@ impl ParamDelivery {
     pub(crate) fn knows(&mut self, address: ParamId) -> bool {
         let known = self.slot(address).is_some();
         if !known {
-            self.counters.dropped_writer.add(1);
+            self.counters.dropped.add(1);
         }
         known
     }
@@ -750,7 +744,7 @@ impl ParamDelivery {
 
     fn point_kind(&mut self, address: ParamId, offset: i32, value: f32, grid: bool) -> bool {
         let Some(i) = self.slot(address) else {
-            self.counters.dropped_writer.add(1);
+            self.counters.dropped.add(1);
             return false;
         };
         self.place(i, offset, Normalized::clamped(f64::from(value)).get(), grid);
@@ -772,7 +766,7 @@ impl ParamDelivery {
                     // Impossible by construction: a queue per slot, and the
                     // chunk has room for every slot. Refused rather than
                     // grown.
-                    self.counters.dropped_writer.add(1);
+                    self.counters.dropped.add(1);
                     return;
                 }
                 self.slots[i].queue = queue;
@@ -800,7 +794,7 @@ impl ParamDelivery {
             // Full: at its room, or at its floor with the pool spent. Grid
             // points go first.
             if grid {
-                self.counters.grid_dropped_writer.add(1);
+                self.counters.grid_dropped.add(1);
                 return;
             }
             let len = self.changes.queues[q].points.len();
@@ -808,7 +802,7 @@ impl ParamDelivery {
                 Some(k) => {
                     self.changes.queues[q].points.remove(k);
                     self.grid.remove(q, k, len);
-                    self.counters.grid_dropped_writer.add(1);
+                    self.counters.grid_dropped.add(1);
                 }
                 None => {
                     // A queue of corners: the latest value replaces the
@@ -905,17 +899,13 @@ impl DeliveryCounters {
     /// `n` MIDI events the node did not deliver. RT-safe: one relaxed add
     /// through the stored writer.
     pub(crate) fn count_midi_dropped(&self, n: u64) {
-        if n > 0 {
-            self.midi_dropped_writer.add(n);
-        }
+        self.midi_dropped.add(n);
     }
 
     /// `n` transport changes the chunk had no room for. RT-safe: one relaxed
     /// add.
     pub(crate) fn count_transport_dropped(&self, n: u64) {
-        if n > 0 {
-            self.transport_dropped_writer.add(n);
-        }
+        self.transport_dropped.add(n);
     }
 
     /// Transport changes since the plugin was bound that did not fit in a

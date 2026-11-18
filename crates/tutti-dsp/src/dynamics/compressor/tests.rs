@@ -212,10 +212,10 @@ fn the_member_reduction_is_the_static_curve() {
 fn the_curve_has_its_three_regions() {
     let m = CompressorMember::designed(&controls(-20.0, 10.0, 4.0, 0.0, 0.0, 0.0), RATE);
     // Under -25 dB: nothing. Over -15 dB: three quarters of the excess.
-    assert_eq!(reduction_db(&m, Db(-40.0)), Db(0.0));
-    assert_eq!(reduction_db(&m, Db(-25.0)), Db(0.0));
+    assert_eq!(reduction_db(&m, Db(-40.0)), Db::UNITY);
+    assert_eq!(reduction_db(&m, Db(-25.0)), Db::UNITY);
     assert!((reduction_db(&m, Db(-10.0)).get() - 7.5).abs() < 1e-5);
-    assert!((reduction_db(&m, Db(0.0)).get() - 15.0).abs() < 1e-5);
+    assert!((reduction_db(&m, Db::UNITY).get() - 15.0).abs() < 1e-5);
     // At the threshold the quadratic has run a half of the knee: (3/4)(5)^2/(2*10).
     assert!((reduction_db(&m, Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-5);
 }
@@ -236,11 +236,11 @@ fn the_member_floors_what_cannot_be_run() {
         },
         RATE,
     );
-    assert_eq!((m.knee, m.ratio), (Db(0.0), CompressionRatio(1.0)));
+    assert_eq!((m.knee, m.ratio), (Db::UNITY, CompressionRatio(1.0)));
     // A time under 0 is the follower of time 0: instant.
     assert_eq!(
         Detector::of(&m).ballistics,
-        Follower::of(floored(Seconds(0.0), Seconds(0.0)), RATE)
+        Follower::of(floored(Seconds::ZERO, Seconds::ZERO), RATE)
     );
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(

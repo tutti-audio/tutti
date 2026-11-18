@@ -229,7 +229,7 @@ impl Fdn {
     fn rt60_bound(&self, band: Band, rate: SampleRate) -> Seconds {
         let rate = rate.get();
         if self.lines.is_empty() {
-            return Seconds(0.0);
+            return Seconds::ZERO;
         }
         let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
             return Seconds(f64::INFINITY);
@@ -333,12 +333,12 @@ impl Network {
     #[must_use]
     pub fn rt60(&self, band: Band) -> Seconds {
         let rate = self.rate;
-        let mut slowest = Seconds(0.0);
+        let mut slowest = Seconds::ZERO;
         for stage in self.stages.iter() {
             let r = match stage {
                 Stage::Fdn(f) => f.rt60(band, rate),
                 Stage::Fir(s) => s.rt60[band.index()],
-                _ => Seconds(0.0),
+                _ => Seconds::ZERO,
             };
             slowest = slowest.max(r);
         }

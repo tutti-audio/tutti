@@ -57,8 +57,10 @@ use tutti_types::MAX_CHANNELS;
 use tutti_units::{Hz, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
+use crate::delay::DelayRing;
+use crate::onepole::cutoff_pole;
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
-use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
+use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 /// How far a line's length moves in a chunk, in frames.
@@ -74,7 +76,7 @@ const PRE_STEP: f32 = 2.0;
 struct Target {
     /// The lines in use.
     n: usize,
-    rate_hz: f32,
+    rate: Hz,
     crossover: [f32; 2],
     pole: [f32; 2],
 
@@ -95,7 +97,7 @@ impl Target {
     fn new(lines: usize) -> Self {
         Self {
             n: 0,
-            rate_hz: 0.5,
+            rate: Hz(0.5),
             crossover: [0.0; 2],
             pole: [0.0; 2],
             len: vec![1.0; lines],
@@ -125,7 +127,7 @@ pub struct FdnGlides {
     ramp: Steps,
     /// The lines in use: 0 until the first aim, and the bank is silent.
     n: usize,
-    rate_hz: f32,
+    rate: Hz,
     pole: [f32; 2],
     crossover: [f32; 2],
 
@@ -157,7 +159,7 @@ impl FdnGlides {
         Self {
             ramp,
             n: 0,
-            rate_hz: 0.5,
+            rate: Hz(0.5),
             pole: t.pole,
             crossover: t.crossover,
             len: vec![Glide::landed(1.0); lines],
@@ -229,7 +231,7 @@ impl FdnGlides {
         self.v_len.aim_by(t.v_len, ramp);
         self.mix.aim_by(t.mix, ramp);
         self.depth.aim_by(t.depth, ramp);
-        self.rate_hz = t.rate_hz;
+        self.rate = t.rate;
         self.pre_len.aim_by(t.pre_len, Steps::Rate(PRE_STEP));
         self.wet.aim_by(t.wet, ramp);
         self.width.aim_by(t.width, ramp);
@@ -240,10 +242,8 @@ impl FdnGlides {
 /// absorption's one-poles, and the constants of the chunk being run.
 #[derive(Clone, Debug)]
 struct State {
-    buf: Vec<f32>,
-    w: usize,
-    pre: Vec<f32>,
-    pre_w: usize,
+    lines: Vec<DelayRing>,
+    pre: DelayRing,
     phase: Vec<f64>,
     /// One-pole states a line: `[L1 first, L1 second, L2 first, L2 second]`.
     pole: Vec<[f32; 4]>,
@@ -317,10 +317,8 @@ impl FdnBank {
             ceiling: tail_of(bounds.tail, rate),
             into: 0,
             state: State {
-                buf: vec![0.0; max_lines * cap],
-                w: 0,
-                pre: vec![0.0; pre_cap],
-                pre_w: 0,
+                lines: (0..max_lines).map(|_| DelayRing::new(cap)).collect(),
+                pre: DelayRing::new(pre_cap),
                 phase: vec![0.0; max_lines],
                 pole: vec![[0.0; 4]; max_lines],
                 fresh: true,
@@ -391,10 +389,8 @@ impl FdnBank {
     /// Back to silence, the chunks counted from here. No allocation.
     pub fn reset(&mut self) {
         let s = &mut self.state;
-        s.buf.fill(0.0);
-        s.pre.fill(0.0);
-        s.w = 0;
-        s.pre_w = 0;
+        s.lines.iter_mut().for_each(DelayRing::clear);
+        s.pre.clear();
         s.pole.fill([0.0; 4]);
         for (j, p) in s.phase.iter_mut().enumerate() {
             *p = std::f64::consts::TAU * j as f64 / self.max_lines.max(1) as f64;
@@ -474,11 +470,11 @@ impl FdnBank {
         let m = f.lines[0].modulation;
         t.depth = (m.depth.get() as f32).min((self.cap as f32) * 0.25);
         let hz = m.rate.get();
-        t.rate_hz = if hz.is_finite() {
+        t.rate = Hz(if hz.is_finite() {
             hz.clamp(0.0, 20.0)
         } else {
             0.5
-        };
+        });
         let pre = self.network.pre_delay.get() as f32;
         t.pre_len = pre.clamp(0.0, (self.pre_cap - 4) as f32);
         let wet = self.network.wet.to_amplitude().get();
@@ -504,7 +500,7 @@ impl FdnBank {
             }
         }
         let dphi =
-            std::f64::consts::TAU * f64::from(c.rate_hz) * Self::CHUNK as f64 / self.rate.get();
+            std::f64::consts::TAU * f64::from(c.rate.get()) * Self::CHUNK as f64 / self.rate.get();
         for j in 0..n {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();
@@ -548,7 +544,7 @@ impl FdnBank {
     /// silent. No allocation.
     #[expect(
         clippy::needless_range_loop,
-        reason = "the per-line arrays (`c_len`, `c_out`, `pole`, `buf` rows) are indexed by one \
+        reason = "the per-line arrays (`c_len`, `c_out`, `pole`, `lines`) are indexed by one \
                   line number with the loop's scratch `d`; an iterator over any one of them \
                   would only hide the others"
     )]
@@ -580,7 +576,6 @@ impl FdnBank {
         }
         let scale = 1.0 / width.max(1) as f32;
         let p = glides.pole.map(|x| 1.0 - x);
-        let (cap, pre_cap) = (self.cap, self.pre_cap);
         let mut d = [0.0f32; 16];
         for i in 0..frames {
             if self.into == 0 {
@@ -595,16 +590,15 @@ impl FdnBank {
                 .sum::<f32>()
                 * scale;
 
-            s.pre[s.pre_w] = x;
-            let xd = read(&s.pre, s.pre_w, s.c_pre);
-            s.pre_w = (s.pre_w + 1) % pre_cap;
+            s.pre.put(x);
+            let xd = s.pre.at(s.c_pre);
+            s.pre.advance();
 
             let (mut out_l, mut out_r) = (0.0f32, 0.0f32);
             for j in 0..n {
                 let delay =
                     (s.c_len[j] + crate::lerp(s.c_mod_prev[j], s.c_mod_next[j], t)).max(1.0);
-                let line = &s.buf[j * cap..(j + 1) * cap];
-                d[j] = read(line, s.w, delay);
+                d[j] = s.lines[j].at(delay);
                 out_l += s.c_out[j][0] * d[j];
                 out_r += s.c_out[j][1] * d[j];
             }
@@ -623,9 +617,11 @@ impl FdnBank {
             // `m` scales the projection, so `m = 1` is the reflection to the bit.
             let sum = s.c_mix * sum;
             for j in 0..n {
-                s.buf[j * cap + s.w] = s.c_in[j] * xd + d[j] - 2.0 * s.c_v[j] * sum;
+                s.lines[j].put(s.c_in[j] * xd + d[j] - 2.0 * s.c_v[j] * sum);
             }
-            s.w = (s.w + 1) % cap;
+            // Every row moves on, the idle ones too: a line past `n` keeps the frames it held
+            // and a later regrowth reads them at the right age.
+            s.lines.iter_mut().for_each(DelayRing::advance);
 
             let (mid, side) = ((out_l + out_r) * 0.5, (out_l - out_r) * 0.5);
             let wet = s.c_wet;
@@ -650,7 +646,7 @@ impl FdnBank {
                 let len = glides.len[j].now() as usize;
                 (1..=len)
                     .map(|i| {
-                        let x = s.buf[j * self.cap + (s.w + self.cap - i) % self.cap];
+                        let x = s.lines[j].back(i);
                         f64::from(x) * f64::from(x)
                     })
                     .sum::<f64>()

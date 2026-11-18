@@ -82,7 +82,7 @@ use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 
 use sync::{Arc, AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence};
-use tutti_buffers::{BufferError, I24, Interleaved, Sample};
+use tutti_buffers::{BufferError, Float, I24, Interleaved, Sample};
 use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
@@ -126,6 +126,11 @@ pub trait RingSample: Sample + sealed::Sealed {
     /// Stores `v` in the word, a `Relaxed` store.
     fn store(word: &Self::Atom, v: Self);
 }
+
+/// A [`Float`] format a [`PosRing`] holds: `f32` or `f64`.
+pub trait RingFloat: Float + RingSample {}
+
+impl<F: Float + RingSample> RingFloat for F {}
 
 macro_rules! ring_sample {
     ($t:ty, $atom:ident, $to:expr, $from:expr) => {
