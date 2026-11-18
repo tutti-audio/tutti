@@ -1673,9 +1673,7 @@ impl<F: Float> Reference<F> {
                             RefFrame::Warm => x.unwrap_or(F::ZERO),
                             RefFrame::Fade { wy, wx, y_on, x_on } => {
                                 match (y_on, x_on && x.is_some()) {
-                                    (true, true) => {
-                                        *y * wy + x.unwrap_or(F::ZERO) * wx
-                                    }
+                                    (true, true) => *y * wy + x.unwrap_or(F::ZERO) * wx,
                                     (true, false) => *y * wy,
                                     (false, true) => x.unwrap_or(F::ZERO) * wx,
                                     (false, false) => F::ZERO,
@@ -1687,7 +1685,9 @@ impl<F: Float> Reference<F> {
                                 // the blend (a channel with no input has one
                                 // term).
                                 NodeMode::Active if !moving && mix == F::ONE => *y,
-                                NodeMode::Active if !moving && mix == F::ZERO => x.unwrap_or(F::ZERO),
+                                NodeMode::Active if !moving && mix == F::ZERO => {
+                                    x.unwrap_or(F::ZERO)
+                                }
                                 NodeMode::Active => match x {
                                     Some(x) => *y * mix + x * (F::ONE - mix),
                                     None => *y * mix,
@@ -1738,8 +1738,9 @@ impl<F: Float> Reference<F> {
         events: &BTreeMap<EventOut, Vec<Event>>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
-        // The control narrows once per block into the lane's float.
-        let to = F::from_f64(targets[&id].get());
+        // The weight reaches the lane through the edge's `f32` cell word, and
+        // the lane's float takes it once per block.
+        let to = control_in::<F>(targets[&id].get() as f32);
         let ran = self.lane_prev.contains_key(&id);
         let evs: Vec<Event> = match gain.source {
             Some(from) => {

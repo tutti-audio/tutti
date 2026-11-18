@@ -61,7 +61,7 @@ pub(crate) fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: 
 /// `Piece::ramp_at` read in `F`: frame `k` of an `n`-frame linear ramp,
 /// landing exactly on `to` on its last frame.
 #[inline]
-pub(crate) fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {
+pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {
     if k + 1 >= n {
         to
     } else {
@@ -74,7 +74,7 @@ pub(crate) fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usi
 /// is the curve crate's and its gains are `Amplitude`s; they narrow once here,
 /// where the fade is rendered into a lane.
 #[inline]
-pub(crate) fn fade_gains<F: Float>(law: FadeLaw, j: usize, len: usize) -> (F, F) {
+pub fn fade_gains<F: Float>(law: FadeLaw, j: usize, len: usize) -> (F, F) {
     let (out, inn) = law.gains(j, len);
     (F::from_f64(out.get()), F::from_f64(inn.get()))
 }
@@ -82,7 +82,7 @@ pub(crate) fn fade_gains<F: Float>(law: FadeLaw, j: usize, len: usize) -> (F, F)
 /// `start` moved to `goal` at frame `j` of a `len`-frame fade of `law`, and
 /// exactly `goal` from `len` on.
 #[inline]
-pub(crate) fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: usize) -> F {
+pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: usize) -> F {
     if j >= len {
         return goal;
     }
@@ -94,6 +94,6 @@ pub(crate) fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: 
 /// float: the one place a node-side control is read into a lane. It widens
 /// exactly and narrows once.
 #[inline]
-pub(crate) fn control_in<F: Float>(value: impl Into<f64>) -> F {
+pub fn control_in<F: Float>(value: impl Into<f64>) -> F {
     F::from_f64(value.into())
 }

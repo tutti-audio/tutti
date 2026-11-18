@@ -3,7 +3,7 @@ use super::*;
 /// Folds `block` into `writer` as the op would.
 fn fold(writer: &mut LevelWriter, block: &[f32]) {
     let stats = block_stats(block);
-    writer.fold(stats.peak, f64::from(stats.sum_sq), block.len() as u32);
+    writer.fold(stats.peak, stats.sum_sq, block.len() as u32);
 }
 
 /// Constant `v` over `frames`.
@@ -48,8 +48,8 @@ fn every_length_is_measured_whole() {
         let got = block_stats(&block);
         let peak = block.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         let sum: f32 = block.iter().map(|s| s * s).sum();
-        assert_eq!(got.peak, peak, "len {len}");
-        assert_eq!(got.sum_sq, sum, "len {len}");
+        assert_eq!(got.peak, f64::from(peak), "len {len}");
+        assert_eq!(got.sum_sq, f64::from(sum), "len {len}");
     }
 }
 
@@ -189,10 +189,10 @@ fn an_hour_unread_reads_the_analytic_rms() {
     let stats = block_stats(&block);
     let blocks = 337_500u64;
     for _ in 0..blocks {
-        w.fold(stats.peak, f64::from(stats.sum_sq), 512);
+        w.fold(stats.peak, stats.sum_sq, 512);
     }
     let l = take(&mut r);
-    let want = (f64::from(stats.sum_sq) / 512.0).sqrt();
+    let want = (stats.sum_sq / 512.0).sqrt();
     assert_eq!(l.rms.get(), want);
     assert_eq!(l.frames, Samples(337_500 * 512));
 }
@@ -209,15 +209,12 @@ fn the_switch_starts_off_and_both_ends_see_it() {
     assert!(!on());
 }
 
-/// An `f64` block of 600 frames, metered
-/// (256, 256 and a short 88): its peak and root-mean-square are the analytic
-/// figures of the block.
+/// An `f64` block of 600 frames, metered (256, 256 and a short 88): its peak
+/// and root-mean-square are the analytic figures of the block.
 ///
 /// The samples are `(i % 7 - 3) / 4`: every sample and square is a multiple of
-/// 1/16 below 2^20, so each `f32` partial sum is exact and the chunked fold
-/// equals the whole one. The sum of squares is `85 * 28/16 + 15/16` (85 whole
-/// periods and 5 samples), the peak `3/4`. The only rounding left is the
-/// final `f32` rms, so the tolerance is one `f32` epsilon relative.
+/// 1/16 below 2^20, so every partial sum is exact. The sum of squares is
+/// `85 * 28/16 + 15/16` (85 whole periods and 5 samples), the peak `3/4`.
 #[test]
 fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     use crate::arena::Arena;
@@ -231,12 +228,53 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     meter_op::<f64, _, _>(&mut writer, &arena, &[0u8][..], &[0], FRAMES);
     let level = reader.read()[0];
     let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
-    let rms = (sum_sq / FRAMES as f64).sqrt();
     assert_eq!(level.frames, Samples(FRAMES));
     assert_eq!(level.peak, Amplitude(0.75));
+    assert_eq!(level.rms, Amplitude((sum_sq / FRAMES as f64).sqrt()));
+}
+
+/// An `f64` block's peak is read at `f64`: a sample of `1 + 2^-40` is not
+/// narrowed before it is measured.
+#[test]
+fn an_f64_peak_is_not_narrowed_before_it_is_measured() {
+    let peak = 1.0 + 2f64.powi(-40);
+    assert_eq!(peak as f32, 1.0, "an f32 cannot hold the peak");
+    let got = block_stats(&[0.5, -peak, 0.25]);
+    assert_eq!(got.peak, peak);
+}
+
+/// An `f32` block of 1 Mi frames reads its RMS within a bound that does not
+/// depend on the block's length. A constant `v` has the analytic RMS `|v|`.
+/// Each chunk's partial sums hold at most `CHUNK / WIDTH` terms and are combined
+/// over `WIDTH` lanes, so the energy's relative error is at most
+/// `(CHUNK / WIDTH + WIDTH)` roundings of `f32`, and the RMS's half of that.
+#[test]
+fn a_mebiframe_f32_block_reads_its_rms_within_a_length_free_bound() {
+    const FRAMES: usize = 1 << 20;
+    let v = 0.3f32;
+    let block = vec![v; FRAMES];
+    let bound = (CHUNK / WIDTH + WIDTH) as f64 * f64::from(f32::EPSILON) * f64::from(v) / 2.0;
+    // The setup: one `f32` accumulation over the whole block, in the shape
+    // the chunks have, misses the figure by more than the bound.
+    let whole: f64 = {
+        let mut lanes = [0.0f32; WIDTH];
+        for pass in block.chunks_exact(WIDTH) {
+            for (l, x) in lanes.iter_mut().zip(pass) {
+                *l += x * x;
+            }
+        }
+        f64::from(lanes.iter().fold(0.0f32, |a, &l| a + l))
+    };
+    let naive = (whole / FRAMES as f64).sqrt();
     assert!(
-        (level.rms.0 - rms).abs() <= rms * f64::from(f32::EPSILON),
-        "{} against {rms}",
-        level.rms.0
+        (naive - f64::from(v)).abs() > bound,
+        "a whole-block f32 accumulation is already within the bound: {naive}"
+    );
+    let l = read(&block);
+    assert_eq!(l.peak.get(), f64::from(v));
+    assert!(
+        (l.rms.get() - f64::from(v)).abs() <= bound,
+        "{} against {v}, bound {bound}",
+        l.rms.get()
     );
 }
