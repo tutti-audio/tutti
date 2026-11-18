@@ -21,9 +21,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventOut, ForkMode, ForkTarget, IntoNode, Io, Law, MAX_PARAM_PORTS, Node,
-    NodeParts, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment, ParamSet,
-    Prepare, Shape, Status, TransportPosition, param_parts,
+    Cx, Editor, EventOut, ForkMode, ForkTarget, IntoNode, Io, Law, MAX_PARAM_PORTS, Node,
+    NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
+    ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_types::{ChannelLayout, Param};
@@ -99,13 +99,14 @@ impl IntoNode for Bands {
 /// threshold of each address in `to` to its value.
 #[derive(Clone)]
 struct Steps {
-    to: Vec<(UnitAddr, f32)>,
+    to: Vec<(UnitAddr, f64)>,
 }
 
 impl Node for Steps {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -113,7 +114,7 @@ impl Node for Steps {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
             let seg = ParamSegment::unit(addr, v, v, Samples(0), Law::Linear);
-            let _ = io.event_out(0).push(Event::segment(at, seg));
+            let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
     }
@@ -154,7 +155,7 @@ fn render(ed: &mut Editor, exec: &mut tutti_graph::Executor, frames: usize) -> [
 
 /// A graph of [`Bands`] (thresholds -10 and -20) and a [`Steps`] source
 /// stepping `to`; the two bands are its outputs. Nothing is connected yet.
-fn graph(to: &[(UnitAddr, f32)]) -> (Editor, tutti_graph::Executor, ParamSet) {
+fn graph(to: &[(UnitAddr, f64)]) -> (Editor, tutti_graph::Executor, ParamSet) {
     let (mut ed, exec) = Editor::new(prepare(64));
     let controls = ed.insert(BANDS, "bands", Bands::new(-10.0, -20.0)).controls;
     ed.insert(
