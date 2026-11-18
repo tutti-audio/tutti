@@ -37,9 +37,19 @@ pub trait Sealed: tutti_rt::RingFloat {
     /// hosts plugins, so an `f64` one has nobody to tell.
     #[doc(hidden)]
     fn announce_render_mode<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
+
+    /// A builder's opener, which serves both floats, as the opener of this one.
+    #[doc(hidden)]
+    #[cfg(feature = "capture")]
+    fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<Self>>;
 }
 
 impl Sealed for f32 {
+    #[cfg(feature = "capture")]
+    fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f32>> {
+        opener
+    }
+
     fn serve_plugins<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
         cx: PhaseCx<'_>,
@@ -74,6 +84,11 @@ impl Sealed for f32 {
 }
 
 impl Sealed for f64 {
+    #[cfg(feature = "capture")]
+    fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f64>> {
+        opener
+    }
+
     fn serve_plugins<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
         _: PhaseCx<'_>,

@@ -40,6 +40,16 @@ impl InputOpener<f64> for Opener {
     }
 }
 
+/// The test's opener captures at one width and refuses the other, as a capture device
+/// refuses a format it cannot give.
+impl InputOpener<f32> for Opener {
+    fn open(&mut self, _: &MicConfig, _: SampleRate) -> tutti_cpal::Result<OpenedInput<f32>> {
+        Err(tutti_cpal::Error::InvalidConfig(
+            "this capture serves one sample width only".into(),
+        ))
+    }
+}
+
 /// **A take of `f64` frames reads back as a `Clip<f64>` holding `FINE`.** The
 /// inlet is fed `[FINE, -FINE]` every frame; the take is written as 64-bit
 /// float and read back unrounded, and the clip, added to the graph and played,

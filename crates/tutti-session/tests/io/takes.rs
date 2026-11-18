@@ -55,6 +55,16 @@ impl InputOpener for Opener {
     }
 }
 
+/// The test's opener captures at one width and refuses the other, as a capture device
+/// refuses a format it cannot give.
+impl InputOpener<f64> for Opener {
+    fn open(&mut self, _: &MicConfig, _: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
+        Err(tutti_cpal::Error::InvalidConfig(
+            "this capture serves one sample width only".into(),
+        ))
+    }
+}
+
 struct Rig {
     session: LiveSession,
     stream: ManualStream,
