@@ -23,7 +23,7 @@
 //!   (it runs on every platform, and its tests with it) and `winmm` the calls.
 //!   Windows MIDI Services, the UMP-native API, is not bound.
 //! - **Everything else** — [`stub`]: it enumerates nothing and returns
-//!   [`Error::Unsupported`](crate::error::Error::Unsupported).
+//!   [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported).
 
 #[cfg(midi_backend = "coremidi")]
 mod coremidi;

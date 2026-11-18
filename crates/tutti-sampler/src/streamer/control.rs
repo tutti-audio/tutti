@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_buffers::Wave;
+use tutti_buffers::{Float, Wave};
 use tutti_units::SampleRate;
 
 /// The streamer thread is gone, so a stream-control command was discarded.
@@ -41,14 +41,18 @@ pub struct StreamerGone;
 /// frees units, never the audio thread; what it frees is a path and a wave the
 /// streamer's writer shares.
 #[derive(Clone)]
-pub struct StreamFile {
+pub struct StreamFile<F: Float = f32> {
     path: PathBuf,
     file_rate: SampleRate,
-    resident: Option<Arc<Wave>>,
+    resident: Option<Arc<Wave<F>>>,
 }
 
-impl StreamFile {
-    pub(crate) fn new(path: PathBuf, file_rate: SampleRate, resident: Option<Arc<Wave>>) -> Self {
+impl<F: Float> StreamFile<F> {
+    pub(crate) fn new(
+        path: PathBuf,
+        file_rate: SampleRate,
+        resident: Option<Arc<Wave<F>>>,
+    ) -> Self {
         Self {
             path,
             file_rate,
@@ -73,12 +77,12 @@ impl StreamFile {
     /// wave in place rather than decode it a second time. `None` for a file the
     /// streamer reads a piece at a time.
     #[must_use]
-    pub fn resident(&self) -> Option<&Arc<Wave>> {
+    pub fn resident(&self) -> Option<&Arc<Wave<F>>> {
         self.resident.as_ref()
     }
 }
 
-impl std::fmt::Debug for StreamFile {
+impl<F: Float> std::fmt::Debug for StreamFile<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamFile")
             .field("path", &self.path)

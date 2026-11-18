@@ -2627,7 +2627,7 @@ impl Graph {
                     source
                 };
                 let fold = match self.root_topology() {
-                    Some(root) => tutti_buffers::Fold::between(&placed, root),
+                    Some(root) => tutti_buffers::Fold::<f32>::between(&placed, root),
                     None => tutti_graph::fold_to_width(
                         &placed,
                         // The root's width is a `ChannelLayout`'s: every call
@@ -3279,7 +3279,7 @@ impl Graph {
             });
         }
         if let Some(device) = device {
-            tutti_graph::fold_to_topology(root, device)?;
+            tutti_graph::fold_to_topology::<f32>(root, device)?;
         }
         Ok(())
     }
@@ -3442,7 +3442,7 @@ impl Graph {
                     let width = ChannelLayout::try_from(outputs).map_err(|e| {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
-                    tutti_graph::fold_to_topology(
+                    tutti_graph::fold_to_topology::<f32>(
                         &tutti_types::ChannelTopology::assumed(width),
                         placed,
                     )?;

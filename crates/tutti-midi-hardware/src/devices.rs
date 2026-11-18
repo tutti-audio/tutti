@@ -27,7 +27,7 @@ use crate::HardwareMidiInputs;
 use crate::backend;
 use crate::capability::UmpCapability;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::sensing::Heartbeat;
 use crate::wire::Wire;
 
@@ -50,11 +50,11 @@ pub enum WatchFailure {
     /// The OS refused the watch, or it broke: the error is the OS's own, and
     /// its text is shown as it is.
     #[error(transparent)]
-    Failed(Arc<Error>),
+    Failed(Arc<MidiHardwareError>),
 }
 
-impl From<Error> for WatchFailure {
-    fn from(error: Error) -> Self {
+impl From<MidiHardwareError> for WatchFailure {
+    fn from(error: MidiHardwareError) -> Self {
         Self::Failed(Arc::new(error))
     }
 }
@@ -213,7 +213,7 @@ impl core::fmt::Debug for ChangeSink {
 /// Cheap to clone: every clone is the same list over the same watch.
 ///
 /// ```no_run
-/// # fn main() -> Result<(), tutti_midi_hardware::Error> {
+/// # fn main() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
 /// use std::time::Duration;
 /// use tutti_midi_hardware::Devices;
 ///
@@ -253,7 +253,7 @@ impl Devices {
     ///
     /// Where the build has no MIDI backend (Windows, or alsa-lib older than
     /// 1.2.10) the list is empty and stays so, as enumeration is; opening a
-    /// device reports [`Error::Unsupported`].
+    /// device reports [`MidiHardwareError::Unsupported`].
     ///
     /// # Errors
     ///
@@ -337,7 +337,7 @@ impl Devices {
     ///
     /// # Errors
     ///
-    /// [`Error::NotFound`] when `id` is not present, [`Error::WrongDirection`]
+    /// [`MidiHardwareError::NotFound`] when `id` is not present, [`MidiHardwareError::WrongDirection`]
     /// when it is not an input, or the platform error from opening it. A failed
     /// open leaves no port in `ports`.
     pub(crate) fn open_input(
@@ -363,7 +363,7 @@ impl Devices {
     ///
     /// # Errors
     ///
-    /// [`Error::NotFound`] when `id` is not present, [`Error::WrongDirection`]
+    /// [`MidiHardwareError::NotFound`] when `id` is not present, [`MidiHardwareError::WrongDirection`]
     /// when it is not an output, or the platform error from opening it.
     pub fn open_output(&self, id: &DeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
@@ -395,7 +395,7 @@ impl Devices {
             .ok_or_else(|| NotFound::Device(id.clone()))?;
         wanted(info.direction)
             .then(|| (info.clone(), handle))
-            .ok_or_else(|| Error::WrongDirection {
+            .ok_or_else(|| MidiHardwareError::WrongDirection {
                 id: id.clone(),
                 direction: info.direction,
             })
@@ -626,7 +626,7 @@ impl OpenOutput {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] when the thread cannot start.
+    /// [`MidiHardwareError::Spawn`] when the thread cannot start.
     pub fn active_sensing(&mut self) -> Result<()> {
         if self.heartbeat.is_none() {
             self.heartbeat = Some(Heartbeat::start(

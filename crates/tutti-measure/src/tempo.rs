@@ -40,6 +40,7 @@ use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::parabolic_peak;
 use tutti_units::ranged;
 
 /// The default analysis window, in samples.
@@ -523,12 +524,8 @@ impl Periodicity {
     /// The lag refined to a fraction of a frame by a parabola through its
     /// value and its neighbours', or `lag` when they do not bend down.
     fn refined(&self, lag: usize) -> f64 {
-        let (a, b, c) = (self.at(lag - 1), self.at(lag), self.at(lag + 1));
-        let curvature = a - 2.0 * b + c;
-        if curvature >= 0.0 {
-            return lag as f64;
-        }
-        lag as f64 + f64::from((0.5 * (a - c) / curvature).clamp(-0.5, 0.5))
+        let peak = parabolic_peak(self.at(lag - 1), self.at(lag), self.at(lag + 1));
+        lag as f64 + f64::from(peak.offset)
     }
 
     fn tempo(&self, cfg: &TempoConfig) -> Tempo {

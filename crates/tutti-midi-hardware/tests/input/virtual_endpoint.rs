@@ -260,7 +260,7 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
     let bend = per_note_pitch_bend(MidiChannel::of(2), 60, 0x8000_0000);
     assert!(matches!(
         source.send(bend),
-        Err(tutti_midi_hardware::Error::NoMidi1Form(
+        Err(tutti_midi_hardware::MidiHardwareError::NoMidi1Form(
             tutti_midi_protocol::NoMidi1Form::PerNote
         ))
     ));

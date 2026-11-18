@@ -266,9 +266,10 @@ fn refill_one(
     // The buffer is whole frames of the ring's width, so the view is built.
     let read_ok = InterleavedMut::new(buffer.as_mut_slice(), layout)
         .is_ok_and(|view| writer.fill_with(&mapping, to, view));
-    writer.push_interleaved(buffer);
+    // A refused push is the stream's decode fault, as a failed read is.
+    let pushed = writer.push_interleaved(buffer).is_ok();
     Refilled {
-        read_ok,
+        read_ok: read_ok && pushed,
         primed: false,
         fill,
     }

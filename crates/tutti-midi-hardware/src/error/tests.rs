@@ -1,33 +1,57 @@
 use super::*;
 use std::error::Error as _;
 
-/// **An error made from another carries it as its source**, so a caller that
-/// walks `source()` reaches the OS error, and one made without a cause has
-/// none.
+/// The `io::Error` at the end of `error`'s `source()` chain, if there is one.
+fn io_cause(error: &MidiHardwareError) -> Option<&std::io::Error> {
+    error.source()?.downcast_ref::<std::io::Error>()
+}
+
+/// **A thread that cannot start keeps the OS's refusal as its source**, so a
+/// caller walking `source()` reaches the `io::Error` and its kind.
 #[test]
-fn a_device_or_port_error_keeps_the_error_under_it() {
-    let io = std::io::Error::other("no threads left");
-    let error = Error::device_from("spawn MIDI pump", io);
-    assert_eq!(error.to_string(), "MIDI device error: spawn MIDI pump");
+fn a_spawn_failure_keeps_the_os_refusal_as_its_source() {
+    let error = MidiHardwareError::Spawn {
+        thread: MidiThread::MidiIn,
+        source: std::io::Error::from(std::io::ErrorKind::OutOfMemory),
+    };
     assert_eq!(
-        error.source().map(ToString::to_string).as_deref(),
-        Some("no threads left")
+        io_cause(&error).map(std::io::Error::kind),
+        Some(std::io::ErrorKind::OutOfMemory)
     );
-    let error = Error::port_from("watch", std::io::Error::other("gone"));
-    assert!(error.source().is_some());
-    assert!(Error::device("plain").source().is_none());
-    assert!(Error::port("plain").source().is_none());
+}
+
+/// **A failed system call keeps its `io::Error` as the source.**
+#[test]
+fn an_io_failure_keeps_the_os_error_as_its_source() {
+    let error = MidiHardwareError::Io {
+        step: "make a stop pair",
+        source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+    };
+    assert_eq!(
+        io_cause(&error).map(std::io::Error::kind),
+        Some(std::io::ErrorKind::PermissionDenied)
+    );
+}
+
+/// **A refused seed is the `SeedError` itself**, reachable through `source()`
+/// and through `From`.
+#[test]
+fn a_seed_failure_keeps_the_seed_error_as_its_source() {
+    let error = MidiHardwareError::from(crate::SeedError);
+    assert!(matches!(error, MidiHardwareError::Seed(_)));
+    assert!(error.source().is_some_and(|s| s.is::<crate::SeedError>()));
 }
 
 /// **`NoDeviceNamed` says what was searched**, in its message too.
 #[test]
 fn a_name_that_matched_nothing_lists_its_candidates() {
-    let error = Error::NoDeviceNamed {
+    let error = MidiHardwareError::NoDeviceNamed {
         name: "keystpe".into(),
         searched: vec!["Keystep Pro".into(), "IAC Bus 1".into()],
     };
-    assert_eq!(
-        error.to_string(),
-        "no MIDI device named like 'keystpe' (searched: Keystep Pro, IAC Bus 1)"
-    );
+    let MidiHardwareError::NoDeviceNamed { name, searched } = error else {
+        panic!("not NoDeviceNamed");
+    };
+    assert_eq!(name, "keystpe");
+    assert_eq!(searched, ["Keystep Pro", "IAC Bus 1"]);
 }

@@ -1,9 +1,8 @@
 //! The read half of the streamer's cold-path disk refill.
 //!
 //! The streamer moves frames from a resident (whole-file) [`Wave`] into a
-//! per-region ring buffer. This module owns the source end: [`read_wave`] and
-//! [`wave_frame_into`] are the one place the planar `wave.at(0,i)/at(1,i)`
-//! unpack lives, with mono up-mix and zero-pad past end. A loop is not its
+//! per-region ring buffer. This module owns the source end: [`read_wave`] is the one
+//! place the planar unpack lives, zero-padded past the end. A loop is not its
 //! business: the refill cuts its reads at the loop's end and places each run
 //! (`loops::Mapping::fill`), so a read always runs the file straight on.
 //!
@@ -12,47 +11,41 @@
 //! [`RegionOut::push_interleaved`](crate::streamer::prefetch::RegionOut::push_interleaved).
 
 use crate::nonempty;
-use crate::voice::interp::Place;
-use tutti_buffers::Wave;
+use tutti_buffers::{Float, InterleavedMut, Wave, interleave};
 use tutti_types::ChannelLayout;
-
-/// The canonical planar→interleaved unpack: writes frame `idx` of `wave` into
-/// `out` at `out.len()` channels, zero past the end.
-///
-/// # Channel policy
-///
-/// Identical to [`interp::read_frame`](crate::voice::interp::read_frame)'s,
-/// through the same [`Place`]. The two tiers must agree here — this is the
-/// streamer's unpack and that is the RT reader, and a voice that unpacked
-/// differently on disk than in memory is precisely the divergence the shared
-/// kernel exists to prevent.
-#[inline]
-pub(crate) fn wave_frame_into(wave: &Wave, place: &Place, idx: usize, out: &mut [f32]) {
-    if out.is_empty() {
-        return;
-    }
-    let src_ch = wave.channels();
-    if idx >= wave.len().get() || src_ch == 0 {
-        out.fill(0.0);
-        return;
-    }
-    place.frame(src_ch, |c| wave.at(c, idx), out);
-}
+use tutti_units::Samples;
 
 /// Read file frames `at..` of a resident `wave` into `out` (`channels` wide,
 /// floored at one), zero past its end: the whole-file source a region without
 /// a decoder reads, and the loop's reads of a resident file.
 ///
+/// The wave is read as it stands, so it is as wide as `channels`: `false`
+/// (with `out` silent) for a wave of another width, which is the ring's bug,
+/// never a fold.
+///
 /// It fills the whole buffer, so it is not a [`Source`](tutti_buffers::Source):
 /// it never ends and has no verdict to give. The caller owns the bound, by the
 /// size of the scratch buffer it hands in.
-pub(crate) fn read_wave(wave: &Wave, at: usize, out: &mut [f32], channels: ChannelLayout) {
+pub(crate) fn read_wave<F: Float>(
+    wave: &Wave<F>,
+    at: usize,
+    out: &mut [F],
+    channels: ChannelLayout,
+) -> bool {
     let channels = nonempty(channels);
-    let place = Place::native(channels);
-    let stride = channels.count() as usize;
-    for (k, frame) in out.chunks_exact_mut(stride).enumerate() {
-        wave_frame_into(wave, &place, at + k, frame);
+    let frames = channels.from_interleaved_len(out.len());
+    let whole = channels.interleaved_len(frames);
+    out.fill(F::ZERO);
+    if wave.layout() != channels {
+        return false;
     }
+    let have = wave.len().get().saturating_sub(at).min(frames.get());
+    let from = Samples(at.min(wave.len().get()));
+    let planes = wave.planes().slice(from..Samples(from.get() + have));
+    let head = &mut out[..channels.interleaved_len(Samples(have)).min(whole)];
+    InterleavedMut::new(head, channels)
+        .and_then(|dst| interleave(planes, dst))
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -70,16 +63,6 @@ mod tests {
         wave
     }
 
-    /// `wave_frame_into` with the placement a reader of `out`'s width has.
-    fn frame_into(wave: &Wave, idx: usize, out: &mut [f32]) {
-        let place = Place::for_wave(
-            wave,
-            ChannelLayout::try_from(out.len()).expect("a test width is small"),
-        )
-        .expect("placeable");
-        wave_frame_into(wave, &place, idx, out);
-    }
-
     fn indexed_wave(channels: usize, len: usize) -> Wave {
         let mut w = Wave::zero(
             channels,
@@ -92,79 +75,6 @@ mod tests {
             }
         }
         w
-    }
-
-    #[test]
-    fn wave_frame_reads_stereo() {
-        let wave = test_wave(&[(0.1, 0.2), (0.3, 0.4)]);
-        let mut f = [0.0f32; 2];
-        frame_into(&wave, 0, &mut f);
-        assert_eq!(f, [0.1, 0.2]);
-        frame_into(&wave, 1, &mut f);
-        assert_eq!(f, [0.3, 0.4]);
-    }
-
-    #[test]
-    fn wave_frame_pads_zeros_past_end() {
-        let wave = test_wave(&[(0.5, 0.6)]);
-        let mut f = [9.0f32; 2];
-        frame_into(&wave, 1, &mut f);
-        assert_eq!(f, [0.0, 0.0]);
-    }
-
-    #[test]
-    fn wave_frame_duplicates_left_for_mono() {
-        let mut wave = Wave::new(1, SampleRate::SR_48K);
-        wave.append(Interleaved::new(&[0.7], wave.layout()).unwrap())
-            .unwrap();
-        let mut f = [0.0f32; 2];
-        frame_into(&wave, 0, &mut f);
-        assert_eq!(f, [0.7, 0.7]);
-    }
-
-    /// The streamer's unpack must follow the SAME channel policy as the RT
-    /// reader's `interp::read_frame`: mono is placed by the spread, anything else by its topology. Two
-    /// implementations of a channel policy is how the two tiers drift apart.
-    #[test]
-    fn wave_frame_matches_the_rt_readers_channel_policy() {
-        // Mono goes to the centre of a 5.1 frame and nowhere else (the lone
-        // centre rule of `Fold`; the memory tier's pinned in `interp`).
-        let mut mono = Wave::new(1, SampleRate::SR_48K);
-        mono.append(Interleaved::new(&[0.4], mono.layout()).unwrap())
-            .unwrap();
-        let mut f = [9.0f32; 6];
-        frame_into(&mono, 0, &mut f);
-        assert_eq!(f, [0.0, 0.0, 0.4, 0.0, 0.0, 0.0], "mono is the centre");
-
-        // Six channels reach six slots.
-        let six = indexed_wave(6, 4);
-        let mut f = [0.0f32; 6];
-        frame_into(&six, 0, &mut f);
-        for (c, &s) in f.iter().enumerate() {
-            assert_eq!(s, (c + 1) as f32, "channel {c} dropped: {f:?}");
-        }
-
-        // Narrowing folds through the engine matrix rather than truncating.
-        let mut narrow = [0.0f32; 2];
-        frame_into(&six, 0, &mut narrow);
-        // The ITU figures, in the fold's order of operations.
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
-        assert_eq!(
-            narrow,
-            [1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0],
-            "narrowing must fold, not truncate"
-        );
-
-        // Stereo into a wide frame zero-fills rather than fanning.
-        let stereo = indexed_wave(2, 4);
-        let mut wide = [9.0f32; 6];
-        frame_into(&stereo, 0, &mut wide);
-        assert_eq!(wide[0], 1.0);
-        assert_eq!(wide[1], 2.0);
-        assert!(
-            wide[2..].iter().all(|&s| s == 0.0),
-            "surrounds must be silent: {wide:?}"
-        );
     }
 
     #[test]

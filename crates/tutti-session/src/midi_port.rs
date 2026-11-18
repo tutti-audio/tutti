@@ -139,7 +139,7 @@ pub enum MidiPortError {
     CellsHeld(DeviceId),
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
-    Hardware(Arc<tutti_midi_hardware::Error>),
+    Hardware(Arc<tutti_midi_hardware::MidiHardwareError>),
 }
 
 /// What a [`MidiInput`] says of itself: one snapshot, as of the last update

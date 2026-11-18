@@ -21,8 +21,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::Wave;
-use tutti_buffers::{Fold, FoldEnd, FoldError, MonoMut, Planes};
+use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_types::{
@@ -358,7 +357,7 @@ pub(crate) fn past_window(clock: &BlockClock<'_>, range: Range<usize>, gate: Gat
 /// the scalar kernel's. The slices are cut to `out`'s length first, which
 /// keeps the bounds checks out of the loop.
 #[inline]
-pub(crate) fn hermite_lanes(out: &mut [f32], y: [&[f32]; 4], t: &[f32]) {
+pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
     let n = out.len();
     let (y0, y1, y2, y3, t) = (&y[0][..n], &y[1][..n], &y[2][..n], &y[3][..n], &t[..n]);
     for i in 0..n {
@@ -405,21 +404,28 @@ pub(crate) fn hermite_lanes(out: &mut [f32], y: [&[f32]; 4], t: &[f32]) {
 /// - a wave already in the frame's order and width is read channel for
 ///   channel, with no fold.
 #[inline]
-pub fn read_frame(wave: &Arc<Wave>, place: &Place, position: f64, out: &mut [f32]) {
+pub fn read_frame<S: Sample, F: Float>(
+    wave: &Arc<Wave<S>>,
+    place: &Place<F>,
+    position: SamplePosition,
+    out: &mut [F],
+) {
     if out.is_empty() {
         return;
     }
     let len = wave.len().get();
     let src_ch = wave.channels();
     if len == 0 || src_ch == 0 {
-        out.fill(0.0);
+        out.fill(F::ZERO);
         return;
     }
     let (taps, frac) = tap_indices(len, position);
     // Every channel index `interpolate_taps` asks for is `< src_ch`, which is
     // what keeps `Wave::at` — an unchecked `self.vec[channel][index]` — from
     // panicking; `tap_indices` keeps the frame index in bounds.
-    interpolate_taps(src_ch, place, frac, out, |c, t| wave.at(c, taps[t]));
+    interpolate_taps(src_ch, place, frac, out, |c, t| {
+        wave.at(c, taps[t]).convert_to::<F>()
+    });
 }
 
 /// The four frames [`read_frame`] interpolates `position` from, in a source
@@ -434,7 +440,7 @@ pub fn read_frame(wave: &Arc<Wave>, place: &Place, position: f64, out: &mut [f32
 ///
 /// `len` must be non-zero.
 #[inline]
-pub(crate) fn tap_indices(len: usize, position: f64) -> ([usize; 4], f32) {
+pub(crate) fn tap_indices<F: Float>(len: usize, position: SamplePosition) -> ([usize; 4], F) {
     let (idx, frac) = split_position(position);
     let last = len - 1;
     ([0, 1, 2, 3].map(|t| tap(idx, last, t)), frac)
@@ -457,17 +463,17 @@ pub(crate) fn tap(idx: usize, last: usize, t: usize) -> usize {
 /// A position's whole frame and the fraction past it, as every tap layout
 /// ([`tap_indices`], and a loop's, `LoopSpan::taps`) takes them.
 #[inline]
-pub(crate) fn split_position(position: f64) -> (usize, f32) {
-    let mut idx = position.floor() as usize;
-    let mut frac = position.fract() as f32;
+pub(crate) fn split_position<F: Float>(position: SamplePosition) -> (usize, F) {
+    let mut idx = position.get().floor() as usize;
+    let mut frac = F::from_f64(position.fract());
     // A fraction a hair under 1 rounds to 1.0 in `f32`: "frame n, all the
     // way to n + 1", which the cubic returns as frame n + 1 only to within
     // an ulp. It *is* frame n + 1 at `t` = 0, where the kernel returns the
     // tap exactly. (A position n - e inside a block, which no snap on the
     // block's origin reaches, landed here.)
-    if frac >= 1.0 {
+    if frac >= F::ONE {
         idx += 1;
-        frac = 0.0;
+        frac = F::ZERO;
     }
     (idx, frac)
 }
@@ -480,13 +486,13 @@ pub(crate) fn split_position(position: f64) -> (usize, f32) {
 ///
 /// Silent for an empty wave, as `read_frame` is.
 #[inline]
-pub(crate) fn read_looped_frame(
-    wave: &Arc<Wave>,
-    place: &Place,
+pub(crate) fn read_looped_frame<S: Sample, F: Float>(
+    wave: &Arc<Wave<S>>,
+    place: &Place<F>,
     span: &LoopSpan,
-    pos: f64,
+    pos: SamplePosition,
     looped: bool,
-    out: &mut [f32],
+    out: &mut [F],
 ) {
     if out.is_empty() {
         return;
@@ -494,15 +500,15 @@ pub(crate) fn read_looped_frame(
     let len = wave.len().get();
     let src_ch = wave.channels();
     if len == 0 || src_ch == 0 {
-        out.fill(0.0);
+        out.fill(F::ZERO);
         return;
     }
     let (taps, frac) = span.taps(len, pos, looped);
     interpolate_taps(src_ch, place, frac, out, |c, t| {
         let tap = taps[t];
-        let tail = wave.at(c, tap.frame);
+        let tail = wave.at(c, tap.frame).convert_to::<F>();
         match tap.fade {
-            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead), w),
+            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead).convert_to::<F>(), w),
             None => tail,
         }
     });
@@ -525,13 +531,13 @@ pub(crate) fn read_looped_frame(
 /// frame of any width other than the one the spread was built for. A width past
 /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MonoSpread {
+pub struct MonoSpread<F: Float = f32> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
     /// destination.
-    fold: Option<Fold>,
+    fold: Option<Fold<F>>,
 }
 
-impl MonoSpread {
+impl<F: Float> MonoSpread<F> {
     /// A mono sample to every channel of the frame.
     pub const FAN: Self = Self { fold: None };
 
@@ -561,7 +567,7 @@ impl MonoSpread {
     /// The fold, if `width` is the one it was built for. A frame of another
     /// width has no centre this spread knows, so it fans.
     #[inline]
-    fn fold_for(&self, width: usize) -> Option<&Fold> {
+    fn fold_for(&self, width: usize) -> Option<&Fold<F>> {
         self.fold
             .as_ref()
             .filter(|fold| usize::from(fold.dst_layout().count()) == width)
@@ -569,7 +575,7 @@ impl MonoSpread {
 
     /// Writes the mono sample `v` into `out`, every element.
     #[inline]
-    pub(crate) fn frame(&self, v: f32, out: &mut [f32]) {
+    pub(crate) fn frame(&self, v: F, out: &mut [F]) {
         match self.fold_for(out.len()) {
             Some(fold) => fold.frame(&[v], out),
             None => out.fill(v),
@@ -586,12 +592,12 @@ impl MonoSpread {
     ///
     /// If `scratch` is short.
     #[inline]
-    pub(crate) fn lanes<L: AsMut<[f32]>>(
+    pub(crate) fn lanes<L: AsMut<[F]>>(
         &self,
         lanes: &mut [L],
         width: usize,
         range: Range<usize>,
-        scratch: &mut [f32],
+        scratch: &mut [F],
     ) {
         let fold = self.fold_for(width);
         let lanes = &mut lanes[..width];
@@ -622,7 +628,7 @@ impl MonoSpread {
                     );
                     if folded.is_err() {
                         // Not folded: silent, never the lane's previous contents.
-                        lane.as_mut()[range.clone()].fill(0.0);
+                        lane.as_mut()[range.clone()].fill(F::ZERO);
                     }
                 }
             }
@@ -647,18 +653,16 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 /// The frame is the one a reader writes: its width is the node's, at most
 /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Place {
+pub enum Place<F: Float = f32> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
-    Native(MonoSpread),
+    Native(MonoSpread<F>),
     /// A wave that is not mono and not already the frame's order and width,
     /// placed by the fold.
-    Folded(Fold),
+    Folded(Fold<F>),
 }
 
 /// The spread of a wave that is not mono: never consulted.
-static NO_SPREAD: MonoSpread = MonoSpread::FAN;
-
-impl Place {
+impl<F: Float> Place<F> {
     /// A wave read as it stands: every channel of one as wide as the frame in
     /// its own slot, and a mono one to every channel. For the readers whose
     /// frame is the wave's own width (the streamer's ring writers, which carry the file as it is) and for a
@@ -687,7 +691,7 @@ impl Place {
     /// - [`PlaceError::Fold`] with [`FoldError::Unplaced`] for a wave wider
     ///   than the frame where either has no channel order (10 channels into 8,
     ///   a 5.1 file into 5): its extra channels would be dropped.
-    pub fn for_wave(wave: &Wave, width: ChannelLayout) -> Result<Self, PlaceError> {
+    pub fn for_wave<S: Sample>(wave: &Wave<S>, width: ChannelLayout) -> Result<Self, PlaceError> {
         Self::for_topology(wave.topology(), width)
     }
 
@@ -744,17 +748,17 @@ impl Place {
 
     /// The mono rule, for a reader that spreads a block in place.
     #[inline]
-    pub(crate) fn mono(&self) -> &MonoSpread {
+    pub(crate) fn mono(&self) -> &MonoSpread<F> {
         match self {
             Self::Native(spread) => spread,
-            Self::Folded(_) => &NO_SPREAD,
+            Self::Folded(_) => &MonoSpread::<F>::FAN,
         }
     }
 
     /// Writes one frame of a `src_ch`-wide wave into `out`, every element:
     /// channel `c` of the wave is `sample(c)`.
     #[inline]
-    pub(crate) fn frame(&self, src_ch: usize, sample: impl Fn(usize) -> f32, out: &mut [f32]) {
+    pub(crate) fn frame(&self, src_ch: usize, sample: impl Fn(usize) -> F, out: &mut [F]) {
         let fold = match self {
             Self::Native(spread) => {
                 // Mono is placed by the spread. Bound: only channel 0 is read.
@@ -773,7 +777,7 @@ impl Place {
                     out.len()
                 );
                 for (c, o) in out.iter_mut().enumerate() {
-                    *o = if c < src_ch { sample(c) } else { 0.0 };
+                    *o = if c < src_ch { sample(c) } else { F::ZERO };
                 }
                 return;
             }
@@ -786,7 +790,7 @@ impl Place {
             "a wave of {src_ch} channels read with a fold of {:?}",
             fold.src_layout()
         );
-        let mut src = [0.0f32; MAX_WAVE_CHANNELS];
+        let mut src = [F::ZERO; MAX_WAVE_CHANNELS];
         for (c, s) in src.iter_mut().enumerate().take(src_ch) {
             *s = sample(c);
         }
@@ -801,12 +805,12 @@ impl Place {
 ///
 /// Writes every element of `out`. `src_ch` must be non-zero.
 #[inline]
-pub(crate) fn interpolate_taps(
+pub(crate) fn interpolate_taps<F: Float>(
     src_ch: usize,
-    place: &Place,
-    frac: f32,
-    out: &mut [f32],
-    sample: impl Fn(usize, usize) -> f32,
+    place: &Place<F>,
+    frac: F,
+    out: &mut [F],
+    sample: impl Fn(usize, usize) -> F,
 ) {
     // One interpolated sample from channel `c`. Every caller below derives `c`
     // from a bound that is `<= src_ch`.
@@ -835,7 +839,7 @@ mod tests {
             )
             .expect("a placeable wave")
         };
-        super::read_frame(wave, &place, position, out);
+        super::read_frame(wave, &place, SamplePosition(position), out);
     }
 
     /// The `(left, right)` of a two-channel read.
@@ -852,7 +856,10 @@ mod tests {
     #[test]
     fn a_position_a_hair_under_a_frame_reads_that_frame() {
         let below = 5.0 - 1e-12;
-        assert_eq!(tap_indices(100, below), ([4, 5, 6, 7], 0.0));
+        assert_eq!(
+            tap_indices::<f32>(100, SamplePosition(below)),
+            ([4, 5, 6, 7], 0.0)
+        );
         let mut wave = Wave::new(1, SampleRate::SR_48K);
         for i in 0..16 {
             wave.append(Interleaved::new(&[(i as f32 + 1.0) * 0.1234567], wave.layout()).unwrap())
@@ -1141,7 +1148,10 @@ mod tests {
             }
         }
         // A width with no order is the fan.
-        assert_eq!(MonoSpread::to(ChannelLayout::from(5u16)), MonoSpread::FAN);
+        assert_eq!(
+            MonoSpread::<f32>::to(ChannelLayout::from(5u16)),
+            MonoSpread::FAN
+        );
     }
 
     /// Stereo *does* have a channel identity, so it occupies the front pair and
@@ -1213,13 +1223,13 @@ mod tests {
         };
         for width in [1u16, 2, 5, 6, 8] {
             assert_eq!(
-                Place::for_wave(&wave, ChannelLayout::from(width)),
+                Place::<f32>::for_wave(&wave, ChannelLayout::from(width)),
                 Err(PlaceError::Fold(refused)),
                 "into {width}"
             );
         }
         let mono = constant_wave(ChannelTopology::new([Unknown(1)]).unwrap(), &[0.0]);
-        assert!(Place::for_wave(&mono, ChannelLayout::STEREO).is_err());
+        assert!(Place::<f32>::for_wave(&mono, ChannelLayout::STEREO).is_err());
         let wave = Arc::new(wave);
         assert_eq!(
             super::super::MemorySource::with_channels(Arc::clone(&wave), ChannelLayout::STEREO)
@@ -1257,12 +1267,12 @@ mod tests {
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         assert!(!place.is_direct());
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, 4.0, &mut out);
+        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
         // The engine's own order needs no fold.
         let own = constant_wave(ChannelTopology::assumed(ChannelLayout::from(8u16)), &frame);
         assert!(
-            Place::for_wave(&own, ChannelLayout::from(8u16))
+            Place::<f32>::for_wave(&own, ChannelLayout::from(8u16))
                 .unwrap()
                 .is_direct()
         );
@@ -1299,7 +1309,7 @@ mod tests {
         .unwrap();
         let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
         assert!(matches!(
-            Place::for_topology(&twenty, frame),
+            Place::<f32>::for_topology(&twenty, frame),
             Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
         ));
     }
@@ -1317,7 +1327,7 @@ mod tests {
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, 4.0, &mut out);
+        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
         assert!(
             (out[0] - <f32 as tutti_buffers::Float>::MINUS_3_DB).abs() < 1e-6,
             "{out:?}"
@@ -1334,7 +1344,7 @@ mod tests {
         super::read_frame(
             &quad,
             &Place::for_wave(&quad, ChannelLayout::STEREO).unwrap(),
-            4.0,
+            SamplePosition(4.0),
             &mut out,
         );
         let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
@@ -1346,16 +1356,16 @@ mod tests {
     /// frame of eight, a 5.1 file into five.
     #[test]
     fn a_wave_with_no_place_for_its_extra_channels_is_refused() {
-        let ten = Wave::new(10, SampleRate::SR_48K);
+        let ten = Wave::<f32>::new(10, SampleRate::SR_48K);
         assert!(matches!(
-            Place::for_wave(&ten, ChannelLayout::from(8u16)),
+            Place::<f32>::for_wave(&ten, ChannelLayout::from(8u16)),
             Err(PlaceError::Fold(FoldError::Unplaced { channel: 8, .. }))
         ));
         let mut six = Wave::new(6, SampleRate::SR_48K);
         six.append(Interleaved::new(&[0.0; 6], six.layout()).unwrap())
             .unwrap();
         assert!(matches!(
-            Place::for_wave(&six, ChannelLayout::from(5u16)),
+            Place::<f32>::for_wave(&six, ChannelLayout::from(5u16)),
             Err(PlaceError::Fold(FoldError::Unplaced { channel: 5, .. }))
         ));
         let w = Arc::new(six);

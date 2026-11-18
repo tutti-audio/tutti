@@ -9,7 +9,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_buffers::Wave;
+use tutti_buffers::{Float, Wave};
 use tutti_graph::{
     Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
@@ -158,8 +158,8 @@ impl Default for MemorySourceConfig {
 /// change in [`set_loop`](Self::set_loop) — the audio thread drains
 /// the pool's loop command inline. The one exception is
 /// [`set_wave`](Self::set_wave), which is control-thread only.
-pub struct MemorySource {
-    wave: Arc<Wave>,
+pub struct MemorySource<F: Float = f32> {
+    wave: Arc<Wave<F>>,
     position: Param64<SamplePosition>,
 
     /// Defaults to true (auto-play).
@@ -224,7 +224,7 @@ pub struct MemorySource {
 
     /// Where the wave's channels go in a frame of [`channels`](Self::channels):
     /// built from the wave's topology when the source is.
-    channel_place: Place,
+    channel_place: Place<F>,
 
     /// A block's placed positions when this source is a graph node of its
     /// own, sized from `Prepare::max_block` in `prepare` (empty until then,
@@ -234,16 +234,16 @@ pub struct MemorySource {
 
     /// The block read's gather ([`read_placed_lanes`](Self::read_placed_lanes)),
     /// sized beside [`positions`](Self::positions) and empty where they are.
-    gather: Gather,
+    gather: Gather<F>,
 
     /// The lanes a wrap crossfade's tail is read into, one per output
     /// channel, sized beside [`positions`](Self::positions).
     tail: Vec<Lane>,
 }
 
-// Hand-rolled: `wave` is a non-`Debug` `Arc<Wave>`. Print the wave length +
+// Hand-rolled: `wave` is a non-`Debug` `Arc<Wave<F>>`. Print the wave length +
 // scalar params; never borrow the `Wave` samples.
-impl std::fmt::Debug for MemorySource {
+impl<F: Float> std::fmt::Debug for MemorySource<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemorySource")
             .field("wave_frames", &self.wave.len())
@@ -259,7 +259,7 @@ impl std::fmt::Debug for MemorySource {
     }
 }
 
-impl Clone for MemorySource {
+impl<F: Float> Clone for MemorySource<F> {
     fn clone(&self) -> Self {
         Self {
             wave: Arc::clone(&self.wave),
@@ -287,7 +287,7 @@ impl Clone for MemorySource {
     }
 }
 
-impl MemorySource {
+impl<F: Float> MemorySource<F> {
     /// A stereo sampler over `wave`.
     ///
     /// Stays stereo even for a wider wave — see [`channels`](Self::channels).
@@ -296,7 +296,7 @@ impl MemorySource {
     /// # Errors
     ///
     /// As [`with_channels`](Self::with_channels).
-    pub fn new(wave: Arc<Wave>) -> Result<Self, PlaceError> {
+    pub fn new(wave: Arc<Wave<F>>) -> Result<Self, PlaceError> {
         Self::with_channels(wave, ChannelLayout::STEREO)
     }
 
@@ -314,7 +314,7 @@ impl MemorySource {
     /// [`PlaceError`] for a wave with a channel no speaker names (a second
     /// LFE, a wide or high speaker), or one the frame has no place for.
     pub fn with_channels(
-        wave: Arc<Wave>,
+        wave: Arc<Wave<F>>,
         channels: impl Into<ChannelLayout>,
     ) -> Result<Self, PlaceError> {
         let channels = nonempty(channels.into());
@@ -355,7 +355,7 @@ impl MemorySource {
     /// # Errors
     ///
     /// As [`with_channels`](Self::with_channels).
-    pub fn with_config(wave: Arc<Wave>, config: MemorySourceConfig) -> Result<Self, PlaceError> {
+    pub fn with_config(wave: Arc<Wave<F>>, config: MemorySourceConfig) -> Result<Self, PlaceError> {
         let mut unit = Self {
             gain: Param::new(config.gain),
             speed: config.speed,
@@ -377,7 +377,7 @@ impl MemorySource {
     /// # Errors
     ///
     /// As [`with_channels`](Self::with_channels).
-    pub fn placed(wave: Arc<Wave>, window: VoiceWindow) -> Result<Self, PlaceError> {
+    pub fn placed(wave: Arc<Wave<F>>, window: VoiceWindow) -> Result<Self, PlaceError> {
         Self::with_config(
             wave,
             MemorySourceConfig {
@@ -557,7 +557,7 @@ impl MemorySource {
     /// it drops the old wave, and if this source held its last reference that
     /// frees the whole decoded buffer. The audio thread uses
     /// `replace_wave` (crate-private), which hands the old wave back.
-    pub fn set_wave(&mut self, wave: Arc<Wave>) {
+    pub fn set_wave(&mut self, wave: Arc<Wave<F>>) {
         drop(self.replace_wave(wave));
     }
 
@@ -566,7 +566,7 @@ impl MemorySource {
     /// caller owns the returned reference and must release it off the audio
     /// thread (the pool's drain retires it to the control thread).
     #[must_use = "dropping the old wave here frees it on this thread"]
-    pub(crate) fn replace_wave(&mut self, wave: Arc<Wave>) -> Arc<Wave> {
+    pub(crate) fn replace_wave(&mut self, wave: Arc<Wave<F>>) -> Arc<Wave<F>> {
         self.sample_rate = wave.sample_rate();
         let old = std::mem::replace(&mut self.wave, wave);
         self.position.store(SamplePosition::new(0.0));
@@ -641,10 +641,9 @@ impl MemorySource {
     /// channel count need not match `out.len()` —
     /// `read_frame` owns that policy.
     #[inline]
-    pub fn sample_raw_into(&self, position: f64, out: &mut [f32]) {
-        let len = self.wave.len().get() as f64;
-        if position >= len {
-            out.fill(0.0);
+    pub fn sample_raw_into(&self, position: SamplePosition, out: &mut [F]) {
+        if position >= SamplePosition(0.0).advanced_by(self.wave.len()) {
+            out.fill(F::ZERO);
             return;
         }
 
@@ -673,23 +672,23 @@ impl MemorySource {
         &self,
         pos: SamplePosition,
         direction: Direction,
-        out: &mut [f32],
+        out: &mut [F],
     ) {
         let len = self.wave.len().get() as f64;
         match direction {
             Direction::Reverse => {
                 if pos.get() >= len {
-                    out.fill(0.0);
+                    out.fill(F::ZERO);
                     return;
                 }
-                self.sample_raw_into((len - 1.0 - pos.get()).max(0.0), out);
+                self.sample_raw_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), out);
             }
             Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
                 Some(span) => {
                     let (p, looped) = span.place(pos.get());
-                    self.read_looped_raw_into(&span, p, looped, out);
+                    self.read_looped_raw_into(&span, SamplePosition(p), looped, out);
                 }
-                None => self.sample_raw_into(pos.get(), out),
+                None => self.sample_raw_into(pos, out),
             },
         }
     }
@@ -697,9 +696,15 @@ impl MemorySource {
     /// One un-gained frame of this wave on `span`, at `p` placed on it: silent
     /// at and past the file's end, as an unlooped read is.
     #[inline]
-    fn read_looped_raw_into(&self, span: &LoopSpan, p: f64, looped: bool, out: &mut [f32]) {
-        if p >= self.wave.len().get() as f64 {
-            out.fill(0.0);
+    fn read_looped_raw_into(
+        &self,
+        span: &LoopSpan,
+        p: SamplePosition,
+        looped: bool,
+        out: &mut [F],
+    ) {
+        if p >= SamplePosition(0.0).advanced_by(self.wave.len()) {
+            out.fill(F::ZERO);
             return;
         }
         read_looped_frame(&self.wave, &self.channel_place, span, p, looped, out);
@@ -797,13 +802,13 @@ impl MemorySource {
     /// at a time through `read_placed_into`.
     ///
     /// [`read_frame`]: super::interp::read_frame
-    pub(crate) fn read_placed_lanes<L: AsMut<[f32]>>(
+    pub(crate) fn read_placed_lanes<L: AsMut<[F]>>(
         &self,
         positions: &[Option<SamplePosition>],
         direction: Direction,
         lanes: &mut [L],
         n: usize,
-        gather: &mut Gather,
+        gather: &mut Gather<F>,
     ) {
         let frames = positions.len();
         if frames == 0 {
@@ -817,11 +822,11 @@ impl MemorySource {
             && len <= u32::MAX as usize
             && (src_ch == 1 || (src_ch == n && self.channel_place.is_direct()));
         if !along_time {
-            let mut frame = [0.0f32; MAX_CHANNELS];
+            let mut frame = [F::ZERO; MAX_CHANNELS];
             for (i, pos) in positions.iter().enumerate() {
                 match pos {
                     Some(pos) => self.read_placed_into(*pos, direction, &mut frame[..n]),
-                    None => frame[..n].fill(0.0),
+                    None => frame[..n].fill(F::ZERO),
                 }
                 for (lane, &s) in lanes.iter_mut().zip(&frame[..n]) {
                     lane.as_mut()[i] = s;
@@ -867,12 +872,12 @@ impl MemorySource {
             });
             (index[i], frac[i], live[i]) = match at {
                 Some(at) => {
-                    let (idx, f) = split_position(at);
+                    let (idx, f) = split_position(SamplePosition(at));
                     // `idx` ≤ `len` (a fraction rounding up to the next
                     // frame), and `len` fits a `u32` (above).
                     (idx as u32, f, true)
                 }
-                None => (0, 0.0, false),
+                None => (0, F::ZERO, false),
             };
         }
         let (index, frac, live) = (&*index, &*frac, &*live);
@@ -916,7 +921,7 @@ impl MemorySource {
                             *s = if on {
                                 wave[tap(idx as usize, last, t)]
                             } else {
-                                0.0
+                                F::ZERO
                             };
                         }
                     }
@@ -929,7 +934,7 @@ impl MemorySource {
                         let (idx, looped) = match pos {
                             Some(pos) if live[i] => (index[i] as usize, span.wrapped(pos.get())),
                             _ => {
-                                (y0[i], y1[i], y2[i], y3[i]) = (0.0, 0.0, 0.0, 0.0);
+                                (y0[i], y1[i], y2[i], y3[i]) = (F::ZERO, F::ZERO, F::ZERO, F::ZERO);
                                 continue;
                             }
                         };
@@ -971,7 +976,7 @@ impl MemorySource {
     /// applied. One scalar gain across every channel — per-channel level is the
     /// mixer strip's job, not the reader's.
     #[inline]
-    pub fn sample_into(&self, position: f64, out: &mut [f32]) {
+    pub fn sample_into(&self, position: SamplePosition, out: &mut [F]) {
         self.sample_raw_into(position, out);
         let gain = self.block_gain();
         for s in out.iter_mut() {
@@ -1026,9 +1031,9 @@ impl MemorySource {
     /// and a partial write can never leave a stale channel from the previous
     /// block in a trailing slot.
     #[inline]
-    fn free_frame_into(&mut self, out: &mut [f32]) {
+    fn free_frame_into(&mut self, out: &mut [F]) {
         if !self.playing.load(Ordering::Relaxed) {
-            out.fill(0.0);
+            out.fill(F::ZERO);
             return;
         }
 
@@ -1038,10 +1043,10 @@ impl MemorySource {
         match &span {
             Some(span) => {
                 let looped = self.looped.load(Ordering::Relaxed);
-                self.read_looped_raw_into(span, pos, looped, out);
+                self.read_looped_raw_into(span, SamplePosition(pos), looped, out);
                 self.apply_gain(out);
             }
-            None => self.sample_into(pos, out),
+            None => self.sample_into(SamplePosition(pos), out),
         }
 
         // One output sample's worth of source material.
@@ -1089,15 +1094,15 @@ impl MemorySource {
     /// head alone.
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    pub(crate) fn render_placed<H: AsMut<[f32]>, T: AsMut<[f32]>>(
+    pub(crate) fn render_placed<H: AsMut<[F]>, T: AsMut<[F]>>(
         &self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
         direction: Direction,
-        gain: f32,
+        gain: F,
         n: usize,
         positions: &mut [Option<SamplePosition>],
-        gather: &mut Gather,
+        gather: &mut Gather<F>,
         head: &mut [H],
         tail: &mut [T],
     ) -> Piece {
@@ -1117,7 +1122,7 @@ impl MemorySource {
         }
         let span = self.placed_tail(clock, range.clone(), positions);
         let first = span.as_ref().map_or(0, |s| s.start);
-        let mut views: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
+        let mut views: [&mut [F]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (view, lane) in views.iter_mut().zip(tail.iter_mut()) {
             *view = lane
                 .as_mut()
@@ -1157,18 +1162,18 @@ impl MemorySource {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
-        gather: &mut Gather,
-        tail: &mut [Lane],
-        out: &mut [&mut [f32]],
+        gather: &mut Gather<F>,
+        tail: &mut [Lane<F>],
+        out: &mut [&mut [F]],
     ) {
         let n = out.len().min(MAX_CHANNELS);
-        let mut frame = [0.0f32; MAX_CHANNELS];
+        let mut frame = [F::ZERO; MAX_CHANNELS];
         let base = range.start;
         if self.placement.is_some() {
             let frames = range.len();
             let positions = &mut positions[..frames];
             if gather.frames() >= frames {
-                let mut lanes: [&mut [f32]; MAX_CHANNELS] =
+                let mut lanes: [&mut [F]; MAX_CHANNELS] =
                     std::array::from_fn(|_| Default::default());
                 for (lane, ch) in lanes.iter_mut().zip(out.iter_mut()) {
                     *lane = &mut ch[range.clone()];
@@ -1189,7 +1194,7 @@ impl MemorySource {
                 if piece == Piece::Silent {
                     // Every frame is outside the window: silence, ungained.
                     for lane in lanes.iter_mut() {
-                        lane.fill(0.0);
+                        lane.fill(F::ZERO);
                     }
                 }
                 return;
@@ -1198,13 +1203,13 @@ impl MemorySource {
             // time, with no wrap crossfade.
             if !self.placed_positions(clock, range.clone(), ReadRate::UNITY, positions) {
                 for lane in out.iter_mut().take(n) {
-                    lane[range.clone()].fill(0.0);
+                    lane[range.clone()].fill(F::ZERO);
                 }
                 return;
             }
             for (k, pos) in positions.iter().enumerate() {
                 match pos {
-                    None => frame[..n].fill(0.0),
+                    None => frame[..n].fill(F::ZERO),
                     Some(pos) => {
                         self.read_placed_into(*pos, Direction::Forward, &mut frame[..n]);
                         self.apply_gain(&mut frame[..n]);
@@ -1227,13 +1232,15 @@ impl MemorySource {
     /// The gain this block renders at: the driven port's, else the cell's.
     /// A NaN or infinite one is silence ([`audible`]).
     #[inline]
-    fn block_gain(&self) -> f32 {
-        audible(self.driven_gain.unwrap_or_else(|| self.gain.load()).get())
+    fn block_gain(&self) -> F {
+        audible(F::from_f32(
+            self.driven_gain.unwrap_or_else(|| self.gain.load()).get(),
+        ))
     }
 
     /// Scale a frame by this unit's gain.
     #[inline]
-    fn apply_gain(&self, out: &mut [f32]) {
+    fn apply_gain(&self, out: &mut [F]) {
         let gain = self.block_gain();
         for s in out.iter_mut() {
             *s *= gain;
@@ -1255,13 +1262,13 @@ impl MemorySource {
 /// is not ramped, and the join steps as the clip's first pass does. Both
 /// sounding at full level, correlated, the sum peaks at the two together.
 #[allow(clippy::too_many_arguments)]
-fn crossfade_wraps<H: AsMut<[f32]>>(
+fn crossfade_wraps<F: Float, H: AsMut<[F]>>(
     clock: &BlockClock<'_>,
     range: Range<usize>,
     gate: Gate,
     first: usize,
     positions: &[Option<SamplePosition>],
-    tail: &[&mut [f32]],
+    tail: &[&mut [F]],
     head: &mut [H],
     n: usize,
 ) -> bool {
@@ -1278,11 +1285,16 @@ fn crossfade_wraps<H: AsMut<[f32]>>(
         for at in run.start..end {
             let i = at - base;
             let (g_out, g_in) = FadeLaw::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
-            let g_in = if own_start { 1.0 } else { g_in };
+            let (g_out, g_in) = (F::from_f32(g_out), F::from_f32(g_in));
+            let g_in = if own_start { F::ONE } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
             let sounding = positions[i].is_some();
             for (h, t) in head.iter_mut().zip(tail).take(n) {
-                let tail = if sounding { t[i - first] * g_out } else { 0.0 };
+                let tail = if sounding {
+                    t[i - first] * g_out
+                } else {
+                    F::ZERO
+                };
                 let h = &mut h.as_mut()[i];
                 *h = *h * g_in + tail;
             }
@@ -1311,7 +1323,7 @@ pub(crate) fn wrap_into_loop(pos: f64, loop_start: f64, loop_end: f64) -> f64 {
     loop_start + (pos - loop_start).rem_euclid(len)
 }
 
-impl MemorySource {
+impl<F: Float> MemorySource<F> {
     /// Run at `sample_rate`: the conversion from the wave's rate is derived
     /// from it. What [`Node::prepare`] does; allocation-free.
     pub(crate) fn set_render_rate(&mut self, sample_rate: SampleRate) {
@@ -1325,7 +1337,7 @@ impl MemorySource {
     /// reaches this, so the prepared render never initialises the array.
     #[cold]
     #[inline(never)]
-    fn render_unprepared(&mut self, clock: &BlockClock<'_>, frames: usize, out: &mut [&mut [f32]]) {
+    fn render_unprepared(&mut self, clock: &BlockClock<'_>, frames: usize, out: &mut [&mut [F]]) {
         let mut positions = [None; UNPREPARED_FRAMES];
         // Unsized: the frame-at-a-time read.
         let mut gather = Gather::empty();
@@ -1354,7 +1366,7 @@ impl MemorySource {
     }
 }
 
-impl MemorySource {
+impl<F: Float> MemorySource<F> {
     /// This source reading the project's tempo map through `tempo`
     /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
     /// Over a map whose tempo changes, how long a placed voice has played is
@@ -1369,7 +1381,7 @@ impl MemorySource {
     }
 }
 
-impl Node for MemorySource {
+impl Node for MemorySource<f32> {
     /// No inputs, [`channels`](Self::channels) outputs; a source, never
     /// skipped. Its tail is `ring_out`: none when placed.
     fn shape(&self) -> Shape {
@@ -1463,11 +1475,11 @@ impl Node for MemorySource {
 }
 
 // Its gain, as `UnitParam::Volume`.
-tutti_graph::declare_params!([] MemorySource, n {
+tutti_graph::declare_params!([] MemorySource<f32>, n {
     Volume => Amplitude = &n.gain,
 });
 
-impl ParamNode for MemorySource {
+impl ParamNode for MemorySource<f32> {
     /// Its gain, as [`UnitParam::Volume`].
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -1483,7 +1495,7 @@ impl ParamNode for MemorySource {
     }
 }
 
-impl IntoNode for MemorySource {
+impl IntoNode for MemorySource<f32> {
     type Controls = ParamSet;
 
     fn into_parts(self) -> NodeParts<ParamSet> {

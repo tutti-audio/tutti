@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use tutti_buffers::Planes;
+use tutti_buffers::{Float, Planes};
 
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition, contract};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
@@ -134,27 +134,27 @@ pub fn prepared<N: Node>(node: N, rate: impl Into<SampleRate>, max_block: usize)
 
 /// One block of `frames` of `node` (no inputs) under `t` at `rate`; the
 /// transport is not moved. One `Vec` per output channel.
-pub fn block(
-    node: &mut dyn Node,
+pub fn block<F: Float>(
+    node: &mut dyn Node<F>,
     t: &MockTransport,
     rate: impl Into<SampleRate>,
     frames: usize,
-) -> Vec<Vec<f32>> {
+) -> Vec<Vec<F>> {
     let env = t.env(frames, rate);
     contract::drive_input(node, &env, Planes::default(), &[], &[]).audio
 }
 
 /// `frames` of `node` in blocks of `block_len`, the transport moved after
 /// each, as a host renders; planar.
-pub fn play(
-    node: &mut dyn Node,
+pub fn play<F: Float>(
+    node: &mut dyn Node<F>,
     t: &MockTransport,
     rate: impl Into<SampleRate> + Copy,
     frames: usize,
     block_len: usize,
-) -> Vec<Vec<f32>> {
+) -> Vec<Vec<F>> {
     let rate: SampleRate = rate.into();
-    let mut out: Vec<Vec<f32>> = Vec::new();
+    let mut out: Vec<Vec<F>> = Vec::new();
     let mut done = 0;
     while done < frames {
         let n = block_len.min(frames - done);

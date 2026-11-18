@@ -5,10 +5,12 @@
 //! spread over several host blocks; [`FftScratch`] is the reusable plan and
 //! buffers the analysis kernels thread through.
 
+mod correlator;
 mod real;
 mod scratch;
 mod staged;
 
+pub use correlator::Correlator;
 pub use real::{Complex, Complex32, Complex64, RealFft};
 pub use scratch::FftScratch;
 pub(crate) use staged::StagedRealFft;

@@ -43,10 +43,9 @@ use std::sync::Arc;
 use super::fault::FirstError;
 #[cfg(codec)]
 use tutti_buffers::Source;
-use tutti_buffers::Wave;
-use tutti_units::SamplePosition;
-#[cfg(codec)]
-use tutti_units::Samples;
+use tutti_buffers::{Float, Wave};
+use tutti_types::ChannelLayout;
+use tutti_units::{SamplePosition, Samples};
 
 use super::Loop;
 use super::interp::{
@@ -98,22 +97,25 @@ pub(crate) enum ReadFault {
         message: String,
     },
     #[cfg(codec)]
+    #[error("page at frame {frame}: {message}")]
+    Page { frame: usize, message: String },
+    #[cfg(codec)]
     #[error(transparent)]
     Open(#[from] tutti_codec::DecodeError),
 }
 
 /// The file a forked disk voice plays: the streamer's description of it, and
 /// the file itself, opened on the first read.
-pub(crate) struct OfflineRead {
+pub(crate) struct OfflineRead<F: Float = f32> {
     /// What to play. Shared by clones: it is a description, never written.
-    file: Arc<StreamFile>,
+    file: Arc<StreamFile<F>>,
     /// The loop the stream ran when the fork was taken, as the streamer
     /// applied it (`RingControl`); `Off` for none.
     loop_: Option<Loop>,
     /// The open file. `None` until the first read and after a
     /// [`close`](Self::close); never cloned: a clone opens its own, so no two
     /// renders share a decoder's cursor.
-    open: Option<Open>,
+    open: Option<Open<F>>,
     /// The file's length in frames, once it has been opened: what lets a
     /// closed reader know a position past the end without opening again.
     len: Option<usize>,
@@ -124,7 +126,7 @@ pub(crate) struct OfflineRead {
     failed: bool,
 }
 
-impl Clone for OfflineRead {
+impl<F: Float> Clone for OfflineRead<F> {
     fn clone(&self) -> Self {
         Self {
             file: Arc::clone(&self.file),
@@ -137,7 +139,7 @@ impl Clone for OfflineRead {
     }
 }
 
-impl std::fmt::Debug for OfflineRead {
+impl<F: Float> std::fmt::Debug for OfflineRead<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OfflineRead")
             .field("file", &self.file)
@@ -147,10 +149,14 @@ impl std::fmt::Debug for OfflineRead {
     }
 }
 
-impl OfflineRead {
+impl<F: Float> OfflineRead<F> {
     /// A reader for `file` looped as `loop_`, latching its failures into
     /// `fault`. Opens nothing yet.
-    pub(crate) fn new(file: Arc<StreamFile>, loop_: Option<Loop>, fault: Arc<FirstError>) -> Self {
+    pub(crate) fn new(
+        file: Arc<StreamFile<F>>,
+        loop_: Option<Loop>,
+        fault: Arc<FirstError>,
+    ) -> Self {
         Self {
             file,
             loop_,
@@ -196,12 +202,12 @@ impl OfflineRead {
         &mut self,
         pos: SamplePosition,
         direction: Direction,
-        place: &Place,
-        out: &mut [f32],
+        place: &Place<F>,
+        out: &mut [F],
     ) {
         // A position that is not a number is nowhere in the file.
         if !pos.get().is_finite() {
-            out.fill(0.0);
+            out.fill(F::ZERO);
             return;
         }
         // Past what this direction can play, known without opening the file.
@@ -214,12 +220,12 @@ impl OfflineRead {
             && pos.get() >= len as f64
         {
             self.close();
-            out.fill(0.0);
+            out.fill(F::ZERO);
             return;
         }
         let setting = self.loop_;
         let Some(open) = self.open() else {
-            out.fill(0.0);
+            out.fill(F::ZERO);
             return;
         };
         let span = LoopSpan::from_setting(setting, open.len());
@@ -227,16 +233,16 @@ impl OfflineRead {
         match (direction, span) {
             (Direction::Reverse, _) => {
                 if pos.get() >= len {
-                    out.fill(0.0);
+                    out.fill(F::ZERO);
                     return;
                 }
-                open.read_into((len - 1.0 - pos.get()).max(0.0), place, out);
+                open.read_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), place, out);
             }
             (Direction::Forward, Some(span)) => {
                 let (p, looped) = span.place(pos.get());
-                open.read_looped_into(&span, p, looped, place, out);
+                open.read_looped_into(&span, SamplePosition(p), looped, place, out);
             }
-            (Direction::Forward, None) => open.read_into(pos.get(), place, out),
+            (Direction::Forward, None) => open.read_into(pos, place, out),
         }
     }
 
@@ -266,7 +272,7 @@ impl OfflineRead {
     /// The open file, opening it on first use. `None` when it cannot be opened
     /// (moved, deleted, no codec for it): the voice renders silence, and the
     /// failure is latched.
-    fn open(&mut self) -> Option<&mut Open> {
+    fn open(&mut self) -> Option<&mut Open<F>> {
         if self.open.is_none() && !self.failed {
             match Open::from_file(&self.file, Arc::clone(&self.fault)) {
                 Ok(open) => {
@@ -288,19 +294,19 @@ impl OfflineRead {
 
 /// An opened file: decoded whole already (the streamer's cached wave, or a
 /// file that cannot seek), or paged in through a decoder.
-enum Open {
-    Resident(Arc<Wave>),
+enum Open<F: Float = f32> {
+    Resident(Arc<Wave<F>>),
     /// Boxed: a decoder and two pages' bookkeeping, against an `Arc`. With
     /// no codec compiled in nothing builds one (`open_path` fails first).
     #[cfg_attr(not(codec), allow(dead_code))]
-    Paged(Box<Pages>),
+    Paged(Box<Pages<F>>),
 }
 
-impl Open {
+impl<F: Float> Open<F> {
     /// Open `file`: the streamer's decoded copy when its cache holds one, else
     /// the file by its path — header only when it can seek, a whole decode
     /// when it cannot.
-    fn from_file(file: &StreamFile, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
+    fn from_file(file: &StreamFile<F>, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         if let Some(wave) = file.resident() {
             return Ok(Self::Resident(Arc::clone(wave)));
         }
@@ -308,15 +314,17 @@ impl Open {
     }
 
     #[cfg(codec)]
-    fn open_path(file: &StreamFile, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
-        let decoder = tutti_codec::FileIn::<f32>::open(file.path())?;
-        let channels = usize::from(decoder.layout().count());
+    fn open_path(file: &StreamFile<F>, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
+        let decoder = tutti_codec::FileIn::<F>::open(file.path())?;
+        let decoder_layout = decoder.layout();
+        let channels = usize::from(decoder_layout.count());
         match decoder.total_frames().filter(|_| decoder.seekable()) {
             Some(len) => Ok(Self::Paged(Box::new(Pages {
                 decoder,
                 path: file.path().to_path_buf(),
                 fault,
                 channels,
+                layout: decoder_layout,
                 len: len.get(),
                 slots: Default::default(),
                 recent: 0,
@@ -326,7 +334,7 @@ impl Open {
             // wave: no second, interleaved copy.
             None => {
                 drop(decoder);
-                tutti_codec::read_wave::<f32>(file.path())
+                tutti_codec::read_wave::<F>(file.path())
                     .map(|wave| Self::Resident(Arc::new(wave)))
                     .map_err(ReadFault::from)
             }
@@ -335,7 +343,7 @@ impl Open {
 
     /// No codec compiled in: nothing can be decoded, here or by the streamer.
     #[cfg(not(codec))]
-    fn open_path(_file: &StreamFile, _fault: Arc<FirstError>) -> Result<Self, ReadFault> {
+    fn open_path(_file: &StreamFile<F>, _fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         Err(ReadFault::NoCodec)
     }
 
@@ -348,9 +356,9 @@ impl Open {
 
     /// Interpolate position `p` into `out` as `read_frame` would from the
     /// whole file resident: silence at and past the end.
-    fn read_into(&mut self, p: f64, place: &Place, out: &mut [f32]) {
-        if p >= self.len() as f64 {
-            out.fill(0.0);
+    fn read_into(&mut self, p: SamplePosition, place: &Place<F>, out: &mut [F]) {
+        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
+            out.fill(F::ZERO);
             return;
         }
         match self {
@@ -366,13 +374,13 @@ impl Open {
     fn read_looped_into(
         &mut self,
         span: &LoopSpan,
-        p: f64,
+        p: SamplePosition,
         looped: bool,
-        place: &Place,
-        out: &mut [f32],
+        place: &Place<F>,
+        out: &mut [F],
     ) {
-        if p >= self.len() as f64 {
-            out.fill(0.0);
+        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
+            out.fill(F::ZERO);
             return;
         }
         match self {
@@ -395,16 +403,18 @@ impl Open {
 /// read decodes a page per page of frames, not one per few frames.
 // With no codec compiled in nothing builds one (`open_path` fails first).
 #[cfg_attr(not(codec), allow(dead_code))]
-struct Pages {
+struct Pages<F: Float = f32> {
     #[cfg(codec)]
-    decoder: tutti_codec::FileIn,
+    decoder: tutti_codec::FileIn<F>,
     path: PathBuf,
     fault: Arc<FirstError>,
     /// The file's width. Every page is interleaved at it.
     channels: usize,
+    /// `channels` as the layout a page's frames are counted in.
+    layout: ChannelLayout,
     /// The file's length in frames.
     len: usize,
-    slots: [Page; 2],
+    slots: [Page<F>; 2],
     /// The slot read last; a miss replaces the other one.
     recent: usize,
     /// Pages decoded so far. What a test bounds the paging by.
@@ -413,26 +423,26 @@ struct Pages {
 
 /// A run of decoded frames, `data` interleaved at the file's width.
 #[derive(Default)]
-struct Page {
+struct Page<F> {
     start: usize,
     frames: usize,
-    data: Vec<f32>,
+    data: Vec<F>,
 }
 
-impl Page {
+impl<F> Page<F> {
     fn holds(&self, frame: usize) -> bool {
         frame >= self.start && frame < self.start + self.frames
     }
 }
 
-impl Pages {
+impl<F: Float> Pages<F> {
     /// Interpolate position `p` (`< len`) into `out`.
-    fn read_into(&mut self, p: f64, place: &Place, out: &mut [f32]) {
+    fn read_into(&mut self, p: SamplePosition, place: &Place<F>, out: &mut [F]) {
         // The file's width: the placement reads all of it (a file wider than
         // a frame is folded, or refused when the voice is built).
         let ch = self.channels.min(MAX_WAVE_CHANNELS);
         let (taps, frac) = tap_indices(self.len, p);
-        let mut frames = [[0.0f32; MAX_WAVE_CHANNELS]; 4];
+        let mut frames = [[F::ZERO; MAX_WAVE_CHANNELS]; 4];
         for (frame, &at) in frames.iter_mut().zip(taps.iter()) {
             frame[..ch].copy_from_slice(&self.frame(at)[..ch]);
         }
@@ -445,14 +455,14 @@ impl Pages {
     fn read_looped_into(
         &mut self,
         span: &LoopSpan,
-        p: f64,
+        p: SamplePosition,
         looped: bool,
-        place: &Place,
-        out: &mut [f32],
+        place: &Place<F>,
+        out: &mut [F],
     ) {
         let ch = self.channels.min(MAX_WAVE_CHANNELS);
         let (taps, frac) = span.taps(self.len, p, looped);
-        let mut frames = [[0.0f32; MAX_WAVE_CHANNELS]; 4];
+        let mut frames = [[F::ZERO; MAX_WAVE_CHANNELS]; 4];
         for (frame, tap) in frames.iter_mut().zip(taps.iter()) {
             frame[..ch].copy_from_slice(&self.frame(tap.frame)[..ch]);
             if let Some((lead, t)) = tap.fade {
@@ -467,7 +477,7 @@ impl Pages {
 
     /// Frame `at` (`< len`), interleaved at the file's width, paging it in if
     /// neither resident page holds it.
-    fn frame(&mut self, at: usize) -> &[f32] {
+    fn frame(&mut self, at: usize) -> &[F] {
         let slot = match self.slots.iter().position(|page| page.holds(at)) {
             Some(slot) => slot,
             None => {
@@ -492,7 +502,6 @@ impl Pages {
     /// silent and latches the failure; a decode that comes up short (a
     /// truncated file) leaves the rest silent, as the streamer's refill does.
     fn load(&mut self, slot: usize, at: usize, backward: bool) {
-        let ch = self.channels;
         let start = if backward {
             (at + PAGE_LEAD + 1).saturating_sub(PAGE_FRAMES)
         } else {
@@ -504,7 +513,8 @@ impl Pages {
         page.start = start;
         page.frames = frames;
         page.data.clear();
-        page.data.resize(frames * ch, 0.0);
+        page.data
+            .resize(self.layout.interleaved_len(Samples(frames)), F::ZERO);
         #[cfg(codec)]
         {
             let fail = |what: ReadFault| OfflineReadError {
@@ -521,9 +531,16 @@ impl Pages {
                 return;
             }
             // Frames read before a fault stay in the page.
-            let layout = self.decoder.topology().width();
-            let view = tutti_buffers::InterleavedMut::new(&mut page.data, layout)
-                .expect("a page is whole frames of the file's width");
+            let view = match tutti_buffers::InterleavedMut::new(&mut page.data, self.layout) {
+                Ok(view) => view,
+                Err(e) => {
+                    self.fault.latch(fail(ReadFault::Page {
+                        frame: start,
+                        message: e.to_string(),
+                    }));
+                    return;
+                }
+            };
             let _ = self.decoder.fill_sequential_interleaved(view);
             if let Some(e) = self.decoder.error() {
                 self.fault.latch(fail(ReadFault::Decode {
@@ -722,6 +739,106 @@ mod tests {
                     read.read_into(SamplePosition(pos), direction, &Place::FAN, &mut out);
                     assert_eq!(out, [0.0; 2], "{loop_:?} {direction:?} at {pos}");
                 }
+            }
+        }
+    }
+
+    /// A stereo WAV of `frames` frames at 48 kHz in `spec`'s format, frame `i`
+    /// holding `sample(i)` (left, right).
+    fn stereo_file<T: hound::Sample + Copy>(
+        dir: &std::path::Path,
+        spec: hound::WavSpec,
+        frames: usize,
+        sample: impl Fn(usize) -> (T, T),
+    ) -> std::path::PathBuf {
+        let path = dir.join("stereo.wav");
+        let mut w = hound::WavWriter::create(&path, spec).expect("writes");
+        for i in 0..frames {
+            let (l, r) = sample(i);
+            w.write_sample(l).expect("writes");
+            w.write_sample(r).expect("writes");
+        }
+        w.finalize().expect("writes");
+        path
+    }
+
+    /// Every frame of a file of more than a page reads back as the value the
+    /// file holds, in a graph of format `F`: an I24 file holds frame `i` as the
+    /// integer `i - 500` (left) and `-i` (right), which is that over 2^23 as a
+    /// float, exactly, so the pages are exact in either float format.
+    fn assert_i24_pages_exact<F: Float>() {
+        const FRAMES: usize = 3 * PAGE_FRAMES / 2;
+        const SCALE: f64 = 8_388_608.0;
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 24,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = stereo_file(dir.path(), spec, FRAMES, |i| (i as i32 - 500, -(i as i32)));
+        let mut read = OfflineRead::<F>::new(
+            Arc::new(StreamFile::new(path, SampleRate::SR_48K, None)),
+            None,
+            Arc::default(),
+        );
+        let mut out = [F::ZERO; 2];
+        for k in (0..FRAMES).step_by(7).chain([FRAMES - 1]) {
+            read.read_into(
+                SamplePosition(k as f64),
+                Direction::Forward,
+                &Place::FAN,
+                &mut out,
+            );
+            let want = [(k as f64 - 500.0) / SCALE, -(k as f64) / SCALE];
+            assert_eq!(
+                [out[0].to_f64(), out[1].to_f64()],
+                want,
+                "frame {k} of an I24 file"
+            );
+        }
+        assert!(read.page_loads() >= 2, "the file spans more than one page");
+    }
+
+    #[test]
+    fn offline_pages_of_an_i24_file_read_back_the_exact_values_in_f32() {
+        assert_i24_pages_exact::<f32>();
+    }
+
+    #[test]
+    fn offline_pages_of_an_i24_file_read_back_the_exact_values_in_f64() {
+        assert_i24_pages_exact::<f64>();
+    }
+
+    /// A graph of `f64` reading an `f32` file: the frames arrive converted,
+    /// the left and right where the file has them (they differ), both when
+    /// the file is paged and when the streamer holds it resident.
+    #[test]
+    fn an_f64_read_of_an_f32_file_keeps_each_channel_where_the_file_has_it() {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = stereo_file(dir.path(), spec, 16, |i| (i as f32 / 16.0, -0.25f32));
+        let resident = Arc::new(tutti_codec::read_wave::<f64>(&path).expect("decodes"));
+        for wave in [None, Some(resident)] {
+            let mut read = OfflineRead::<f64>::new(
+                Arc::new(StreamFile::new(path.clone(), SampleRate::SR_48K, wave)),
+                None,
+                Arc::default(),
+            );
+            let mut out = [0.0f64; 2];
+            for k in 0..16 {
+                read.read_into(
+                    SamplePosition(k as f64),
+                    Direction::Forward,
+                    &Place::FAN,
+                    &mut out,
+                );
+                assert_eq!(out, [k as f64 / 16.0, -0.25], "frame {k}");
             }
         }
     }

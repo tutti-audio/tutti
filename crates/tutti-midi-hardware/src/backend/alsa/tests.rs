@@ -176,7 +176,7 @@ fn watch_threads() -> usize {
         .filter_map(Result::ok)
         .filter(|t| {
             std::fs::read_to_string(t.path().join("comm"))
-                .is_ok_and(|name| name.trim() == "tutti-devwatch")
+                .is_ok_and(|name| name.trim() == crate::MidiThread::DeviceWatch.name())
         })
         .count()
 }
@@ -489,13 +489,13 @@ impl crate::MidiEndpoints for Panicky {
         _: tutti_midi_device::EndpointId,
         _: crate::InputProducerHandle,
     ) -> crate::Result<Box<dyn crate::InputConnection>> {
-        Err(crate::Error::device("none"))
+        Err(crate::MidiHardwareError::Unsupported("none"))
     }
     fn open_output(
         &self,
         _: tutti_midi_device::EndpointId,
     ) -> crate::Result<Box<dyn crate::DeviceOut>> {
-        Err(crate::Error::device("none"))
+        Err(crate::MidiHardwareError::Unsupported("none"))
     }
 }
 

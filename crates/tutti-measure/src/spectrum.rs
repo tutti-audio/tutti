@@ -69,6 +69,7 @@ use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_nyquist};
 use crate::{Error, Measure, Meter, Result};
+use tutti_dsp::BinIndex;
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
@@ -393,32 +394,20 @@ impl SpectrumPlan {
         Ok(edges)
     }
 
-    /// Time between frames.
-    #[must_use]
-    pub(crate) fn frame_interval(&self) -> Seconds {
-        let hop = self.geometry.hop().get() as f64;
-        Seconds(hop / self.geometry.sample_rate().get())
-    }
-
     /// Whole frames a peak is held for: the hold rounded up to the hop.
     ///
-    /// Worked in `f64` from the integer hop, since the `f32` frame interval
-    /// would turn an exact multiple into one frame too many. The hold itself is
-    /// an `f32` with a relative error of at most 2^-24 (6e-8), so a millionth
-    /// of slack keeps 0.1 s at a hop of 480 samples and 48 kHz at 10 frames.
+    /// Worked in `f64` from the frame interval, since an `f32` one would turn an
+    /// exact multiple into one frame too many. The hold itself is an `f32` with
+    /// a relative error of at most 2^-24 (6e-8), so a millionth of slack keeps
+    /// 0.1 s at a hop of 480 samples and 48 kHz at 10 frames.
     #[must_use]
     pub(crate) fn peak_hold_frames(&self) -> FrameCount {
-        let hop = self.geometry.hop().get() as f64;
-        let frames = self.peak_hold.get().get() * self.geometry.sample_rate().get() / hop;
+        let frames = self.peak_hold.get().get() / self.geometry.frame_interval().get();
         FrameCount((frames * (1.0 - 1e-6)).ceil() as usize)
     }
 
     fn bins(&self) -> usize {
         self.geometry.window().get() / 2 + 1
-    }
-
-    fn bin_width(&self) -> f64 {
-        self.geometry.sample_rate().get() / self.geometry.window().get() as f64
     }
 
     fn check_cells(&self, outputs: usize) -> Result<()> {
@@ -473,11 +462,10 @@ impl SpectrumPlan {
                 max: MAX_BANDS,
             });
         }
-        let width = self.bin_width();
         let bins = self.bins();
         let first: Vec<usize> = edges
             .iter()
-            .map(|&e| ((e / width).ceil() as usize).min(bins))
+            .map(|&e| (self.geometry.bin_of_f64(e).ceil() as usize).min(bins))
             .collect();
         if let Some(band) = first.windows(2).position(|w| w[0] >= w[1]) {
             // A band `w` Hz wide holds a bin once the bin spacing is within `w`.
@@ -557,14 +545,13 @@ impl<S: Sample> SpectrumMeter<S> {
         let outputs = edges.as_ref().map_or(cfg.bins(), |e| e.len() - 1);
         let band_bins = edges.unwrap_or_default();
         let size = cfg.geometry.window().get();
-        let width = cfg.bin_width();
         let frequencies: Vec<Hz> = match cfg.edge_frequencies()? {
             Some(edges) => edges
                 .windows(2)
                 .map(|e| Hz((e[0] * e[1]).sqrt() as f32))
                 .collect(),
             None => (0..cfg.bins())
-                .map(|k| Hz((k as f64 * width) as f32))
+                .map(|k| cfg.geometry.bin_frequency(BinIndex(k)))
                 .collect(),
         };
         let mut spectrum = vec![Complex32::default(); cfg.bins()];
@@ -672,7 +659,7 @@ impl<S: Sample> SpectrumMeter<S> {
             clamp_power(bin.norm_sqr() * if lone { scale / 4.0 } else { scale })
         };
         let smoothing = cfg.smoothing.ballistics();
-        let dt = cfg.frame_interval();
+        let dt = cfg.geometry.frame_interval();
         let first = self.frames == 0;
         // Validated to fit when the state was built.
         let hold = cfg.peak_hold_frames().get() as u32;
@@ -1092,7 +1079,7 @@ mod tests {
         let alpha = f64::from(
             Ballistics::new(tau, tau)
                 .expect("a valid time")
-                .coeff_over(true, plan(&cfg).frame_interval()),
+                .coeff_over(true, plan(&cfg).geometry.frame_interval()),
         );
         let b = picked.len() as f64;
         let rel_sigma = (alpha / (2.0 - alpha) / b).sqrt();
@@ -1132,8 +1119,8 @@ mod tests {
             assert!((at(k) - want).abs() < FFT_TOL, "frame {k}: {}", at(k));
         }
 
-        let step =
-            10.0 * std::f64::consts::E.log10() * plan(&cfg).frame_interval().get() / tau.get();
+        let step = 10.0 * std::f64::consts::E.log10() * plan(&cfg).geometry.frame_interval().get()
+            / tau.get();
         let first_silent = loud_end.div_ceil(hop);
         let mut checked = 0;
         for k in first_silent..frames.len() - 1 {
@@ -1169,7 +1156,7 @@ mod tests {
             .iter()
             .rposition(|&(l, p)| l == p && l > -20.0)
             .unwrap();
-        let dt = plan(&cfg).frame_interval().get();
+        let dt = plan(&cfg).geometry.frame_interval().get();
         let held = plan(&cfg).peak_hold_frames().get();
         assert!(held as f64 * dt >= hold.get() && (held - 1) as f64 * dt < hold.get());
         assert_eq!(held, 24);

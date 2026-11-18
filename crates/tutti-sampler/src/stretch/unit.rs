@@ -5,6 +5,7 @@
 //! geometry expresses both, and [`Unit::input_rate`] tells the caller how fast
 //! to feed it.
 
+use tutti_buffers::{Float, Mono, MonoMut, Sample, convert_mono};
 use tutti_dsp::StftGeometry;
 
 use super::vocoder::Vocoder;
@@ -608,7 +609,7 @@ impl Unit {
     /// Processes one frame: `input` in (one sample per channel; a short frame
     /// fans channel 0 to the rest), `output` out. Allocation-free; safe on the
     /// audio thread.
-    pub fn tick(&mut self, input: &[f32], output: &mut [f32]) {
+    pub fn tick<F: Float>(&mut self, input: &[F], output: &mut [F]) {
         // `input` is the source frame the caller already produced (in-memory index
         // or streaming ring pop). This unit does not own or pull a source.
         //
@@ -617,7 +618,7 @@ impl Unit {
         // past the first.
         // Stride derived once, above the loops.
         let n = self.stride().min(output.len());
-        let src0 = input.first().copied().unwrap_or(0.0);
+        let src0 = input.first().copied().unwrap_or(F::ZERO);
         let src = |c: usize| input.get(c).copied().unwrap_or(src0);
 
         if !self.is_processing() {
@@ -637,7 +638,7 @@ impl Unit {
         while self.intake_debt >= 1.0 {
             self.intake_debt -= 1.0;
             for (c, v) in self.ch.vocoders.iter_mut().enumerate() {
-                v.input.push(&[src(c)]);
+                v.input.push(&[src(c).convert_to::<f32>()]);
                 v.process(analysis_hop, synthesis_hop);
             }
         }
@@ -646,7 +647,7 @@ impl Unit {
         for (c, o) in output.iter_mut().enumerate().take(n) {
             one[0] = 0.0;
             self.ch.vocoders[c].output.drain(&mut one);
-            *o = one[0];
+            *o = one[0].convert_to::<F>();
         }
     }
 
@@ -662,7 +663,7 @@ impl Unit {
     /// # Panics
     ///
     /// If a slice of `input` or `output` holds fewer than `size` frames.
-    pub fn process(&mut self, size: usize, input: &[&[f32]], output: &mut [&mut [f32]]) {
+    pub fn process<F: Float>(&mut self, size: usize, input: &[&[F]], output: &mut [&mut [F]]) {
         // The scratch is fixed at MAX_BUFFER_SIZE so a block can never
         // reallocate it; a longer block is split here rather than clamped,
         // which would leave the tail of `output` unwritten.
@@ -676,7 +677,13 @@ impl Unit {
 
     /// `process` for frames `at..at + size` of each slice, with `size` at
     /// most the scratch capacity (a larger one panics on the slice).
-    fn process_run(&mut self, at: usize, size: usize, input: &[&[f32]], output: &mut [&mut [f32]]) {
+    fn process_run<F: Float>(
+        &mut self,
+        at: usize,
+        size: usize,
+        input: &[&[F]],
+        output: &mut [&mut [F]],
+    ) {
         // One scratch pair per channel (not one flat strided buffer): the
         // vocoder API is per-channel `push`/`pop` over a contiguous run of
         // samples, so channel-major is what it wants. A frame-major buffer
@@ -691,14 +698,14 @@ impl Unit {
             // Fewer input channels than vocoders: mirror `tick`'s
             // fan-from-channel-0 rather than emitting silence.
             let src_ch = if c < in_ch { c } else { 0 };
-            s[..size].copy_from_slice(&input[src_ch][frames.clone()]);
+            convert_into(&input[src_ch][frames.clone()], &mut s[..size]);
         }
 
         let out_ch = output.len().min(channels);
 
         if !self.is_processing() {
             for (lane, scratch) in output[..out_ch].iter_mut().zip(&self.ch.scratch_in) {
-                lane[frames.clone()].copy_from_slice(&scratch[..size]);
+                convert_into(&scratch[..size], &mut lane[frames.clone()]);
             }
             return;
         }
@@ -725,13 +732,22 @@ impl Unit {
         for c in 0..channels {
             let out = &mut self.ch.scratch_out[c][..size];
             out.fill(0.0);
-            let count = self.ch.vocoders[c].output.drain(out);
+            self.ch.vocoders[c].output.drain(out);
             let Some(lane) = output[..out_ch].get_mut(c) else {
                 continue;
             };
-            for (i, (l, &s)) in lane[frames.clone()].iter_mut().zip(out.iter()).enumerate() {
-                *l = if i < count { s } else { 0.0 };
-            }
+            // `out` was cleared, so it is zero past what the vocoder had.
+            convert_into(out, &mut lane[frames.clone()]);
         }
     }
+}
+
+/// `dst` as `src` in `dst`'s format, the two one length by construction.
+#[inline]
+fn convert_into<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
+    let done = convert_mono(Mono::new(src), MonoMut::new(dst));
+    debug_assert!(
+        done.is_ok(),
+        "a block and its scratch are one length: {done:?}"
+    );
 }

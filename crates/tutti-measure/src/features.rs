@@ -249,7 +249,7 @@ mod tests {
         let width = RATE as f32 / size as f32;
         let row = {
             let mut out = vec![tutti_dsp::Complex32::default(); size / 2 + 1];
-            fft.forward(tutti_buffers::Mono::new(&x), &vec![1.0; size], &mut out);
+            fft.forward_unwindowed(tutti_buffers::Mono::new(&x), &mut out);
             out.iter().map(|b| b.norm()).collect::<Vec<_>>()
         };
         let r = spectral_rolloff(&row, Hz(width), 0.99);

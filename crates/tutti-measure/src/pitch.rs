@@ -45,10 +45,11 @@ impl PitchResult {
 use tutti_units::{Confidence, Hz};
 
 use tutti_buffers::{Mono, MonoMut};
-use tutti_dsp::RealFft;
+use tutti_dsp::Correlator;
+use tutti_dsp::FftScratch;
+use tutti_dsp::parabolic_peak;
 
 use crate::yin::YinPlan;
-use tutti_dsp::Complex32;
 
 /// YIN pitch detector (de Cheveigné & Kawahara, 2002).
 ///
@@ -60,17 +61,11 @@ pub(crate) struct PitchDetector {
     cfg: YinPlan,
     difference: Vec<f32>,
     cumulative_mean: Vec<f32>,
-    fft: RealFft,
-    /// The zero-padded real analysis window `x[0..W]`.
-    time_a: Vec<f32>,
-    /// The zero-padded real signal `x[0..W+max_period]`; then, after the
-    /// inverse transform, the cross-correlation.
-    time_b: Vec<f32>,
-    /// The `fft_size / 2 + 1` bins of `time_a`.
-    fft_a: Vec<Complex32>,
-    /// The bins of `time_b`; then the cross-power spectrum.
-    fft_buffer: Vec<Complex32>,
-    fft_scratch: Vec<Complex32>,
+    fft: FftScratch,
+    correlator: Correlator,
+    /// The circular cross-correlation `r(τ) = Σ_j x[j]*x[j+τ]`, `fft_size`
+    /// points.
+    correlation: Vec<f32>,
     /// Prefix sums of the squared input, for the windowed energies.
     cum_sq: Vec<f64>,
 }
@@ -79,23 +74,25 @@ impl PitchDetector {
     pub fn new(cfg: YinPlan) -> Self {
         let max_period = cfg.max_period().get();
         let fft_size = (max_period * 2).next_power_of_two();
-        let fft = RealFft::new(fft_size);
-        let bins = fft.bins();
-        let fft_scratch = fft.new_scratch();
-
-        Self {
+        let mut detector = Self {
             cfg,
             difference: vec![0.0; max_period + 1],
             cumulative_mean: vec![0.0; max_period + 1],
-            fft,
-            time_a: vec![0.0; fft_size],
-            time_b: vec![0.0; fft_size],
-            fft_a: vec![Complex32::new(0.0, 0.0); bins],
-            fft_buffer: vec![Complex32::new(0.0, 0.0); bins],
-            fft_scratch,
+            fft: FftScratch::new(),
+            correlator: Correlator::with_capacity(fft_size),
+            correlation: vec![0.0; fft_size],
             // `usable` is at most `2 * max_period` (see `compute_difference`).
             cum_sq: vec![0.0; 2 * max_period + 1],
-        }
+        };
+        // Plans the transform, so a detect call allocates nothing.
+        detector.correlator.correlate(
+            Mono::new(&[]),
+            Mono::new(&[]),
+            &mut detector.fft,
+            |_| {},
+            MonoMut::new(&mut detector.correlation),
+        );
+        detector
     }
 
     /// Needs at least `buffer_size()` samples.
@@ -142,14 +139,10 @@ impl PitchDetector {
     /// autocorrelation taken by FFT via Wiener-Khinchin:
     /// `r(τ) = IFFT(|FFT(x)|²)`.
     ///
-    /// `r(τ) = Σ_{j=0}^{W-1} x[j]*x[j+τ]` is the cross-correlation of `x[0..W]`
-    /// with `x[0..W+max_period]`, computed in three steps:
-    /// 1. FFT of `x[0..W]` zero-padded to `fft_size`
-    /// 2. FFT of `x[0..W+max_period]` zero-padded to `fft_size`
-    /// 3. `r = IFFT(conj(FFT_a) * FFT_b)`
+    /// `r(τ) = Σ_{j=0}^{W-1} x[j]*x[j+τ]` is the cross-correlation of
+    /// `x[0..W+max_period]` against `x[0..W]`, taken by the [`Correlator`].
     fn compute_difference(&mut self, samples: &[f32], max_period: usize) {
         let window = max_period;
-        let fft_size = self.time_b.len();
         let usable = samples.len().min(window + max_period);
 
         // Cumulative squared energy for running window sums
@@ -169,50 +162,23 @@ impl PitchDetector {
             }
         };
 
-        // Signal a = x[0..W] zero-padded.
+        // r(τ) = Σ_j a[j]*b[j+τ] with a = x[0..W] and b = x[0..W+max_period]:
+        // `b` against `a`. The transform holds `2 * max_period` points, so the
+        // lags `0..=max_period` read here are free of alias.
         let a_len = window.min(usable);
-        let (head, tail) = self.time_a.split_at_mut(a_len);
-        head.copy_from_slice(&samples[..a_len]);
-        tail.fill(0.0);
-
-        // Signal b = x[0..W+max_period] zero-padded.
-        let (head, tail) = self.time_b.split_at_mut(usable);
-        head.copy_from_slice(&samples[..usable]);
-        tail.fill(0.0);
-
-        self.fft.forward(
-            Mono::new(&self.time_a),
-            &mut self.fft_a,
-            &mut self.fft_scratch,
-        );
-        self.fft.forward(
-            Mono::new(&self.time_b),
-            &mut self.fft_buffer,
-            &mut self.fft_scratch,
+        self.correlator.correlate(
+            Mono::new(&samples[..usable]),
+            Mono::new(&samples[..a_len]),
+            &mut self.fft,
+            |_| {},
+            MonoMut::new(&mut self.correlation),
         );
 
-        // Cross-power spectrum: conj(A) * B, over the non-redundant bins.
-        for (a, buf) in self.fft_a.iter().zip(self.fft_buffer.iter_mut()) {
-            *buf = a.conj() * *buf;
-        }
-
-        // Inverse FFT -> cross-correlation. The product of two real signals'
-        // spectra has real DC and Nyquist bins, so nothing is dropped. A
-        // non-finite sample makes those imaginary parts NaN: the inverse
-        // ignores them and still writes the output. The estimate is then
-        // unvoiced, as the NaNs fail every threshold comparison.
-        self.fft.inverse(
-            &mut self.fft_buffer,
-            MonoMut::new(&mut self.time_b),
-            &mut self.fft_scratch,
-        );
-
-        let inv_n = 1.0 / fft_size as f64;
         self.difference[0] = 0.0;
 
         let e0 = energy(0, window);
         for tau in 1..=max_period {
-            let autocorr = (self.time_b[tau] as f64) * inv_n;
+            let autocorr = f64::from(self.correlation[tau]);
             let e_tau = energy(tau, window);
             self.difference[tau] = (e0 + e_tau - 2.0 * autocorr).max(0.0) as f32;
         }
@@ -276,18 +242,13 @@ impl PitchDetector {
             return tau as f64;
         }
 
-        let s0 = self.cumulative_mean[tau - 1] as f64;
-        let s1 = self.cumulative_mean[tau] as f64;
-        let s2 = self.cumulative_mean[tau + 1] as f64;
-
-        let denominator = 2.0 * (2.0 * s1 - s2 - s0);
-
-        if denominator.abs() > 1e-10 {
-            let adjustment = (s2 - s0) / denominator;
-            tau as f64 + adjustment
-        } else {
-            tau as f64
-        }
+        // The period is a minimum of the cumulative mean: the peak of its negation.
+        let peak = parabolic_peak(
+            -self.cumulative_mean[tau - 1],
+            -self.cumulative_mean[tau],
+            -self.cumulative_mean[tau + 1],
+        );
+        tau as f64 + f64::from(peak.offset)
     }
 }
 

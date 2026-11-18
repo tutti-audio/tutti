@@ -123,11 +123,11 @@ fn a_watch_that_fails_says_so_and_the_list_freezes() {
     let (devices, events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     assert!(events.failure().is_none());
-    fake.fail_watch("the sequencer went away");
-    assert_eq!(
-        events.failure().map(|f| f.to_string()),
-        Some("MIDI port error: the sequencer went away".into())
-    );
+    fake.fail_watch();
+    assert!(matches!(
+        events.failure(),
+        Some(WatchFailure::Failed(e)) if matches!(*e, MidiHardwareError::DescriptorBroken)
+    ));
     // The thread has ended: a later plug is not reported.
     fake.plug(endpoint(2, "Pads"), PortDirection::Input);
     assert_eq!(devices.list().len(), 1);
@@ -195,7 +195,7 @@ fn a_dropped_subscriber_is_forgotten() {
 fn a_failed_watch_ends_the_stream_after_what_it_reported() {
     let (devices, events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    fake.fail_watch("gone");
+    fake.fail_watch();
     assert!(matches!(
         events.recv_timeout(PATIENCE),
         Ok(DeviceEvent::Added(_))
@@ -245,10 +245,10 @@ impl MidiEndpoints for Refuses {
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        Err(Error::device("refused"))
+        Err(MidiHardwareError::Unsupported("refused"))
     }
     fn open_output(&self, _: EndpointId) -> Result<Box<dyn crate::DeviceOut>> {
-        Err(Error::device("refused"))
+        Err(MidiHardwareError::Unsupported("refused"))
     }
 }
 
@@ -262,7 +262,7 @@ fn a_backend_failure_leaves_no_port() {
     for _ in 0..3 {
         assert!(matches!(
             devices.open_input(&keys, &ports, DeviceWriters::unread()),
-            Err(Error::MidiDevice { .. })
+            Err(MidiHardwareError::Unsupported(_))
         ));
     }
     assert!(ports.list_input_ports().is_empty());
@@ -382,7 +382,7 @@ fn open_input_takes_a_present_input_only() {
     let synth = id_of(&devices, "Synth");
     assert!(matches!(
         devices.open_input(&synth, &ports(), DeviceWriters::unread()),
-        Err(Error::WrongDirection { .. })
+        Err(MidiHardwareError::WrongDirection { .. })
     ));
     assert!(devices.open_output(&synth).is_ok());
     assert!(devices.open_output(&id_of(&devices, "Keys")).is_err());
@@ -398,7 +398,7 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     wake(&events);
     assert!(matches!(
         devices.open_input(&keys, &ports(), DeviceWriters::unread()),
-        Err(Error::NotFound(NotFound::Device(_)))
+        Err(MidiHardwareError::NotFound(NotFound::Device(_)))
     ));
 }
 
@@ -634,7 +634,7 @@ impl MidiEndpoints for Tagging {
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        Err(Error::device("no inputs"))
+        Err(MidiHardwareError::Unsupported("no inputs"))
     }
     fn open_output(&self, _: EndpointId) -> Result<Box<dyn crate::DeviceOut>> {
         Ok(Box::new(TaggedSink(Arc::clone(&self.0))))

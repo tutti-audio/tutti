@@ -2,7 +2,7 @@
 
 use tutti_buffers::{
     BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, convert,
-    convert_mono, convert_planes, deinterleave, interleave,
+    convert_counting_clips, convert_mono, convert_planes, deinterleave, interleave,
 };
 use tutti_types::{ChannelLayout, LayoutError};
 use tutti_units::Samples;
@@ -363,4 +363,80 @@ fn convert_mono_refuses_a_length_mismatch_and_writes_nothing() {
         })
     );
     assert_eq!(dst, [7, 7]);
+}
+
+fn clips_into_i16(src: &[f32]) -> (usize, Vec<i16>) {
+    let mut dst = vec![0i16; src.len()];
+    let clipped = convert_counting_clips(
+        Interleaved::new(src, ChannelLayout::MONO).unwrap(),
+        InterleavedMut::new(&mut dst, ChannelLayout::MONO).unwrap(),
+    )
+    .unwrap();
+    (clipped, dst)
+}
+
+#[test]
+fn plus_one_and_above_clip_into_i16() {
+    let (clipped, dst) = clips_into_i16(&[1.0, 1.5, f32::INFINITY, 1.0e30]);
+    assert_eq!(clipped, 4);
+    assert_eq!(dst, [i16::MAX; 4]);
+}
+
+#[test]
+fn minus_one_is_min_and_not_a_clip_but_below_it_is() {
+    let (clipped, dst) = clips_into_i16(&[-1.0, -1.0 - 1.0 / 32768.0, f32::NEG_INFINITY]);
+    assert_eq!(clipped, 2);
+    assert_eq!(dst, [i16::MIN; 3]);
+}
+
+#[test]
+fn the_top_step_below_one_does_not_clip() {
+    let (clipped, dst) = clips_into_i16(&[32767.0 / 32768.0, 0.0, -0.5]);
+    assert_eq!(clipped, 0);
+    assert_eq!(dst, [32767, 0, -16384]);
+}
+
+#[test]
+fn nan_reads_as_zero_and_is_not_a_clip() {
+    let (clipped, dst) = clips_into_i16(&[f32::NAN]);
+    assert_eq!((clipped, dst), (0, vec![0]));
+}
+
+#[test]
+fn a_narrowing_that_rounds_past_max_is_a_clip_and_a_float_target_never_is() {
+    let src = [i16::MAX, 0];
+    let mut narrow = [0i8; 2];
+    let clipped = convert_counting_clips(
+        Interleaved::new(&src, ChannelLayout::MONO).unwrap(),
+        InterleavedMut::new(&mut narrow, ChannelLayout::MONO).unwrap(),
+    )
+    .unwrap();
+    assert_eq!((clipped, narrow), (1, [i8::MAX, 0]));
+
+    let loud = [4.0f32, f32::NAN];
+    let mut wide = [0.0f64; 2];
+    let clipped = convert_counting_clips(
+        Interleaved::new(&loud, ChannelLayout::MONO).unwrap(),
+        InterleavedMut::new(&mut wide, ChannelLayout::MONO).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(clipped, 0);
+    assert_eq!(wide[0], 4.0);
+}
+
+#[test]
+fn counting_refuses_width_then_frames_and_writes_nothing() {
+    let src = [1.0f32; 4];
+    let mut dst = [7i16; 4];
+    let width = convert_counting_clips(
+        Interleaved::new(&src, ChannelLayout::STEREO).unwrap(),
+        InterleavedMut::new(&mut dst, ChannelLayout::MONO).unwrap(),
+    );
+    assert!(matches!(width, Err(BufferError::WidthMismatch { .. })));
+    let frames = convert_counting_clips(
+        Interleaved::new(&src, ChannelLayout::MONO).unwrap(),
+        InterleavedMut::new(&mut dst[..3], ChannelLayout::MONO).unwrap(),
+    );
+    assert!(matches!(frames, Err(BufferError::LengthMismatch { .. })));
+    assert_eq!(dst, [7; 4]);
 }

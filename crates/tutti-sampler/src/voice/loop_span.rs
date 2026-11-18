@@ -59,7 +59,8 @@
 
 use std::cmp::Ordering;
 use std::ops::Range;
-use tutti_units::Samples;
+use tutti_buffers::Float;
+use tutti_units::{SamplePosition, Samples};
 
 /// A loop over whole file frames `[start, end)`, with a crossfade into it: the
 /// one value every tier takes (a memory voice, a disk voice, a stream, a pool
@@ -220,9 +221,9 @@ pub(crate) struct LoopSpan {
 /// file frame it reads, and, inside the crossfade, the lead-in frame it blends
 /// toward and the lead-in's weight.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LoopTap {
+pub(crate) struct LoopTap<F = f32> {
     pub(crate) frame: usize,
-    pub(crate) fade: Option<(usize, f32)>,
+    pub(crate) fade: Option<(usize, F)>,
 }
 
 impl LoopSpan {
@@ -323,7 +324,7 @@ impl LoopSpan {
     /// (one of the `fade` frames leading into `resume`) and the lead-in's
     /// weight, or `None` outside the fade.
     #[inline]
-    pub(crate) fn fade_at(&self, frame: usize) -> Option<(usize, f32)> {
+    pub(crate) fn fade_at<F: Float>(&self, frame: usize) -> Option<(usize, F)> {
         let fade_start = self.end - self.fade;
         if frame < fade_start || frame >= self.end {
             return None;
@@ -331,7 +332,7 @@ impl LoopSpan {
         let k = frame - fade_start;
         Some((
             self.resume - self.fade + k,
-            (k + 1) as f32 / (self.fade + 1) as f32,
+            F::from_f64((k + 1) as f64) / F::from_f64((self.fade + 1) as f64),
         ))
     }
 
@@ -349,7 +350,12 @@ impl LoopSpan {
     /// the old one leaves it there). Each tap is clamped to the file, as
     /// [`tap_indices`](super::interp::tap_indices) clamps an unlooped read.
     #[inline]
-    pub(crate) fn taps(&self, len: usize, pos: f64, looped: bool) -> ([LoopTap; 4], f32) {
+    pub(crate) fn taps<F: Float>(
+        &self,
+        len: usize,
+        pos: SamplePosition,
+        looped: bool,
+    ) -> ([LoopTap<F>; 4], F) {
         let (idx, frac) = super::interp::split_position(pos);
         (self.frame_taps(len, idx, looped), frac)
     }
@@ -369,7 +375,12 @@ impl LoopSpan {
     /// [`taps`](Self::taps) for whole frame `idx` (the position split by
     /// `interp::split_position`): the four frames, without the fraction.
     #[inline]
-    pub(crate) fn frame_taps(&self, len: usize, idx: usize, looped: bool) -> [LoopTap; 4] {
+    pub(crate) fn frame_taps<F: Float>(
+        &self,
+        len: usize,
+        idx: usize,
+        looped: bool,
+    ) -> [LoopTap<F>; 4] {
         let cycle = self.end - self.resume;
         let last = len - 1;
         let back_wraps = looped && idx >= self.resume;
@@ -418,7 +429,7 @@ mod tests {
                     for looped in [false, true] {
                         for idx in 1..end {
                             let own = span
-                                .frame_taps(len, idx, looped)
+                                .frame_taps::<f32>(len, idx, looped)
                                 .iter()
                                 .enumerate()
                                 .all(|(k, tap)| tap.frame + 1 == idx + k && tap.fade.is_none());
@@ -442,10 +453,10 @@ mod tests {
     #[test]
     fn the_fade_blends_the_tail_toward_what_leads_into_start() {
         let span = LoopSpan::unbounded(10, 20, 4).expect("a loop");
-        assert_eq!(span.fade_at(15), None);
+        assert_eq!(span.fade_at::<f32>(15), None);
         assert_eq!(span.fade_at(16), Some((6, 0.2)));
         assert_eq!(span.fade_at(19), Some((9, 0.8)));
-        assert_eq!(span.fade_at(20), None);
+        assert_eq!(span.fade_at::<f32>(20), None);
         assert_eq!(span.resume(), 10);
         assert_eq!(span.place(20.0), (10.0, true));
     }
@@ -494,7 +505,7 @@ mod tests {
     fn a_position_before_the_loop_reads_the_file_behind_it() {
         let span = LoopSpan::unbounded(2_000, 4_000, 0).expect("a loop");
         for looped in [false, true] {
-            let (taps, _) = span.taps(10_000, 1_500.5, looped);
+            let (taps, _) = span.taps::<f32>(10_000, SamplePosition(1_500.5), looped);
             assert_eq!(taps.map(|t| t.frame), [1_499, 1_500, 1_501, 1_502]);
         }
     }
@@ -505,7 +516,7 @@ mod tests {
     fn taps_wrap_through_the_loop() {
         let span = LoopSpan::unbounded(10, 20, 0).expect("a loop");
         let frames = |pos, looped| {
-            let (taps, _) = span.taps(100, pos, looped);
+            let (taps, _) = span.taps::<f32>(100, SamplePosition(pos), looped);
             taps.map(|t| t.frame)
         };
         assert_eq!(frames(18.5, false), [17, 18, 19, 10]);

@@ -9,9 +9,9 @@
 //! An endpoint is described by a [`VirtualSpec`]: its name, the UMP protocol it
 //! carries, and the Function Blocks it declares. What a platform cannot do is an
 //! error from the call that asks for it: creating on a platform with no backend
-//! is [`Error::Unsupported`](crate::Error::Unsupported), and declaring Function
+//! is [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported), and declaring Function
 //! Blocks where the platform cannot publish them is
-//! [`Error::VirtualBlocksUnsupported`](crate::Error::VirtualBlocksUnsupported). The protocol is
+//! [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported). The protocol is
 //! the exception, because a platform may carry the other one than asked for:
 //! [`VirtualSource::protocol`] and [`VirtualDestination::protocol`] report the
 //! one the endpoint was created with.
@@ -135,8 +135,8 @@ impl VirtualSource {
     ///
     /// # Errors
     ///
-    /// [`Error::Unsupported`](crate::Error::Unsupported) on a platform with no
-    /// backend, [`Error::VirtualBlocksUnsupported`](crate::Error::VirtualBlocksUnsupported)
+    /// [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported) on a platform with no
+    /// backend, [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
     /// when `spec` declares Function Blocks the platform cannot publish, and the
     /// platform's own error when the OS refuses the endpoint.
     pub fn open(spec: &VirtualSpec) -> Result<Self> {
@@ -174,7 +174,7 @@ impl VirtualSource {
     ///
     /// # Errors
     ///
-    /// [`Error::NoMidi1Form`](crate::Error::NoMidi1Form) for a MIDI 2.0 message
+    /// [`MidiHardwareError::NoMidi1Form`](crate::MidiHardwareError::NoMidi1Form) for a MIDI 2.0 message
     /// on a MIDI 1.0 endpoint that has no MIDI 1.0 form even in sequence (a
     /// per-note controller, per-note management); nothing is sent. Otherwise
     /// the platform's error when the OS refuses the message.
@@ -289,7 +289,7 @@ mod tests {
     use tutti_ump::{ControlValue, MidiChannel, MidiGroup, Rpn, Voice1, Voice2};
 
     use super::*;
-    use crate::error::Error;
+    use crate::error::MidiHardwareError;
 
     /// A backend that records what it sent and refuses its `fail_at`th send.
     struct Recorder {
@@ -301,7 +301,7 @@ mod tests {
     impl SourceBackend for Recorder {
         fn send(&self, words: &[u32]) -> Result<()> {
             if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
-                return Err(Error::Unsupported("recorder"));
+                return Err(MidiHardwareError::Unsupported("recorder"));
             }
             let mut ump = [0u32; 4];
             ump[..words.len()].copy_from_slice(words);
@@ -361,7 +361,7 @@ mod tests {
         let (source, sent) = midi1_source(1);
         assert!(matches!(
             source.send(bend_range(12)),
-            Err(Error::Unsupported(_))
+            Err(MidiHardwareError::Unsupported(_))
         ));
         source.send(bend_range(7)).unwrap();
         // CC 101 of the first; then the whole sequence of the second.
