@@ -89,7 +89,7 @@ pub struct EnvelopeFilterBank<F: Float + Lanes = f64> {
     coefficients: Glide<SvfCoefficients<F>>,
     controls: EnvelopeFilterControls,
     /// The frames of the current grid period already run.
-    phase: usize,
+    phase: Samples,
 }
 
 impl<F: Float + Lanes> EnvelopeFilterBank<F> {
@@ -110,7 +110,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             )))
             .by(COEFF_INTERVAL as u32),
             controls,
-            phase: 0,
+            phase: Samples::ZERO,
         };
         bank.aim(&controls);
         bank.settle();
@@ -122,7 +122,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     pub fn reset(&mut self) {
         self.env = Amplitude::SILENT;
         self.bank.reset();
-        self.phase = 0;
+        self.phase = Samples::ZERO;
         self.coefficients.aim(self.design(Amplitude::SILENT));
         self.coefficients.settle();
     }
@@ -185,11 +185,11 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
         let mut levels = [0.0f32; COEFF_INTERVAL];
         let mut start = 0;
         while start < frames {
-            if self.phase == 0 {
+            if self.phase == Samples::ZERO {
                 let design = self.design(self.env);
                 self.coefficients.aim(design);
             }
-            let n = (frames - start).min(COEFF_INTERVAL - self.phase);
+            let n = (frames - start).min(COEFF_INTERVAL - self.phase.get());
             let end = start + n;
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
@@ -202,7 +202,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
                 input.slice(range.clone()),
                 output.slice_mut(range),
             );
-            self.phase = (self.phase + n) % COEFF_INTERVAL;
+            self.phase = Samples((self.phase.get() + n) % COEFF_INTERVAL);
             start = end;
         }
     }
