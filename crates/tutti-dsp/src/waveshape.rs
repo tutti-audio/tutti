@@ -75,6 +75,8 @@ macro_rules! with_kind {
 
 mod adaa;
 
+use adaa::Guard;
+
 impl ShapeKind {
     /// Shapes one sample: `x` through this curve at `drive`, in the float `F`.
     ///
@@ -128,20 +130,20 @@ impl ShapeKind {
     /// `input` through the curve at one `hardness`, into `output`. The loop is compiled
     /// for the kind, so the curve inlines.
     #[inline(always)]
-    fn shape_held<F: Float, S: Float>(self, hardness: F, input: &[S], output: &mut [S]) {
+    fn shape_held<F: Float>(self, hardness: F, input: &[F], output: &mut [F]) {
         with_kind!(self, |K| {
-            for (o, x) in output.iter_mut().zip(input) {
-                *o = K.curve(hardness, x.convert_to::<F>()).convert_to::<S>();
+            for (o, &x) in output.iter_mut().zip(input) {
+                *o = K.curve(hardness, x);
             }
         })
     }
 
     /// `input` through the curve at a hardness per frame, into `output`.
     #[inline(always)]
-    fn shape_each<F: Float, S: Float>(self, hardness: &[F], input: &[S], output: &mut [S]) {
+    fn shape_each<F: Float>(self, hardness: &[F], input: &[F], output: &mut [F]) {
         with_kind!(self, |K| {
-            for ((o, x), &h) in output.iter_mut().zip(input).zip(hardness) {
-                *o = K.curve(h, x.convert_to::<F>()).convert_to::<S>();
+            for ((o, &x), &h) in output.iter_mut().zip(input).zip(hardness) {
+                *o = K.curve(h, x);
             }
         })
     }
@@ -152,26 +154,46 @@ impl ShapeKind {
 /// smooth S rather than a jump. The coefficients are exact in both widths.
 #[inline]
 fn smooth9<F: Float>(x: F) -> F {
-    let c = F::from_f32;
     let x2 = x * x;
-    ((((c(70.0) * x - c(315.0)) * x + c(540.0)) * x - c(420.0)) * x + c(126.0)) * x2 * x2 * x
+    ((((F::lit(70.0) * x - F::lit(315.0)) * x + F::lit(540.0)) * x - F::lit(420.0)) * x
+        + F::lit(126.0))
+        * x2
+        * x2
+        * x
 }
 
 /// The order of antiderivative antialiasing (ADAA) a [`WaveshaperBank`] shapes with.
 ///
 /// With `F1` the antiderivative of the curve `g` and `F2` that of `F1`, **first-order** ADAA
 /// outputs, from the input `x` and the one before it `x'`, `(F1(x) - F1(x')) / (x - x')`: the
-/// mean of `g` over the segment between them. Where `|x - x'|` is under 1e-4 (in the units of
-/// the curve's argument) it outputs `g((x + x') / 2)`.
+/// mean of `g` over the segment between them, and `g(x)` where they are the same.
 ///
 /// **Second-order** ADAA, from `x`, `x'` and `x''`, with `D(p, q) = (F2(p) - F2(q)) / (p - q)`,
-/// outputs `2 (D(x, x') - D(x', x'')) / (x - x'')`. Where `|p - q|` is under 1e-4, `D(p, q)` is
-/// `F1((p + q) / 2)`. Where `|x - x''|` is under 1e-4, with `m = (x + x'') / 2`, it outputs the
-/// limit `2 (F1(m) - D(m, x')) / (m - x')`, and `g(m)` where `|m - x'|` is under 1e-4 too.
+/// outputs `2 (D(x, x') - D(x', x'')) / (x - x'')`.
+///
+/// Each quotient is written as differences that do not cancel (`x - x'`, `|x| - |x'|`,
+/// `clamp(x) - clamp(x')`, `ln_1p` of a ratio of differences, the hard clip's second order as
+/// divided differences of the truncated cube), so it is within a few `eps` of the closed form
+/// at any gap, `eps` the bank's float epsilon: measured at most `1.2 eps` at first order
+/// for `Tanh`, `Atan`, `Softsign`, `HardClip` and `Crush` and `0.6 eps` at the hard clip's
+/// second, at `f32` (`1.4e-7`). Two quotients have no such form and take a guard, `(36
+/// eps)^(1/3)` of the larger of 1 and the inputs' magnitudes (0.016 at `f32`, 2.0e-5 at
+/// `f64`):
+///
+/// - `SoftCrush`'s first order, where `|x - x'|` under the guard outputs `g((x + x') / 2)`;
+/// - `Softsign`'s second order, where `|x - x''|` under it, with `m = (x + x'') / 2`, outputs the
+///   limit `2 (F1(m) - D(m, x')) / (m - x')`, and `g((x + x' + x'') / 3)`, the Taylor form to
+///   `O(d^2)`, where `|m - x'|` is under it too.
+///
+/// There the nested quotient's error is `3 eps` over the span and the limit's is the span's
+/// square over 12: at `f32` the floor is 2e-5 (-94 dB) at the guard, measured at most 1.7e-5
+/// (-95 dB) over every window (2.2e-6 inside the guard).
+///
+/// The argument of the curve (`x` times the hardness) is held to `sqrt(MAX) / 4` so a square of
+/// it is finite: an infinite input shapes as the curve's end value.
 ///
 /// The history is the input before the drive, and the drive of the frame scales all of it, so a
-/// drive change makes no step. The quotients are formed in `f64`, where the cancellation of the
-/// antiderivatives is conditioned, and the history is kept in the bank's float. A non-finite
+/// drive change makes no step. The history is kept in the bank's float. A non-finite
 /// input enters the history as 0, so the frame after it (the two after, at second order) reads
 /// its segment from 0.
 ///
@@ -252,6 +274,8 @@ pub struct WaveshaperBank<F: Float> {
     antialiasing: Antialiasing,
     /// Each channel's last two inputs before the drive, newest first: per-sample values in `F`.
     history: [[F; 2]; MAX_CHANNELS],
+    /// The closeness at which a quotient with no conditioned form takes its limit.
+    guard: Guard<F>,
 }
 
 impl<F: Float + Lerp> WaveshaperBank<F> {
@@ -267,6 +291,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
             steps,
             antialiasing: Antialiasing::Off,
             history: [[F::ZERO; 2]; MAX_CHANNELS],
+            guard: Guard::new(),
         }
     }
 
@@ -309,11 +334,11 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
     /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
     /// not touched, and the frames rendered are the fewer of the two
     /// views'. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
-        lane: Option<Mono<'_, S>>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lane: Option<Mono<'_, F>>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
@@ -341,7 +366,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                     let i = start + k;
                     let drive = lane
                         .and_then(|l| l.samples().get(i))
-                        .map(|x| x.convert_to::<F>())
+                        .copied()
                         .filter(|d| d.is_finite())
                         .unwrap_or_else(|| {
                             let step = taken.saturating_add(1).saturating_add(i as u32);
@@ -357,7 +382,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                     if order == Antialiasing::Off {
                         kind.shape_each(hardness, input, output);
                     } else {
-                        kind.adaa_each(order, hardness, input, output, history);
+                        kind.adaa_each(order, self.guard, hardness, input, output, history);
                     }
                 }
                 start = end;

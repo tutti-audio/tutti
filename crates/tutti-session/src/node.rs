@@ -2,7 +2,12 @@
 //! way in, takes, and the engine's own nodes as ones.
 
 use tutti_buffers::Float;
-use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unforkable};
+use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, ParamSet, Params, Unforkable};
+
+#[cfg(feature = "midi")]
+use std::sync::Arc;
+
+use crate::NodeSlots;
 
 /// A node that may enter a session's graph: it declares its own ports (event
 /// ports included), its controls and its fork ([`IntoNode`]), and says which
@@ -71,6 +76,15 @@ pub trait SessionNode<F: Float = f32>: IntoNode<F> + Send + 'static {
     fn params(controls: &Self::Controls) -> Option<ParamSet> {
         let _ = controls;
         None
+    }
+
+    /// The node's other values by what they are, read off its controls once
+    /// it is in: the cells a slot target (`clip.events()`) writes through.
+    /// They are kept under `node`, and forgotten when the node is removed or
+    /// replaced. Empty, the default, for a node with none.
+    fn slots(node: NodeKey, controls: &Self::Controls) -> NodeSlots {
+        let _ = (node, controls);
+        NodeSlots::default()
     }
 
     /// What frees the values the node's published cells retired, read off
@@ -312,10 +326,19 @@ impl<F: Float> SessionNode<F> for tutti_nodes::automation::AutomationLaneNode {
     }
 }
 
-/// A MIDI clip as a graph node: its `MidiClipControls`, no params; the
-/// clips it replaced freed by its reclaimer.
+/// A MIDI clip as a graph node: its `MidiClipControls`, no params; its
+/// events are a slot (`clip.events()`), and the clips it replaced are freed
+/// by its reclaimer.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
+    fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
+        NodeSlots::of(
+            crate::value::SlotId::ClipEvents(node),
+            Arc::new(crate::value::PublishedSlot(controls.clone()))
+                as crate::value::SlotCell<Arc<tutti_midi_runtime::ClipEvents>>,
+        )
+    }
+
     fn reclaimer(controls: &tutti_midi_runtime::MidiClipControls) -> Reclaims {
         Reclaims::of(controls)
     }
@@ -330,10 +353,19 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MpeTransformNode {
     }
 }
 
-/// The harmony node: its `HarmonyControls`, no params; the timelines it
-/// replaced freed by its reclaimer.
+/// The harmony node: its `HarmonyControls`, no params; its changes are a slot
+/// (`harmony.changes()`), and the lanes it replaced are freed by its
+/// reclaimer.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
+    fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
+        NodeSlots::of(
+            crate::value::SlotId::Harmony(node),
+            Arc::new(crate::value::PublishedSlot(controls.clone()))
+                as crate::value::SlotCell<Arc<tutti_midi_runtime::HarmonyChanges>>,
+        )
+    }
+
     fn reclaimer(controls: &tutti_midi_runtime::HarmonyControls) -> Reclaims {
         Reclaims::of(controls)
     }

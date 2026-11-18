@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use super::super::legacy_port::anchor::Anchor;
 use super::super::legacy_port::bytes::ByteIn;
+use crate::InputFault;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
@@ -15,13 +16,18 @@ use tutti_winmm_ffi::{Event, InputPort, MidiIn};
 /// An open winmm input. Dropping it stops the port and returns its buffers.
 pub struct WinMmInput {
     /// Raised when the driver closes the port or the callback panics.
-    died: Arc<FaultLatch>,
+    died: Arc<FaultLatch<InputFault>>,
     port: MidiIn,
 }
 
 impl InputConnection for WinMmInput {
-    fn is_alive(&self) -> bool {
-        !self.died.is_raised() && self.port.is_alive()
+    fn fault(&self) -> Option<InputFault> {
+        // The latch holds what the callback raised. The port's own flag, which
+        // its worker sets when it cannot return a buffer, is read each time and
+        // not latched.
+        self.died
+            .cause()
+            .or_else(|| (!self.port.is_alive()).then_some(InputFault::BufferLost))
     }
 }
 
@@ -33,7 +39,7 @@ impl InputConnection for WinMmInput {
 /// turns `MmResult::Allocated`, another application holding the port, into
 /// [`MidiHardwareError::InUse`].
 pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {
-    let died = Arc::new(FaultLatch::new());
+    let died = Arc::new(FaultLatch::<InputFault>::new());
     let guard = Guard::new(Arc::clone(&died));
     let closed = Arc::clone(&died);
     let mut bytes = ByteIn::new();
@@ -61,7 +67,7 @@ pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Resul
                         push(ump, at);
                     }
                 }
-                Event::Closed => closed.raise(()),
+                Event::Closed => closed.raise(InputFault::DriverClosed),
             }
         });
     })?;

@@ -37,10 +37,10 @@
 //!
 //! [`HardwareMidiInputs`]: crate::HardwareMidiInputs
 
-use crate::InputProducerHandle;
 use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::error::Result;
+use crate::{InputFault, InputProducerHandle};
 use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::MidiOut;
@@ -61,12 +61,19 @@ use tutti_ump::Protocol;
 /// does — this is where a backend author reads that contract, which is a
 /// distinct thing to be even with no behaviour attached.
 pub trait InputConnection: Send {
-    /// Whether the backend is still delivering. A backend whose reader can end
-    /// on its own, on an error, returns `false` from then on: the port is
-    /// silent while the connection is still held. The default is `true`, for a
-    /// backend that cannot tell.
+    /// Whether the backend is still delivering: `false` from the moment
+    /// [`fault`](Self::fault) reads a cause, when the port is silent while the
+    /// connection is still held.
     fn is_alive(&self) -> bool {
-        true
+        self.fault().is_none()
+    }
+
+    /// Why the backend stopped delivering, `None` while it is. The first cause
+    /// stays. A backend that can end on its own overrides this (and
+    /// [`is_alive`](Self::is_alive) follows); the default is `None`, for a
+    /// backend that cannot tell.
+    fn fault(&self) -> Option<InputFault> {
+        None
     }
 }
 

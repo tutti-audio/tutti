@@ -13,6 +13,20 @@ use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 /// past its `max_message`.
 pub const SYSEX7_MAX_PAYLOAD: usize = 64 * 1024;
 
+/// The first payload byte of a Universal System Exclusive, Non-Real Time
+/// message: `0x7E` (M1 p.34), and of every MIDI-CI message (M2-101 §5.2.1).
+pub const UNIVERSAL_NON_REAL_TIME: u8 = 0x7E;
+
+/// The first payload byte of a Universal System Exclusive, Real Time message:
+/// `0x7F` (M1 p.34).
+pub const UNIVERSAL_REAL_TIME: u8 = 0x7F;
+
+/// The payload of an Identity Request to every device, between `F0` and `F7`
+/// (M1 p.40): Universal Non-Real Time, device id `7F` (every device should
+/// answer, whatever its own device id), General Information `06`, Identity
+/// Request `01`.
+pub const IDENTITY_REQUEST: [u8; 4] = [UNIVERSAL_NON_REAL_TIME, 0x7F, 0x06, 0x01];
+
 /// The most bytes one SysEx7 packet adds to a buffer: six payload bytes and
 /// both delimiters (a `Complete`).
 const BYTES_PER_PACKET: usize = 8;

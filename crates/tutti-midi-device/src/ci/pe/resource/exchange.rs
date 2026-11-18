@@ -160,7 +160,7 @@ pub(super) fn store() -> ResourceStore {
         .unwrap();
     store.declare(
         ResourceEntry::builder(custom("X-ProgramEdit"))
-            .schema(json(r#"{"title":"Program Edit"}"#))
+            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
             .can_set(CanSet::Partial)
             .require_res_id(true)
             .can_subscribe(true)
@@ -170,7 +170,7 @@ pub(super) fn store() -> ResourceStore {
     store.put(Some(id("abcd")), program_edit()).unwrap();
     for (name, flow) in [("X-Blob", false), ("X-BigBlob", true)] {
         let blob = ResourceEntry::builder(custom(name))
-            .schema(json(r#"{"title":"Blob"}"#))
+            .schema(json(r#"{"title":"Blob","type":"string"}"#))
             .can_set(CanSet::Full)
             .fc_on_set(flow)
             .can_subscribe(true)

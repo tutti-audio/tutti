@@ -277,7 +277,7 @@ mod tests {
         let (watched, mut writer) = std::io::pipe().unwrap();
         let (own, _own_writer) = std::io::pipe().unwrap();
         let mut ready = Vec::new();
-        let fd = FdId::new(watched.as_raw_fd());
+        let fd = FdId::new(watched.as_raw_fd()).unwrap();
         let read = [Watch {
             fd,
             interest: Interest::READ,

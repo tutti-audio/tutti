@@ -17,11 +17,13 @@ workspace = true
 thiserror = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 mdns-sd = { workspace = true }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", default-features = false }
 
 [dev-dependencies]
 proptest = "1.9.0"
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]
 all-features = true

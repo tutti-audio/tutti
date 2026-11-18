@@ -165,8 +165,8 @@ pub use orchestral::{
 pub use reserved::{Field, Reserved, ReservedAccents, ReservedAttribute};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
-    SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexPart,
-    SysexRef, SysexStep,
+    IDENTITY_REQUEST, SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage,
+    SysexPart, SysexRef, SysexStep, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME,
 };
 pub use sysex8::{
     Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step, Sysex8Stream, Sysex8StreamIds,

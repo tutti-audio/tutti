@@ -38,7 +38,9 @@ std only. A rule the compiler already enforces is not a gate.
   pkg-config`).
 - **Windows:** `cargo xtask check-windows` lints for MSVC from Linux; CI's `clippy
   (windows)` lints natively and also runs `tutti-winmm-ffi`'s and `tutti-midi-hardware`'s
-  tests there, `--features synth-tests` included (no other CI job runs tests on Windows).
+  tests there, `--features synth-tests` included, and `tutti-plugin-ipc-ffi`'s and
+  `tutti-plugin-ipc`'s `transport::` tests (the contract's `contract (windows)` job is not
+  required; no other job runs tests on Windows).
   The synth suites open the GS Wavetable Synth, which needs an audio endpoint: the job
   installs a virtual audio driver first (`.github/scripts/install-virtual-audio.ps1`).
   A vst3 SDK enum constant
@@ -48,6 +50,12 @@ std only. A rule the compiler already enforces is not a gate.
   CONTRIBUTING.md's checklist before it is queued; the review is recorded in its
   description. A reviewed PR with CI green and no open blocking finding is queued by its
   author.
+- **Stacked PRs:** a PR may sit on an open PR's branch when it needs that unmerged work
+  (three deep at most; each piece builds, passes and stays under the size limit against
+  its parent). Auto-merge is armed only once its base is main. Before queueing, merge
+  `origin/main` in, check `git diff origin/main...HEAD` shows only its own change, rerun
+  the gates and write baseline counts from the gate, never by picking a side. A parent
+  fix is made in the parent and merged up. Never delete a parent's branch by hand.
 
 ## Testing
 

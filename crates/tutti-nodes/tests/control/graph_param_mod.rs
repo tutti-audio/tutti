@@ -39,7 +39,7 @@ use tutti_nodes::{
     LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
     PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{AtomicF32, BusTopology, ChannelLayout, ParamCell};
+use tutti_types::{AtomicF64, BusTopology, ChannelLayout, ParamCell};
 use tutti_units::{
     Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
@@ -156,7 +156,12 @@ fn render(
             node: n,
             param: param.into(),
         };
-        drive(r.editor_mut(), at, Arc::new(AtomicF32::new(v)), vec![]);
+        drive(
+            r.editor_mut(),
+            at,
+            Arc::new(AtomicF64::new(f64::from(v))),
+            vec![],
+        );
     }
     let input: Vec<Vec<f32>> = (0..ins).map(|c| input(c as u32 + 7)).collect();
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
@@ -202,7 +207,12 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
             node: n,
             param: NodeMix::ADDR,
         };
-        drive(r.editor_mut(), at, Arc::new(AtomicF32::new(v)), vec![]);
+        drive(
+            r.editor_mut(),
+            at,
+            Arc::new(AtomicF64::new(f64::from(v))),
+            vec![],
+        );
     }
     let input: Vec<Vec<f32>> = (0..ins).map(|c| noise(c as u32 + 7)).collect();
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
@@ -1010,10 +1020,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
     let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
     let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
-        .expect("a distortion has a drive")
-    else {
-        unreachable!("a kernel node's controls are f64 cells")
-    };
+        .expect("a distortion has a drive");
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1069,7 +1076,7 @@ fn a_crossed_range_is_survivable() {
     let mut r = g
         .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
         .expect("builds");
-    drive(r.editor_mut(), at, Arc::new(AtomicF32::new(100.0)), vec![]);
+    drive(r.editor_mut(), at, Arc::new(AtomicF64::new(100.0)), vec![]);
     let out = r.render_input(Planes::new(&[&noise(7)]).unwrap()).remove(0);
     let at_4 = plain_distortion(4.0);
     for i in declick_frames(SampleRate::SR_48K).get()..FRAMES {
@@ -1094,7 +1101,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
     let lane = ControlLaneNode::for_unit(
         UnitParam::Drive,
         ControlProgram::default(),
-        Some(Arc::new(AtomicF32::new(5.0)).into()),
+        Some(Arc::new(AtomicF64::new(5.0)).into()),
         None,
     );
     let controls = r.editor_mut().insert(LANE, "lane", lane).controls;
@@ -1166,7 +1173,7 @@ fn a_fork_modulates_as_the_live_graph_does() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    drive(&mut editor, at, Arc::new(AtomicF32::new(3.0)), vec![]);
+    drive(&mut editor, at, Arc::new(AtomicF64::new(3.0)), vec![]);
     let (fed, fexec) = editor
         .fork(
             tutti_graph::ForkTarget::Master,

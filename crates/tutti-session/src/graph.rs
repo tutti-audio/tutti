@@ -888,12 +888,13 @@ impl<F: Float> Graph<F> {
     }
 
     /// Keeps what a [`SessionNode`] says of its controls under `node`: its
-    /// params and its reclaimer.
+    /// params, its slots and its reclaimer.
     fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
             if let Some(set) = N::params(controls) {
                 self.values.address(node, std::any::TypeId::of::<N>(), set);
             }
+            self.values.provide_node(N::slots(node, controls));
             entry.reclaimer = N::reclaimer(controls).into_reclaimer();
         }
     }

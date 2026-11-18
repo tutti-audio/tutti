@@ -7,7 +7,7 @@
 //! this crate. The trajectory's impl is here too, so `tutti-curve` stays free of
 //! the trait.
 
-use tutti_curve::{CurveRaw, Law, Trajectory};
+use tutti_curve::{Law, Trajectory};
 use tutti_units::{Beat, Unit};
 
 /// The piece of a [`Curve`] a beat falls in, between two breakpoints: what a
@@ -89,16 +89,11 @@ pub trait Curve: Send + Sync {
     }
 }
 
-/// A unit's value as the curve's `f64`.
-fn lane<U: Unit<Raw: CurveRaw>>(value: U) -> f64 {
-    value.to_raw().widen()
-}
-
-/// A trajectory of any unit reads at its raw value, widened to `f64`: the
-/// lane that consumes a `Curve` knows its target's unit.
-impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
+/// A trajectory of any unit reads at its raw value: the lane that consumes a
+/// `Curve` knows its target's unit.
+impl<U: Unit<Raw = f64> + Send + Sync> Curve for Trajectory<U> {
     fn value_at(&self, beat: Beat) -> Option<f64> {
-        Trajectory::value_at(self, beat).map(lane)
+        Trajectory::value_at(self, beat).map(|u| u.to_raw())
     }
 
     /// The trajectory's breakpoints, each breakpoint's `curve` the law of the piece it
@@ -113,8 +108,8 @@ impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
         }
         let inside = |v: U| {
             self.range().is_none_or(|(min, max)| {
-                let v = v.to_raw().widen();
-                v >= min.to_raw().widen() && v <= max.to_raw().widen()
+                let v = v.to_raw();
+                v >= min.to_raw() && v <= max.to_raw()
             })
         };
         // The first point after `beat`: the piece is the one before it.
@@ -123,7 +118,7 @@ impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
         // clamped as `value_at` clamps it.
         let hold = |until: Option<Beat>| {
             self.value_at(beat).map(|value| CurveSegment::Hold {
-                value: lane(value),
+                value: value.to_raw(),
                 until,
             })
         };
@@ -140,8 +135,8 @@ impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
         Some(CurveSegment::Move {
             start: p.time,
             end: q.time,
-            from: lane(p.value),
-            to: lane(q.value),
+            from: p.value.to_raw(),
+            to: q.value.to_raw(),
             shape: p.law,
         })
     }

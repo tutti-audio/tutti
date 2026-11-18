@@ -717,12 +717,10 @@ fn profile_specific_data_from_the_peer_is_handed_out_whole() {
     let (mut i, _, _) = start();
     let data = SpecificData::new(vec![1, 2, 3]).unwrap();
     for to in [Destination::Broadcast, Destination::Muid(Muid::of(OURS))] {
-        let message = Decoded::Message(CiMessage::ProfileSpecificData {
-            header: header_from(PEER, channel(9)),
-            to,
-            profile: profile(1),
-            data: data.clone(),
-        });
+        let message = Decoded::Message(CiMessage::ProfileSpecificData(
+            ProfileSpecific::new(header_from(PEER, channel(9)), to, profile(1), data.clone())
+                .unwrap(),
+        ));
         assert_eq!(
             i.on_message(&message),
             [ProfileAction::SpecificData {
@@ -738,12 +736,15 @@ fn profile_specific_data_from_the_peer_is_handed_out_whole() {
 fn profile_specific_data_for_another_muid_or_from_another_source_is_not_ours() {
     let (mut i, _, _) = start();
     for (source, to) in [(PEER, OTHER), (OTHER, OURS)] {
-        let message = Decoded::Message(CiMessage::ProfileSpecificData {
-            header: header_from(source, channel(0)),
-            to: Destination::Muid(Muid::of(to)),
-            profile: profile(1),
-            data: SpecificData::default(),
-        });
+        let message = Decoded::Message(CiMessage::ProfileSpecificData(
+            ProfileSpecific::new(
+                header_from(source, channel(0)),
+                Destination::Muid(Muid::of(to)),
+                profile(1),
+                SpecificData::default(),
+            )
+            .unwrap(),
+        ));
         assert!(i.on_message(&message).is_empty());
     }
 }
@@ -947,7 +948,7 @@ fn an_inquiry_with_a_timeout_wait_outlives_the_profile_timeout() {
     );
 }
 
-// tutti's own Responder (`CiDevice`) has no Profiles: an Initiator's inquiry of it
+// The crate's own Responder (`CiDevice`) has no Profiles: an Initiator's inquiry of it
 // completes at the final Reply on 0x7F with nothing in the table (§7.13, M2-102 §2.4).
 #[test]
 fn an_inquiry_of_tuttis_own_responder_completes_with_an_empty_table() {

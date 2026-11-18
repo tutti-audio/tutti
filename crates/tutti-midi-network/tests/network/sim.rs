@@ -12,10 +12,11 @@ use tutti_midi_network::{
 use tutti_ump::Ump;
 
 pub fn identity(name: &str, id: &str) -> EndpointIdentity {
-    EndpointIdentity {
-        name: EndpointName::new(name).unwrap(),
-        instance_id: ProductInstanceId::new(id).unwrap(),
-    }
+    EndpointIdentity::new(
+        EndpointName::new(name).unwrap(),
+        ProductInstanceId::new(id).unwrap(),
+    )
+    .unwrap()
 }
 
 pub fn host_addr() -> SocketAddr {

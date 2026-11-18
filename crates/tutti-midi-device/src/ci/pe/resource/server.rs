@@ -699,8 +699,8 @@ impl ResourceResponder {
     }
 
     /// Asks the device about the body so far of a State being set, and ends the
-    /// transfer with Terminate Inquiry when it refuses (M2-111 §3.3). Returns
-    /// whether it did.
+    /// transfer with a Terminate Transaction NAK (M2-103 §12.1.1) when it refuses
+    /// (M2-111 §3.3). Returns whether it did.
     fn state_refused_midway(
         &mut self,
         peer: Muid,
