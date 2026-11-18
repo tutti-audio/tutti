@@ -189,7 +189,7 @@ pub struct MultibandBank {
     model: CrossoverModel,
     /// The coefficients in flight over one grid period.
     coefficients: Glide<CrossoverCoefficients>,
-    compressors: [CompressorBank; MAX_BANDS],
+    compressors: [CompressorBank<f32>; MAX_BANDS],
     /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`].
     bypass: [Glide<f32>; MAX_BANDS],
     /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`].
@@ -458,9 +458,12 @@ impl MultibandBank {
             self.bypass[b].advance(steps);
             self.audible[b].advance(steps);
         }
-        for c in 0..width.min(output.channels()) {
+        for (c, sum) in scratch.sum[..width.min(output.channels())]
+            .iter()
+            .enumerate()
+        {
             let mut plane = output.plane_mut(c);
-            convert_equal(&scratch.sum[c][..n], &mut plane.samples_mut()[at.clone()]);
+            convert_equal(&sum[..n], &mut plane.samples_mut()[at.clone()]);
         }
     }
 }

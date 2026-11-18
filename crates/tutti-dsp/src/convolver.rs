@@ -488,9 +488,10 @@ impl<F: FftFloat> LevelState<F> {
             self.begun = true;
         }
         let upto = upto.min(count - 1);
-        for i in self.accumulated + 1..=upto {
+        let from = self.accumulated + 1;
+        for (i, segment) in lv.segments.iter().enumerate().take(upto + 1).skip(from) {
             let slot = (self.current + i) % count;
-            complex_multiply_accumulate(&mut self.building, &lv.segments[i], &self.history[slot]);
+            complex_multiply_accumulate(&mut self.building, segment, &self.history[slot]);
         }
         self.accumulated = self.accumulated.max(upto);
     }

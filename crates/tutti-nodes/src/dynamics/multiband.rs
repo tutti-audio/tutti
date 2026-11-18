@@ -536,11 +536,11 @@ impl Node for MultibandCompressorNode {
                 .declared_param_at::<{ UnitParam::Cutoff as u16 }>(&io, i as u8)
                 .frames();
         }
-        for b in 0..nb {
+        for (b, lane) in lanes.band[..nb].iter_mut().enumerate() {
             let band = b as u8;
             // In the order of `BAND_PARAMS`: `declared_param_at` takes its kind as a const
             // generic, which a loop over the array cannot supply.
-            lanes.band[b] = [
+            *lane = [
                 self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, band)
                     .frames(),
                 self.declared_param_at::<{ UnitParam::Knee as u16 }>(&io, band)

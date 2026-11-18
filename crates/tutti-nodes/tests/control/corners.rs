@@ -58,7 +58,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         tutti_types::ChannelLayout::MONO,
     );
     let NodeParts { node, fork, .. } =
-        CompressorNode::new(BusTopology::MONO, KeySource::Own, controls).into_parts();
+        CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Own, controls).into_parts();
     let c = g.add(NodeParts {
         node,
         controls: (),

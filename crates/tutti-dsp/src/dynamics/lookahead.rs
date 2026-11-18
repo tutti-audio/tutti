@@ -1,25 +1,28 @@
 //! The lookahead limiter's delay ring with its sliding gain minimum, and the linked-peak
 //! fold. The [`LimiterBank`](super::LimiterBank) holds them in its state.
 
-use tutti_buffers::{Float, Sample};
+use tutti_buffers::Float;
 
+use super::shared::{held, level};
 use super::window::MonotonicMinDeque;
 use tutti_units::Samples;
 
 use crate::DelayLine;
 
-/// Lookahead ring buffers + sliding-window-minimum tracker for the limiter.
+/// Lookahead ring buffers + sliding-window-minimum tracker for the limiter. The gains it
+/// pushes and the minimum it holds are per-sample levels in `F`; they become `Amplitude` once
+/// that unit stores `f64`.
 #[derive(Clone, Debug)]
-pub(crate) struct LookaheadRing {
+pub(crate) struct LookaheadRing<F: Float> {
     /// One delay line per audio channel, read at the lookahead by the whole-frame reader;
     /// `lines.len()` == width. Built at construction, never resized in the RT path.
-    lines: Vec<DelayLine<f32>>,
+    lines: Vec<DelayLine<F>>,
     lookahead: usize,
-    min_deque: MonotonicMinDeque,
+    min_deque: MonotonicMinDeque<F>,
     sample_counter: u64,
 }
 
-impl LookaheadRing {
+impl<F: Float> LookaheadRing<F> {
     /// A ring of `channels` channels delaying by `lookahead_samples` frames, whose gain
     /// window holds the newest `window` frames of gain: at least one and at most
     /// `lookahead_samples + 1` (the delayed frame's own and the lookahead after it).
@@ -60,7 +63,7 @@ impl LookaheadRing {
     /// gain that scales a sample is never later than its own target's: the
     /// push drops the gain leaving the window before adding this one.
     #[inline]
-    pub(crate) fn push_gain(&mut self, gain: f32) -> f32 {
+    pub(crate) fn push_gain(&mut self, gain: F) -> F {
         self.min_deque.push(self.sample_counter, gain);
         self.sample_counter = self.sample_counter.wrapping_add(1);
         self.min_deque.min().unwrap_or(gain)
@@ -75,23 +78,23 @@ impl LookaheadRing {
         &mut self,
         c: usize,
         input: &[S],
-        gains: &[f32],
+        gains: &[F],
         out: &mut [S],
     ) {
         let line = &mut self.lines[c];
         for ((o, x), &g) in out.iter_mut().zip(input).zip(gains) {
-            line.push_sample(x.convert_to::<f32>());
+            line.push_sample(x.convert_to::<F>());
             let d = line.read_whole(self.lookahead);
             // A NaN in both operands: x86 returns the first one's and which
             // is first is up to the compiler, so pick the delayed sample's
             // (as the per-frame product did) to keep the sign bit. An infinite sample
-            // is held to the largest finite one, as the detector read it, so its
-            // product with the gain (a divide of the ceiling by that level, or 0) is
-            // finite and not `inf * 0`.
+            // is held to the level the detector read it at, so its product with the
+            // gain (a divide of the ceiling by that level, or 0) is finite and not
+            // `inf * 0`.
             *o = (if d.is_nan() {
                 d + d
             } else {
-                d.clamp(-f32::MAX, f32::MAX) * g
+                d.clamp(-held::<F>(), held::<F>()) * g
             })
             .convert_to::<S>();
         }
@@ -101,8 +104,8 @@ impl LookaheadRing {
 /// The linked-peak fold: a NaN sample never reaches the peak (it reads as quiet) and an
 /// infinity reads as the largest finite level, so the peak's dB is finite.
 #[inline]
-pub(crate) fn fold_peak(peak: f32, x: f32) -> f32 {
-    peak.max(super::shared::level(x))
+pub(crate) fn fold_peak<F: Float>(peak: F, x: F) -> F {
+    peak.max(level(x))
 }
 
 #[cfg(test)]

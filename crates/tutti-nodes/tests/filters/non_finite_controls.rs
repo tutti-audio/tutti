@@ -228,7 +228,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "compressor",
         || {
-            CompressorNode::new(
+            CompressorNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {
@@ -271,7 +271,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "gate",
         || {
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 GateControls {

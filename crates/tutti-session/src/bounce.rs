@@ -2383,7 +2383,7 @@ mod tests {
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
-        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::mono(
+        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::mono(
             tutti_nodes::LimiterControls {
                 threshold: Db(-6.0),
                 ceiling: Db(-1.0),

@@ -51,7 +51,11 @@ units! {
         tutti_nodes::EqBandNode<f64> { Cutoff => Hz, Q => Q, GainDb => Db }
         tutti_nodes::LadderFilterNode<f32> { Cutoff => Hz, Q => Resonance, Drive => Drive }
         tutti_nodes::LadderFilterNode<f64> { Cutoff => Hz, Q => Resonance, Drive => Drive }
-        tutti_nodes::CompressorNode {
+        tutti_nodes::CompressorNode<f32> {
+            Threshold => Db, Ratio => CompressionRatio, Attack => Seconds, Release => Seconds,
+            GainDb => Db
+        }
+        tutti_nodes::CompressorNode<f64> {
             Threshold => Db, Ratio => CompressionRatio, Attack => Seconds, Release => Seconds,
             GainDb => Db
         }
@@ -59,11 +63,16 @@ units! {
             Threshold => Db, Knee => Db, Ratio => CompressionRatio, Attack => Seconds,
             Release => Seconds, Range => Db, Cutoff => Hz, Q => Q
         }
-        tutti_nodes::GateNode {
+        tutti_nodes::GateNode<f32> {
             Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
         }
-        tutti_nodes::LimiterNode { Threshold => Db, Ceiling => Db, Release => Seconds }
-        tutti_nodes::BrickwallLimiterNode { Ceiling => Db }
+        tutti_nodes::GateNode<f64> {
+            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
+        }
+        tutti_nodes::LimiterNode<f32> { Threshold => Db, Ceiling => Db, Release => Seconds }
+        tutti_nodes::LimiterNode<f64> { Threshold => Db, Ceiling => Db, Release => Seconds }
+        tutti_nodes::BrickwallLimiterNode<f32> { Ceiling => Db }
+        tutti_nodes::BrickwallLimiterNode<f64> { Ceiling => Db }
         tutti_nodes::DistortionNode { Drive => Drive }
         tutti_nodes::BitCrusherNode { BitDepth => BitDepth, HoldFactor => HoldFactor }
         tutti_nodes::EnvelopeFilterNode {

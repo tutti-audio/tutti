@@ -349,7 +349,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                         });
                     *h = kind.hardness(drive);
                 }
-                for c in 0..width {
+                for (c, history) in self.history[..width].iter_mut().enumerate() {
                     let mut plane = output.plane_mut(c);
                     let (hardness, input) = (&hardness[..end - start], input.plane(c));
                     let (input, output) = (&input.samples()[start..end], plane.samples_mut());
@@ -357,7 +357,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                     if order == Antialiasing::Off {
                         kind.shape_each(hardness, input, output);
                     } else {
-                        kind.adaa_each(order, hardness, input, output, &mut self.history[c]);
+                        kind.adaa_each(order, hardness, input, output, history);
                     }
                 }
                 start = end;

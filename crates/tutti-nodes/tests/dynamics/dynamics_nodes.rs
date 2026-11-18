@@ -70,8 +70,8 @@ fn first_difference(a: &[Vec<f32>], b: &[Vec<f32>]) -> Option<usize> {
     })
 }
 
-fn compressor() -> CompressorNode {
-    CompressorNode::new(
+fn compressor() -> CompressorNode<f32> {
+    CompressorNode::<f32>::new(
         BusTopology::STEREO,
         KeySource::Sidechain,
         CompressorControls {
@@ -86,8 +86,8 @@ fn compressor() -> CompressorNode {
     )
 }
 
-fn gate() -> GateNode {
-    GateNode::new(
+fn gate() -> GateNode<f32> {
+    GateNode::<f32>::new(
         BusTopology::STEREO,
         KeySource::Sidechain,
         GateControls {
@@ -101,16 +101,16 @@ fn gate() -> GateNode {
     )
 }
 
-fn limiter() -> LimiterNode {
-    LimiterNode::stereo(LimiterControls {
+fn limiter() -> LimiterNode<f32> {
+    LimiterNode::<f32>::stereo(LimiterControls {
         threshold: Db(-12.0),
         ceiling: Db(-3.0),
         release: Seconds(0.05),
     })
 }
 
-fn brickwall() -> BrickwallLimiterNode {
-    BrickwallLimiterNode::new(Db(0.0))
+fn brickwall() -> BrickwallLimiterNode<f32> {
+    BrickwallLimiterNode::<f32>::new(Db(0.0))
 }
 
 /// A write between blocks to a control that lands whole starts at the next grid point: with
@@ -219,7 +219,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "compressor",
             Box::new(|block, moved, driven| {
                 render(
-                    CompressorNode::new(
+                    CompressorNode::<f32>::new(
                         BusTopology::STEREO,
                         KeySource::Sidechain,
                         CompressorControls {
@@ -249,7 +249,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "gate",
             Box::new(|block, moved, driven| {
                 render(
-                    GateNode::new(
+                    GateNode::<f32>::new(
                         BusTopology::STEREO,
                         KeySource::Sidechain,
                         GateControls {
@@ -326,7 +326,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "brickwall",
             Box::new(|block, moved, driven| {
                 render(
-                    BrickwallLimiterNode::new(Db(-1.0)),
+                    BrickwallLimiterNode::<f32>::new(Db(-1.0)),
                     &[&audio[0], &audio[1]],
                     &[driven.then_some(&ceiling[..])],
                     block,
@@ -443,7 +443,7 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
     let lookahead = Lookahead::of(Seconds(0.005));
     let make = || {
         prepared(
-            LimiterNode::new(BusTopology::STEREO, lookahead, LimiterControls::DEFAULT),
+            LimiterNode::<f32>::new(BusTopology::STEREO, lookahead, LimiterControls::DEFAULT),
             rate,
             64,
         )
@@ -507,12 +507,12 @@ fn the_key_is_the_sidechain_role_bus_and_the_detector_listens_to_it() {
         (
             "compressor",
             Box::new(compressor()) as Box<dyn Node>,
-            Box::new(CompressorNode::stereo(CompressorControls::DEFAULT)) as Box<dyn Node>,
+            Box::new(CompressorNode::<f32>::stereo(CompressorControls::DEFAULT)) as Box<dyn Node>,
         ),
         (
             "gate",
             Box::new(gate()) as Box<dyn Node>,
-            Box::new(GateNode::stereo(GateControls::DEFAULT)) as Box<dyn Node>,
+            Box::new(GateNode::<f32>::stereo(GateControls::DEFAULT)) as Box<dyn Node>,
         ),
     ] {
         let shape = keyed.shape();
