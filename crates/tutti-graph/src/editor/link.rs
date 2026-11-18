@@ -6,8 +6,7 @@ use tutti_rt::FaultLatch;
 use tutti_units::At;
 
 use super::CommitError;
-use crate::command::{CommandId, CommandTx, ScheduleError};
-use crate::event::EventKind;
+use crate::command::{CommandId, CommandTx, ScheduleError, Scheduled};
 use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::gain::EdgeFade;
 use crate::spec::EventIn;
@@ -201,9 +200,9 @@ impl<F: Float> Link<F> {
         &mut self,
         at: At,
         to: EventIn,
-        kind: EventKind,
+        payload: Scheduled,
     ) -> Result<CommandId, ScheduleError> {
-        self.commands.send(self.sent, at, to, kind)
+        self.commands.send(self.sent, at, to, payload)
     }
 
     /// Takes back command `id`, if it has not landed.
