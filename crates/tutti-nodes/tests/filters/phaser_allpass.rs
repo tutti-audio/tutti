@@ -16,6 +16,9 @@ use tutti_nodes::{PhaserControls, PhaserNode, Stages, Stagger, SweepRange};
 use tutti_types::BusTopology;
 use tutti_units::{Amplitude, Depth, Feedback, Hz, SampleRate, Samples};
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances
+// are `f32`'s.
+
 const SR: SampleRate = SampleRate::SR_48K;
 const F0: f64 = 1_000.0;
 const LEN: usize = 6_000;

@@ -21,6 +21,9 @@ use tutti_nodes::{FdnNode, FreeverbNode};
 use tutti_types::{AtomicF32, ChannelLayout, MaxBlock};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances
+// are `f32`'s.
+
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 

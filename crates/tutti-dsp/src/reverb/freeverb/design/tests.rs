@@ -17,11 +17,11 @@ fn the_scalings_are_freeverbs() {
     let gm = FreeverbControls::GENERAL_MIDI;
     assert_eq!(gm, FreeverbControls::default());
     assert!((gm.feedback().get() - 0.84).abs() < 1e-6);
-    assert!((gm.damping() - 0.2).abs() < 1e-6);
+    assert!((gm.damping() - 0.2).abs() < 1e-15);
     assert!((controls(0.0, 0.0).feedback().get() - 0.7).abs() < 1e-6);
     assert!((controls(1.0, 1.0).feedback().get() - 0.98).abs() < 1e-6);
     assert_eq!(controls(0.0, 0.0).damping(), 0.0);
-    assert!((controls(1.0, 1.0).damping() - 0.4).abs() < 1e-6);
+    assert!((controls(1.0, 1.0).damping() - 0.4).abs() < 1e-15);
 }
 
 /// A control outside `0..1` is clamped and one that is not finite is the General MIDI

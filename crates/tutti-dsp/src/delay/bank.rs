@@ -191,11 +191,11 @@ impl<F: Float + Lerp> DelayBank<F> {
             };
         }
         let steps = Steps::Fixed(glides.steps);
-        let fb = F::from_f64(f64::from(finite_or(controls.feedback.get(), 0.0)));
+        let fb = F::from_f32(finite_or(controls.feedback.get(), 0.0));
         let cross = if self.routing.is_none() {
             F::ZERO
         } else {
-            F::from_f64(f64::from(finite_or(controls.cross_feedback.get(), 0.0)))
+            F::from_f32(finite_or(controls.cross_feedback.get(), 0.0))
         };
         glides.feedback.aim_by(fb, steps);
         glides.cross.aim_by(cross, steps);
@@ -325,8 +325,8 @@ impl<F: Float + Lerp> DelayBank<F> {
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
                 for (i, (y, x)) in ys[c][..frames].iter_mut().zip(xs[c]).enumerate() {
                     let (fb, _) = gain(i);
-                    let out = delay_step(line, F::from_f64(x.to_f64()), delay_at(c, i), fb, interp);
-                    *y = S::from_f64(out.to_f64());
+                    let out = delay_step(line, x.convert_to::<F>(), delay_at(c, i), fb, interp);
+                    *y = out.convert_to::<S>();
                 }
             }
             return;
@@ -340,17 +340,17 @@ impl<F: Float + Lerp> DelayBank<F> {
                 self.taps[c] = line.read_sample((d.max(F::ONE) - F::ONE).max(F::ZERO), interp);
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
-                let mut acc = F::from_f64(xs[c][i].to_f64()) + self.taps[c] * fb;
+                let mut acc = xs[c][i].convert_to::<F>() + self.taps[c] * fb;
                 for j in 0..width {
                     let w = self.routing.weight(c, j);
                     if w != Gain::SILENT {
-                        acc += F::from_f64(f64::from(w.get())) * cf * self.taps[j];
+                        acc += F::from_f32(w.get()) * cf * self.taps[j];
                     }
                 }
                 line.push_sample(acc);
             }
             for (c, line) in self.lines.iter().enumerate().take(width) {
-                ys[c][i] = S::from_f64(line.read_sample(delay_at(c, i), interp).to_f64());
+                ys[c][i] = line.read_sample(delay_at(c, i), interp).convert_to::<S>();
             }
         }
     }

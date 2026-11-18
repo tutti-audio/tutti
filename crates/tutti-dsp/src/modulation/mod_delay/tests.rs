@@ -5,6 +5,9 @@ use tutti_units::{Feedback, Gain, Hz, PhaseIncrement, SampleRate, SampleSpan, Se
 use super::*;
 use crate::{DELAY_SLEW, Steps};
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn bus(width: u16) -> BusTopology {
@@ -111,14 +114,14 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     );
     let (lo, hi) = reach(&flanger, 0.01);
     assert_eq!(lo, 1.0);
-    assert!((hi - 0.011 * 48_000.0).abs() < 1e-6, "{hi}");
+    assert!((hi - 0.011 * 48_000.0).abs() < 1e-9, "{hi}");
     // The depth is the sweep's: 1 s asks for the greatest (40 ms, 1,920 frames), and a
     // depth of none on the real flanger is its least, 0.1 ms.
     assert_eq!(chorus.design(&controls(1.0, 1.0, 0.0)).depth.get(), 1_920.0);
     assert_eq!(reach(&chorus, 1.0), (1.0, 2_400.0));
     let real = ModDelayBank::<f32>::new(&ModDelayLayout::flanger(bus(1)), RATE);
     let least = real.design(&controls(1.0, 0.0, 0.0)).depth.get();
-    assert!((least - 0.0001 * 48_000.0).abs() < 1e-3, "{least}");
+    assert!((least - 0.0001 * 48_000.0).abs() < 1e-9, "{least}");
     // The centre is the base, and the delay is held inside the line.
     assert_eq!(centre(&chorus), 480.0);
     assert_eq!(

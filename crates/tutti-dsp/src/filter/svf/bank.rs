@@ -113,8 +113,8 @@ fn group<F: Float + Lanes, S: Float, const N: usize>(
     macro_rules! frame {
         ($i:expr, $c:expr) => {
             for k in 0..N {
-                let y = svf_step($c, &mut st[k], F::from_f64(xs[k][$i].to_f64()));
-                ys[k][$i] = S::from_f64(y.to_f64());
+                let y = svf_step($c, &mut st[k], xs[k][$i].convert_to::<F>());
+                ys[k][$i] = y.convert_to::<S>();
             }
         };
     }

@@ -35,8 +35,8 @@ impl Smoother {
     /// At `coeff = 1` the result is `target` only to within half an ulp of
     /// the larger of the two (exactly when they are within 2x of each
     /// other). The retention form `(1 - c) * current + c * target` would be
-    /// exact there, but in `f32` its `1 - c` rounds to 1 for a long time
-    /// constant and the value then stops approaching a lower target.
+    /// exact there, but its `1 - c` rounds to 1 for a long time constant
+    /// and the value then stops approaching a lower target.
     #[inline]
     pub fn toward<F: Float>(current: F, target: F, coeff: F) -> F {
         current + coeff * (target - current)

@@ -260,7 +260,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             for c in 0..width {
                 let plane = &input.plane(c).samples()[at..at + run];
                 for (slot, v) in x.iter_mut().zip(plane) {
-                    *slot += F::from_f64(v.to_f64());
+                    *slot += v.convert_to::<F>();
                 }
             }
             for slot in &mut x[..run] {
@@ -269,12 +269,12 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             self.run(&x[..run], &mut l[..run], &mut r[..run]);
             if let Some(y) = left.as_deref_mut() {
                 for (y, &v) in y[at..at + run].iter_mut().zip(&l[..run]) {
-                    *y = S::from_f64(v.to_f64());
+                    *y = v.convert_to::<S>();
                 }
             }
             if let Some(y) = right.as_deref_mut() {
                 for (y, &v) in y[at..at + run].iter_mut().zip(&r[..run]) {
-                    *y = S::from_f64(v.to_f64());
+                    *y = v.convert_to::<S>();
                 }
             }
             self.into = (self.into + run) % CHUNK;

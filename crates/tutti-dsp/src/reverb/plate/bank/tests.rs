@@ -321,7 +321,7 @@ fn an_unaimed_bank_renders_silence() {
 }
 
 /// `x` through an `f64` bank in one call: the two output channels.
-fn run_f64(bank: &mut PlateBank<f64>, glides: &mut PlateGlides<f64>, x: &[f64]) -> [Vec<f64>; 2] {
+fn run_wide(bank: &mut PlateBank<f64>, glides: &mut PlateGlides<f64>, x: &[f64]) -> [Vec<f64>; 2] {
     let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
     bank.process(
         glides,
@@ -377,7 +377,7 @@ fn an_f64_plate_is_linear() {
         let mut glides = bank.glides();
         bank.aim(&mut glides, &controls);
         glides.settle();
-        run_f64(&mut bank, &mut glides, input)
+        run_wide(&mut bank, &mut glides, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
     for c in 0..2 {
