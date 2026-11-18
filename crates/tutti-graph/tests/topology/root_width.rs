@@ -25,7 +25,7 @@ fn a_channel_no_speaker_names_is_refused_for_every_destination() {
         .unwrap();
     for dst in [1u16, 2, 5, 6] {
         assert_eq!(
-            fold_to_width(&lfe2, width(dst)).map(|_| ()),
+            fold_to_width::<f32>(&lfe2, width(dst)).map(|_| ()),
             Err(FoldError::Unnamed {
                 end: tutti_buffers::FoldEnd::Source,
                 channel: 4
@@ -47,7 +47,7 @@ fn an_unassigned_source_goes_by_index_and_only_widens() {
         .frame(&[1.0, 2.0, 3.0, 4.0], &mut out);
     assert_eq!(out, [1.0, 2.0, 3.0, 4.0, 0.0, 0.0]);
     assert_eq!(
-        fold_to_width(&four, width(2)).map(|_| ()),
+        fold_to_width::<f32>(&four, width(2)).map(|_| ()),
         Err(FoldError::Unplaced {
             channel: 2,
             speaker: Speaker::Unassigned
@@ -79,7 +79,7 @@ fn a_named_source_goes_by_index_into_a_width_with_no_order() {
         .frame(&[1.0, 2.0], &mut five);
     assert_eq!(five, [1.0, 2.0, 0.0, 0.0, 0.0]);
     assert!(matches!(
-        fold_to_width(&smpte(6), width(5)),
+        fold_to_width::<f32>(&smpte(6), width(5)),
         Err(FoldError::Unplaced { channel: 5, .. })
     ));
 }
@@ -119,15 +119,15 @@ fn a_named_source_with_an_order_is_placed_by_speaker() {
 fn a_zero_width_at_either_end_is_refused() {
     let zero = FoldError::Buffer(tutti_buffers::BufferError::ZeroWidth);
     assert_eq!(
-        fold_to_width(&ChannelTopology::new([]).unwrap(), width(2)).map(|_| ()),
+        fold_to_width::<f32>(&ChannelTopology::new([]).unwrap(), width(2)).map(|_| ()),
         Err(zero)
     );
     assert_eq!(
-        fold_to_width(&smpte(2), ChannelLayout::EMPTY).map(|_| ()),
+        fold_to_width::<f32>(&smpte(2), ChannelLayout::EMPTY).map(|_| ()),
         Err(zero)
     );
     assert_eq!(
-        fold_to_width(&ChannelTopology::new([]).unwrap(), width(3)).map(|_| ()),
+        fold_to_width::<f32>(&ChannelTopology::new([]).unwrap(), width(3)).map(|_| ()),
         Err(zero)
     );
 }

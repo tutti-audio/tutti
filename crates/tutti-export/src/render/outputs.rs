@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes};
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
@@ -50,10 +50,10 @@ struct Waiting {
 /// Where a lane's gated frames go.
 enum Sink {
     /// Straight into the file's chain as the blocks arrive.
-    Stream { chain: Box<Chain> },
+    Stream { chain: Box<Chain<f32>> },
     /// Into a spill, to be measured and written once the render is over.
     Spill {
-        chain: Box<Chain>,
+        chain: Box<Chain<f32>>,
         waiting: Box<Waiting>,
     },
     /// Onto planes in memory.
@@ -454,7 +454,7 @@ fn finish(
 
     // Finalizing.
     let mut produced: Vec<Option<Produced>> = Vec::with_capacity(lanes.len());
-    let mut files: Vec<PendingFile> = Vec::new();
+    let mut files: Vec<PendingFile<f32>> = Vec::new();
     let placements: Vec<tutti_types::Placement> = lanes.iter().map(|l| l.placement).collect();
     for (i, lane) in lanes.into_iter().enumerate() {
         match lane.sink {
@@ -579,11 +579,11 @@ fn feed_planes(
 }
 
 /// A file output whose frames are all written: its chain, to be finalized.
-pub(crate) struct PendingFile {
+pub(crate) struct PendingFile<F: Float = f32> {
     /// The output's index in the list the render was given.
     pub(crate) index: usize,
     pub(crate) path: PathBuf,
-    pub(crate) chain: Chain,
+    pub(crate) chain: Chain<F>,
 }
 
 /// Finalizes every file into its temporary, then puts them in place: the token is checked before each output's finalize
@@ -595,8 +595,8 @@ pub(crate) struct PendingFile {
 /// [`Error::NotCommitted`], naming what landed, which is kept: nothing is
 /// rolled back. One that fails before any landed is the rename's own error.
 /// Every file that did not land is removed.
-pub(crate) fn finalize_files(
-    files: Vec<PendingFile>,
+pub(crate) fn finalize_files<F: Float>(
+    files: Vec<PendingFile<F>>,
     control: &mut Control<'_>,
 ) -> Result<Outcome<Vec<(usize, PathBuf, Landed)>>> {
     let count = files.len();
