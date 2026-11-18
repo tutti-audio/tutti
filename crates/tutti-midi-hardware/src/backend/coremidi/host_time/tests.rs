@@ -41,3 +41,18 @@ fn a_departure_is_stamped_in_host_ticks_after_the_reading() {
     assert_eq!(pairing.host_time_of(earlier), base.ticks(HOST_NOW - TEN_MS));
     assert_eq!(pairing.instant_of(pairing.host_time_of(earlier)), earlier);
 }
+
+// What CoreMIDI holds a packet until is its stamp: one sent `Now` is stamped 0
+// (delivered at once) and one sent 2 s ahead is stamped 2 s of ticks after the
+// reading, never 0 and never earlier than a packet sent `Now` would be.
+#[test]
+fn a_now_packet_is_stamped_zero_and_a_scheduled_one_its_host_time() {
+    let os = Instant::now() + Duration::from_secs(100);
+    let two_s = Duration::from_secs(2);
+    let mut reading = Some(pairing(os));
+    assert_eq!(stamp_of(SendAt::Now, &mut reading), 0);
+    assert_eq!(
+        stamp_of(SendAt::At(os + two_s), &mut reading),
+        Timebase::get().ticks(HOST_NOW + two_s)
+    );
+}

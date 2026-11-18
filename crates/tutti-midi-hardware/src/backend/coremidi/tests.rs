@@ -134,13 +134,13 @@ fn the_os_blocks_are_within_the_spec() {
 }
 
 /// **A packet sent `At` a future instant is held by CoreMIDI until then, and
-/// one sent `Now` goes at once**: the send time the plan gives becomes the
-/// packet's host-time stamp, which CoreMIDI schedules. A virtual UMP
-/// destination records when each packet arrives; the note sent 2 s ahead
-/// arrives after the one sent now, though it was queued first, and not before
-/// its instant. Only lateness depends on load.
+/// one sent `Now` goes at once**: the stamp each gets is pinned in `host_time`'s
+/// tests; here CoreMIDI schedules them. A virtual UMP destination receives the
+/// note sent 2 s ahead after the one sent now, though it was queued first. No
+/// time is asserted: the order is what a hold changes, and the waits only guard
+/// a hang.
 #[test]
-fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
+fn a_scheduled_packet_arrives_after_the_one_sent_now() {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
     use tutti_midi_runtime::{Outgoing, SendAt};
@@ -149,7 +149,7 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
     let (tx, rx) = mpsc::channel();
     let _destination =
         UmpVirtualDestination::new("tutti-sched-out", VirtualProtocol::Midi2, move |ump| {
-            let _ = tx.send((Instant::now(), ump));
+            let _ = tx.send(ump);
         })
         .expect("a virtual UMP destination");
     let backend = CoreMidiEndpoints::new();
@@ -171,16 +171,11 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
     assert_eq!(sent.packets(), 2);
 
     let wait = Duration::from_secs(30);
-    let (_, first) = rx.recv_timeout(wait).expect("the note sent now");
-    let (second_at, second) = rx.recv_timeout(wait).expect("the scheduled note");
+    let first = rx.recv_timeout(wait).expect("the note sent now");
+    let second = rx.recv_timeout(wait).expect("the scheduled note");
     assert_eq!(
         (first, second),
         (note(61), note(60)),
         "now first, then the scheduled one"
-    );
-    assert!(
-        second_at + Duration::from_millis(5) >= due,
-        "the scheduled note arrived {:?} before its instant",
-        due - second_at
     );
 }
