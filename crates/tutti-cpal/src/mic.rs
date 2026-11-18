@@ -488,8 +488,8 @@ impl Capture {
         let selected = select.dst_layout();
         Self {
             select,
-            device: vec![0.0; frames.interleaved_len(device)],
-            chunk: vec![0.0; frames.interleaved_len(selected)],
+            device: vec![0.0; device.interleaved_len(frames)],
+            chunk: vec![0.0; selected.interleaved_len(frames)],
             rec,
             mon,
         }
@@ -506,15 +506,15 @@ impl Capture {
     {
         let device = self.select.src_layout();
         let selected = self.select.dst_layout();
-        let whole = Samples::from_interleaved_len(data.len(), device).interleaved_len(device);
-        let run_len = Samples(CHUNK_FRAMES).interleaved_len(device).max(1);
+        let whole = device.interleaved_len(device.from_interleaved_len(data.len()));
+        let run_len = device.interleaved_len(Samples(CHUNK_FRAMES)).max(1);
         for run in data[..whole].chunks(run_len) {
-            let frames = Samples::from_interleaved_len(run.len(), device);
+            let frames = device.from_interleaved_len(run.len());
             let held = &mut self.device[..run.len()];
             for (slot, s) in held.iter_mut().zip(run) {
                 *slot = s.to_sample();
             }
-            let pushed = &mut self.chunk[..frames.interleaved_len(selected)];
+            let pushed = &mut self.chunk[..selected.interleaved_len(frames)];
             // The chunks are sized to the run, so the views agree in width and frames.
             let folded = Interleaved::new(held, device).and_then(|src| {
                 let dst = InterleavedMut::new(&mut *pushed, selected)?;

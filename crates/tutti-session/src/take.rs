@@ -933,8 +933,8 @@ struct Pump {
 impl Pump {
     fn run(mut self, landings: &Landings<Started>) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
-        let mut scratch = vec![0.0f32; Samples(PASS_FRAMES).interleaved_len(layout)];
-        let silence = vec![0.0f32; Samples(PASS_FRAMES).interleaved_len(layout)];
+        let mut scratch = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
+        let silence = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
         // A whole number of frames at the tap's width, so the view builds; a
         // zero-width tap has nothing to take.
         let Ok(silence) = Interleaved::new(&silence, layout) else {
@@ -965,7 +965,7 @@ impl Pump {
             let first = self.reader.next_frame();
             // `run` whole frames at the tap's width, so the view builds.
             let Ok(window) =
-                InterleavedMut::new(&mut scratch[..Samples(run).interleaved_len(layout)], layout)
+                InterleavedMut::new(&mut scratch[..layout.interleaved_len(Samples(run))], layout)
             else {
                 failed = true;
                 break 'pump;
@@ -1003,7 +1003,7 @@ impl Pump {
                 let to = hi.since(first).map_or(0, Samples::get);
                 // `popped` whole frames at the tap's width, so the view builds.
                 let Ok(popped_view) =
-                    Interleaved::new(&scratch[..Samples(popped).interleaved_len(layout)], layout)
+                    Interleaved::new(&scratch[..layout.interleaved_len(Samples(popped))], layout)
                 else {
                     failed = true;
                     break 'pump;

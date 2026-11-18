@@ -121,7 +121,7 @@ impl ManualStream {
 
     fn render_block_inner(&self, frames: usize, delay: Option<Duration>) -> Option<Vec<f32>> {
         let layout = self.with_block(|b| b.layout())?;
-        let mut out = vec![0.0f32; Samples(frames).interleaved_len(layout)];
+        let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
         self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
         if let Some(faults) = self.faults.lock_recover().as_ref() {
             faults.delivered();

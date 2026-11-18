@@ -659,7 +659,7 @@ pub(crate) fn apply_mapping(
             let start = at.saturating_sub(3);
             let frames =
                 (fade_frames.get() as f64 * rate.max(1.0)).ceil() as usize + GAP_COVER_FRAMES + 8;
-            let mut data = vec![0.0f32; Samples(frames).interleaved_len(layout)];
+            let mut data = vec![0.0f32; layout.interleaved_len(Samples(frames))];
             // The old content piecewise, as the reader would have heard it.
             let split = (content
                 .switch_at
@@ -828,7 +828,7 @@ mod tests {
 
     fn fill(mapping: &Mapping, wave: &Wave, pos: u64, frames: usize, ch: usize) -> Vec<f32> {
         let layout = ChannelLayout::try_from(ch).expect("a test width is small");
-        let mut out = vec![0.0f32; Samples(frames).interleaved_len(layout)];
+        let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
         let reads = std::cell::Cell::new(0);
         let mut read = reader(wave, ch, &reads);
         let view = InterleavedMut::new(&mut out, layout).expect("whole frames");

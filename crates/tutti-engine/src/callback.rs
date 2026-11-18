@@ -153,7 +153,7 @@ impl OutputBlock {
             state,
             layout,
             channels,
-            buffer: vec![0.0f32; Samples(MAX_FRAMES).interleaved_len(layout)],
+            buffer: vec![0.0f32; layout.interleaved_len(Samples(MAX_FRAMES))],
             last_rendered_frames: 0,
             latency: Arc::new(StreamLatency::new()),
             faults: Arc::new(StreamFaults::new()),
@@ -298,11 +298,13 @@ impl OutputBlock {
         // Clamp so we never allocate. If a backend hands us a larger buffer we
         // process the head and write silence to the tail. The assertion that
         // this should not happen lives at the driver boundary, not here.
-        let frames =
-            Samples::from_interleaved_len(data.len(), self.layout).min(Samples(MAX_FRAMES));
+        let frames = self
+            .layout
+            .from_interleaved_len(data.len())
+            .min(Samples(MAX_FRAMES));
         self.last_rendered_frames = frames.get();
 
-        let mix = &mut self.buffer[..frames.interleaved_len(self.layout)];
+        let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];
         // Zero before rendering: the previous callback's contents are not
         // meaningful input for the graph.
         mix.fill(0.0);

@@ -261,7 +261,7 @@ fn refill_one(
     let (_, to) = writer.window();
     let layout = writer.channels();
     buffer.clear();
-    buffer.resize(Samples(n).interleaved_len(layout), 0.0);
+    buffer.resize(layout.interleaved_len(Samples(n)), 0.0);
     let mapping = writer.content().current.clone();
     // The buffer is whole frames of the ring's width, so the view is built.
     let read_ok = InterleavedMut::new(buffer.as_mut_slice(), layout)

@@ -379,7 +379,7 @@ pub(crate) fn replay_through(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Samples>> {
     let layout = chain.layout;
-    let mut block = vec![0.0f32; Samples(block_frames.max(1)).interleaved_len(layout)];
+    let mut block = vec![0.0f32; layout.interleaved_len(Samples(block_frames.max(1)))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     let mut at = done.get();
     loop {
