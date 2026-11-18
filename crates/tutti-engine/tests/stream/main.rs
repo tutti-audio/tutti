@@ -4,6 +4,7 @@
 
 mod fixtures;
 
+mod f64_render;
 mod lifecycle;
 mod output_block;
 mod process_audio;

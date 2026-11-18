@@ -3,8 +3,8 @@
 //! A tap in the plan (`tutti-graph`) copies the graph's signal before the
 //! engine's declick fader and the fold to the device width. This is the other
 //! kind: [`Engine`](crate::Engine) writes each chunk of its output buffer,
-//! device-width and after the fader (the engine's f32 output buffer, before
-//! the device layer clamps and converts it), to the rings of a [`TapReader`], the same
+//! device-width and after the fader (the engine's output buffer in the graph's
+//! float format, before the device layer clamps and converts it), to the rings of a [`TapReader`], the same
 //! reader type. It is written by [`Engine::process`](crate::Engine::process)
 //! and [`Engine::process_segment`](crate::Engine::process_segment), so a
 //! device callback and an offline session's `render` feed it; an export forks
@@ -32,7 +32,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Float, Interleaved};
 use tutti_graph::{TapReader, TapWriter};
 use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::ChannelLayout;
@@ -44,7 +44,7 @@ use tutti_units::Samples;
 const INSTALLS: usize = 4;
 
 /// An install: a writer, or `None` to close.
-type Install = Option<Box<TapWriter>>;
+type Install<F> = Option<Box<TapWriter<F>>>;
 
 /// Why [`HeardTaps::open`] or [`HeardTaps::close`] refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
@@ -65,18 +65,18 @@ pub enum HeardTapError {
 /// reader is alive, nothing is open), and this one is a moment that passes.
 #[derive(Debug)]
 #[must_use = "a Retry opened nothing"]
-pub enum HeardOpen {
+pub enum HeardOpen<F: Float = f32> {
     /// The tap is open: this reads it. It flows from the first render that
     /// begins after the call returned.
-    Opened(TapReader),
+    Opened(TapReader<F>),
     /// The audio thread has not yet taken the last installs (it is not
     /// rendering). Nothing was opened or changed; call again once it has.
     Retry,
 }
 
-impl HeardOpen {
+impl<F: Float> HeardOpen<F> {
     /// The reader, or `None` for a [`Retry`](Self::Retry).
-    pub fn reader(self) -> Option<TapReader> {
+    pub fn reader(self) -> Option<TapReader<F>> {
         match self {
             Self::Opened(reader) => Some(reader),
             Self::Retry => None,
@@ -88,11 +88,11 @@ impl HeardOpen {
 /// usable from any control thread. Get it from
 /// [`Engine::heard_taps`](crate::Engine::heard_taps).
 #[derive(Clone, Debug)]
-pub struct HeardTaps(Arc<Mutex<Control>>);
+pub struct HeardTaps<F: Float = f32>(Arc<Mutex<Control<F>>>);
 
-struct Control {
-    install: RingWriter<Install>,
-    retired: RingReader<Box<TapWriter>>,
+struct Control<F: Float> {
+    install: RingWriter<Install<F>>,
+    retired: RingReader<Box<TapWriter<F>>>,
     /// The open tap's reader, to see when it was dropped.
     reader: Option<Weak<()>>,
     /// A close the install queue had no room for, owed to the audio thread:
@@ -100,13 +100,13 @@ struct Control {
     owed_close: bool,
 }
 
-impl std::fmt::Debug for Control {
+impl<F: Float> std::fmt::Debug for Control<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Control").finish_non_exhaustive()
     }
 }
 
-impl Control {
+impl<F: Float> Control<F> {
     /// Frees what the audio thread retired.
     fn free(&mut self) {
         while self.retired.pop().is_some() {}
@@ -138,18 +138,18 @@ impl Control {
 /// The rings hold boxed writers, so this is dropped with the engine on the
 /// control side (`tutti_rt::ring`'s contract): an install still queued is
 /// freed there.
-pub(crate) struct Hearing {
-    install: RingReader<Install>,
-    retire: RingWriter<Box<TapWriter>>,
-    writer: Option<Box<TapWriter>>,
+pub(crate) struct Hearing<F: Float> {
+    install: RingReader<Install<F>>,
+    retire: RingWriter<Box<TapWriter<F>>>,
+    writer: Option<Box<TapWriter<F>>>,
 }
 
 /// A linked pair, built with the engine.
-pub(crate) fn link() -> (HeardTaps, Hearing) {
-    let (install_tx, install_rx) = ring::<Install>(INSTALLS + 1, Overflow::Refuse);
+pub(crate) fn link<F: Float>() -> (HeardTaps<F>, Hearing<F>) {
+    let (install_tx, install_rx) = ring::<Install<F>>(INSTALLS + 1, Overflow::Refuse);
     // A retired writer waits here for the control side; this holds every
     // install that can be in flight and the live one.
-    let (retire_tx, retire_rx) = ring::<Box<TapWriter>>(INSTALLS + 3, Overflow::Refuse);
+    let (retire_tx, retire_rx) = ring::<Box<TapWriter<F>>>(INSTALLS + 3, Overflow::Refuse);
     (
         HeardTaps(Arc::new(Mutex::new(Control {
             install: install_tx,
@@ -165,8 +165,8 @@ pub(crate) fn link() -> (HeardTaps, Hearing) {
     )
 }
 
-impl HeardTaps {
-    fn control(&self) -> std::sync::MutexGuard<'_, Control> {
+impl<F: Float> HeardTaps<F> {
+    fn control(&self) -> std::sync::MutexGuard<'_, Control<F>> {
         self.0.lock_recover()
     }
 
@@ -186,7 +186,7 @@ impl HeardTaps {
         &self,
         width: ChannelLayout,
         capacity: Samples,
-    ) -> Result<HeardOpen, HeardTapError> {
+    ) -> Result<HeardOpen<F>, HeardTapError> {
         let mut c = self.control();
         c.settle();
         if c.alive() {
@@ -242,7 +242,7 @@ impl HeardTaps {
     }
 }
 
-impl Hearing {
+impl<F: Float> Hearing<F> {
     /// Takes the installs that arrived, retiring the writers they replace.
     /// Audio thread: pops and pushes boxes, drops nothing, allocates nothing.
     #[inline]
@@ -265,7 +265,7 @@ impl Hearing {
     /// Writes a chunk of the (faded) output. A chunk of another width than
     /// the tap's is counted lost (`TapWriter::push_interleaved`).
     #[inline]
-    pub(crate) fn write(&mut self, block: Interleaved<'_>) {
+    pub(crate) fn write(&mut self, block: Interleaved<'_, F>) {
         if let Some(writer) = self.writer.as_mut() {
             writer.push_interleaved(block);
         }
@@ -276,11 +276,11 @@ impl Hearing {
 mod tests {
     use super::*;
 
-    fn writer(width: usize) -> Box<TapWriter> {
+    fn writer(width: usize) -> Box<TapWriter<f32>> {
         Box::new(TapReader::pair(width, Samples(8)).1)
     }
 
-    fn width(h: &Hearing) -> Option<usize> {
+    fn width(h: &Hearing<f32>) -> Option<usize> {
         h.writer.as_ref().map(|w| w.width())
     }
 

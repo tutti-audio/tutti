@@ -63,7 +63,7 @@
 use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_buffers::{BufferError, Fold, FoldError};
+use tutti_buffers::{BufferError, Float, Fold, FoldError};
 use tutti_graph::{RootError, RootId};
 use tutti_rt::{LockExt, Publisher};
 use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
@@ -87,21 +87,21 @@ struct DeviceEntry {
 
 /// One root generation's folds.
 #[derive(Debug, Clone)]
-struct RootFolds {
+struct RootFolds<F: Float> {
     id: RootId,
     /// What the root was declared with; `None` is the engine's order for the
     /// plan's width, at every width.
     topology: Option<ChannelTopology>,
     /// Index `d - 1` holds the folds into a device of `d` channels, `None` for
     /// a width not supported; inside, index `w - 1` folds a root of `w`.
-    by_device: Vec<Option<Box<[Option<Fold>]>>>,
+    by_device: Vec<Option<Box<[Option<Fold<F>>]>>>,
 }
 
-impl RootFolds {
+impl<F: Float> RootFolds<F> {
     /// The fold of this root at `width` channels into `device`, or none: a
     /// declared root has the one width it was declared at, and a pair that
     /// cannot be placed has no fold.
-    fn build(&self, width: usize, device: &DeviceEntry, routing: &Routing) -> Option<Fold> {
+    fn build(&self, width: usize, device: &DeviceEntry, routing: &Routing) -> Option<Fold<F>> {
         let assumed;
         let root = match &self.topology {
             Some(root) if usize::from(root.width().count()) != width => return None,
@@ -117,7 +117,7 @@ impl RootFolds {
     }
 
     /// The folds of every root width this root has into `device`.
-    fn column(&self, device: &DeviceEntry, routing: &Routing) -> Box<[Option<Fold>]> {
+    fn column(&self, device: &DeviceEntry, routing: &Routing) -> Box<[Option<Fold<F>>]> {
         (1..=MAX_CHANNELS)
             .map(|w| self.build(w, device, routing))
             .collect()
@@ -135,12 +135,12 @@ impl RootFolds {
 /// The folds from each published root, at each width it renders, to each
 /// device width supported.
 #[derive(Debug, Clone)]
-pub(crate) struct OutputFolds {
+pub(crate) struct OutputFolds<F: Float> {
     /// Index `d - 1` is the device of `d` channels, `None` for a width not
     /// supported.
     devices: Vec<Option<DeviceEntry>>,
     /// Every root still published, by ascending id.
-    roots: Vec<RootFolds>,
+    roots: Vec<RootFolds<F>>,
     /// Where the mix lands: composed into every root's folds.
     routing: Routing,
     /// Counts the changes that replace folds in place (a routing, a device's
@@ -148,10 +148,10 @@ pub(crate) struct OutputFolds {
     generation: u64,
     /// The table the last such change replaced, while the audio thread
     /// crossfades from it; `None` is a cut. It holds no `previous` of its own.
-    previous: Option<Arc<OutputFolds>>,
+    previous: Option<Arc<OutputFolds<F>>>,
 }
 
-impl OutputFolds {
+impl<F: Float> OutputFolds<F> {
     /// The folds into devices of `1..=widest` channels, for the undeclared
     /// first root. Control side: it allocates.
     pub(crate) fn up_to(widest: usize) -> Self {
@@ -236,7 +236,7 @@ impl OutputFolds {
     }
 
     /// The table the last in-place change replaced, while it is crossfaded from.
-    pub(crate) fn previous(&self) -> Option<&Arc<OutputFolds>> {
+    pub(crate) fn previous(&self) -> Option<&Arc<OutputFolds<F>>> {
         self.previous.as_ref()
     }
 
@@ -256,7 +256,7 @@ impl OutputFolds {
     /// into a device of `device` channels, or `None` for a root not published
     /// (or retired), a root of no channels (or more than the engine renders), a
     /// device not supported, or a pair that cannot be placed.
-    pub(crate) fn get(&self, root: RootId, device: usize, width: usize) -> Option<&Fold> {
+    pub(crate) fn get(&self, root: RootId, device: usize, width: usize) -> Option<&Fold<F>> {
         let root = self.roots.iter().find(|r| r.id == root)?;
         root.by_device
             .get(device.checked_sub(1)?)?
@@ -293,8 +293,8 @@ pub struct OutputPlacement {
 /// A publish is a read-modify-write, so clones serialize on a lock (control
 /// side only; the audio thread never touches it).
 #[derive(Debug, Clone)]
-pub struct OutputControl {
-    cell: Publisher<OutputFolds>,
+pub struct OutputControl<F: Float = f32> {
+    cell: Publisher<OutputFolds<F>>,
     /// The gain each device output is ramped to, lent beside the folds.
     stage: Publisher<StageTargets>,
     writer: Arc<Mutex<()>>,
@@ -306,8 +306,8 @@ pub struct OutputControl {
     routing_ended: Arc<AtomicU64>,
 }
 
-impl OutputControl {
-    pub(crate) fn new(folds: OutputFolds) -> Self {
+impl<F: Float> OutputControl<F> {
+    pub(crate) fn new(folds: OutputFolds<F>) -> Self {
         Self {
             cell: Publisher::new(folds),
             stage: Publisher::new(StageTargets::UNITY),
@@ -322,11 +322,11 @@ impl OutputControl {
     }
 
     /// Whether the audio thread may still be fading from `folds.previous`.
-    fn fade_in_flight(&self, folds: &OutputFolds) -> bool {
+    fn fade_in_flight(&self, folds: &OutputFolds<F>) -> bool {
         folds.previous.is_some() && self.routing_ended.load(Ordering::Acquire) < folds.generation
     }
 
-    pub(crate) fn cell(&self) -> &Publisher<OutputFolds> {
+    pub(crate) fn cell(&self) -> &Publisher<OutputFolds<F>> {
         &self.cell
     }
 
@@ -340,7 +340,10 @@ impl OutputControl {
 
     /// Publishes the current set as `edit` leaves it, unless `edit` finds
     /// nothing to do (`Ok(false)`). Nothing is published on an error.
-    fn update<E>(&self, edit: impl FnOnce(&mut OutputFolds) -> Result<bool, E>) -> Result<(), E> {
+    fn update<E>(
+        &self,
+        edit: impl FnOnce(&mut OutputFolds<F>) -> Result<bool, E>,
+    ) -> Result<(), E> {
         let _writer = self.writer.lock_recover();
         let mut folds = (*self.cell.current()).clone();
         if edit(&mut folds)? {
@@ -475,7 +478,7 @@ impl OutputControl {
             // A refusal of the fold itself is the call's; a map that does not
             // fit leaves the pair with no fold, which a commit names.
             if let Err(RoutingError::Fold(refused)) =
-                self.cell.current().routing.fold(root, &placed)
+                self.cell.current().routing.fold::<F>(root, &placed)
             {
                 return Err(refused.into());
             }
@@ -615,7 +618,7 @@ impl OutputControl {
     }
 }
 
-impl tutti_graph::RootGate for OutputControl {
+impl<F: Float> tutti_graph::RootGate for OutputControl<F> {
     fn published(&self, root: RootId, outputs: usize) -> bool {
         self.has_width(root, outputs)
     }

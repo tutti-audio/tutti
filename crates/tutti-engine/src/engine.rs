@@ -118,7 +118,7 @@ use crate::stage::OutputStage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tutti_buffers::{FoldError, Interleaved, InterleavedMut, Planes};
+use tutti_buffers::{Float, FoldError, Interleaved, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
 use tutti_rt::{AudioThreadCell, Reader, RtScope};
 #[cfg(doc)]
@@ -188,8 +188,8 @@ type GraphTransport = tutti_graph::TransportPosition;
 /// [`process_segment`](Self::process_segment) is public separately because it
 /// is the pure render — useful to drive directly in a test or an offline pass,
 /// where transport motion and declicking are not in play.
-pub struct Engine {
-    graph: AudioThreadCell<GraphRender>,
+pub struct Engine<F: Float = f32> {
+    graph: AudioThreadCell<GraphRender<F>>,
     /// Cached from the transport so the fade path avoids a double deref.
     fader: AudioThreadCell<Fader>,
     /// The block capacity (the editor's `MaxBlock` limit).
@@ -199,21 +199,21 @@ pub struct Engine {
     /// The reading half of `load`.
     meter: Option<LoadMeter>,
     /// The tap after the fader, the audio thread's ends.
-    hearing: AudioThreadCell<crate::hearing::Hearing>,
+    hearing: AudioThreadCell<crate::hearing::Hearing<F>>,
     /// Its control side.
-    heard_taps: crate::HeardTaps,
+    heard_taps: crate::HeardTaps<F>,
     /// A reader of the block clock the graph render writes.
     clock_reader: BlockClockReader,
     /// The folds from the root to the device, published by
     /// [`support_output`](Self::support_output).
-    output: OutputControl,
+    output: OutputControl<F>,
     /// The audio thread's reader of `output`, lent once per call.
-    folds: AudioThreadCell<Reader<OutputFolds>>,
+    folds: AudioThreadCell<Reader<OutputFolds<F>>>,
     /// The gain each device output is ramped to, published beside the folds.
     stage: AudioThreadCell<Reader<StageTargets>>,
 }
 
-impl std::fmt::Debug for Engine {
+impl<F: Float> std::fmt::Debug for Engine<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Engine")
             .field("graph", &self.graph)
@@ -226,15 +226,15 @@ impl std::fmt::Debug for Engine {
 
 /// The graph's executor, the clock that feeds its `Env`, and the
 /// planar scratch its outputs land in before the fold.
-struct GraphRender {
-    exec: Executor,
+struct GraphRender<F: Float> {
+    exec: Executor<F>,
     /// The transport's audio side: motion machine, playhead clock and
     /// commands. The graph reads the transport from `Env`, so the engine
     /// drives the clock itself; every node reads what it publishes from its
     /// block's `Env`.
     transport: TransportAudio,
     /// `SCRATCH_CHUNKS` planar channels of `stride` frames each.
-    scratch: Vec<f32>,
+    scratch: Vec<F>,
     stride: usize,
     playhead: Playhead,
     /// The executor's [`dropped_event_count`](Executor::dropped_event_count) already
@@ -273,8 +273,8 @@ struct RoutingRun {
 /// What the control side published, lent for one segment: the folds and the
 /// gains the outputs ramp to.
 #[derive(Clone, Copy)]
-struct Lent<'a> {
-    folds: &'a OutputFolds,
+struct Lent<'a, F: Float> {
+    folds: &'a OutputFolds<F>,
     stage: &'a StageTargets,
 }
 
@@ -288,27 +288,27 @@ const SCRATCH_CHUNKS: usize = ROOT_BANKS * MAX_CHANNELS + 4;
 
 /// The scratch a crossfade folds through (a root change's, or a routing
 /// change's): the block's worth of each.
-struct Mixing<'a> {
+struct Mixing<'a, F: Float> {
     /// One device channel of the new root's fold.
-    fold: &'a mut [f32],
+    fold: &'a mut [F],
     /// The same channel of the old fold: the old root's, or the replaced
     /// routing's of the same root.
-    old: &'a mut [f32],
+    old: &'a mut [F],
     /// The gain of the old side at each frame of the block, and the new
     /// side's.
-    gain_old: &'a mut [f32],
-    gain_new: &'a mut [f32],
+    gain_old: &'a mut [F],
+    gain_new: &'a mut [F],
 }
 
 /// The two roots a block folds into the device, and how far their fade has
 /// got.
-struct Crossfaded<'a, 'p> {
+struct Crossfaded<'a, 'p, F: Float> {
     /// The new root's fold into the device, and its channels.
-    new: (&'a tutti_buffers::Fold, &'p [&'p [f32]]),
+    new: (&'a tutti_buffers::Fold<F>, &'p [&'p [F]]),
     /// The old fold of the same channels: the old root's, or the replaced
     /// routing's of the same root. `None` when the old root's fold is not
     /// published, which fades the new root in from silence.
-    old: Option<(&'a tutti_buffers::Fold, &'p [&'p [f32]])>,
+    old: Option<(&'a tutti_buffers::Fold<F>, &'p [&'p [F]])>,
     /// The fade's law and length, and the frames of it already rendered.
     fade: FadeRun,
 }
@@ -321,7 +321,7 @@ struct FadeRun {
     done: usize,
 }
 
-impl Mixing<'_> {
+impl<F: Float> Mixing<'_, F> {
     /// Folds the two roots into `device` and sums them under the fade's
     /// gains: frame `k` of the fade is `old * g_old + new * g_new` with
     /// `(g_old, g_new)` the fade law's gains at `k`, and from the fade's last
@@ -329,8 +329,8 @@ impl Mixing<'_> {
     /// written. Allocation-free.
     fn crossfade(
         &mut self,
-        roots: Crossfaded<'_, '_>,
-        mut device: InterleavedMut<'_>,
+        roots: Crossfaded<'_, '_, F>,
+        mut device: InterleavedMut<'_, F>,
     ) -> Result<(), tutti_buffers::BufferError> {
         let Crossfaded { new, old, fade } = roots;
         let frames = device.frames().get();
@@ -345,11 +345,12 @@ impl Mixing<'_> {
             .zip(&mut self.gain_new[..frames])
             .enumerate()
         {
-            (*go, *gn) = if first + i < length {
+            let (old, new) = if first + i < length {
                 law.gains(first + i, length)
             } else {
                 (0.0, 1.0)
             };
+            (*go, *gn) = (F::from_f32(old), F::from_f32(new));
         }
         let new_planes = Planes::new(new.1)?;
         let old_planes = old.map(|(_, planes)| Planes::new(planes)).transpose()?;
@@ -366,7 +367,7 @@ impl Mixing<'_> {
                     channel,
                     tutti_buffers::MonoMut::new(&mut self.old[..frames]),
                 )?,
-                _ => self.old[..frames].fill(0.0),
+                _ => self.old[..frames].fill(F::ZERO),
             }
             for (i, sample) in block[channel..].iter_mut().step_by(channels).enumerate() {
                 *sample = self.old[i] * self.gain_old[i] + self.fold[i] * self.gain_new[i];
@@ -376,7 +377,7 @@ impl Mixing<'_> {
     }
 }
 
-impl GraphRender {
+impl<F: Float> GraphRender<F> {
     /// Publishes one render call's start: the OS time it began at
     /// (`os_ns`), the frame it renders first, and `first`, the transport at
     /// that frame (after the commands due on it), for producer threads that
@@ -401,7 +402,7 @@ impl GraphRender {
     }
 }
 
-impl Engine {
+impl<F: Float> Engine<F> {
     /// Creates an engine that renders the graph run by `executor`.
     ///
     /// `executor` is the audio half of `editor`'s pair, whose `Prepare` comes
@@ -416,8 +417,8 @@ impl Engine {
     /// The same as [`with_capacity`](Self::with_capacity).
     pub fn new(
         transport: &tutti_transport::Transport,
-        editor: &mut Editor,
-        executor: Executor,
+        editor: &mut Editor<F>,
+        executor: Executor<F>,
         dates: BlockDates,
     ) -> Result<Self, GraphEngineError> {
         Self::with_capacity(transport, editor, executor, DEFAULT_BLOCK_CAPACITY, dates)
@@ -476,8 +477,8 @@ impl Engine {
     ///   capacity.
     pub fn with_capacity(
         transport: &tutti_transport::Transport,
-        editor: &mut Editor,
-        executor: Executor,
+        editor: &mut Editor<F>,
+        executor: Executor<F>,
         capacity: Samples,
         dates: BlockDates,
     ) -> Result<Self, GraphEngineError> {
@@ -519,7 +520,7 @@ impl Engine {
             graph: AudioThreadCell::new(GraphRender {
                 exec: executor,
                 transport: audio,
-                scratch: vec![0.0; SCRATCH_CHUNKS * stride],
+                scratch: vec![F::ZERO; SCRATCH_CHUNKS * stride],
                 stride,
                 playhead: Playhead::new(),
                 dropped_seen,
@@ -589,7 +590,7 @@ impl Engine {
     /// ([`OutputControl::publish_root`]), states what a device is
     /// ([`OutputControl::state_device`]) and adds devices, publishing into the
     /// folds this engine lends.
-    pub fn output_control(&self) -> OutputControl {
+    pub fn output_control(&self) -> OutputControl<F> {
         self.output.clone()
     }
 
@@ -649,7 +650,7 @@ impl Engine {
     /// device-width output of every [`process`](Self::process) and
     /// [`process_segment`](Self::process_segment) call, read through a
     /// [`TapReader`](tutti_graph::TapReader). See [`HeardTaps`](crate::HeardTaps).
-    pub fn heard_taps(&self) -> crate::HeardTaps {
+    pub fn heard_taps(&self) -> crate::HeardTaps<F> {
         self.heard_taps.clone()
     }
 
@@ -682,7 +683,7 @@ impl Engine {
     /// confusion — a width disagreeing with its slice — unrepresentable
     /// rather than merely unlikely.
     #[inline]
-    pub fn process_segment(&self, output: &mut InterleavedMut<'_>) {
+    pub fn process_segment(&self, output: &mut InterleavedMut<'_, F>) {
         // A monotonic clock read, two per call, no lock and no allocation:
         // normally a vDSO read on Linux (a real syscall if the clocksource
         // is not vDSO-capable, e.g. some VMs), the commpage on macOS, QPC
@@ -707,7 +708,7 @@ impl Engine {
         // (`apply_pending` racing a callback): this block is silent.
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
-            output.fill(0.0);
+            output.fill(F::ZERO);
             self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
                 load.record_silenced();
@@ -779,7 +780,7 @@ impl Engine {
     /// Called once per block from the audio callback. RT-safe: no
     /// allocation, no locks, no I/O.
     #[inline]
-    pub fn process(&self, output: &mut InterleavedMut<'_>) {
+    pub fn process(&self, output: &mut InterleavedMut<'_, F>) {
         self.process_stamped(output, None);
     }
 
@@ -792,14 +793,14 @@ impl Engine {
     /// due, so a reader mapping frames to the OS clock sees the schedule and
     /// not the jitter of the wake-up that ran it.
     #[inline]
-    pub(crate) fn process_at(&self, output: &mut InterleavedMut<'_>, os_ns: i64) {
+    pub(crate) fn process_at(&self, output: &mut InterleavedMut<'_, F>, os_ns: i64) {
         self.process_stamped(output, Some(os_ns));
     }
 
     /// Writes frames `done..done + len` of the rendered `output` to the heard
     /// tap. Audio thread.
     #[inline]
-    fn heard(&self, output: &[f32], layout: ChannelLayout, done: usize, len: usize) {
+    fn heard(&self, output: &[F], layout: ChannelLayout, done: usize, len: usize) {
         if let Ok(block) = Interleaved::new(output, layout) {
             let block = block.slice(Samples(done)..Samples(done + len));
             self.hearing.borrow_mut().write(block);
@@ -807,7 +808,7 @@ impl Engine {
     }
 
     #[inline]
-    fn process_stamped(&self, output: &mut InterleavedMut<'_>, stamp: Option<i64>) {
+    fn process_stamped(&self, output: &mut InterleavedMut<'_, F>, stamp: Option<i64>) {
         // Timed for the load meter (`load_meter`): see `process_segment`.
         let start = Instant::now();
         let out_ch = output.channels();
@@ -830,7 +831,7 @@ impl Engine {
         let declared = reader.lend().has_device(out_ch);
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
-            output.fill(0.0);
+            output.fill(F::ZERO);
             self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
                 load.record_silenced();
@@ -1258,11 +1259,11 @@ impl Fader {
     /// Shape frames `base..base + frames` of the interleaved `output`
     /// (`channels` wide), the block that starts at `frame0`, by `plan`. The
     /// gain is per frame, the same across every channel.
-    fn apply(
+    fn apply<F: Float>(
         &mut self,
         plan: &GainPlan,
         frame0: Frame,
-        output: &mut [f32],
+        output: &mut [F],
         channels: usize,
         base: usize,
         frames: usize,
@@ -1338,7 +1339,7 @@ impl Fader {
             if self.gain != 1.0 {
                 let at = (base + i) * channels;
                 for s in &mut output[at..at + channels] {
-                    *s *= self.gain;
+                    *s *= F::from_f32(self.gain);
                 }
             }
         }
@@ -1378,7 +1379,7 @@ impl Pieces for GraphPieces {
     }
 }
 
-impl GraphRender {
+impl<F: Float> GraphRender<F> {
     /// Bring the executor up to date before a graph block: install queued
     /// commits (a re-prepare's resume adopts its `Prepare` here, so the block
     /// length below is the new maximum and not a stale one), and follow a
@@ -1425,8 +1426,8 @@ impl GraphRender {
     /// `out_ch`.
     fn render(
         &mut self,
-        output: &mut [f32],
-        lent: Lent<'_>,
+        output: &mut [F],
+        lent: Lent<'_, F>,
         out_ch: usize,
         at: usize,
         len: usize,
@@ -1452,7 +1453,7 @@ impl GraphRender {
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
         let mut chunks = self.scratch.chunks_mut(stride);
-        let mut outs: [&mut [f32]; ROOT_BANKS * MAX_CHANNELS] =
+        let mut outs: [&mut [F]; ROOT_BANKS * MAX_CHANNELS] =
             std::array::from_fn(|_| chunks.next().expect("a chunk per rendered channel"));
         let mut mixing = Mixing {
             fold: chunks.next().expect("a chunk to fold the new root into"),
@@ -1492,7 +1493,7 @@ impl GraphRender {
             // No fold plays, so nothing fades: the replaced table is free.
             self.routing.done = length;
             self.routing_ended.store(generation, Ordering::Release);
-            block.fill(0.0);
+            block.fill(F::ZERO);
             return true;
         }
         // The fold of this width into the device, built on the control side.
@@ -1506,7 +1507,7 @@ impl GraphRender {
                     .expect("a fold exists only for a held device width, and the block is whole frames of it");
                 // The rendered channels, a block long each, as one table on
                 // the stack.
-                let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+                let mut table: [&[F]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
                 for (slot, out) in table.iter_mut().zip(&outs).take(width) {
                     *slot = &out[..len];
                 }
@@ -1539,7 +1540,7 @@ impl GraphRender {
                     Some(fade) => {
                         // The old root's channels follow the new root's.
                         let old = fade.width.min(MAX_CHANNELS);
-                        let mut old_table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+                        let mut old_table: [&[F]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
                         for (slot, out) in old_table.iter_mut().zip(&outs[width..]).take(old) {
                             *slot = &out[..len];
                         }
@@ -1576,7 +1577,7 @@ impl GraphRender {
                 );
                 if folded.is_err() {
                     // Not placed: silent, and the caller counts it.
-                    device.samples_mut().fill(0.0);
+                    device.samples_mut().fill(F::ZERO);
                     return false;
                 }
                 // The output gains, ramped over the declick length.
@@ -1590,7 +1591,7 @@ impl GraphRender {
             None => {
                 self.routing.done = length;
                 self.routing_ended.store(generation, Ordering::Release);
-                block.fill(0.0);
+                block.fill(F::ZERO);
                 false
             }
         }

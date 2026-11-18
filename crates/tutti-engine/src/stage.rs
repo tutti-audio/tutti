@@ -2,6 +2,7 @@
 //! control side published, over the declick length, never by a swap.
 
 use crate::routing::StageTargets;
+use tutti_buffers::Float;
 use tutti_types::MAX_CHANNELS;
 
 /// One output's ramp: from the gain it left off at to the target, `done` of
@@ -45,9 +46,9 @@ impl OutputStage {
     /// target changed starts a ramp of `frames` frames (the declick length now)
     /// from where it stands, so a change in mid-ramp turns smoothly; an output
     /// at unity and steady is not touched.
-    pub(crate) fn apply(
+    pub(crate) fn apply<F: Float>(
         &mut self,
-        block: &mut [f32],
+        block: &mut [F],
         out_ch: usize,
         targets: &StageTargets,
         frames: usize,
@@ -69,7 +70,7 @@ impl OutputStage {
                         .iter_mut()
                         .skip(c)
                         .step_by(out_ch)
-                        .for_each(|s| *s *= ramp.now);
+                        .for_each(|s| *s *= F::from_f32(ramp.now));
                 }
                 continue;
             }
@@ -83,7 +84,7 @@ impl OutputStage {
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
-                *s *= ramp.now;
+                *s *= F::from_f32(ramp.now);
             }
         }
     }

@@ -8,7 +8,7 @@
 #         impl's type or the trait), `<file>::<Type>.<member>` for a field or enum
 #         variant. No line numbers; same-keyed items share one row.
 # reason  ffi          C ABI, IPC or wire; a comment at the site says why.
-#         engine-f32   the engine edge is fixed at f32 until it goes generic.
+#         session-f32  the session surface is fixed at f32 until the session goes generic.
 #         pending      not judged yet.
 #         not-audio: <why>   the item is not audio (a spectrum, a curve, a reading).
 #         spec-f32: <why>    a spec fixes f32 (control values, param lanes).
@@ -18,13 +18,6 @@ crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  not-audi
 crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights
-crates/tutti-engine/src/callback.rs::OutputBlock::render  engine-f32
-crates/tutti-engine/src/callback.rs::process_audio  engine-f32
-crates/tutti-engine/src/engine.rs::Engine::process  engine-f32
-crates/tutti-engine/src/engine.rs::Engine::process_segment  engine-f32
-crates/tutti-engine/src/manual.rs::ManualStream::callback_once  engine-f32
-crates/tutti-engine/src/manual.rs::ManualStream::render_block  engine-f32
-crates/tutti-engine/src/manual.rs::ManualStream::render_block_delayed  engine-f32
 crates/tutti-graph/src/contract.rs::Detect.Exact  pending
 crates/tutti-graph/src/contract.rs::Direct::feed  spec-f32: the param lanes are f32 by spec; the audio edge is generic
 crates/tutti-graph/src/contract.rs::drive  spec-f32: the param lanes are f32 by spec; the audio edge is generic
@@ -46,8 +39,8 @@ crates/tutti-plugin-types/src/contract.rs::positions  not-audio: a normalized pa
 crates/tutti-plugin-types/src/contract.rs::round_trip  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::steps  not-audio: a normalized parameter position, not audio
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  not-audio: a scale's frequency ratios, a tuning table not audio
-crates/tutti-session/src/graph/testing.rs::AudioSide::render  engine-f32
-crates/tutti-session/src/graph/testing.rs::AudioSide::tick  engine-f32
-crates/tutti-session/src/session.rs::Session::render  engine-f32
-crates/tutti-session/src/session.rs::Session::render_frame  engine-f32
-crates/tutti-session/src/session.rs::Session::render_frame_at  engine-f32
+crates/tutti-session/src/graph/testing.rs::AudioSide::render  session-f32
+crates/tutti-session/src/graph/testing.rs::AudioSide::tick  session-f32
+crates/tutti-session/src/session.rs::Session::render  session-f32
+crates/tutti-session/src/session.rs::Session::render_frame  session-f32
+crates/tutti-session/src/session.rs::Session::render_frame_at  session-f32

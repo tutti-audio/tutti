@@ -19,6 +19,7 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_transport::Transport;
 use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
+use tutti_units::Samples;
 
 fn engine_and_state() -> (OutputStream, Arc<AudioCallbackState>) {
     let (_transport, state) = rolling_state(2);
@@ -51,7 +52,9 @@ fn an_engine_over_a_manual_driver_starts_renders_and_stops() {
     assert!(engine.is_running());
     assert!(stream.is_open());
 
-    let block = stream.render_block(128).expect("the stream is open");
+    let block = stream
+        .render_block(Samples(128))
+        .expect("the stream is open");
     assert_eq!(block.len(), 128 * 2, "stereo frames, interleaved");
     assert!(
         block.iter().any(|&s| s != 0.0),
@@ -67,7 +70,7 @@ fn an_engine_over_a_manual_driver_starts_renders_and_stops() {
          polling it"
     );
     assert_eq!(
-        stream.render_block(128),
+        stream.render_block(Samples(128)),
         None,
         "a stopped stream renders nothing"
     );
@@ -138,7 +141,8 @@ fn a_restarted_stream_renders_from_a_different_thread() {
     driver.start_with(d1).unwrap();
     std::thread::scope(|scope| {
         scope.spawn(|| {
-            s1.render_block(64).expect("the first stream is open");
+            s1.render_block(Samples(64))
+                .expect("the first stream is open");
         });
     });
 
@@ -151,7 +155,9 @@ fn a_restarted_stream_renders_from_a_different_thread() {
 
     std::thread::scope(|scope| {
         scope.spawn(|| {
-            let block = s2.render_block(64).expect("the restarted stream is open");
+            let block = s2
+                .render_block(Samples(64))
+                .expect("the restarted stream is open");
             assert_eq!(block.len(), 128);
             assert!(
                 block.iter().any(|&x| x != 0.0),
@@ -392,7 +398,7 @@ fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
     let (driver, stream) = ManualStreamDriver::new();
     engine.start_with(Arc::clone(&state), driver).unwrap();
 
-    let first = stream.render_block(64).unwrap();
+    let first = stream.render_block(Samples(64)).unwrap();
     assert!(first.iter().all(|&s| s == 0.5), "the first block renders");
     assert!(!faults.is_faulted());
 
@@ -427,7 +433,7 @@ fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
     engine.start_with(state, driver).unwrap();
     assert!(!faults.is_faulted(), "a new stream reads clear");
     assert!(engine.is_running());
-    let again = stream.render_block(64).unwrap();
+    let again = stream.render_block(Samples(64)).unwrap();
     assert!(
         again.iter().all(|&s| s == 0.5),
         "a new stream renders again"

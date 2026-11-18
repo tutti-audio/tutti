@@ -903,7 +903,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // the host sets a new map.
         self.output_policy
             .routing()
-            .fold(&root, &placed)
+            .fold::<f32>(&root, &placed)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     root: self.graph.root_id(),
