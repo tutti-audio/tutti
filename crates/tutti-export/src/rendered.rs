@@ -1,7 +1,7 @@
 //! [`Rendered`]: planar audio held in memory, which only this crate builds
 //! unchecked.
 
-use tutti_codec::Wave;
+use tutti_buffers::{Planes, Wave};
 use tutti_types::{ChannelLayout, LayoutError};
 use tutti_types::{SampleRate, Samples};
 
@@ -250,16 +250,9 @@ impl From<Rendered> for Wave {
     /// Infallible: a `Rendered` has at least one channel, no more than a
     /// layout holds, and planes of one length, which is what a `Wave` is.
     fn from(rendered: Rendered) -> Self {
-        let mut wave =
-            Wave::with_capacity(rendered.channels(), rendered.sample_rate, rendered.frames());
-        let mut frame = vec![0.0; rendered.planes.len()];
-        for i in 0..rendered.frames().get() {
-            for (sample, plane) in frame.iter_mut().zip(&rendered.planes) {
-                *sample = plane[i];
-            }
-            wave.push_frame(&frame);
-        }
-        wave
+        let planes = Planes::from_vecs(&rendered.planes)
+            .expect("a render has at least one plane, all of one length");
+        Wave::from_planes(rendered.sample_rate, planes)
     }
 }
 

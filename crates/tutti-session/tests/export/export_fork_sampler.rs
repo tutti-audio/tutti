@@ -13,6 +13,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_buffers::Interleaved;
 use tutti_session::Root;
 
 use tutti_export::Produced;
@@ -112,9 +113,10 @@ fn a_node_export_follows_a_90_bpm_timeline() {
     let tone = |i: usize| (std::f32::consts::TAU * 440.0 * i as f32 / RATE as f32).sin();
 
     let mut session = session();
-    let mut wave = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+    let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize {
-        wave.push_frame(&[tone(i)]);
+        wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
+            .unwrap();
     }
     let voice = {
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(3.0)))
@@ -124,9 +126,10 @@ fn a_node_export_follows_a_90_bpm_timeline() {
         node
     };
     let zero = {
-        let mut wave = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+        let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
         for i in 0..RATE as usize {
-            wave.push_frame(&[tone(i)]);
+            wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
+                .unwrap();
         }
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
             .expect("a placeable wave");
@@ -254,9 +257,10 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
     let (disk_node, memory_node): (NodeKey, NodeKey) = {
         let bare = disk_voice(reader, 3.0);
         let wrapped = node_of(VoiceSource::Disk(disk_voice(other_reader, 3.0)));
-        let mut wave = tutti_codec::Wave::new(2, SampleRate::of(RATE));
+        let mut wave = tutti_buffers::Wave::new(2, SampleRate::of(RATE));
         for i in 0..LEN {
-            wave.push_frame(&[value(i), -value(i)]);
+            wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
+                .unwrap();
         }
         let memory = node_of(VoiceSource::Memory(
             MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(3.0)))

@@ -2,6 +2,7 @@ use super::*;
 use crate::VoiceWindow;
 use crate::testing::MockTransport;
 use crate::testing::loop_frames;
+use tutti_buffers::Mono;
 use tutti_buffers::Planes;
 use tutti_types::Bpm;
 use tutti_types::MaxBlock;
@@ -10,7 +11,10 @@ use tutti_types::{Samples, Seconds};
 
 fn ramp_wave(len: usize, sample_rate: f64) -> Arc<Wave> {
     let samples: Vec<f32> = (0..len).map(|i| (i + 1) as f32).collect();
-    Arc::new(Wave::from_samples(SampleRate::of(sample_rate), &samples))
+    Arc::new(Wave::from_mono(
+        SampleRate::of(sample_rate),
+        Mono::new(&samples),
+    ))
 }
 
 fn stereo_ramp_wave(len: usize, sample_rate: f64) -> Arc<Wave> {
@@ -571,7 +575,7 @@ fn test_sampler_outputs_silence_when_stopped() {
 #[test]
 fn test_loop_crossfade_integration() {
     let samples: Vec<f32> = (0..100).map(|i| i as f32 / 100.0).collect();
-    let wave = Wave::from_samples(SampleRate::SR_44K1, &samples);
+    let wave = Wave::from_mono(SampleRate::SR_44K1, Mono::new(&samples));
     let mut sampler = MemorySource::new(Arc::new(wave)).expect("a placeable wave");
 
     sampler.set_loop(Some(loop_frames(10, 90, 10)));

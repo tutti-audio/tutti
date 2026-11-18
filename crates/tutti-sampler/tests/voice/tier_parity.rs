@@ -47,10 +47,11 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::rms_f64;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{Node, contract};
 use tutti_sampler::testing::{MockTransport, settle};
 use tutti_sampler::{ByHand, DiskStreamer, DiskStreamerConfig, Placement, StepOutcome, Stream};
@@ -229,7 +230,8 @@ fn load_wave(path: &Path) -> Arc<Wave> {
     let mut wave = Wave::new(2, SampleRate::of(SR));
     let samples: Vec<f32> = r.samples::<f32>().map(|s| s.unwrap()).collect();
     for frame in samples.as_chunks::<2>().0 {
-        wave.push_frame(&[frame[0], frame[1]]);
+        wave.append(Interleaved::new(&[frame[0], frame[1]], wave.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(wave)
 }

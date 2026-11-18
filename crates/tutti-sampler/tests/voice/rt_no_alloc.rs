@@ -24,7 +24,7 @@ use tutti_sampler::testing::loop_frames;
 
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_sampler::stretch::Unit as TimeStretchUnit;
