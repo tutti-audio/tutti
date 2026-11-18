@@ -9,16 +9,18 @@
 //! packets the conversion makes survive them.
 
 use crate::common::{metrical, note, track};
+use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
-    SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
+    SmfDivision, SmfFormat, SmpteFractionalFrames, SmpteOffset, TextKind, Tick, ToClipError, Track,
 };
+use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
-    Message, Metronome, MidiGroup, SharpsFlats, Stream, SysexStatus, TextError, Utility,
-    split_stream,
+    ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats, Stream, SysexStatus,
+    TextError, Utility, split_stream,
 };
 
 const TPQ: u16 = 480;
@@ -313,7 +315,16 @@ fn a_complete_sysex_is_sysex7_packets() {
 fn a_sysex_that_is_not_one_complete_message_is_reported() {
     let divided = FileEvent::SysEx(vec![0x7E, 1, 2].into()); // no F7: continued by an F7 event
     let eight_bit = FileEvent::SysEx(vec![0x7E, 0x80, 0xF7].into());
-    let smf = format0(vec![(0, divided.clone()), (1, eight_bit.clone())]);
+    // A reader keeps the unended message; a writer would refuse it.
+    let smf = MidiFile::from_bytes(&build_smf(
+        0,
+        Division::Metrical(TPQ),
+        &[vec![
+            RawEvent::new(0, [0xF0, 3, 0x7E, 1, 2]),
+            RawEvent::new(1, [0xF0, 3, 0x7E, 0x80, 0xF7]),
+        ]],
+    ))
+    .unwrap();
     let converted = metrical(&smf).to_clip().unwrap();
     let report: Vec<_> = converted
         .dropped
@@ -377,7 +388,6 @@ fn the_first_tempo_and_signature_lead_the_clip() {
         SmfFormat::Parallel,
         SMF_DIVISION,
         vec![
-            track(vec![(0, note(0, 60))]),
             track(vec![
                 (
                     0,
@@ -397,6 +407,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
                     }),
                 ),
             ]),
+            track(vec![(0, note(0, 60))]),
         ],
     )
     .unwrap();
@@ -414,7 +425,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
 
 /// SMF 1.0 section 3.3: with no Set Tempo 120 bpm is assumed, and with no Time
 /// Signature 4/4 (24 clocks, 8 32nds). The clip says it (section 7.1.1).
-/// Spec: m2-116/7.1.1#1, m2-116/7.1.2#1
+/// Spec: m2-116/7.1.1#1, m2-116/7.1.2#1, smf/formats#12
 #[test]
 fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
     let smf = format0(vec![
@@ -504,6 +515,11 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         })
     };
     let escape = FileEvent::Escape(vec![0xF3, 1].into());
+    let offset = SmpteOffset::new(
+        SmpteTimecode::origin(SmpteFrameRate::Fps25),
+        SmpteFractionalFrames::of(0),
+    )
+    .unwrap();
     let whole_note = meta(Meta::TimeSignature {
         numerator: 4,
         denominator_power: 0,
@@ -512,16 +528,23 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         extra: Box::default(),
     });
     let events = vec![
-        (0, other(0x00)), // sequence number
-        (0, other(0x20)), // channel prefix
+        (0, meta(Meta::sequence_number(1))),
+        (0, meta(Meta::channel_prefix(MidiChannel::of(3)))),
         (5, other(0x21)), // port prefix
         (7, text(TextKind::Marker, "A")),
         (7, text(TextKind::CuePoint, "door")),
         (8, text(TextKind::InstrumentName, "piano")),
         (8, text(TextKind::ProgramName, "p")),
         (9, text(TextKind::DeviceName, "d")),
-        (10, other(0x54)), // SMPTE offset: Appendix B names a successor M2-104 lacks
-        (11, other(0x7F)), // sequencer specific
+        // SMPTE offset: Appendix B names a successor M2-104 lacks
+        (10, meta(Meta::smpte_offset(offset))),
+        (
+            11,
+            meta(Meta::SequencerSpecific {
+                manufacturer: ManufacturerId::of(0x7D),
+                data: vec![1, 2].into(),
+            }),
+        ),
         (12, escape.clone()),
         (13, whole_note.clone()),
         (

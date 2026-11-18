@@ -28,6 +28,11 @@ impl std::fmt::Display for TrackPart {
 /// ([`MidiFile::smf`](crate::MidiFile::smf), [`MidiFile::clip`](crate::MidiFile::clip),
 /// and a read): each variant is one rule of the container, with where it was
 /// broken. A `track` is an index into the list given.
+///
+/// [`SysExNotEnded`](Self::SysExNotEnded) to
+/// [`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack) are the rules of
+/// SMF 1.0 a writer keeps: [`MidiFile::smf`](crate::MidiFile::smf) refuses what
+/// breaks them, and a read keeps such a file as it is.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {
@@ -77,6 +82,69 @@ pub enum TracksError {
     TextInterrupted {
         /// The tick of the message that interrupts it, or of the last event
         /// of the track if it is never ended.
+        at: Tick,
+    },
+    /// A System Exclusive message that does not end in `F7` (SMF 1.0 section
+    /// 3: it always ends with one, so the reader knows it has read all of it;
+    /// the last packet of a divided message ends with it).
+    #[error("track {track}: the SysEx message at tick {} does not end in F7", at.0)]
+    SysExNotEnded {
+        /// The track.
+        track: usize,
+        /// The tick of the last packet of the message.
+        at: Tick,
+    },
+    /// A channel message or an `F0` event between the packets of a divided
+    /// System Exclusive message (SMF 1.0 section 3: no transmittable MIDI event
+    /// goes between them).
+    #[error("track {track}: an event at tick {} interrupts a divided SysEx message", at.0)]
+    SysExInterrupted {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// A Sequence Number after the start of its track (SMF 1.0 section 3.3: at
+    /// time 0, before any nonzero delta-time and any transmittable MIDI event).
+    #[error("track {track}: the Sequence Number at tick {} is not at the start", at.0)]
+    SequenceNumberNotAtStart {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// A Sequence/Track Name after time 0 (SMF 1.0 section 3.3).
+    #[error("track {track}: the Track Name at tick {} is not at time 0", at.0)]
+    TrackNameNotAtStart {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// A Sequence Number in a track of a format 0 or 1 file other than the
+    /// first (SMF 1.0 section 3.3: such a file holds one sequence, whose number
+    /// is in the first track).
+    #[error("track {track}: a Sequence Number belongs in the first track")]
+    SequenceNumberNotInFirstTrack {
+        /// The track.
+        track: usize,
+    },
+    /// An SMPTE Offset in a track of a format 1 file other than the first
+    /// (SMF 1.0 section 3.3: it is stored with the tempo map and means nothing
+    /// in the other tracks).
+    #[error("track {track}: an SMPTE Offset belongs in the first track")]
+    SmpteOffsetNotInFirstTrack {
+        /// The track.
+        track: usize,
+    },
+    /// A Set Tempo or Time Signature in a track of a format 1 file other than
+    /// the first (SMF 1.0 section 2.2: the tempo map is stored as the first
+    /// track).
+    #[error("track {track}: the tempo map at tick {} belongs in the first track", at.0)]
+    TempoMapNotInFirstTrack {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
         at: Tick,
     },
     /// The container cannot hold an event.

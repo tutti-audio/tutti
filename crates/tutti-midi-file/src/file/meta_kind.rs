@@ -1,6 +1,8 @@
 //! The parts of a [`Meta`](crate::Meta) that are not a plain field: the wire's
-//! 24-bit tempo, the type byte of an untyped meta event, and a meta event the
-//! reader could not type.
+//! 24-bit tempo, the SMPTE Offset, the type byte of an untyped meta event, and a
+//! meta event the reader could not type.
+
+use tutti_midi_protocol::{MtcRate, SmpteTimecode};
 
 tutti_types::ranged! {
     /// Microseconds per quarter note as a Set Tempo holds it: 24 bits,
@@ -23,17 +25,88 @@ impl MicrosPerQuarter {
     }
 }
 
-/// Whether `kind` is a meta event type the model types: the text events `01`
-/// to `09`, End of Track `2F` (a track's `end`), Set Tempo `51`, Time
-/// Signature `58` and Key Signature `59`.
+tutti_types::ranged! {
+    /// The fractional frames of an SMPTE Offset, `0..=99`: the `ff` field is in
+    /// 100ths of a frame (SMF 1.0 section 3.3, `FF 54 05 hr mn se fr ff`).
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    SmpteFractionalFrames(u8), SmpteFractionalFramesOutOfRange, "within 0..=99", |raw| raw <= 99
+}
+
+/// The SMPTE time a track starts at: the five data bytes of `FF 54 05 hr mn se
+/// fr ff` (SMF 1.0 section 3.3).
+///
+/// The hour byte is encoded as MIDI Time Code encodes it, `0rrhhhhh`: the frame
+/// rate in bits 5 and 6 over the hour in bits 0 to 4. So the time's rate is one
+/// of MTC's four, and [`new`](Self::new) refuses a timecode at any other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SmpteOffset {
+    time: SmpteTimecode,
+    fractional: SmpteFractionalFrames,
+}
+
+impl SmpteOffset {
+    /// The offset of `time` and `fractional` 100ths of a frame, or `None` when
+    /// `time` is counted at 29.97 non-drop, which MTC has no code for.
+    #[must_use]
+    pub const fn new(time: SmpteTimecode, fractional: SmpteFractionalFrames) -> Option<Self> {
+        match time.frame_rate().mtc_rate() {
+            Some(_) => Some(Self { time, fractional }),
+            None => None,
+        }
+    }
+
+    /// The hours, minutes, seconds and frames, at the rate the hour byte names.
+    #[must_use]
+    pub const fn time(self) -> SmpteTimecode {
+        self.time
+    }
+
+    /// The fractional frames, in 100ths of a frame.
+    #[must_use]
+    pub const fn fractional(self) -> SmpteFractionalFrames {
+        self.fractional
+    }
+
+    /// The offset of the five data bytes, `None` for a byte that is out of its
+    /// range: the hour byte's top bit, an hour past 23, a minute or second past
+    /// 59, a frame past the rate's count, a fraction past 99.
+    pub(crate) fn from_wire([hours, minutes, seconds, frames, fraction]: [u8; 5]) -> Option<Self> {
+        if hours & 0x80 != 0 {
+            return None;
+        }
+        let rate = MtcRate::masked(hours >> 5);
+        let time = SmpteTimecode::new(hours & 0x1F, minutes, seconds, frames, rate.frame_rate())?;
+        Self::new(time, SmpteFractionalFrames::new(fraction)?)
+    }
+
+    /// The five data bytes: the hour byte carries the rate's MTC code.
+    pub(crate) fn to_wire(self) -> [u8; 5] {
+        let rate = self.time.frame_rate().mtc_rate().map_or(0, MtcRate::code);
+        [
+            rate << 5 | self.time.hours(),
+            self.time.minutes(),
+            self.time.seconds(),
+            self.time.frames(),
+            self.fractional.get(),
+        ]
+    }
+}
+
+/// Whether `kind` is a meta event type the model types: Sequence Number `00`,
+/// the text events `01` to `09`, MIDI Channel Prefix `20`, End of Track `2F`
+/// (a track's `end`), Set Tempo `51`, SMPTE Offset `54`, Time Signature `58`,
+/// Key Signature `59` and Sequencer-Specific `7F`.
 const fn is_typed(kind: u8) -> bool {
-    matches!(kind, 0x01..=0x09 | 0x2F | 0x51 | 0x58 | 0x59)
+    matches!(
+        kind,
+        0x00..=0x09 | 0x20 | 0x2F | 0x51 | 0x54 | 0x58 | 0x59 | 0x7F
+    )
 }
 
 tutti_types::ranged! {
     /// The type byte of a [`Meta::Other`](crate::Meta::Other): any of `0..=127`
-    /// that [`Meta`](crate::Meta) has no variant for. A typed kind (the text
-    /// events `01` to `09`, `2F`, `51`, `58`, `59`) is refused, so an `Other` is
+    /// that [`Meta`](crate::Meta) has no variant for. A typed kind (`00` to `09`,
+    /// `20`, `2F`, `51`, `54`, `58`, `59`, `7F`) is refused, so an `Other` is
     /// never read back as the variant of its kind, and a type byte has no top
     /// bit (SMF 1.0 section 3.3).
     #[derive(Eq, Hash, PartialOrd, Ord)]
@@ -42,8 +115,10 @@ tutti_types::ranged! {
 
 /// A meta event whose type the model types but whose data is not what the type
 /// defines: a Set Tempo, Time Signature or Key Signature shorter than its
-/// fixed part, a Key Signature whose mode is neither 0 nor 1, an End of Track
-/// with data (SMF 1.0 section 3.3), or a type byte with its top bit set.
+/// fixed part, a Key Signature whose mode is neither 0 nor 1, a MIDI Channel
+/// Prefix of a channel past 15, an SMPTE Offset with a field out of its range, a
+/// Sequencer-Specific with no manufacturer id, an End of Track with data (SMF
+/// 1.0 section 3.3), or a type byte with its top bit set.
 ///
 /// A lenient reader keeps it: the file's other events are read, and a write
 /// gives the event's bytes back exactly. Only a read makes one, so a

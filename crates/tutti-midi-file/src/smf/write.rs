@@ -96,6 +96,21 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             0x59,
             [&[sharps.cast_unsigned(), u8::from(*minor)][..], extra].concat(),
         ),
+        Meta::SequenceNumber { number, extra } => {
+            (0x00, [&number.to_be_bytes()[..], extra].concat())
+        }
+        Meta::ChannelPrefix { channel, extra } => (0x20, [&[channel.get()][..], extra].concat()),
+        Meta::SmpteOffset { offset, extra } => (0x54, [&offset.to_wire()[..], extra].concat()),
+        Meta::SequencerSpecific { manufacturer, data } => {
+            let id = manufacturer.get();
+            let [_, hi, lo] = manufacturer.sysex_bytes().map(tutti_ump::U7::get);
+            let lead: &[u8] = if manufacturer.is_extended() {
+                &[0, hi, lo]
+            } else {
+                &[id as u8]
+            };
+            (0x7F, [lead, data].concat())
+        }
         Meta::Other { kind, data } => (kind.get(), data.to_vec()),
         Meta::Malformed(malformed) => (malformed.kind(), malformed.data().to_vec()),
     }
@@ -108,6 +123,12 @@ fn meta_data_len(meta: &Meta) -> usize {
         Meta::Tempo { extra, .. } => 3 + extra.len(),
         Meta::TimeSignature { extra, .. } => 4 + extra.len(),
         Meta::KeySignature { extra, .. } => 2 + extra.len(),
+        Meta::SequenceNumber { extra, .. } => 2 + extra.len(),
+        Meta::ChannelPrefix { extra, .. } => 1 + extra.len(),
+        Meta::SmpteOffset { extra, .. } => 5 + extra.len(),
+        Meta::SequencerSpecific { manufacturer, data } => {
+            data.len() + if manufacturer.is_extended() { 3 } else { 1 }
+        }
         Meta::Other { data, .. } => data.len(),
         Meta::Malformed(malformed) => malformed.data().len(),
     }
