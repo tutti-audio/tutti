@@ -24,6 +24,7 @@ use tutti_coremidi_ffi::UmpDestination;
 use tutti_ump::{Ump, split_stream};
 
 use super::virtual_source::protocol_of;
+use crate::InputFault;
 use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{VirtualProtocol, VirtualSpec};
@@ -53,10 +54,10 @@ impl core::fmt::Debug for UmpVirtualDestination {
 
 /// The endpoint catches a panic in its receive callback and counts it
 /// ([`UmpDestination::faults`]); after one the callback delivers nothing, so
-/// the destination reads as gone.
+/// the destination reads as gone, for [`InputFault::Panicked`].
 impl InputConnection for UmpVirtualDestination {
-    fn is_alive(&self) -> bool {
-        self._destination.faults() == 0
+    fn fault(&self) -> Option<InputFault> {
+        (self._destination.faults() > 0).then_some(InputFault::Panicked)
     }
 }
 

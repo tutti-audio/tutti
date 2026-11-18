@@ -10,7 +10,7 @@
 //! - `alloc` (the crate, `extern crate alloc` or an `alloc::` path), `Vec`,
 //!   `String`, `Box` and `Arc`;
 //! - `atomic` (the `core::sync::atomic` module) and any name starting with
-//!   `Atomic`.
+//!   "Atomic".
 //!
 //! Limits: a textual scan of code (comments and literals blanked), so a type
 //! that merely shares one of the names is a finding too.

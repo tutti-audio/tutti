@@ -3,7 +3,6 @@
 //! holds and naps between asks.
 
 use super::control::{ControlStream, back_off};
-use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::{GenericNamespaced, Name, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
 use std::path::Path;
@@ -109,64 +108,42 @@ impl Watch {
     }
 }
 
-/// How a blocked read is made to return so the deadline can be re-checked.
-///
-/// `Timeout` is tried first; a named pipe refuses it, so `Peek` is what applies.
-pub(super) enum Wakeup {
-    /// A receive timeout, when the stream accepts one.
-    Timeout,
-    /// `PeekNamedPipe`. Nothing wakes a blocked read on a Windows named pipe, so
-    /// this end never blocks in the first place: it asks how many bytes are
-    /// buffered and only reads when the answer is "some". The waiting happens
-    /// in `back_off`.
-    Peek,
-}
+/// How a blocked read is made to return so the deadline can be re-checked:
+/// `PeekNamedPipe`. Nothing wakes a blocked read on a Windows named pipe, so
+/// this end never blocks in the first place: it asks how many bytes are
+/// buffered and only reads when the answer is "some". The waiting happens in
+/// `back_off`.
+pub(super) struct Wakeup;
 
 impl Wakeup {
-    pub(super) fn arm(stream: &mut ControlStream, poll: Duration) -> Self {
-        if stream.set_recv_timeout(Some(poll)).is_ok() {
-            return Self::Timeout;
-        }
-        // No receive timeout on a named pipe: `interprocess` refuses one
-        // unconditionally. Peek instead of blocking; see [`bytes_available`].
-        //
-        // Returned unconditionally rather than after a trial peek, because
-        // `would_park` already defers to the real read on any peek failure.
-        //
-        // **Do not reach for `set_nonblocking` here.** `interprocess`
-        // implements it as `PIPE_NOWAIT`, and in that mode `ReadFile` reports
-        // *success with zero bytes* when nothing is available. The read loop
-        // reads `Ok(0)` as `UnexpectedEof`, which `crashed_on_eof` turns into
-        // `ProcessCrashed`, so a peer that is merely quiet is reported as a
-        // peer that died. Microsoft says the same of the flag itself:
-        // PIPE_NOWAIT exists for LAN Manager 2.0 compatibility and "should not
-        // be used to achieve asynchronous input and output".
-        //
-        // `PeekNamedPipe` answers a different question, "is there data" rather
-        // than "give me data now", and so cannot confuse silence with death.
-        Self::Peek
+    /// The peek, with no receive timeout tried first: `interprocess` refuses
+    /// one on a named pipe unconditionally, and it refuses with an error built
+    /// from a message string, so asking would allocate on every receive.
+    ///
+    /// **Do not reach for `set_nonblocking` here.** `interprocess`
+    /// implements it as `PIPE_NOWAIT`, and in that mode `ReadFile` reports
+    /// *success with zero bytes* when nothing is available. The read loop
+    /// reads `Ok(0)` as `UnexpectedEof`, which `crashed_on_eof` turns into
+    /// `ProcessCrashed`, so a peer that is merely quiet is reported as a
+    /// peer that died. Microsoft says the same of the flag itself:
+    /// PIPE_NOWAIT exists for LAN Manager 2.0 compatibility and "should not
+    /// be used to achieve asynchronous input and output".
+    ///
+    /// `PeekNamedPipe` answers a different question, "is there data" rather
+    /// than "give me data now", and so cannot confuse silence with death.
+    pub(super) fn arm(_: &mut ControlStream, _: Duration) -> Self {
+        Self
     }
 
     /// Whether a blocking `read` on this stream would park the thread now.
     ///
-    /// Only `Wakeup::Peek` can answer, and it answers conservatively: any
-    /// failure to peek reports `false`, handing the decision to the real read.
-    /// A peek must never be able to *invent* a reason not to read.
+    /// It answers conservatively: any failure to peek reports `false`,
+    /// handing the decision to the real read. A peek must never be able to
+    /// *invent* a reason not to read.
     pub(super) fn would_park(&self, stream: &ControlStream) -> bool {
-        match self {
-            Self::Peek => matches!(bytes_available(stream), Ok(0)),
-            Self::Timeout => false,
-        }
+        matches!(bytes_available(stream), Ok(0))
     }
 
-    /// Put the stream back as it was, undoing only what was actually done.
-    pub(super) fn disarm(self, stream: &mut ControlStream) {
-        match self {
-            Self::Timeout => {
-                let _ = stream.set_recv_timeout(None);
-            }
-            // Peeking leaves no state on the handle.
-            Self::Peek => {}
-        }
-    }
+    /// Nothing to put back: peeking leaves no state on the handle.
+    pub(super) fn disarm(self, _: &mut ControlStream) {}
 }

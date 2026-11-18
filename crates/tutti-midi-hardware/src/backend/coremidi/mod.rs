@@ -33,6 +33,7 @@
 //! device it presents as UMP). Before macOS 15 the classes do not exist and the
 //! capability is the property's alone, with no blocks.
 
+use crate::InputFault;
 use coremidi::{
     Client, Destinations, EventBuffer, InputPortWithContext, OutputPort, Properties,
     PropertyGetter, Protocol as CmProtocol, Source, Sources,
@@ -363,7 +364,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         let protocol = input_protocol(&source, ump_of(&endpoints, unique, true));
         // CoreMIDI calls this closure from its own thread through a block, so
         // a panic must not leave it: the guard catches it and ends the input.
-        let died = Arc::new(FaultLatch::new());
+        let died = Arc::new(FaultLatch::<InputFault>::new());
         let guard = Guard::new(Arc::clone(&died));
         let mut port = client
             .input_port_with_protocol("tutti-in", protocol, move |event_list, _ctx| {
@@ -416,12 +417,12 @@ struct CoreMidiInput {
     /// Held for its `Drop`: releasing the port is what disconnects.
     _port: InputPortWithContext<()>,
     /// Raised by the callback's [`Guard`] when it panicked.
-    died: Arc<FaultLatch>,
+    died: Arc<FaultLatch<InputFault>>,
 }
 
 impl InputConnection for CoreMidiInput {
-    fn is_alive(&self) -> bool {
-        !self.died.is_raised()
+    fn fault(&self) -> Option<InputFault> {
+        self.died.cause()
     }
 }
 
