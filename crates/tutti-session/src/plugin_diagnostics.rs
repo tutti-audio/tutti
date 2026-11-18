@@ -43,22 +43,27 @@ impl<'a> Diagnostics<'a> {
     }
 
     /// The blocks the audio path gave up waiting for, and the replies it took,
-    /// over the plugin's life. A plugin that runs in this process has no
+    /// over the plugin's life. What the node itself did not render is
+    /// [`block_losses`](Self::block_losses). A plugin that runs in this process has no
     /// replies to wait for: both are zero.
     pub fn block_counts(&self) -> BlockCounts {
         self.hosted.handle.block_counts()
     }
 
     /// What the node did not render, or the plugin did not take, over the
-    /// life of the node: blocks with no Processor in hand, blocks the plugin
-    /// failed, blocks it wrote a NaN or an infinity in, and the entries and
-    /// input messages it refused. Counted in blocks and entries, not events
-    /// (what such a block costs in MIDI is in
-    /// [`Plugin::losses`](crate::Plugin::losses)). For a plugin that runs in
-    /// a server, its node counts the same: a block the pipeline did not
-    /// answer is [`missed_chunks`](Self::missed_chunks).
+    /// life of the plugin at this node: blocks with no Processor in hand,
+    /// blocks the plugin failed, blocks it wrote a NaN or an infinity in, and
+    /// the entries and input messages it refused. Cumulative, and carried
+    /// across a rebuild of the node and a swap of the plugin, as
+    /// [`Plugin::losses`](crate::Plugin::losses) is. Counted in blocks and
+    /// entries, not events (what such a block costs in MIDI is in `losses`),
+    /// and in pieces of a block for a plugin that renders in chunks.
+    ///
+    /// Not [`block_counts`](Self::block_counts), which are the replies a
+    /// served plugin's pipeline waited for: those are the pipeline's, these
+    /// are the node's own renders, whichever hosting runs the plugin.
     pub fn block_losses(&self) -> tutti_plugin_host::BlockLosses {
-        self.hosted.node.block_losses()
+        self.hosted.block_losses()
     }
 
     /// The chunks the plugin's pipeline had not answered by the time the node

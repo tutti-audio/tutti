@@ -194,6 +194,88 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
     assert_eq!(losses(&s, node), Losses::refused(over as u64));
 }
 
+/// `blocks` blocks a node over the fake plugin did not render, counted in
+/// `controls`: a node built for new ports and not yet given the Processor.
+fn leave_unlent(controls: &PluginControls, blocks: usize) {
+    use tutti_graph::contract::Direct;
+    use tutti_plugin_types::fake::FakeLoaded;
+    use tutti_plugin_types::{Control, Loaded, MaxBlock, Prepare};
+
+    let (_plugin, loaded) = FakePlugin::new();
+    let main = tutti_fixtures::main_thread();
+    let wiring = loaded.wiring(main);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::new(Samples(64)).expect("a block"),
+    );
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the fake activates");
+    };
+    let client = tutti_plugin_host::client_over::<FakeLoaded>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        Some(controls.clone()),
+    )
+    .expect("the fake is narrow");
+    let rebinder = client.rebinder(tutti_fixtures::tempo());
+    let (successor, _pending) = rebinder.prepare().expect("a successor");
+    let mut unit = Direct::new(successor, SampleRate::SR_48K, 64);
+    for _ in 0..blocks {
+        unit.block();
+    }
+}
+
+fn block_losses(s: &DetachedSession, node: NodeKey) -> tutti_plugin_host::BlockLosses {
+    s.plugin_view(node)
+        .expect("hosted")
+        .diagnostics()
+        .block_losses()
+}
+
+/// **The blocks a node did not render are counted over the life of the plugin
+/// at the node**, as `losses()` are: a rebuilt node starts its own count at
+/// zero and a swapped-in plugin brings its own, and what the ones before
+/// counted stays in `Diagnostics::block_losses`.
+#[test]
+fn block_losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_did_not_render() {
+    let (mut s, node, counters, _fake) = hosted();
+    assert_eq!(block_losses(&s, node).unlent, 0);
+    leave_unlent(&counters.controls, 3);
+    assert_eq!(block_losses(&s, node).unlent, 3, "the node's own");
+
+    let rebuilt = Counters::new();
+    s.graph
+        .plugins
+        .get_mut(&node)
+        .unwrap()
+        .set_node((*rebuilt.controls).clone());
+    assert_eq!(block_losses(&s, node).unlent, 3, "the rebuild lost nothing");
+    leave_unlent(&rebuilt.controls, 2);
+    assert_eq!(block_losses(&s, node).unlent, 5);
+
+    let (incoming, _incoming_fake) = handle();
+    let swapped = Counters::new();
+    let outgoing = s.graph.plugins.get_mut(&node).unwrap().replace(
+        incoming,
+        swapped.controls.clone(),
+        plugin(),
+    );
+    drop(outgoing);
+    assert_eq!(block_losses(&s, node).unlent, 5, "the swap lost nothing");
+    leave_unlent(&swapped.controls, 1);
+    assert_eq!(
+        block_losses(&s, node).unlent,
+        6,
+        "the incoming plugin's add to the outgoing's"
+    );
+}
+
 /// **The count only grows across a rebuild of the node and a swap of the
 /// plugin at the same key.** A node rebuilt for new ports starts its counters
 /// at zero, and a swap brings a handle that has dropped no edits: what the

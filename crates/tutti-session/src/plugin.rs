@@ -761,6 +761,9 @@ pub(crate) struct HostedPlugin {
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
     banked: tutti_graph::Losses,
+    /// What the nodes before the held one did not render, or the plugin did
+    /// not take ([`Diagnostics::block_losses`]): banked with `banked`.
+    banked_blocks: tutti_plugin_host::BlockLosses,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -991,6 +994,7 @@ impl HostedPlugin {
             controls: None,
             node,
             banked: tutti_graph::Losses::NONE,
+            banked_blocks: tutti_plugin_host::BlockLosses::default(),
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -1086,6 +1090,7 @@ impl HostedPlugin {
     /// ones counted is banked first.
     pub(crate) fn set_node(&mut self, node: NodeControls) {
         self.banked += self.node_losses();
+        self.banked_blocks += self.node.block_losses();
         self.node = node;
     }
 
@@ -1111,6 +1116,12 @@ impl HostedPlugin {
             + Losses::lost(points.grid_points_dropped)
             + Losses::evicted(points.points_merged)
             + Losses::refused(points.points_dropped)
+    }
+
+    /// What the node did not render, or the plugin did not take, over the
+    /// record's life: the held node's, and the nodes before it.
+    pub(crate) fn block_losses(&self) -> tutti_plugin_host::BlockLosses {
+        self.banked_blocks + self.node.block_losses()
     }
 
     /// What the plugin lost, over the record's life: what the held handle and

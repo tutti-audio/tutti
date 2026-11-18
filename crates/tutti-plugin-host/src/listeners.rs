@@ -181,7 +181,8 @@ impl<A: Clone> Listener<A> {
 
     /// Calls every subscriber with each of `events`, in order, taking the
     /// subscribers once: a preset that moves a thousand parameters is one lock,
-    /// not a thousand.
+    /// not a thousand. A subscription that drops during the batch still hears
+    /// the rest of that batch.
     pub fn fire_all(&self, events: impl IntoIterator<Item = A>) {
         let callbacks = Arc::clone(&self.inner.lock().list);
         for event in events {

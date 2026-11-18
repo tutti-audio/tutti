@@ -114,7 +114,8 @@ pub enum PluginInvalidation {
     /// A restart the host asked for (a rate or a render mode) did not happen:
     /// the plugin would not stop, and runs as it was. Not a refusal of the
     /// rate and not a death: [`RateRefused`](Self::RateRefused) and
-    /// [`Crashed`](Self::Crashed) say those.
+    /// [`Crashed`](Self::Crashed) say those. The session maps it to no
+    /// `PluginChange`: only a handle's subscribers hear it.
     Stuck {
         /// Why the plugin would not stop.
         reason: String,

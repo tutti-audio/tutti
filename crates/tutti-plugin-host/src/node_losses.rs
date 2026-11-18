@@ -63,7 +63,10 @@ impl LossCounts {
 /// What a plugin node did not render, or the plugin did not take, since it was
 /// bound ([`NodeControls::block_losses`](crate::NodeControls::block_losses)).
 /// Counted in blocks and entries, not events: the MIDI such a block loses is
-/// in [`dropped_midi_in`](crate::NodeControls::dropped_midi_in).
+/// in [`dropped_midi_in`](crate::NodeControls::dropped_midi_in). A node whose
+/// Processor renders in chunks ([`Processor::chunk`](tutti_plugin_types::Processor::chunk))
+/// cuts a block into pieces, and each piece is a block here: `unlent`, `failed`
+/// and `nonfinite` count the pieces of such a node.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BlockLosses {
@@ -82,4 +85,24 @@ pub struct BlockLosses {
     /// Input messages the plugin's host refused, in the host's unit: a MIDI 1.0
     /// message or a whole SysEx message, not the node's events.
     pub inputs_refused: u64,
+}
+
+impl std::ops::Add for BlockLosses {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self {
+            unlent: self.unlent.saturating_add(rhs.unlent),
+            failed: self.failed.saturating_add(rhs.failed),
+            nonfinite: self.nonfinite.saturating_add(rhs.nonfinite),
+            entries_refused: self.entries_refused.saturating_add(rhs.entries_refused),
+            inputs_refused: self.inputs_refused.saturating_add(rhs.inputs_refused),
+        }
+    }
+}
+
+impl std::ops::AddAssign for BlockLosses {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
 }

@@ -565,6 +565,11 @@ impl<F: Loaded> Instance<F> {
     /// What the plugin did not do, kept for the control side by its kind.
     /// A death is reported by [`drive`](Self::drive), where the latch is set.
     fn note(&mut self, trouble: Trouble) {
+        // A lost plugin is reported as lost, once, by `drive`: what it
+        // refused on the way is not a refusal of a rate.
+        if self.lost.is_lost() {
+            return;
+        }
         match trouble {
             Trouble::Refused { rate, reason } => {
                 self.rate_refused = true;
@@ -908,5 +913,24 @@ mod tests {
             "{reports:?}"
         );
         assert!(instance.pump(main_thread()).reports.is_empty(), "told once");
+    }
+
+    /// **A plugin that panics in the middle of a restart is reported lost and
+    /// nothing else**: the refusal its failed activation raises is not a
+    /// refused rate.
+    #[test]
+    fn a_panic_during_a_restart_reports_the_death_and_no_refusal() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        fake.panic_in_activate(true);
+        let why = instance
+            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
+            .expect_err("the plugin is lost");
+        assert!(why.contains("lost") || why.contains("refused"), "{why}");
+        let reports = instance.take_reports();
+        assert!(
+            matches!(reports.as_slice(), [PluginInvalidation::Crashed { .. }]),
+            "{reports:?}"
+        );
+        assert!(instance.lost_latch().is_lost());
     }
 }

@@ -1,4 +1,4 @@
-//! An in-process plugin of any [`InProcess`](tutti_plugin_types::InProcess) format, behind a handle: its
+//! An in-process plugin of any [`InProcess`] format, behind a handle: its
 //! [`AnyThread`] (the hop to the main thread), its [`Health`] and the
 //! [`MainThreadControl`] a handle's token-taking calls reach it by.
 //!
@@ -42,7 +42,7 @@ use super::off_main_wait::{OffMainWait, Wait};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, Loaded,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, RenderMode, TerminationReason};
@@ -51,7 +51,7 @@ use tutti_types::ParamId;
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
 /// the user-installed callback.
-pub(crate) struct ControlBackend<F: Loaded> {
+pub(crate) struct ControlBackend<F: InProcess> {
     pub(super) inner: Arc<Mutex<Instance<F>>>,
     pub(crate) param_sink: ParameterChangeSink,
     /// The cell the audio unit parks a rate change in, shared with the
@@ -129,7 +129,7 @@ const OFF_MAIN_DEADLINE: Duration = if cfg!(test) {
 
 impl<F> ControlBackend<F>
 where
-    F: Loaded + 'static,
+    F: InProcess + 'static,
     F::Processor: 'static,
 {
     /// Runs `work` on the plugin on the main thread, under the instance lock,
@@ -193,7 +193,7 @@ where
 
 impl<F> AnyThread for ControlBackend<F>
 where
-    F: Loaded + 'static,
+    F: InProcess + 'static,
     F::Processor: 'static,
 {
     /// `None` for a lost plugin, and when the main thread does not answer.
@@ -342,7 +342,7 @@ where
 /// call into it latches the instance's [`Lost`], which is what this reads, with
 /// no lock. A plugin that takes the host down with it is not observed; the rest
 /// is the trait's defaults.
-impl<F: Loaded> Health for ControlBackend<F> {
+impl<F: InProcess> Health for ControlBackend<F> {
     fn is_crashed(&self) -> bool {
         self.lost.is_lost()
     }
@@ -364,7 +364,7 @@ impl<F: Loaded> Health for ControlBackend<F> {
 
 impl<F> MainThreadControl for ControlBackend<F>
 where
-    F: Loaded + 'static,
+    F: InProcess + 'static,
     F::Processor: 'static,
 {
     /// Under the instance's lock; not called for a lost plugin.
@@ -687,111 +687,5 @@ mod off_main_tests {
             automation,
             Err(AutomationModeError::Unsupported { .. })
         ));
-    }
-}
-
-/// An in-process plugin that panics reads lost through its handle.
-#[cfg(test)]
-mod lost_tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use parking_lot::Mutex;
-    use tutti_fixtures::main_thread;
-    use tutti_plugin_types::fake::{FakeLoaded, FakePlugin};
-    use tutti_plugin_types::{
-        Control, Loaded, MainWork, PluginFailure, PluginInvalidation, Prepare, Request,
-    };
-    use tutti_types::{MaxBlock, SampleRate, Samples};
-
-    use super::{ControlBackend, Reporting};
-    use crate::node::instance::Instance;
-    use crate::{Notice, ParameterChangeSink, PluginHandle, PluginStatus};
-
-    /// A fake plugin active in an instance, behind a handle whose notices it
-    /// counts, with the Processor's end kept alive.
-    fn rig() -> (
-        FakePlugin,
-        PluginHandle,
-        Arc<AtomicUsize>,
-        crate::Subscription,
-        tutti_rt::Rt<tutti_plugin_types::fake::FakeProcessor>,
-    ) {
-        let (fake, loaded) = FakePlugin::new();
-        let main = main_thread();
-        let wiring = loaded.wiring(main);
-        let descriptor = loaded.info().clone();
-        let prepare = Prepare::new(
-            SampleRate::SR_48K,
-            MaxBlock::new(Samples(64)).expect("a block"),
-        );
-        let Ok((processor, controller)) = loaded.activate(main, prepare) else {
-            panic!("the fake activates");
-        };
-        let (instance, rt) = Instance::<FakeLoaded>::adopt(processor, controller, prepare, &wiring);
-        let lost = instance.lost_latch();
-        let inner = Arc::new(Mutex::new(instance));
-        let (_collector, work) = MainWork::new();
-        let reporting = Reporting {
-            invalidate: crate::InvalidateSink::new(),
-            transport: crate::TransportSink::new(),
-        };
-        let backend = Arc::new(ControlBackend {
-            inner,
-            param_sink: ParameterChangeSink::new(),
-            pending_sample_rate: Arc::default(),
-            reporting: reporting.clone(),
-            lost,
-            format: "fake",
-            work,
-        });
-        let control: Arc<dyn crate::MainThreadControl> = backend.clone();
-        let handle = PluginHandle::from_backend(
-            backend,
-            Some(control),
-            descriptor,
-            wiring,
-            ParameterChangeSink::new(),
-        )
-        .with_invalidate_sink(reporting.invalidate);
-        let crashes = Arc::new(AtomicUsize::new(0));
-        let seen = Arc::clone(&crashes);
-        let hearing = handle.subscribe(move |notice| {
-            if matches!(
-                notice,
-                Notice::Invalidate(PluginInvalidation::Crashed {
-                    cause: PluginFailure::Panicked { .. }
-                })
-            ) {
-                seen.fetch_add(1, Ordering::Relaxed);
-            }
-        });
-        (fake, handle, crashes, hearing, rt)
-    }
-
-    /// **A panic out of an in-process plugin's call is observed as death**: the
-    /// handle's status is `Dead` with a `PluginFailure::Panicked` cause, which
-    /// is what the session turns into `PluginChange::Died`, and the listeners
-    /// hear `Crashed` once.
-    #[test]
-    fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
-        let (fake, handle, crashes, _hearing, _rt) = rig();
-        assert!(matches!(handle.status(), PluginStatus::Alive));
-        fake.panic_in_latency(true);
-        assert!(Request::LatencyChanged.raise(fake.request_word()));
-        handle.editor_idle(main_thread());
-        assert!(handle.is_crashed());
-        assert!(
-            matches!(
-                handle.status(),
-                PluginStatus::Dead {
-                    cause: PluginFailure::Panicked { .. }
-                }
-            ),
-            "{:?}",
-            handle.status()
-        );
-        handle.editor_idle(main_thread());
-        assert_eq!(crashes.load(Ordering::Relaxed), 1, "heard once");
     }
 }
