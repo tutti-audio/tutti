@@ -48,8 +48,9 @@
 //!   any thread with one `fetch_or` and taken whole by any one thread.
 //! - [`DirtySet`] — a sized set of dirty flags, an atomic bit per index, with
 //!   no capacity to overflow.
-//! - [`FaultLatch`] — a flag a producer raises when it stops for good, read
-//!   before the ring so a failure never hides the frames pushed ahead of it.
+//! - [`FaultLatch`] — a flag a producer raises when it stops for good, with
+//!   its first [`Cause`], read before the ring so a failure never hides the
+//!   frames pushed ahead of it.
 //! - [`drain_clock()`] — counts the drains the audio side begins, so the
 //!   control side can tell which of its writes a block has surely taken.
 //! - [`handoff()`] — one value that moves between a control thread and the
@@ -201,7 +202,7 @@ pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
 pub use doorbell::{Doorbell, Sleeper, doorbell};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
-pub use fault_latch::{Drained, FaultLatch};
+pub use fault_latch::{Cause, Drained, FaultLatch};
 pub use gauge::{
     Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
     gauge, tally,

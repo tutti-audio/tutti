@@ -145,7 +145,7 @@ impl<F: Float> Editor<F> {
     fn end_replaced_tap(&mut self, id: TapId) {
         if let Some(Closed { meta, unsent }) = self.taps.close(id) {
             if unsent {
-                meta.end.raise();
+                meta.end.raise(());
             } else {
                 self.link.end_tap(meta.end);
             }

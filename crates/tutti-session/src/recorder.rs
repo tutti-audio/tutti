@@ -363,7 +363,7 @@ where
         self.lost
             .fetch_add(self.src.take_lost().get() as u64, Ordering::Relaxed);
         if pass == PumpPass::Failed {
-            self.failed.raise();
+            self.failed.raise(());
         }
         pass
     }

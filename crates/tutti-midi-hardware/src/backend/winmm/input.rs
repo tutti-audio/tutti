@@ -61,7 +61,7 @@ pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Resul
                         push(ump, at);
                     }
                 }
-                Event::Closed => closed.raise(),
+                Event::Closed => closed.raise(()),
             }
         });
     })?;
