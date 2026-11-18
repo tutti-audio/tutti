@@ -282,8 +282,9 @@ mod tests {
             at(90_000.0, 1.0, 6.0),
             at(RATE.nyquist_scaled(0.99).get(), 1.0, 6.0)
         );
-        // The lower bound 0.1 is not an `f32`, which the control carries, so two figures
-        // below it are compared; the upper bound 30 is exact in both.
+        // The lower bound 0.1 is not an `f32`, which the control carries until the control
+        // cells are `f64`, so two figures below it are compared: this pins that the floor
+        // clamps, not that it is 0.1. The upper bound 30 is exact in both.
         assert_eq!(at(500.0, 0.0, 6.0), at(500.0, 0.05, 6.0));
         assert_eq!(at(500.0, 900.0, 6.0), at(500.0, 30.0, 6.0));
         assert_eq!(at(500.0, 1.0, 90.0), at(500.0, 1.0, 24.0));
