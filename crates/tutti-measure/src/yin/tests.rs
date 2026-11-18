@@ -256,7 +256,7 @@ fn reaches_the_ends_of_a_widened_range() {
 /// Jump penalization attenuates an octave error without deleting it.
 #[test]
 fn penalize_jumps_attenuates_implausible_leaps() {
-    let voiced = |f: f64, c: f32| {
+    let voiced = |f: f64, c: f64| {
         let (note, cents) = Note::nearest_to(Hz(f)).unwrap();
         PitchEstimate::Voiced(Pitch {
             frequency: Hz(f),
