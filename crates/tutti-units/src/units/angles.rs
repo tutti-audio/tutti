@@ -362,17 +362,19 @@ impl PhaseStep {
 }
 
 impl From<PhaseIncrement> for PhaseStep {
-    /// The increment wrapped into one cycle (`-0.25` is `0.75`) and scaled by `2^64`,
-    /// truncated to a count. A non-finite increment is [`ZERO`](Self::ZERO).
-    ///
-    /// A positive increment's step is exact to the count. A negative one is exact only to
-    /// `2^-53` cycles: `Phase::wrapped` of a tiny negative value is the largest value under
-    /// one, `1 - 2^-53`, so `-1e-20` steps back by `2^11` counts, not `1e-20 * 2^64`.
+    /// The increment's fraction of a cycle, `inc - trunc(inc)` (exact, in `(-1, 1)`), scaled
+    /// by `2^64` and truncated toward zero to a signed count, taken modulo one cycle: `-0.25`
+    /// is `0.75`, and a negative increment's step is the two's complement of the positive
+    /// one's, so a reverse run has the forward run's rate. A non-finite increment is
+    /// [`ZERO`](Self::ZERO).
     #[inline]
     fn from(inc: PhaseIncrement) -> PhaseStep {
         const CYCLE: f64 = 18_446_744_073_709_551_616.0; // 2^64
-        // `Phase::wrapped` is below 1, so the product is below 2^64; NaN casts to 0.
-        PhaseStep((Phase::wrapped(inc.0).0 * CYCLE) as u64)
+        let fraction = inc.0 - libm::trunc(inc.0);
+        // `|fraction| < 1`, so the product's magnitude is below 2^64 and fits an `i128`; the
+        // `u64` cast of the signed count is its value modulo 2^64. NaN (an infinite or NaN
+        // increment) casts to 0.
+        PhaseStep((fraction * CYCLE) as i128 as u64)
     }
 }
 

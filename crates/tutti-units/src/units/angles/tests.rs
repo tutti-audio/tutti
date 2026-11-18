@@ -480,10 +480,17 @@ fn an_increment_of_half_a_cycle_is_two_to_the_63() {
 }
 
 #[test]
-fn a_tiny_negative_increment_steps_back_by_the_largest_value_under_one_cycle() {
-    // `Phase::wrapped(-1e-20)` is `1 - 2^-53`, which is `2^64 - 2^11` counts.
+fn a_negative_increment_steps_back_by_the_two_s_complement_of_the_positive_step() {
+    for x in [1e-20, 2f64.powi(-40), 1.0 / 19.2e6, 0.125] {
+        assert_eq!(
+            PhaseStep::from(PhaseIncrement(-x)).get(),
+            PhaseStep::from(PhaseIncrement(x)).get().wrapping_neg(),
+            "{x}"
+        );
+    }
+    // `-2^-60` cycles is exactly 16 counts back.
     assert_eq!(
-        PhaseStep::from(PhaseIncrement(-1e-20)).get(),
-        0_u64.wrapping_sub(1 << 11)
+        PhaseStep::from(PhaseIncrement(-(2f64.powi(-60)))).get(),
+        0_u64.wrapping_sub(16)
     );
 }

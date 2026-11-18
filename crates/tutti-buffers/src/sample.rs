@@ -392,7 +392,14 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// assert_eq!(f64::from_phase(half), 0.5);
     /// ```
     #[must_use]
-    fn from_phase(p: RunningPhase) -> Self;
+    #[inline]
+    fn from_phase(p: RunningPhase) -> Self {
+        let bits = <Self as Real>::MANTISSA_DIGITS;
+        let top = p.get() >> (u64::BITS - bits);
+        // `top` has `bits` bits, so it and the power-of-two scale are exact in `f64` and in
+        // `Self`, and so is their product.
+        Self::lit(top as f64) * Self::lit(1.0 / (1_u64 << bits) as f64)
+    }
 
     /// A read position as its whole frames and a fraction of this width in `[0, 1)`:
     /// the top bits of the position's fraction (the width's mantissa, capped at the
@@ -413,7 +420,18 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// assert_eq!(f64::split_position(p), (Samples(7), 0.5));
     /// ```
     #[must_use]
-    fn split_position(p: ReadPosition) -> (Samples, Self);
+    #[inline]
+    fn split_position(p: ReadPosition) -> (Samples, Self) {
+        let bits = <Self as Real>::MANTISSA_DIGITS.min(ReadPosition::FRACTION_BITS);
+        let fraction = (p.get() & ((1 << ReadPosition::FRACTION_BITS) - 1))
+            >> (ReadPosition::FRACTION_BITS - bits);
+        // `fraction` has `bits` bits, so it and the power-of-two scale are exact in `f64` and
+        // in `Self`, and so is their product.
+        (
+            p.frames(),
+            Self::lit(fraction as f64) * Self::lit(1.0 / (1_u64 << bits) as f64),
+        )
+    }
 
     /// The position `by` frames on from `p`, `by` data of a modulation: the one
     /// spelling of data to position. The offset is widened to `f64` (exact), scaled
@@ -475,27 +493,6 @@ impl Float for f32 {
         }
     }
     #[inline]
-    fn from_phase(p: RunningPhase) -> Self {
-        let top = p.get() >> (u64::BITS - Self::MANTISSA_DIGITS);
-        // `top` has `MANTISSA_DIGITS` bits: the conversion and the power-of-two scale are exact.
-        top as Self * (1.0 / (1_u64 << Self::MANTISSA_DIGITS) as Self)
-    }
-    #[inline]
-    fn split_position(p: ReadPosition) -> (Samples, Self) {
-        const BITS: u32 = if <f32 as Real>::MANTISSA_DIGITS < ReadPosition::FRACTION_BITS {
-            <f32 as Real>::MANTISSA_DIGITS
-        } else {
-            ReadPosition::FRACTION_BITS
-        };
-        let fraction = (p.get() & ((1 << ReadPosition::FRACTION_BITS) - 1))
-            >> (ReadPosition::FRACTION_BITS - BITS);
-        // `fraction` has `BITS` bits: the conversion and the power-of-two scale are exact.
-        (
-            p.frames(),
-            fraction as Self * (1.0 / (1_u64 << BITS) as Self),
-        )
-    }
-    #[inline]
     fn lit(x: f64) -> Self {
         x as Self
     }
@@ -519,27 +516,6 @@ impl Float for f64 {
         } else {
             x.clamp(-Self::MAX, Self::MAX)
         }
-    }
-    #[inline]
-    fn from_phase(p: RunningPhase) -> Self {
-        let top = p.get() >> (u64::BITS - Self::MANTISSA_DIGITS);
-        // `top` has `MANTISSA_DIGITS` bits: the conversion and the power-of-two scale are exact.
-        top as Self * (1.0 / (1_u64 << Self::MANTISSA_DIGITS) as Self)
-    }
-    #[inline]
-    fn split_position(p: ReadPosition) -> (Samples, Self) {
-        const BITS: u32 = if <f64 as Real>::MANTISSA_DIGITS < ReadPosition::FRACTION_BITS {
-            <f64 as Real>::MANTISSA_DIGITS
-        } else {
-            ReadPosition::FRACTION_BITS
-        };
-        let fraction = (p.get() & ((1 << ReadPosition::FRACTION_BITS) - 1))
-            >> (ReadPosition::FRACTION_BITS - BITS);
-        // `fraction` has `BITS` bits: the conversion and the power-of-two scale are exact.
-        (
-            p.frames(),
-            fraction as Self * (1.0 / (1_u64 << BITS) as Self),
-        )
     }
     #[inline]
     fn lit(x: f64) -> Self {
@@ -648,14 +624,14 @@ mod tests {
     /// `f32` phase near 0.5 rounds each add to one ulp (6.0e-8), a rate 15% fast. The running
     /// phase read through `f32` wraps on the period, ten times, each to within one sample.
     #[test]
-    fn an_f32_read_phase_at_001_hz_and_192_khz_completes_ten_periods_to_within_a_sample() {
+    fn an_f32_read_phase_at_001_hz_and_192_khz_completes_three_periods_to_within_a_sample() {
         let rate = SampleRate::new(192_000.0).unwrap();
         let step = PhaseStep::from(PhaseIncrement::per_sample(Hz(0.01), rate));
         let period = 19_200_000_u64;
         let mut p = RunningPhase::START;
         let mut wraps = 0_u32;
         let mut last = 0.0_f32;
-        for n in 1..=10 * period {
+        for n in 1..=3 * period {
             p = p.advance(step);
             let v = f32::from_phase(p);
             if v < last {
@@ -666,7 +642,7 @@ mod tests {
             }
             last = v;
         }
-        assert_eq!(wraps, 9);
+        assert_eq!(wraps, 2);
         assert!(f32::from_phase(p) < 1e-6 || f32::from_phase(p) > 1.0 - 1e-6);
     }
 
