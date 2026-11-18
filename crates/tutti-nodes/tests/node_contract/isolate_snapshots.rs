@@ -27,7 +27,7 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, TransientShaperConfig, TransientShaperNode,
 };
 use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -35,7 +35,7 @@ use tutti_nodes::{
 };
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Samples, Seconds, StereoWidth, UnitAddr, UnitParam,
+    Resonance, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -292,6 +292,24 @@ fn cut_filter() {
     })
     .control("cutoff", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 400.0))
+    })
+    .check();
+}
+
+#[test]
+fn envelope_filter() {
+    IsolateRow::new("EnvelopeFilterNode (stereo)", || {
+        EnvelopeFilterNode::from(
+            EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::LowPass)
+                .depth(Semitones(24.0)),
+        )
+    })
+    .control("base", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 900.0))
+    })
+    .control("q", |d| assert!(d.param_set().set(UnitParam::Q, 3.0)))
+    .control("depth", |d| {
+        assert!(d.param_set().set(UnitParam::Semitones, 12.0))
     })
     .check();
 }

@@ -16,6 +16,7 @@ mod rt_no_alloc_dc_blocker;
 mod rt_no_alloc_dynamic_eq;
 mod rt_no_alloc_dynamics;
 mod rt_no_alloc_engine;
+mod rt_no_alloc_envelope_filter;
 mod rt_no_alloc_eq_filters;
 mod rt_no_alloc_filter;
 mod rt_no_alloc_filter_corners;

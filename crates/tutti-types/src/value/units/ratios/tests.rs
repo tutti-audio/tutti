@@ -37,6 +37,7 @@ fn cents_and_semitones_convert_rather_than_scale() {
 
     // An octave doubles the frequency, by either spelling.
     assert!((Semitones::OCTAVE.to_pitch_ratio() - 2.0).abs() < 1e-6);
+    assert_eq!(Semitones::UNISON.to_pitch_ratio(), 1.0);
     assert!((Cents(1200.0).to_pitch_ratio() - 2.0).abs() < 1e-6);
     assert!((Semitones(0.0).to_pitch_ratio() - 1.0).abs() < 1e-6);
 }
