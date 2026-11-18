@@ -1829,7 +1829,7 @@ pub fn drive_input<F: Float>(
 /// # Panics
 ///
 /// As [`drive_input`], and when a param event list is unsorted or reaches past
-/// the block ([`SortedEvents::with_params`](crate::SortedEvents::with_params)).
+/// the block ([`SortedEvents::with_both`](crate::SortedEvents::with_both)).
 pub fn drive_input_params<F: Float>(
     node: &mut dyn Node<F>,
     env: &Env,

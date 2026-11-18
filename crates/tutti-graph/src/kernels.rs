@@ -210,7 +210,7 @@ impl EventFifo {
         Self::sized_for(len, cap, max_block, 0)
     }
 
-    /// As [`sized`](Self::sized), with room for at least `room` events: a
+    /// As `sized`, with room for at least `room` events: a
     /// FIFO that takes over another's queue must hold all of it. Control
     /// side: allocates.
     pub(crate) fn sized_for(len: Samples, cap: usize, max_block: usize, room: usize) -> Self {
