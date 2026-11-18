@@ -538,7 +538,8 @@
 //!   commands bring, and the executor counts the rest as it counts a refused
 //!   write ([`Executor::dropped_event_count`]). The bound holds however the
 //!   edges change at a commit.
-//! - [`Editor::schedule`] delivers an event on an exact frame or beat
+//! - [`Editor::schedule`] delivers an event, or a param ramp or segment to a
+//!   node that declares [`Shape::param_events`], on an exact frame or beat
 //!   ([`At`](tutti_units::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.
 //! - Each node declares how finely it honours event offsets
@@ -691,7 +692,7 @@ mod time;
 mod wake;
 
 pub use builder::{GraphBuilder, Renderer, Solo};
-pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError};
+pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};

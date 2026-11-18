@@ -58,7 +58,8 @@ impl<L: Loaded + 'static, F: Float> Node<F> for PluginNode<L, F>
 where
     L::Processor: 'static,
 {
-    /// The plugin's channels, one event input (MIDI and parameter events),
+    /// The plugin's channels, one event input (MIDI and parameter events; a
+    /// param ramp or segment scheduled to the node arrives here),
     /// and a MIDI event output for a plugin that declared MIDI out; its
     /// latency and tail as the control side last read them. The plugin reports its tail apart from
     /// its latency, so the tail excludes latency as [`Shape::tail`] asks.
@@ -82,6 +83,7 @@ where
         this.declared
             .ports
             .with_events(1, midi_out)
+            .with_param_events()
             .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured

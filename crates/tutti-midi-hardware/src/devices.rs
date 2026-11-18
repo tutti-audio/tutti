@@ -23,13 +23,13 @@ use tutti_midi_device::{
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
-use crate::HardwareMidiInputs;
 use crate::backend;
 use crate::capability::UmpCapability;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::sensing::Heartbeat;
 use crate::wire::Wire;
+use crate::{HardwareMidiInputs, InputFault};
 
 // Only a native backend reports through it; the stub has none.
 #[cfg_attr(
@@ -567,11 +567,18 @@ impl OpenInput {
     }
 
     /// Whether the connection is still delivering. `false` once the backend's
-    /// reader has ended on an error (a warning is logged): the device is
-    /// still listed, but nothing will arrive until the input is reopened.
+    /// reader has ended on an error: the device is still listed, but nothing
+    /// will arrive until the input is reopened. [`fault`](Self::fault) says why.
     #[must_use]
     pub fn is_alive(&self) -> bool {
         self.connection.as_ref().is_some_and(|c| c.is_alive())
+    }
+
+    /// Why the connection stopped delivering, `None` while it delivers (and
+    /// for a connection already closed).
+    #[must_use]
+    pub fn fault(&self) -> Option<InputFault> {
+        self.connection.as_ref().and_then(|c| c.fault())
     }
 
     /// The port its events land in, for the list's `set_port_active`.

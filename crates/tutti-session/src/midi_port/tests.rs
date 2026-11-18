@@ -82,3 +82,12 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         "carried on by the reopened output, not started over"
     );
 }
+
+/// **A port whose reader died reads the fault it died of; one whose input was
+/// not held, and so read none, reads `ReopenFailed`.**
+#[test]
+fn a_lost_reader_reads_its_fault_or_reopen_failed() {
+    let fault = InputFault::WaitFailed(tutti_midi_hardware::Errno::new(5));
+    assert_eq!(reader_loss(Some(fault)), PortCause::ReaderFailed(fault));
+    assert_eq!(reader_loss(None), PortCause::ReopenFailed);
+}
