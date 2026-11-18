@@ -2,6 +2,7 @@
 //! names a key or port that does not exist fails at the call with a named
 //! error, never later at the commit and never as silence.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
 use tutti_graph::{FadeLaw, GraphInvalid, NodeKey, ParamRange};
 use tutti_nodes::testing::{Const, Through};
@@ -9,7 +10,6 @@ use tutti_session::{
     ConnectError, Crossfade, CrossfadeRefused, DetachedSession, EventInPort, EventOutPort, InPort,
     OutPort, Root, Session,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

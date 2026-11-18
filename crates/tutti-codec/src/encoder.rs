@@ -10,8 +10,8 @@ use crate::writer::FormatWriter;
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Writes blocks of audio as one file of a [format](crate::Format): the
@@ -38,7 +38,7 @@ use tutti_units::Samples;
 /// # #[cfg(feature = "encode-wav")] {
 /// use std::io::Cursor;
 /// use tutti_codec::{Encoder, Format, Pcm, Spec};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_units::SampleRate;
 /// use tutti_buffers::{Interleaved, Sample};
 ///

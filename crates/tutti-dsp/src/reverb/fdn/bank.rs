@@ -54,8 +54,8 @@
 //! the edges. The loop gains and the poles are designed in `f64` and narrowed to `F` once per
 //! design.
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Amplitude, Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};

@@ -17,9 +17,10 @@
 //! progress differ in the last bits).
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -31,7 +32,6 @@ use tutti_modulation::ControlProgram;
 use tutti_modulation::Curve;
 use tutti_music::{FrameClock, LoopRange};
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Hz, ParamKey, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;

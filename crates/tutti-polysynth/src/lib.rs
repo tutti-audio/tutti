@@ -27,7 +27,7 @@
 //!
 //! ```rust
 //! use std::num::NonZeroUsize;
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_polysynth::{
 //!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
 //! };

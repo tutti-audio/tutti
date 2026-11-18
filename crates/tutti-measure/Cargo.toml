@@ -19,7 +19,6 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `ChannelLayout`, `Interleaved` and the downmix helpers.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # `RealFft`/`FftScratch` (the CPU-independent real FFT every kernel here runs
 # on), `Complex`, `StftGeometry`, `Grid` and the `Error` they share with the
@@ -43,7 +42,7 @@ serde = { version = "1", optional = true, features = ["derive"] }
 [features]
 default = []
 # Serialize/Deserialize for `PeakBlocks` and `PeakBlock`.
-serde = ["dep:serde", "tutti-types/serde", "tutti-units/serde"]
+serde = ["dep:serde", "tutti-buffers/serde", "tutti-units/serde"]
 
 [dev-dependencies]
 # The README's "Reading from a running graph" doctest shows the engine-side
@@ -58,7 +57,6 @@ rand = "0.10"
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
 tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
-tutti-types = { path = "../tutti-types", default-features = false, features = ["serde"] }
 serde = "1"
 # `PeakBlocks`' serde round trip in the `serde` feature's tests.
 serde_json = "1"

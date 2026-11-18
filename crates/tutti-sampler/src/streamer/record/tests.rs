@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::SampleRate;
 
 use super::*;

@@ -1041,7 +1041,7 @@ impl<F: Float> ModeState<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
     use tutti_units::{Latency, Samples};
 
     /// [`DECLICK`](crate::DECLICK) at 48 kHz.

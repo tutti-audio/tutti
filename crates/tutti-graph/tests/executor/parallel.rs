@@ -14,9 +14,10 @@ use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkCause, ForkMode, ForkSource,
@@ -24,7 +25,6 @@ use tutti_graph::{
     ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, UnitParam};
 

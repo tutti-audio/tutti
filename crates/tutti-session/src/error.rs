@@ -336,9 +336,9 @@ pub enum Error {
         /// The root generation in force.
         root: tutti_graph::RootId,
         /// The root's channels.
-        width: tutti_types::ChannelLayout,
+        width: tutti_buffers::ChannelLayout,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// Why the fold is refused.
         source: tutti_buffers::FoldError,
     },
@@ -352,7 +352,7 @@ pub enum Error {
         /// The map in force.
         map: tutti_engine::OutputMap,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// What the map broke on.
         source: tutti_engine::RoutingError,
     },

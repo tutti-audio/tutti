@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::MAX_NODE_LATENCY;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -15,7 +16,6 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Latency, SampleRate, Samples};
 
 /// The delay the plugin actually runs.

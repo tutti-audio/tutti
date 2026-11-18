@@ -4,8 +4,8 @@
 //! (a zero stays a zero of either sign, and NaN stays NaN). It is memoryless, so a
 //! block's render does not depend on where blocks fall.
 
+use tutti_buffers::{ChannelIndex, ChannelLayout};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelIndex, ChannelLayout};
 
 /// A channel an inversion names that the width lacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -24,7 +24,7 @@ pub struct ChannelOutOfRange {
 ///
 /// ```
 /// use tutti_dsp::Polarity;
-/// use tutti_types::{ChannelIndex, ChannelLayout};
+/// use tutti_buffers::{ChannelIndex, ChannelLayout};
 ///
 /// let flips = Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(1)]).unwrap();
 /// let (first, second) = (ChannelIndex::of(0), ChannelIndex::of(1));

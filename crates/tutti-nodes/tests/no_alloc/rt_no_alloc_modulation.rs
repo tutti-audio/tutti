@@ -11,6 +11,8 @@
 //! lanes, and 200 lanes of every layer kind with republishes, knob writes
 //! and range edits between blocks.
 
+use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
@@ -18,8 +20,6 @@ use tutti_nodes::{
     ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
     MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
 };
-use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
     Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,

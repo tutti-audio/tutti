@@ -56,7 +56,7 @@ tutti_units::ranged! {
 /// is a different guess), so a struct holding one names the width it means:
 ///
 /// ```compile_fail
-/// # use tutti_types::ChannelLayout;
+/// # use tutti_buffers::ChannelLayout;
 /// // A width is always chosen, never defaulted.
 /// let _ = ChannelLayout::default();
 /// ```
@@ -64,7 +64,7 @@ tutti_units::ranged! {
 /// # Examples
 ///
 /// ```
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// let surround = ChannelLayout::from(6u16);
 /// assert_eq!(surround.count(), 6);

@@ -13,6 +13,7 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode};
 
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
@@ -22,7 +23,6 @@ use tutti_graph::{
     Prepare, Source, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
 };
 use tutti_rt::PushError;
-use tutti_types::MaxBlock;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
 use tutti_units::{Frame, Moment, SampleRate, Samples};
 

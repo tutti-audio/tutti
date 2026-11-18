@@ -6,11 +6,11 @@
 //! prepared rate (control thread, where that may allocate), keeping the
 //! preset.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Chase, ConstantMask, Cx, IntoNode, Io, Node, NodeParts, Prepare, Resolution, Shape,
     SilenceMask, Status,
 };
-use tutti_types::ChannelLayout;
 
 use crate::SoundFontUnit;
 use crate::player::{Plane, Player};

@@ -31,16 +31,16 @@
 
 use std::sync::OnceLock;
 use std::time::Duration;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Latent;
 use tutti_graph::{GraphBuilder, Prepare, Renderer, Unforkable};
 use tutti_plugin::BridgeConfig;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::{PluginControls, PluginHandle};
-use tutti_types::ChannelLayout;
 use tutti_units::{Latency, SampleRate, Samples};
 
 /// A bound plugin as the only node of a graph: the global inputs feed

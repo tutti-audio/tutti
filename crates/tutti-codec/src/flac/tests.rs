@@ -67,8 +67,8 @@ fn an_empty_stream_states_valid_sizes() {
 fn a_writer_that_lost_a_frame_fails_promptly() {
     use crate::test_sink::Flaky;
     use crate::{FormatWriter, Spec};
+    use tutti_buffers::ChannelLayout;
     use tutti_buffers::Interleaved;
-    use tutti_types::ChannelLayout;
     use tutti_units::SampleRate;
 
     let (tx, rx) = mpsc::channel();

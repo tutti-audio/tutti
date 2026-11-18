@@ -15,8 +15,8 @@
 //! and aims each channel's glide across it, so the cut of the blocks does not move the
 //! render.
 
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Depth, Feedback, Hz};
 
 use crate::{Glide, Lerp};

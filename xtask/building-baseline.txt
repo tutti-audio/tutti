@@ -41,6 +41,8 @@ tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::Planes::new
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::PlanesMut::from_vecs
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::PlanesMut::new
 tutti-buffers  ctor-result  crates/tutti-buffers/src/stereo.rs::StereoPlanes::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/topology.rs::ChannelTopology::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/topology.rs::Speakers::new
 
 # tutti-clap-host
 tutti-clap-host  setter  crates/tutti-clap-host/src/events.rs::InputEventList::set_note_ports
@@ -515,10 +517,6 @@ tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettin
 tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo
 tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo_map
 tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
-
-# tutti-types
-tutti-types  ctor-result  crates/tutti-types/src/topology.rs::ChannelTopology::new
-tutti-types  ctor-result  crates/tutti-types/src/topology.rs::Speakers::new
 
 # tutti-ump
 tutti-ump  chain-result  crates/tutti-ump/src/mpe_zone.rs::MpeZoneSet::with

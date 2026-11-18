@@ -3,13 +3,13 @@
 
 use crate::fixtures::{SAMPLE_RATE, spec};
 use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{AudioCallbackState, Engine, ManualStreamDriver, OutputBlock, OutputStream};
 use tutti_graph::{
     Cx, Editor, ForkByClone, Io, Node, NodeKey, OutPort, Prepare, Shape, Source, Status,
 };
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

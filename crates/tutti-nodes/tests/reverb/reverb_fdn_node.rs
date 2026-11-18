@@ -5,9 +5,10 @@
 //! another reverb's render.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
@@ -19,7 +20,7 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::AtomicF32;
 use tutti_units::{
     Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };

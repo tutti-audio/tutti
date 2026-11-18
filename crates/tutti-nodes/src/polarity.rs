@@ -1,9 +1,9 @@
 //! [`PolarityNode`]: a polarity flip of chosen channels, from a [`PolarityConfig`].
 
+use tutti_buffers::{ChannelIndex, ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{ChannelOutOfRange, Polarity};
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
-use tutti_types::{ChannelIndex, ChannelLayout, MAX_CHANNELS};
 
 use crate::kernel::through_planes;
 
@@ -11,7 +11,7 @@ use crate::kernel::through_planes;
 ///
 /// ```
 /// use tutti_nodes::{PolarityConfig, PolarityNode};
-/// use tutti_types::{ChannelIndex, ChannelLayout};
+/// use tutti_buffers::{ChannelIndex, ChannelLayout};
 ///
 /// // Invert the right channel of a stereo pair.
 /// let config = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);

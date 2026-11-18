@@ -6,10 +6,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_session::{Session, midi_sink};
-use tutti_types::MaxBlock;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
 

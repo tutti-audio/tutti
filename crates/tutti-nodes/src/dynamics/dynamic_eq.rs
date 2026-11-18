@@ -1,12 +1,12 @@
 //! The dynamic EQ band [`DynamicEqNode`]: an SVF bell whose gain follows the level of a
 //! band-passed key, and its de-esser configuration.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lanes, Lerp,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

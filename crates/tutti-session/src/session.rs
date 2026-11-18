@@ -5,12 +5,12 @@ use std::any::Any;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_music::{LoopRange, MeterMap};
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
 use crate::RootDeclaration;
@@ -524,9 +524,9 @@ pub enum RootTopologyStatus {
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
 /// use tutti_session::{OutPort, Root, Session};
@@ -1090,7 +1090,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
+    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_root_topology(
@@ -1176,10 +1176,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// What the output device's channels are as the session folds the root
     /// into them, and whether that was
-    /// [`Stated`](tutti_types::Placement::Stated)
+    /// [`Stated`](tutti_buffers::Placement::Stated)
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
     /// `DeviceRestart::topology`) or
-    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// [`Assumed`](tutti_buffers::Placement::Assumed) from the device's width
     /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
     /// engine (a detached one).
     #[must_use]
@@ -1948,9 +1948,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 mod tests {
     use std::sync::Arc;
 
+    use tutti_buffers::ChannelLayout;
     use tutti_music::{MeterChange, MeterMap, TimeSignature};
     use tutti_transport::MeterSlot;
-    use tutti_types::ChannelLayout;
     use tutti_units::{Beat, SampleRate};
 
     use crate::Session;

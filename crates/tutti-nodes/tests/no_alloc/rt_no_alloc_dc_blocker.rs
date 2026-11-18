@@ -1,9 +1,9 @@
 //! Regression gate: the DC blocker must not allocate per block, held and with its corner
 //! moved between blocks (the pole glide).
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the corner moved before each.

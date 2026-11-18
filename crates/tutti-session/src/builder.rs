@@ -4,12 +4,12 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tutti_buffers::MAX_CHANNELS;
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
-use tutti_types::MAX_CHANNELS;
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
@@ -47,7 +47,7 @@ use tutti_engine::BlockDates;
 ///
 /// ```
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::{ChannelLayout, MaxBlock};
+/// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_session::{Session, Workers};
 ///
 /// let session = Session::builder()
@@ -692,7 +692,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// speaker. Without it the device is taken to be the engine's order for
     /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
-    /// [`Placement::Assumed`](tutti_types::Placement::Assumed)
+    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed)
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
@@ -1180,7 +1180,7 @@ pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_units::{SampleRate, Samples};
 
     use super::LIVE_MAX_BLOCK;

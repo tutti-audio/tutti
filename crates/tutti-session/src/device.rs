@@ -42,9 +42,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
 use tutti_engine::{OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::{
@@ -640,7 +640,7 @@ pub struct DeviceRestart {
     /// What the new device's channels are, when the host states it
     /// ([`topology`](Self::topology)); `None` takes the engine's order for
     /// the device's width, and the device is read back as
-    /// [`Placement::Assumed`](tutti_types::Placement::Assumed). It is the
+    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed). It is the
     /// request's own: another device is wired another way, so a statement
     /// made for the device the session opened on is not carried over.
     pub topology: Option<ChannelTopology>,
@@ -1027,8 +1027,8 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
 mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
+    use tutti_buffers::ChannelLayout;
     use tutti_engine::{ManualStreamDriver, OutputSpec};
-    use tutti_types::ChannelLayout;
     use tutti_units::SampleRate;
 
     use crate::Session;

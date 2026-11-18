@@ -45,9 +45,9 @@ use crate::writer::FormatWriter;
 use std::io::{Seek, Write};
 use std::num::{NonZeroU8, NonZeroU32};
 use std::sync::{Arc, Mutex, mpsc};
+use tutti_buffers::{ChannelLayout, Speaker};
 use tutti_buffers::{Interleaved, PlanesMut, Sample, deinterleave};
 use tutti_rt::{ThreadHandle, spawn_named};
-use tutti_types::{ChannelLayout, Speaker};
 use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoder, VorbisEncoderBuilder};
 
 /// Blocks in flight between the caller and the encoder thread.

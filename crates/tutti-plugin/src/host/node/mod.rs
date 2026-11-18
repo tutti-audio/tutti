@@ -100,6 +100,7 @@ pub(crate) use capability_view::is_declined;
 use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
 use std::sync::Arc;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
@@ -113,7 +114,6 @@ use tutti_plugin_types::{
     BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
     ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare, ResyncClass,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};

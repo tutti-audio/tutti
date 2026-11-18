@@ -954,7 +954,7 @@ pub const MAX_EVENT_PORT_CAPACITY: NonZeroU32 = NonZeroU32::new(8_192).unwrap();
 /// control side.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{EventDensity, Prepare};
 /// use tutti_units::{SampleRate, Samples};
 ///
@@ -1233,7 +1233,7 @@ pub(crate) fn merge_walk(
 mod tests {
     use super::*;
 
-    use tutti_types::MaxBlock;
+    use tutti_buffers::MaxBlock;
     use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
 
     fn ev(offset: u32, tag: u32) -> Event {

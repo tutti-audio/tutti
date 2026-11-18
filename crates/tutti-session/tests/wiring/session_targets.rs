@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
 use tutti_session::{OutPort, Root, Session, SetRefusal, ValueErrorKind};
 use tutti_tempo::TempoMap;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate};
 
 fn offline() -> Session {

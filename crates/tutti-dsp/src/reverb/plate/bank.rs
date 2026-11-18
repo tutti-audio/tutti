@@ -25,8 +25,8 @@
 //! the edges. The coefficients are designed in `f64` or as `f32` units and narrowed to `F` once
 //! per design.
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};

@@ -6,13 +6,13 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, Placement, StreamPhase};
 use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
     SessionEvent, audio_file,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;

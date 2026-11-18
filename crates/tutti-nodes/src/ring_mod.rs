@@ -1,9 +1,9 @@
 //! [`RingModNode`]: the input multiplied by a sine carrier.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

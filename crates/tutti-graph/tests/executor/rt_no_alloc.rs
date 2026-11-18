@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -32,7 +33,6 @@ use tutti_graph::{
     ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
@@ -2380,11 +2380,11 @@ fn event_pdc(ed: &mut Editor, base: u64) {
 /// - crossfades, a fade queued behind another, and a chase handed on;
 /// - a re-prepare's suspend and resume, at the same rate and at another.
 fn applying_a_commit_allocates_nothing_on(workers: usize) {
+    use tutti_buffers::MaxBlock;
     use tutti_graph::{
         EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, Sink, TapAlign,
         TapId,
     };
-    use tutti_types::MaxBlock;
     use tutti_units::{Amplitude, SampleRate};
 
     let (mut ed, mut exec) = Editor::new(prepare(64));

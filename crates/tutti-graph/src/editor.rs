@@ -93,7 +93,7 @@ use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
 use placements::Placements;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Amplitude;
 pub use unwired::{Placed, Unwired};
 
@@ -177,11 +177,11 @@ impl Limits {
 /// # Examples
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
 /// use tutti_graph::{Edge, InPort, OutPort, Source};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
 ///
 /// #[derive(Clone)]

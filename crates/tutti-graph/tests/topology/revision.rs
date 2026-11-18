@@ -6,13 +6,13 @@
 //! so a call that changes the graph without moving it would leave the
 //! reconcile behind (a lane on a removed node, a range cell never fetched).
 
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Fade, FadeLaw, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Latency, SampleRate, Samples, UnitParam};
 
 struct Out;

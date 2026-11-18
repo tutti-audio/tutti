@@ -21,10 +21,11 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Mono, Planes};
 use tutti_fixtures::Noise;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -39,7 +40,7 @@ use tutti_nodes::{
     LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
     PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{AtomicF32, BusTopology, ChannelLayout, ParamCell};
+use tutti_types::{AtomicF32, ParamCell};
 use tutti_units::{
     Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,

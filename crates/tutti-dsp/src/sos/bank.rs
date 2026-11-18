@@ -1,8 +1,8 @@
 //! [`SosBank`]: a [`Sos`] run as a cascade of state-variable sections per channel, its
 //! coefficients [`SosCoefficients`] gliding between designs.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 
 use super::{Sos, svf_form};
 use crate::{Glide, Lanes, Lerp, SvfCoefficients, svf_step};

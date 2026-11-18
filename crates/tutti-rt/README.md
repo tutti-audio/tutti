@@ -2,7 +2,7 @@
 
 Small data structures that are safe to touch from an audio callback, where code must not wait, allocate or take locks.
 
-It depends on arc-lend (a separate crate), on tutti-units, the units, on tutti-types, the channel layouts, and on tutti-buffers, the sample formats, and on no other part of tutti. It is mostly a building block for the other tutti crates.
+It depends on arc-lend (a separate crate), on tutti-units, the units, on tutti-buffers, the sample formats and channel layouts, and on no other part of tutti. It is mostly a building block for the other tutti crates.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

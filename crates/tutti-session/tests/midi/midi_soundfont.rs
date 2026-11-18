@@ -14,12 +14,13 @@
 //! beat); the property is that a note sounds on its beat and not before.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::rms;
 use tutti_session::Root;
-use tutti_types::MaxBlock;
 
 use crate::common::{note, play};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::{EventCapacity, NodeKey};
@@ -28,7 +29,6 @@ use tutti_session::Stamp;
 use tutti_session::{EventInPort, MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::ChannelLayout;
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, BeatDuration, SampleRate, Samples};
 

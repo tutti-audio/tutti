@@ -1,9 +1,9 @@
 //! [`EnvelopeFilterNode`]: a state-variable filter whose cutoff follows the signal's level.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lanes, Lerp, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
 use super::filter_bus;

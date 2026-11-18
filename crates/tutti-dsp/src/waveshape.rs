@@ -10,8 +10,8 @@
 //! previous input to this one, which removes most of what the curve folds back past the Nyquist
 //! frequency. The bank then keeps each channel's last two inputs.
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Drive, SampleRate, Samples};
 
 use crate::{GAIN_GLIDE, Glide, Lerp, OversamplingFactor, Steps};

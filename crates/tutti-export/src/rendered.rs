@@ -1,8 +1,8 @@
 //! [`Rendered`]: planar audio held in memory, which only this crate builds
 //! unchecked.
 
+use tutti_buffers::{ChannelLayout, LayoutError};
 use tutti_buffers::{Float, Planes, Wave};
-use tutti_types::{ChannelLayout, LayoutError};
 use tutti_units::{SampleRate, Samples};
 
 /// Rendered audio held in memory, one `Vec` per channel.

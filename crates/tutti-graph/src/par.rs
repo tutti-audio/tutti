@@ -91,7 +91,7 @@ use crate::node::{Env, MAX_PORTS};
 use crate::plan::{Op, Plan, Span};
 use crate::rtlog::LogLane;
 use crate::slots::{ArenaView, EventSlots, EventsView, SharedFlags};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 /// A pool of threads that runs a job on several of them — what the parallel
 /// executor (and a CLAP plugin's `clap.thread-pool` request) asks of a

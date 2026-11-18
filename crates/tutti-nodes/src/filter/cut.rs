@@ -1,13 +1,13 @@
 //! [`CutFilterNode`]: a Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per
 //! octave, run as a cascade of state-variable sections.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     Butterworth, ButterworthOrder, CutResponse, Lanes, LinkwitzRiley, Ring, SosCoefficients,
     System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Hz, SampleRate, Samples, Tail};
 
 use super::filter_bus;

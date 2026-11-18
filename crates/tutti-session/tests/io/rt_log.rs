@@ -3,10 +3,10 @@
 //! executor filled in, on the session's next update.
 
 use tracing::Level;
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 #[path = "../support/rt_log.rs"]

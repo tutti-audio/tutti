@@ -56,7 +56,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 ///
 /// ```
 /// use std::num::NonZeroUsize;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};

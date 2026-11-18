@@ -25,9 +25,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use support::{clap_probe, plugin_server};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
@@ -41,7 +42,6 @@ use tutti_session::{
     Range, Session, SessionEvent,
 };
 use tutti_session::{RecoveryFailure, ReloadCause};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

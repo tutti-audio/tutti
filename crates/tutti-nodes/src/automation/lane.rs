@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Latency, Tail};
 
 use super::Curve;
@@ -59,7 +59,7 @@ use super::Curve;
 /// stopped there), which is halfway along it.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo, TransportPosition};
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
@@ -200,10 +200,10 @@ impl Clone for AutomationLaneNode {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+    use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
     use tutti_types::AtomicF32;
-    use tutti_types::MaxBlock;
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {

@@ -34,8 +34,8 @@
 
 use std::collections::BTreeMap;
 
+use tutti_buffers::{BusTopology, ChannelTopology};
 use tutti_buffers::{Fold, FoldError};
-use tutti_types::{BusTopology, ChannelTopology};
 use tutti_units::Amplitude;
 
 use crate::gain::{EdgeFade, EdgeGain};
@@ -88,7 +88,7 @@ pub enum BusSource {
     /// An output bus of a node.
     Node(BusRef),
     /// The graph's own global input, as one
-    /// [`Unassigned`](tutti_types::Speaker::Unassigned) bus of its width: it folds
+    /// [`Unassigned`](tutti_buffers::Speaker::Unassigned) bus of its width: it folds
     /// only to a bus of the same width and kind.
     Global,
 }
@@ -147,7 +147,7 @@ pub enum BusError {
         side: BusSide,
     },
     /// The global input is wider than a bus holds
-    /// ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)).
+    /// ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)).
     #[error("the global input ({width} channels) is wider than a bus")]
     GlobalTooWide {
         /// The global input's width.

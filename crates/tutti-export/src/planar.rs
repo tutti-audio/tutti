@@ -2,10 +2,10 @@
 //! an encoder takes and the planes a converter or a buffer holds.
 
 use crate::Result;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
     BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, Sample, deinterleave, interleave,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Deinterleaves `block` into `planes`, converting to the planes' format, each

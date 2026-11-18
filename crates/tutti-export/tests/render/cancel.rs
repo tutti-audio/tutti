@@ -10,6 +10,7 @@ use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_buffers_under, render_file_under, render_to_file};
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{
     CancelToken, Control, FileTarget, GRAPH_MAX_BLOCK, Normalize, NormalizeSpec, Outcome, Output,
@@ -18,7 +19,6 @@ use tutti_export::{
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_units::Seconds;
 use tutti_units::{Db, SampleRate, Samples};
 

@@ -51,7 +51,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: every Samples is a valid latency, and new is infallible",
     ),
     (
-        "crates/tutti-types/src/channels.rs",
+        "crates/tutti-buffers/src/channels.rs",
         "ChannelLayout",
         "permanent: every u16 is a valid layout, so the derive cannot admit a bad raw",
     ),
@@ -136,7 +136,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: any peer with any saved bytes and media type is a state; a plugin's restore does not read the media type (its format decides), and the peer refuses bytes it cannot read",
     ),
     (
-        "crates/tutti-types/src/ambisonic.rs",
+        "crates/tutti-buffers/src/ambisonic.rs",
         "AmbisonicFormat",
         "permanent: each field is its own checked type, so every combination is a format",
     ),

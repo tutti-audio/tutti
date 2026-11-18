@@ -33,8 +33,8 @@
 //! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`; a view of
 //! another [`Float`] is converted at the edges.
 
+use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{BusTopology, MAX_CHANNELS};
 use tutti_units::{
     Feedback, Gain, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
 };

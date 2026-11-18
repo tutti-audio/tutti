@@ -1,6 +1,7 @@
 //! A graph rendered at `f64` end to end: a figure `f32` cannot hold survives the
 //! builder, the executor's fan-in sum and the renderer's views unrounded.
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct, drive};
 use tutti_graph::testing::{bits, test_pool};
@@ -8,7 +9,7 @@ use tutti_graph::{
     Cx, ForkByClone, ForkMode, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params,
     Prepare, Renderer, Shape, Status,
 };
-use tutti_types::{ChannelLayout, MaxBlock, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

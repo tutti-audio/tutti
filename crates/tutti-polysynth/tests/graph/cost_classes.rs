@@ -5,8 +5,8 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
-use tutti_types::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;

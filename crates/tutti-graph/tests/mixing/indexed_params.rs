@@ -19,6 +19,7 @@
 use tutti_graph::testing as common;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventOut, ForkMode, ForkTarget, IntoNode, Io, Law, MAX_PARAM_PORTS, Node,
@@ -26,7 +27,7 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Db, Samples, UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1: the same kind, two indices.

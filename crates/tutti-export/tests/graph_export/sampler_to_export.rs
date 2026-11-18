@@ -51,6 +51,7 @@ use std::sync::Arc;
 use tutti_units::Seconds;
 
 use crate::support::render_to_file;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
@@ -59,7 +60,6 @@ use tutti_graph::GraphBuilder;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;

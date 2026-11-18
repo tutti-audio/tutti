@@ -993,8 +993,8 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
 /// run as jobs on the session's spawner).
 #[cfg(feature = "device")]
 mod clock_switch {
+    use tutti_buffers::ChannelLayout;
     use tutti_engine::{ManualStreamDriver, OutputSpec};
-    use tutti_types::ChannelLayout;
 
     use crate::JobStatus;
 
@@ -1331,7 +1331,7 @@ mod clock_switch {
         let _ = events(&mut s);
         s.when_loaded(&"a", |s| {
             s.set(s.policy::<crate::OutputPolicy>().to(crate::OutputPolicy {
-                monitor: Some(tutti_types::Bed::Stereo.topology()),
+                monitor: Some(tutti_buffers::Bed::Stereo.topology()),
                 map: tutti_engine::OutputMap::channels([4, 5]).unwrap(),
                 ..crate::OutputPolicy::default()
             }))

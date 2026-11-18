@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;

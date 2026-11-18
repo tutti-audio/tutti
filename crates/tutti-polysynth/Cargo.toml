@@ -35,6 +35,8 @@ wide = { version = "1.6", default-features = false }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+# The buffer views `Renderer::render_input` takes.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Law`, the shape of the portamento glide.
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
@@ -42,8 +44,6 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 
 [dev-dependencies]
-# The buffer views `Renderer::render_input` takes.
-tutti-buffers = { path = "../tutti-buffers" }
 # The filter nodes the bank is compared against (`bank.rs`), and the mixing and
 # lane nodes of the integration tests.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }

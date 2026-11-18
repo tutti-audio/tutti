@@ -1,9 +1,9 @@
 //! [`TremoloNode`]: an LFO scales the level.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

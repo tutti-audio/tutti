@@ -22,8 +22,8 @@
 //! The gate has no latency (the detector is on the key, never ahead of it) and no tail (the
 //! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};

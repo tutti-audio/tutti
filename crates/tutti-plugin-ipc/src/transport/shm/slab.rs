@@ -4,7 +4,7 @@
 //! Layout is **mono-planar** — one contiguous region per channel, addressed by
 //! index — not interleaved, because the plugin ABIs it feeds are deinterleaved
 //! and the memcpy must stay a straight per-channel copy with no transpose. It is
-//! a transport, not an edge (`tutti_types`' `Source`/`Sink`).
+//! a transport, not an edge (`tutti_buffers`' `Source`/`Sink`).
 //!
 //! # Why shared memory
 //!

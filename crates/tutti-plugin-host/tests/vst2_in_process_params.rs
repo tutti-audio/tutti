@@ -20,11 +20,11 @@
 //! cleared after.
 
 use std::sync::{Arc, Mutex, MutexGuard};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
-use tutti_types::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::contract::Direct;
@@ -37,9 +37,9 @@ use tutti_plugin_host::PluginHandle;
 #[path = "support/param_reads.rs"]
 mod param_reads;
 use param_reads::ParamReads as _;
+use tutti_buffers::ChannelLayout;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};

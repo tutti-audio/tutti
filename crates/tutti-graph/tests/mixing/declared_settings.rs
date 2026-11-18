@@ -11,12 +11,12 @@ use std::sync::Arc;
 use tutti_graph::testing as common;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, Io, Node, OutPort, Prepare, Shape, Source, Status,
     TransportPosition, declare_params,
 };
 use tutti_rt::{Setting, SettingWord, setting_word};
-use tutti_types::ChannelLayout;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]

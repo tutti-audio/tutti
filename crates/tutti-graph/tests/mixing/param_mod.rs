@@ -42,10 +42,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tutti_buffers::MaxBlock;
 use tutti_graph::{Curvature, Exponent};
-use tutti_types::MaxBlock;
 
 use proptest::prelude::*;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, Cx, Editor, Event, EventOut, Executor, ForkByClone, ForkMode, ForkTarget,
@@ -53,7 +54,6 @@ use tutti_graph::{
     Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{Hz, Latency, ParamKey, Q, SamplePosition, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

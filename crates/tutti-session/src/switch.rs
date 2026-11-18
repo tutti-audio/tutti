@@ -43,9 +43,9 @@
 //!   again (`Session::into_device` on the system clock) once what broke is
 //!   fixed.
 
+use tutti_buffers::ChannelLayout;
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
 use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 use crate::clock::SystemEngine;
@@ -457,8 +457,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
 
 #[cfg(all(test, feature = "testing"))]
 mod tests {
+    use tutti_buffers::MaxBlock;
     use tutti_engine::{ManualStreamDriver, OutputBlock, RunningStream, StreamFaults, TimerError};
-    use tutti_types::MaxBlock;
     use tutti_units::Samples;
 
     use super::*;

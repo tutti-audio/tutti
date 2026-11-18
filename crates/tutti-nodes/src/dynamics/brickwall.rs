@@ -5,10 +5,10 @@
 //! the brickwall clamps in place, which costs nothing and distorts. Reach for the
 //! first to limit musically, the second as a safety catch.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallLanes, COEFF_INTERVAL};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -164,9 +164,9 @@ mod tests {
     use crate::test_support::{
         RATE_44K, fed_sample_gain, prepared, prepared_at, sample_gain, tick, tick_fed,
     };
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::ChannelLayout;
     use tutti_units::{Tail, UnitParam};
 
     // The nodes under test are `f32` (the session's audio format), so their tolerances are

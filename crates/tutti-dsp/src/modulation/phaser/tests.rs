@@ -1,5 +1,5 @@
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Feedback, Hz, Real, SampleRate};
 
 use super::*;

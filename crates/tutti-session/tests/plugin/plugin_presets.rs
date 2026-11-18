@@ -16,8 +16,8 @@ use tutti_session::{Peer as _, PoolEvent, PresetJobError, PresetJobFailed, Sessi
 mod clap {
     use super::*;
     use crate::support::{clap_probe, plugin_server};
+    use tutti_buffers::MaxBlock;
     use tutti_graph::NodeKey;
-    use tutti_types::MaxBlock;
     use tutti_units::Samples;
 
     fn loaded() -> (Session, u64, NodeKey) {
@@ -152,9 +152,9 @@ mod clap {
 mod vst3 {
     use super::*;
     use crate::support::plugin_server;
+    use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PresetId;
     use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
-    use tutti_types::ChannelLayout;
     use tutti_units::SampleRate;
 
     /// **A served plugin's list is read by the first update on the main
@@ -244,10 +244,10 @@ mod vst3 {
 #[cfg(feature = "vst2")]
 mod vst2 {
     use super::*;
+    use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_types::PresetId;
     use tutti_session::DetachedSession;
-    use tutti_types::ChannelLayout;
     use tutti_units::SampleRate;
 
     fn probe_with(programs: &str) -> (DetachedSession, u64, ScopedEnv) {

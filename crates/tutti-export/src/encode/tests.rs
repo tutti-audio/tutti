@@ -7,7 +7,7 @@ struct Case {
     rate: SampleRate,
     channels: ChannelLayout,
     pcm: Pcm,
-    topology: Option<tutti_types::ChannelTopology>,
+    topology: Option<tutti_buffers::ChannelTopology>,
     resample: Option<Resample>,
 }
 
@@ -111,11 +111,11 @@ fn the_limit_is_judged_at_the_output_rate() {
 fn the_topology_reaches_the_file() {
     let dir = tempfile::tempdir().unwrap();
     for (channels, topology, mask) in [
-        (4u16, Some(tutti_types::Bed::Quad.topology()), 0x33u32),
+        (4u16, Some(tutti_buffers::Bed::Quad.topology()), 0x33u32),
         (4, None, 0x33),
         (
             4,
-            Some(tutti_types::ChannelTopology::unassigned(
+            Some(tutti_buffers::ChannelTopology::unassigned(
                 ChannelLayout::QUAD,
             )),
             0,

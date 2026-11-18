@@ -2,8 +2,8 @@
 
 use core::ops::Range;
 
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Hz, Q, SampleRate, Samples};
 
 use super::shared::{CHUNK, level};

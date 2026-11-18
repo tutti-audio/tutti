@@ -9,10 +9,10 @@
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Samples};
 
 const MAX_BLOCK: usize = 256;

@@ -1,12 +1,12 @@
 //! [`SourceNode`]: the one node that sends a [`ControlSource`]'s legs to
 //! control lanes.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, Io, Node, Offset, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
-use tutti_types::ChannelLayout;
 use tutti_units::{Frame, ParamId, SamplePosition, Samples};
 
 use super::PlayWalk;

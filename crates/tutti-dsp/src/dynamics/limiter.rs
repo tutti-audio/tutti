@@ -43,8 +43,8 @@
 /// the peak (floored at -144 dB), stays finite in `f32`, and so at any width.
 const LANE_DB_LIMIT: f32 = 300.0;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 use super::curves::{LimiterCurve, WideCurve, level_db, limiter_gain};

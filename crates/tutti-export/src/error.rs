@@ -7,7 +7,7 @@
 use crate::TargetError;
 use std::io;
 use thiserror::Error;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 /// Anything that can go wrong rendering or writing an export.
 ///
@@ -54,9 +54,9 @@ pub enum Error {
     #[error("the topology is {topology:?} wide and the rendered audio {rendered:?}")]
     TopologyWidth {
         /// The topology's width.
-        topology: tutti_types::ChannelLayout,
+        topology: tutti_buffers::ChannelLayout,
         /// The rendered audio's width.
-        rendered: tutti_types::ChannelLayout,
+        rendered: tutti_buffers::ChannelLayout,
     },
 
     /// A loudness measurement was asked for and the audio cannot be

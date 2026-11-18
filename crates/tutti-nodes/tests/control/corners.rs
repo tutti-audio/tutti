@@ -2,13 +2,13 @@
 //! controls, as well as on its grid.
 
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_curve::Law;
 use tutti_graph::{
     Cx, Event, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamIn, ParamSegment,
     Prepare, Shape, Status,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam};
 
 /// Sends each `(absolute frame, segment)` on its frame.
@@ -54,8 +54,8 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         ..CompressorControls::DEFAULT
     };
     let mut g = GraphBuilder::new(
-        tutti_types::ChannelLayout::MONO,
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     );
     let NodeParts { node, fork, .. } =
         CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Own, controls).into_parts();

@@ -337,6 +337,7 @@ mod tests {
     use std::sync::Arc;
     use tutti_buffers::Planes;
 
+    use tutti_buffers::MaxBlock;
     use tutti_fixtures::main_thread;
     use tutti_graph::contract::{self, Driven, drive_input};
     use tutti_graph::{
@@ -345,7 +346,6 @@ mod tests {
     use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
     use tutti_plugin_types::{Control, Layout, Loaded, PluginInvalidation, Prepare, Request};
     use tutti_tempo::TempoMap;
-    use tutti_types::MaxBlock;
     use tutti_units::{Bpm, Frame, ParamId, SampleRate, Samples};
 
     use super::*;

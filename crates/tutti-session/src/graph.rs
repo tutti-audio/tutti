@@ -45,6 +45,8 @@ use tutti_graph::TransportPosition;
 #[cfg(feature = "export")]
 use crate::fork::PendingExport;
 
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
 use tutti_graph::FadeLaw;
 #[cfg(feature = "testing")]
@@ -62,8 +64,6 @@ use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapAlign, TapId,
 };
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_types::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
@@ -360,7 +360,7 @@ pub struct Graph<F: Float = f32> {
     /// What the root's channels are, when a host declared it
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
     /// `None` is the engine's order for the root's width.
-    root: Option<tutti_types::ChannelTopology>,
+    root: Option<tutti_buffers::ChannelTopology>,
     /// The engine's output folds and the device it renders into, once an
     /// engine was built over this graph: a declaration is published through
     /// it, and a commit must fold into the device. One value, so a graph has
@@ -380,7 +380,7 @@ pub struct Graph<F: Float = f32> {
     apply_refusal: Option<tutti_graph::RootError>,
     /// A root declared while a root crossfade ran, applied when it ends:
     /// the newest declaration (`Some(None)` takes the declaration back).
-    pending_root: Option<Option<tutti_types::ChannelTopology>>,
+    pending_root: Option<Option<tutti_buffers::ChannelTopology>>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -637,7 +637,7 @@ impl<F: Float> Graph<F> {
         &mut self,
         transport: &tutti_transport::Transport,
         device: ChannelLayout,
-        topology: Option<tutti_types::ChannelTopology>,
+        topology: Option<tutti_buffers::ChannelTopology>,
         dates: tutti_engine::BlockDates,
     ) -> crate::Result<tutti_engine::Engine<F>> {
         let mut exec = self.take_executor();
@@ -1164,7 +1164,7 @@ impl<F: Float> Graph<F> {
         &self,
         rate: SampleRate,
         serial: bool,
-        root: Option<Option<tutti_types::ChannelTopology>>,
+        root: Option<Option<tutti_buffers::ChannelTopology>>,
     ) -> tutti_export::Result<PendingExport<F>> {
         let root = root.unwrap_or_else(|| self.root.clone());
         // Its own pool, not the live engine's: the live callback would find a
@@ -2648,9 +2648,9 @@ impl<F: Float> Graph<F> {
                 // declared topology, else the engine's order for its width. A
                 // bus that names no speaker is read in the engine's order for
                 // its width.
-                let source = tutti_types::ChannelTopology::from(out_topology);
+                let source = tutti_buffers::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_types::ChannelTopology::assumed(source.width())
+                    tutti_buffers::ChannelTopology::assumed(source.width())
                 } else {
                     source
                 };
@@ -3201,7 +3201,7 @@ impl<F: Float> Graph<F> {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS): the root
+    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root
     ///   is widened to that and the excess is not rendered
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
@@ -3224,11 +3224,11 @@ impl<F: Float> Graph<F> {
                 // saturated figure loses nothing.
                 requested: ChannelLayout::clamped(channels),
             })
-        } else if channels > tutti_types::MAX_CHANNELS {
+        } else if channels > tutti_buffers::MAX_CHANNELS {
             Some(tutti_graph::RootError::Fold(
                 tutti_buffers::FoldError::Unplaced {
-                    channel: tutti_types::MAX_CHANNELS,
-                    speaker: tutti_types::Speaker::Unassigned,
+                    channel: tutti_buffers::MAX_CHANNELS,
+                    speaker: tutti_buffers::Speaker::Unassigned,
                 },
             ))
         } else {
@@ -3239,7 +3239,7 @@ impl<F: Float> Graph<F> {
         // request widens as far as the engine renders.
         let target = match refused {
             Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_types::MAX_CHANNELS),
+            _ => channels.min(tutti_buffers::MAX_CHANNELS),
         };
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() < target {
@@ -3264,7 +3264,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// The topology the root was declared with, if one was.
-    pub fn root_topology(&self) -> Option<&tutti_types::ChannelTopology> {
+    pub fn root_topology(&self) -> Option<&tutti_buffers::ChannelTopology> {
         self.root.as_ref()
     }
 
@@ -3282,29 +3282,29 @@ impl<F: Float> Graph<F> {
     /// # Errors
     ///
     /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
+    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS),
     /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
     /// changed.
     /// Whether `root` can be a root, and be placed on `device` when there is
     /// one: not empty, no wider than the engine renders, and every channel
     /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
     pub(crate) fn check_root(
-        root: &tutti_types::ChannelTopology,
-        device: Option<&tutti_types::ChannelTopology>,
+        root: &tutti_buffers::ChannelTopology,
+        device: Option<&tutti_buffers::ChannelTopology>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
         let width = usize::from(root.width().count());
         if width == 0 {
             return Err(BufferError::ZeroWidth.into());
         }
-        if width > tutti_types::MAX_CHANNELS {
+        if width > tutti_buffers::MAX_CHANNELS {
             return Err(FoldError::Unplaced {
-                channel: tutti_types::MAX_CHANNELS,
+                channel: tutti_buffers::MAX_CHANNELS,
                 speaker: root
                     .positions()
-                    .and_then(|list| list.get(tutti_types::MAX_CHANNELS))
+                    .and_then(|list| list.get(tutti_buffers::MAX_CHANNELS))
                     .copied()
-                    .unwrap_or(tutti_types::Speaker::Unassigned),
+                    .unwrap_or(tutti_buffers::Speaker::Unassigned),
             });
         }
         if let Some(device) = device {
@@ -3325,7 +3325,7 @@ impl<F: Float> Graph<F> {
 
     /// The device the engine renders into and what it is for a fold; `None`
     /// with no engine.
-    pub(crate) fn placed_device(&self) -> Option<(ChannelLayout, tutti_types::ChannelTopology)> {
+    pub(crate) fn placed_device(&self) -> Option<(ChannelLayout, tutti_buffers::ChannelTopology)> {
         let placed = self.output.as_ref()?;
         Some((placed.device, self.placed_topology()?))
     }
@@ -3351,18 +3351,18 @@ impl<F: Float> Graph<F> {
 
     /// The root the next commit renders: what was declared, else the engine's
     /// order for the width the graph has.
-    pub(crate) fn root_in_force(&self) -> tutti_types::ChannelTopology {
+    pub(crate) fn root_in_force(&self) -> tutti_buffers::ChannelTopology {
         self.root.clone().unwrap_or_else(|| {
-            tutti_types::ChannelTopology::assumed(ChannelLayout::clamped(self.outputs()))
+            tutti_buffers::ChannelTopology::assumed(ChannelLayout::clamped(self.outputs()))
         })
     }
 
     /// What the device the engine renders into is for a fold: what was stated
     /// for it, else the engine's order for its width. `None` with no engine.
-    fn placed_topology(&self) -> Option<tutti_types::ChannelTopology> {
+    fn placed_topology(&self) -> Option<tutti_buffers::ChannelTopology> {
         let placed = self.output.as_ref()?;
         Some(placed.control.device(placed.device).map_or_else(
-            || tutti_types::ChannelTopology::assumed(placed.device),
+            || tutti_buffers::ChannelTopology::assumed(placed.device),
             |p| p.topology,
         ))
     }
@@ -3380,7 +3380,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn place_device(
         &mut self,
         device: ChannelLayout,
-        topology: Option<tutti_types::ChannelTopology>,
+        topology: Option<tutti_buffers::ChannelTopology>,
     ) -> Result<(), tutti_buffers::FoldError> {
         if let Some(placed) = &mut self.output {
             placed.control.support(device)?;
@@ -3430,7 +3430,7 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    fn apply_declared(&mut self, root: Option<tutti_types::ChannelTopology>, hard: bool) {
+    fn apply_declared(&mut self, root: Option<tutti_buffers::ChannelTopology>, hard: bool) {
         let applied = self
             .check_declaration(&root)
             .and_then(|width| self.apply_root(root, hard, width));
@@ -3454,7 +3454,7 @@ impl<F: Float> Graph<F> {
     /// to be checked against the device it finds when it is applied.
     pub(crate) fn declare_root(
         &mut self,
-        root: Option<tutti_types::ChannelTopology>,
+        root: Option<tutti_buffers::ChannelTopology>,
         hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
         let width = self.check_declaration(&root)?;
@@ -3472,7 +3472,7 @@ impl<F: Float> Graph<F> {
     /// device: [`declare_root`](Self::declare_root)'s checks.
     fn check_declaration(
         &self,
-        root: &Option<tutti_types::ChannelTopology>,
+        root: &Option<tutti_buffers::ChannelTopology>,
     ) -> Result<usize, tutti_graph::RootError> {
         let placed = self.placed_topology();
         Ok(match root {
@@ -3487,7 +3487,7 @@ impl<F: Float> Graph<F> {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology::<f32>(
-                        &tutti_types::ChannelTopology::assumed(width),
+                        &tutti_buffers::ChannelTopology::assumed(width),
                         placed,
                     )?;
                 }
@@ -3498,7 +3498,7 @@ impl<F: Float> Graph<F> {
 
     fn apply_root(
         &mut self,
-        root: Option<tutti_types::ChannelTopology>,
+        root: Option<tutti_buffers::ChannelTopology>,
         hard: bool,
         width: usize,
     ) -> Result<(), tutti_graph::RootError> {
@@ -3521,7 +3521,7 @@ impl<F: Float> Graph<F> {
         // `MAX_CHANNELS`, which is a bus's width.
         let bus = root
             .as_ref()
-            .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));
+            .map(|r| tutti_buffers::BusTopology::try_from(r).expect("a checked root fits a bus"));
         // Both roots render the same nodes, in phase.
         self.editor.set_root_fade((!hard).then(|| {
             tutti_graph::Fade::seconds(
@@ -4029,10 +4029,10 @@ mod tail_tests {
 mod root_fade_tests {
     use super::*;
     use std::sync::Arc;
+    use tutti_buffers::Bed;
     use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
     use tutti_nodes::testing::Const;
     use tutti_tempo::TempoMap;
-    use tutti_types::Bed;
     use tutti_units::Bpm;
 
     fn graph() -> (Graph, NodeKey) {

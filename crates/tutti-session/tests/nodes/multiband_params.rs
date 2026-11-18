@@ -13,6 +13,7 @@
 use std::f64::consts::{PI, TAU};
 use tutti_buffers::PlanesMut;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
@@ -20,7 +21,6 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandCompressorNode, MultibandControls};
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, SampleRate};
 use tutti_units::{BeatsPerCycle, Depth};
 use tutti_units::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};

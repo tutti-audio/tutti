@@ -81,9 +81,9 @@
 
 use crate::NodeKey;
 use crate::OutPort;
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_ump::{Message, NoteKeyEvent, NoteNumber, Ump, Voice2};
 use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr};
 
@@ -2033,10 +2033,10 @@ fn or_empty<T: Default>(planes: Result<T, BufferError>) -> T {
     }
 }
 
-/// The widest node [`BlockRig`] drives: twice a bus ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)),
+/// The widest node [`BlockRig`] drives: twice a bus ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)),
 /// so a test can drive a node wider than a bus. Its per-block slice lists live
 /// on the stack, so the rig allocates nothing per block.
-pub const RIG_MAX_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
+pub const RIG_MAX_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 
 /// One node alone in a graph, driven block by block **without allocating**:
 /// the harness for a node's allocation gate (`assert_no_alloc` around

@@ -1,9 +1,9 @@
 //! [`DcBlockerNode`]: a first-order high-pass that removes a constant offset.
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNER};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -114,7 +114,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 
     /// `width` channels in and out, `Light`: a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus = tutti_types::BusTopology::unassigned(self.width)
+        let bus = tutti_buffers::BusTopology::unassigned(self.width)
             .expect("a DC blocker is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Light)
     }

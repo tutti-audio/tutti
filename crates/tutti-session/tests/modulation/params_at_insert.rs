@@ -14,11 +14,11 @@ use crate::common;
 
 use std::sync::atomic::Ordering;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::FadeLaw;
 use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionNode, ShapeKind};
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_types::ChannelLayout;
 use tutti_types::ParamCell;
 use tutti_units::{Depth, Drive, Seconds, UnitParam};
 

@@ -19,7 +19,7 @@
 
 use std::num::NonZeroU32;
 
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
 use tutti_music::{FrameClock, LoopRange, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
@@ -356,7 +356,7 @@ impl Shape {
     /// processor built for a width. Its dry path is output `c` = input `c`, and
     /// a bus edge folds it only to a bus of the same width (a width is not a
     /// placement). Past a bus's width
-    /// ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)) the channels are
+    /// ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)) the channels are
     /// ports with no bus, passed by index all the same.
     #[must_use]
     pub const fn through_unassigned(width: ChannelLayout) -> Self {
@@ -365,13 +365,13 @@ impl Shape {
 
     /// `inputs` channels in and `outputs` out that name no speaker: a node built
     /// for widths, not placements (a sum of `inputs` channels into one). Past a
-    /// bus's width ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)) a side's
+    /// bus's width ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)) a side's
     /// channels are ports with no bus, reached by port. Unequal widths have no
     /// dry path to fold ([`PassError`](crate::PassError)).
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     ///
     /// // A sum of 24 channels into one: wider than a bus, so the inputs are ports.
     /// let s = Shape::unassigned(ChannelLayout::from_count(24), ChannelLayout::MONO);
@@ -410,7 +410,7 @@ impl Shape {
 
     /// This shape with `audio_in` and `audio_out` ports, of which its buses
     /// cover a prefix: the channels past them are ports with no bus (a
-    /// plugin's bus wider than [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
+    /// plugin's bus wider than [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS),
     /// or past [`MAX_BUSES`](crate::MAX_BUSES)), reached by port. A side whose
     /// ports outnumber its buses has no main bus to fold, so a dry path across
     /// unequal widths is refused ([`PassError::Unplaced`](crate::PassError::Unplaced)).
@@ -550,7 +550,7 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// use std::num::NonZeroU32;
     /// let arp = Shape::EMPTY
     ///     .with_events(1, 1)
@@ -613,7 +613,7 @@ impl Shape {
     /// ```compile_fail
     /// use tutti_graph::Shape;
     /// use tutti_units::Samples;
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// let echo_time = Samples(24_000);
     /// let _ = Shape::through_unassigned(ChannelLayout::MONO).with_latency(echo_time);
     /// ```
@@ -630,7 +630,7 @@ impl Shape {
     /// ```
     /// use tutti_graph::Shape;
     /// use tutti_units::{Latency, Samples};
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// let lookahead = Latency::new(Samples(512));
     /// let s = Shape::through_unassigned(ChannelLayout::MONO).with_latency(lookahead);
     /// assert_eq!(s.latency.samples(), Samples(512));
@@ -675,7 +675,7 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::{Cost, Shape};
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// let gain = Shape::through_unassigned(ChannelLayout::STEREO).with_cost(Cost::Light);
     /// assert_eq!(gain.cost, Cost::Light);
     /// ```
@@ -721,7 +721,7 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// let lane = Shape::EMPTY
     ///     .with_events(0, 1)
     ///     .with_no_note_events();
@@ -1461,7 +1461,7 @@ pub(crate) fn narrow_tail(ceiling: Tail, reported: Tail) -> Option<Tail> {
 ///
 /// ```
 /// use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// /// Multiplies its input by a fixed gain.
 /// #[derive(Clone)]
@@ -1616,7 +1616,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
 /// ```compile_fail,E0277
 /// # use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status};
 /// # use tutti_units::{SampleRate, Samples};
-/// # use tutti_types::ChannelLayout;
+/// # use tutti_buffers::ChannelLayout;
 /// # use tutti_graph::NodeKey;
 /// struct Silence;
 /// impl Node for Silence {

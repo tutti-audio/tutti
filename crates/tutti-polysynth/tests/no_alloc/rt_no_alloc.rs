@@ -21,10 +21,10 @@
 
 use crate::support::Hand;
 use std::num::NonZeroUsize;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
-use tutti_types::MaxBlock;
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,

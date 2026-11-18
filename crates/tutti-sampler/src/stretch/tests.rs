@@ -7,8 +7,8 @@ use super::fft::{Complex32, Fft};
 use super::unit::*;
 use super::vocoder::*;
 use super::*;
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::signal::rms;
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Cents, Hz, Phase, PhaseIncrement, Radians, ReadRate, SampleRate, Samples,
     StretchFactor,

@@ -8,6 +8,7 @@ use tutti_graph::testing as common;
 use std::sync::{Arc, Mutex};
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, ParamRamp, Prepare,
@@ -15,7 +16,6 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, Samples, Tail};
 

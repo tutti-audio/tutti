@@ -56,14 +56,14 @@ impl GraphUnit {
             "`run` holds 16 ports on the stack"
         );
         let layout =
-            |n: usize| tutti_types::ChannelLayout::from_count(u16::try_from(n).expect("ports"));
+            |n: usize| tutti_buffers::ChannelLayout::from_count(u16::try_from(n).expect("ports"));
         let mut g = tutti_graph::GraphBuilder::new(layout(inputs), layout(outputs));
         let (key, controls) = g.add_with_controls(node);
         g.pipe_input(key).pipe_output(key);
         let renderer = g
             .renderer(tutti_graph::Prepare::new(
                 tutti_units::SampleRate::of(SAMPLE_RATE),
-                tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
             ))
             .expect("a one-plugin graph compiles");
         Self {

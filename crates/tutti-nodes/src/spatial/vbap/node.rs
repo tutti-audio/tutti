@@ -1,8 +1,9 @@
 use super::error::Result;
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::{Bed, ChannelLayout, ChannelTopology, Param};
+use tutti_types::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 
@@ -51,7 +52,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// A VBAP loudspeaker panner: stereo in, one output per channel of a [`Bed`].
 ///
 /// Build it with [`new`](Self::new) from a bed, whose speakers sit where
-/// `tutti_types::Bed::direction` puts them, or from a preset
+/// `tutti_buffers::Bed::direction` puts them, or from a preset
 /// ([`stereo`](Self::stereo), [`quad`](Self::quad),
 /// [`surround_5_1`](Self::surround_5_1), [`surround_7_1`](Self::surround_7_1),
 /// [`atmos_7_1_4`](Self::atmos_7_1_4)), which is `new` over one bed. It is a
@@ -66,7 +67,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples, UnitParam};
 /// use tutti_graph::{ParamNode, Prepare, Solo};
 /// use tutti_nodes::VbapPannerNode;
@@ -82,7 +83,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// # The beds
 ///
 /// The speaker positions are the bed's: [`Bed::direction`] answers each from the
-/// one BS.2051 table in `tutti_types`, and a channel's speaker is its place
+/// one BS.2051 table in `tutti_buffers`, and a channel's speaker is its place
 /// among the bed's placed speakers. VBAP pans across the two or three speakers
 /// surrounding a direction, so it needs an arrangement and not merely a channel
 /// count; a topology that is not a bed ([`Bed::from_topology`]) is not a panner

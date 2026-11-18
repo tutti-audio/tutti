@@ -22,13 +22,13 @@ use std::sync::{Arc, Mutex};
 
 use common::prepare;
 use proptest::prelude::*;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, GraphSpec, Io, Node,
     Prepare, Reference, Shape, Shapes, Status, TransportPosition, compile,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
 use tutti_graph::{NodeKey, Topology};
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{At, Frame, Latency, Samples, Tail};
 

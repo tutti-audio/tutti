@@ -20,7 +20,7 @@ use tutti_sampler::testing::loop_frames;
 use std::cell::Cell;
 use std::path::Path;
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
 use tutti_music::{FrameClock, LoopRange};

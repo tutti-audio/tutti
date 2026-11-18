@@ -19,8 +19,8 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::BlockClock;
-use tutti_types::MaxBlock;
 
 use tutti_fixtures::midi;
 use tutti_graph::EventInletNode;
