@@ -61,9 +61,9 @@ pub(crate) fn load_gui_instance(
     }
 }
 
-/// `F`'s editor-only instance, boxed.
+/// `L`'s editor-only instance, boxed.
 #[cfg(any(feature = "vst3", feature = "clap"))]
-fn editor<F: tutti_plugin_types::OutOfProcess>(
+fn editor<L: tutti_plugin_types::OutOfProcess>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     path: &Path,
@@ -71,9 +71,9 @@ fn editor<F: tutti_plugin_types::OutOfProcess>(
     format: &str,
 ) -> BridgeResult<Box<dyn Editor>>
 where
-    F::Editor: 'static,
+    L::Editor: 'static,
 {
-    let editor = F::load_editor(main, work, path, load).map_err(|e| BridgeError::LoadFailed {
+    let editor = L::load_editor(main, work, path, load).map_err(|e| BridgeError::LoadFailed {
         path: Some(path.to_path_buf()),
         stage: LoadStage::Opening,
         reason: format!("{format} GUI-only load failed: {e}"),

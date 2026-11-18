@@ -57,6 +57,10 @@ pub enum RebindError {
 /// Made from the node it replaces ([`InProcClient::rebinder`]) and kept on the
 /// control side. [`prepare`](Self::prepare) takes the instance lock, so never the
 /// audio thread.
+///
+/// `F` is the graph float of the node it replaces. The default `F = f32` is the
+/// common width and converts nothing; it is staging until every caller names
+/// its graph's float.
 pub struct Rebinder<L: Loaded, F: Float = f32> {
     inner: Arc<Mutex<Instance<L>>>,
     descriptor: PluginDescriptor,

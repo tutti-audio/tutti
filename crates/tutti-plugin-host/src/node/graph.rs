@@ -723,7 +723,7 @@ mod owed_tests {
             &Load::new(),
             rate,
         )
-        .map_err(crate::LoadClientError::into_bridge)
+        .map_err(|e| e.into_bridge(path))
     }
 
     const BLOCK: usize = 64;

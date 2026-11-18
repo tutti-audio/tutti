@@ -56,15 +56,15 @@ impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
 }
 
 impl<L: Loaded + 'static> LoadClientError<L> {
-    /// The failure as a [`BridgeError`], for a host of one width, where a
+    /// The failure as a [`BridgeError`] for the plugin at `path`, for a host of one width, where a
     /// width refusal cannot come: the load's own failure, or the refusal as a
     /// failed activation that drops the plugin.
     #[must_use]
-    pub fn into_bridge(self) -> BridgeError {
+    pub fn into_bridge(self, path: &Path) -> BridgeError {
         match self {
             Self::Failed(e) => e,
             Self::Width(e) => BridgeError::LoadFailed {
-                path: None,
+                path: Some(path.to_path_buf()),
                 stage: LoadStage::Activation,
                 reason: e.to_string(),
             },

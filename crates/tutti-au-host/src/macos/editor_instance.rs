@@ -29,7 +29,7 @@ fn editor_error(reason: String) -> PluginError {
 ///
 /// ```
 /// use tutti_plugin_types::{InProcess, OutOfProcess};
-/// fn hostable<F: InProcess + OutOfProcess>() {}
+/// fn hostable<L: InProcess + OutOfProcess>() {}
 /// hostable::<tutti_au_host::AuLoaded>();
 /// ```
 #[derive(Debug)]

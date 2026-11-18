@@ -302,7 +302,7 @@ impl Plugin {
         }
     }
 
-    /// Loads the format `F` in this process, restoring `state` before it is
+    /// Loads the format `L` in this process, restoring `state` before it is
     /// activated, and wraps its client as `place`.
     #[cfg(any(
         feature = "vst2",
@@ -310,20 +310,20 @@ impl Plugin {
         feature = "vst3",
         all(feature = "au", target_os = "macos")
     ))]
-    fn load_in_process<F>(
+    fn load_in_process<L>(
         main: MainThreadMarker,
         work: &MainWorkHandle,
         plugin: &PluginRef,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-        place: fn(Box<InProcClient<F>>) -> Placed,
+        place: fn(Box<InProcClient<L>>) -> Placed,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)>
     where
-        F: tutti_plugin_types::InProcess + 'static,
-        F::Processor: 'static,
+        L: tutti_plugin_types::InProcess + 'static,
+        L::Processor: 'static,
     {
         let mut restore = state.map(|data| {
-            move |loaded: &mut F| {
+            move |loaded: &mut L| {
                 tutti_plugin_types::Control::load_state(
                     loaded,
                     main,
@@ -341,7 +341,7 @@ impl Plugin {
             sample_rate,
             restore.as_mut().map(|r| r as _),
         )
-        .map_err(tutti_plugin_host::LoadClientError::into_bridge)?;
+        .map_err(|e| e.into_bridge(plugin.path()))?;
         let plugin = plugin.identified(&handle.descriptor().id);
         Ok((
             Self {

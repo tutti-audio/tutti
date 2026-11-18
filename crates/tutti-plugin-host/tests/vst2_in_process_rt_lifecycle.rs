@@ -741,7 +741,20 @@ fn a_plugin_without_64_bit_audio_fails_a_64_bit_load_and_returns_at_32() {
     };
     assert_eq!(refused.requested(), tutti_buffers::FloatWidth::F64);
     assert_eq!(refused.widths(), tutti_plugin_types::Widths::F32);
-    let (client, _handle) = refused.into_inner();
-    let node: PluginNode<Vst2Loaded, f32> = client.bind(tutti_fixtures::tempo());
-    drop(node);
+    let (client, handle) = refused.into_inner();
+    let mut node: PluginNode<Vst2Loaded, f32> = client.bind(tutti_fixtures::tempo());
+    // The plugin came back whole: its handle is live, and the node renders a
+    // block through the 32-bit entry point.
+    assert!(
+        !handle.descriptor().id.is_empty(),
+        "the handle reads the plugin"
+    );
+    drive_block(&mut node);
+    let capture = read_capture(&path);
+    assert!(capture.valid);
+    assert_eq!(capture.process_calls, 1);
+    assert_eq!(
+        capture.entry,
+        tutti_vst2_test_plugin::ProcessEntry::Replacing
+    );
 }

@@ -248,6 +248,10 @@ impl<L: Loaded> Instance<L> {
     /// A plugin its shell activated itself, on any thread, at `prepare`
     /// (`Lifecycle::adopt`): the Processor is lent to the realtime end this
     /// returns. For a hosting whose activation needs no main thread.
+    ///
+    /// The [`widths`](Self::widths) of an adopted instance are the width it
+    /// runs at, not the plugin's capability: a served plugin's capability is
+    /// the server's `Loaded::widths`, which this side is not told.
     pub(super) fn adopt(
         processor: L::Processor,
         controller: L::Controller,
@@ -740,6 +744,49 @@ mod tests {
             Err((stage, reason)) => panic!("{stage:?} {reason}"),
             Ok(_) => panic!("a block of no frames must be refused"),
         }
+    }
+
+    /// **A plugin that processes 32-bit audio only, started for a 64-bit graph,
+    /// is activated at 32-bit**: [`Widths::negotiate`] lowers the request, the
+    /// instance reports the plugin's widths as `Widths::F32` and the width it
+    /// runs at as 32-bit, and the plugin was sent a 32-bit activation. The load
+    /// then returns it in a `WidthError` (`load_client`) rather than hosting it.
+    #[test]
+    fn a_32_bit_plugin_started_for_64_bit_runs_at_32() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        fake.only_32_bit();
+        let (instance, _rt) = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F64,
+        )
+        .expect("the plugin activates at 32-bit");
+        assert_eq!(instance.widths(), Widths::F32);
+        assert_eq!(instance.width(), FloatWidth::F32);
+        assert_eq!(fake.activated_width(), Some(FloatWidth::F32));
+        assert!(instance.renders());
+    }
+
+    /// **A plugin that processes both widths, started for 64-bit, is activated
+    /// at 64-bit.**
+    #[test]
+    fn a_64_bit_plugin_started_for_64_bit_runs_at_64() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        let (instance, _rt) = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F64,
+        )
+        .expect("the plugin activates at 64-bit");
+        assert_eq!(instance.widths(), Widths::BOTH);
+        assert_eq!(instance.width(), FloatWidth::F64);
+        assert_eq!(fake.activated_width(), Some(FloatWidth::F64));
     }
 
     /// **A rate the plugin takes is the instance's new configuration, and a

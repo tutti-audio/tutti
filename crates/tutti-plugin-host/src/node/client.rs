@@ -52,7 +52,9 @@ use tutti_plugin_types::{
 use tutti_units::ParamId;
 
 /// A plugin running inside the host process, as a graph node, whatever its
-/// format `L`, activated at the width of the graph `F` it joins.
+/// format `L`, activated at the width of the graph `F` it joins. The default
+/// `F = f32` is the common width and converts nothing; it is staging until
+/// every caller names its graph's float.
 ///
 /// Created by [`load_client`](crate::load_client), or by
 /// `tutti-plugin`'s `Plugin::open` for a `.vst`/`.dll`/`.so`
@@ -442,6 +444,9 @@ impl TransportFeed {
 /// `F` is a [`WidthError`](crate::WidthError) at load, never converted);
 /// the loaded client is neither. It derefs to the client for its control
 /// surface (`controls`, `set_meter`, ...).
+///
+/// The default `F = f32` is the common width and converts nothing; it is
+/// staging until every caller names its graph's float.
 pub struct PluginNode<L: Loaded, F: Float = f32> {
     pub(super) client: InProcClient<L, F>,
     pub(super) tempo: TempoReader,

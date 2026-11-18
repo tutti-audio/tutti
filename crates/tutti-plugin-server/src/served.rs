@@ -1,4 +1,4 @@
-//! [`Served<F>`]: one plugin of any [`OutOfProcess`] format, in this process.
+//! [`Served<L>`]: one plugin of any [`OutOfProcess`] format, in this process.
 //!
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
@@ -72,7 +72,7 @@ pub(crate) trait Render {
 
 /// What the session asks of the loaded plugin, with its format erased.
 ///
-/// Object-safe, implemented by [`Served<F>`] alone; the
+/// Object-safe, implemented by [`Served<L>`] alone; the
 /// `served!` table's enum lends it as a trait object.
 pub(crate) trait ServedPlugin {
     /// The plugin's catalog identity.
@@ -197,12 +197,12 @@ pub(crate) trait ServedPlugin {
     ) -> PluginResult<()>;
 }
 
-/// A plugin of format `F` that the server runs: its [`Lifecycle`], the
+/// A plugin of format `L` that the server runs: its [`Lifecycle`], the
 /// Processor's seat, the core's state, and what the host has not yet been told.
-pub(crate) struct Served<F: OutOfProcess> {
-    lifecycle: Lifecycle<F>,
+pub(crate) struct Served<L: OutOfProcess> {
+    lifecycle: Lifecycle<L>,
     state: State,
-    hand: Hand<F::Processor>,
+    hand: Hand<L::Processor>,
     descriptor: PluginDescriptor,
     wiring: LoadedPlugin,
     /// The buses the host was last told: at load, or by `PluginIoChanged`.
@@ -229,7 +229,7 @@ const HOME_PATIENCE: Duration = Duration::from_secs(3);
 /// A Processor that is still on the render thread when the plugin is dropped
 /// must not outlive the Controller that destroys the plugin, so the plugin is
 /// leaked instead: only a render thread stuck inside the plugin reaches it.
-impl<F: OutOfProcess> Drop for Served<F> {
+impl<L: OutOfProcess> Drop for Served<L> {
     fn drop(&mut self) {
         if matches!(
             self.lifecycle,
@@ -254,7 +254,7 @@ fn load_failed(stage: LoadStage, reason: String) -> PluginError {
     PluginError::Load { stage, reason }
 }
 
-impl<F: ServerSide> Served<F> {
+impl<L: ServerSide> Served<L> {
     /// Loads the plugin `load` chooses in the file at `path`, not activated.
     ///
     /// # Errors
@@ -265,8 +265,8 @@ impl<F: ServerSide> Served<F> {
         work: &MainWorkHandle,
         path: &Path,
         load: &Load,
-    ) -> PluginResult<F> {
-        let mut loaded = F::load_served(main, work, path, load)?;
+    ) -> PluginResult<L> {
+        let mut loaded = L::load_served(main, work, path, load)?;
         loaded.adopt();
         Ok(loaded)
     }
@@ -287,7 +287,7 @@ impl<F: ServerSide> Served<F> {
         requested: FloatWidth,
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
-        hand: Hand<F::Processor>,
+        hand: Hand<L::Processor>,
         ties: Ties,
     ) -> PluginResult<(Self, Option<PluginError>)> {
         Self::activate(
@@ -325,13 +325,13 @@ impl<F: ServerSide> Served<F> {
     /// took.
     pub(crate) fn activate(
         main: MainThreadMarker,
-        loaded: F,
+        loaded: L,
         sample_rate: SampleRate,
         block_size: usize,
         requested: FloatWidth,
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
-        hand: Hand<F::Processor>,
+        hand: Hand<L::Processor>,
         ties: Ties,
     ) -> PluginResult<(Self, Option<PluginError>)> {
         let activation_failed = |reason: String| {
@@ -350,7 +350,7 @@ impl<F: ServerSide> Served<F> {
 
         let mut this = Self {
             lifecycle: Lifecycle::new(loaded),
-            state: Lifecycle::<F>::initial_state(),
+            state: Lifecycle::<L>::initial_state(),
             hand,
             descriptor: PluginDescriptor::default(),
             wiring: LoadedPlugin::default(),
@@ -407,7 +407,7 @@ impl<F: ServerSide> Served<F> {
         let mut told = Vec::new();
         // Taken, not cloned: a clone copies the layout's `Vec`s. The state put
         // in its place is built without allocating and is replaced below.
-        let state = std::mem::replace(&mut self.state, Lifecycle::<F>::initial_state());
+        let state = std::mem::replace(&mut self.state, Lifecycle::<L>::initial_state());
         self.state = self
             .lifecycle
             .drive(state, event, &mut self.hand, main, |n| told.push(n));
@@ -614,7 +614,7 @@ impl<F: ServerSide> Served<F> {
                     control.take_requests(main, &mut requests);
                 }
             } else {
-                F::take_raised(&mut self.lifecycle, main, &mut requests);
+                L::take_raised(&mut self.lifecycle, main, &mut requests);
             }
             let asked = !requests.is_empty();
             if !asked && self.state.is_quiet() {
@@ -649,7 +649,7 @@ impl<F: ServerSide> Served<F> {
     fn forward_edits(&mut self, main: MainThreadMarker) {
         let mut edits = std::mem::take(&mut self.edits);
         edits.clear();
-        F::take_edits(&mut self.lifecycle, main, &mut edits);
+        L::take_edits(&mut self.lifecycle, main, &mut edits);
         self.events.extend(
             edits
                 .iter()
@@ -692,7 +692,7 @@ impl<F: ServerSide> Served<F> {
     }
 }
 
-impl<F: ServerSide> ServedPlugin for Served<F> {
+impl<L: ServerSide> ServedPlugin for Served<L> {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
     }
@@ -915,7 +915,7 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
         // no block is draining the writes.
         let home = self.bring_home(main);
         if home {
-            F::settle_edits(&mut self.lifecycle, main);
+            L::settle_edits(&mut self.lifecycle, main);
         }
         let saved = self
             .lifecycle

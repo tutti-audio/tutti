@@ -186,10 +186,10 @@ pub trait Reopen: Loaded {
     fn reopen(&self, main: MainThreadMarker) -> PluginResult<Self>;
 }
 
-impl<F: InProcess> Reopen for F {
+impl<L: InProcess> Reopen for L {
     fn reopen(&self, main: MainThreadMarker) -> PluginResult<Self> {
         let origin = self.origin();
-        F::load_in_process(main, self.main_work(), origin.path(), origin.load())
+        L::load_in_process(main, self.main_work(), origin.path(), origin.load())
     }
 }
 

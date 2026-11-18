@@ -227,7 +227,7 @@ where
             path: self.origin.path().to_path_buf(),
             // The live plugin took this width, so the same plugin refusing it
             // is a load that failed.
-            source: source.into_bridge(),
+            source: source.into_bridge(self.origin.path()),
         })?;
         // The fork is driven through its node alone: no editor, no parameter
         // surface. Its instance stays alive in the node.
