@@ -24,10 +24,20 @@ impl Imp {
     /// `None` when the queue could not be made or the registration was refused
     /// (the process had ended already, say).
     pub(super) fn of(child: &Child) -> Option<Self> {
+        Self::watching(Pid::from_child(child))
+    }
+
+    /// A watch on the process `pid` of any parent. `None` when it has ended
+    /// already or the queue was refused.
+    pub(super) fn of_pid(pid: u32) -> Option<Self> {
+        Self::watching(Pid::from_raw(i32::try_from(pid).ok()?)?)
+    }
+
+    fn watching(pid: Pid) -> Option<Self> {
         let queue = kqueue().ok().filter(|queue| {
             let change = Event::new(
                 EventFilter::Proc {
-                    pid: Pid::from_child(child),
+                    pid,
                     flags: ProcessEvents::EXIT,
                 },
                 EventFlags::ADD | EventFlags::ONESHOT,
@@ -70,6 +80,28 @@ impl Imp {
             // A failure to ask (a signal, say) is "may have ended": the owner's
             // `try_wait` decides, and the next wait asks again.
             Err(_) => true,
+        }
+    }
+
+    /// Blocks until the process has ended: `true`. `false` when the wait
+    /// itself failed.
+    pub(super) fn wait_ended(&self) -> bool {
+        loop {
+            if self.seen.load(Ordering::Acquire) {
+                return true;
+            }
+            let mut taken = [MaybeUninit::<Event>::uninit(); 1];
+            // SAFETY: as in `wait`: no change is submitted and the event list
+            // is a live buffer of one slot.
+            match unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], None) } {
+                Ok(([], _)) => {}
+                Ok(_) => {
+                    self.seen.store(true, Ordering::Release);
+                    return true;
+                }
+                Err(rustix::io::Errno::INTR) => {}
+                Err(_) => return false,
+            }
         }
     }
 }

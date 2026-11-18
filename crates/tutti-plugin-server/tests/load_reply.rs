@@ -97,7 +97,7 @@ fn start_server() -> (Server, Stream) {
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
             .arg(&socket)
             .env("TUTTI_PLUGIN_HOST_PID", std::process::id().to_string())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .spawn()
             .expect("spawn plugin-server"),
     );
@@ -179,4 +179,57 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
 
     write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
     drop(server);
+}
+
+/// Waits for the server to end and returns its status and what it printed.
+fn ended(server: &mut Server) -> (std::process::ExitStatus, String) {
+    let mut status = None;
+    tutti_fixtures::wait_until("the server to end", Duration::from_secs(60), || {
+        status = server.0.try_wait().expect("poll the server");
+        status.is_some()
+    });
+    let mut printed = String::new();
+    std::io::Read::read_to_string(&mut server.0.stdout.take().expect("piped"), &mut printed)
+        .expect("what the server printed");
+    (status.expect("the wait ended on a status"), printed)
+}
+
+/// **A handshake that ends in `Shutdown` releases the plugin it loaded.** The
+/// plugin's Processor is lent at its activation to a seat that only the render
+/// thread polls, and no render thread exists before the audio phase: an exit
+/// that drops the plugin there leaves it leaked, with a log that blames a
+/// render thread that was never started.
+#[test]
+fn a_shutdown_in_the_handshake_releases_the_plugin() {
+    let (_not_a_plugin, good) = fixtures();
+    let (mut server, mut stream) = start_server();
+    assert!(matches!(
+        load(&mut stream, &good, PluginFormat::Clap),
+        BridgeMessage::PluginLoaded { .. }
+    ));
+
+    write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
+    let (status, printed) = ended(&mut server);
+    assert!(status.success(), "{status:?}");
+    assert!(
+        !printed.contains("leaking the plugin"),
+        "the plugin was leaked: {printed}"
+    );
+}
+
+/// **A handshake frame that does not decode ends the server, with that cause
+/// and not as a host that went away.** A host of another protocol sends a
+/// well-framed body the server cannot read; the server used to take it for the
+/// handshake's end and wait for an audio connection from that peer.
+#[test]
+fn a_handshake_frame_that_does_not_decode_ends_the_server() {
+    use std::io::Write as _;
+
+    let (mut server, mut stream) = start_server();
+    // A length prefix of four, and four bytes no message begins with.
+    stream
+        .write_all(&[0, 0, 0, 4, 0xFF, 0xFF, 0xFF, 0xFF])
+        .expect("send a frame");
+    let (status, _) = ended(&mut server);
+    assert!(!status.success(), "the server ended as if the host left");
 }

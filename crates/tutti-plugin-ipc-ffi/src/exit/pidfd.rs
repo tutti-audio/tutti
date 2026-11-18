@@ -20,6 +20,28 @@ impl Imp {
             .map(|pidfd| Self { pidfd })
     }
 
+    /// A watch on the process `pid` of any parent. `None` when it has ended
+    /// already or the kernel refused a pidfd.
+    pub(super) fn of_pid(pid: u32) -> Option<Self> {
+        let pid = Pid::from_raw(i32::try_from(pid).ok()?)?;
+        rustix::process::pidfd_open(pid, PidfdFlags::empty())
+            .ok()
+            .map(|pidfd| Self { pidfd })
+    }
+
+    /// Blocks until the process has ended: `true`. `false` when the wait
+    /// itself failed.
+    pub(super) fn wait_ended(&self) -> bool {
+        loop {
+            let mut polls = [PollFd::new(&self.pidfd, PollFlags::IN)];
+            match rustix::event::poll(&mut polls, None) {
+                Ok(ready) if ready > 0 => return true,
+                Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                Err(_) => return false,
+            }
+        }
+    }
+
     pub(super) fn wait(&self, timeout: Duration) -> bool {
         let timeout = Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),

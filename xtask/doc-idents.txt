@@ -71,7 +71,6 @@
 1 crates/tutti-plugin-ipc/src/protocol/envelope.rs
 1 crates/tutti-plugin-ipc/src/protocol/frame.rs
 1 crates/tutti-plugin-ipc/src/transport/sys/unix.rs
-1 crates/tutti-plugin-server/src/main_loop/unix.rs
 1 crates/tutti-plugin-server/src/transport.rs
 1 crates/tutti-plugin-server/tests/orphan_watchdog.rs
 1 crates/tutti-plugin/tests/clap_nodes/clap_fork.rs

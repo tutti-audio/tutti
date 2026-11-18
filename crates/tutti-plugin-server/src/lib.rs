@@ -69,10 +69,10 @@
 //! Values crossing this boundary are plain numbers (a raw `f64` sample rate, for
 //! example), as they are at the plugin formats' C ABIs.
 //!
-//! If the host dies before connecting, the server notices on its own and exits.
-//! It compares its current parent with the host PID recorded at startup (which
-//! the host passes in `TUTTI_PLUGIN_HOST_PID`) on Unix, and checks whether the
-//! parent process is still alive on Windows.
+//! If the host dies, at any point of the session, the server notices on its own
+//! and exits: from [`PluginServer::new`] on, a thread the OS wakes when the host
+//! process ends (the PID the host passes in `TUTTI_PLUGIN_HOST_PID`) ends the
+//! server wherever it is blocked.
 //!
 //! ## Features
 //!
@@ -119,6 +119,7 @@ mod render;
 mod served;
 mod server;
 mod session;
+mod ties;
 mod transport;
 
 pub use server::PluginServer;
