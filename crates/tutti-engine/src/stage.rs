@@ -3,8 +3,9 @@
 
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
+use tutti_graph::{control_in, ramp_in};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Amplitude, Normalized, Samples};
+use tutti_units::{Amplitude, Samples};
 
 /// One output's ramp: from the gain it left off at to the target, `done` of
 /// `frames` frames along.
@@ -69,7 +70,7 @@ impl OutputStage {
             }
             if ramp.done >= ramp.frames {
                 if ramp.now != Amplitude::UNITY {
-                    let gain = F::from_f64(ramp.now.get());
+                    let gain = control_in::<F>(ramp.now.get());
                     block
                         .iter_mut()
                         .skip(c)
@@ -78,19 +79,19 @@ impl OutputStage {
                 }
                 continue;
             }
+            // The ramp renders in `F`, as an edge weight's does; the gain it
+            // ends the block on is where the next target starts from.
+            let (from, to) = (
+                control_in::<F>(ramp.from.get()),
+                control_in::<F>(ramp.to.get()),
+            );
             for s in block.iter_mut().skip(c).step_by(out_ch) {
-                ramp.now = if ramp.done + 1 >= ramp.frames {
-                    ramp.to
-                } else {
-                    ramp.from.lerp(
-                        ramp.to,
-                        Normalized::progress(Samples(ramp.done + 1), Samples(ramp.frames)),
-                    )
-                };
+                let gain = ramp_in(None, from, to, Samples(ramp.done), Samples(ramp.frames));
+                ramp.now = Amplitude(gain.to_f64());
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
-                *s *= F::from_f64(ramp.now.get());
+                *s *= gain;
             }
         }
     }
