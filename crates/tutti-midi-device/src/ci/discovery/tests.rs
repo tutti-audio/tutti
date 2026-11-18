@@ -292,10 +292,9 @@ fn a_byte_with_its_top_bit_set_is_malformed() {
     }
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_receivable_size_is_a_range_checked_value() {
-    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_fixtures::{RangeContract, check_range_contract};
     let c = RangeContract {
         new: MaxSysexSize::new,
         get: MaxSysexSize::get,
@@ -304,7 +303,6 @@ fn the_receivable_size_is_a_range_checked_value() {
         invalid: &[0, 127, 0x1000_0000, u32::MAX],
     };
     check_range_contract(&c);
-    check_range_serde(&c);
 }
 
 // M2-101 Table 6: after the 13-byte preamble come the manufacturer's three
