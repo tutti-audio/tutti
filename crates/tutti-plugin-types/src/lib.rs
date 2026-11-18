@@ -351,7 +351,7 @@ pub use presets::{Preset, PresetId, PresetSupport};
 #[cfg(feature = "probe-wire")]
 pub use probe_exit::{ProbeDeath, ProbeExit};
 #[cfg(feature = "probe-wire")]
-pub use probe_failure::{ProbeError, ProbeRefusal};
+pub use probe_failure::{MeasureFailure, ProbeError, ProbeRefusal, Unmeasured};
 #[cfg(feature = "probe-wire")]
 pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};

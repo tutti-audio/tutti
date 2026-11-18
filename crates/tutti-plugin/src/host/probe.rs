@@ -10,9 +10,10 @@
 //! at the deadline means it hung. The host states its pid to the child
 //! ([`HOST_PID_ENV`]), which ends itself with the host.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
+use tracing::warn;
 use tutti_plugin_ipc::Reaped;
 use tutti_plugin_ipc_ffi::HOST_PID_ENV;
 use tutti_plugin_types::{
@@ -26,6 +27,29 @@ use tutti_rt::StopToken;
 /// socket probe allowed about twelve.
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(5);
+
+/// What a measuring probe leaves of the host's deadline for what is not rendering:
+/// the result's write and the host's own wake. The most of it, and at most a
+/// quarter of a short deadline.
+const BUDGET_MARGIN: Duration = Duration::from_secs(10);
+
+/// The probe's run budget (`--budget`) under the host's deadline `timeout`: the
+/// deadline less [`BUDGET_MARGIN`] (a quarter of it, if that is less), so each
+/// plugin's renders time out on their own rows before the host gives up on the
+/// whole file and kills the probe.
+fn run_budget(timeout: Duration) -> Duration {
+    timeout - BUDGET_MARGIN.min(timeout / 4)
+}
+
+/// The state a measuring probe puts one plugin in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProbeState {
+    /// A file of the bytes the plugin's own `save_state` wrote.
+    pub(crate) file: PathBuf,
+    /// The descriptor id of the plugin the state is for; `None` is the file's
+    /// first plugin.
+    pub(crate) plugin: Option<String>,
+}
 
 /// Reads the descriptor of every plugin a file holds in a `plugin-probe` subprocess, so a plugin that
 /// crashes or hangs in its init does not take the caller down. `locator` names
@@ -52,15 +76,23 @@ pub(crate) fn probe_metadata_with(
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
 /// --measure`): the descriptors come back with
-/// [`PluginDescriptor::measured`] set where the plugin could be measured. It
-/// renders the plugin, so give it the long deadline
+/// [`PluginDescriptor::measured`] set where the plugin could be measured, and a
+/// plugin that could not be is logged with why. It renders the plugin, so give it
+/// the long deadline
 /// ([`DEFAULT_MEASURE_TIMEOUT`](crate::host::db_probe::DEFAULT_MEASURE_TIMEOUT)):
 /// a plugin that crashes or hangs while rendering is [`ProbeError::Died`] or
-/// [`ProbeError::TimedOut`], as in the load.
+/// [`ProbeError::TimedOut`], as in the load. The probe bounds each plugin's render
+/// itself, so a slow plugin loses its own row and not the file's.
 ///
-/// `state` is a file of the bytes a plugin's own `save_state` wrote, which puts
-/// the plugin in that state before the measurement (`--state`); the record carries
-/// a hash of it.
+/// `state` puts one plugin in the state a file holds before the measurement
+/// (`--state`, `--plugin`); the record carries a hash of it.
+///
+/// The probe is given one budget for its whole run, `timeout` less a margin
+/// ([`run_budget`], `--budget`), which the plugins of a file share: a plugin that
+/// is slow, or one that follows slow ones, times out its own rows (logged, no
+/// measurement) while the file's others keep theirs, and the probe ends before
+/// `timeout` and is not killed as a hang. A plugin that never returns from a block
+/// is still the host's `timeout`, and the whole file.
 ///
 /// # Errors
 ///
@@ -72,12 +104,17 @@ pub(crate) fn measure_metadata_with(
     format: PluginFormat,
     timeout: Duration,
     stop: &StopToken,
-    state: Option<&Path>,
+    state: Option<&ProbeState>,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
-    let mut args = vec!["--measure".as_ref()];
+    let budget = run_budget(timeout).as_secs().to_string();
+    let mut args = vec!["--measure".as_ref(), "--budget".as_ref(), budget.as_ref()];
     if let Some(state) = state {
         args.push("--state".as_ref());
-        args.push(state.as_os_str());
+        args.push(state.file.as_os_str());
+        if let Some(plugin) = &state.plugin {
+            args.push("--plugin".as_ref());
+            args.push(plugin.as_ref());
+        }
     }
     run(locator, plugin_path, format, timeout, stop, &args)
 }
@@ -130,8 +167,23 @@ fn run(
         (Ok(None), Waited::Cancelled) => return Err(ProbeError::Cancelled),
     };
     match outcome {
-        ProbeOutcome::Described(plugins) if plugins.is_empty() => Err(ProbeRefusal::Empty.into()),
-        ProbeOutcome::Described(plugins) => Ok(plugins),
+        ProbeOutcome::Described { plugins, .. } if plugins.is_empty() => {
+            Err(ProbeRefusal::Empty.into())
+        }
+        ProbeOutcome::Described {
+            plugins,
+            unmeasured,
+        } => {
+            for lost in &unmeasured {
+                warn!(
+                    "{}: {} has no measurement: {}",
+                    plugin_path.display(),
+                    lost.plugin,
+                    lost.failure
+                );
+            }
+            Ok(plugins)
+        }
         ProbeOutcome::Failed(refusal) => Err(refusal.into()),
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
         other => Err(ResultError::Malformed(format!("an unknown outcome: {other:?}")).into()),
@@ -344,6 +396,20 @@ mod tests {
         let exits = stand_in(&dir, "exit 1");
         let long = probe(&exits, Duration::from_secs(10));
         assert_eq!(long.unwrap_err(), ProbeError::Died(ProbeDeath::Status(1)));
+    }
+
+    /// The run budget leaves a margin under the host's deadline, so a probe whose
+    /// plugins are slow finishes before the host kills it.
+    #[test]
+    fn the_run_budget_is_the_deadline_less_a_margin() {
+        let secs = Duration::from_secs;
+        assert_eq!(run_budget(secs(180)), secs(170));
+        assert_eq!(run_budget(secs(15)), secs(15) - secs(15) / 4);
+        assert_eq!(run_budget(secs(4)), secs(3));
+        assert_eq!(run_budget(Duration::ZERO), Duration::ZERO);
+        for timeout in [secs(1), secs(15), secs(180), secs(3600)] {
+            assert!(run_budget(timeout) < timeout, "{timeout:?}");
+        }
     }
 
     /// The default allows a cold plugin well past the old five seconds.

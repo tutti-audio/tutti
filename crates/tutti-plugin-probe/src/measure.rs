@@ -29,13 +29,14 @@
 //! program material, so a figure is a lower bound.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
-    Controller, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock, Measured, NotChecked,
-    PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError, PluginIo, PluginTail, Prepare,
-    ProbeConfig, ProbeRefusal, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict,
-    Verdict,
+    Controller, Deadline, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock,
+    MeasureFailure, Measured, NotChecked, PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError,
+    PluginIo, PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor,
+    StateHash, TailVerdict, Verdict,
 };
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
@@ -67,6 +68,14 @@ pub const SETTLE: Seconds = Seconds(1.0);
 /// - an **instrument** is `NotChecked(NeverReachedFloor)`: a held note has no
 ///   lower bound worth reporting.
 pub const BUDGET_MARGIN: Seconds = Seconds(5.0);
+
+/// How long one plugin may render at one configuration before it loses its row
+/// ([`MeasureFailure::TimedOut`]): a plugin slower than real time over the
+/// render budget. The probe checks it between blocks, so a plugin that never
+/// returns from one is the host's deadline for the whole probe. A render is also
+/// bounded by what is left of the probe's run budget (see [`measure`]), so the
+/// sum over a file's plugins never passes the host's deadline.
+pub const RENDER_DEADLINE: Duration = Duration::from_secs(60);
 
 /// How long an instrument's note is held before its note-off.
 pub const NOTE_LENGTH: Seconds = Seconds(0.1);
@@ -195,16 +204,40 @@ fn note(on: bool, offset: usize, block: usize) -> UmpAt {
 }
 
 /// One experiment on an activated plugin, at the configuration `config` it was
-/// activated at.
+/// activated at, with no deadline.
 ///
 /// # Errors
 ///
-/// A block the plugin failed to render.
+/// [`MeasureFailure::Render`] for a block the plugin failed to render.
 pub fn measure_at<P: Processor>(
     processor: &mut P,
     subject: Subject,
     config: ProbeConfig,
-) -> Result<Measured, PluginError> {
+) -> Result<Measured, MeasureFailure> {
+    measure_within(processor, subject, config, Deadline::never())
+}
+
+/// [`measure_at`] that stops at `deadline`, read from the clock before each block.
+///
+/// # Errors
+///
+/// [`MeasureFailure::Render`] for a block the plugin failed to render,
+/// [`MeasureFailure::TimedOut`] if `deadline` passed first.
+pub fn measure_within<P: Processor>(
+    processor: &mut P,
+    subject: Subject,
+    config: ProbeConfig,
+    deadline: Deadline,
+) -> Result<Measured, MeasureFailure> {
+    let rendering = |e: PluginError| MeasureFailure::Render {
+        rate: config.rate,
+        block: config.block,
+        reason: e.to_string(),
+    };
+    let timed_out = || MeasureFailure::TimedOut {
+        rate: config.rate,
+        block: config.block,
+    };
     // The render is `f32`: the floor narrows once.
     let floor = config.floor.to_amplitude().get() as f32;
     let frames = |t: Seconds| t.to_samples_ceil(config.rate).get();
@@ -214,7 +247,10 @@ pub fn measure_at<P: Processor>(
     // 1. Silence in: does the plugin settle at all?
     let mut held = f32::INFINITY;
     for _ in 0..frames(SILENCE).div_ceil(block) {
-        run.run(&[])?;
+        if deadline.passed(Instant::now()) {
+            return Err(timed_out());
+        }
+        run.run(&[]).map_err(rendering)?;
         held = held.min(run.peak());
     }
     if held > floor {
@@ -230,6 +266,10 @@ pub fn measure_at<P: Processor>(
     let judge_tail = matches!(subject.tail, PluginTail::None | PluginTail::Finite(_));
     let (settle, budget) = (frames(SETTLE), frames(MAX_NODE_TAIL + BUDGET_MARGIN));
     let note_off = subject.instrument.then(|| frames(NOTE_LENGTH));
+    // The earliest frame the stimulus can be heard at: the settle window starts
+    // here, never before, so a plugin that reports more latency than `SETTLE`
+    // is not judged settled before its output has begun.
+    let heard_from = note_off.unwrap_or(0) + subject.latency.get();
     let mut onset = None;
     let mut last = None;
     let mut at = 0usize;
@@ -252,7 +292,10 @@ pub fn measure_at<P: Processor>(
                 ch[0] = IMPULSE.get() as f32;
             }
         }
-        run.run(&events)?;
+        if deadline.passed(Instant::now()) {
+            return Err(timed_out());
+        }
+        run.run(&events).map_err(rendering)?;
         if onset.is_none() {
             onset = run.first_above(floor).map(|i| at + i);
         }
@@ -260,12 +303,12 @@ pub fn measure_at<P: Processor>(
             last = Some(at + i);
         }
         at += block;
-        let quiet_from = last.unwrap_or(0).max(note_off.unwrap_or(0));
+        let quiet_from = last.unwrap_or(0).max(heard_from);
         let done = if judge_tail {
             at >= budget || at.saturating_sub(quiet_from) >= settle
         } else {
             // The tail is not judged: all that is wanted is the onset.
-            onset.is_some() || at >= settle
+            onset.is_some() || at >= heard_from + settle
         };
         if done {
             let settled = at.saturating_sub(quiet_from) >= settle;
@@ -355,46 +398,53 @@ fn judge(
 /// Loads the plugin `descriptor` names from the file at `path` as format `L`,
 /// puts it in `state` if one is given (the bytes its own `save_state` wrote; the
 /// record's [`ProbeConfig::state`] hashes them), measures it at each of
-/// [`CONFIGS`] and returns the one record they make ([`Measured::merge`]).
-/// `Ok(None)` when it cannot be measured: it would not load or activate, it has
-/// no audio output, or a block failed.
+/// [`CONFIGS`], each within [`RENDER_DEADLINE`] and within `run` (the deadline of
+/// the probe's whole run, which the plugins of a file share), and returns the one
+/// record they make ([`Measured::merge`]). A plugin that finds `run` passed times
+/// out on its own row, so one slow plugin never costs the file's others their
+/// rows nor the file a kill by the host.
 ///
 /// A plugin that crashes or hangs here takes the probe process with it, which
 /// the host that spawned it sees as it sees a crash in the load.
 ///
 /// # Errors
 ///
-/// [`ProbeRefusal::StateRefused`]: the plugin refused `state`. A measurement of a
-/// state it would not take is no measurement, and the caller asked for that state.
+/// A [`MeasureFailure`] says why this plugin has no measurement: it would not
+/// load, take `state` ([`MeasureFailure::StateRefused`]: the caller asked for
+/// that state, so the probe refuses the file), save its state, activate, render
+/// or deactivate, it has no audio output, or a render passed its deadline.
 pub fn measure<L: InProcess>(
     main: MainThreadMarker,
     path: &Path,
     descriptor: &PluginDescriptor,
     state: Option<&[u8]>,
-) -> Result<Option<Measured>, ProbeRefusal> {
+    run: Deadline,
+) -> Result<Measured, MeasureFailure> {
     // The plugin closes on this thread when `loaded` drops, so the collector it is
     // given never receives work.
     let (_collector, work) = tutti_plugin_types::MainWork::new();
-    let Ok(mut loaded) = L::load_in_process(main, &work, path, &Load::new().plugin(&descriptor.id))
-    else {
-        return Ok(None);
-    };
+    let mut loaded = L::load_in_process(main, &work, path, &Load::new().plugin(&descriptor.id))
+        .map_err(|e| MeasureFailure::Load {
+            reason: e.to_string(),
+        })?;
     if let Some(bytes) = state {
         loaded
             .load_state(main, bytes, tutti_plugin_types::StateUse::Project)
-            .map_err(|e| ProbeRefusal::StateRefused {
-                plugin: descriptor.id.clone(),
+            .map_err(|e| MeasureFailure::StateRefused {
                 reason: e.to_string(),
             })?;
     }
-    let state = StateHash::of(
-        &loaded
-            .save_state(main, tutti_plugin_types::StateUse::Project)
-            .unwrap_or_default(),
-    );
+    // The hash names the state the figure is of: a plugin that cannot say what
+    // state it is in has no state to record, and empty bytes would name another.
+    let saved = loaded
+        .save_state(main, tutti_plugin_types::StateUse::Project)
+        .map_err(|e| MeasureFailure::SaveState {
+            reason: e.to_string(),
+        })?;
+    let state = StateHash::of(&saved);
     let wiring = loaded.wiring(main);
     if wiring.total_outputs() == 0 {
-        return Ok(None);
+        return Err(MeasureFailure::NoAudioOutput);
     }
     // An instrument is a plugin with no audio input, whatever its descriptor's
     // features say (the shared plugin's says both): what decides the stimulus is
@@ -402,10 +452,13 @@ pub fn measure<L: InProcess>(
     let instrument = wiring.total_inputs() == 0;
     let mut record: Option<Measured> = None;
     for (rate, block) in CONFIGS {
-        let prepare = Prepare::new(rate, block);
-        let Ok((mut processor, controller)) = loaded.activate(main, prepare) else {
-            return Ok(None);
-        };
+        let (mut processor, controller) = loaded
+            .activate(main, Prepare::new(rate, block))
+            .map_err(|refused| MeasureFailure::Activate {
+                rate,
+                block,
+                reason: refused.reason.to_string(),
+            })?;
         let subject = Subject {
             inputs: wiring.total_inputs(),
             outputs: wiring.total_outputs(),
@@ -419,19 +472,21 @@ pub fn measure<L: InProcess>(
             floor: PROBE_FLOOR,
             state,
         };
-        let Ok(measured) = measure_at(&mut processor, subject, config) else {
-            return Ok(None);
-        };
+        let deadline = Deadline::after(Instant::now(), RENDER_DEADLINE).sooner(run);
+        let measured = measure_within(&mut processor, subject, config, deadline)?;
         record = Some(match record {
             Some(first) => first.merge(measured),
             None => measured,
         });
-        let Ok(rejoined) = L::deactivate(main, processor, controller) else {
-            return Ok(None);
-        };
-        loaded = rejoined;
+        loaded =
+            L::deactivate(main, processor, controller).map_err(|e| MeasureFailure::Deactivate {
+                rate,
+                block,
+                reason: e.reason.to_string(),
+            })?;
     }
-    Ok(record)
+    // `CONFIGS` is not empty, so a record was made.
+    record.ok_or(MeasureFailure::NoAudioOutput)
 }
 
 #[cfg(test)]

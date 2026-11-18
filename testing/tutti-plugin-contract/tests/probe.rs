@@ -99,13 +99,17 @@ fn probe_all_with_timeout(
     Ok(db.plugins().map(|p| p.descriptor.clone()).collect())
 }
 
-/// A catalog measure task over `path`, the plugin put in the state `file` holds
-/// first, under the deadline `timeout`.
+/// A catalog measure task over the first plugin of `path`, which is put in the
+/// state `file` holds first, under the deadline `timeout`. The ref names the
+/// plugin by the id a plain probe read (a state with no plugin named is refused
+/// for a file of several).
 fn measure_db(path: &Path, file: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
+    let scanned = probe_db(path)?;
+    let entry = scanned.plugins().next().expect("a plugin in the file");
+    let plugin = PluginRef::from(&entry);
     let pedal = tempfile::tempdir().unwrap();
     let config = config(pedal.path()).measure_timeout(timeout);
     run_task(config, |catalog| {
-        let plugin = PluginRef::file(path).expect("a plugin file");
         catalog.measure(&plugin, Some(file)).expect("a plugin file")
     })
 }
@@ -665,6 +669,140 @@ fn an_unreadable_state_file_is_a_refusal() {
             Some(ProbeOutcome::Failed(ProbeRefusal::StateUnreadable(_)))
         ),
         "{outcome:?}"
+    );
+}
+
+/// The two plugins of the reference CLAP factory, under a file name of its own.
+const FACTORY_FIRST: &str = "tutti.conformance-probe";
+const FACTORY_SECOND: &str = "tutti.conformance-probe.second";
+
+/// A state file the reference plugins refuse, in a directory of its own.
+fn refused_state(dir: &tempfile::TempDir) -> PathBuf {
+    let file = dir.path().join("state");
+    std::fs::write(&file, b"not a state").unwrap();
+    file
+}
+
+/// **`--state` goes to the plugin `--plugin` names and to no other**: given for the
+/// factory's second plugin, it is the second that refuses it, by id. The first is
+/// measured as it loads.
+#[test]
+fn a_state_goes_only_to_the_plugin_it_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory = dir.path().join("two.clap");
+    std::fs::copy(
+        tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin"),
+        &factory,
+    )
+    .expect("copy the plugin");
+    let state = refused_state(&dir);
+    let state_args = |plugin: Option<&'static str>| {
+        let mut args: Vec<std::ffi::OsString> =
+            vec!["--measure".into(), "--state".into(), state.clone().into()];
+        if let Some(plugin) = plugin {
+            args.extend(["--plugin".into(), plugin.into()]);
+        }
+        args
+    };
+    let refusing = |plugin: Option<&'static str>| {
+        let args = state_args(plugin);
+        let args: Vec<&std::ffi::OsStr> = args.iter().map(AsRef::as_ref).collect();
+        match run_probe(&factory, &args).1 {
+            Some(ProbeOutcome::Failed(ProbeRefusal::StateRefused { plugin, .. })) => plugin,
+            other => panic!("the state was refused by a plugin: {other:?}"),
+        }
+    };
+
+    assert_eq!(refusing(Some(FACTORY_SECOND)), FACTORY_SECOND);
+    assert_eq!(refusing(Some(FACTORY_FIRST)), FACTORY_FIRST);
+
+    // No plugin named, and the file holds two: the state would go to one by position.
+    let args = state_args(None);
+    let args: Vec<&std::ffi::OsStr> = args.iter().map(AsRef::as_ref).collect();
+    assert_eq!(
+        run_probe(&factory, &args).1,
+        Some(ProbeOutcome::Failed(ProbeRefusal::AmbiguousPlugin {
+            count: 2
+        }))
+    );
+}
+
+/// **A state with no plugin named goes to the file's only plugin**: the
+/// refusal here is the plugin's own, by its id.
+#[test]
+fn a_state_with_no_plugin_named_goes_to_the_files_only_plugin() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = refused_state(&dir);
+    let (_, outcome) = run_probe(
+        &clap_path(),
+        &["--measure".as_ref(), "--state".as_ref(), state.as_os_str()],
+    );
+    assert!(
+        matches!(
+            outcome,
+            Some(ProbeOutcome::Failed(ProbeRefusal::StateRefused { .. }))
+        ),
+        "{outcome:?}"
+    );
+}
+
+/// **A run budget that is spent costs each plugin its own rows, and the probe
+/// still finishes**: with no time left (`--budget 0`) every plugin of the factory
+/// is described and reported unmeasured with a typed timeout, the probe writes
+/// its result and exits cleanly, and the host is not left to kill it as a hang.
+#[test]
+fn a_spent_budget_times_out_each_plugins_rows_and_the_probe_finishes() {
+    use tutti_plugin_types::MeasureFailure;
+    let dir = tempfile::tempdir().unwrap();
+    let factory = dir.path().join("two.clap");
+    std::fs::copy(
+        tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin"),
+        &factory,
+    )
+    .expect("copy the plugin");
+
+    let (status, outcome) = run_probe(
+        &factory,
+        &["--measure".as_ref(), "--budget".as_ref(), "0".as_ref()],
+    );
+
+    assert_eq!(status.code(), Some(i32::from(ProbeExit::Written.code())));
+    let Some(ProbeOutcome::Described {
+        plugins,
+        unmeasured,
+    }) = outcome
+    else {
+        panic!("a described result: {outcome:?}");
+    };
+    let ids: Vec<_> = plugins.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, [FACTORY_FIRST, FACTORY_SECOND]);
+    assert!(plugins.iter().all(|p| p.measured.is_none()));
+    let lost: Vec<_> = unmeasured.iter().map(|u| u.plugin.as_str()).collect();
+    assert_eq!(lost, ids, "each plugin lost its own rows");
+    assert!(
+        unmeasured
+            .iter()
+            .all(|u| matches!(u.failure, MeasureFailure::TimedOut { .. })),
+        "{unmeasured:?}"
+    );
+}
+
+/// **A `--plugin` the file does not hold is `UnknownPlugin`**, not a state given
+/// to nobody.
+#[test]
+fn a_state_for_a_plugin_the_file_does_not_hold_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = refused_state(&dir);
+    assert_refused(
+        &clap_path(),
+        &[
+            "--measure".as_ref(),
+            "--state".as_ref(),
+            state.as_os_str(),
+            "--plugin".as_ref(),
+            "no.such.plugin".as_ref(),
+        ],
+        &ProbeRefusal::UnknownPlugin("no.such.plugin".into()),
     );
 }
 

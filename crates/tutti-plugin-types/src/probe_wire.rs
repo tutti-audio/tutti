@@ -10,7 +10,7 @@
 //! probe did not finish (a crash or a hang), which the reader tells from the
 //! process, not from the file.
 
-use crate::{PluginDescriptor, ProbeRefusal, ResultError};
+use crate::{PluginDescriptor, ProbeRefusal, ResultError, Unmeasured};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ const TAG: [u8; 4] = *b"TPRB";
 /// version mismatch is [`ResultError::ProtocolMismatch`] and not a decode
 /// error. Nothing derives the version from the types; a test that pinned the
 /// bytes of a value would pin tutti's own output, which is no spec.
-const VERSION: u8 = 5;
+const VERSION: u8 = 6;
 
 /// Magic, the version, then the payload length as a little-endian `u64`.
 const HEADER: usize = TAG.len() + 1 + 8;
@@ -39,7 +39,14 @@ pub enum ProbeOutcome {
     /// factory, each audio class of a VST3 factory, each unit an AU bundle
     /// declares, each sub-plugin of a VST2 shell. Never empty: a file that holds
     /// no plugin is a [`Failed`](Self::Failed).
-    Described(Vec<PluginDescriptor>),
+    Described {
+        /// The descriptors.
+        plugins: Vec<PluginDescriptor>,
+        /// The plugins a measuring probe could not measure, and why; empty when
+        /// it did not measure. Such a plugin's descriptor has no
+        /// [`measured`](PluginDescriptor::measured).
+        unmeasured: Vec<Unmeasured>,
+    },
     /// The probe ran to its end and refused the plugin.
     Failed(ProbeRefusal),
 }
@@ -162,6 +169,7 @@ pub fn read_result(result: &Path) -> Result<Option<ProbeOutcome>, ResultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MeasureFailure;
 
     fn described() -> ProbeOutcome {
         let plugin = |id: &str| PluginDescriptor {
@@ -169,7 +177,13 @@ mod tests {
             name: id.into(),
             ..PluginDescriptor::default()
         };
-        ProbeOutcome::Described(vec![plugin("clap.test"), plugin("clap.other")])
+        ProbeOutcome::Described {
+            plugins: vec![plugin("clap.test"), plugin("clap.other")],
+            unmeasured: vec![Unmeasured {
+                plugin: "clap.other".into(),
+                failure: MeasureFailure::NoAudioOutput,
+            }],
+        }
     }
 
     /// A file already at the staging name is refused, never written through
@@ -327,17 +341,21 @@ mod tests {
                 ..PluginDescriptor::default()
             })
             .collect();
-        let outcome = ProbeOutcome::Described(plugins);
+        let outcome = ProbeOutcome::Described {
+            plugins,
+            unmeasured: Vec::new(),
+        };
         assert_eq!(decode_result(&encode_result(&outcome)), Ok(outcome));
     }
 
-    /// **Every refusal a probe can write survives
+    /// **Every refusal and every measurement failure a probe can write survives
     /// the file**: postcard has no defaults, so a variant a reader cannot decode
     /// would read as a malformed result, and a host would mistake a refusal for a
     /// broken probe.
     #[test]
     fn every_refusal_and_failure_survives_the_result_file() {
-        use crate::{LoadStage, PluginFormat};
+        use crate::{LoadStage, MaxBlock, PluginFormat, SampleRate, Samples};
+        let (rate, block) = (SampleRate::SR_48K, MaxBlock::new(Samples(512)).unwrap());
         let reason = || "the plugin's words".to_string();
         let refusals = [
             ProbeRefusal::Missing,
@@ -353,6 +371,8 @@ mod tests {
                 reason: reason(),
             },
             ProbeRefusal::Describe(reason()),
+            ProbeRefusal::UnknownPlugin("p".into()),
+            ProbeRefusal::AmbiguousPlugin { count: 2 },
             ProbeRefusal::Usage,
             ProbeRefusal::NotMainThread,
             ProbeRefusal::Empty,
@@ -361,12 +381,46 @@ mod tests {
             let outcome = ProbeOutcome::Failed(refusal);
             assert_eq!(decode_result(&encode_result(&outcome)), Ok(outcome));
         }
+        let failures = [
+            MeasureFailure::Load { reason: reason() },
+            MeasureFailure::StateRefused { reason: reason() },
+            MeasureFailure::SaveState { reason: reason() },
+            MeasureFailure::NoAudioOutput,
+            MeasureFailure::Activate {
+                rate,
+                block,
+                reason: reason(),
+            },
+            MeasureFailure::Render {
+                rate,
+                block,
+                reason: reason(),
+            },
+            MeasureFailure::Deactivate {
+                rate,
+                block,
+                reason: reason(),
+            },
+            MeasureFailure::TimedOut { rate, block },
+        ];
+        let outcome = ProbeOutcome::Described {
+            plugins: vec![PluginDescriptor::default()],
+            unmeasured: failures
+                .into_iter()
+                .map(|failure| Unmeasured {
+                    plugin: "p".into(),
+                    failure,
+                })
+                .collect(),
+        };
+        assert_eq!(decode_result(&encode_result(&outcome)), Ok(outcome));
     }
 
     /// Every plugin of a file, in order, is in the file: the list is the outcome.
     #[test]
     fn every_plugin_of_a_file_survives_it_in_order() {
-        let ProbeOutcome::Described(plugins) = decode_result(&encode_result(&described())).unwrap()
+        let ProbeOutcome::Described { plugins, .. } =
+            decode_result(&encode_result(&described())).unwrap()
         else {
             panic!("described");
         };
