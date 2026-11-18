@@ -84,9 +84,11 @@ impl Members {
                         .filter(|c| members[c.index()].held.is_none())
                         .min_by_key(|c| Reverse(tick.wrapping_sub(members[c.index()].released)));
                     let chosen = free.unwrap_or_else(|| {
-                        zone.member_channels()
-                            .min_by_key(|c| Reverse(tick.wrapping_sub(members[c.index()].started)))
-                            .unwrap_or_else(|| zone.first_member())
+                        let age =
+                            |c: MidiChannel| Reverse(tick.wrapping_sub(members[c.index()].started));
+                        zone.member_channels().fold(zone.first_member(), |best, c| {
+                            if age(c) < age(best) { c } else { best }
+                        })
                     });
                     // A member that still plays is stolen: its note ends first.
                     if let Some(old) = members[chosen.index()].held {

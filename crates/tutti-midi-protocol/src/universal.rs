@@ -115,6 +115,38 @@ impl QuarterFrame {
     }
 }
 
+/// The eight nibbles of one MTC cycle, indexed by piece ([`MtcTimeCode::nibbles`]
+/// as [`U4`]s). A [`QuarterFrame`] of it takes its piece from the index, so a
+/// frame never names a piece other than the nibble's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QuarterFrameCycle([U4; 8]);
+
+impl QuarterFrameCycle {
+    /// A cycle of eight zero nibbles.
+    pub const ZERO: Self = Self([U4::masked(0); 8]);
+
+    /// The Quarter Frame of `piece`.
+    #[must_use]
+    pub const fn frame(&self, piece: QuarterFramePiece) -> QuarterFrame {
+        QuarterFrame {
+            piece,
+            nibble: self.0[piece.get() as usize],
+        }
+    }
+
+    /// The eight Quarter Frames, in piece order.
+    #[must_use]
+    pub const fn frames(&self) -> [QuarterFrame; 8] {
+        let mut frames = [QuarterFrame::FIRST; 8];
+        let mut piece = 0;
+        while piece < 8 {
+            frames[piece] = self.frame(QuarterFramePiece::masked(piece as u8));
+            piece += 1;
+        }
+        frames
+    }
+}
+
 /// A time code at a rate that has an MTC code (24, 25, 29.97 drop-frame or 30
 /// frames): the labels `hours:minutes:seconds:frames` checked against their
 /// ranges, so a value of this type is a position some clock can read. It is
@@ -250,21 +282,17 @@ impl MtcTimeCode {
         ]
     }
 
-    /// The eight Quarter Frames that state this position, in the order of the
-    /// pieces ([`nibbles`](Self::nibbles) as [`QuarterFrame`]s).
+    /// The eight Quarter Frames that state this position, as a cycle.
     #[must_use]
-    pub const fn quarter_frames(self) -> [QuarterFrame; 8] {
+    pub const fn cycle(self) -> QuarterFrameCycle {
         let nibbles = self.nibbles();
-        let mut frames = [QuarterFrame::FIRST; 8];
+        let mut cycle = [U4::masked(0); 8];
         let mut piece = 0;
         while piece < 8 {
-            frames[piece] = QuarterFrame {
-                piece: QuarterFramePiece::masked(piece as u8),
-                nibble: U4::masked(nibbles[piece]),
-            };
+            cycle[piece] = U4::masked(nibbles[piece]);
             piece += 1;
         }
-        frames
+        QuarterFrameCycle(cycle)
     }
 
     /// The position the eight nibbles of a completed cycle state, the inverse

@@ -56,8 +56,8 @@ use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
 use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
 use tutti_midi_protocol::{
-    MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrame, SmpteTimecode, flex_tempo_field,
-    flex_time_signature_wire, song_position,
+    MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrameCycle, QuarterFramePiece, SmpteTimecode,
+    flex_tempo_field, flex_time_signature_wire, song_position,
 };
 
 use super::sync_messages::SyncMessages;
@@ -169,7 +169,7 @@ struct MtcGrid {
     lead: f64,
     /// The eight Quarter Frames of the timecode being sent, in piece order. Set
     /// once at piece 0, so one cycle carries one position.
-    cycle: [QuarterFrame; 8],
+    cycle: QuarterFrameCycle,
     /// The grid was just restarted: its first piece 0 is still to be placed
     /// on an even frame ([`ClockMaster::tick_mtc`]).
     align: bool,
@@ -181,7 +181,7 @@ impl MtcGrid {
         next: 0,
         frames: 0,
         lead: 0.0,
-        cycle: [QuarterFrame::FIRST; 8],
+        cycle: QuarterFrameCycle::ZERO,
         align: true,
     };
 }
@@ -640,7 +640,9 @@ impl ClockMaster {
             }
             emit((
                 frame_offset(sample_offset, block_size),
-                self.system(System::TimeCode(cycle[usize::from(piece)].data())),
+                self.system(System::TimeCode(
+                    cycle.frame(QuarterFramePiece::masked(piece)).data(),
+                )),
             ));
             next += 1;
         }
@@ -701,9 +703,9 @@ fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
 /// even one (a cycle's eight pieces span two frames). Rounding, not flooring,
 /// so a position a float's width short of a frame boundary still reads as that
 /// frame.
-fn mtc_cycle(position: Seconds, fps: MtcRate) -> [QuarterFrame; 8] {
+fn mtc_cycle(position: Seconds, fps: MtcRate) -> QuarterFrameCycle {
     let nearest = SmpteTimecode::from_seconds(position, fps.frame_rate());
-    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps).quarter_frames()
+    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps).cycle()
 }
 
 #[cfg(test)]

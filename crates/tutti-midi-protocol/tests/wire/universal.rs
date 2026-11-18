@@ -178,9 +178,14 @@ fn the_quarter_frame_pieces_of_a_position_are_the_nibbles_of_t9() {
         .time_code();
     assert_eq!(at.nibbles(), [6, 1, 5, 1, 4, 1, 3, 7]);
     assert_eq!(
-        at.quarter_frames().map(|q| q.data().get()),
+        at.cycle().frames().map(|q| q.data().get()),
         [0x06, 0x11, 0x25, 0x31, 0x44, 0x51, 0x63, 0x77]
     );
+    // Each frame carries its own piece number and that piece's nibble.
+    for (piece, frame) in at.cycle().frames().into_iter().enumerate() {
+        assert_eq!(usize::from(frame.piece.get()), piece);
+        assert_eq!(frame.nibble.get(), at.nibbles()[piece]);
+    }
     assert_eq!(MtcTimeCode::from_nibbles(at.nibbles()), Some(at));
 }
 

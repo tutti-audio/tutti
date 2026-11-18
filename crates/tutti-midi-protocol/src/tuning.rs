@@ -114,6 +114,15 @@ pub struct KeyTable([TuningFrequency; 128]);
 pub struct InvalidKeyTable(usize);
 
 #[cfg(feature = "serde")]
+impl InvalidKeyTable {
+    /// How many words the document held.
+    #[must_use]
+    pub const fn count(self) -> usize {
+        self.0
+    }
+}
+
+#[cfg(feature = "serde")]
 impl From<KeyTable> for Vec<TuningFrequency> {
     fn from(table: KeyTable) -> Self {
         table.0.to_vec()
@@ -270,6 +279,15 @@ impl KeyChanges {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("a Single Note Tuning Change holds at most {MAX_KEY_CHANGES} changes, not {0}")]
 pub struct InvalidKeyChanges(usize);
+
+#[cfg(feature = "serde")]
+impl InvalidKeyChanges {
+    /// How many changes the document held.
+    #[must_use]
+    pub const fn count(self) -> usize {
+        self.0
+    }
+}
 
 #[cfg(feature = "serde")]
 impl From<KeyChanges> for Vec<KeyChange> {

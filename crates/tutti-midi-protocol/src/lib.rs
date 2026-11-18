@@ -199,9 +199,9 @@ pub use universal::{
     MmcTimeCodeSource, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate,
     MmcUserBitFlags, MmcUserBits, MotionControlTally, MotionProcess, MotionState, MtcAction,
     MtcFlags, MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcPosition, NotMmcSlot,
-    NotMmcSubframes, NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFramePiece,
-    Recipient, RunReference, SysexDeviceId, Universal, UniversalRead, UniversalReader, VitcInsert,
-    read,
+    NotMmcSubframes, NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle,
+    QuarterFramePiece, Recipient, RunReference, SysexDeviceId, Universal, UniversalRead,
+    UniversalReader, VitcInsert, read,
 };
 pub use voice::{
     channel_voice, widen, widen_bend, widen_bytes, widen_message, widen_value, widen_velocity,

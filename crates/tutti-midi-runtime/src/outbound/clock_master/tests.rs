@@ -4,7 +4,7 @@ use atomic_float::AtomicF64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::SmpteFrameRate;
+use tutti_midi_protocol::{QuarterFramePiece, SmpteFrameRate};
 use tutti_music::LoopRange;
 use tutti_music::MeterChange;
 use tutti_transport::ProjectMeter;
@@ -673,7 +673,8 @@ fn outbound_mtc_assembles_whole_valid_timecodes_across_a_minute() {
 fn timecode_rounds_to_the_nearest_even_frame() {
     let at = |pos: f64, fps| {
         let cycle = mtc_cycle(Seconds::new(pos / SampleRate::SR_48K.get()), fps);
-        let nibbles = std::array::from_fn(|p| cycle[p].nibble.get());
+        let nibbles =
+            std::array::from_fn(|p| cycle.frame(QuarterFramePiece::masked(p as u8)).nibble.get());
         MtcTimeCode::from_nibbles(nibbles)
             .expect("a position the grid sends is one a clock reads")
             .timecode()

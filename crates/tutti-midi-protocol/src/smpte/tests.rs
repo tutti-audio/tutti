@@ -1,5 +1,25 @@
 use super::*;
 
+/// **A second holds 24, 25, 30, 30 and 30 frame labels** at 24, 25, 29.97
+/// drop-frame, 29.97 non-drop and 30 fps (SMPTE 12M): the 29.97 rates count
+/// 30 labels a second though they run at 30000/1001 frames.
+#[test]
+fn a_second_holds_the_labels_of_its_frame_rate() {
+    let table = [
+        (SmpteFrameRate::Fps24, 24, 24),
+        (SmpteFrameRate::Fps25, 25, 25),
+        (SmpteFrameRate::Fps2997Df, 30, 30),
+        (SmpteFrameRate::Fps2997Ndf, 30, 30),
+        (SmpteFrameRate::Fps30, 30, 30),
+    ];
+    for (rate, labels, mtc_labels) in table {
+        assert_eq!(rate.labels_per_second(), labels, "{rate:?}");
+        if let Some(mtc) = rate.mtc_rate() {
+            assert_eq!(mtc.labels_per_second(), mtc_labels, "{mtc:?}");
+        }
+    }
+}
+
 /// **MTC's two-bit code names 24, 25, 29.97 drop-frame and 30 (M1 p.53)**: the
 /// code reads back to the rate and the rate to its code, only the low two bits
 /// are read, and each converts to the timecode rate of the same speed.

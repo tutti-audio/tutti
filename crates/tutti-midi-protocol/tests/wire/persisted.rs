@@ -72,7 +72,14 @@ fn a_key_table_and_a_change_list_read_back_only_at_their_wire_counts() {
         let json = serde_json::to_value(&words).unwrap();
         let refused = serde_json::from_value::<KeyTable>(json).unwrap_err();
         assert!(refused.to_string().contains("128"), "{len}: {refused}");
+        assert!(
+            refused.to_string().contains(&len.to_string()),
+            "{len}: {refused}"
+        );
     }
+
+    let words = vec![TuningFrequency::NO_CHANGE; 5];
+    assert_eq!(KeyTable::try_from(words).unwrap_err().count(), 5);
 
     let change = KeyChange {
         key: NoteNumber::of(60),
@@ -84,6 +91,10 @@ fn a_key_table_and_a_change_list_read_back_only_at_their_wire_counts() {
     let too_many = serde_json::to_value(vec![change; 128]).unwrap();
     let refused = serde_json::from_value::<KeyChanges>(too_many).unwrap_err();
     assert!(refused.to_string().contains("127"), "{refused}");
+    assert_eq!(
+        KeyChanges::try_from(vec![change; 128]).unwrap_err().count(),
+        128
+    );
 }
 
 /// A frequency word is 21 bits, and the small tuning values keep their bits.

@@ -75,11 +75,8 @@ impl MtcRate {
     /// frame field.
     #[must_use]
     pub const fn labels_per_second(self) -> u8 {
-        match self {
-            Self::Fps24 => 24,
-            Self::Fps25 => 25,
-            Self::Fps2997Df | Self::Fps30 => 30,
-        }
+        // At most 30, so it fits a byte.
+        self.frame_rate().labels_per_second() as u8
     }
 
     /// The two-bit code on the wire.
@@ -171,11 +168,8 @@ impl SmpteFrameRate {
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,
     /// 30, 30 for the two 29.97 rates).
     pub const fn labels_per_second(self) -> u64 {
-        match self {
-            Self::Fps24 => 24,
-            Self::Fps25 => 25,
-            Self::Fps2997Df | Self::Fps2997Ndf | Self::Fps30 => 30,
-        }
+        let (num, den) = self.ratio();
+        num.div_ceil(den)
     }
 
     /// Reports whether frame *numbers* are skipped to track wall-clock time.
