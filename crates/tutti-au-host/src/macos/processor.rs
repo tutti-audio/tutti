@@ -801,6 +801,11 @@ fn block_reason(error: &AuError) -> &'static str {
 }
 
 impl Processor for AuProcessor {
+    /// Takes the node's own intake: events are sent on in lists of its own, as many as a block needs.
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)

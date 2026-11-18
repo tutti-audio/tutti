@@ -82,6 +82,7 @@ where
         this.declared
             .ports
             .with_events(1, midi_out)
+            .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
@@ -96,6 +97,11 @@ where
     /// over); what was delivered to the plugin is kept.
     fn prepare(&mut self, p: &Prepare) {
         let this = &mut self.client;
+        // What the event input is declared to take in a block: the node's own
+        // intake, at most the Processor's input room (`Processor::event_input`;
+        // the last one seen while it is away). A served plugin has a second cut
+        // at its chunk (`Processor::event_input`).
+        this.event_input = this.event_bound();
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.

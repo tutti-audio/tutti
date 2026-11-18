@@ -351,6 +351,14 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
 }
 
 impl Processor for ClapProcessor {
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        // A list with no MIDI room takes none; one is the least a bound says.
+        self.scratch
+            .input_events
+            .event_input()
+            .unwrap_or(std::num::NonZeroU32::MIN)
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)

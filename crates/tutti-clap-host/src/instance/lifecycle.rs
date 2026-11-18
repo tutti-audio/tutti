@@ -20,18 +20,14 @@ use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_clap_ffi::ActivateError;
-use tutti_graph::{MAX_EVENT_PORT_CAPACITY, note_off_room};
 use tutti_plugin_types::{
-    Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
+    Control, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, SampleFormat, negotiate,
+    taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
 use tutti_types::{MaxBlock, ParamId};
 
-/// The UMPs one block's input note port holds at the most: a graph event
-/// port's largest capacity and the room behind it for note-offs
-/// ([`note_off_room`]).
-const INPUT_PORT_UMPS: usize = note_off_room(MAX_EVENT_PORT_CAPACITY.get() as usize);
 /// The events the plugin's output list holds besides parameter values, in one
 /// block: notes, MIDI, note expressions, SysEx and gestures. A push past it is
 /// refused and counted ([`ClapProcessor::output_events_refused`]).
@@ -293,21 +289,22 @@ impl ClapLoaded {
 }
 
 /// The rooms of the input event list for a block of `max_frames`: the MIDI
-/// the input note port can deliver ([`InputRooms::for_port`] of
-/// [`INPUT_PORT_UMPS`]), the parameter points the host's chunk can arrive with
-/// (`ParameterChanges::point_budget` for the plugin's parameters with a room of
-/// `ParameterQueue::chunk_room`: the chunk's pooled points, and one more in
-/// every queue for the value a skipped block carries, which the bridge
-/// prepends), and the edits the Controller can queue ([`EDIT_CAPACITY`]), the
-/// note expressions ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
-/// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the MIDI
-/// and the parameter points do not count. So a chunk the host's pool bounded
-/// reaches the plugin whole; past it (a set nothing bounded) the list's own
-/// overflow policy applies (`InputEventList::add_param_changes`).
+/// the node is declared to send ([`InputRooms::for_port`] of
+/// [`MIDI_STACK_BOUND`], the node's own intake), the parameter points the
+/// host's chunk can arrive with (`ParameterChanges::point_budget` for the
+/// plugin's parameters with a room of `ParameterQueue::chunk_room`: the
+/// chunk's pooled points, and one more in every queue for the value a skipped
+/// block carries, which the bridge prepends), and the edits the Controller
+/// can queue ([`EDIT_CAPACITY`]), the note expressions
+/// ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
+/// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the
+/// MIDI and the parameter points do not count. So a chunk the host's pool
+/// bounded reaches the plugin whole; past it (a set nothing bounded) the
+/// list's own overflow policy applies (`InputEventList::add_param_changes`).
 fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
-    InputRooms::for_port(INPUT_PORT_UMPS)
+    InputRooms::for_port(MIDI_STACK_BOUND)
         .param_points(param_points)
         .sources(
             EDIT_CAPACITY,
@@ -372,6 +369,26 @@ mod tests {
     use crate::ParamBounds;
     use tutti_midi_protocol::Narrower;
 
+    /// **The input list built for a declared bound reports that bound as what
+    /// it holds**: the Processor's `event_input`, which the node declares, is
+    /// the list's MIDI room over `Narrower::MAX_MESSAGES`, at any block.
+    #[test]
+    fn the_input_list_reports_the_bound_it_was_built_from() {
+        let table = RangeTable {
+            ranges: Vec::new(),
+            claims: true,
+        };
+        for frames in [64usize, 4096] {
+            let rooms = input_rooms(&table, frames);
+            let list = crate::InputEventList::new(rooms);
+            assert_eq!(
+                list.event_input(),
+                Some(MIDI_STACK_BOUND),
+                "{frames} frames"
+            );
+        }
+    }
+
     /// **Activation reserves the pool budget, not parameters × room**: for
     /// 2 000 and 16 384 parameters at 512- and 4096-frame blocks, the input
     /// event list's parameter room is `ParameterChanges::point_budget` of
@@ -411,7 +428,9 @@ mod tests {
                 );
                 assert!(
                     scratch.input_events.events.capacity()
-                        >= INPUT_PORT_UMPS * Narrower::MAX_MESSAGES + input + EDIT_CAPACITY
+                        >= MIDI_STACK_BOUND.get() as usize * Narrower::MAX_MESSAGES
+                            + input
+                            + EDIT_CAPACITY
                 );
                 assert!(3 * input < n * (room + 1));
                 assert_eq!(scratch.output_events.param_room, output);

@@ -312,7 +312,8 @@ pub use metadata::{
     Processing,
 };
 pub use midi::{
-    MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,
+    MIDI_STACK_BOUND, MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi,
+    group_of_port,
 };
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};

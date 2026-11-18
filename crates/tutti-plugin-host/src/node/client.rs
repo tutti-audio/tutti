@@ -155,6 +155,13 @@ pub struct InProcClient<F: Loaded> {
     /// changed, so a re-prepare at the same mode leaves what the session
     /// announced since.
     prepared_mode: tutti_graph::RenderMode,
+    /// The events per block the node declares it accepts on its event input
+    /// (`Shape::event_input_capacity`): `MIDI_STACK_BOUND`, held to `event_room`.
+    pub(super) event_input: std::num::NonZeroU32,
+    /// The room of the last Processor this node saw (`Processor::event_input`),
+    /// kept while the Processor is away (recalled for a restart or lent to the
+    /// realtime end), so the declared bound never rises to the intake's alone.
+    pub(super) event_room: std::num::NonZeroU32,
     /// The parameter events on the event input, as changes only: a slot per
     /// parameter the plugin declared at load and no spares (`closed`: the
     /// node addresses only its declared parameters), the value last
@@ -524,6 +531,7 @@ impl<F: Loaded> InProcClient<F> {
         spares: usize,
         controls: Option<PluginControls>,
         pipeline: Option<Samples>,
+        event_room: Option<std::num::NonZeroU32>,
     ) -> Self {
         // A slot per declared parameter: every parameter can move in one
         // block. Its point room is sized in `prepare`. `spares` is how many
@@ -552,6 +560,15 @@ impl<F: Loaded> InProcClient<F> {
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
         let lost = inner.lock().lost_flag();
+        // The Processor's room: the one on offer, else the predecessor's, else
+        // the node's own intake (a node built before its Processor reached it,
+        // with no predecessor).
+        let event_room = rt
+            .poll(Processor::stop)
+            .map(|processor| processor.event_input())
+            .or(event_room)
+            .unwrap_or(tutti_plugin_types::MIDI_STACK_BOUND);
+        let event_input = event_room;
         let failed = tally();
         let refused = tally();
         let input_refused = tally();
@@ -584,6 +601,8 @@ impl<F: Loaded> InProcClient<F> {
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
+            event_input,
+            event_room,
             params,
             segments,
             phase: Samples(0),
@@ -729,6 +748,24 @@ impl<F: Loaded> InProcClient<F> {
         self.rate_refused = false;
         self.inner.lock().retuned(rate);
         true
+    }
+
+    /// Whether no Processor is held by the realtime end: lent away or not yet
+    /// arrived. A test's view of the recall the declared bound survives.
+    #[cfg(test)]
+    pub(super) fn rt_unlent(&mut self) -> bool {
+        self.rt.held().is_none()
+    }
+
+    /// The events per block the node declares: the node's own intake
+    /// (`MIDI_STACK_BOUND`), at most the room of the Processor's input storage.
+    /// The room is read from the Processor when it is held here and kept across
+    /// a recall.
+    pub(super) fn event_bound(&mut self) -> std::num::NonZeroU32 {
+        if let Some(processor) = self.rt.held() {
+            self.event_room = processor.event_input();
+        }
+        tutti_plugin_types::MIDI_STACK_BOUND.min(self.event_room)
     }
 
     /// Tells the plugin the render mode `p` carries when it is not the mode
@@ -1180,6 +1217,10 @@ mod render_tests {
     }
 
     impl Processor for Scripted {
+        fn event_input(&self) -> std::num::NonZeroU32 {
+            tutti_plugin_types::MIDI_STACK_BOUND
+        }
+
         fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
             if self.fail {
                 return Err(PluginError::Block("scripted failure"));
@@ -1294,6 +1335,10 @@ mod sanitize_tests {
     struct Poisoned;
 
     impl Processor for Poisoned {
+        fn event_input(&self) -> std::num::NonZeroU32 {
+            tutti_plugin_types::MIDI_STACK_BOUND
+        }
+
         fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
             if let PluginAudio::F32(buf) = &mut io.buffer {
                 buf.output().plane_mut(0).samples_mut().copy_from_slice(&[

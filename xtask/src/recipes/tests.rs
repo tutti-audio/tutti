@@ -207,7 +207,7 @@ fn loom_recipes_carry_their_environment() {
     assert_eq!(
         dry("check-loom", &[]),
         [
-            "RUSTFLAGS='--cfg loom' cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi --all-targets -- -D warnings"
+            "RUSTFLAGS='--cfg loom' cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"
         ]
     );
 }
