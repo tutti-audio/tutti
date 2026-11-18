@@ -13,8 +13,8 @@
 //! that ran is counted too ([`BlockLosses`](crate::BlockLosses), read through
 //! [`NodeControls::block_losses`](crate::NodeControls::block_losses)).
 //!
-//! A block is one [`Processor::process`]: the graph's channel slices as
-//! [`PluginAudio`](tutti_plugin_types::PluginAudio), the block's MIDI, parameter chunk and transport as a
+//! A block is one [`Processor::process`]: the graph's channel slices as an
+//! [`InputOutput`](tutti_buffers::InputOutput), the block's MIDI, parameter chunk and transport as a
 //! [`ProcessContext`], and a [`ProcessOutput`] the client owns and clears each
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
@@ -1157,6 +1157,7 @@ mod transport_tests {
 #[cfg(test)]
 mod render_tests {
     use super::*;
+    use tutti_buffers::Float;
     use tutti_plugin_types::{PluginError, PluginIo, PluginResult, WireMidi};
     use tutti_ump::Ump;
 
@@ -1172,7 +1173,7 @@ mod render_tests {
             tutti_plugin_types::MIDI_STACK_BOUND
         }
 
-        fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+        fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
             if self.fail {
                 return Err(PluginError::Block("scripted failure"));
             }
@@ -1277,8 +1278,9 @@ mod render_tests {
 #[cfg(test)]
 mod sanitize_tests {
     use super::*;
+    use tutti_buffers::{ByWidth, Float};
+    use tutti_plugin_types::PluginIo;
     use tutti_plugin_types::PluginResult;
-    use tutti_plugin_types::{PluginAudio, PluginIo};
 
     /// Writes NaN, +inf and -inf among finite samples to its first output channel.
     struct Poisoned;
@@ -1288,15 +1290,15 @@ mod sanitize_tests {
             tutti_plugin_types::MIDI_STACK_BOUND
         }
 
-        fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-            if let PluginAudio::F32(buf) = &mut io.buffer {
-                buf.output().plane_mut(0).samples_mut().copy_from_slice(&[
-                    0.5,
-                    f32::NAN,
-                    f32::INFINITY,
-                    f32::NEG_INFINITY,
-                ]);
-            }
+        fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+            let ByWidth::F32(io) = io.by_width() else {
+                unreachable!("the graph is f32");
+            };
+            io.buffer
+                .output()
+                .plane_mut(0)
+                .samples_mut()
+                .copy_from_slice(&[0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
             Ok(())
         }
 

@@ -3183,6 +3183,7 @@ dependencies = [
  "libloading 0.9.1",
  "tempfile",
  "tutti-au-host",
+ "tutti-buffers",
  "tutti-clap-host",
  "tutti-fixtures",
  "tutti-graph",

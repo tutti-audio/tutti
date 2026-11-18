@@ -7,9 +7,9 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
-    ParameterChanges, PluginAudio, PluginBus, PluginIo, PluginTail, Preset, PresetId,
-    ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange,
-    TransportInfo,
+    ParameterChanges, PluginBus, PluginIo, PluginTail, Preset, PresetId, ProcessContext,
+    ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
+    channel_block,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -1429,7 +1429,7 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
+        buffer: channel_block(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

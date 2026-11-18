@@ -4,8 +4,8 @@
 use tutti_buffers::Float;
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
-    Loaded, MaxBlock, PluginAudio, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor,
-    SampleFormat, SampleRate, Samples,
+    Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat,
+    SampleRate, Samples, channel_block,
 };
 
 /// The default rate.
@@ -28,34 +28,11 @@ pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
 }
 
 /// A sample width a case can render at.
-pub trait Width: Float + Into<f64> + From<f32> {
-    /// The block over `inputs` and `outputs`, in the width's variant.
-    fn audio<'a>(
-        frames: Samples,
-        inputs: &'a [&'a [Self]],
-        outputs: &'a mut [&'a mut [Self]],
-    ) -> PluginAudio<'a>;
-}
+pub trait Width: Float + Into<f64> + From<f32> {}
 
-impl Width for f32 {
-    fn audio<'a>(
-        frames: Samples,
-        inputs: &'a [&'a [Self]],
-        outputs: &'a mut [&'a mut [Self]],
-    ) -> PluginAudio<'a> {
-        PluginAudio::new(frames, inputs, outputs).expect("equal channels")
-    }
-}
+impl Width for f32 {}
 
-impl Width for f64 {
-    fn audio<'a>(
-        frames: Samples,
-        inputs: &'a [&'a [Self]],
-        outputs: &'a mut [&'a mut [Self]],
-    ) -> PluginAudio<'a> {
-        PluginAudio::new(frames, inputs, outputs).expect("equal channels")
-    }
-}
+impl Width for f64 {}
 
 /// One activation, both halves held together.
 pub type Active<L> = tutti_fixtures::Active<Whole<L>>;
@@ -96,7 +73,7 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: S::audio(Samples(frames), &ins, &mut refs),
+            buffer: channel_block(Samples(frames), &ins, &mut refs).expect("equal channels"),
             ctx,
             out: &mut out,
         };

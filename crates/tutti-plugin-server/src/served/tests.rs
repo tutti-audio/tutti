@@ -1,7 +1,8 @@
 //! `Served<F>` against each format's reference plugin.
 
 use super::*;
-use tutti_plugin_types::PluginFormat;
+use tutti_buffers::{Float, InputOutput};
+use tutti_plugin_types::{PluginFormat, ProcessContext, ProcessOutput, Processor, channel_block};
 
 #[cfg(served_au)]
 mod au;
@@ -40,25 +41,31 @@ impl<F: ServerSide> Served<F> {
 /// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
 /// this value's, as a test that calls the plugin needs it (production renders
 /// through [`crate::render::End`], which holds the Processor on its thread).
-impl<F: ServerSide> Render for Served<F> {
+impl<F: ServerSide> Rendering for Served<F> {
     fn features(&self) -> Features {
         self.wiring.features
     }
 
-    fn render<'a>(
+    fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+        // A rate change the plugin refused left it deactivated: silence.
+        let Some(processor) = self.lifecycle.processor() else {
+            io.out.clear();
+            io.buffer.output().silence();
+            return Ok(());
+        };
+        processor.process(io)
+    }
+}
+
+impl<F: ServerSide> Served<F> {
+    /// Renders `buffer` in place, as the pipeline's [`Rendering`] does.
+    fn render_block<'a, S: Float>(
         &mut self,
-        buffer: PluginAudio<'a>,
+        buffer: InputOutput<'a, 'a, 'a, S>,
         ctx: &'a ProcessContext<'a>,
         out: &'a mut ProcessOutput,
     ) -> PluginResult<()> {
-        // A rate change the plugin refused left it deactivated: silence.
-        let Some(processor) = self.lifecycle.processor() else {
-            out.clear();
-            let mut buffer = buffer;
-            buffer.clear_outputs();
-            return Ok(());
-        };
-        buffer.process(processor, ctx, out)
+        self.render(&mut PluginIo { buffer, ctx, out })
     }
 }
 

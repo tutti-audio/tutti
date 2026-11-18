@@ -5,8 +5,9 @@
 
 use super::*;
 use std::time::Instant;
+use tutti_buffers::{ByWidth, Float};
 use tutti_graph::MAX_NODE_TAIL;
-use tutti_plugin_types::{PluginAudio, PluginResult, Processing};
+use tutti_plugin_types::{PluginResult, Processing};
 
 /// A processor that answers a trigger with `delay` frames of nothing, then a
 /// held `LEVEL` for `ring` more frames. An effect is triggered by any non-zero
@@ -60,10 +61,25 @@ impl Processor for Fake {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let PluginAudio::F32(buf) = &mut io.buffer else {
-            unreachable!("the probe renders 32-bit");
-        };
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+        match io.by_width() {
+            ByWidth::F32(io) => self.render(io),
+            ByWidth::F64(_) => unreachable!("the probe renders 32-bit"),
+        }
+    }
+
+    fn stop(&mut self) {}
+
+    fn reset(&mut self) {
+        self.age = None;
+        self.held = false;
+    }
+}
+
+impl Fake {
+    /// One 32-bit block.
+    fn render(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+        let buf = &mut io.buffer;
         let frames = buf.frames().0;
         let (input, mut output) = buf.split();
         let mut events = io.ctx.midi_events.iter().peekable();
@@ -87,13 +103,6 @@ impl Processor for Fake {
             }
         }
         Ok(())
-    }
-
-    fn stop(&mut self) {}
-
-    fn reset(&mut self) {
-        self.age = None;
-        self.held = false;
     }
 }
 
@@ -535,7 +544,7 @@ impl Processor for Failing {
     fn event_input(&self) -> std::num::NonZeroU32 {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
-    fn process(&mut self, _: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, _: &mut PluginIo<'_, S>) -> PluginResult<()> {
         Err(PluginError::Block("no render today"))
     }
     fn stop(&mut self) {}

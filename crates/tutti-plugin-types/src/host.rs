@@ -26,13 +26,13 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Instant;
 
 use dpi::Size;
-use tutti_buffers::{Float, InputOutput};
+use tutti_buffers::{ByWidth, Float, InputOutput, OverFloat};
 
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
-    ProcessWake, SampleRate, Samples, WindowHandle,
+    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
+    SampleRate, Samples, WindowHandle, channel_block,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -418,7 +418,7 @@ pub trait Processor: Send {
     /// # Errors
     ///
     /// [`PluginError::Process`] when the plugin failed the block.
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()>;
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()>;
 
     /// Ends processing (CLAP `stop_processing`, VST3 `setProcessing(false)`) so
     /// the realtime thread can hand the Processor back. Realtime. Processing
@@ -901,43 +901,88 @@ pub fn process_block<P: Processor, S: Float>(
     frames: Samples,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
-) -> PluginResult<()>
-where
-    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
-{
+) -> PluginResult<()> {
     let mut table: ChannelTable<&mut [S]> = outputs.iter_mut().map(|o| &mut **o).collect();
-    let audio = PluginAudio::new(frames, inputs, &mut table)
+    let buffer = channel_block(frames, inputs, &mut table)
         .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
-    audio.process(processor, ctx, out)
+    processor.process(&mut PluginIo { buffer, ctx, out })
 }
 
-impl<'a> PluginAudio<'a> {
-    /// This block through `processor`, whichever width it carries.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginError::Process`] when the plugin failed the block.
-    pub fn process<P: Processor>(
-        self,
-        processor: &mut P,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
-        processor.process(&mut PluginIo {
-            buffer: self,
-            ctx,
-            out,
-        })
-    }
-}
-
-/// One block's buffers, inputs and outputs.
+/// One block's buffers at the sample width `S`, inputs and outputs.
 #[derive(Debug)]
-pub struct PluginIo<'a> {
-    /// The channel tables, in the width the plugin was activated at.
-    pub buffer: PluginAudio<'a>,
+pub struct PluginIo<'a, S: Float> {
+    /// The channel tables.
+    pub buffer: InputOutput<'a, 'a, 'a, S>,
     /// The block's MIDI, transport and automation.
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.
     pub out: &'a mut ProcessOutput,
+}
+
+/// The shape of a borrowed [`PluginIo`] over a float width: what
+/// [`PluginIo::by_width`] holds at `f32` and at `f64`.
+#[derive(Debug)]
+pub struct IoAt<'x, 'a>(std::marker::PhantomData<&'x mut PluginIo<'a, f32>>);
+
+impl<'x, 'a> OverFloat for IoAt<'x, 'a> {
+    type At<S: Float> = &'x mut PluginIo<'a, S>;
+}
+
+impl<'a, S: Float> PluginIo<'a, S> {
+    /// This block as its `f32` or its `f64` self, borrowed: what a format
+    /// whose ABI width is fixed at activation matches against that width, once
+    /// per block. Nothing is converted or copied.
+    #[must_use]
+    pub fn by_width(&mut self) -> ByWidth<IoAt<'_, 'a>> {
+        S::by_width::<IoAt<'_, 'a>>(self)
+    }
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    /// A 64-bit block is the `F64` arm with its samples unrounded, and what is
+    /// written through the arm is what the caller's outputs hold: the view is
+    /// the same words, not a copy.
+    #[test]
+    fn a_wide_block_is_the_f64_arm_and_writes_through() {
+        let wide = 1.0f64 + f64::EPSILON;
+        let input = [wide; 4];
+        let inputs = [&input[..]];
+        let mut l = [0.0f64; 4];
+        let mut outputs = [&mut l[..]];
+        let ctx = ProcessContext::new();
+        let mut out = ProcessOutput::default();
+        let buffer = channel_block(Samples(4), &inputs, &mut outputs).expect("equal lengths");
+        let mut io = PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        };
+        let ByWidth::F64(io) = io.by_width() else {
+            panic!("an f64 block is the F64 arm");
+        };
+        let (input, mut output) = io.buffer.split();
+        assert_eq!(input.plane(0).samples(), &[wide; 4]);
+        output.plane_mut(0).samples_mut().fill(-wide);
+        assert_eq!(l, [-wide; 4]);
+    }
+
+    /// A 32-bit block is the `F32` arm: a format activated at 64 bits sees
+    /// the other width and refuses.
+    #[test]
+    fn a_narrow_block_is_the_f32_arm() {
+        let mut l = [0.25f32; 4];
+        let mut outputs = [&mut l[..]];
+        let ctx = ProcessContext::new();
+        let mut out = ProcessOutput::default();
+        let buffer = channel_block(Samples(4), &[], &mut outputs).expect("one plane");
+        let mut io = PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        };
+        assert!(matches!(io.by_width(), ByWidth::F32(_)));
+    }
 }

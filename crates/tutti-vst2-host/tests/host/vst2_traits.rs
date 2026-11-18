@@ -14,8 +14,8 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
-    MaxBlock, Notice, ParameterChanges, PluginAudio, PluginError, PluginIo, Prepare,
-    ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
+    MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
+    ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage, channel_block,
 };
 use tutti_ump::{Address, MidiChannel, MidiGroup};
 use tutti_units::Normalized;
@@ -190,7 +190,7 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(
+        buffer: channel_block(
             tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,
@@ -234,7 +234,7 @@ fn render_out(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Proces
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(Samples(BLOCK), &inputs, &mut outputs).expect("equal channels"),
+        buffer: channel_block(Samples(BLOCK), &inputs, &mut outputs).expect("equal channels"),
         ctx,
         out: &mut out,
     };
@@ -286,7 +286,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let mut out = ProcessOutput::default();
     processor
         .process(&mut PluginIo {
-            buffer: PluginAudio::new(
+            buffer: channel_block(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,
@@ -306,7 +306,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let inputs32 = [input32.as_slice(), input32.as_slice()];
     let mut outputs32 = [left32.as_mut_slice(), right32.as_mut_slice()];
     let refused = processor.process(&mut PluginIo {
-        buffer: PluginAudio::new(
+        buffer: channel_block(
             tutti_plugin_types::Samples(inputs32[0].len()),
             &inputs32,
             &mut outputs32,
@@ -417,7 +417,7 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: PluginAudio::new(
+            buffer: channel_block(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,
@@ -462,7 +462,7 @@ fn a_block_with_automation_midi_and_transport_does_not_allocate() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: PluginAudio::new(
+            buffer: channel_block(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,

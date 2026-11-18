@@ -24,7 +24,7 @@ use tutti_clap_host::{ClapError, ClapLoaded, LoadOptions};
 use tutti_clap_test_plugin::ParamStateCapture;
 use tutti_clap_test_plugin::refusal::ACTIVATE_REFUSE_NONE;
 use tutti_plugin_types::Control;
-use tutti_plugin_types::PluginAudio;
+use tutti_plugin_types::channel_block;
 use tutti_plugin_types::{LoadStage, PluginError};
 
 /// The sample rate every fixture loads and activates at. The probe accepts it,
@@ -343,7 +343,7 @@ fn a_plugin_still_processes_after_a_refused_activation() {
     let inputs: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = PluginAudio::new(
+    let mut buffer = channel_block(
         tutti_plugin_types::Samples(inputs[0].len()),
         &inputs,
         &mut outputs,

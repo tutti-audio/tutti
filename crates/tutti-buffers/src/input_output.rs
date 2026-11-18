@@ -3,7 +3,7 @@
 
 use tutti_units::Samples;
 
-use crate::{BufferError, Planes, PlanesMut, Sample};
+use crate::{BufferError, ByWidth, Float, OverFloat, Planes, PlanesMut, Sample};
 
 /// One block: its frame count, and its input and output views at that count.
 ///
@@ -60,6 +60,26 @@ impl core::fmt::Display for BlockSide {
             Self::Input => "input",
             Self::Output => "output",
         })
+    }
+}
+
+/// The shape of a borrowed [`InputOutput`] over a float width: what
+/// [`InputOutput::by_width`] holds at `f32` and at `f64`.
+#[derive(Debug)]
+pub struct AtMut<'x, 'i, 's, 'a>(core::marker::PhantomData<&'x mut InputOutput<'i, 's, 'a, f32>>);
+
+impl<'x, 'i, 's, 'a> OverFloat for AtMut<'x, 'i, 's, 'a> {
+    type At<S: Float> = &'x mut InputOutput<'i, 's, 'a, S>;
+}
+
+impl<'i, 's, 'a, S: Float> InputOutput<'i, 's, 'a, S> {
+    /// This block as its `f32` or its `f64` self, borrowed: the type-level
+    /// fact that `S` is one of the two, for code written for one width (a
+    /// plugin format's ABI) that takes the graph's. Nothing is converted or
+    /// copied.
+    #[must_use]
+    pub fn by_width(&mut self) -> ByWidth<AtMut<'_, 'i, 's, 'a>> {
+        S::by_width::<AtMut<'_, 'i, 's, 'a>>(self)
     }
 }
 

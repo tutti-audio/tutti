@@ -17,8 +17,8 @@ use tutti_clap_test_plugin::{
     PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, ProcessCapture, Site, ThreadCapture,
 };
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginAudio, PluginError, PluginIo, PluginTail, Prepare,
-    ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate, Samples,
+    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
+    ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate, Samples, channel_block,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -137,7 +137,7 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(
+                buffer: channel_block(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -155,7 +155,7 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(
+                buffer: channel_block(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -637,7 +637,7 @@ fn an_errored_block_does_not_allocate() {
     let inputs = [input.as_slice(), input.as_slice()];
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: PluginAudio::new(
+        buffer: channel_block(
             tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,

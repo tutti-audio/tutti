@@ -7,10 +7,10 @@ use tutti_graph::UmpAt;
 
 use vst3::Steinberg::Vst::ProcessSetup;
 
-use tutti_buffers::InputOutput;
+use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
-    ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginAudio,
-    PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
+    ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginError, PluginIo,
+    PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::{DrainBeat, RtVec, Tally, TallyWriter, tally};
 use tutti_types::ChannelLayout;
@@ -901,20 +901,18 @@ impl ProcessorAny {
     /// [`PluginError::Block`] when the plugin failed the block or the buffer's
     /// sample format is not the one the processor was activated with. Neither
     /// allocates.
-    pub fn render(
+    pub fn render<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, '_, '_, S>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
-        match (buffer, self) {
-            (PluginAudio::F32(buf), Self::F32(p)) => p.process_shared(buf, ctx, out),
-            (PluginAudio::F64(buf), Self::F64(p)) => p.process_shared(buf, ctx, out),
-            (PluginAudio::F32(_), Self::F64(_)) | (PluginAudio::F64(_), Self::F32(_)) => {
-                Err(PluginError::Block(
-                    "the block's sample format is not the one the plugin was activated with",
-                ))
-            }
+        match (self, buffer.by_width()) {
+            (Self::F32(p), ByWidth::F32(buf)) => p.process_shared(buf, ctx, out),
+            (Self::F64(p), ByWidth::F64(buf)) => p.process_shared(buf, ctx, out),
+            _ => Err(PluginError::Block(
+                "the block's sample format is not the one the plugin was activated with",
+            )),
         }
     }
 }
@@ -931,7 +929,7 @@ impl Processor for ProcessorAny {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)
     }

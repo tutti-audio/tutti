@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
+use tutti_buffers::{ByWidth, Float};
 use tutti_fixtures::main_thread;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
@@ -26,9 +27,9 @@ use tutti_plugin_host::{HostedNode, InProcClient, NodeControls, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
-    MainWorkHandle, Origin, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor, PluginError,
-    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderModeSupport,
-    RestartRules, Samples, Speaker, Stuck, WindowHandle,
+    MainWorkHandle, Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, PluginTail, Prepare, Processor, Refused, RenderModeSupport, RestartRules,
+    Samples, Speaker, Stuck, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -346,7 +347,28 @@ impl Processor for RecProcessor {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+        match io.by_width() {
+            ByWidth::F32(io) => self.render(io),
+            ByWidth::F64(_) => unreachable!("the graph is f32"),
+        }
+    }
+
+    fn stop(&mut self) {}
+
+    fn reset(&mut self) {
+        self.pos = 0;
+        self.rig.resets.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn chunk(&self) -> Option<NonZeroUsize> {
+        self.rig.chunk
+    }
+}
+
+impl RecProcessor {
+    /// One 32-bit block: the graph's.
+    fn render(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
         if self.rig.fail.load(Ordering::Relaxed) {
             return Err(PluginError::Block(FAILURE));
         }
@@ -356,9 +378,7 @@ impl Processor for RecProcessor {
                 offset: 0,
                 ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
             }));
-        let PluginAudio::F32(buffer) = &mut io.buffer else {
-            unreachable!("the graph is f32");
-        };
+        let buffer = &mut io.buffer;
         let frames = buffer.frames().0;
         let (input, mut output) = buffer.split();
         let poison = self.rig.poison.load(Ordering::Relaxed);
@@ -412,17 +432,6 @@ impl Processor for RecProcessor {
             }
         }
         Ok(())
-    }
-
-    fn stop(&mut self) {}
-
-    fn reset(&mut self) {
-        self.pos = 0;
-        self.rig.resets.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn chunk(&self) -> Option<NonZeroUsize> {
-        self.rig.chunk
     }
 }
 

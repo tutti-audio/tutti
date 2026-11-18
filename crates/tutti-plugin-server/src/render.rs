@@ -43,11 +43,12 @@ use std::time::{Duration, Instant};
 use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
 use std::borrow::Cow;
+use tutti_buffers::Float;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
-    BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginAudio, PluginResult,
-    ProcessContext, ProcessOutput, Processor, SampleFormat,
+    BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
+    ProcessOutput, Processor, SampleFormat,
 };
 use tutti_rt::{
     Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
@@ -57,7 +58,7 @@ use crate::audio_pipeline::{
     AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
 };
 use crate::main_loop::Bell;
-use crate::served::Render;
+use crate::served::{Render, Rendering};
 use crate::ties::{Notify, Patience, Ties, ties};
 use crate::transport::Transport;
 
@@ -137,26 +138,20 @@ impl<P: Processor> End<P> {
     }
 }
 
-impl<P: Processor + 'static> Render for End<P> {
+impl<P: Processor + 'static> Rendering for End<P> {
     fn features(&self) -> Features {
         self.features
     }
 
-    fn render<'a>(
-        &mut self,
-        buffer: PluginAudio<'a>,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
+    fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         // A Processor that is not here (recalled for a rate change, or
         // refused): the block is silence and the plugin is not touched.
         let Some(processor) = self.rt.held() else {
-            out.clear();
-            let mut buffer = buffer;
-            buffer.clear_outputs();
+            io.out.clear();
+            io.buffer.output().silence();
             return Ok(());
         };
-        buffer.process(processor, ctx, out)
+        processor.process(io)
     }
 }
 
@@ -1116,17 +1111,13 @@ mod tests {
         }
     }
 
-    impl Render for Faulty {
+    impl Rendering for Faulty {
         fn features(&self) -> Features {
             Features::empty()
         }
 
-        fn render<'a>(
-            &mut self,
-            _buffer: PluginAudio<'a>,
-            _ctx: &'a ProcessContext<'a>,
-            out: &'a mut ProcessOutput,
-        ) -> PluginResult<()> {
+        fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+            let out = &mut *io.out;
             self.blocks += 1;
             let fails = match &mut self.mode {
                 Mode::Fail => true,

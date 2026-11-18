@@ -51,6 +51,8 @@ name = "tutti_plugin_probe"
 path = "src/lib.rs"
 
 [dev-dependencies]
+# `measure/tests.rs`: the sample width `Float` a test Processor is generic over.
+tutti-buffers = { path = "../tutti-buffers" }
 # `tests/vst2_not_activated.rs`: the reference VST2 plugin, found beside the test
 # binary, and `libloading` to read what it recorded.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }

@@ -45,7 +45,7 @@ use support::main_thread;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, ParameterChanges};
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{HOLE_NONE, ProcessCapture};
-use tutti_plugin_types::PluginAudio;
+use tutti_plugin_types::channel_block;
 use tutti_units::ParamId;
 
 /// CLAP's `PARAM_VALUE` wire type, pinned rather than imported: it is the value
@@ -196,7 +196,7 @@ fn drive_block(
     let ins_owned: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0f32; frames]).collect();
     let mut outs: Vec<&mut [f32]> = outs_owned.iter_mut().map(|v| &mut v[..]).collect();
     let ins: Vec<&[f32]> = ins_owned.iter().map(|v| &v[..]).collect();
-    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+    let mut buffer = channel_block(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
         .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }

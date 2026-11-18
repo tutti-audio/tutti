@@ -8,14 +8,14 @@
 
 use std::marker::PhantomData;
 
-use tutti_buffers::Float;
+use tutti_buffers::{Float, InputOutput};
 use tutti_clap_host::{
     ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{
-    MainThreadMarker, MaxBlock, PluginAudio, PluginError, Prepare, SampleFormat, SampleRate,
-    Samples,
+    MainThreadMarker, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
+    channel_block,
 };
 
 /// A sample width a suite names with a type (`Active<f32>`): test-side sugar
@@ -95,7 +95,7 @@ pub trait ActiveExt<T: Width> {
     /// One block through the Processor.
     fn process(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>>;
     /// [`ClapProcessor::reset`].
@@ -141,7 +141,7 @@ pub trait ActiveExt<T: Width> {
 impl<T: Width> ActiveExt<T> for Active<T> {
     fn process(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>> {
         self.processor().process(buffer, ctx)
@@ -224,7 +224,7 @@ pub fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessConte
     let in_r = vec![0.0f32; frames];
     let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
     let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+    let mut buffer = channel_block(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
         .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }

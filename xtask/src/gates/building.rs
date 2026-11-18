@@ -231,12 +231,6 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
     ),
-    ty(
-        "crates/tutti-plugin-types/src/audio.rs",
-        "PluginAudio::new",
-        CTOR,
-        "the same validity as `InputOutput::new` over two channel tables: their frame counts must agree",
-    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",

@@ -422,7 +422,7 @@ boundary in one sentence without "and". The plugin hosting split (`Loaded` / `Pr
 `Controller` / `Control`, and `AnyThread` / `Health` beside them) passes — each
 answers a *different* "why is this not just a graph node?", which is why they
 are separate doc comments and not one. (The per-capability traits of the first
-split, `PluginMeta` / `PluginAudio` / `PluginParams` / `PluginState` /
+split, `PluginMeta` / the audio trait / `PluginParams` / `PluginState` /
 `PluginPresets` under a blanket-impl `PluginInstance`, were the server's own
 dispatch seam; one generic `Served<F>` replaced it and they are deleted.) The failure mode to watch is reaching for a **compile-time** guarantee where
 the quantity is genuinely runtime, which is exactly how `AudioIn` ended up with a

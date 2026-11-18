@@ -7,13 +7,13 @@
 //! polls itself (`Rig::threaded`).
 
 use super::*;
+use crate::channel_block;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
-    HostOp, MaxBlock, PluginAudio, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
+    HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
     ProcessOutput, Processor, RenderMode, Request, RequestWord, SampleFormat, Samples, Stage,
     taken,
 };
-use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -96,14 +96,8 @@ impl Rig {
         let ctx = ProcessContext::new();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: PluginAudio::F32(
-                InputOutput::new(
-                    tutti_plugin_types::Samples(inputs[0].len()),
-                    Planes::new(&inputs).expect("two planes"),
-                    PlanesMut::new(&mut outputs).expect("two planes"),
-                )
+            buffer: channel_block(Samples(inputs[0].len()), &inputs, &mut outputs)
                 .expect("equal lengths"),
-            ),
             ctx: &ctx,
             out: &mut out,
         };
@@ -503,14 +497,8 @@ fn the_processor_renders_without_allocating() {
     let processor = rig.lifecycle.processor().expect("held");
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: PluginAudio::F32(
-            InputOutput::new(
-                tutti_plugin_types::Samples(inputs[0].len()),
-                Planes::new(&inputs).expect("two planes"),
-                PlanesMut::new(&mut outputs).expect("two planes"),
-            )
+        buffer: channel_block(Samples(inputs[0].len()), &inputs, &mut outputs)
             .expect("equal lengths"),
-        ),
         ctx: &ctx,
         out: &mut out,
     };

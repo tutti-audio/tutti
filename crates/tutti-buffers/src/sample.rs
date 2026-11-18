@@ -331,6 +331,37 @@ impl Sample for f64 {
         <Self as sealed::Sealed>::from_f64_clipped(x).0
     }
 }
+/// A type built over a float width: `At<S>` for each `S: Float`. The shape
+/// [`Float::by_width`] takes a value of, and what [`ByWidth`] holds one of at
+/// each width.
+pub trait OverFloat {
+    /// The type at width `S`.
+    type At<S: Float>;
+}
+
+/// A value of `T::At<S>` for a `S` that is `f32` or `f64`, as the one it is.
+///
+/// Made by [`Float::by_width`], and it carries no conversion: `F32` holds the
+/// `f32` value of the shape, `F64` the `f64` one.
+pub enum ByWidth<T: OverFloat> {
+    /// The value, at `f32`.
+    F32(T::At<f32>),
+    /// The value, at `f64`.
+    F64(T::At<f64>),
+}
+
+impl<T: OverFloat> core::fmt::Debug for ByWidth<T>
+where
+    T::At<f32>: core::fmt::Debug,
+    T::At<f64>: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::F32(x) => f.debug_tuple("F32").field(x).finish(),
+            Self::F64(x) => f.debug_tuple("F64").field(x).finish(),
+        }
+    }
+}
 
 /// A [`Sample`] that arithmetic runs in: `f32` or `f64`.
 ///
@@ -360,6 +391,16 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// The value as an `f32`: rounded to nearest even from `f64`.
     #[must_use]
     fn to_f32(self) -> f32;
+
+    /// `x`, a value built over this width, as the `f32` or the `f64` one it
+    /// is: the type-level fact that `Self` is one of the two, in a form a
+    /// `match` reads. No conversion happens and nothing is allocated.
+    ///
+    /// What a block does to pass through code written for one width (a plugin
+    /// format's ABI) while it is generic over the graph's. `T` names the shape
+    /// of `x` ([`OverFloat`]); [`InputOutput::by_width`] is the usual caller.
+    #[must_use]
+    fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T>;
 }
 
 impl Float for f32 {
@@ -371,6 +412,10 @@ impl Float for f32 {
     #[inline]
     fn to_f32(self) -> f32 {
         self
+    }
+    #[inline]
+    fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T> {
+        ByWidth::F32(x)
     }
 }
 
@@ -384,11 +429,39 @@ impl Float for f64 {
     fn to_f32(self) -> f32 {
         self as f32
     }
+    #[inline]
+    fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T> {
+        ByWidth::F64(x)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Float;
+    use super::{ByWidth, Float, OverFloat};
+
+    /// A value over `S` is the `f32` arm at `f32` and the `f64` arm at
+    /// `f64`, and keeps its contents.
+    #[test]
+    fn by_width_names_the_arm_of_the_width_it_was_made_at() {
+        struct Words;
+        impl OverFloat for Words {
+            type At<S: Float> = Vec<S>;
+        }
+        fn arm<S: Float>(words: Vec<S>) -> &'static str {
+            match S::by_width::<Words>(words) {
+                ByWidth::F32(w) => {
+                    assert_eq!(w, [0.5f32]);
+                    "f32"
+                }
+                ByWidth::F64(w) => {
+                    assert_eq!(w, [0.5f64]);
+                    "f64"
+                }
+            }
+        }
+        assert_eq!(arm(vec![0.5f32]), "f32");
+        assert_eq!(arm(vec![0.5f64]), "f64");
+    }
 
     #[test]
     fn minus_3_db_is_one_over_root_two_at_both_widths() {
