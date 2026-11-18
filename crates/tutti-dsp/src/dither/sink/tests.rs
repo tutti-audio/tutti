@@ -79,22 +79,29 @@ fn the_top_step_and_a_nan_are_not_clips() {
     assert_eq!(sink.into_inner().got, [32767, 0, 0, -32768]);
 }
 
-/// TPDF is `r1 - r2`, within one LSB, so a silent block rounds to -1, 0 or 1
-/// and never strays past 2 LSB; its mean over many blocks is 0. The rounded
-/// noise has the TPDF variance `lsb^2/6` plus the rounding's `lsb^2/12`, which
-/// is `1/4` in LSBs squared, so the mean of `n` samples is within six standard
-/// deviations, `6 * sqrt(1 / (4 n))`.
+/// TPDF is `r1 - r2`, within one LSB, so a silent block rounds to -1, 0 or 1:
+/// `|r1 - r2| < 1/2` (probability `3/4`) rounds to 0, and each side past it
+/// (probability `1/8`) to one step. So the nonzero fraction is `1/4`, with
+/// standard deviation `sqrt(3 / (16 n))` over `n` samples, and the rounded
+/// noise's variance is `1/4` in LSBs squared, so its mean is within six
+/// standard deviations, `6 * sqrt(1 / (4 n))`, of 0. RPDF or a doubled LSB
+/// fails the fraction or the bound.
 #[test]
-fn tpdf_on_silence_stays_within_two_lsb_and_averages_to_zero() {
+fn tpdf_on_silence_is_one_step_a_quarter_of_the_time_and_averages_to_zero() {
     let silence = vec![0.0f32; 4096 * 2];
     let mut sink = tpdf_i16();
     for _ in 0..64 {
         sink.write(stereo(&silence)).unwrap();
     }
     let got = sink.into_inner().got;
-    assert!(got.iter().all(|v| v.abs() <= 2), "past 2 LSB");
-    assert!(got.iter().any(|&v| v != 0), "the noise is audible");
+    assert!(got.iter().all(|v| v.abs() <= 1), "past 1 LSB");
     let n = got.len() as f64;
+    let nonzero = got.iter().filter(|&&v| v != 0).count() as f64 / n;
+    let spread = 6.0 * (3.0 / (16.0 * n)).sqrt();
+    assert!(
+        (nonzero - 0.25).abs() <= spread,
+        "nonzero fraction {nonzero}, not 1/4 within {spread}"
+    );
     let mean = got.iter().map(|&v| f64::from(v)).sum::<f64>() / n;
     let bound = 6.0 * (0.25 / n).sqrt();
     assert!(mean.abs() <= bound, "mean {mean} past {bound}");
