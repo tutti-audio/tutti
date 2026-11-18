@@ -68,7 +68,8 @@ pub(super) struct Record<F: RingFloat = f32> {
     /// What the control side reads of this stream ([`Stream::status`](crate::Stream::status)).
     status: Arc<StatusCell>,
     /// How full the ring was at the last refill, as a fraction of its
-    /// capacity: what the loop asks whether the stream is healthy by.
+    /// capacity: what the loop asks whether the stream is healthy by. A ring
+    /// occupancy, not audio, so no sample format or unit applies.
     fill: f32,
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).

@@ -53,14 +53,15 @@
 //! instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
 //! paused voice holds no refill back.
 
+use tutti_buffers::Float;
 use tutti_graph::FadeLaw;
-use tutti_types::{SamplePosition, Samples};
+use tutti_rt::RingFloat;
+use tutti_types::{Amplitude, MAX_CHANNELS, ReadRate, SamplePosition, Samples};
 
-use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader};
-use tutti_types::MAX_CHANNELS;
+use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader, straight};
 
 use super::interp::{Place, hermite_lanes, interpolate_taps};
-use crate::lanes::{Gather, Lane};
+use crate::lanes::{Gather, Lane, audible_gain};
 
 /// Output frames of continuation rendered at a discontinuity: the refill gap
 /// plus the fade, with room to spare.
@@ -69,7 +70,7 @@ pub(crate) const OLD_FRAMES: usize = 2_048;
 /// How far a frame's position may sit from the last one's continuation before
 /// it counts as a jump. Under a frame: a seat re-anchored by the clock lands on
 /// its continuation to within rounding.
-const JUMP_FRAMES: f64 = 0.5;
+const JUMP: SamplePosition = SamplePosition::new(0.5);
 
 /// A crossfade in progress.
 #[derive(Clone, Copy, Debug)]
@@ -88,37 +89,37 @@ impl Fade {
     /// [`FadeLaw::EqualAmplitude`] (the two sides are one source, in phase), and
     /// 1 from the fade's end on.
     #[inline]
-    fn weight(frames: usize, k: usize) -> f32 {
-        FadeLaw::EqualAmplitude.between(0.0, 1.0, k, frames)
+    fn weight<F: Float>(frames: usize, k: usize) -> F {
+        F::from_f32(FadeLaw::EqualAmplitude.between(0.0, 1.0, k, frames))
     }
 }
 
 /// The reader's mutable state, apart from the ring it reads (so a block can
 /// borrow the ring's map while it changes this).
 #[derive(Clone, Debug)]
-struct State {
+struct State<F: Float> {
     /// Output width.
     width: usize,
     /// The ring's width (the file's channels).
     src: usize,
     /// The continuation rendered at the last discontinuity, output frames of
     /// `width` samples (before gain), and a spare to render the next into.
-    old: Vec<f32>,
-    spare: Vec<f32>,
+    old: Vec<F>,
+    spare: Vec<F>,
     old_len: usize,
     old_k: usize,
     fade: Option<Fade>,
     /// The map epoch whose switch this reader has crossed.
     applied_epoch: Option<u64>,
     /// The straight position of the last frame read, `None` after silence.
-    last: Option<f64>,
+    last: Option<SamplePosition>,
     /// The segment the last block read in.
     segment: u64,
     /// Frames sounded since the last underrun, while ramping back in.
     recover: Option<usize>,
     /// The highest straight position read (tests observe consumption).
     #[cfg(test)]
-    read_to: f64,
+    read_to: SamplePosition,
     /// Runs read along time by `steady_lanes` (tests observe the path).
     #[cfg(test)]
     steady: usize,
@@ -126,22 +127,22 @@ struct State {
 
 /// A live voice's reader over its stream's ring.
 #[derive(Debug)]
-pub(crate) struct LiveRead {
-    ring: SharedReader,
+pub(crate) struct LiveRead<F: RingFloat = f32> {
+    ring: SharedReader<F>,
     /// The ring's one reader, this voice's alone (see the module docs);
     /// `None` once severed, in a clone, or for a ring whose reader was taken.
     ///
     /// It holds the reader of the ring's published control (the map, and the
     /// direction and applied loop beside it) too, registered beside the
     /// position reader when the voice is built: a block lends it.
-    reader: Option<RingReader>,
+    reader: Option<RingReader<F>>,
     /// Where the ring's channels go in the voice's frame: built once, on the
     /// control side, from the file's topology (`Place::for_topology`).
-    place: Place,
-    st: State,
+    place: Place<F>,
+    st: State<F>,
 }
 
-impl Clone for LiveRead {
+impl<F: RingFloat> Clone for LiveRead<F> {
     /// The same ring and read state, without the reader: a clone renders
     /// silence until it is severed and handed a file (see the module docs).
     fn clone(&self) -> Self {
@@ -154,17 +155,17 @@ impl Clone for LiveRead {
     }
 }
 
-impl LiveRead {
+impl<F: RingFloat> LiveRead<F> {
     /// A reader over `ring` through its one `reader` and the reader of the
     /// ring's control registered beside it (`None`: silent), `width` wide (at most
     /// [`MAX_CHANNELS`]), placing the ring's channels by `place`. Both
     /// are registered by whoever built them, on the control side: building the
     /// pair is what may allocate, and this does not.
     pub(crate) fn new(
-        ring: SharedReader,
-        reader: Option<RingReader>,
+        ring: SharedReader<F>,
+        reader: Option<RingReader<F>>,
         width: usize,
-        place: Place,
+        place: Place<F>,
     ) -> Self {
         let src = ring.channels().count().max(1) as usize;
         Self {
@@ -174,8 +175,8 @@ impl LiveRead {
             st: State {
                 width,
                 src,
-                old: vec![0.0; OLD_FRAMES * width],
-                spare: vec![0.0; OLD_FRAMES * width],
+                old: vec![F::ZERO; OLD_FRAMES * width],
+                spare: vec![F::ZERO; OLD_FRAMES * width],
                 old_len: 0,
                 old_k: 0,
                 fade: None,
@@ -185,7 +186,7 @@ impl LiveRead {
                 segment: 0,
                 recover: None,
                 #[cfg(test)]
-                read_to: 0.0,
+                read_to: SamplePosition::new(0.0),
                 #[cfg(test)]
                 steady: 0,
             },
@@ -193,19 +194,19 @@ impl LiveRead {
     }
 
     /// Where the ring's channels go in the voice's frame.
-    pub(crate) fn place(&self) -> &Place {
+    pub(crate) fn place(&self) -> &Place<F> {
         &self.place
     }
 
     /// The ring.
-    pub(crate) fn ring(&self) -> &SharedReader {
+    pub(crate) fn ring(&self) -> &SharedReader<F> {
         &self.ring
     }
 
     /// The control as the voice's reader lends it (tests): the value one
     /// block's lend would hold now. `None` severed.
     #[cfg(test)]
-    pub(crate) fn lent_control(&mut self) -> Option<crate::streamer::RingControl> {
+    pub(crate) fn lent_control(&mut self) -> Option<crate::streamer::RingControl<F>> {
         self.reader.as_mut().map(|reader| {
             reader
                 .block(
@@ -222,7 +223,7 @@ impl LiveRead {
 
     /// The highest straight position read (tests).
     #[cfg(test)]
-    pub(crate) fn read_to(&self) -> f64 {
+    pub(crate) fn read_to(&self) -> SamplePosition {
         self.st.read_to
     }
 
@@ -284,22 +285,23 @@ impl LiveRead {
     /// plays such a frame as `read_ring` reads it, gained), so the same
     /// samples bit for bit; anything else reads a frame at a time.
     #[allow(clippy::too_many_arguments)] // one block's read, and where it goes
-    pub(crate) fn render<F: FnMut(usize, &[f32])>(
+    pub(crate) fn render<E: FnMut(usize, &[F])>(
         &mut self,
         positions: &[Option<SamplePosition>],
         segment: u64,
-        rate: f64,
+        rate: ReadRate,
         declick: usize,
-        gain: f32,
+        gain: Amplitude,
         state: &Cells,
         at: usize,
-        out: &mut Out<'_, F>,
+        out: &mut Out<'_, E, F>,
     ) {
+        let gain = audible_gain::<F>(gain);
         let ring = &self.ring;
         let place = &self.place;
         let st = &mut self.st;
         let w = st.width;
-        let silent = [0.0f32; MAX_CHANNELS];
+        let silent = [F::ZERO; MAX_CHANNELS];
         let Some(reader) = self.reader.as_mut() else {
             // Severed, or a clone: nothing to read (not an underrun).
             for i in 0..positions.len() {
@@ -309,11 +311,11 @@ impl LiveRead {
         };
         let (mut lo, mut hi) = (u64::MAX, 0u64);
         for p in positions.iter().flatten() {
-            let f = p.get().max(0.0).floor() as u64;
+            let f = p.to_samples_floor().get() as u64;
             lo = lo.min(f.saturating_sub(3));
             hi = hi.max(f.saturating_add(5));
         }
-        let Some(first) = positions.iter().flatten().next().map(|p| p.get()) else {
+        let Some(first) = positions.iter().flatten().next().copied() else {
             for i in 0..positions.len() {
                 out.put(at + i, &silent[..w]);
             }
@@ -326,20 +328,22 @@ impl LiveRead {
         st.segment = segment;
         let jump = st
             .last
-            .map(|last| last + rate)
-            .filter(|expected| moved || (first - expected).abs() > JUMP_FRAMES);
+            .map(|last| last + rate.advance(Samples::new(1)))
+            .filter(|&expected| moved || first > expected + JUMP || first < expected - JUMP);
         // The old continuation's positions, for the claim.
         let old_range = jump.map_or((0, 0), |expected| {
-            let a = (expected.max(0.0).floor() as u64).saturating_sub(3);
-            let e =
-                ((expected + rate * OLD_FRAMES as f64).max(0.0).floor() as u64).saturating_add(5);
+            let a = (expected.to_samples_floor().get() as u64).saturating_sub(3);
+            let e = ((expected + rate.advance(Samples::new(OLD_FRAMES)))
+                .to_samples_floor()
+                .get() as u64)
+                .saturating_add(5);
             (a, e)
         });
         // One block: the claim, and the control lent once, for the map this
         // block reads by (the direction and the applied loop ride in the same
         // value; a fork reads those, on the control side).
         let block = reader.block(
-            Samples::new(first.max(0.0).floor() as usize),
+            first.to_samples_floor(),
             [
                 Samples::new(lo as usize)..Samples::new(hi as usize),
                 Samples::new(old_range.0 as usize)..Samples::new(old_range.1 as usize),
@@ -351,7 +355,7 @@ impl LiveRead {
             // The old position's continuation, read from the ring while the
             // window still holds it.
             st.continue_from(ring.fade_frames().get(), |j, out| {
-                let pos = expected + rate * j as f64;
+                let pos = expected + rate.advance(Samples::new(j));
                 read_ring(&block, src, place, map.arrangement(pos), pos, out)
             });
         }
@@ -362,20 +366,20 @@ impl LiveRead {
             && st.recover.is_none()
             && steady_lanes(&block, map, place, st, positions, gain, lanes, at, gather)
         {
-            st.last = positions.last().copied().flatten().map(SamplePosition::get);
+            st.last = positions.last().copied().flatten();
             #[cfg(test)]
             {
-                for p in positions.iter().flatten() {
-                    st.read_to = st.read_to.max(p.get());
+                for &p in positions.iter().flatten() {
+                    st.read_to = st.read_to.max(p);
                 }
                 st.steady += 1;
             }
             return;
         }
 
-        let mut frame = [0.0f32; MAX_CHANNELS];
-        for (i, pos) in positions.iter().enumerate() {
-            let Some(pos) = pos.map(SamplePosition::get) else {
+        let mut frame = [F::ZERO; MAX_CHANNELS];
+        for (i, &pos) in positions.iter().enumerate() {
+            let Some(pos) = pos else {
                 out.put(at + i, &silent[..w]);
                 st.last = None;
                 st.fade = None;
@@ -393,13 +397,13 @@ impl LiveRead {
             let sounded = st.mix(new, &mut frame[..w], declick);
             if sounded {
                 if let Some(r) = st.recover {
-                    let g = FadeLaw::EqualAmplitude.between(0.0, 1.0, r, declick);
+                    let g = Fade::weight::<F>(declick, r);
                     frame[..w].iter_mut().for_each(|s| *s *= g);
                     st.recover = (r + 1 < declick).then_some(r + 1);
                 }
             } else {
                 state.report_underrun();
-                frame[..w].fill(0.0);
+                frame[..w].fill(F::ZERO);
                 st.recover = Some(0);
             }
             for s in frame[..w].iter_mut() {
@@ -416,22 +420,22 @@ impl LiveRead {
 }
 
 /// Where [`LiveRead::render`] puts its frames.
-pub(crate) enum Out<'a, F> {
+pub(crate) enum Out<'a, E, F: Float> {
     /// Frame `i` handed to the closure.
-    Frames(F),
+    Frames(E),
     /// Frame `i` into frame `i` of the lanes (as many of the frame's
     /// channels as there are lanes), and `gather` for a steady block's read
     /// along time.
     Lanes {
-        lanes: &'a mut [Lane],
-        gather: &'a mut Gather,
+        lanes: &'a mut [Lane<F>],
+        gather: &'a mut Gather<F>,
     },
 }
 
-impl<F: FnMut(usize, &[f32])> Out<'_, F> {
+impl<E: FnMut(usize, &[F]), F: Float> Out<'_, E, F> {
     /// Put frame `i`: one sample per channel of `frame`.
     #[inline]
-    fn put(&mut self, i: usize, frame: &[f32]) {
+    fn put(&mut self, i: usize, frame: &[F]) {
         match self {
             Out::Frames(emit) => emit(i, frame),
             Out::Lanes { lanes, .. } => {
@@ -456,16 +460,16 @@ impl<F: FnMut(usize, &[f32])> Out<'_, F> {
 /// `st.width` wide and lands on as many lanes as there are, so a reader
 /// wider than the caller drops its last channels.
 #[allow(clippy::too_many_arguments)] // one block's read, and where it goes
-fn steady_lanes(
-    block: &Block<'_>,
-    map: &RingMap,
-    place: &Place,
-    st: &State,
+fn steady_lanes<F: RingFloat>(
+    block: &Block<'_, F>,
+    map: &RingMap<F>,
+    place: &Place<F>,
+    st: &State<F>,
     positions: &[Option<SamplePosition>],
-    gain: f32,
-    lanes: &mut [Lane],
+    gain: F,
+    lanes: &mut [Lane<F>],
     at: usize,
-    gather: &mut Gather,
+    gather: &mut Gather<F>,
 ) -> bool {
     let frames = positions.len();
     let (w, src) = (st.width, st.src);
@@ -480,13 +484,10 @@ fn steady_lanes(
     let Gather { index, frac, y, .. } = gather;
     let mut base = 0u64;
     for (i, pos) in positions.iter().enumerate() {
-        let Some(pos) = pos.map(SamplePosition::get) else {
+        let Some(pos) = *pos else {
             return false;
         };
-        let short_of_switch = matches!(
-            pos.partial_cmp(&(map.at.saturating_sub(2) as f64)),
-            Some(std::cmp::Ordering::Less)
-        );
+        let short_of_switch = pos < straight(map.at.saturating_sub(2));
         if switch && !short_of_switch {
             return false;
         }
@@ -527,20 +528,20 @@ fn steady_lanes(
     true
 }
 
-impl State {
+impl<F: Float> State<F> {
     /// Render the continuation of what is playing now into the old side and
     /// start a fade of `frames` from it: `source(j, out)` is what the
     /// discontinuity replaced, `j` output frames on (`false` where it has
     /// nothing); a fade in progress is blended into it at its own weights.
-    fn continue_from(&mut self, frames: usize, mut source: impl FnMut(usize, &mut [f32]) -> bool) {
+    fn continue_from(&mut self, frames: usize, mut source: impl FnMut(usize, &mut [F]) -> bool) {
         let w = self.width;
-        let mut s = [0.0f32; MAX_CHANNELS];
+        let mut s = [F::ZERO; MAX_CHANNELS];
         let mut n = 0;
         while n < OLD_FRAMES && source(n, &mut s[..w]) {
             let out = &mut self.spare[n * w..(n + 1) * w];
             match self.fade {
                 Some(fade) if self.old_k + n < self.old_len => {
-                    let t = Fade::weight(fade.frames, fade.k + n);
+                    let t = Fade::weight::<F>(fade.frames, fade.k + n);
                     let o = &self.old[(self.old_k + n) * w..(self.old_k + n + 1) * w];
                     for ((d, &o), &s) in out.iter_mut().zip(o).zip(&s[..w]) {
                         *d = tutti_dsp::lerp(o, s, t);
@@ -563,15 +564,21 @@ impl State {
     /// Cross a published switch when `pos` first reaches it (two frames early:
     /// the taps reach two frames ahead): the old side becomes the record of
     /// the old mapping from here on, at this rate.
-    fn cross_switch(&mut self, place: &Place, map: &RingMap, pos: f64, rate: f64) {
+    fn cross_switch(
+        &mut self,
+        place: &Place<F>,
+        map: &RingMap<F>,
+        pos: SamplePosition,
+        rate: ReadRate,
+    ) {
         let Some(record) = map.fade.as_ref() else {
             return;
         };
-        if Some(map.epoch) == self.applied_epoch || pos < map.at.saturating_sub(2) as f64 {
+        if Some(map.epoch) == self.applied_epoch || pos < straight(map.at.saturating_sub(2)) {
             return;
         }
         self.applied_epoch = Some(map.epoch);
-        if pos >= (record.start + record.frames as u64) as f64 {
+        if pos >= straight(record.start + record.frames as u64) {
             return;
         }
         let (src, before) = (self.src, map.before);
@@ -583,7 +590,7 @@ impl State {
                 src,
                 place,
                 before,
-                pos + rate * j as f64,
+                pos + rate.advance(Samples::new(j)),
                 out,
             )
         });
@@ -592,7 +599,7 @@ impl State {
     /// Mix one frame: `frame` holds the ring's read (`new`: it sounded). Plays
     /// the fade in progress, if any, into `frame`; `true` when the frame
     /// sounded.
-    fn mix(&mut self, new: bool, frame: &mut [f32], declick: usize) -> bool {
+    fn mix(&mut self, new: bool, frame: &mut [F], declick: usize) -> bool {
         let w = self.width;
         let Some(mut fade) = self.fade else {
             return new;
@@ -602,15 +609,15 @@ impl State {
         // Running out fades: the old side's gain (alone) or weight (in a
         // fade) goes to the new side over its last `declick` frames.
         let out_ramp = if left > declick {
-            1.0
+            F::ONE
         } else {
-            FadeLaw::EqualAmplitude.between(1.0, 0.0, declick - left, declick)
+            F::from_f32(FadeLaw::EqualAmplitude.between(1.0, 0.0, declick - left, declick))
         };
         fade.started |= new;
 
         match (fade.started, old) {
             (true, Some(o)) if fade.k < fade.frames => {
-                let t = Fade::weight(fade.frames, fade.k).max(1.0 - out_ramp);
+                let t = Fade::weight::<F>(fade.frames, fade.k).max(F::ONE - out_ramp);
                 for (n, &o) in frame.iter_mut().zip(o) {
                     *n = tutti_dsp::lerp(o, *n, t);
                 }
@@ -643,16 +650,16 @@ impl State {
 /// into `out`: `true` when it sounded or is silent by the arrangement, `false`
 /// when the window lacks a tap.
 #[inline]
-fn read_ring(
-    block: &Block<'_>,
+fn read_ring<F: RingFloat>(
+    block: &Block<'_, F>,
     src: usize,
-    place: &Place,
+    place: &Place<F>,
     arrangement: Arrangement,
-    pos: f64,
-    out: &mut [f32],
+    pos: SamplePosition,
+    out: &mut [F],
 ) -> bool {
     let Some((taps, frac)) = arrangement.taps(pos) else {
-        out.fill(0.0);
+        out.fill(F::ZERO);
         return true;
     };
     if !taps.iter().all(|&t| block.holds(t)) {
@@ -677,18 +684,18 @@ fn read_ring(
 /// `start..start + frames`, flat at `src`) into `out`; `false` when a tap
 /// lies outside it.
 #[inline]
-fn read_frames(
-    data: &[f32],
+fn read_frames<F: Float>(
+    data: &[F],
     start: u64,
     frames: usize,
     src: usize,
-    place: &Place,
+    place: &Place<F>,
     arrangement: Arrangement,
-    pos: f64,
-    out: &mut [f32],
+    pos: SamplePosition,
+    out: &mut [F],
 ) -> bool {
     let Some((taps, frac)) = arrangement.taps(pos) else {
-        out.fill(0.0);
+        out.fill(F::ZERO);
         return true;
     };
     let end = start + frames as u64;

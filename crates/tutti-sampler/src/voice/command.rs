@@ -22,6 +22,7 @@ use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
 use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
+use tutti_rt::RingFloat;
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
 use tutti_types::{
     Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
@@ -73,7 +74,7 @@ pub(super) const COMMAND_CAPACITY: usize = 64;
 /// allocated control-side: that is why the two stretch-carrying variants
 /// have the filter handed to them rather than constructing one. Each is one
 /// of the handle's methods.
-pub(crate) enum VoiceCommand {
+pub(crate) enum VoiceCommand<F: RingFloat = f32> {
     /// Add a voice by handing the reader a fully-formed [`Voice`]: a
     /// [`VoiceSource`] (in-memory `MemorySource` or
     /// streaming `DiskVoice`) plus its
@@ -99,7 +100,7 @@ pub(crate) enum VoiceCommand {
         /// itself moves into the pool's slot — the drain never unboxes it, so
         /// it frees nothing — and leaves through the retirement ring with
         /// the slot.
-        voice: Box<Voice>,
+        voice: Box<Voice<F>>,
         /// A stretch filter built by the SENDER, on the control thread, when
         /// `voice.play` asks for stretching.
         ///
@@ -140,7 +141,7 @@ pub(crate) enum VoiceCommand {
         /// The slot to re-point.
         id: SlotId,
         /// The new wave. Shared rather than copied — several voices may read one.
-        wave: Arc<Wave>,
+        wave: Arc<Wave<F>>,
     },
     /// Move the voice's timeline window: a [`VoiceWindow`], so not a scalar
     /// param.
@@ -244,7 +245,7 @@ pub(crate) enum VoiceCommand {
 
 // Hand-rolled: `ReplaceWave` carries a non-`Debug` `Arc<Wave>` (summarize it by
 // frame count); `AddVoice`'s `Box<Voice>` is `Debug`, forwarded as-is.
-impl std::fmt::Debug for VoiceCommand {
+impl<F: RingFloat> std::fmt::Debug for VoiceCommand<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AddVoice { id, voice, stretch } => f
@@ -309,8 +310,8 @@ impl std::fmt::Debug for VoiceCommand {
 /// or direction only when this names that slot's stream, so whether a setting
 /// reached a stream is decided from the command itself, never from what the
 /// handle believed the slot held. Only [`VoicePoolHandle::send`] builds one.
-pub(crate) struct Queued {
-    pub(crate) cmd: VoiceCommand,
+pub(crate) struct Queued<F: RingFloat = f32> {
+    pub(crate) cmd: VoiceCommand<F>,
     pub(crate) forwarded: Option<StreamId>,
 }
 
@@ -415,7 +416,7 @@ impl SendError {
 /// handle.set_window(VoiceWindow::from(tutti_types::Beat::new(1.0)));
 /// ```
 #[derive(Clone, Debug)]
-pub struct VoiceNodeHandle {
+pub struct VoiceNodeHandle<F: RingFloat = f32> {
     /// What the handle publishes besides the gain, shared with the node
     /// (which reads it once per block) and with its fork source (which reads
     /// it at fork time).
@@ -429,7 +430,7 @@ pub struct VoiceNodeHandle {
     /// for a host that sets params by address.
     pub(crate) params: ParamSet,
     /// The stream that feeds a disk voice, with its loop set through it.
-    stream: Option<Arc<Mutex<Stream>>>,
+    stream: Option<Arc<Mutex<Stream<F>>>>,
 }
 
 /// What a [`VoiceNode`](super::node::VoiceNode)'s handle publishes besides
@@ -457,12 +458,12 @@ pub(crate) struct Steering {
 
 pub(crate) type SteeringCell = Publisher<Steering>;
 
-impl VoiceNodeHandle {
+impl<F: RingFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
         gain: Param<Amplitude>,
         params: ParamSet,
-        stream: Option<Stream>,
+        stream: Option<Stream<F>>,
     ) -> Self {
         Self {
             latest: Arc::new(Mutex::new(*steering.current())),
@@ -605,17 +606,17 @@ impl VoiceNodeHandle {
 /// stream per refused streaming add. A loop sent for such an id reaches a
 /// stream nothing plays, and the drain finds no slot to record it on.
 #[derive(Clone, Debug)]
-pub struct VoicePoolHandle {
+pub struct VoicePoolHandle<F: RingFloat = f32> {
     /// Pushes into the pool's bounded command ring. A handle is `Clone` and
     /// several control threads send, so the one writer sits behind a lock no
     /// audio thread ever takes.
-    pub(crate) tx: Arc<Mutex<RingWriter<Queued>>>,
+    pub(crate) tx: Arc<Mutex<RingWriter<Queued<F>>>>,
     /// Slots the audio thread has removed and handed back to be freed here.
     ///
     /// See [`VoicePool`](super::pool::VoicePool)'s `retired`. Draining this is what actually moves the
     /// deallocation off the callback; [`collect_retired`](Self::collect_retired)
     /// is the call that does it.
-    pub(crate) retired: Arc<Mutex<RingReader<Retired>>>,
+    pub(crate) retired: Arc<Mutex<RingReader<Retired<F>>>>,
     /// The reader's output width, copied at construction (it is fixed for the
     /// reader's lifetime). Lets [`send`](Self::send) build a stretch filter at
     /// the right width on the CONTROL thread — see
@@ -636,7 +637,7 @@ pub struct VoicePoolHandle {
     /// [`insert_voice`](super::pool::VoicePool::insert_voice) after the handle
     /// was made is not in it, and the drain then refuses that slot's loops
     /// ([`PoolDrops::loops_not_forwarded`]).
-    pub(crate) streams: SlotStreams,
+    pub(crate) streams: SlotStreams<F>,
 }
 
 /// [`VoicePoolHandle::streams`]: the table is locked for a lookup or for
@@ -645,21 +646,21 @@ pub struct VoicePoolHandle {
 /// one slot reach its stream and the pool in one order and a command for another
 /// slot (a remove, an in-memory add) never waits on the streamer. Control
 /// threads only.
-pub(crate) type SlotStreams = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Stream>>>>>;
+pub(crate) type SlotStreams<F = f32> = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Stream<F>>>>>>;
 
 /// A streaming add that did not reach the pool: why, and the stream, which the
 /// handle takes only once the add is queued. Its loop and direction are as they
 /// were before the call.
 #[derive(Debug, thiserror::Error)]
 #[error("{error}")]
-pub struct StreamingAddError {
+pub struct StreamingAddError<F: RingFloat = f32> {
     /// Why the add was refused, with the command (the voice) it carried.
     pub error: SendError,
     /// The stream that was to steer the voice, handed back.
-    pub stream: Stream,
+    pub stream: Stream<F>,
 }
 
-impl VoicePoolHandle {
+impl<F: RingFloat> VoicePoolHandle<F> {
     /// Frees everything the audio thread has retired since the last call — removed
     /// slots, surplus stretch filters and replaced waves alike.
     ///
@@ -692,7 +693,7 @@ impl VoicePoolHandle {
     /// ```compile_fail
     /// # use tutti_sampler::{DiskVoice, Playback, SlotId, VoicePool};
     /// # fn add(voice: DiskVoice) {
-    /// let (_pool, handle) = VoicePool::new().with_handle();
+    /// let (_pool, handle) = VoicePool::<f32>::new().with_handle();
     /// // A disk voice has no door here: its loop and direction are its stream's.
     /// let _ = handle.add(SlotId(0), voice, Playback::default());
     /// # }
@@ -703,7 +704,12 @@ impl VoicePoolHandle {
     /// [`SendError`]: the add did not reach the pool, and the voice is
     /// dropped with it.
     #[must_use = "a dropped add is a note that never sounds"]
-    pub fn add(&self, id: SlotId, source: MemorySource, play: Playback) -> Result<(), SendError> {
+    pub fn add(
+        &self,
+        id: SlotId,
+        source: MemorySource<F>,
+        play: Playback,
+    ) -> Result<(), SendError> {
         self.send(VoiceCommand::AddVoice {
             id,
             voice: Box::new(Voice {
@@ -740,7 +746,7 @@ impl VoicePoolHandle {
     ///
     /// [`SendError`], as [`add`](Self::add).
     #[must_use = "a dropped command changes nothing"]
-    pub fn replace_wave(&self, id: SlotId, wave: Arc<Wave>) -> Result<(), SendError> {
+    pub fn replace_wave(&self, id: SlotId, wave: Arc<Wave<F>>) -> Result<(), SendError> {
         self.send(VoiceCommand::ReplaceWave { id, wave })
     }
 
@@ -848,7 +854,7 @@ impl VoicePoolHandle {
     ///
     /// `Ok` means only that the command was *queued*: the pool applies it on the
     /// audio thread, and that outcome is not available synchronously.
-    pub(crate) fn send(&self, cmd: VoiceCommand) -> Result<(), SendError> {
+    pub(crate) fn send(&self, cmd: VoiceCommand<F>) -> Result<(), SendError> {
         match self.prepare(cmd) {
             VoiceCommand::AddVoice { id, voice, stretch } => {
                 let displaced = {
@@ -901,10 +907,10 @@ impl VoicePoolHandle {
     pub fn add_streaming(
         &self,
         id: SlotId,
-        voice: DiskVoice,
-        stream: Stream,
+        voice: DiskVoice<F>,
+        stream: Stream<F>,
         play: Playback,
-    ) -> Result<(), Box<StreamingAddError>> {
+    ) -> Result<(), Box<StreamingAddError<F>>> {
         let VoiceCommand::AddVoice { id, voice, stretch } = self.prepare(VoiceCommand::AddVoice {
             id,
             voice: Box::new(Voice {
@@ -923,10 +929,10 @@ impl VoicePoolHandle {
     fn add_stream_voice(
         &self,
         id: SlotId,
-        mut voice: Box<Voice>,
-        mut stream: Stream,
+        mut voice: Box<Voice<F>>,
+        mut stream: Stream<F>,
         stretch: Option<stretch::Unit>,
-    ) -> Result<(), Box<StreamingAddError>> {
+    ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
             return Err(Box::new(StreamingAddError { error, stream }));
@@ -1029,22 +1035,22 @@ impl VoicePoolHandle {
     }
 
     /// The stream the handle holds for slot `id`, if any.
-    pub(crate) fn stream_of(&self, id: SlotId) -> Option<Arc<Mutex<Stream>>> {
+    pub(crate) fn stream_of(&self, id: SlotId) -> Option<Arc<Mutex<Stream<F>>>> {
         self.streams().get(&id).cloned()
     }
 
     /// The command ring's writer, locked.
-    fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued>> {
+    fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued<F>>> {
         self.tx.lock_recover()
     }
 
     /// The stream table, locked.
-    fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<Stream>>>> {
+    fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<Stream<F>>>>> {
         self.streams.lock_recover()
     }
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.
-    fn queue(&self, cmd: VoiceCommand, forwarded: Option<StreamId>) -> Result<(), SendError> {
+    fn queue(&self, cmd: VoiceCommand<F>, forwarded: Option<StreamId>) -> Result<(), SendError> {
         self.writer()
             .push(Queued { cmd, forwarded })
             .map_err(|r| match r.error {
@@ -1056,7 +1062,7 @@ impl VoicePoolHandle {
     }
 
     /// Move control-thread work out of the drain. Runs on the caller's thread.
-    fn prepare(&self, cmd: VoiceCommand) -> VoiceCommand {
+    fn prepare(&self, cmd: VoiceCommand<F>) -> VoiceCommand<F> {
         match cmd {
             VoiceCommand::AddVoice {
                 id,
@@ -1102,7 +1108,7 @@ impl VoicePoolHandle {
 
 /// Frees what the control side retired and no block holds, without publishing
 /// (the placement windows a replacement left behind); control thread, from the owner's tick.
-impl tutti_rt::Reclaim for VoiceNodeHandle {
+impl<F: RingFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
     fn reclaim(&self) -> usize {
         self.steering.reclaim()
     }
@@ -1112,7 +1118,7 @@ impl tutti_rt::Reclaim for VoiceNodeHandle {
 /// ([`collect_retired`](VoicePoolHandle::collect_retired)), so the pool's
 /// owner's tick keeps the retire ring from filling; control thread only. Nothing a
 /// reader pins is left over: it returns 0.
-impl tutti_rt::Reclaim for VoicePoolHandle {
+impl<F: RingFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
         0
@@ -1132,7 +1138,7 @@ mod tests {
     #[test]
     fn a_full_queue_is_reported_to_the_caller() {
         // Build the pool but never drain it, so the queue fills.
-        let (_pool, handle) = VoicePool::new().with_handle();
+        let (_pool, handle) = VoicePool::<f32>::new().with_handle();
 
         for _ in 0..COMMAND_CAPACITY {
             handle
@@ -1154,7 +1160,7 @@ mod tests {
     /// no-op with nothing to notice it by.
     #[test]
     fn a_dropped_pool_is_reported_as_disconnected() {
-        let (pool, handle) = VoicePool::new().with_handle();
+        let (pool, handle) = VoicePool::<f32>::new().with_handle();
         drop(pool);
 
         let err = handle

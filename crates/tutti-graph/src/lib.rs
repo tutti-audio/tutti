@@ -709,6 +709,7 @@ pub use tutti_types::PlayReading;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
+    pub use tutti_buffers::Float;
     pub use tutti_rt::{Setting, SettingWord};
     pub use tutti_types::{UnitAddr, UnitParam};
 }

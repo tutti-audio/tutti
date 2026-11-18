@@ -9,13 +9,20 @@
 
 use std::ops::Range;
 
-use crate::lanes::{BlockScratch, accumulate, audible, scale};
+use crate::lanes::{BlockScratch, accumulate, audible_gain, scale};
 use crate::nonempty;
 use crate::stretch;
 
 use super::clock::BlockClock;
 use super::types::{Playback, SlotId, Voice, VoiceSource};
-use tutti_types::{Cents, ChannelLayout, ReadRate, SamplePosition, SampleRate, StretchFactor};
+use tutti_rt::RingFloat;
+use tutti_types::{
+    Cents, ChannelLayout, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor,
+};
+
+/// The first frame of a wave: before it a stretch filter's priming reads
+/// nothing.
+const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
 /// turns the pair into audio.
@@ -38,7 +45,7 @@ use tutti_types::{Cents, ChannelLayout, ReadRate, SamplePosition, SampleRate, St
 /// about which slot is live is decided by the owner. Sharing the name across the
 /// two crates invited reading one crate's stealing rules into the other's, so
 /// the name says which job this is.
-pub(crate) struct PlaybackSlot {
+pub(crate) struct PlaybackSlot<F: RingFloat = f32> {
     /// Addresses this slot for every command after the add. `SlotId(0)` on a
     /// `VoiceNode`, whose single voice has nothing to disambiguate.
     pub(crate) id: SlotId,
@@ -51,7 +58,7 @@ pub(crate) struct PlaybackSlot {
     /// the box in rather than moving the `Voice` out of it — which would free
     /// the box on the audio thread. A slot leaves the pool through the
     /// retirement channel, box and all.
-    pub(crate) voice: Box<Voice>,
+    pub(crate) voice: Box<Voice<F>>,
     /// The time-stretch filter, present only while the voice stretches or
     /// transposes: `None` reads the source dry, the common case. It owns no
     /// copy of the audio source: it is a pure frame-in → frame-out filter,
@@ -83,7 +90,7 @@ pub(crate) struct PlaybackSlot {
     pub(crate) sample_rate: SampleRate,
 }
 
-impl PlaybackSlot {
+impl<F: RingFloat> PlaybackSlot<F> {
     /// Build a slot at an explicit width.
     ///
     /// # Width is explicit at every call site
@@ -136,7 +143,7 @@ impl PlaybackSlot {
     /// error proportional to the device's real rate, with nothing logged.
     pub(crate) fn with_channels(
         id: SlotId,
-        voice: Box<Voice>,
+        voice: Box<Voice<F>>,
         sample_rate: SampleRate,
         channels: impl Into<ChannelLayout>,
     ) -> Self {
@@ -264,8 +271,8 @@ impl PlaybackSlot {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         width: usize,
-        scratch: &mut BlockScratch,
-        out: &mut [&mut [f32]],
+        scratch: &mut BlockScratch<F>,
+        out: &mut [&mut [F]],
     ) {
         let n = width.min(out.len());
         debug_assert!(
@@ -313,13 +320,13 @@ impl PlaybackSlot {
         clock: &BlockClock<'_>,
         at: usize,
         n: usize,
-        scratch: &mut BlockScratch,
+        scratch: &mut BlockScratch<F>,
     ) {
         if !self.needs_stretch() {
             return;
         }
         let direction = self.voice.play.direction;
-        let gain = audible(self.voice.play.gain.get());
+        let gain = audible_gain::<F>(self.voice.play.gain);
         let (VoiceSource::Memory(sampler), Some(unit)) =
             (&mut self.voice.source, self.stretch.as_mut())
         else {
@@ -341,14 +348,13 @@ impl PlaybackSlot {
         let Some(origin) = positions[0] else {
             return;
         };
-        let step = sampler.read_rate().then(stretch_rate).get();
+        let step = sampler.read_rate().then(stretch_rate);
         let mut done = 0;
         while done < refill {
             let frames = (refill - done).min(positions.len());
             for (i, slot) in positions[..frames].iter_mut().enumerate() {
-                let back = (refill - done - i) as f64;
-                let pos = origin.get() - back * step;
-                *slot = (pos >= 0.0).then_some(SamplePosition(pos));
+                let pos = origin - step.advance(Samples::new(refill - done - i));
+                *slot = (pos >= WAVE_START).then_some(pos);
             }
             sampler.read_placed_lanes(&positions[..frames], direction, raw.lanes_mut(), n, gather);
             for lane in raw.lanes_mut().iter_mut().take(n) {
@@ -377,8 +383,8 @@ impl PlaybackSlot {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         n: usize,
-        scratch: &mut BlockScratch,
-        out: &mut [&mut [f32]],
+        scratch: &mut BlockScratch<F>,
+        out: &mut [&mut [F]],
     ) {
         if range.is_empty() {
             return;
@@ -407,11 +413,11 @@ impl PlaybackSlot {
         clock: &BlockClock<'_>,
         range: Range<usize>,
         n: usize,
-        scratch: &mut BlockScratch,
+        scratch: &mut BlockScratch<F>,
     ) -> Piece {
         let frames = range.len();
         let direction = self.voice.play.direction;
-        let gain = audible(self.voice.play.gain.get());
+        let gain = audible_gain::<F>(self.voice.play.gain);
         // Route through the filter only when the intent asks for it AND a unit
         // is resident; a missing unit reads dry rather than silent.
         let stretching = self.needs_stretch() && self.stretch.is_some();
@@ -468,7 +474,7 @@ impl PlaybackSlot {
                         unit.filter_lanes(raw.lanes(), out.lanes_mut(), n, i..j);
                     } else {
                         for lane in out.lanes_mut().iter_mut().take(n) {
-                            lane[i..j].fill(0.0);
+                            lane[i..j].fill(F::ZERO);
                         }
                     }
                     i = j;

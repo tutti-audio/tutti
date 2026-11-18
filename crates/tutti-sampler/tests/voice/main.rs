@@ -2,6 +2,7 @@
 
 mod block_length_invariance;
 mod disk_placement;
+mod f64_graph;
 mod file_formats;
 mod frame_exact_entry;
 mod gain;
