@@ -2,9 +2,7 @@ use super::*;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{
-    bend_to_signed_f32, channel_voice, narrow_velocity, value_to_unit_f32, velocity_to_unit_f32,
-};
+use tutti_midi_protocol::{bend_to_signed_f32, channel_voice, narrow_velocity};
 use tutti_midi_protocol::{widen_bend, widen_value};
 use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use tutti_ump::{
@@ -729,8 +727,9 @@ fn a_sysex_fragment_does_not_convert_alone() {
 #[test]
 fn note_on_velocity_round_trips_at_full_width() {
     // A MIDI-2 note-on carrying a value not representable in 7 bits keeps
-    // (close to) its width through the f32 VST3 struct on the way back out,
-    // rather than collapsing to a 7-bit grid point.
+    // its width through the f32 VST3 struct on the way back out (an f32 holds
+    // a 16-bit velocity to well under half a step), rather than collapsing to
+    // a 7-bit grid point.
     let velocity_u16 = 0x9123; // not a multiple of the 7-bit step
     let event = (
         Offset::ZERO,
@@ -740,13 +739,7 @@ fn note_on_velocity_round_trips_at_full_width() {
     let back = vst3.to_midi(&mut OutputStream::new()).expect("round-trips");
     match back.ump.decode().expect("decodes") {
         Message::Midi2(_, Voice2::NoteOn { velocity: raw, .. }) => {
-            let velocity = velocity_to_unit_f32(raw);
-            let expected = velocity_u16 as f32 / u16::MAX as f32;
-            // f32 velocity carries far more than 7 bits — error stays tiny.
-            assert!(
-                (velocity - expected).abs() < 1e-3,
-                "velocity {velocity} vs {expected}"
-            );
+            assert_eq!(raw, NoteVelocity::new(velocity_u16));
         }
         _ => panic!("expected NoteOn"),
     }
@@ -869,8 +862,8 @@ fn legacy_cc_out_decodes_to_midi() {
     match m.ump.decode().expect("UMP") {
         Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
             assert_eq!((address.channel.get(), controller.get()), (3, 74));
-            let value = value_to_unit_f32(value);
-            assert!((value - 100.0 / 127.0).abs() < 0.01);
+            // M2-115 section 3.3 widens 100 to `0xC924_9249`.
+            assert_eq!(value, ControlValue::new(0xC924_9249));
         }
         other => panic!("expected CC, got {other:?}"),
     }
@@ -1073,8 +1066,7 @@ mod message {
             panic!("expected a Note Off, got {vst3:?}");
         };
         assert_eq!((off.channel, off.pitch), (2, 60));
-        assert_eq!(off.velocity, 32768.0 / 65535.0);
-        assert!((off.velocity - 0.5).abs() < 1e-4);
+        assert_eq!(off.velocity, (32768.0_f64 / 65535.0) as f32);
     }
 
     /// A MIDI 2.0 Note On at velocity 0 is a Note On (M2-104 §7.4.2: it
@@ -1301,14 +1293,14 @@ mod message {
         assert_eq!((p.channel, p.pitch), (3, 60));
         assert_eq!(
             p.pressure,
-            value_to_unit_f32(ControlValue::new(0x4000_0000))
+            (f64::from(0x4000_0000_u32) / f64::from(u32::MAX)) as f32
         );
         let Payload::PolyPressure(p) = event(&[0x20A3_3C21]).payload else {
             panic!("expected poly pressure");
         };
         assert_eq!(
             p.pressure,
-            value_to_unit_f32(ControlValue::new(0x4200_0000))
+            (f64::from(0x4200_0000_u32) / f64::from(u32::MAX)) as f32
         );
     }
 
@@ -1622,7 +1614,7 @@ mod message {
         });
         // M2-115 §3.3: 100 widens to 100 << 9 plus its low six bits repeated,
         // 0b110100 << 3 | 0b110100 >> 3 | 0b110100 >> 9.. = 51492.
-        let velocity = velocity_to_unit_f32(NoteVelocity::new(51492));
+        let velocity = (f64::from(51492_u16) / 65535.0) as f32;
         assert_eq!(
             seen,
             vec![(60, velocity, 7), (64, velocity, 7), (67, velocity, 7)]
@@ -1864,8 +1856,8 @@ fn volumes_after(follow: Voice2) -> Vec<f64> {
 
 /// **A Per-Note volume stages on VST3's scale**: `kVolumeTypeID` is `0` for
 /// silence, `0.25` for 0 dB and `1` for +12 dB (`ivstnoteexpression.h`), and a
-/// per-note controller's full scale is unity, so full scale is `0.25` and half
-/// of it `0.125`.
+/// per-note controller's full scale is unity, so full scale is `0.25` and the
+/// centre word `0x8000_0000` a quarter of its position.
 #[test]
 fn a_full_scale_per_note_volume_stages_at_vst3_unity() {
     let volume = |value: u32| Voice2::AssignablePerNote {
@@ -1875,7 +1867,10 @@ fn a_full_scale_per_note_volume_stages_at_vst3_unity() {
     };
     assert_eq!(volumes_after(volume(u32::MAX)), [0.25]);
     let half = volumes_after(volume(0x8000_0000));
-    assert!((half[0] - 0.125).abs() < 1e-6, "{half:?}");
+    assert_eq!(
+        half,
+        [f64::from(0x8000_0000_u32) / f64::from(u32::MAX) / 4.0]
+    );
     assert_eq!(volumes_after(volume(0)), [0.0]);
 }
 

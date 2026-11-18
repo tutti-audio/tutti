@@ -121,8 +121,8 @@
 //! ## Where it sits
 //!
 //! Depends on `tutti-units` ([`Samples`]) and `tutti-types` ([`ChannelLayout`],
-//! [`ChannelTopology`], the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt`, `tutti-ump` and
-//! `tutti-midi-protocol`, re-exporting the parts format crates need so none of them takes its
+//! [`ChannelTopology`], the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt` and `tutti-ump`,
+//! re-exporting the parts format crates need so none of them takes its
 //! own dependency for the type names.
 //! All four format hosts and `tutti-plugin` depend on it.
 //!

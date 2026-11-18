@@ -47,8 +47,7 @@ pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
-    Narrower, PitchBendSensitivity, Translator, narrow, narrow_velocity, unit_f32_to_velocity,
-    value_to_unit_f32, velocity_to_unit_f32, widen,
+    Narrower, PitchBendSensitivity, Translator, narrow, narrow_velocity, widen,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
@@ -209,7 +208,7 @@ const CLAP_VOLUME_MAX_GAIN: f64 = 4.0;
 /// while staying inside the legal open interval.
 const CLAP_VOLUME_MIN_GAIN: f64 = 1e-6;
 
-/// MIDI-2 per-note volume (unit `0..=1`, full scale = unity) → a CLAP VOLUME
+/// MIDI-2 per-note volume (`0..=1`, full scale = unity) → a CLAP VOLUME
 /// gain in the spec's `0 < x <= 4`.
 ///
 /// Unity is preserved: MIDI full scale maps to gain 1.0, matching CLAP's
@@ -217,12 +216,11 @@ const CLAP_VOLUME_MIN_GAIN: f64 = 1e-6;
 /// the CLAP range is unreachable *from MIDI* — that is correct, not a loss. The
 /// bottom is clamped to [`CLAP_VOLUME_MIN_GAIN`], because 0.0 is outside
 /// CLAP's open interval.
-fn unit_to_clap_volume(unit: f32) -> f64 {
-    let gain = f64::from(unit.clamp(0.0, 1.0));
-    gain.max(CLAP_VOLUME_MIN_GAIN)
+fn unit_to_clap_volume(unit: Normalized) -> f64 {
+    unit.get().max(CLAP_VOLUME_MIN_GAIN)
 }
 
-/// A CLAP VOLUME gain (`0 < x <= 4`) → MIDI-2 per-note volume (unit `0..=1`).
+/// A CLAP VOLUME gain (`0 < x <= 4`) → MIDI-2 per-note volume (`0..=1`).
 ///
 /// Exact inverse of [`unit_to_clap_volume`] over the attenuating half `0..=1`,
 /// so a host→plugin→host round trip is lossless there and unity stays unity.
@@ -232,34 +230,26 @@ fn unit_to_clap_volume(unit: f32) -> f64 {
 /// alternative (rescaling by 4) would move unity to 0.25 and silently attenuate
 /// every ordinary value by 12 dB on the way back. Saturating loses only the
 /// boost amount; rescaling would corrupt the whole range.
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "CLAP gain is f64; the unit vocabulary is f32 by definition"
-)]
-fn clap_volume_to_unit(gain: f64) -> f32 {
-    gain.clamp(0.0, CLAP_VOLUME_MAX_GAIN).min(1.0) as f32
+fn clap_volume_to_unit(gain: f64) -> Normalized {
+    Normalized::clamped(gain.clamp(0.0, CLAP_VOLUME_MAX_GAIN))
 }
 
-/// Scales a MIDI-2 unit `0..=1` controller value into the CLAP value range of
+/// Scales a MIDI-2 `0..=1` controller value into the CLAP value range of
 /// `ty`. Only VOLUME differs from the identity: Pan (`0` left, `0.5`
 /// centre, `1` right), Brightness, Expression, Vibrato and Pressure are all
 /// genuinely `0..1` per `clap/events.h`.
-fn expression_value_from_unit(ty: NoteExpressionType, unit: f32) -> f64 {
+fn expression_value_from_unit(ty: NoteExpressionType, unit: Normalized) -> f64 {
     match ty {
         NoteExpressionType::Volume => unit_to_clap_volume(unit),
-        _ => f64::from(unit),
+        _ => unit.get(),
     }
 }
 
 /// Inverse of [`expression_value_from_unit`].
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "CLAP expression values are f64; the unit vocabulary is f32"
-)]
-fn expression_value_to_unit(ty: NoteExpressionType, value: f64) -> f32 {
+fn expression_value_to_unit(ty: NoteExpressionType, value: f64) -> Normalized {
     match ty {
         NoteExpressionType::Volume => clap_volume_to_unit(value),
-        _ => value as f32,
+        _ => Normalized::clamped(value),
     }
 }
 
@@ -471,10 +461,6 @@ impl ClapEvent {
     /// CLAP-side form there: poly pressure falls back to its own MIDI 1.0 bytes
     /// (`key_pressure`, `0xAn`), and the rest (per-note pitch bend,
     /// controllers) is `None`. Other events pass through.
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "CLAP carries a velocity as f64; the MIDI-2 conversion helper takes f32"
-    )]
     fn into_midi_dialect(self, port: u16, key_pressure: Option<[u8; 3]>) -> Option<Self> {
         let (note_on, e) = match self {
             ClapEvent::NoteOn(e) => (true, e),
@@ -487,7 +473,9 @@ impl ClapEvent {
         // The 16-bit velocity the event came from, narrowed by the shift of
         // M2-115 section 3.4. A note-on at velocity 0 is a note-off in
         // MIDI 1.0, so the lowest audible note-on velocity is 1.
-        let narrowed = narrow_velocity(unit_f32_to_velocity(e.velocity as f32));
+        let narrowed = narrow_velocity(NoteVelocity::from_normalized(Normalized::clamped(
+            e.velocity,
+        )));
         let velocity = if note_on && narrowed.get() == 0 {
             U7::of(1)
         } else {
@@ -662,13 +650,8 @@ impl ClapEvent {
     /// of being squashed to 7 bits. Generic `Midi` events upconvert from their
     /// raw MIDI-1 bytes. Returns `None` for non-MIDI variants (NoteExpression,
     /// ParamValue, etc.).
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "CLAP carries velocities and expression values as f64; the MIDI-2 conversion helpers take f32"
-    )]
     #[must_use]
     pub fn to_midi(&self, translator: &mut Translator) -> Option<WireMidi> {
-        use tutti_midi_protocol::unit_f32_to_velocity;
         match self {
             ClapEvent::NoteOn(e) => {
                 let (channel, note) = note_address(e.channel, e.key, e.note_id)?;
@@ -679,7 +662,7 @@ impl ClapEvent {
                         channel,
                         Voice2::note_on(
                             note,
-                            NoteVelocity::new(unit_f32_to_velocity(e.velocity as f32).get()),
+                            NoteVelocity::from_normalized(Normalized::clamped(e.velocity)),
                         ),
                     ),
                 })
@@ -695,7 +678,7 @@ impl ClapEvent {
                         channel,
                         Voice2::note_off(
                             note,
-                            NoteVelocity::new(unit_f32_to_velocity(e.velocity as f32).get()),
+                            NoteVelocity::from_normalized(Normalized::clamped(e.velocity)),
                         ),
                     ),
                 })
@@ -723,10 +706,6 @@ impl ClapEvent {
     /// from decoding its `note_id`; the Group is its note port's. Returns
     /// `None` for dimensions with no MIDI-2 per-note counterpart (Vibrato,
     /// Expression).
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "CLAP expression values are f64; the MIDI-2 helpers take f32"
-    )]
     fn note_expression_to_midi(e: &clap_event_note_expression) -> Option<WireMidi> {
         // A value that is not a number is no expression.
         if !e.value.is_finite() {
@@ -750,11 +729,7 @@ impl ClapEvent {
             // fraction: converted before the unit encoding, or a plugin's
             // unity 1.0 and its +12 dB 4.0 both saturate to MIDI full scale
             // indistinguishably.
-            other => per_note_message(
-                other,
-                note,
-                Normalized::clamped(f64::from(expression_value_to_unit(other, e.value))),
-            )?,
+            other => per_note_message(other, note, expression_value_to_unit(other, e.value))?,
         };
         Some(WireMidi {
             offset: e.header.time,
@@ -798,20 +773,20 @@ fn control_expression(
         )),
         NoteControl::Pressure(value) => Some((
             NoteExpressionType::Pressure,
-            f64::from(value_to_unit_f32(ControlValue::new(value))),
+            ControlValue::new(value).normalized().get(),
         )),
         NoteControl::Registered(controller, value) => {
             let ty = expression_of_per_note_controller(controller.number())?;
             Some((
                 ty,
-                expression_value_from_unit(ty, value_to_unit_f32(ControlValue::new(value))),
+                expression_value_from_unit(ty, ControlValue::new(value).normalized()),
             ))
         }
         NoteControl::Assignable(index, value) => {
             let ty = expression_of_per_note_controller(index)?;
             Some((
                 ty,
-                expression_value_from_unit(ty, value_to_unit_f32(ControlValue::new(value))),
+                expression_value_from_unit(ty, ControlValue::new(value).normalized()),
             ))
         }
     }
@@ -1352,7 +1327,7 @@ impl InputEventList {
                     time,
                     i16::from(address.channel.get()),
                     i16::from(note.get()),
-                    f64::from(velocity_to_unit_f32(velocity)),
+                    velocity.normalized().get(),
                 )
                 .addressed(port, -1);
                 let off = if self.midi_ports >> port & 1 != 0 {
@@ -1453,7 +1428,7 @@ impl InputEventList {
                     time,
                     i16::from(channel.get()),
                     i16::from(note.get()),
-                    velocity.map_or(0.0, |v| f64::from(velocity_to_unit_f32(v))),
+                    velocity.map_or(0.0, |v| v.normalized().get()),
                 )
                 .into_midi_dialect(port, None),
                 (Voice2::PolyPressure { .. }, _) => narrow(voice)
@@ -1485,7 +1460,7 @@ impl InputEventList {
                         time,
                         i16::from(channel.get()),
                         i16::from(note.get()),
-                        velocity.map_or(0.0, |v| f64::from(velocity_to_unit_f32(v))),
+                        velocity.map_or(0.0, |v| v.normalized().get()),
                     )
                     .addressed(port, plugin_note_id(id));
                     push(&mut self.events, Some(on));
@@ -2546,7 +2521,7 @@ mod tests {
 
     // (`use super::*` is already in scope from the top of this module.)
     use tutti_fixtures::midi;
-    use tutti_midi_protocol::{signed_f32_to_bend, unit_f32_to_value, widen_value, widen_velocity};
+    use tutti_midi_protocol::{signed_f32_to_bend, widen_value, widen_velocity};
     use tutti_ump::{Bank, Sysex7Packets, parse_exact};
 
     // --- Param-change denormalization (host 0..1 → CLAP plain) ---
@@ -2716,11 +2691,7 @@ mod tests {
             panic!("a MIDI 1.0 Note On at velocity 0 is a Note Off");
         };
         assert_eq!((e.channel, e.key), (1, 60));
-        assert!(
-            (e.velocity - 32768.0 / 65535.0).abs() < 1e-6,
-            "{}",
-            e.velocity
-        );
+        assert_eq!(e.velocity, 32768.0 / 65535.0);
 
         let midi2 = packet(0, &[0x4091_3C00, 0]);
         let list = from_midi(&midi2);
@@ -3123,13 +3094,13 @@ mod tests {
         };
         let (id, v) = expression(7, 0x4000_0000);
         assert_eq!(id, CLAP_NOTE_EXPRESSION_VOLUME);
-        assert!((v - 0.25).abs() < 1e-3, "{v}");
+        assert_eq!(v, f64::from(0x4000_0000_u32) / f64::from(u32::MAX));
         let (id, v) = expression(10, 0x8000_0000);
         assert_eq!(id, CLAP_NOTE_EXPRESSION_PAN);
-        assert!((v - 0.5).abs() < 1e-3, "{v}");
+        assert_eq!(v, f64::from(0x8000_0000_u32) / f64::from(u32::MAX));
         let (id, v) = expression(74, 0xC000_0000);
         assert_eq!(id, CLAP_NOTE_EXPRESSION_BRIGHTNESS);
-        assert!((v - 0.75).abs() < 1e-3, "{v}");
+        assert_eq!(v, f64::from(0xC000_0000_u32) / f64::from(u32::MAX));
     }
 
     /// **A dense block sorts without allocating, and ties keep their
@@ -3481,13 +3452,12 @@ mod tests {
             &[ParamBounds::continuous(ParamId::new(9), 100.0, 1100.0)],
             true,
         );
-        assert!((first_param_value(&list) - 350.0).abs() < 1e-6);
+        assert_eq!(first_param_value(&list), 350.0);
     }
 
     /// `params.h`: a `CLAP_PARAM_IS_STEPPED` value is cast to an integer by the
     /// plugin (trunc). Step `k` of `n` is normalized `k / n`; denormalized
-    /// naively that is `k - epsilon` for some `(k, n)` (13 of 22 in `f32`, 15 of
-    /// 22 in `f64`), which the cast takes to step `k - 1`. Every step of every
+    /// naively that is `k - epsilon` for some `(k, n)` (15 of 22), which the cast takes to step `k - 1`. Every step of every
     /// span up to 199 must reach the plugin as a value whose cast is `k`.
     #[test]
     fn a_stepped_parameter_reaches_the_plugin_on_the_step_the_host_named() {
@@ -3562,15 +3532,15 @@ mod tests {
     );
 
     /// The edit path (`add_param_edit`) steps the same way, and a range whose
-    /// top step needs more than 24 bits is not narrowed to `f32`.
+    /// top step needs more than 24 bits keeps every step.
     #[test]
-    fn a_stepped_edit_is_computed_in_f64_from_the_plugins_own_range() {
+    fn a_stepped_edit_is_computed_from_the_plugins_own_range() {
         let bounds = [ParamBounds::stepped(ParamId::new(4), 0.0, 22.0)];
         let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
         list.add_param_edit(ParamId::new(4), 13.0 / 22.0, &bounds, true);
         assert_eq!(first_param_value(&list).trunc(), 13.0);
 
-        // 0..=16_777_217 is not representable in f32 at the top step.
+        // A span of 16_777_217 steps.
         let wide = [ParamBounds::stepped(ParamId::new(5), 0.0, 16_777_217.0)];
         let mut list = InputEventList::new(InputRooms::new(0).sources(1, 0, 0));
         list.add_param_edit(ParamId::new(5), 1.0, &wide, true);
@@ -3588,12 +3558,12 @@ mod tests {
             &[ParamBounds::continuous(ParamId::new(9), 0.0, 10.0)],
             true,
         );
-        assert!((first_param_value(&list) - 10.0).abs() < 1e-6);
+        assert_eq!(first_param_value(&list), 10.0);
     }
 
     #[test]
     fn add_param_changes_survives_a_plugin_reporting_inverted_bounds() {
-        // `f32::clamp` panics when `lo > hi`, and these bounds are whatever the
+        // `f64::clamp` panics when `lo > hi`, and these bounds are whatever the
         // plugin reported. A malformed plugin must not take down the audio
         // thread — the value lands inside the range either way round.
         let mut changes = ParameterChanges::reserved(1, 1);
@@ -3616,7 +3586,7 @@ mod tests {
         changes.add_change(ParamId::new(9u32), 0, 0.42);
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
-        assert!((first_param_value(&list) - 0.42).abs() < 1e-6);
+        assert_eq!(first_param_value(&list), 0.42);
     }
 
     // --- MIDI only to a port that declares the MIDI dialect (note-ports.h) ---
@@ -3851,11 +3821,7 @@ mod tests {
             panic!("expected NoteExpression");
         };
         assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_VOLUME);
-        assert!(
-            (e.value - 1.0).abs() < 1e-3,
-            "full MIDI volume must be CLAP unity (1.0), got {}",
-            e.value
-        );
+        assert_eq!(e.value, 1.0, "full MIDI volume must be CLAP unity");
 
         // Zero MIDI volume must stay inside the OPEN interval: `0 < x`.
         let zero = (
@@ -3957,9 +3923,7 @@ mod tests {
 
     #[test]
     fn clap_volume_round_trips_and_saturates_boost_l6() {
-        use tutti_midi_protocol::value_to_unit_f32;
-
-        let unit_of = |gain: f64| -> f32 {
+        let unit_of = |gain: f64| -> f64 {
             let clap = per_note_expression(
                 0,
                 NoteExpressionType::Volume,
@@ -3973,19 +3937,22 @@ mod tests {
                 .expect("volume -> midi");
             match message(&midi) {
                 Message::Midi2(_, Voice2::RegisteredPerNote { value, .. }) => {
-                    value_to_unit_f32(value)
+                    value.normalized().get()
                 }
                 other => panic!("expected a registered per-note controller, got {other:?}"),
             }
         };
 
         // Unity gain is MIDI full scale — the anchor the whole mapping hangs on.
-        assert!((unit_of(1.0) - 1.0).abs() < 1e-3, "{}", unit_of(1.0));
-        // Half gain (-6 dB) round-trips to half scale.
-        assert!((unit_of(0.5) - 0.5).abs() < 1e-3, "{}", unit_of(0.5));
+        assert_eq!(unit_of(1.0), 1.0);
+        // Half gain (-6 dB) is the word `round(0.5 * 0xFFFF_FFFF)`, `0x8000_0000`.
+        assert_eq!(
+            unit_of(0.5),
+            f64::from(0x8000_0000_u32) / f64::from(u32::MAX)
+        );
         // Boost is legal in CLAP but unrepresentable in MIDI: saturate at full
         // scale rather than wrapping or rescaling the whole range.
-        assert!((unit_of(4.0) - 1.0).abs() < 1e-3, "{}", unit_of(4.0));
+        assert_eq!(unit_of(4.0), 1.0);
     }
 
     // --- MIDI 2.0 per-note ↔ CLAP note-expression ---
@@ -4110,7 +4077,7 @@ mod tests {
     fn key_pressure_becomes_pressure_note_expression() {
         let midi = (
             at(0),
-            midi::poly_pressure(MidiChannel::of(2), 48, unit_f32_to_value(0.75).get()),
+            midi::poly_pressure(MidiChannel::of(2), 48, 0xC000_0000),
         );
         match from_midi_live(&midi)
             .events()
@@ -4120,7 +4087,7 @@ mod tests {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_PRESSURE);
                 assert_minted(e.note_id);
-                assert!((e.value - 0.75).abs() < 0.01, "pressure {}", e.value);
+                assert_eq!(e.value, f64::from(0xC000_0000_u32) / f64::from(u32::MAX));
             }
             _ => panic!("expected NoteExpression(Pressure)"),
         }
@@ -4136,7 +4103,7 @@ mod tests {
                 Voice2::AssignablePerNote {
                     note: NoteNumber::of(64),
                     controller: 74,
-                    value: ControlValue::new(unit_f32_to_value(0.6).get()),
+                    value: ControlValue::new(0x9999_9999),
                 },
             )),
         );
@@ -4148,7 +4115,7 @@ mod tests {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_BRIGHTNESS);
                 assert_minted(e.note_id);
-                assert!((e.value - 0.6).abs() < 0.01, "brightness {}", e.value);
+                assert_eq!(e.value, f64::from(0x9999_9999_u32) / f64::from(u32::MAX));
             }
             _ => panic!("expected NoteExpression(Brightness)"),
         }
@@ -4165,7 +4132,7 @@ mod tests {
                 Voice2::AssignablePerNote {
                     note: NoteNumber::of(60),
                     controller: 20,
-                    value: ControlValue::new(unit_f32_to_value(0.5).get()),
+                    value: ControlValue::new(0x8000_0000),
                 },
             )),
         );
@@ -4180,7 +4147,7 @@ mod tests {
                 assert_eq!(e.header.time, 7);
                 assert_eq!(e.channel, 1);
                 assert_eq!(e.key, 60);
-                assert!((e.velocity - 0.5).abs() < 0.01, "velocity {}", e.velocity);
+                assert_eq!(e.velocity, 32768.0 / 65535.0);
                 // The note_id must match what the expression path mints.
                 assert_minted(e.note_id);
             }
@@ -4208,7 +4175,7 @@ mod tests {
         list.add_midi(&(at(0), midi::note_on(MidiChannel::of(CH), KEY, 0x8000)));
         list.add_midi(&(
             at(1),
-            midi::poly_pressure(MidiChannel::of(CH), KEY, unit_f32_to_value(0.5).get()),
+            midi::poly_pressure(MidiChannel::of(CH), KEY, 0x8000_0000),
         ));
         list.add_midi(&(at(2), midi::note_off(MidiChannel::of(CH), KEY, 0x4000)));
 
@@ -4261,7 +4228,6 @@ mod tests {
     fn note_off_release_velocity_is_threaded_through() {
         // A MIDI-2 NoteOff carries a release velocity; it must reach the
         // CLAP NoteOff's `velocity`, and round-trip back.
-        use tutti_midi_protocol::velocity_to_unit_f32;
         let rel = 0x6000u16; // ~0.375 of full scale
         let midi = (at(9), midi::note_off(MidiChannel::of(4), 55, rel));
         match from_midi(&midi)
@@ -4271,12 +4237,7 @@ mod tests {
         {
             ClapEvent::NoteOff(e) => {
                 assert_eq!(e.key, 55);
-                let expected = f64::from(velocity_to_unit_f32(NoteVelocity::new(rel)));
-                assert!(
-                    (e.velocity - expected).abs() < 0.01,
-                    "release velocity {} vs {expected}",
-                    e.velocity
-                );
+                assert_eq!(e.velocity, f64::from(rel) / 65535.0);
                 assert!(e.velocity > 0.0, "release velocity must not collapse to 0");
             }
             _ => panic!("expected NoteOff"),
@@ -4286,16 +4247,14 @@ mod tests {
     #[test]
     fn note_off_release_velocity_round_trips() {
         // The CLAP → MIDI-2 direction must preserve release velocity too.
-        use tutti_midi_protocol::velocity_to_unit_f32;
-
         let clap = ClapEvent::note_off(2, 1, 48, 0.5);
         let midi = clap
             .to_midi(&mut Translator::new())
             .expect("note off -> midi");
         match message(&midi) {
             Message::Midi2(_, Voice2::NoteOff { velocity, .. }) => {
-                let vel = velocity_to_unit_f32(velocity);
-                assert!((vel - 0.5).abs() < 0.01, "release velocity {vel}");
+                // `round(0.5 * 0xFFFF)` is `0x8000`.
+                assert_eq!(velocity.get(), 0x8000);
             }
             other => panic!("expected CV2 NoteOff, got {other:?}"),
         }
@@ -4364,8 +4323,6 @@ mod tests {
     fn note_event_round_trips_to_full_width_cv2() {
         // ClapEvent::NoteOn -> WireMidi builds a native MIDI-2 NoteOn preserving
         // the note and full-width velocity (no 7-bit squash).
-        use tutti_midi_protocol::velocity_to_unit_f32;
-
         let clap = ClapEvent::note_on(3, 2, 64, 0.75);
         let midi = clap
             .to_midi(&mut Translator::new())
@@ -4375,8 +4332,8 @@ mod tests {
             Message::Midi2(address, Voice2::NoteOn { note, velocity, .. }) => {
                 assert_eq!(address.channel.get(), 2);
                 assert_eq!(note.get(), 64);
-                let velocity = velocity_to_unit_f32(velocity);
-                assert!((velocity - 0.75).abs() < 0.01, "velocity {velocity}");
+                // `round(0.75 * 0xFFFF)` is `49151`.
+                assert_eq!(velocity.get(), 49151);
             }
             other => panic!("expected CV2 NoteOn, got {other:?}"),
         }
