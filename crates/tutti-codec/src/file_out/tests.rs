@@ -399,7 +399,7 @@ fn a_view_of_another_width_fails_the_sink() {
 #[cfg(all(feature = "encode-flac", feature = "decode-flac"))]
 #[test]
 fn a_flac_take_round_trips_through_the_decoder() {
-    use crate::{FlacLevel, IntDepth, Wave};
+    use crate::{FlacLevel, IntDepth, read_wave};
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.flac");
@@ -427,7 +427,7 @@ fn a_flac_take_round_trips_through_the_decoder() {
     }
     sink.finalize().unwrap();
 
-    let wave = Wave::read(&path).expect("the codec's own decoder reads the take");
+    let wave = read_wave::<f32>(&path).expect("the codec's own decoder reads the take");
     assert_eq!(wave.channels(), 2);
     assert_eq!(wave.sample_rate(), SampleRate::SR_44K1);
     assert_eq!(wave.len().get(), frames);

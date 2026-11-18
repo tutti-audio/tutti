@@ -7,8 +7,8 @@ fn a_missing_file_is_an_io_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let missing = dir.path().join("none.wav");
     for error in [
-        Wave::read(&missing).unwrap_err(),
-        Wave::read_metadata(&missing).unwrap_err(),
+        read_wave::<f32>(&missing).unwrap_err(),
+        read_wave_metadata(&missing).unwrap_err(),
     ] {
         assert!(
             matches!(&error, DecodeError::Io(e) if e.kind() == std::io::ErrorKind::NotFound),
@@ -20,8 +20,8 @@ fn a_missing_file_is_an_io_error() {
 /// Bytes that are no container are refused, not decoded as silence.
 #[test]
 fn bytes_that_are_no_audio_are_an_error() {
-    assert!(Wave::from_bytes(vec![0x5a; 4096]).is_err());
-    assert!(Wave::from_bytes(Vec::new()).is_err());
+    assert!(read_wave_bytes::<f32>(vec![0x5a; 4096]).is_err());
+    assert!(read_wave_bytes::<f32>(Vec::new()).is_err());
 }
 
 /// A track that states no sample rate is refused with `NoSampleRate`, never
@@ -75,7 +75,7 @@ fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     bytes.extend(b"data");
     bytes.extend(0x4500_0040u32.to_le_bytes());
     bytes.extend([0u8; 32]);
-    let wave = Wave::from_bytes(bytes).expect("decodes");
+    let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
     assert_eq!(wave.channels(), 1);
     assert_eq!(wave.len().0, 16);
 }

@@ -65,11 +65,11 @@ impl<'w> Chunk<'w> {
 
     /// The interleaved buffer to decode `frames` frames into.
     #[cfg(codec)]
-    pub(crate) fn fill(&mut self, frames: Samples) -> &mut [f32] {
+    pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_>, AnalyzeError> {
         self.held = Layout::Interleaved;
         self.data.clear();
         self.data.resize(self.layout.interleaved_len(frames), 0.0);
-        &mut self.data
+        Ok(InterleavedMut::new(&mut self.data, self.layout)?)
     }
 
     /// Keeps the first `frames` frames of what was decoded.

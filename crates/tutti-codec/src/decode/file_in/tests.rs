@@ -1,7 +1,8 @@
 use super::super::read::probe_path;
 use super::*;
-use crate::Wave;
+use crate::{DecodeError, read_wave};
 use symphonia::core::errors::Error;
+use tutti_buffers::{Interleaved, Sample, Wave};
 use tutti_buffers::{InterleavedMut, Stop};
 use tutti_types::Seconds;
 
@@ -9,6 +10,12 @@ use tutti_types::Seconds;
 fn pull_into<S: Source<Sample = f32>>(src: &mut S, buf: &mut [f32]) -> Pull {
     let out = InterleavedMut::new(buf, src.layout()).unwrap();
     src.pull(out)
+}
+
+/// One fallible read of `buf`, viewed at the file's own width.
+fn fill_sequential<S: Sample>(file: &mut FileIn<S>, buf: &mut [S]) -> Result<Samples, DecodeError> {
+    let out = InterleavedMut::new(buf, file.layout()).unwrap();
+    file.fill_sequential_interleaved(out)
 }
 
 /// Write `wave` as a 16-bit WAV named `name` and return its path.
@@ -47,13 +54,14 @@ fn write_test_wav(frames: usize, tag: &str) -> std::path::PathBuf {
         // Distinct per-frame values so slice comparisons are meaningful.
         let l = (i as f32 / frames as f32) - 0.5;
         let r = 0.25 - (i as f32 / frames as f32);
-        wave.push_frame(&[l, r]);
+        wave.append(Interleaved::new(&[l, r], ChannelLayout::STEREO).unwrap())
+            .unwrap();
     }
     save_wav16(&wave, &format!("tutti_stream_decoder_{tag}_{frames}.wav"))
 }
 
 fn loaded_stereo(path: &std::path::Path) -> Vec<[f32; 2]> {
-    let w = Wave::read(path).expect("load");
+    let w = read_wave::<f32>(path).expect("load");
     (0..w.len().get())
         .map(|i| [w.at(0, i), w.at(1, i)])
         .collect()
@@ -65,7 +73,7 @@ fn full_sequential_read_matches_full_load() {
     let path = write_test_wav(frames, "sequential");
     let expected = loaded_stereo(&path);
 
-    let mut dec = FileIn::open(&path).expect("open");
+    let mut dec = FileIn::<f32>::open(&path).expect("open");
     assert!(dec.seekable());
 
     // Poll the whole file in several sequential chunks (all fast-path, no
@@ -98,7 +106,7 @@ fn seek_then_poll_matches_slice() {
     let path = write_test_wav(frames, "seek");
     let expected = loaded_stereo(&path);
 
-    let mut dec = FileIn::open(&path).expect("open");
+    let mut dec = FileIn::<f32>::open(&path).expect("open");
 
     let start = 12_345u64;
     let len = 2_000usize;
@@ -128,7 +136,7 @@ fn poll_past_eof_returns_short_count() {
     let path = write_test_wav(frames, "eof");
     let expected = loaded_stereo(&path);
 
-    let mut dec = FileIn::open(&path).expect("open");
+    let mut dec = FileIn::<f32>::open(&path).expect("open");
 
     // Straddle EOF: seek to 500 before the end, then ask for 1000 frames.
     let start = (frames - 500) as u64;
@@ -195,12 +203,12 @@ fn drain(dec: &mut FileIn) -> usize {
 #[test]
 fn a_truncated_flac_is_a_fault_not_a_clean_end() {
     let path = truncated_asset("stereo.flac", 0.9);
-    let mut dec = FileIn::open(&path).expect("a cut file still opens");
+    let mut dec = FileIn::<f32>::open(&path).expect("a cut file still opens");
     let total = dec.total_frames().expect("flac reports a length").get();
     let mut buf = vec![0.0f32; 1024 * usize::from(dec.layout().count())];
     let mut frames = 0;
     loop {
-        match dec.fill_sequential_interleaved(&mut buf) {
+        match fill_sequential(&mut dec, &mut buf) {
             Ok(Samples(0)) => panic!("a fault must surface as Err, not as a bare end"),
             Ok(n) => frames += n.get(),
             Err(e) => {
@@ -211,7 +219,7 @@ fn a_truncated_flac_is_a_fault_not_a_clean_end() {
     }
     assert!(frames > 0 && frames < total, "{frames} of {total}");
     assert!(dec.error().is_some());
-    assert!(dec.fill_sequential_interleaved(&mut buf).is_err(), "sticky");
+    assert!(fill_sequential(&mut dec, &mut buf).is_err(), "sticky");
     assert_eq!(pull_into(&mut dec, &mut buf), Pull::Failed);
     dec.seek(Samples(0)).expect("seek");
     assert!(dec.error().is_none(), "a successful seek clears the fault");
@@ -239,7 +247,7 @@ fn a_file_without_an_exact_count_reads_clean() {
         ("whole ogg", asset("stereo.ogg")),
     ];
     for (what, path) in cases {
-        let mut dec = FileIn::open(&path).expect("open");
+        let mut dec = FileIn::<f32>::open(&path).expect("open");
         assert!(drain(&mut dec) > 0, "{what}");
         assert_eq!(dec.error().map(ToString::to_string), None, "{what}");
     }
@@ -293,7 +301,7 @@ impl symphonia::core::formats::FormatReader for FailAfter {
 fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
     let path = write_test_wav(20_000, "inject");
     let open = |left| {
-        let mut dec = FileIn::open(&path).expect("open");
+        let mut dec = FileIn::<f32>::open(&path).expect("open");
         let reader = std::mem::replace(
             &mut dec.reader,
             Box::new(FailAfter {
@@ -305,7 +313,7 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
         dec
     };
 
-    let mut clean = FileIn::open(&path).expect("open");
+    let mut clean = FileIn::<f32>::open(&path).expect("open");
     let mut first = vec![0.0f32; 4096 * 2];
     assert_eq!(
         pull_into(&mut clean, &mut first),
@@ -316,8 +324,7 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
     // what the stream holds. Read more than they cover.
     let mut dec = open(1);
     let mut buf = vec![0.0f32; 20_000 * 2];
-    let got = dec
-        .fill_sequential_interleaved(&mut buf)
+    let got = fill_sequential(&mut dec, &mut buf)
         .expect("frames first")
         .get();
     assert!(got > 0 && got < 20_000, "{got}");
@@ -327,12 +334,12 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
             .unwrap()
             .contains("injected")
     );
-    let again = dec.fill_sequential_interleaved(&mut buf).unwrap_err();
+    let again = fill_sequential(&mut dec, &mut buf).unwrap_err();
     assert!(again.to_string().contains("injected"), "{again}");
     assert_eq!(
         &buf[..got * 2],
         &{
-            let mut c = FileIn::open(&path).expect("open");
+            let mut c = FileIn::<f32>::open(&path).expect("open");
             let mut v = vec![0.0f32; got * 2];
             assert_eq!(pull_into(&mut c, &mut v), Pull::Frames(Samples(got)));
             v
@@ -363,7 +370,7 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
     }
 
     let cut = truncated_asset("stereo.flac", 0.9);
-    let mut dec = FileIn::open(&cut).expect("a cut file still opens");
+    let mut dec = FileIn::<f32>::open(&cut).expect("a cut file still opens");
     let total = dec.total_frames().expect("flac reports a length").get();
     let (frames, stop) = frames_then_stop(&mut dec);
     assert!(frames > 0 && frames < total, "{frames} of {total}");
@@ -375,7 +382,7 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
         "a seek clears the fault"
     );
 
-    let (whole, stop) = frames_then_stop(&mut FileIn::open(asset("stereo.flac")).unwrap());
+    let (whole, stop) = frames_then_stop(&mut FileIn::<f32>::open(asset("stereo.flac")).unwrap());
     assert_eq!(whole, total);
     assert_eq!(stop, Stop::Ended);
 
@@ -386,7 +393,7 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
 #[test]
 fn a_clean_end_of_file_has_no_error() {
     let path = write_test_wav(3_000, "clean_end");
-    let mut dec = FileIn::open(&path).expect("open");
+    let mut dec = FileIn::<f32>::open(&path).expect("open");
     let mut buf = vec![0.0f32; 4096 * 2];
     let end = loop {
         match pull_into(&mut dec, &mut buf) {
@@ -428,12 +435,11 @@ fn write_indexed_wav(channels: usize, frames: usize, tag: &str) -> std::path::Pa
 fn interleaved_read_delivers_every_channel() {
     let frames = 128;
     let path = write_indexed_wav(6, frames, "every_channel");
-    let mut decoder = FileIn::open(&path).expect("open");
+    let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout(), ChannelLayout::from(6u16));
 
     let mut out = vec![0.0f32; 16 * 6];
-    let got = decoder
-        .fill_sequential_interleaved(&mut out)
+    let got = fill_sequential(&mut decoder, &mut out)
         .expect("interleaved read")
         .get();
     assert_eq!(got, 16, "expected 16 frames of 6 channels");
@@ -459,14 +465,13 @@ fn interleaved_read_delivers_every_channel() {
 fn interleaved_read_stays_frame_aligned_across_packets() {
     let frames = 4096;
     let path = write_indexed_wav(6, frames, "packet_boundary");
-    let mut decoder = FileIn::open(&path).expect("open");
+    let mut decoder = FileIn::<f32>::open(&path).expect("open");
 
     // Read in small odd-sized chunks so reads land mid-packet repeatedly.
     let mut produced = 0usize;
     let mut chunk = vec![0.0f32; 7 * 6];
     while produced < 2048 {
-        let got = decoder
-            .fill_sequential_interleaved(&mut chunk)
+        let got = fill_sequential(&mut decoder, &mut chunk)
             .expect("read")
             .get();
         if got == 0 {
@@ -507,7 +512,7 @@ fn pull_delivers_the_files_own_width() {
     }
     let path = save_wav16(&wave, "tutti_stream_centre_only.wav");
 
-    let mut decoder = FileIn::open(&path).expect("open");
+    let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout().count(), 6u16, "the trait reports the file");
 
     let mut out = [0.0f32; 6 * 16];
@@ -547,7 +552,7 @@ fn a_mono_file_is_not_widened() {
     }
     let path = save_wav16(&wave, "tutti_stream_mono_native.wav");
 
-    let mut decoder = FileIn::open(&path).expect("open");
+    let mut decoder = FileIn::<f32>::open(&path).expect("open");
     assert_eq!(decoder.layout(), ChannelLayout::MONO, "no widening");
 
     let mut out = [0.0f32; 16];
@@ -579,7 +584,7 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     }
     let path = save_wav16(&wave, "tutti_stream_caller_fold.wav");
 
-    let mut decoder = FileIn::open(&path).expect("open");
+    let mut decoder = FileIn::<f32>::open(&path).expect("open");
     let ch = decoder.layout().count() as usize;
     let mut native = vec![0.0f32; ch * 16];
     assert!(matches!(
@@ -608,5 +613,28 @@ fn a_caller_can_still_fold_to_stereo_itself() {
         stereo[0].abs() > 0.1 && stereo[1].abs() > 0.1,
         "centre was lost in the caller-side fold: {stereo:?}"
     );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// **A view of another width is refused, untouched.** A stereo file read into a
+/// mono or a three-channel view is [`DecodeError::Width`] naming both widths,
+/// and the view keeps what it held.
+#[test]
+fn a_view_of_another_width_is_refused_and_untouched() {
+    let path = write_test_wav(64, "width_refused");
+    for view in [ChannelLayout::MONO, ChannelLayout::from_count(3)] {
+        let mut file = FileIn::<i16>::open(&path).expect("open");
+        let mut buf = [7i16; 12];
+        let out = InterleavedMut::new(&mut buf, view).expect("whole frames");
+        match file.fill_sequential_interleaved(out) {
+            Err(DecodeError::Width { file, view: got }) => {
+                assert_eq!(file, ChannelLayout::STEREO);
+                assert_eq!(got, view);
+            }
+            other => panic!("expected Width, got {other:?}"),
+        }
+        assert_eq!(buf, [7i16; 12], "{view:?}: the view is untouched");
+        assert_eq!(file.cursor(), Samples(0), "nothing was consumed");
+    }
     let _ = std::fs::remove_file(&path);
 }

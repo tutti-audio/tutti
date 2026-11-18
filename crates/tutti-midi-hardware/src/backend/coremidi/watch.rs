@@ -36,6 +36,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::Result;
+use tutti_coremidi_ffi::OsStatus;
 use tutti_midi_device::OsDevice;
 use tutti_rt::spawn_named;
 
@@ -180,6 +181,7 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
                         hub.notify();
                     }
                 })
+                .map_err(OsStatus::new)
             });
             let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
             // The client lives as long as the process.
@@ -204,7 +206,7 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
         .detach();
         match started.recv() {
             Ok(Ok(())) => Ok(hub),
-            Ok(Err(status)) => Err(format!("CoreMIDI client status {status}")),
+            Ok(Err(status)) => Err(format!("CoreMIDI refused the client: {status}")),
             Err(_) => Err("the CoreMIDI watch thread ended at once".into()),
         }
     }

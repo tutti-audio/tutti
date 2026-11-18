@@ -17,6 +17,7 @@ use tutti::{
     Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
     Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
+use tutti_buffers::Interleaved;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -34,7 +35,8 @@ fn saw() -> Wave {
     let mut wave = Wave::new(1, RATE);
     for i in 0..96_000u32 {
         let phase = (i as f32 * 110.0 / RATE.get() as f32).fract();
-        wave.push_frame(&[0.4 * (2.0 * phase - 1.0)]);
+        wave.append(Interleaved::new(&[0.4 * (2.0 * phase - 1.0)], wave.layout()).unwrap())
+            .unwrap();
     }
     wave
 }

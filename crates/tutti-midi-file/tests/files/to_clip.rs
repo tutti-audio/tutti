@@ -11,7 +11,7 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
+    DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
     SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
@@ -22,7 +22,7 @@ use tutti_ump::{
 };
 
 const TPQ: u16 = 480;
-const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
 fn meta(m: Meta) -> FileEvent {
     FileEvent::Meta(m)
@@ -41,7 +41,7 @@ fn format0(events: Vec<(u64, FileEvent)>) -> MidiFile {
 }
 
 fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
-    &file.tracks()[0].events
+    file.tracks()[0].events()
 }
 
 const DEFAULT_TEMPO: u32 = 50_000_000;
@@ -259,7 +259,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         ),
         (480, note(0, 60)),
     ]);
-    let bytes = smf.to_clip().unwrap().clip.to_bytes().unwrap();
+    let bytes = smf.to_clip().unwrap().clip.to_bytes();
     let words: Vec<u32> = bytes[8..]
         .as_chunks::<4>()
         .0
@@ -353,7 +353,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
         .collect();
     assert_eq!(notes, [(50, c), (100, a.0), (100, a.1), (100, b)]);
     // The end is the longest track's.
-    assert_eq!(clip.tracks()[0].end, Tick(100));
+    assert_eq!(clip.tracks()[0].end(), Tick(100));
 }
 
 #[test]
@@ -364,19 +364,13 @@ fn format_2_is_refused() {
         vec![track(vec![(0, note(0, 60))]), track(vec![(0, note(0, 61))])],
     )
     .unwrap();
-    assert!(matches!(
-        smf.to_clip(),
-        Err(Error::ToClip(ToClipError::Sequential))
-    ));
+    assert!(matches!(smf.to_clip(), Err(ToClipError::Sequential)));
 }
 
 #[test]
 fn a_clip_is_not_converted_again() {
     let clip = format0(vec![(0, note(0, 60))]).to_clip().unwrap().clip;
-    assert!(matches!(
-        clip.to_clip(),
-        Err(Error::ToClip(ToClipError::AlreadyClip))
-    ));
+    assert!(matches!(clip.to_clip(), Err(ToClipError::AlreadyClip)));
 }
 
 /// M2-116 sections 7.1.1 and 7.1.2: the first Set Tempo, then the first Set
@@ -456,7 +450,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
         ]
     );
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
-    assert_eq!(clip.seconds_at(Beat(4.0)), Seconds(1.5));
+    assert_eq!(clip.seconds_at(Tick(4 * u64::from(TPQ))), Seconds(1.5));
 }
 
 #[test]
@@ -483,27 +477,23 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
 fn the_division_and_the_end_carry_over() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        SmfDivision::of(96),
+        SmfDivision::per_quarter(96),
         vec![
-            Track {
-                header: vec![],
-                header_end: Tick(0),
-                events: vec![(Tick(10), note(0, 60))],
-                end: Tick(400),
-            },
-            Track {
-                header: vec![],
-                header_end: Tick(0),
-                events: vec![(Tick(10), note(1, 60))],
-                end: Tick(250),
-            },
+            Track::new()
+                .push(Tick(10), note(0, 60))
+                .unwrap()
+                .ending_at(Tick(400)),
+            Track::new()
+                .push(Tick(10), note(1, 60))
+                .unwrap()
+                .ending_at(Tick(250)),
         ],
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
-    assert_eq!(clip.ticks_per_quarter().get(), 96);
-    assert_eq!(clip.tracks()[0].end, Tick(400));
-    assert!(clip.tracks()[0].header.is_empty());
+    assert_eq!(clip.ticks_per_quarter().unwrap().get(), 96);
+    assert_eq!(clip.tracks()[0].end(), Tick(400));
+    assert!(clip.tracks()[0].header().is_empty());
 }
 
 /// Each event with no UMP form, with its tick and reason, in clip order.
@@ -657,7 +647,10 @@ fn text_that_flex_cannot_carry_is_reported() {
     let reasons: Vec<_> = converted.dropped.iter().map(|d| d.reason).collect();
     assert_eq!(
         reasons,
-        [DropReason::TextNotUtf8, DropReason::Text(TextError::Nul)]
+        [
+            DropReason::TextNotUtf8,
+            DropReason::Text(TextError::Nul.into())
+        ]
     );
     assert_eq!(
         flex_texts(&converted.clip),
@@ -775,7 +768,7 @@ fn the_clip_round_trips_through_its_bytes() {
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
 }
 
@@ -840,7 +833,7 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
 fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(100),
+        SmfDivision::per_quarter(100),
         vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
     )
     .unwrap();
@@ -856,13 +849,8 @@ fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
 fn a_tempo_does_not_move_past_the_end_of_the_clip() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(96),
-        vec![Track {
-            header: vec![],
-            header_end: Tick(0),
-            events: vec![(Tick(90), tempo_event(400_000))],
-            end: Tick(90),
-        }],
+        SmfDivision::per_quarter(96),
+        vec![Track::new().push(Tick(90), tempo_event(400_000)).unwrap()],
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
@@ -917,7 +905,7 @@ fn events_on_their_grids_are_not_moved() {
 fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
     MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(tpq),
+        SmfDivision::per_quarter(tpq),
         vec![track(events)],
     )
     .unwrap()
@@ -1033,7 +1021,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
@@ -1047,7 +1035,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
     let clip = smf.to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
     assert_eq!(flex_events(&again, is_signature), [(0, sig)]);
@@ -1179,9 +1167,9 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
         [
             DropReason::LyricWithoutSyllable,
             DropReason::LyricWithoutSyllable,
-            DropReason::Text(TextError::TooLong),
-            DropReason::Text(TextError::Nul),
-            DropReason::Text(TextError::TooLong),
+            DropReason::Text(TextError::TooLong.into()),
+            DropReason::Text(TextError::Nul.into()),
+            DropReason::Text(TextError::TooLong.into()),
         ]
     );
 }
@@ -1314,7 +1302,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         .collect();
     assert_eq!(signatures, [pickup, bar]);
     // The pickup is one beat: the second bar begins a quarter note in.
-    assert_eq!(done.clip.beat_at(Tick(480)), Beat(1.0));
+    assert_eq!(done.clip.beat_at(Tick(480)), Some(Beat(1.0)));
 }
 
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of

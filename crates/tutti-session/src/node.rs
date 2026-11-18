@@ -220,7 +220,7 @@ impl SessionNode for tutti_nodes::MultibandCompressorNode {
         Reclaims::Nothing
     }
 }
-// The delay, modulation, LFO and oscillator nodes, and the two reverbs (wet only: their
+// The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(
     tutti_nodes::DelayNode,
@@ -230,6 +230,7 @@ param_session_node!(
     tutti_nodes::OscillatorNode,
     tutti_nodes::FreeverbNode,
     tutti_nodes::FdnNode,
+    tutti_nodes::PlateReverbNode,
     tutti_nodes::ConvolverNode,
 );
 
@@ -439,7 +440,7 @@ mod tests {
         {
             use std::sync::Arc;
             let source = tutti_sampler::MemorySource::placed(
-                Arc::new(tutti_codec::Wave::new(1, tutti_types::SampleRate::SR_48K)),
+                Arc::new(tutti_buffers::Wave::new(1, tutti_types::SampleRate::SR_48K)),
                 tutti_sampler::VoiceWindow::from(tutti_types::Beat(0.0)),
             )
             .expect("a placeable wave");

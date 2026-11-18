@@ -26,10 +26,6 @@ pub(crate) enum Step {
     },
     /// A gate over the repo's files (`gates.rs`), run in this process.
     Gate(Gate),
-    /// `cargo doc` for each member's features together and each feature of
-    /// the feature-gated crates alone (`gates/doc_features.rs`); every run is
-    /// attempted and the failures reported together.
-    DocFeatures,
     /// `conformance-inventory <format>`: rewrite an inventory from its spec source.
     ConformanceInventory(String),
     /// `conformance`: the dashboard and badges from per-OS JUnit files
@@ -72,7 +68,6 @@ impl Step {
             Step::Run(c) => c.display(),
             Step::WriteFile { path, .. } => format!("write {}", path.display()),
             Step::Gate(g) => g.display(),
-            Step::DocFeatures => "doc-features: cargo doc --locked -p <crate> --no-deps --features <fs>, each member with its features together (private items), then each feature of tutti-session and tutti alone".to_owned(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
             Step::Conformance { results, out } => format!(
                 "conformance: join {}/<os>.xml to the inventories, write {}/index.html, ../index.html and ../badges/*.json",
@@ -81,13 +76,19 @@ impl Step {
             ),
             Step::InLlvmCovEnv(c) => format!("(cargo llvm-cov show-env) {}", c.display()),
             Step::RequireLlvmCov => {
-                "cargo llvm-cov --version || fail (cargo install cargo-llvm-cov --locked)".to_owned()
+                "cargo llvm-cov --version || fail (cargo install cargo-llvm-cov --locked)"
+                    .to_owned()
             }
             Step::RequireCargoDeny => {
                 "cargo deny --version || fail (cargo install cargo-deny --version 0.20.2 --locked)"
                     .to_owned()
             }
-            Step::UmbrellaApi(dir) => format!("umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in", dir.as_ref().map_or(String::new(), |d| format!(" (the texts of {d}/<package>.txt instead)"))),
+            Step::UmbrellaApi(dir) => format!(
+                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in",
+                dir.as_ref().map_or(String::new(), |d| format!(
+                    " (the texts of {d}/<package>.txt instead)"
+                ))
+            ),
             Step::Package => {
                 "cargo package --locked --no-verify -p <each crate under crates/>".to_owned()
             }
@@ -133,12 +134,12 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-features",
         "",
-        "clippy for every feature combination a workspace run leaves dark",
+        "clippy over every member with all its features (needs libjack headers)",
     ),
     (
         "test-features",
         "",
-        "run the suites a workspace run leaves dark (see check-features)",
+        "run the suites a feature gates, every feature on (see check-features)",
     ),
     ("miri", "", "miri over tutti-rt (needs nightly + miri)"),
     (
@@ -150,11 +151,6 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "loom",
         "[<model>...]",
         "the loom models, as CI runs them (or only those named, e.g. handoff_loom)",
-    ),
-    (
-        "check-jack",
-        "",
-        "clippy for tutti-cpal's jack feature (needs libjack headers)",
     ),
     (
         "pressure",
@@ -271,7 +267,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-buffers",
         "",
-        "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt",
+        "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt, and a hand interleave loop or frame-times-width length in src only as a row of xtask/buffers-loops.txt",
     ),
     (
         "check-session-api",
@@ -337,11 +333,6 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "check-submodule-pins",
         "",
         "the VST3 SDK submodules are at the v3.8.0_build_66 SHAs",
-    ),
-    (
-        "check-doc-features",
-        "",
-        "rustdoc over every member's features together, and per feature for tutti-session and tutti",
     ),
     (
         "gates",
@@ -624,9 +615,6 @@ impl Planner<'_> {
                     .collect();
                 self.lines(&chosen);
             }
-            "check-jack" => self.lines(&[
-                "cargo clippy --locked -p tutti-cpal --features jack --all-targets -- -D warnings",
-            ]),
             "pressure" => self.lines(&[
                 "cargo build --locked -p tutti-plugin-server",
                 "cargo nextest run --locked -p tutti-plugin --features clap --test real_plugin_pressure --no-capture",
@@ -722,7 +710,6 @@ impl Planner<'_> {
                 self.out.push(Step::ConformanceInventory(f));
             }
             "check-submodule-pins" => self.out.push(Step::Gate(Gate::SubmodulePins)),
-            "check-doc-features" => self.out.push(Step::DocFeatures),
             "check-hosting" => self.out.push(Step::Gate(Gate::Hosting)),
             "check-paths" => self.out.push(Step::Gate(Gate::CanonicalPaths(args.to_vec()))),
             "fmt" => self.lines(&["cargo fmt --all --check"]),
@@ -733,15 +720,8 @@ impl Planner<'_> {
             "check-windows" => self.check_windows(),
             "doc" => {
                 self.lines(&[
-                    r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps"#,
-                    r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked -p tutti-session -p tutti --no-deps --all-features"#,
-                    r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-graph --no-deps --features contract"#,
-                    r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-plugin-types --no-deps --features contract"#,
+                    r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps --all-features"#,
                 ]);
-                self.out.push(Step::DocFeatures);
-                self.lines(&[format!(
-                    r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{DOCS_NIGHTLY} doc --locked --workspace --no-deps"#
-                )]);
                 self.out.push(Step::UmbrellaApi(None));
             }
             "check-no-std" => self.check_no_std(),
@@ -895,80 +875,15 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-voicing", &[]),
 ];
 
-const CHECK_FEATURES: &[&str] = &[
-    r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features analyze,decode-wav,sampler --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-export --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --lib --features export,encode-flac,encode-aiff,encode-vorbis -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --lib --features vst3,au -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features device,soundfont,decode-wav,decode-flac,decode-mp3,decode-ogg,export,encode-flac,encode-aiff,encode-vorbis --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-sampler --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-sampler --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin --features vst3,au,serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --features encode-wav --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --features encode-aiff --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --features encode-flac --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --features encode-vorbis --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --lib --features decode-wav -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --lib --features decode-flac -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --lib --features decode-mp3 -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --lib --features decode-ogg -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-codec --all-features --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-ump --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-buffers --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-midi-protocol --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-midi-hardware --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-measure --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-dsp --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-clap-ffi --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin --features clap,vst2,serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-db --features serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-contract --features server --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-server --no-default-features --features vst3 --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-server --no-default-features --features clap --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-probe --no-default-features --features vst2 --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-probe --no-default-features --features vst3 --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-plugin-probe --no-default-features --features clap --all-targets -- -D warnings"#,
-];
+const CHECK_FEATURES: &[&str] =
+    &[r#"cargo clippy --locked --workspace --all-features --all-targets -- -D warnings"#];
 
 const TEST_FEATURES: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-server --no-default-features --features clap,vst3"#,
     r#"cargo build --locked -p tutti-plugin-probe"#,
-    r#"cargo nextest run --locked -p tutti-cpal --features capture"#,
-    r#"cargo nextest run --locked -p tutti-session --features audio-io"#,
-    r#"cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze"#,
-    r#"cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth"#,
-    r#"cargo nextest run --locked -p tutti --features audio-io"#,
-    r#"cargo nextest run --locked -p tutti --features analyze,decode-wav,sampler"#,
-    r#"cargo nextest run --locked -p tutti --no-default-features --features io"#,
-    r#"cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis"#,
-    r#"cargo nextest run --locked -p tutti-codec"#,
-    r#"cargo nextest run --locked -p tutti-codec --features encode-wav"#,
-    r#"cargo nextest run --locked -p tutti-codec --features encode-aiff"#,
-    r#"cargo nextest run --locked -p tutti-codec --features encode-flac"#,
-    r#"cargo nextest run --locked -p tutti-codec --features encode-vorbis"#,
-    r#"cargo nextest run --locked -p tutti-codec --all-features"#,
-    r#"cargo nextest run --locked -p tutti-ump --features serde"#,
-    r#"cargo nextest run --locked -p tutti-midi-protocol --features serde"#,
-    r#"cargo nextest run --locked -p tutti-midi-device --features serde"#,
-    r#"cargo nextest run --locked -p tutti-midi-hardware --features serde"#,
-    r#"cargo nextest run --locked -p tutti-tempo --features serde"#,
-    r#"cargo nextest run --locked -p tutti-measure --features serde"#,
-    r#"cargo nextest run --locked -p tutti-buffers --features serde"#,
-    r#"cargo nextest run --locked -p tutti-midi-hardware --features sequencer-tests"#,
-    r#"cargo nextest run --locked -p tutti-plugin-types --features testing"#,
-    r#"cargo nextest run --locked -p tutti-plugin-db --features serde"#,
-    r#"cargo nextest run --locked -p tutti-plugin-contract --features server"#,
+    r#"cargo nextest run --locked --all-features -p tutti-cpal -p tutti-session -p tutti -p tutti-codec -p tutti-ump -p tutti-midi-protocol -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types -p tutti-plugin-db -p tutti-plugin-contract"#,
+    r#"cargo nextest run --locked -p tutti-midi-hardware --all-features"#,
+    r#"cargo build --locked -p tutti-plugin-server"#,
     r#"cargo nextest run --locked -p tutti-plugin --features clap,vst2,serde"#,
 ];
 

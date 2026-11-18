@@ -13,6 +13,7 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
+use tutti_buffers::Mono;
 
 use crate::support::{render_to_buffers, render_to_file};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
@@ -239,7 +240,7 @@ fn a_convolver_reports_its_ir_ring_out() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&ir))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
         .0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
@@ -259,10 +260,10 @@ fn cascaded_convolvers_sum_their_tails() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let first = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&a))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&a)))
         .0;
     let second = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&b))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&b)))
         .0;
     g.connect(src, 0, first, 0)
         .connect(first, 0, second, 0)
@@ -305,7 +306,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     let src = g.add(Const::mono(0.5));
     let quiet = g.add(ForkByClone(Unreporting));
     let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&ir))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
         .0;
     g.connect(src, 0, quiet, 0)
         .connect(quiet, 0, conv, 0)
@@ -406,7 +407,7 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&ir))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
         .0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 

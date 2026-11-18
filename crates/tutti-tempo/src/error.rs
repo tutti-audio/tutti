@@ -1,6 +1,6 @@
 /// Why a [`TempoMap`](crate::TempoMap) was refused. An index is the position of
 /// the offending point in the list given.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum TempoError {
     /// No points.
     #[error("a tempo map needs at least one point")]

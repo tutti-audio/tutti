@@ -30,9 +30,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
 use tutti_types::{
@@ -98,7 +99,8 @@ impl Clock {
 fn dc_wave(len: usize) -> Arc<Wave> {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for _ in 0..len {
-        w.push_frame(&[LEVEL, LEVEL]);
+        w.append(Interleaved::new(&[LEVEL, LEVEL], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

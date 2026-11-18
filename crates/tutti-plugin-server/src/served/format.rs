@@ -186,7 +186,7 @@ pub(in crate::served) mod clap {
             for (id, value) in pending {
                 let requires = match &*lifecycle {
                     Lifecycle::Active { controller, .. } => {
-                        controller.loaded().param_requires_process(main, id.get())
+                        controller.loaded().param_requires_process(main, id)
                     }
                     _ => false,
                 };

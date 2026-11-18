@@ -9,7 +9,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{
     Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
@@ -892,7 +892,7 @@ impl MemorySource {
         // Mono fans one interpolated lane to every channel.
         let reads = if src_ch == 1 { 1 } else { n };
         for (c, lane) in lanes.iter_mut().enumerate().take(reads) {
-            let wave = self.wave.channel(c);
+            let wave = self.wave.channel(c).samples();
             let out = &mut lane.as_mut()[..frames];
             if in_place {
                 let from = first - 1;

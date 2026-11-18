@@ -13,10 +13,11 @@
 //! is what the ABI alone says.
 
 use tutti_plugin_types::{
-    Normalized, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParamUnit,
+    Normalized, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamUnit,
     ParameterInfo as SharedParameterInfo,
 };
 use tutti_rt::Tally;
+use tutti_types::ParamId;
 
 use crate::loaded::Vst2Loaded;
 use crate::param_properties::{IntegerRange, IntegerSteps};

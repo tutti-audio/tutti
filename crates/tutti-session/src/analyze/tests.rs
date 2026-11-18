@@ -4,13 +4,13 @@
 use std::num::NonZeroUsize;
 use std::path::Path;
 
-use tutti_codec::Wave;
+use tutti_buffers::{Interleaved, Mono, Wave};
 use tutti_fixtures::signal;
 use tutti_measure::{
     ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
     VectorscopeConfig,
 };
-use tutti_types::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_types::{Amplitude, ChannelLayout, Db, Hz, SampleRate, Samples, Seconds};
 
 use super::{Analyze, AnalyzeError};
 
@@ -56,7 +56,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     let mut s = session();
     // 1 kHz at 48 kHz: 48 samples a cycle, a sample on every crest.
     let samples = signal::sine(Hz(1000.0), Amplitude(0.5), RATE, Samples(48_000));
-    let wave = Wave::from_samples(RATE, &samples);
+    let wave = Wave::from_mono(RATE, Mono::new(&samples));
     let job = s.analyze(wave, peak_blocks(512));
     let blocks = land(&mut s, &job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
@@ -149,7 +149,7 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
 #[test]
 fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
     let mut s = session();
-    let wave = Wave::from_samples(RATE, &[0.0; 64]);
+    let wave = Wave::from_mono(RATE, Mono::new(&[0.0; 64]));
     let job = s.analyze(wave, VectorscopeConfig::new(NonZeroUsize::MIN));
     let failed = land(&mut s, &job).unwrap_err();
     assert!(
@@ -186,7 +186,8 @@ fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
         } else {
             0.0
         };
-        wave.push_frame(&[level, level]);
+        wave.append(Interleaved::new(&[level, level], ChannelLayout::STEREO).unwrap())
+            .unwrap();
     }
     let config = SilenceConfig::new(FiniteLevel::of(Db(-40.0)), Seconds(0.01));
     let job = s.analyze(wave, config);
@@ -240,7 +241,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
         .unwrap();
     let pushed = Arc::new(AtomicUsize::new(0));
     // Ten chunks long: a worker that ignored the drop would push ten.
-    let wave = Wave::from_samples(RATE, &vec![0.0; 10 * CHUNK_FRAMES]);
+    let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 10 * CHUNK_FRAMES]));
     let job = s.analyze(wave, Counting(Arc::clone(&pushed)));
     drop(job);
     let tasks: Vec<_> = held.lock().unwrap().drain(..).collect();
@@ -260,7 +261,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
 fn a_job_that_is_not_dropped_pushes_every_chunk() {
     let mut s = session();
     let pushed = std::sync::Arc::default();
-    let wave = Wave::from_samples(RATE, &vec![0.0; 2 * CHUNK_FRAMES + 1]);
+    let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 2 * CHUNK_FRAMES + 1]));
     let job = s.analyze(wave, Counting(std::sync::Arc::clone(&pushed)));
     assert_eq!(land(&mut s, &job).unwrap(), 3);
 }
@@ -311,7 +312,8 @@ fn a_stereo_wave_reads_each_channels_peak_through_its_own_planes() {
             f if f == CHUNK_FRAMES + 9 => (0.0, -0.25),
             _ => (0.0, 0.0),
         };
-        wave.push_frame(&[left, right]);
+        wave.append(Interleaved::new(&[left, right], ChannelLayout::STEREO).unwrap())
+            .unwrap();
     }
     let job = s.analyze(wave, ChannelPeaks);
     assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);

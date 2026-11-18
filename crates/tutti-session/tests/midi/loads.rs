@@ -27,8 +27,12 @@ fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile)
         NoteNumber::of(key),
         U7::of(100),
     );
-    let file =
-        MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track]).expect("builds");
+    let file = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::per_quarter(480),
+        vec![track],
+    )
+    .expect("builds");
     let path = dir.join(name);
     file.write(&path).expect("writes");
     (path, file)
@@ -84,7 +88,7 @@ fn a_missing_file_lands_as_a_file_error_with_its_id() {
     let id = s.midi().load_file(dir.path().join("none.mid"));
     let (load, file) = land(&mut s, 1, files).pop().unwrap();
     assert_eq!(load, id);
-    assert!(matches!(file, Err(MidiError::File(_))), "{file:?}");
+    assert!(matches!(file, Err(MidiError::Read(_))), "{file:?}");
 }
 
 #[test]

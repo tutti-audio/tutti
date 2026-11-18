@@ -11,13 +11,13 @@ use tutti_nodes::{
     CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, DynamicEqConfig,
     DynamicEqNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
     LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection,
-    PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode, TremoloConfig,
-    TremoloNode,
+    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    TiltFilterConfig, TiltFilterNode,
+    TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -140,6 +140,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
             )),
         ),
+        (
+            "transient shaper",
+            Box::new(TransientShaperNode::from(
+                TransientShaperConfig::new(ChannelLayout::STEREO)
+                    .attack(Db(12.0))
+                    .sustain(Db(-6.0)),
+            )),
+        ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (
             "limiter",
@@ -174,6 +182,10 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 room: Mix(0.9),
                 damp: Mix(0.2),
             })),
+        ),
+        (
+            "plate",
+            Box::new(PlateReverbNode::from(PlateReverbConfig::new())),
         ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.

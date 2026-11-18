@@ -43,7 +43,7 @@ use std::sync::Arc;
 use super::fault::FirstError;
 #[cfg(codec)]
 use tutti_buffers::Source;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_types::SamplePosition;
 #[cfg(codec)]
 use tutti_types::Samples;
@@ -309,7 +309,7 @@ impl Open {
 
     #[cfg(codec)]
     fn open_path(file: &StreamFile, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
-        let decoder = tutti_codec::FileIn::open(file.path())?;
+        let decoder = tutti_codec::FileIn::<f32>::open(file.path())?;
         let channels = usize::from(decoder.layout().count());
         match decoder.total_frames().filter(|_| decoder.seekable()) {
             Some(len) => Ok(Self::Paged(Box::new(Pages {
@@ -326,7 +326,7 @@ impl Open {
             // wave: no second, interleaved copy.
             None => {
                 drop(decoder);
-                Wave::read(file.path())
+                tutti_codec::read_wave::<f32>(file.path())
                     .map(|wave| Self::Resident(Arc::new(wave)))
                     .map_err(ReadFault::from)
             }
@@ -521,7 +521,10 @@ impl Pages {
                 return;
             }
             // Frames read before a fault stay in the page.
-            let _ = self.decoder.fill_sequential_interleaved(&mut page.data);
+            let layout = self.decoder.topology().width();
+            let view = tutti_buffers::InterleavedMut::new(&mut page.data, layout)
+                .expect("a page is whole frames of the file's width");
+            let _ = self.decoder.fill_sequential_interleaved(view);
             if let Some(e) = self.decoder.error() {
                 self.fault.latch(fail(ReadFault::Decode {
                     frame: start,

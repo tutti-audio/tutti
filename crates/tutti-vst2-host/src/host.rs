@@ -92,7 +92,7 @@ pub(crate) const PARAM_QUEUE_CAPACITY: usize = 512;
 
 /// Capacity of the plugin→host MIDI-out queue.
 ///
-/// Sized in *blocks*, not events: [`crate::Vst2Processor::process_f32`] drains
+/// Sized in *blocks*, not events: [`crate::Vst2Processor::process_planes`] drains
 /// this at the end of every block, so the steady-state occupancy is one
 /// block's emission. `tutti_plugin_types::RT_MIDI_CAPACITY` puts a per-block
 /// plugin emission ceiling at 64 events on the same reasoning ("already far

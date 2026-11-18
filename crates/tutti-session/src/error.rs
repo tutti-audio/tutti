@@ -187,9 +187,13 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// A MIDI file could not be read, built or written.
+    /// A MIDI file could not be read.
     #[error("MIDI file: {0}")]
-    File(#[from] tutti_midi_file::Error),
+    Read(#[from] tutti_midi_file::ReadError),
+
+    /// A file has no timeline of beats to play ([`Midi::play_file`](crate::Midi::play_file)).
+    #[error(transparent)]
+    NoTimeline(#[from] tutti_midi_file::TimelineError),
 
     /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
     /// its work panicked, or the spawner dropped it.
@@ -475,7 +479,7 @@ pub enum Error {
     #[error(transparent)]
     Timed(tutti_transport::TimedError<tutti_transport::TransportCommand>),
 
-    /// A file could not be decoded (`Wave::read`, `FileIn`).
+    /// A file could not be decoded (`read_wave`, `FileIn`).
     #[error(transparent)]
     Decode(#[from] tutti_codec::DecodeError),
 

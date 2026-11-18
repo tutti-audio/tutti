@@ -58,10 +58,10 @@ fn more_planes_than_a_layout_holds_are_refused() {
 fn a_render_becomes_the_wave_of_its_planes() {
     let rendered =
         Rendered::new(vec![vec![0.1, 0.2, 0.3], vec![-0.1, -0.2, -0.3]], RATE, 7).unwrap();
-    let wave = tutti_codec::Wave::from(rendered);
+    let wave = tutti_buffers::Wave::from(rendered);
     assert_eq!(wave.channels(), 2);
     assert_eq!(wave.len(), Samples(3));
     assert_eq!(wave.sample_rate(), RATE);
-    assert_eq!(wave.channel(0), [0.1, 0.2, 0.3]);
-    assert_eq!(wave.channel(1), [-0.1, -0.2, -0.3]);
+    assert_eq!(wave.channel(0).samples(), [0.1, 0.2, 0.3]);
+    assert_eq!(wave.channel(1).samples(), [-0.1, -0.2, -0.3]);
 }

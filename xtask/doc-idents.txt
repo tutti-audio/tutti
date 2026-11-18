@@ -41,8 +41,7 @@
 1 crates/tutti-codec/src/decode/extensions.rs
 1 crates/tutti-coremidi-ffi/src/destination.rs
 1 crates/tutti-dsp/src/convolver.rs
-3 crates/tutti-dsp/src/fft/real.rs
-1 crates/tutti-dsp/src/lib.rs
+2 crates/tutti-dsp/src/fft/real.rs
 2 crates/tutti-dsp/src/resample/streaming.rs
 1 crates/tutti-engine/tests/render/engine_graph.rs
 1 crates/tutti-export/src/control.rs
@@ -59,7 +58,6 @@
 2 crates/tutti-midi-file/src/file.rs
 1 crates/tutti-midi-file/src/kind.rs
 3 crates/tutti-midi-file/src/smf/read.rs
-2 crates/tutti-midi-file/tests/files/support.rs
 1 crates/tutti-midi-hardware/src/backend/alsa/tests.rs
 13 crates/tutti-midi-hardware/src/backend/alsa/watch.rs
 3 crates/tutti-midi-hardware/src/backend/alsa/watch/tests.rs
@@ -143,7 +141,7 @@
 1 crates/tutti-vst3-host/tests/host/integration_tests.rs
 3 crates/tutti-vst3-host/tests/support/audio-probe/README.md
 9 crates/tutti-vst3-host/tests/support/conformance.rs
-41 docs/engineering-notes.md
+40 docs/engineering-notes.md
 5 docs/style-guide.md
 1 testing/tutti-clap-test-plugin/src/lib.rs
 3 testing/tutti-clap-test-plugin/src/params_state.rs

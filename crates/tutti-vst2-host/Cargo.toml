@@ -27,6 +27,7 @@ crossbeam-queue = { version = "0.3", default-features = false, features = ["allo
 thiserror = "2"
 # The editor key vocabulary a `KeyEvent` is written in.
 keyboard-types.workspace = true
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # `SeqWriter` / `SeqReader`, the sequence lock the transport snapshot lives in.
@@ -44,8 +45,6 @@ raw-window-handle = "0.6"
 tutti-vst2-ffi = { path = "../tutti-vst2-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `IntegerRange` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
-# The block views the suites build (`InputOutput`, `Planes`, `PlanesMut`).
-tutti-buffers = { path = "../tutti-buffers" }
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }

@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-105/<section>#<n>          the nth sentence under the numbered section
@@ -21,34 +24,34 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-105/1.4.1#1 | both |  | permitted | M2-105 §1.4.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-105/1.4.1#2 | both |  | permitted | M2-105 §1.4.1 | either device can start a Transaction at any time |  |  |
-m2-105/1.4.1#3 | both |  | permitted | M2-105 §1.4.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-105/1.4.1#4 | both |  | permitted | M2-105 §1.4.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-105/1.4.1#5 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-105/1.4.1#6 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
-m2-105/2#1 | responder |  | required | M2-105 §2 | every Property Exchange device implements the DeviceInfo Resource |  |  |
-m2-105/2#2 | responder |  | recommended | M2-105 §2 | every Property Exchange device implements the ChannelList Resource |  |  |
-m2-105/2#3 | responder |  | required | M2-105 §2 | a device with manufacturer Resources whose schema is a midi+jsonschema reference implements the JSONSchema Resource |  |  |
-m2-105/3#1 | responder |  | required | M2-105 §3 | every Property Exchange device implements the DeviceInfo Resource |  |  |
-m2-105/3.1#1 | initiator |  | permitted | M2-105 §3.1 | an Initiator can read DeviceInfo with a Get |  |  |
-m2-105/3.2#1 | responder |  | required | M2-105 §3.2 | a Responder with DeviceInfo answers a Get with an object as the Property Data |  |  |
-m2-105/3.2#2 | responder |  | permitted | M2-105 §3.2 | a device can report a unique serial number |  |  |
-m2-105/3.2#3 | responder |  | required | M2-105 §3.2 | the family, model and version ids of DeviceInfo equal the fields of the Discovery message |  |  |
-m2-105/4.1#1 | responder |  | recommended | M2-105 §4.1 | a ChannelList the user can edit on the device is subscribable |  |  |
-m2-105/4.2#1 | initiator |  | permitted | M2-105 §4.2 | an Initiator can read ChannelList with a Get |  |  |
-m2-105/4.3#1 | responder |  | required | M2-105 §4.3 | a Responder with ChannelList answers a Get with its list as the Property Data |  |  |
-m2-105/4.3#2 | responder |  | permitted | M2-105 §4.3 | a ChannelList entry can have a Cluster; channels count on across the Groups of a Function Block |  |  |
-m2-105/4.3#3 | responder |  | permitted | M2-105 §4.3 | the Cluster start can equal the entry's channel or differ from it |  |  |
-m2-105/4.4#1 | responder |  | permitted | M2-105 §4.4 | the entry's channel can be a Basic, Global or Manager Channel, or none |  |  |
-m2-105/4.4#2 | responder |  | permitted | M2-105 §4.4 | a single channel with no Cluster is a Basic Channel, or both a Basic and a Manager Channel |  |  |
-m2-105/4.4#3 | responder |  | required | M2-105 §4.4 | a Basic Channel of Mode 3 or 4 with a Cluster is the first Channel of that Cluster |  |  |
-m2-105/4.4#4 | responder |  | required | M2-105 §4.4 | a Global or Manager Channel is not a member of its own Cluster | neg=1 |  |
-m2-105/4.4#5 | responder |  | required | M2-105 §4.4 | a Mode 1 or 2 device lists one entry for a Group whose Cluster spans channels 1 to 16 |  |  |
-m2-105/4.4#6 | responder |  | required | M2-105 §4.4 | that single entry is on the Basic Channel |  |  |
-m2-105/4.5#1 | responder |  | recommended | M2-105 §4.5 | an entry's links point to its ProgramList Resource |  |  |
-m2-105/4.5#2 | responder |  | permitted | M2-105 §4.5 | other linked Resources can be CtrlList or manufacturer Resources |  |  |
-m2-105/4.5.1#1 | responder |  | permitted | M2-105 §4.5.1 | example: a Channel can offer many Resource operations, standard and manufacturer |  |  |
-m2-105/4.5.2#1 | initiator |  | permitted | M2-105 §4.5.2 | an Initiator can offer the Program Collections of a Channel for the user to pick |  |  |
-m2-105/5#1 | responder |  | required | M2-105 §5 | a device whose manufacturer Resources reference a midi+jsonschema id implements the JSONSchema Resource |  |  |
-m2-105/5.1#1 | initiator |  | permitted | M2-105 §5.1 | an Initiator can read JSONSchema with a Get |  |  |
+m2-105/1.4.1#1 | both |  | permitted | M2-105 §1.4.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-105/1.4.1#2 | both |  | permitted | M2-105 §1.4.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-105/1.4.1#3 | both |  | permitted | M2-105 §1.4.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-105/1.4.1#4 | both |  | permitted | M2-105 §1.4.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | 216896626127c89f
+m2-105/1.4.1#5 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-105/1.4.1#6 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |  | bbe806d164dfe0e4
+m2-105/2#1 | responder |  | required | M2-105 §2 | every Property Exchange device implements the DeviceInfo Resource |  |  |  | faa3e7fb51bb5314
+m2-105/2#2 | responder |  | recommended | M2-105 §2 | every Property Exchange device implements the ChannelList Resource |  |  |  | bbd43fb4c8d3cb3f
+m2-105/2#3 | responder |  | required | M2-105 §2 | a device with manufacturer Resources whose schema is a midi+jsonschema reference implements the JSONSchema Resource |  |  |  | ff35e12c4ae8e46e
+m2-105/3#1 | responder |  | required | M2-105 §3 | every Property Exchange device implements the DeviceInfo Resource |  |  |  | a0f55c7ab0e2c660
+m2-105/3.1#1 | initiator |  | permitted | M2-105 §3.1 | an Initiator can read DeviceInfo with a Get |  |  |  | 8559923fe3b6e9eb
+m2-105/3.2#1 | responder |  | required | M2-105 §3.2 | a Responder with DeviceInfo answers a Get with an object as the Property Data |  |  |  | 20d03b0bbcb7ebd8
+m2-105/3.2#2 | responder |  | permitted | M2-105 §3.2 | a device can report a unique serial number |  |  |  | c26a890d80f212ee
+m2-105/3.2#3 | responder |  | required | M2-105 §3.2 | the family, model and version ids of DeviceInfo equal the fields of the Discovery message |  |  |  | 9859b1cc338c93c2
+m2-105/4.1#1 | responder |  | recommended | M2-105 §4.1 | a ChannelList the user can edit on the device is subscribable |  |  |  | 927864f08f3b4c8a
+m2-105/4.2#1 | initiator |  | permitted | M2-105 §4.2 | an Initiator can read ChannelList with a Get |  |  |  | 0d2ace7520e8c018
+m2-105/4.3#1 | responder |  | required | M2-105 §4.3 | a Responder with ChannelList answers a Get with its list as the Property Data |  |  |  | 7ab4f177586e5cb1
+m2-105/4.3#2 | responder |  | permitted | M2-105 §4.3 | a ChannelList entry can have a Cluster; channels count on across the Groups of a Function Block |  |  |  | 88c1b04a8c097f75
+m2-105/4.3#3 | responder |  | permitted | M2-105 §4.3 | the Cluster start can equal the entry's channel or differ from it |  |  |  | 7d9825e561624f0a
+m2-105/4.4#1 | responder |  | permitted | M2-105 §4.4 | the entry's channel can be a Basic, Global or Manager Channel, or none |  |  |  | 71266245480c9189
+m2-105/4.4#2 | responder |  | permitted | M2-105 §4.4 | a single channel with no Cluster is a Basic Channel, or both a Basic and a Manager Channel |  |  |  | 2f381092fa4f666f
+m2-105/4.4#3 | responder |  | required | M2-105 §4.4 | a Basic Channel of Mode 3 or 4 with a Cluster is the first Channel of that Cluster |  |  |  | d8819ce435d68944
+m2-105/4.4#4 | responder |  | required | M2-105 §4.4 | a Global or Manager Channel is not a member of its own Cluster | neg=1 |  |  | de3a517cd6953b38
+m2-105/4.4#5 | responder |  | required | M2-105 §4.4 | a Mode 1 or 2 device lists one entry for a Group whose Cluster spans channels 1 to 16 |  |  |  | dfe68f33b778321f
+m2-105/4.4#6 | responder |  | required | M2-105 §4.4 | that single entry is on the Basic Channel |  |  |  | 9a1a4994f16bc085
+m2-105/4.5#1 | responder |  | recommended | M2-105 §4.5 | an entry's links point to its ProgramList Resource |  |  |  | 079eaa8a43697541
+m2-105/4.5#2 | responder |  | permitted | M2-105 §4.5 | other linked Resources can be CtrlList or manufacturer Resources |  |  |  | 380e5f4bffde9949
+m2-105/4.5.1#1 | responder |  | permitted | M2-105 §4.5.1 | example: a Channel can offer many Resource operations, standard and manufacturer |  |  |  | a4e200aff25019fa
+m2-105/4.5.2#1 | initiator |  | permitted | M2-105 §4.5.2 | an Initiator can offer the Program Collections of a Channel for the user to pick |  |  |  | 040b9a7a1d25ef17
+m2-105/5#1 | responder |  | required | M2-105 §5 | a device whose manufacturer Resources reference a midi+jsonschema id implements the JSONSchema Resource |  |  |  | 1a399290ddf22185
+m2-105/5.1#1 | initiator |  | permitted | M2-105 §5.1 | an Initiator can read JSONSchema with a Get |  |  |  | 67a22534a25be6c6

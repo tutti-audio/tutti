@@ -36,8 +36,8 @@ testing = []
 # served, so a host's config type does not change shape per OS.
 #
 # Needs libjack at BUILD time on Linux (`libjack-jackd2-dev` /
-# `jack-audio-connection-kit-devel`), which is why `cargo xtask check-jack` is a
-# separate recipe from `cargo xtask check-features`.
+# `jack-audio-connection-kit-devel`), which `cargo xtask check-features` and
+# `cargo xtask doc` need since they turn on every feature.
 jack = ["cpal/jack"]
 
 [dependencies]

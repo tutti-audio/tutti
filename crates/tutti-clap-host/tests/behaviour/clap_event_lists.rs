@@ -8,6 +8,7 @@
 
 use std::ptr;
 use tutti_graph::UmpAt;
+use tutti_types::ParamId;
 
 use crate::support::midi_events;
 use clap_sys::events::{
@@ -22,7 +23,8 @@ use tutti_clap_ffi::{
     EventSink, EventSource, header_size, input_raw_for_test, output_raw_for_test,
 };
 use tutti_clap_host::{
-    ClapEvent, EventList, FlushEvents, InputEventList, NoteExpressionType, OutputEventList,
+    ClapEvent, EventList, FlushEvents, InputEventList, InputRooms, NoteExpressionType,
+    OutputEventList, OutputRooms,
 };
 use tutti_graph::Offset;
 use tutti_plugin_types::{
@@ -78,7 +80,7 @@ fn pooled_value(id: u32, k: usize) -> f64 {
 
 #[test]
 fn test_output_events_push_note_on() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let event = ClapEvent::note_on(0, 0, 60, 0.8);
     let header = event.header();
 
@@ -93,16 +95,16 @@ fn test_output_events_push_note_on() {
 }
 
 #[test]
-fn fill_gestures_captures_gesture_and_mod_events() {
+fn gesture_and_mod_events_are_held_beside_the_value() {
     // Gesture begin/end + param-mod on the output side must not be
-    // silently dropped. They land in the CLAP-private gesture list, and
+    // silently dropped. They stay in the event list, and
     // `fill_param_changes` still ignores them (only PARAM_VALUE flows there).
     use clap_sys::events::{
         CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END, clap_event_param_gesture,
         clap_event_param_mod,
     };
 
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
 
     let begin = clap_event_param_gesture {
@@ -152,8 +154,18 @@ fn fill_gestures_captures_gesture_and_mod_events() {
         assert!(push(list_ptr, value.header() as *const _));
     }
 
-    let mut gestures: Vec<ClapEvent> = Vec::new();
-    output.fill_gestures(&mut gestures);
+    let gestures: Vec<&ClapEvent> = output
+        .events()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                ClapEvent::ParamGestureBegin(_)
+                    | ClapEvent::ParamGestureEnd(_)
+                    | ClapEvent::ParamMod(_)
+            )
+        })
+        .collect();
     assert_eq!(gestures.len(), 3, "begin + mod + end captured");
     assert!(
         gestures
@@ -178,18 +190,12 @@ fn fill_gestures_captures_gesture_and_mod_events() {
         "nothing past the room"
     );
     assert_eq!(changes.queues.len(), 1, "only the PARAM_VALUE queued");
-    assert_eq!(changes.queues[0].param_id, 5u32.into());
-
-    // Draining clears the pool.
-    output.fill_gestures(&mut gestures);
-    assert_eq!(gestures.len(), 3);
-    gestures.clear();
-    assert!(gestures.is_empty());
+    assert_eq!(changes.queues[0].param_id, ParamId::new(5u32));
 }
 
 #[test]
 fn test_output_events_push_null_event() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
     unsafe {
         let push_fn = (*list_ptr).try_push.unwrap();
@@ -205,7 +211,9 @@ fn test_output_events_push_null_list() {
     let header = event.header();
     unsafe {
         // A real vtable, called with a null list.
-        let raw = raw_out(&mut OutputEventList::new());
+        let raw = raw_out(&mut OutputEventList::new(
+            OutputRooms::new(256).params(64, &[]),
+        ));
         let result =
             ((*raw).try_push.unwrap())(std::ptr::null(), header as *const clap_event_header);
         assert!(!result);
@@ -217,7 +225,7 @@ fn test_output_events_push_null_list() {
 /// full-parameter-room path (`coalesce_param`) read the struct.
 #[test]
 fn output_events_refuse_a_foreign_space() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(0, &[]));
     let list_ptr = raw_out(&mut output);
     let push = unsafe { (*list_ptr).try_push.unwrap() };
 
@@ -239,7 +247,6 @@ fn output_events_refuse_a_foreign_space() {
         value: 0.5,
     };
     param.header.space_id = 512;
-    output.set_param_room(0, &[]);
     assert!(!unsafe { push(list_ptr, &param.header) });
     assert!(output.events().is_empty());
     assert_eq!(output.events_refused(), 2);
@@ -248,7 +255,7 @@ fn output_events_refuse_a_foreign_space() {
 /// A `size` under the type's struct would read past the plugin's event.
 #[test]
 fn output_events_refuse_an_undersized_event() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
     let push = unsafe { (*list_ptr).try_push.unwrap() };
 
@@ -355,8 +362,7 @@ fn output_events_take_every_core_type_only_at_its_struct_size() {
         // the body is the real, full-size one, so the exact push is read
         // soundly.
         let push_with = |size: u32| -> bool {
-            let mut output = OutputEventList::new();
-            output.reserve(4);
+            let mut output = OutputEventList::new(OutputRooms::new(4).params(4, &[]));
             let list_ptr = raw_out(&mut output);
             let push = unsafe { (*list_ptr).try_push.unwrap() };
             let mut h = header;
@@ -412,7 +418,7 @@ fn output_events_take_every_core_type_only_at_its_struct_size() {
 
 #[test]
 fn test_output_events_push_unknown_event_type() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
 
     let header = clap_event_header {
@@ -432,7 +438,7 @@ fn test_output_events_push_unknown_event_type() {
 
 #[test]
 fn test_output_events_push_multiple() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
 
     for i in 0..5 {
@@ -450,7 +456,7 @@ fn test_output_events_push_multiple() {
 
 #[test]
 fn test_output_events_push_sysex_with_data() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
 
     let sysex_data: Vec<u8> = vec![0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7];
@@ -498,14 +504,13 @@ fn test_output_events_push_sysex_with_data() {
     assert_eq!(packet.data(), &sysex_data[1..sysex_data.len() - 1]);
 }
 
-/// **A long SysEx a plugin emits reaches the host whole.** It used to be
-/// dropped: `ClapEvent::to_midi` is one event, and a SysEx is many
-/// packets.
+/// **A long SysEx a plugin emits reaches the host whole**, though
+/// `ClapEvent::to_midi` is one event and a SysEx is many packets.
 #[test]
 fn a_long_sysex_from_the_plugin_drains_whole() {
     let body: Vec<u8> = (0..40).map(|i| i as u8).collect();
     let message: Vec<u8> = tutti_ump::frame(&body).collect();
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
     let sysex = clap_event_midi_sysex {
         header: clap_event_header {
@@ -546,7 +551,7 @@ fn a_long_sysex_from_the_plugin_drains_whole() {
 
 #[test]
 fn test_output_events_push_sysex_null_buffer() {
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
 
     let sysex = clap_event_midi_sysex {
@@ -588,10 +593,8 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     const PARAMS: u32 = 2_000;
     let room = ParameterQueue::chunk_room(512);
     let budget = ParameterChanges::point_budget(PARAMS as usize, room);
-    let ids: Vec<u32> = (0..PARAMS).collect();
-    let mut output = OutputEventList::new();
-    output.reserve(16);
-    output.set_param_room(budget, &ids);
+    let ids: Vec<ParamId> = (0..PARAMS).map(ParamId::new).collect();
+    let mut output = OutputEventList::new(OutputRooms::new(16).params(budget, &ids));
     let mut changes = ParameterChanges::reserved(PARAMS as usize, room);
     let (floor, _) = ParameterChanges::point_layout(PARAMS as usize, room);
     // The raw list is made once, outside the gate: building it allocates.
@@ -644,7 +647,7 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     let mut dropped = 0;
     assert_no_alloc::assert_no_alloc(|| dropped = block(&mut output, &mut changes, true));
     assert_eq!(dropped, 1);
-    let last = changes.queue((PARAMS - 1).into()).expect("queued");
+    let last = changes.queue(ParamId::new(PARAMS - 1)).expect("queued");
     assert_eq!(last.points.len(), floor);
     let k = floor;
     assert_eq!(
@@ -668,7 +671,7 @@ fn try_push_reads_an_event_the_plugin_left_4_aligned() {
     assert_eq!(at as usize % align_of::<clap_event_header>(), 0);
     unsafe { ptr::write_unaligned(at.cast::<clap_event_note>(), note) };
 
-    let mut output = OutputEventList::new();
+    let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let list_ptr = raw_out(&mut output);
     let pushed = unsafe {
         ((*list_ptr).try_push.unwrap())(list_ptr, at.cast::<clap_event_header>().cast_const())
@@ -731,8 +734,7 @@ fn input_event_pointers_have_the_alignment_their_payload_needs() {
 /// MIDI 1.0 velocity 100 is a `NOTE_ON` near 100/127.
 #[test]
 fn a_midi1_note_on_at_velocity_zero_reaches_the_plugin_as_a_release_at_half() {
-    let mut list = InputEventList::new();
-    list.reserve(4);
+    let mut list = InputEventList::new(InputRooms::new(4));
     list.add_midi(&packet(7, &[0x2091_3C00]));
     list.add_midi(&packet(8, &[0x2091_3C64]));
     let raw = raw_in(&list);

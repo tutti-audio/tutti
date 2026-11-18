@@ -227,10 +227,11 @@ pub(crate) mod tests {
     use tutti_plugin_host::{ParameterChangeSink, PluginHandle, PluginParamValues};
     use tutti_plugin_types::{
         AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Health,
-        LoadedPlugin, Normalized, OwnBypass, ParamFlags, ParamId, ParameterInfo, PluginDescriptor,
+        LoadedPlugin, Normalized, OwnBypass, ParamFlags, ParameterInfo, PluginDescriptor,
         PluginFailure, RenderMode, StateError, StateUse, TerminationReason, bypass_value,
         is_bypassed,
     };
+    use tutti_types::ParamId;
 
     use tutti_graph::NodeMode;
 

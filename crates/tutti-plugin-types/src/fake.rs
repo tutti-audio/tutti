@@ -25,10 +25,11 @@ use crate::StateError;
 use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink, EditorError,
     EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor, PluginError,
-    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
-    Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
+    ParamFlags, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request,
+    RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
+use tutti_types::ParamId;
 
 /// One call the fake received.
 #[derive(Debug, Clone, Copy, PartialEq)]

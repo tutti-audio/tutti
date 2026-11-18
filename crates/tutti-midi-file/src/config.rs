@@ -1,17 +1,36 @@
-//! What a track list can be refused for: [`ConfigError`], and the order a
+//! What a track list can be refused for: [`TracksError`], and the order a
 //! [`Track`](crate::Track) builder holds ([`OutOfOrder`]).
 
 use thiserror::Error;
 
-use crate::Tick;
+use crate::{ClipFileError, Tick};
+
+/// Which part of a track an error is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TrackPart {
+    /// A Clip File's configuration header, on a clock of its own.
+    Header,
+    /// The events of the sequence.
+    Events,
+}
+
+impl std::fmt::Display for TrackPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Header => "header",
+            Self::Events => "events",
+        })
+    }
+}
 
 /// Why the tracks cannot make a file of the container asked for
 /// ([`MidiFile::smf`](crate::MidiFile::smf), [`MidiFile::clip`](crate::MidiFile::clip),
-/// and a write): each variant is one rule of the container, with where it was
+/// and a read): each variant is one rule of the container, with where it was
 /// broken. A `track` is an index into the list given.
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum ConfigError {
+pub enum TracksError {
     /// The track list is empty.
     #[error("a file needs at least one track")]
     NoTracks,
@@ -33,14 +52,6 @@ pub enum ConfigError {
         /// The track.
         track: usize,
     },
-    /// An event is before the one ahead of it.
-    #[error("track {track}: events out of order at tick {}", at.0)]
-    OutOfOrder {
-        /// The track.
-        track: usize,
-        /// The tick that went backwards.
-        at: Tick,
-    },
     /// Two events are further apart than an SMF's delta (28 bits). A Clip File
     /// has no such gap.
     #[error("track {track}: the gap before tick {} is wider than the wire holds", at.0)]
@@ -50,33 +61,9 @@ pub enum ConfigError {
         /// The tick the gap ends at.
         at: Tick,
     },
-    /// A header message is before the one ahead of it.
-    #[error("track {track}: the header's messages out of order at tick {}", at.0)]
-    HeaderOutOfOrder {
-        /// The track.
-        track: usize,
-        /// The tick that went backwards.
-        at: Tick,
-    },
-    /// The track ends before its last event.
-    #[error("track {track}: ends at tick {} before its last event", end.0)]
-    EndBeforeLast {
-        /// The track.
-        track: usize,
-        /// Where it ends.
-        end: Tick,
-    },
     /// The track ends further after its last event than the wire's delta holds.
     #[error("track {track}: ends at tick {}, too long after its last event", end.0)]
     EndTooFar {
-        /// The track.
-        track: usize,
-        /// Where it ends.
-        end: Tick,
-    },
-    /// The header ends before its last message.
-    #[error("track {track}: the header ends at tick {} before its last message", end.0)]
-    HeaderEndBeforeLast {
         /// The track.
         track: usize,
         /// Where it ends.
@@ -93,26 +80,32 @@ pub enum ConfigError {
         at: Tick,
     },
     /// The container cannot hold an event.
-    #[error("track {track}{}: {refusal}", if *.in_header { " header" } else { "" })]
+    #[error("track {track} {part}: {refusal}")]
     Refused {
         /// The track.
         track: usize,
-        /// Whether it is a header message, not an event of the sequence.
-        in_header: bool,
+        /// The part of it.
+        part: TrackPart,
         /// Which rule it broke.
         refusal: Refusal,
     },
     /// A count or length the writer cannot hold. An SMF's event past 2^28
-    /// bytes, chunk past 4 GB or delta past 28 bits is past the format's
-    /// fields (SMF 1.0 section 1.1). A Clip File's limit is the writer's own
-    /// bound on what it allocates, not M2-116's: the format holds any gap with
-    /// Null restarts (section 3.2.2), and the writer refuses a gap whose
-    /// restarts alone would be over 4 GB.
+    /// bytes or chunk past 4 GB is past the format's fields (SMF 1.0 section
+    /// 1.1). A Clip File's limit is the writer's own bound on what it
+    /// allocates, not M2-116's: the format holds any gap with Null restarts
+    /// (section 3.2.2), and the writer refuses a gap whose restarts alone
+    /// would be over 4 GB.
     #[error("the file is larger than the writer holds")]
     TooLarge,
+    /// A Clip File's header breaks a rule of M2-116 sections 6 to 6.2.
+    #[error("the clip header is not well formed")]
+    Header(#[from] ClipFileError),
+    /// The tempo events do not make a tempo map.
+    #[error("the file's tempo events do not make a tempo map")]
+    Tempo(#[from] tutti_tempo::TempoError),
 }
 
-/// Why a container cannot hold an event ([`ConfigError::Refused`]).
+/// Why a container cannot hold an event ([`TracksError::Refused`]).
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Refusal {

@@ -54,12 +54,13 @@
 //! use std::sync::Arc;
 //! use tutti_types::{SampleRate, Samples};
 //! use tutti_graph::{Prepare, Solo};
+//! use tutti_buffers::Interleaved;
 //! use tutti_sampler::{MemorySource, Wave};
 //!
-//! // 100 stereo frames; `push_frame` takes one frame, not one sample.
+//! // 100 stereo frames; `append` takes one frame, not one sample.
 //! let mut wave = Wave::new(2, SampleRate::SR_44K1);
 //! for _ in 0..100 {
-//!     wave.push_frame(&[0.5, 0.5]);
+//!     wave.append(Interleaved::new(&[0.5, 0.5], wave.layout()).unwrap()).unwrap();
 //! }
 //!
 //! // Free-running (not placed on the transport), so it plays once started.
@@ -167,9 +168,9 @@ pub(crate) fn nonempty(layout: tutti_types::ChannelLayout) -> tutti_types::Chann
 pub mod testing;
 
 // The resident buffer every voice constructor takes (`MemorySource::new`,
-// `Voice`'s memory tier) is `tutti-codec`'s. Re-exported so a consumer building
-// a voice needs no direct `tutti-codec` dependency.
-pub use tutti_codec::Wave;
+// `Voice`'s memory tier) is a `tutti-buffers` type. Re-exported so a consumer building
+// a voice needs no direct `tutti-buffers` dependency.
+pub use tutti_buffers::Wave;
 
 // Voice playback: the two tier units, the mixer over them, and the kernels they
 // share.
@@ -217,7 +218,7 @@ pub use streamer::{ByHand, StepOutcome};
 // streamability half of it is this crate's own capability — so the host and the
 // streamer read one function rather than two copies of a rule.
 //
-// Codec-gated because it *is* the codec layer: `Wave::read_metadata` and
+// Codec-gated because it *is* the codec layer: `read_wave_metadata` and
 // `WaveMetadata` are themselves gated in `tutti-codec`, so with no format feature
 // there is no header to read.
 #[cfg(codec)]

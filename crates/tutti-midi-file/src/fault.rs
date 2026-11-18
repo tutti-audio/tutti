@@ -1,30 +1,9 @@
-//! What a read refused: [`Truncated`], the input that ends too soon, and
-//! [`SmfParseError`], the Standard MIDI File bytes that are not well formed.
+//! What a read of an SMF refused: [`SmfParseError`], the bytes that are not
+//! well formed or end too soon.
 
-/// What was being read when the input ended.
-///
-/// A file that is cut off is an error and never a shorter file: what was read
-/// before the end is not returned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum Truncated {
-    /// An SMF chunk: its type and length short of eight bytes, or a body that
-    /// runs past the end of the file.
-    #[error("a chunk runs past the end of the file")]
-    Chunk,
-    /// The SMF header declares more track chunks than the file holds.
-    #[error("the file holds fewer tracks than the header declares")]
-    Tracks,
-    /// A Clip File's UMP claims more words than remain in the stream.
-    #[error("a message runs past the end of the clip file")]
-    Message,
-    /// A Clip File ends inside a structural rule: a required message has no
-    /// packets left to be read from.
-    #[error("the clip file ends inside its structure")]
-    Clip,
-}
-
-/// Why Standard MIDI File bytes are not a well-formed file.
+/// Why Standard MIDI File bytes are not a well-formed file. A file that is cut
+/// off is refused with one of the cut-off variants and never read as a
+/// shorter file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum SmfParseError {
@@ -34,12 +13,14 @@ pub enum SmfParseError {
     /// The division is zero ticks per quarter note.
     #[error("zero ticks-per-beat")]
     ZeroTicksPerBeat,
-    /// An SMPTE division whose frame rate is none of the four.
+    /// An SMPTE division whose frame rate is none of the four (-24, -25, -29
+    /// and -30).
     #[error("invalid SMPTE frame rate")]
     InvalidFrameRate,
-    /// The header's format is not 0, 1 or 2.
-    #[error("unknown format")]
-    UnknownFormat,
+    /// An SMPTE division of zero ticks per frame. The specification is silent
+    /// on it; this crate refuses it because a tick of no frame has no time.
+    #[error("zero ticks-per-frame")]
+    ZeroTicksPerFrame,
     /// The file does not begin with the header chunk.
     #[error("missing header chunk")]
     MissingHeader,
@@ -67,7 +48,14 @@ pub enum SmfParseError {
     /// A format 0 file with other than one track.
     #[error("a format 0 file has one track")]
     FormatZeroTracks,
-    /// Bytes that no rule names.
-    #[error("unexpected bytes")]
-    Unexpected,
+    /// A chunk's type and length are short of eight bytes, or its body runs
+    /// past the end of the file.
+    #[error("a chunk runs past the end of the file")]
+    ChunkCutOff,
+    /// The header declares more track chunks than the file holds.
+    #[error("the file holds fewer tracks than the header declares")]
+    TracksCutOff,
+    /// An event ends past the end of its track chunk.
+    #[error("an event is cut off by the end of its chunk")]
+    EventCutOff,
 }

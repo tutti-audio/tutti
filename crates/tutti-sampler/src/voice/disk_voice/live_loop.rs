@@ -20,6 +20,7 @@
 //! read (underruns): a reposition costs none.
 
 use crate::VoiceWindow;
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
 use crate::testing::loop_frames;
@@ -65,10 +66,11 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 }
 
 /// The same ramp, resident, for the memory tier.
-fn ramp_wave(rate: u32, frames: usize) -> Arc<tutti_codec::Wave> {
-    let mut wave = tutti_codec::Wave::new(2, SampleRate::of(rate as f64));
+fn ramp_wave(rate: u32, frames: usize) -> Arc<tutti_buffers::Wave> {
+    let mut wave = tutti_buffers::Wave::new(2, SampleRate::of(rate as f64));
     for i in 0..frames {
-        wave.push_frame(&[value(i), -value(i)]);
+        wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(wave)
 }
@@ -254,7 +256,7 @@ struct Memory {
 }
 
 impl Memory {
-    fn new(wave: Arc<tutti_codec::Wave>, loop_: Option<Loop>, speed: f32, from: f64) -> Self {
+    fn new(wave: Arc<tutti_buffers::Wave>, loop_: Option<Loop>, speed: f32, from: f64) -> Self {
         let clock = MockTransport::rolling(Beat::new(from), Bpm::of(120.0));
         let mut source =
             MemorySource::placed(wave, VoiceWindow::from(Beat(0.0))).expect("a placeable wave");

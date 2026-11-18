@@ -7,10 +7,13 @@
 #![allow(clippy::result_large_err, dead_code)]
 
 use std::path::Path;
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::{Whole, main_thread};
 
-use tutti_plugin_types::{MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples};
-use tutti_vst2_host::{MidiEventVec, Vst2Error, Vst2Loaded, Vst2ProcessContext};
+use tutti_plugin_types::{
+    ChannelTable, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
+};
+use tutti_vst2_host::{MidiEventVec, Vst2Error, Vst2Loaded, Vst2ProcessContext, Vst2Processor};
 
 /// The two halves of one activation.
 pub type Active = tutti_fixtures::Active<Whole<Vst2Loaded>>;
@@ -70,7 +73,7 @@ pub trait ActiveExt: Sized {
     fn set_sample_rate(&mut self, rate: f64);
     /// A new maximum block, with the rate and width kept.
     fn set_block_size(&mut self, frames: usize);
-    /// [`Vst2Processor::process_f32`](tutti_vst2_host::Vst2Processor::process_f32).
+    /// [`Vst2Processor::process_planes`](tutti_vst2_host::Vst2Processor::process_planes) at 32-bit.
     fn process_f32(
         &mut self,
         inputs: &[&[f32]],
@@ -78,7 +81,7 @@ pub trait ActiveExt: Sized {
         num_samples: usize,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec;
-    /// [`Vst2Processor::process_f64`](tutti_vst2_host::Vst2Processor::process_f64).
+    /// [`Vst2Processor::process_planes`](tutti_vst2_host::Vst2Processor::process_planes) at 64-bit.
     fn process_f64(
         &mut self,
         inputs: &[&[f64]],
@@ -99,6 +102,33 @@ pub trait ActiveExt: Sized {
     fn loaded(&self) -> &Vst2Loaded;
     /// [`loaded`](Self::loaded), mutably.
     fn loaded_mut(&mut self) -> &mut Vst2Loaded;
+}
+
+/// One block of `num_samples` frames over the caller's channel slices, as the views
+/// [`Vst2Processor::process_planes`] takes. The tables are on the stack: the no-alloc suites run it.
+fn run<'p, S: Float>(
+    processor: &'p mut Vst2Processor,
+    inputs: &[&[S]],
+    outputs: &mut [&mut [S]],
+    num_samples: usize,
+    ctx: &Vst2ProcessContext,
+) -> &'p MidiEventVec {
+    let ins: ChannelTable<&[S]> = inputs.iter().map(|c| &c[..num_samples]).collect();
+    let mut outs: ChannelTable<&mut [S]> =
+        outputs.iter_mut().map(|c| &mut c[..num_samples]).collect();
+    let input = if ins.is_empty() {
+        Planes::default()
+    } else {
+        Planes::new(&ins).expect("equal channels")
+    };
+    let output = if outs.is_empty() {
+        PlanesMut::default()
+    } else {
+        PlanesMut::new(&mut outs).expect("equal channels")
+    };
+    let mut io =
+        InputOutput::new(Samples(num_samples), input, output).expect("the channels hold the block");
+    processor.process_planes(&mut io, ctx)
 }
 
 impl ActiveExt for Active {
@@ -131,8 +161,7 @@ impl ActiveExt for Active {
         num_samples: usize,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
-        self.processor()
-            .process_f32(inputs, outputs, num_samples, ctx)
+        run(self.processor(), inputs, outputs, num_samples, ctx)
     }
 
     fn process_f64(
@@ -142,8 +171,7 @@ impl ActiveExt for Active {
         num_samples: usize,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
-        self.processor()
-            .process_f64(inputs, outputs, num_samples, ctx)
+        run(self.processor(), inputs, outputs, num_samples, ctx)
     }
 
     fn dropped_midi_out(&mut self) -> u64 {

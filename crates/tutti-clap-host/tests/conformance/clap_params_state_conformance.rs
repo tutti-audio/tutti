@@ -38,7 +38,8 @@ use tutti_clap_test_plugin::{
     ProcessCapture, STATE_MAGIC,
 };
 use tutti_plugin_types::{AutomationMode, Control, StateUse};
-use tutti_plugin_types::{Normalized, ParamFlags, ParamId, ParamSteps, Request, RescanScope};
+use tutti_plugin_types::{Normalized, ParamFlags, ParamSteps, Request, RescanScope};
+use tutti_types::ParamId;
 
 /// CLAP event type constants, pinned here rather than imported: these are the
 /// wire values the host puts on the FFI, so a failure names what the plugin
@@ -239,7 +240,7 @@ fn host_enumerates_parameters_with_plugin_ids_in_index_order() {
 
     let listed = loaded.parameter_list(main_thread());
     let got_ids: Vec<ParamId> = listed.iter().map(|p| p.id()).collect();
-    let want_ids: Vec<ParamId> = probe_params().iter().map(|p| p.id.into()).collect();
+    let want_ids: Vec<ParamId> = probe_params().iter().map(|p| ParamId::new(p.id)).collect();
     assert_eq!(
         got_ids, want_ids,
         "host must hand back the plugin's own param ids, in the plugin's index \
@@ -258,7 +259,7 @@ fn host_projects_parameter_metadata_exactly() {
 
     for (i, want) in probe_params().iter().enumerate() {
         let got = &listed[i];
-        assert_eq!(got.id(), want.id.into(), "param {i} id");
+        assert_eq!(got.id(), ParamId::new(want.id), "param {i} id");
         assert_eq!(
             got.name().as_bytes(),
             want.name,
@@ -441,7 +442,7 @@ fn parameter_range_is_keyed_by_id_and_refuses_unknown_ids() {
 
     for want in probe_params() {
         assert_eq!(
-            loaded.parameter_range(main_thread(), want.id),
+            loaded.parameter_range(main_thread(), ParamId::new(want.id)),
             Some((want.min, want.max)),
             "range for param id {} must be the plugin's declared bounds",
             want.id
@@ -452,7 +453,7 @@ fn parameter_range_is_keyed_by_id_and_refuses_unknown_ids() {
     // id, so answering for one would mean a host had confused the two.
     for index in 0..probe_params().len() as u32 {
         assert_eq!(
-            loaded.parameter_range(main_thread(), index),
+            loaded.parameter_range(main_thread(), ParamId::new(index)),
             None,
             "index {index} is not a param id in this plugin"
         );
@@ -550,8 +551,8 @@ fn host_denormalizes_automation_against_the_parameter_range() {
 
     let mut params = ParameterChanges::reserved(1, 2);
     // Deliberately out of offset order, so the sort is exercised too.
-    params.add_change(p.id.into(), 192, 0.75);
-    params.add_change(p.id.into(), 64, 0.25);
+    params.add_change(ParamId::new(p.id), 192, 0.75);
+    params.add_change(ParamId::new(p.id), 64, 0.25);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -586,8 +587,8 @@ fn host_denormalizes_each_parameter_against_its_own_range() {
     let b = param(1); // -12 .. 12
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(a.id.into(), 0, 0.5);
-    params.add_change(b.id.into(), 0, 0.5);
+    params.add_change(ParamId::new(a.id), 0, 0.5);
+    params.add_change(ParamId::new(b.id), 0, 0.5);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -625,7 +626,7 @@ fn a_stepped_parameter_automated_at_each_position_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let mut params = ParameterChanges::reserved(1, 1);
-        params.add_change(mode.id.into(), 0, f64::from(k) / 22.0);
+        params.add_change(ParamId::new(mode.id), 0, f64::from(k) / 22.0);
         let ctx = ClapProcessContext {
             params: Some(&params),
             ..Default::default()
@@ -654,7 +655,7 @@ fn a_stepped_parameter_set_from_the_control_thread_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let n = Normalized::new(f64::from(k) / 22.0).expect("on 0..=1");
-        Control::set_parameter(&mut loaded, main_thread(), mode.id.into(), n)
+        Control::set_parameter(&mut loaded, main_thread(), ParamId::new(mode.id), n)
             .expect("a declared, writable parameter");
         let cap = probe.capture();
         assert_eq!(cap.flush_event_count, 1, "position {k}");
@@ -687,8 +688,11 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     let probe = Probe::acquire();
     // After the load: with no handle open, the switch's own would be the last
     // and closing it would unload the image and reset the switch.
-    let loaded = probe.load();
+    let mut loaded = probe.load();
     set_readonly_param(param(0).id);
+    // A plugin that changes a parameter's flags asks for an info rescan, which
+    // the lifecycle serves.
+    Control::rescan_parameters(&mut loaded, main_thread(), RescanScope::Info);
     let mut inst = loaded
         .activate_at::<f32>(48_000.0, 512)
         .map_err(|(_, e)| e)
@@ -696,8 +700,8 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     let (ro, rw) = (param(0), param(1));
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(ro.id.into(), 0, 0.5);
-    params.add_change(rw.id.into(), 0, 0.5);
+    params.add_change(ParamId::new(ro.id), 0, 0.5);
+    params.add_change(ParamId::new(rw.id), 0, 0.5);
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -718,16 +722,17 @@ fn set_parameter_does_not_write_a_read_only_parameter() {
     let probe = Probe::acquire();
     let mut loaded = probe.load();
     set_readonly_param(param(0).id);
+    Control::rescan_parameters(&mut loaded, main_thread(), RescanScope::Info);
     let n = Normalized::new(0.5).expect("on 0..=1");
 
-    let read_only = param(0).id.into();
+    let read_only = ParamId::new(param(0).id);
     assert_eq!(
         Control::set_parameter(&mut loaded, main_thread(), read_only, n),
         Err(tutti_plugin_types::ParamWriteError::ReadOnly(read_only))
     );
     assert_eq!(probe.capture().flush_event_count, 0, "a read-only value");
 
-    Control::set_parameter(&mut loaded, main_thread(), param(1).id.into(), n)
+    Control::set_parameter(&mut loaded, main_thread(), ParamId::new(param(1).id), n)
         .expect("a declared, writable parameter");
     assert_eq!(probe.capture().flush_event_count, 1, "a writable one");
     set_readonly_param(u32::MAX);
@@ -753,7 +758,9 @@ fn host_decodes_plugin_emitted_param_values() {
 
     // The probe drains its output queue in `params.flush`, which is where
     // `flush_params` will pick it up.
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     assert_eq!(out.len(), 1, "the plugin's one output event must survive");
     let hdr = out[0].header();
@@ -763,8 +770,8 @@ fn host_decodes_plugin_emitted_param_values() {
 /// Gesture begin/end and modulation events the plugin emits are *not*
 /// representable as parameter values, and must not be silently dropped.
 ///
-/// `fill_param_changes` matches only `ParamValue`; the rest go through
-/// `fill_gestures`. A host that collapses all four kinds into `PARAM_VALUE`, or
+/// `fill_param_changes` matches only `ParamValue`; the rest stay in the
+/// output event list. A host that collapses all four kinds into `PARAM_VALUE`, or
 /// drops the two gesture types, fails here.
 /// Spec: clap.event.param_gesture_begin, clap.event.param_gesture_end, clap.event.param_value, clap.event.param_mod, clap.events.output.try_push
 #[test]
@@ -779,7 +786,9 @@ fn host_preserves_gesture_and_modulation_events_from_the_plugin() {
     probe.queue_output(OUT_GESTURE_END, p.id, 0.0);
     probe.queue_output(OUT_PARAM_MOD, p.id, 0.125);
 
-    let out = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert_eq!(flushed.lost(), 0);
+    let out = flushed.events();
 
     let types: Vec<u16> = out.iter().map(|e| e.header().type_).collect();
     assert_eq!(

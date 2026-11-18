@@ -85,6 +85,7 @@ use tutti_au_ffi::property::{
 use tutti_au_ffi::{Element, Property, Scope};
 
 use tutti_plugin_types::{MidiAssignment, MidiSource};
+use tutti_types::ParamId;
 use tutti_ump::{MidiChannel, U7};
 
 use crate::error::Result;
@@ -503,7 +504,7 @@ pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
                     MidiChannel::new(m.channel)
                 },
                 source,
-                param: m.parameter_id.into(),
+                param: ParamId::new(m.parameter_id),
             })
         })
         .collect()
@@ -738,17 +739,17 @@ mod tests {
                 MidiAssignment {
                     channel: MidiChannel::new(3),
                     source: MidiSource::ControlChange(U7::of(74)),
-                    param: 900.into(),
+                    param: ParamId::new(900),
                 },
                 MidiAssignment {
                     channel: None,
                     source: MidiSource::ControlChange(U7::of(1)),
-                    param: 901.into(),
+                    param: ParamId::new(901),
                 },
                 MidiAssignment {
                     channel: MidiChannel::new(0),
                     source: MidiSource::PitchBend,
-                    param: 904.into(),
+                    param: ParamId::new(904),
                 },
             ]
         );

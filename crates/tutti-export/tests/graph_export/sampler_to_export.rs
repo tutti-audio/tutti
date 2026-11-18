@@ -43,6 +43,7 @@
 //! The assertions decode the exported file through `hound`.
 
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
+use tutti_buffers::Interleaved;
 use tutti_fixtures::signal::rms_f64;
 
 use std::f32::consts::TAU;
@@ -50,7 +51,7 @@ use std::sync::Arc;
 use tutti_types::Seconds;
 
 use crate::support::render_to_file;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{RenderGraph, Setup};
@@ -77,7 +78,10 @@ const DUR_S: f64 = 1.0;
 fn tone(frames: usize) -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames {
-        w.push_frame(&[(TAU * BASE_HZ * i as f32 / SR as f32).sin()]);
+        w.append(
+            Interleaved::new(&[(TAU * BASE_HZ * i as f32 / SR as f32).sin()], w.layout()).unwrap(),
+        )
+        .unwrap();
     }
     Arc::new(w)
 }

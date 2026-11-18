@@ -27,9 +27,10 @@ unit! {
     ///
     /// "Samples" in the *sample-frame* sense — one tick of the clock, however many
     /// channels wide — which is how the plugin formats and `Seconds::to_samples`
-    /// already use it. It is **never** a count of interleaved `f32`s; that quantity
-    /// is a slice length, reached only through
-    /// [`ChannelLayout::interleaved_len`](crate::ChannelLayout::interleaved_len), and brought back only through
+    /// already use it. It is **never** a count of interleaved samples; that
+    /// quantity is a slice length, reached only through
+    /// [`ChannelLayout::interleaved_len`](crate::ChannelLayout::interleaved_len)
+    /// and brought back only through
     /// [`ChannelLayout::from_interleaved_len`](crate::ChannelLayout::from_interleaved_len).
     ///
     /// Integer by construction. Distinct from `SamplePosition`, which is an `f64`

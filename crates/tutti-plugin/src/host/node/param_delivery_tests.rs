@@ -8,7 +8,8 @@
 
 use std::sync::Arc;
 use tutti_plugin_host::{DeliveryCounters, ParamDelivery};
-use tutti_plugin_types::{ParamId, ParameterQueue};
+use tutti_plugin_types::ParameterQueue;
+use tutti_types::ParamId;
 
 #[cfg(feature = "clap")]
 fn op(id: u32) -> ParamId {
@@ -73,9 +74,9 @@ fn a_pool_spent_chunk_reaches_a_clap_plugin_whole() {
     let mut latest = vec![0.0; LANES as usize];
     lane_chunk(&mut d, &mut latest, 0);
     let budget = tutti_plugin_types::ParameterChanges::point_budget(PARAMS as usize, room);
-    let mut list = tutti_clap_host::InputEventList::new();
-    list.reserve(budget);
-    list.set_param_point_room(budget);
+    let mut list = tutti_clap_host::InputEventList::new(
+        tutti_clap_host::InputRooms::new(0).param_points(budget),
+    );
     let carried: usize = d.changes().queues.iter().map(|q| q.points.len()).sum();
     assert_no_alloc::assert_no_alloc(|| {
         list.add_param_changes(&*d.changes(), &[], false);

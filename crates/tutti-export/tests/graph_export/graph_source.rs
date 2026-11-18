@@ -23,6 +23,7 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
+use tutti_buffers::{Interleaved, Mono};
 use tutti_types::MaxBlock;
 
 use std::sync::Arc;
@@ -167,7 +168,7 @@ fn convolved() -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Osc::sine(Hz(330.0)).with_amplitude(Amplitude(0.5)));
     let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(&ir()))
+        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir())))
         .0;
     // Half the dry input, aligned by the latency, and half the wet: the graph's mix.
     g.spec_mut().set_mix(conv, tutti_types::Mix::new(0.5));
@@ -660,10 +661,11 @@ impl Node for BeatPorts {
 
 /// A 440 Hz sine at the render's rate, one second long: a plain wave table,
 /// so a voice reading it at unit rate reproduces it sample for sample.
-fn tone() -> Arc<tutti_codec::Wave> {
-    let mut w = tutti_codec::Wave::new(1, SampleRate::of(RATE.get()));
+fn tone() -> Arc<tutti_buffers::Wave> {
+    let mut w = tutti_buffers::Wave::new(1, SampleRate::of(RATE.get()));
     for i in 0..RATE.get() as usize {
-        w.push_frame(&[tone_at(i)]);
+        w.append(Interleaved::new(&[tone_at(i)], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
+use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    ConfigError, Error, FileEvent, Meta, MidiFile, OutOfOrder, Refusal, SmfDivision, SmfFormat,
-    TextKind, Tick, TimelineDrop, Track,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
+    Tick, TimelineDrop, Track, TrackPart, TracksError,
 };
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{
@@ -19,7 +20,7 @@ use tutti_ump::{
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
-const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
 fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
     (
@@ -81,9 +82,9 @@ fn a_note_is_an_on_at_its_start_and_an_off_at_its_end() {
     let ch = MidiChannel::of(4);
     let track = Track::new().note(Tick(100), Tick(150), ch, NoteNumber::of(60), U7::of(90));
     let at = |m| Address::first(ch) == m;
-    assert_eq!(track.events.len(), 2);
-    let (t0, e0) = &track.events[0];
-    let (t1, e1) = &track.events[1];
+    assert_eq!(track.events().len(), 2);
+    let (t0, e0) = &track.events()[0];
+    let (t1, e1) = &track.events()[1];
     assert_eq!((*t0, *t1), (Tick(100), Tick(150)));
     assert!(matches!(
         e0.message(),
@@ -94,7 +95,7 @@ fn a_note_is_an_on_at_its_start_and_an_off_at_its_end() {
         e1.message(),
         Some(Message::Midi1(a, Voice1::NoteOff { note, .. })) if at(*a) && note.get() == 60
     ));
-    assert_eq!(track.end, Tick(150));
+    assert_eq!(track.end(), Tick(150));
 }
 
 /// A note whose end is before its start is a note of no length, at the
@@ -108,9 +109,9 @@ fn a_note_ending_before_it_starts_has_no_length() {
         NoteNumber::of(60),
         U7::of(100),
     );
-    let ticks: Vec<Tick> = track.events.iter().map(|(t, _)| *t).collect();
+    let ticks: Vec<Tick> = track.events().iter().map(|(t, _)| *t).collect();
     assert_eq!(ticks, [Tick(100), Tick(100)]);
-    assert_eq!(track.end, Tick(100));
+    assert_eq!(track.end(), Tick(100));
 }
 
 /// Notes added in any order, a chord and overlapping notes all leave the
@@ -123,9 +124,9 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
         .note(Tick(480), Tick(960), ch, n(64), U7::of(100))
         .note(Tick(0), Tick(960), ch, n(60), U7::of(100)) // overlaps the first
         .note(Tick(0), Tick(480), ch, n(67), U7::of(100)); // a chord with it
-    let ticks: Vec<u64> = track.events.iter().map(|(t, _)| t.0).collect();
+    let ticks: Vec<u64> = track.events().iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 0, 480, 480, 960, 960]);
-    assert_eq!(track.end, Tick(960));
+    assert_eq!(track.end(), Tick(960));
     // And a file takes it as it is.
     MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track]).unwrap();
 }
@@ -138,7 +139,7 @@ fn a_tempo_is_a_meta_event_at_its_tick() {
         .meta(Tick(960), Meta::text(TextKind::Marker, "B"))
         .meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
     assert_eq!(
-        track.events,
+        track.events(),
         [
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(90.0)))),
             (
@@ -147,7 +148,7 @@ fn a_tempo_is_a_meta_event_at_its_tick() {
             ),
         ]
     );
-    assert_eq!(track.end, Tick(960));
+    assert_eq!(track.end(), Tick(960));
 }
 
 /// `push` appends: an event before the last is refused with both ticks, and
@@ -165,8 +166,8 @@ fn push_refuses_an_event_before_the_last() {
         .unwrap()
         .push(Tick(10), Meta::tempo(Bpm::of(100.0)))
         .unwrap();
-    assert_eq!(track.events.len(), 2);
-    assert_eq!(track.end, Tick(10));
+    assert_eq!(track.events().len(), 2);
+    assert_eq!(track.end(), Tick(10));
     let err = track
         .clone()
         .push(Tick(9), Meta::tempo(Bpm::of(100.0)))
@@ -179,11 +180,6 @@ fn push_refuses_an_event_before_the_last() {
         }
     );
     assert!(err.to_string().contains("tick 9"), "{err}");
-    // The typed error crosses `?` into the crate's.
-    let authored = || -> tutti_midi_file::Result<Track> {
-        Ok(track.clone().push(Tick(9), Meta::tempo(Bpm::of(100.0)))?)
-    };
-    assert!(matches!(authored(), Err(Error::OutOfOrder(e)) if e == err));
 }
 
 /// Collecting pairs puts them in tick order, stable: events at one tick keep
@@ -192,13 +188,13 @@ fn push_refuses_an_event_before_the_last() {
 fn collecting_events_sorts_them_by_tick_keeping_ties_in_order() {
     let (a, b, c) = (on(480, 1), on(0, 2), on(480, 3));
     let track: Track = [a.clone(), b.clone(), c.clone()].into_iter().collect();
-    assert_eq!(track.events, [b.clone(), a.clone(), c.clone()]);
-    assert_eq!(track.end, Tick(480));
+    assert_eq!(track.events(), [b.clone(), a.clone(), c.clone()]);
+    assert_eq!(track.end(), Tick(480));
     // Extending an existing track merges into the same order.
     let mut more = Track::new().push(b.0, b.1.clone()).unwrap();
     more.extend([c.clone(), a.clone()]);
-    assert_eq!(more.events, [b, c, a]);
-    assert_eq!(more.end, Tick(480));
+    assert_eq!(more.events(), [b, c, a]);
+    assert_eq!(more.end(), Tick(480));
 }
 
 // ---- the timeline ----------------------------------------------------------
@@ -418,7 +414,7 @@ fn a_format_2_file_has_no_timeline_but_each_track_has() {
     let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
     assert!(f.timeline().is_err());
     let beats: Vec<Beat> = f.tracks()[0]
-        .timeline(f.ticks_per_quarter())
+        .timeline(f.ticks_per_quarter().unwrap())
         .packets
         .into_iter()
         .map(|(b, _)| b)
@@ -457,18 +453,14 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
     let clip = MidiFile::from_bytes(
         &MidiFile::clip(
             DIVISION,
-            Track {
-                events: vec![
-                    (Tick(0), FileEvent::Unknown(tutti_ump::Unknown(reserved))),
-                    (Tick(0), known.into()),
-                ],
-                end: Tick(0),
-                ..Track::new()
-            },
+            Track::new()
+                .push(Tick(0), FileEvent::Unknown(tutti_ump::Unknown(reserved)))
+                .unwrap()
+                .push(Tick(0), known)
+                .unwrap(),
         )
         .unwrap()
-        .to_bytes()
-        .unwrap(),
+        .to_bytes(),
     )
     .unwrap();
     let timeline = clip.timeline().unwrap();
@@ -481,23 +473,18 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
 /// stays MIDI 2.0), and its configuration header is not on it.
 #[test]
 fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
-    let program = Message::Midi2(
-        MidiChannel::FIRST.into(),
-        Voice2::ProgramChange {
-            program: U7::of(5),
-            bank: None,
-        },
-    );
     let note = Message::Midi2(
         MidiChannel::FIRST.into(),
         Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
     );
-    let track = Track {
-        header: vec![(Tick(0), program.into())],
-        events: vec![(Tick(240), note.into())],
-        end: Tick(240),
-        ..Track::new()
-    };
+    let track = Track::new()
+        .profile_on(ProfileOnRequest {
+            target: ProfileTarget::Group,
+            profile: ProfileId::MPE,
+        })
+        .push(Tick(240), note)
+        .unwrap();
+    assert!(!track.header().is_empty());
     let f = MidiFile::clip(DIVISION, track).unwrap();
     let line: Vec<(Beat, Ump)> = f.timeline().unwrap().packets;
     assert_eq!(line, [(Beat(0.5), Ump::from(note))]);
@@ -511,9 +498,15 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
 fn the_tempo_map_is_one_shared_value() {
     let f = file(vec![Track::new().meta(Tick(0), Meta::tempo(Bpm::of(75.0)))]);
     let again = f.clone();
-    assert!(Arc::ptr_eq(f.tempo_map(), again.tempo_map()));
-    assert!(Arc::ptr_eq(f.tempo_map(), f.tempo_map_of(0).unwrap()));
-    assert_eq!(f.tempo_map().tempo_at(Beat(0.0)), Bpm::of(75.0));
+    assert!(Arc::ptr_eq(
+        f.tempo_map().unwrap(),
+        again.tempo_map().unwrap()
+    ));
+    assert!(Arc::ptr_eq(
+        f.tempo_map().unwrap(),
+        f.tempo_map_of(0).unwrap()
+    ));
+    assert_eq!(f.tempo_map().unwrap().tempo_at(Beat(0.0)), Bpm::of(75.0));
 }
 
 // ---- typed refusals --------------------------------------------------------
@@ -522,13 +515,10 @@ fn the_tempo_map_is_one_shared_value() {
 /// tick that broke it.
 #[test]
 fn a_refused_track_list_names_the_rule_and_where() {
-    let config = |r: Result<MidiFile, Error>| match r {
-        Err(Error::Config(c)) => c,
-        other => panic!("not a config error: {other:?}"),
-    };
+    let config = |r: Result<MidiFile, TracksError>| r.expect_err("the list is refused");
     assert_eq!(
         config(MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![])),
-        ConfigError::NoTracks
+        TracksError::NoTracks
     );
     assert_eq!(
         config(MidiFile::smf(
@@ -536,24 +526,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
             SMF_DIVISION,
             vec![Track::new(), Track::new()]
         )),
-        ConfigError::SingleTrack { tracks: 2 }
-    );
-    // The second track goes back from tick 20 to tick 5.
-    let back = Track {
-        events: vec![on(20, 60), on(5, 61)],
-        end: Tick(20),
-        ..Track::new()
-    };
-    assert_eq!(
-        config(MidiFile::smf(
-            SmfFormat::Parallel,
-            SMF_DIVISION,
-            vec![Track::new(), back]
-        )),
-        ConfigError::OutOfOrder {
-            track: 1,
-            at: Tick(5)
-        }
+        TracksError::SingleTrack { tracks: 2 }
     );
     // An SMF holds the first Group only.
     let g2 = Message::midi1(
@@ -563,9 +536,9 @@ fn a_refused_track_list_names_the_rule_and_where() {
     let t = Track::new().push(Tick(0), g2).unwrap();
     assert_eq!(
         config(MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![t])),
-        ConfigError::Refused {
+        TracksError::Refused {
             track: 0,
-            in_header: false,
+            part: TrackPart::Events,
             refusal: Refusal::SmfGroup
         }
     );
@@ -587,12 +560,12 @@ fn a_file_round_trips_through_a_slice() {
                 U7::of(100),
             ),
     ]);
-    let out = f.to_bytes().unwrap();
+    let out = f.to_bytes();
     assert_eq!(MidiFile::try_from(out.as_slice()).unwrap(), f);
     // Bytes of neither container are refused as the other doors refuse them.
     assert!(matches!(
         MidiFile::try_from(&b"RIFF...."[..]),
-        Err(Error::UnknownFormat)
+        Err(ReadError::UnknownFormat)
     ));
 }
 
@@ -605,12 +578,17 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
         .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
         .meta(Tick(0), Meta::tempo(Bpm::of(60.0)));
     assert_eq!(
-        track.events,
+        track.events(),
         [
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(90.0)))),
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(60.0)))),
         ]
     );
-    let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track]).unwrap();
-    assert_eq!(file.tempo_map().tempo_at(Beat(0.0)), Bpm::of(60.0));
+    let file = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::per_quarter(480),
+        vec![track],
+    )
+    .unwrap();
+    assert_eq!(file.tempo_map().unwrap().tempo_at(Beat(0.0)), Bpm::of(60.0));
 }

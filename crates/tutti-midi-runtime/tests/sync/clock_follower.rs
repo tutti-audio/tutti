@@ -53,7 +53,7 @@ impl Rig {
         self.heard
             .iter()
             .filter_map(|e| match e {
-                ClockEvent::Tempo(t) => Some(*t),
+                ClockEvent::Tempo { tempo, .. } => Some(*tempo),
                 _ => None,
             })
             .collect()
@@ -224,7 +224,15 @@ fn a_dropout_unlocks_and_stops_a_started_transport() {
     assert!(rig.take().is_empty());
     rig.poll(last + MidiClockDecoder::DROPOUT.get() + 0.001);
     assert!(!rig.follower.locked());
-    assert_eq!(rig.take(), [ClockEvent::Unlocked, ClockEvent::Stop]);
+    assert_eq!(
+        rig.take(),
+        [
+            ClockEvent::Unlocked,
+            ClockEvent::Stop {
+                at: at(last + MidiClockDecoder::DROPOUT.get() + 0.001)
+            }
+        ]
+    );
     rig.poll(last + 10.0);
     assert!(rig.take().is_empty(), "said once");
 }
@@ -264,7 +272,7 @@ fn start_continue_and_stop_drive_play_state() {
     let t = ticks(&mut rig, 0.2, period_of(120.0), 24);
     rig.take();
     rig.feed(system(System::Stop), t);
-    assert_eq!(rig.take(), [ClockEvent::Stop]);
+    assert_eq!(rig.take(), [ClockEvent::Stop { at: at(t) }]);
     rig.feed(system(System::Continue), t + 1.0);
     let located: Vec<f64> = rig.heard.iter().filter_map(beat_locate).collect();
     assert_eq!(located, [5.0], "a beat of 24 ticks past the pointer's 4");
@@ -351,10 +359,11 @@ fn time_locates(rig: &Rig) -> Vec<f64> {
         .collect()
 }
 
-/// **Quarter Frames give the position at each frame rate**: a cycle spelling
-/// `00:00:01:04` plays at frame `fps + 4 + 2` (the position is two frames old
-/// when its last piece arrives), at the rate's own frame length, 1001/30000 s for
-/// 29.97.
+/// **Quarter Frames name the frame that started at piece 0, at each frame
+/// rate** (MTC, Quarter Frame Message Implementation: piece 0 "must be sent on a
+/// frame boundary"). The third cycle spells `00:00:01:08`: it is located at frame
+/// `fps + 8`, at the rate's own frame length (1001/30000 s for 29.97), as of the
+/// arrival of its piece 0, which is `2 * 2 / fps` after the first cycle's.
 #[test]
 fn quarter_frames_give_the_position_at_every_frame_rate() {
     for rate in RATES {
@@ -363,12 +372,24 @@ fn quarter_frames_give_the_position_at_every_frame_rate() {
         run_mtc(&mut rig, rate, 1, 4, 0.0, 3);
         let located = time_locates(&rig);
         assert_eq!(located.len(), 1, "{rate:?}: {located:?}");
-        // The third cycle spells frame 4 + 4 = 8, and its position is two on.
-        let frames = rate.1.round() + 8.0 + 2.0;
+        // The third cycle spells frame 4 + 4 = 8.
+        let frames = rate.1.round() + 8.0;
         let expected = match rate.0 {
-            2 => (30.0 + 8.0 + 2.0) * 1001.0 / 30_000.0,
+            2 => (30.0 + 8.0) * 1001.0 / 30_000.0,
             _ => frames / rate.1,
         };
+        let arrived = rig
+            .heard
+            .iter()
+            .find_map(|e| match e {
+                ClockEvent::Locate { at, .. } => Some(at.get()),
+                _ => None,
+            })
+            .expect("a locate");
+        assert!(
+            (arrived - 4.0 / rate.1).abs() < 1e-9,
+            "{rate:?}: piece 0 of the third cycle arrives at {arrived}"
+        );
         // Drop-frame never drops at second 1, so labels count at face value.
         assert!(
             (located[0] - expected).abs() < 1e-9,
@@ -416,10 +437,7 @@ fn a_jump_while_playing_locates_and_a_steady_run_does_not() {
     run_mtc(&mut rig, rate, 10, 0, t, 1);
     let located = time_locates(&rig);
     assert_eq!(located.len(), 1);
-    assert!(
-        (located[0] - (10.0 + 2.0 / 25.0)).abs() < 1e-9,
-        "{located:?}"
-    );
+    assert!((located[0] - 10.0).abs() < 1e-9, "{located:?}");
     assert!(rig.follower.locked(), "a jump is not a dropout");
 }
 
@@ -482,7 +500,11 @@ fn a_full_message_while_playing_locates_once() {
     assert_eq!(time_locates(&rig).len(), 1);
     run_mtc(&mut rig, rate, 30, 0, t + 0.01, 3);
     assert_eq!(time_locates(&rig).len(), 1, "no jump after a full message");
-    assert!(!rig.heard.contains(&ClockEvent::Stop));
+    assert!(
+        !rig.heard
+            .iter()
+            .any(|e| matches!(e, ClockEvent::Stop { .. }))
+    );
 }
 
 /// **MTC silence unlocks and stops**: no Quarter Frame for `MTC_DROPOUT` says
@@ -499,7 +521,15 @@ fn an_mtc_dropout_unlocks_and_stops() {
     rig.poll(last + d - 0.001);
     assert!(rig.take().is_empty());
     rig.poll(last + d + 0.001);
-    assert_eq!(rig.take(), [ClockEvent::Stop, ClockEvent::Unlocked]);
+    assert_eq!(
+        rig.take(),
+        [
+            ClockEvent::Stop {
+                at: at(last + d + 0.001)
+            },
+            ClockEvent::Unlocked
+        ]
+    );
     assert!(!rig.follower.locked());
     rig.poll(last + 5.0);
     assert!(rig.take().is_empty());

@@ -48,10 +48,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::{Interleaved, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
+#[cfg(codec)]
+use tutti_buffers::InterleavedMut;
 #[cfg(codec)]
 use tutti_codec::FileIn;
 
@@ -347,14 +349,16 @@ impl RegionOut {
         let channels = self.ring.channels;
         #[cfg(codec)]
         if let Some(decoder) = self.decoder.as_mut() {
-            let ch = self.writer.stride();
+            let ch = usize::from(self.writer.layout().count());
             if decoder.cursor() != Samples(at) && decoder.seek(Samples(at)).is_err() {
                 out.fill(0.0);
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
+            let view = InterleavedMut::new(&mut *out, decoder.topology().width())
+                .expect("the ring is the file's width and `out` holds whole frames");
             let got = decoder
-                .fill_sequential_interleaved(out)
+                .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
             out[got * ch..].fill(0.0);
             let Some(fault) = decoder.error() else {
@@ -386,7 +390,7 @@ impl RegionOut {
     /// reading the file. `false` when any read of the file failed (a decode
     /// fault: the frames before it are kept, the rest is silence).
     pub(crate) fn fill_with(&mut self, mapping: &Mapping, pos: u64, out: &mut [f32]) -> bool {
-        let ch = self.writer.stride();
+        let ch = usize::from(self.writer.layout().count());
         let mut read_ok = true;
         mapping.fill(pos, out, ch, &mut |at, run| {
             read_ok &= self.read_file(at, run);
@@ -399,7 +403,11 @@ impl RegionOut {
     /// be written, or where the ring is full ahead of the reader
     /// (`PosRing::push`). A trailing partial frame is ignored.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
-        Samples(self.writer.push(samples))
+        let layout = self.writer.layout();
+        let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
+        let frames = Interleaved::new(&samples[..whole], layout)
+            .expect("a whole number of frames of the ring's width");
+        self.writer.push(frames).expect("the ring's width")
     }
 }
 
@@ -447,13 +455,13 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut, SharedReader, PosReader) {
         let channels = nonempty(topology.width());
-        let stride = channels.count() as usize;
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),
             None => (Mapping::unbounded(), Arrangement::unbounded()),
         };
-        let (writer, reader) = PosRing::new(frames, stride, HISTORY_FRAMES);
+        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES)
+            .expect("`nonempty` gave a layout of at least one channel");
         let ring = Arc::new(Ring {
             region_id,
             file_path,
@@ -550,7 +558,7 @@ mod tests {
         let path = dir.path().join("cut.flac");
         std::fs::write(&path, &bytes[..bytes.len() * 9 / 10]).expect("write");
 
-        let decoder = FileIn::open(&path).expect("a cut file still opens");
+        let decoder = FileIn::<f32>::open(&path).expect("a cut file still opens");
         let total = decoder.total_frames().expect("flac reports a length").get();
         let (mut writer, _ring, _reader) = ring(4096, 2);
         writer.set_decoder(decoder);
