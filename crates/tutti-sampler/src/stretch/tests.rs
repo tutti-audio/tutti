@@ -60,17 +60,18 @@ fn every_fft_size_yields_a_cola_grid() {
 /// regression to the loop shows up as a hang here rather than as a failure.
 #[test]
 fn wrap_phase_maps_into_a_single_turn() {
+    use core::f64::consts::PI;
     let tau = Radians::TAU.get();
     for &(p, eps) in &[
-        (0.0, 1e-4),
-        (PI, 1e-4),
-        (-PI, 1e-4),
-        (3.0 * PI, 1e-4),
-        (-3.0 * PI, 1e-4),
-        (100.0 * tau + 1.0, 1e-4),
+        (0.0, 1e-9),
+        (PI, 1e-9),
+        (-PI, 1e-9),
+        (3.0 * PI, 1e-9),
+        (-3.0 * PI, 1e-9),
+        (100.0 * tau + 1.0, 1e-9),
         // A phase large enough that a per-turn subtraction loop would not
         // return.
-        (1.0e6, 1e-2),
+        (1.0e6, 1e-6),
     ] {
         let w = wrap_phase(Radians(p)).get();
         assert!(w > -PI - eps && w <= PI + eps, "{p} wrapped to {w}");
@@ -91,7 +92,7 @@ fn wrap_phase_maps_into_a_single_turn() {
 fn fft_roundtrip_is_the_identity() {
     let n = 1024usize;
     let orig: Vec<f32> = (0..n)
-        .map(|i| (Radians::TAU.get() * 5.0 * i as f32 / n as f32).sin() * 0.5 + 0.1)
+        .map(|i| (core::f32::consts::TAU * 5.0 * i as f32 / n as f32).sin() * 0.5 + 0.1)
         .collect();
 
     let mut fft = Fft::new(n);
@@ -339,7 +340,7 @@ fn a_one_to_one_feed_stays_bounded_and_audible_at_every_stretch() {
             let mut peak = 0.0f32;
             for _ in 0..count {
                 let t = *n as f32 / 44_100.0;
-                let sample = 0.5 * (Radians::TAU.get() * 3000.0 * t).sin();
+                let sample = 0.5 * (core::f32::consts::TAU * 3000.0 * t).sin();
                 *n += 1;
                 u.tick(&[sample], &mut out);
                 peak = peak.max(out[0].abs());
@@ -738,8 +739,8 @@ fn dominant_hz(x: &[f32], sample_rate: f32) -> f32 {
     while f < 4000.0 {
         let (mut re, mut im) = (0.0f32, 0.0f32);
         for (i, &s) in x.iter().enumerate() {
-            let w = 0.5 - 0.5 * (Radians::TAU.get() * i as f32 / n as f32).cos();
-            let p = Radians::TAU.get() * f * i as f32 / sample_rate;
+            let w = 0.5 - 0.5 * (core::f32::consts::TAU * i as f32 / n as f32).cos();
+            let p = core::f32::consts::TAU * f * i as f32 / sample_rate;
             re += s * w * p.cos();
             im -= s * w * p.sin();
         }
@@ -767,7 +768,7 @@ fn render_440(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
     let mut au = u.clone();
     let mut out = Vec::with_capacity(out_len);
     for i in 0..out_len {
-        let s = (Radians::TAU.get() * 440.0 * i as f32 / sample_rate).sin();
+        let s = (core::f32::consts::TAU * 440.0 * i as f32 / sample_rate).sin();
         let mut o = [0.0f32];
         au.tick(&[s], &mut o);
         out.push(o[0]);
@@ -788,7 +789,7 @@ fn render_440(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
 #[cfg(test)]
 fn render_440_placed(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
     let table: Vec<f32> = (0..400_000)
-        .map(|i| (Radians::TAU.get() * 440.0 * i as f32 / sample_rate).sin())
+        .map(|i| (core::f32::consts::TAU * 440.0 * i as f32 / sample_rate).sin())
         .collect();
     let rate = u.input_rate().get() as f32;
     let mut au = u.clone();
@@ -991,7 +992,7 @@ fn the_slowest_factor_ripples_because_its_frames_do_not_overlap() {
         let mut peak = 0.0f32;
         for _ in 0..count {
             let t = *n as f32 / 44_100.0;
-            let sample = 0.5 * (Radians::TAU.get() * 3000.0 * t).sin();
+            let sample = 0.5 * (core::f32::consts::TAU * 3000.0 * t).sin();
             *n += 1;
             u.tick(&[sample], &mut out);
             peak = peak.max(out[0].abs());
@@ -1396,8 +1397,8 @@ fn vocoder_reconstructs_its_input_at_unity() {
             // f32 precision, so the test would compare the vocoder against an
             // already-drifted target.
             let t = (i as f64 / sample_rate) as f32;
-            0.4 * (Radians::TAU.get() * 440.0 * t).sin()
-                + 0.2 * (Radians::TAU.get() * 3000.0 * t).sin()
+            0.4 * (core::f32::consts::TAU * 440.0 * t).sin()
+                + 0.2 * (core::f32::consts::TAU * 3000.0 * t).sin()
                 + 0.1
         })
         .collect();
@@ -1471,8 +1472,8 @@ fn vocoder_reconstructs_under_a_non_hann_window() {
     let input: Vec<f32> = (0..len)
         .map(|i| {
             let t = (i as f64 / sample_rate) as f32;
-            0.4 * (Radians::TAU.get() * 440.0 * t).sin()
-                + 0.2 * (Radians::TAU.get() * 3000.0 * t).sin()
+            0.4 * (core::f32::consts::TAU * 440.0 * t).sin()
+                + 0.2 * (core::f32::consts::TAU * 3000.0 * t).sin()
                 + 0.1
         })
         .collect();
@@ -1731,7 +1732,7 @@ fn a_nan_source_does_not_panic_and_a_reset_recovers() {
     u.set_pitch_cents(Cents::new(300.0));
     let mut au = u.clone();
     let mut o = [0.0f32];
-    let tone = |i: usize| (Radians::TAU.get() * 440.0 * i as f32 / sr).sin() * 0.5;
+    let tone = |i: usize| (core::f32::consts::TAU * 440.0 * i as f32 / sr).sin() * 0.5;
 
     for i in 0..4096 {
         au.tick(&[tone(i)], &mut o);

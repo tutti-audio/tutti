@@ -77,13 +77,19 @@ fn clamp_stays_in_the_unit_type() {
 /// stays infinite.
 #[test]
 fn every_new_clamped_passes_nan_and_saturates_infinity() {
-    let nan = f32::NAN;
-    let (inf, ninf) = (f32::INFINITY, f32::NEG_INFINITY);
+    // Each unit is checked at its own width.
     macro_rules! check {
         ($t:ident, $lo:expr, $hi:expr) => {
-            assert!($t::new_clamped(nan).get().is_nan(), stringify!($t));
-            assert_eq!($t::new_clamped(inf).get(), $hi, stringify!($t));
-            assert_eq!($t::new_clamped(ninf).get(), $lo, stringify!($t));
+            check!($t, $lo, $hi, f32)
+        };
+        ($t:ident, $lo:expr, $hi:expr, $raw:ident) => {
+            assert!($t::new_clamped($raw::NAN).get().is_nan(), stringify!($t));
+            assert_eq!($t::new_clamped($raw::INFINITY).get(), $hi, stringify!($t));
+            assert_eq!(
+                $t::new_clamped($raw::NEG_INFINITY).get(),
+                $lo,
+                stringify!($t)
+            );
         };
     }
     check!(Mix, 0.0, 1.0);
@@ -96,7 +102,7 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
     check!(Balance, -1.0, 1.0);
     check!(StereoBalance, -1.0, 1.0);
     check!(Velocity, 0.0, 1.0);
-    check!(Elevation, -90.0, 90.0);
+    check!(Elevation, -90.0, 90.0, f64);
     check!(PlaybackRate, 0.25, 4.0);
     check!(StretchFactor, 0.25, 4.0);
     // The unbounded side stays infinite.
@@ -119,8 +125,15 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
 /// documented half-open range holds for them.
 #[test]
 fn the_wraps_hold_their_half_open_range_at_the_seam() {
-    let below_one = 1.0_f32.next_down();
-    for v in [-1e-9_f32, -1e-30, -f32::MIN_POSITIVE, -2.9e-8, -5.9e-8] {
+    let below_one = 1.0_f64.next_down();
+    for v in [
+        -1e-20_f64,
+        -1e-300,
+        -f64::MIN_POSITIVE,
+        -2.7e-17,
+        -5.5e-17,
+        -1.1e-16,
+    ] {
         let p = Phase::wrapped(v);
         assert!((0.0..1.0).contains(&p.get()), "wrapped({v:e}) = {p}");
         assert_eq!(p, Phase(below_one), "{v:e}");
@@ -132,25 +145,29 @@ fn the_wraps_hold_their_half_open_range_at_the_seam() {
     assert_eq!(Phase::wrapped(2.0), Phase(0.0));
     assert_eq!(Phase::wrapped(-1.0), Phase(0.0));
     // NaN and the infinities give NaN.
-    for v in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(Phase::wrapped(v).get().is_nan());
     }
 
-    let top = 360.0_f32.next_down() - 180.0;
-    for v in [-180.00002_f32, -180.000_01, -180.000_000_1] {
+    let top = 360.0_f64.next_down() - 180.0;
+    for v in [
+        (-180.0_f64).next_down(),
+        -180.000_000_000_000_06,
+        -180.000_000_000_000_1,
+    ] {
         let a = Azimuth(v).wrap().get();
         assert!((-180.0..180.0).contains(&a), "{v} wrapped to {a}");
     }
-    assert_eq!(Azimuth(-180.00002).wrap(), Azimuth(top));
+    assert_eq!(Azimuth((-180.0_f64).next_down()).wrap(), Azimuth(top));
     assert_eq!(Azimuth(190.0).wrap(), Azimuth(-170.0));
     assert_eq!(Azimuth(-190.0).wrap(), Azimuth(170.0));
     assert_eq!(Azimuth(180.0).wrap(), Azimuth(-180.0));
     assert_eq!(Azimuth(-180.0).wrap(), Azimuth(-180.0));
-    assert!(Azimuth(f32::NAN).wrap().get().is_nan());
-    assert!(Azimuth(f32::INFINITY).wrap().get().is_nan());
+    assert!(Azimuth(f64::NAN).wrap().get().is_nan());
+    assert!(Azimuth(f64::INFINITY).wrap().get().is_nan());
 
-    assert!(Radians(f32::NAN).wrapped_signed().get().is_nan());
-    assert!(Radians(f32::INFINITY).wrapped_signed().get().is_nan());
+    assert!(Radians(f64::NAN).wrapped_signed().get().is_nan());
+    assert!(Radians(f64::INFINITY).wrapped_signed().get().is_nan());
 
     let below_one = 1.0_f64.next_down();
     assert_eq!(Beat(-1e-20).fract(), BeatDuration(below_one));

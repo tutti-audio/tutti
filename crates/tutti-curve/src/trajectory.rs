@@ -2,13 +2,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 use tutti_units::{Beat, Unit};
 
-use crate::{Law, Piece};
+use crate::{CurveRaw, Law};
 
 /// A breakpoint of a [`Trajectory`]: a value in the trajectory's unit at a beat,
 /// and the [`Law`] of the piece that starts there and runs to the next
 /// breakpoint.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Breakpoint<U: Unit<Raw = f32>> {
+pub struct Breakpoint<U: Unit<Raw: CurveRaw>> {
     /// Where the breakpoint is.
     pub time: Beat,
     /// The value there.
@@ -17,7 +17,7 @@ pub struct Breakpoint<U: Unit<Raw = f32>> {
     pub law: Law,
 }
 
-impl<U: Unit<Raw = f32>> Breakpoint<U> {
+impl<U: Unit<Raw: CurveRaw>> Breakpoint<U> {
     /// A breakpoint whose piece is [`Law::Linear`].
     #[must_use]
     pub const fn new(time: Beat, value: U) -> Self {
@@ -40,14 +40,15 @@ impl<U: Unit<Raw = f32>> Breakpoint<U> {
 /// It has no value (`None`) while it has no breakpoint.
 ///
 /// It is typed over the unit `U` of the quantity it automates, so a breakpoint,
-/// its range and the value it reads are all in that unit.
+/// its range and the value it reads are all in that unit. A piece is evaluated
+/// in `f64` and the value read has `U`'s width ([`CurveRaw`]).
 #[derive(Clone, Debug, PartialEq)]
-pub struct Trajectory<U: Unit<Raw = f32>> {
+pub struct Trajectory<U: Unit<Raw: CurveRaw>> {
     breakpoints: Vec<Breakpoint<U>>,
     range: Option<(U, U)>,
 }
 
-impl<U: Unit<Raw = f32>> Default for Trajectory<U> {
+impl<U: Unit<Raw: CurveRaw>> Default for Trajectory<U> {
     fn default() -> Self {
         Self {
             breakpoints: Vec::new(),
@@ -56,7 +57,7 @@ impl<U: Unit<Raw = f32>> Default for Trajectory<U> {
     }
 }
 
-impl<U: Unit<Raw = f32>> Trajectory<U> {
+impl<U: Unit<Raw: CurveRaw>> Trajectory<U> {
     /// An empty trajectory with no range.
     #[must_use]
     pub fn new() -> Self {
@@ -115,25 +116,26 @@ impl<U: Unit<Raw = f32>> Trajectory<U> {
         let (first, last) = (self.breakpoints.first()?, self.breakpoints.last()?);
         let time = beat.get();
         if time <= first.time.get() {
-            return Some(self.clamped(first.value.to_raw()));
+            return Some(self.clamped(first.value.to_raw().widen()));
         }
         if time >= last.time.get() {
-            return Some(self.clamped(last.value.to_raw()));
+            return Some(self.clamped(last.value.to_raw().widen()));
         }
         // `first.time < time < last.time`: the piece is the one before the
         // first breakpoint after `time`; a breakpoint exactly at `time` starts its own.
         let next = self.breakpoints.partition_point(|p| p.time.get() <= time);
         let (p, q) = (self.breakpoints[next - 1], self.breakpoints[next]);
-        let t = ((time - p.time.get()) / (q.time.get() - p.time.get())) as f32;
-        Some(self.clamped(Piece::new(p.value.to_raw(), q.value.to_raw(), p.law).value(None, t)))
+        let t = (time - p.time.get()) / (q.time.get() - p.time.get());
+        Some(self.clamped(Self::piece(p, q.value, t)))
     }
 
     /// Drops every breakpoint whose value its neighbours' piece already gives to
     /// within `tolerance`, a distance in the unit's raw value; the first and last stay.
-    pub fn simplify(&mut self, tolerance: f32) -> &mut Self {
+    pub fn simplify(&mut self, tolerance: U::Raw) -> &mut Self {
         if self.breakpoints.len() <= 2 {
             return self;
         }
+        let tolerance = tolerance.widen();
         let last = self.breakpoints.len() - 1;
         let mut kept = vec![self.breakpoints[0]];
         for i in 1..last {
@@ -143,12 +145,8 @@ impl<U: Unit<Raw = f32>> Trajectory<U> {
                 self.breakpoints[i + 1],
             );
             let span = next.time.get() - prev.time.get();
-            let t = ((curr.time.get() - prev.time.get()) / span) as f32;
-            if (curr.value.to_raw()
-                - Piece::new(prev.value.to_raw(), next.value.to_raw(), prev.law).value(None, t))
-            .abs()
-                > tolerance
-            {
+            let t = (curr.time.get() - prev.time.get()) / span;
+            if (curr.value.to_raw().widen() - Self::piece(prev, next.value, t)).abs() > tolerance {
                 kept.push(curr);
             }
         }
@@ -157,11 +155,20 @@ impl<U: Unit<Raw = f32>> Trajectory<U> {
         self
     }
 
-    fn clamped(&self, value: f32) -> U {
-        U::from_raw(match self.range {
-            Some((min, max)) => value.max(min.to_raw()).min(max.to_raw()),
+    /// The value `t` of the way from `from`'s value to `to` along `from`'s law,
+    /// in `f64`.
+    fn piece(from: Breakpoint<U>, to: U, t: f64) -> f64 {
+        let (a, b) = (from.value.to_raw().widen(), to.to_raw().widen());
+        // The law's progress is the shared `f32` shape; the interpolation
+        // between the endpoints is in `f64`.
+        a + (b - a) * f64::from(from.law.eval(t as f32))
+    }
+
+    fn clamped(&self, value: f64) -> U {
+        U::from_raw(U::Raw::narrow(match self.range {
+            Some((min, max)) => value.max(min.to_raw().widen()).min(max.to_raw().widen()),
             None => value,
-        })
+        }))
     }
 }
 

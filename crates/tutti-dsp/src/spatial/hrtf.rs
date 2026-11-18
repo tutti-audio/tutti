@@ -470,8 +470,9 @@ fn unit_vector(aim: Direction) -> [f32; 3] {
     let az = Radians::from(aim.azimuth);
     let el = Radians::from(aim.elevation);
     let cos_el = el.cos();
-    // +90° azimuth (left) → -x; front (0°) → -z.
-    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el]
+    // +90° azimuth (left) → -x; front (0°) → -z. The sphere's vertices are
+    // `f32` (its stored format), so the vector narrows once per aim.
+    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el].map(|c| c as f32)
 }
 
 #[cfg(test)]

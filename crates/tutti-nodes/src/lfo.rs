@@ -205,7 +205,7 @@ impl LfoNode {
     /// The wave at `cycles` plus the phase offset, with the depth applied.
     #[inline]
     fn evaluate(&self, cycles: f64, offset: PhaseIncrement, depth: f32) -> f32 {
-        self.wave.raw_at(cycles + f64::from(offset.get()), false) * depth
+        self.wave.raw_at(cycles + offset.get(), false) * depth
     }
 }
 

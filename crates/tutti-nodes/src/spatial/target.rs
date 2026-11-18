@@ -1,7 +1,6 @@
 //! How a source gets to where it is aimed without zippering: the
 //! [`AngleSmoother`] the binaural panner steps.
 
-use tutti_dsp::Smoother;
 use tutti_units::{Azimuth, Direction, Elevation, SampleRate, Samples, Seconds};
 
 /// The time constant of the position de-zipper, in audio time.
@@ -14,13 +13,16 @@ const SMOOTH_TIME: Seconds = Seconds(0.05);
 /// the linear form and a source crossing behind the listener (170° → -170°, a
 /// 20° move) sweeps 340° the wrong way around the head.
 ///
-/// The one-pole recurrence and its running value are [`Smoother`]'s; this type
-/// derives the coefficient from the time constant and the stride, and wraps
-/// the bearing's arc around it.
+/// Each coordinate runs the one-pole recurrence `y += c * (x - y)` in its own
+/// unit: the bearing along the short arc ([`Azimuth::lerp_shortest`]), the
+/// height along a line ([`Elevation::lerp`]). This type derives the coefficient
+/// from the time constant and the stride.
 #[derive(Clone, Debug)]
 pub(crate) struct AngleSmoother {
-    azimuth: Smoother,
-    elevation: Smoother,
+    azimuth: Azimuth,
+    elevation: Elevation,
+    /// The fraction of the gap one step closes.
+    coeff: f64,
     /// Samples of audio each step stands for: the frame length of a smoother
     /// stepped once per frame. Kept so
     /// [`set_sample_rate`](Self::set_sample_rate) can re-derive the coefficient.
@@ -32,10 +34,10 @@ impl AngleSmoother {
     /// a caller that steps once per `samples_per_step` samples: the convolution
     /// frame length for the binaural panner, which steps once per frame.
     pub(crate) fn new(sample_rate: SampleRate, samples_per_step: Samples) -> Self {
-        let coeff = Self::coeff(sample_rate, samples_per_step);
         Self {
-            azimuth: Smoother::new(coeff),
-            elevation: Smoother::new(coeff),
+            azimuth: Azimuth::FRONT,
+            elevation: Elevation::LEVEL,
+            coeff: Self::coeff(sample_rate, samples_per_step),
             stride: samples_per_step,
         }
     }
@@ -43,19 +45,17 @@ impl AngleSmoother {
     /// The fraction of the gap one step closes: the one-pole coefficient at
     /// the rate the smoother is stepped, `sr / stride`
     /// ([`Seconds::one_pole_coeff`]).
-    fn coeff(sample_rate: SampleRate, stride: Samples) -> f32 {
+    fn coeff(sample_rate: SampleRate, stride: Samples) -> f64 {
         // A step with no rate (a zero stride) is a smoother that jumps:
         // `one_pole_coeff`'s answer for a rate that is no rate.
         SampleRate::new(sample_rate.get() / stride.get() as f64)
-            .map_or(1.0, |rate| SMOOTH_TIME.one_pole_coeff(rate) as f32)
+            .map_or(1.0, |rate| SMOOTH_TIME.one_pole_coeff(rate))
     }
 
     /// Retune for a new sample rate, keeping the stride
     /// [`new`](Self::new) was given, so the 50 ms ramp holds at any rate.
     pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
-        let coeff = Self::coeff(sample_rate, self.stride);
-        self.azimuth.set_coeff(coeff);
-        self.elevation.set_coeff(coeff);
+        self.coeff = Self::coeff(sample_rate, self.stride);
     }
 
     /// Discard the in-flight ramp, seating both coordinates *on* the commanded
@@ -69,9 +69,8 @@ impl AngleSmoother {
     ///
     /// [`Node::reset`]: tutti_graph::Node::reset
     pub(crate) fn reset_to_target(&mut self, target: Direction) {
-        self.azimuth.seed(target.azimuth.wrap().get());
-        self.elevation
-            .seed(Elevation::new_clamped(target.elevation.get()).get());
+        self.azimuth = target.azimuth.wrap();
+        self.elevation = Elevation::new_clamped(target.elevation.get());
     }
 
     /// Where the ramp currently is: the direction the last step returned (or
@@ -81,10 +80,7 @@ impl AngleSmoother {
     /// reseats on.
     #[inline]
     pub(crate) fn current(&self) -> Direction {
-        Direction::new(
-            Azimuth(self.azimuth.value()),
-            Elevation(self.elevation.value()),
-        )
+        Direction::new(self.azimuth, self.elevation)
     }
 
     /// Advance one step toward the target and return the smoothed direction.
@@ -95,11 +91,12 @@ impl AngleSmoother {
     /// value is re-wrapped each step so it never drifts out of `-180..180`.
     #[inline]
     pub(crate) fn step(&mut self, target: Direction) -> Direction {
-        let current = Azimuth(self.azimuth.value()).wrap();
-        let arc = current.shortest_arc_to(target.azimuth.wrap());
-        let next = current.rotate_by(arc * self.azimuth.coeff());
-        self.azimuth.seed(next.get());
-        Direction::new(next, Elevation(self.elevation.step(target.elevation.get())))
+        self.azimuth = self
+            .azimuth
+            .wrap()
+            .lerp_shortest(target.azimuth.wrap(), self.coeff);
+        self.elevation = self.elevation.lerp(target.elevation, self.coeff);
+        Direction::new(self.azimuth, self.elevation)
     }
 }
 

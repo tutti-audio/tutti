@@ -155,7 +155,7 @@ fn bearing_of(p: [f32; 3]) -> Direction {
     let r = (x * x + y * y + z * z).sqrt();
     let az = (-x).atan2(-z).to_degrees();
     let el = (y / r).asin().to_degrees();
-    Direction::new(Azimuth(az as f32), Elevation(el as f32))
+    Direction::new(Azimuth(az), Elevation(el))
 }
 
 fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode {
@@ -324,7 +324,7 @@ fn a_direction_no_face_covers_takes_the_nearest_vertex() {
 
     let (l, r) = ir_of(
         &mut node,
-        Direction::new(Azimuth(f32::NAN), Elevation::LEVEL),
+        Direction::new(Azimuth(f64::NAN), Elevation::LEVEL),
         RATE,
         LEN,
     );

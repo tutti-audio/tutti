@@ -64,7 +64,7 @@ fn cartesian(azimuth: Azimuth, elevation: Elevation) -> [f32; 3] {
     let az = Radians::from(azimuth);
     let el = Radians::from(elevation);
     let cos_el = el.cos();
-    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el]
+    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el].map(|c| c as f32)
 }
 
 /// Encode one vertex IR. `None` is a pole (median plane, no ITD/ILD/marker).
@@ -77,8 +77,9 @@ fn encode_hrir(azimuth: Option<Azimuth>) -> (Vec<f32>, Vec<f32>) {
         return (left, right);
     };
     let az = azimuth.wrap();
-    let sin_az = Radians::from(az).sin();
-    let cos_az = Radians::from(az).cos();
+    // The encoded IRs are `f32`: the two trig values narrow once.
+    let sin_az = Radians::from(az).sin() as f32;
+    let cos_az = Radians::from(az).cos() as f32;
     let itd = (ITD_K * sin_az).round() as i32;
     let left_gain = 1.0 + ILD * sin_az;
     let right_gain = 1.0 - ILD * sin_az;
@@ -433,7 +434,7 @@ fn azimuth_sweep_is_continuous_and_energy_bounded() {
 
     for deg in 1..=360 {
         // Integer degrees, then wrap via Azimuth — never compare bearings.
-        let cur = ir_at(&mut node, Azimuth(deg as f32), Elevation::LEVEL);
+        let cur = ir_at(&mut node, Azimuth(f64::from(deg)), Elevation::LEVEL);
         let jump = max_abs_diff(&prev.0, &cur.0).max(max_abs_diff(&prev.1, &cur.1));
         if jump > worst_jump {
             worst_jump = jump;

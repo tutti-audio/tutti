@@ -90,8 +90,8 @@ fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
     let input = [0.5f32; 64];
     let (mut left, mut right) = ([0.0f32; 64], [0.0f32; 64]);
     for target in [
-        Direction::new(Azimuth(f32::NAN), Elevation(f32::NAN)),
-        Direction::new(Azimuth(f32::INFINITY), Elevation(0.0)),
+        Direction::new(Azimuth(f64::NAN), Elevation(f64::NAN)),
+        Direction::new(Azimuth(f64::INFINITY), Elevation(0.0)),
     ] {
         let mut peak = 0.0f32;
         for _ in 0..20 {

@@ -342,8 +342,8 @@ fn directions(file: &File, measurements: usize) -> Result<Vec<Direction>, SofaEr
                     position,
                 });
             }
-            let azimuth = Azimuth(azimuth as f32).wrap();
-            Ok(Direction::new(azimuth, Elevation(elevation as f32)))
+            let azimuth = Azimuth(azimuth).wrap();
+            Ok(Direction::new(azimuth, Elevation(elevation)))
         })
         .collect()
 }

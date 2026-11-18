@@ -1,10 +1,10 @@
 //! [`SpeakerLayout`]: the tuples of a speaker array and the gain solve.
 
 use tutti_types::{Bed, MAX_CHANNELS};
-use tutti_units::{Azimuth, Direction, Elevation, Spread};
+use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, Radians, Spread};
 
 use super::error::SpeakerGeometryError;
-use super::math::{DEG, Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3, wrapped_deg};
+use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3};
 use super::select;
 
 /// How many times [`SpeakerLayout::gains_into`] may retreat a source's elevation
@@ -27,13 +27,13 @@ const ENERGY_EPSILON: f32 = 1e-10;
 /// power, in `f64`).
 const POWER_FLOOR: f64 = 1e-10;
 
-/// A speaker above or below the horizontal plane by more than this many
-/// degrees makes a layout [`PanningMode::Spherical`].
-const PLANE_TOLERANCE_DEG: f64 = 1e-6;
+/// A speaker above or below the horizontal plane by more than this makes a
+/// layout [`PanningMode::Spherical`].
+const PLANE_TOLERANCE: ArcDegrees = ArcDegrees(1e-6);
 
-/// An elevation retreat that lands within this many degrees of the horizontal
-/// plane snaps to it.
-const ELEVATION_SNAP_DEG: f64 = 1e-4;
+/// An elevation retreat that lands within this of the horizontal plane snaps
+/// to it.
+const ELEVATION_SNAP: ArcDegrees = ArcDegrees(1e-4);
 
 /// Whether a layout pans between pairs of speakers or triplets.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -131,12 +131,10 @@ impl SpeakerLayout {
         {
             return Err(SpeakerGeometryError::NonFinitePosition);
         }
-        // The types stop at the trigonometry: the solve works in f64 degrees.
-        let degrees: Vec<(f64, f64)> = positions
+        let mode = if positions
             .iter()
-            .map(|d| (f64::from(d.azimuth.get()), f64::from(d.elevation.get())))
-            .collect();
-        let mode = if degrees.iter().any(|&(_, e)| e.abs() > PLANE_TOLERANCE_DEG) {
+            .any(|d| d.elevation.get().abs() > PLANE_TOLERANCE.get())
+        {
             PanningMode::Spherical
         } else {
             PanningMode::Horizontal
@@ -154,14 +152,15 @@ impl SpeakerLayout {
 
         let tuples: Box<[Tuple]> = match mode {
             PanningMode::Horizontal => {
-                let azimuths: Vec<f64> = degrees.iter().map(|&(a, _)| a).collect();
+                let azimuths: Vec<Azimuth> = positions.iter().map(|d| d.azimuth).collect();
                 select::pairs(&azimuths)
                     .into_iter()
                     .filter_map(|[a, b]| {
-                        let (azi_a, azi_b) = (azimuths[usize::from(a)], azimuths[usize::from(b)]);
+                        let azi_a = Radians::from(azimuths[usize::from(a)]);
+                        let azi_b = Radians::from(azimuths[usize::from(b)]);
                         // The matrix's columns are the speakers' (sin, cos).
-                        let (sin_a, cos_a) = libm::sincos(azi_a * DEG);
-                        let (sin_b, cos_b) = libm::sincos(azi_b * DEG);
+                        let (sin_a, cos_a) = (azi_a.sin(), azi_a.cos());
+                        let (sin_b, cos_b) = (azi_b.sin(), azi_b.cos());
                         Some(Tuple {
                             speakers: [a, b, 0],
                             inverse: Inverse::Pair(inverse2([sin_a, cos_a], [sin_b, cos_b])?),
@@ -169,13 +168,10 @@ impl SpeakerLayout {
                     })
                     .collect()
             }
-            PanningMode::Spherical => select::triplets(&degrees)
+            PanningMode::Spherical => select::triplets(positions)
                 .into_iter()
                 .filter_map(|[i, j, k]| {
-                    let column = |s: u16| {
-                        let (azimuth, elevation) = degrees[usize::from(s)];
-                        direction(azimuth, elevation)
-                    };
+                    let column = |s: u16| direction(positions[usize::from(s)]);
                     Some(Tuple {
                         speakers: [i, j, k],
                         inverse: Inverse::Triplet(inverse3([column(i), column(j), column(k)])?),
@@ -187,7 +183,9 @@ impl SpeakerLayout {
             return Err(SpeakerGeometryError::NoValidTuples);
         }
 
-        let has_rear_speakers = degrees.iter().any(|&(a, _)| wrapped_deg(a).abs() > 90.0);
+        let has_rear_speakers = positions
+            .iter()
+            .any(|d| d.azimuth.wrap().get().abs() > 90.0);
         Ok(Self {
             count,
             tuples,
@@ -282,12 +280,10 @@ impl SpeakerLayout {
             fold_to_front(azimuth)
         };
 
-        // The types stop at the trigonometry: the solve takes f64 degrees.
-        let azimuth_deg = f64::from(azimuth.get());
-        let mut elevation_deg = f64::from(Elevation::new_clamped(elevation.get()).get());
+        let mut elevation = Elevation::new_clamped(elevation.get());
 
         for _ in 0..MAX_ELEVATION_RETREATS {
-            self.tuple_gains(azimuth_deg, elevation_deg, scratch);
+            self.tuple_gains(Direction::new(azimuth, elevation), scratch);
 
             let sum_sq: f64 = scratch.iter().map(|g| g * g).sum();
             if sum_sq > f64::from(ENERGY_EPSILON) {
@@ -302,9 +298,9 @@ impl SpeakerLayout {
             // the horizontal plane, which every supported layout covers, and
             // try again. Snapping the last sliver to exactly 0 rather than
             // halving forever is what keeps the bound at a few rounds in practice.
-            elevation_deg *= 0.5;
-            if elevation_deg.abs() < ELEVATION_SNAP_DEG {
-                elevation_deg = 0.0;
+            elevation = elevation.lerp(Elevation::LEVEL, 0.5);
+            if elevation.get().abs() < ELEVATION_SNAP.get() {
+                elevation = Elevation::LEVEL;
             }
         }
 
@@ -318,10 +314,10 @@ impl SpeakerLayout {
     /// largest (the tuple the direction lies inside), scaled to unit power
     /// and then clamped at zero. `gains` is `speaker_count` long; all of it is
     /// written.
-    pub(super) fn tuple_gains(&self, azimuth_deg: f64, elevation_deg: f64, gains: &mut [f64]) {
+    pub(super) fn tuple_gains(&self, aim: Direction, gains: &mut [f64]) {
         debug_assert_eq!(gains.len(), self.count);
         gains.fill(0.0);
-        let p = direction(azimuth_deg, elevation_deg);
+        let p = direction(aim);
 
         let mut best: Option<(usize, [f64; 3], usize)> = None;
         let mut best_min = f64::NEG_INFINITY;

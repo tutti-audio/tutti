@@ -98,7 +98,7 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
             assert!(out.iter().flatten().all(|s| s.is_finite()));
         }
     };
-    let near = |aim: Direction, want: (f32, f32)| {
+    let near = |aim: Direction, want: (f64, f64)| {
         (aim.azimuth.get() - want.0).abs() < 0.01 && (aim.elevation.get() - want.1).abs() < 0.01
     };
     aim(&node.param_set(), Azimuth::new(-45.0), Elevation::new(30.0));
@@ -110,7 +110,7 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
     );
     // An infinite bearing wraps to NaN on the way into the cell; an
     // infinite height is clamped to the pole there, so it is a position.
-    for (az, el) in [(f32::NAN, 0.0), (0.0, f32::NAN), (f32::INFINITY, 10.0)] {
+    for (az, el) in [(f64::NAN, 0.0), (0.0, f64::NAN), (f64::INFINITY, 10.0)] {
         // Only the bad coordinate is ignored; the other moves.
         let want = (
             if az.is_finite() { az } else { -45.0 },
@@ -134,10 +134,10 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
     // The cells hold any `f32` raw (a param write is not normalized), so ±∞
     // reaches the node as it wrote it; `LastGood` must refuse it there.
     for (az, el) in [
-        (f32::INFINITY, 30.0),
-        (f32::NEG_INFINITY, 30.0),
-        (-45.0, f32::INFINITY),
-        (-45.0, f32::NEG_INFINITY),
+        (f64::INFINITY, 30.0),
+        (f64::NEG_INFINITY, 30.0),
+        (-45.0, f64::INFINITY),
+        (-45.0, f64::NEG_INFINITY),
     ] {
         node.azimuth.store(Azimuth(az));
         node.elevation.store(Elevation(el));
@@ -158,8 +158,8 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
     // A reset (and a fork's) seats on the held position, not on a NaN.
     aim(
         &node.param_set(),
-        Azimuth::new(f32::NAN),
-        Elevation::new(f32::NAN),
+        Azimuth::new(f64::NAN),
+        Elevation::new(f64::NAN),
     );
     Node::reset(&mut node);
     assert!(
@@ -412,7 +412,7 @@ fn a_prepare_above_the_ceiling_retunes_the_glide() {
         MaxBlock::of(Samples(64)),
     ));
 
-    let e_inv = (-1.0f32).exp();
+    let e_inv = (-1.0f64).exp();
     let left = remaining_after(&mut node.aim, 400);
     assert!(
         (left - e_inv).abs() < 1e-4,
@@ -422,7 +422,7 @@ fn a_prepare_above_the_ceiling_retunes_the_glide() {
 
 /// Remaining fraction of a step from 0 to 90 degrees of height after
 /// `steps` rendered steps.
-fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f32 {
+fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f64 {
     aim.reset_to_target(Direction::new(Azimuth::FRONT, Elevation(0.0)));
     for _ in 0..steps {
         aim.step(Direction::new(Azimuth::FRONT, Elevation(90.0)));
@@ -437,7 +437,7 @@ fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f32 {
 #[test]
 fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
-    let e_inv = (-1.0f32).exp();
+    let e_inv = (-1.0f64).exp();
 
     let mut aim = AngleSmoother::new(SampleRate::of(51_200.0), Samples(HRTF_STEP));
     let left = remaining_after(&mut aim, 20);

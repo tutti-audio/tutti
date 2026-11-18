@@ -8,7 +8,7 @@ fn bus(width: u16) -> BusTopology {
     BusTopology::assumed(width.into()).expect("a test width is one bus")
 }
 
-fn step(x: f32) -> Stagger {
+fn step(x: f64) -> Stagger {
     Stagger::of_step(PhaseIncrement(x))
 }
 
@@ -102,7 +102,7 @@ fn a_sweep_of_a_transposed_base_panics_where_it_is_a_constant() {
 #[test]
 fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
     assert!(Stagger::step(PhaseIncrement(0.25)).is_some());
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(Stagger::step(PhaseIncrement(bad)), None, "{bad}");
         assert!(matches!(
             Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(bad)]),

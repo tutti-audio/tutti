@@ -9,7 +9,7 @@ use super::*;
 // one does not compile.
 //
 // "An omission must ship with its replacement" matters most here: with `Ord`
-// and `Add` gone and no substitute, call sites escape to raw `f32` and write a
+// and `Add` gone and no substitute, call sites escape to raw `f64` and write a
 // saturating clamp on a wrapping coordinate, or a smoother that sweeps 340
 // degrees to travel 20. Every omission below has its replacement written.
 
@@ -22,7 +22,7 @@ unit! {
     /// and no `clamp` (constraining a bearing to a range is what
     /// [`wrap`](Self::wrap) does correctly and what a saturating clamp does
     /// wrongly). Displacements are [`ArcDegrees`].
-    pub struct Azimuth(pub f32): Unit, Signed;
+    pub struct Azimuth(pub f64): Unit, Signed;
 }
 // `Neg` is meaningful — mirroring a bearing across the front axis, which is how
 // a left/right flip is expressed. Everything else is a named method:
@@ -45,8 +45,8 @@ impl Azimuth {
     #[inline]
     #[must_use]
     pub fn wrap(self) -> Azimuth {
-        let r = crate::maths::rem_euclid_f32(self.0 + 180.0, 360.0);
-        Azimuth((if r >= 360.0 { 360.0_f32.next_down() } else { r }) - 180.0)
+        let r = crate::maths::rem_euclid_f64(self.0 + 180.0, 360.0);
+        Azimuth((if r >= 360.0 { 360.0_f64.next_down() } else { r }) - 180.0)
     }
 
     /// The shortest signed rotation from `self` to `to`, in `-180..180`: a
@@ -74,7 +74,7 @@ impl Azimuth {
     /// the seam and is audible as a panner sweeping the wrong direction.
     #[inline]
     #[must_use]
-    pub fn lerp_shortest(self, to: Azimuth, t: f32) -> Azimuth {
+    pub fn lerp_shortest(self, to: Azimuth, t: f64) -> Azimuth {
         self.rotate_by(self.shortest_arc_to(to) * t)
     }
 }
@@ -88,7 +88,7 @@ unit! {
     /// straight up does not continue over the top and come out behind you at
     /// this layer, it stops. So ordering and `clamp` — traps on a circle — are
     /// exactly right here.
-    pub struct Elevation(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Elevation(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Additive`: `Elevation + Elevation` is a position sum with no
 // origin, and it would also bypass the pole clamp. `tilt_by` is the addition.
@@ -126,7 +126,7 @@ impl Elevation {
     /// [`Azimuth::wrap`] — the distinction the split exists to enforce.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Elevation {
+    pub fn new_clamped(v: f64) -> Elevation {
         Elevation(v).clamp(Self::DOWN, Self::UP)
     }
 
@@ -141,7 +141,7 @@ impl Elevation {
     /// because there is no seam to cross.
     #[inline]
     #[must_use]
-    pub fn lerp(self, to: Elevation, t: f32) -> Elevation {
+    pub fn lerp(self, to: Elevation, t: f64) -> Elevation {
         Elevation::new_clamped(self.0 + (to.0 - self.0) * t)
     }
 }
@@ -154,7 +154,7 @@ unit! {
     /// is, this names how far to turn. Being a displacement, it has the full
     /// algebra its positions cannot have — two rotations compose, and a
     /// rotation scales.
-    pub struct ArcDegrees(pub f32): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct ArcDegrees(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 // Deliberately NOT `Affine(ArcDegrees)`, though the pair looks
 // exactly like `Beat`/`BeatDuration` and the ability would expand cleanly. The
@@ -189,7 +189,7 @@ unit! {
     ///
     /// Turns rather than radians because that is what a shape table is indexed
     /// by; [`to_radians`](Self::to_radians) converts at the trig call.
-    pub struct Phase(pub f32): Unit, Ordered;
+    pub struct Phase(pub f64): Unit, Ordered;
 }
 // NOT `Bounded`: clamping a phase is never the right answer — a phase
 // past the end of a cycle belongs at the *start* of the next one, not pinned to
@@ -217,20 +217,20 @@ impl Phase {
     /// value under 1 instead.
     ///
     /// The two ranges an advance by less than one cycle lands in — already in
-    /// `[0, 1)`, or one cycle past it — are taken without the `fmodf` call
+    /// `[0, 1)`, or one cycle past it — are taken without the `fmod` call
     /// `rem_euclid` makes, which was a libm call per sample per channel on
     /// every LFO. Both shortcuts are bit-identical to `rem_euclid`: in
     /// `[1, 2)` the subtraction `v - 1` is exact (Sterbenz).
     #[inline]
     #[must_use]
-    pub fn wrapped(v: f32) -> Phase {
+    pub fn wrapped(v: f64) -> Phase {
         if (0.0..1.0).contains(&v) {
             Phase(v)
         } else if (1.0..2.0).contains(&v) {
             Phase(v - 1.0)
         } else {
-            let r = crate::maths::rem_euclid_f32(v, 1.0);
-            Phase(if r >= 1.0 { 1.0_f32.next_down() } else { r })
+            let r = crate::maths::rem_euclid_f64(v, 1.0);
+            Phase(if r >= 1.0 { 1.0_f64.next_down() } else { r })
         }
     }
 
@@ -256,17 +256,17 @@ impl Phase {
     /// every target and `Phase(0.25).sin()` is exactly `1.0`.
     #[inline]
     #[must_use]
-    pub fn sin(self) -> f32 {
-        libm::sin(f64::from(self.0) * core::f64::consts::TAU) as f32
+    pub fn sin(self) -> f64 {
+        libm::sin(self.0 * core::f64::consts::TAU)
     }
 
     /// This phase in radians, `[0, 2·pi)`. An oscillator's sine of a phase is
     /// [`sin`](Self::sin), which keeps the turn in f64; [`Radians::sin`] is
-    /// `libm`'s f32 sine, deterministic and within 1e-6 of it.
+    /// `libm`'s sine of the radians, which carries the `2·pi` product's own rounding.
     #[inline]
     #[must_use]
     pub fn to_radians(self) -> Radians {
-        Radians(self.0 * core::f32::consts::TAU)
+        Radians(self.0 * core::f64::consts::TAU)
     }
 }
 
@@ -276,7 +276,7 @@ unit! {
     ///
     /// Signed: a negative increment runs a modulator backwards, which is
     /// exactly the case a sign-preserving `%` or `.fract()` wrap gets wrong.
-    pub struct PhaseIncrement(pub f32): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct PhaseIncrement(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 // Deliberately NOT `Affine(PhaseIncrement)`, for the same reason
 // `Azimuth` declines it: the generated `+` does not wrap, and an unwrapped
@@ -285,12 +285,12 @@ unit! {
 impl PhaseIncrement {
     /// The step that completes `frequency` cycles per second at `sample_rate`.
     ///
-    /// Computed in f64 and narrowed once at the end: at 20 Hz against 192 kHz
-    /// the step is ~1.04e-4, and accumulating an f32-rounded version of that
-    /// drifts audibly over a long note.
+    /// At 20 Hz against 192 kHz the step is ~1.04e-4; it is kept in `f64`
+    /// because an `f32`-rounded step accumulates a drift that is audible over a
+    /// long note.
     #[inline]
     pub fn per_sample(frequency: Hz, sample_rate: impl Into<SampleRate>) -> PhaseIncrement {
-        PhaseIncrement((frequency.0 as f64 / sample_rate.into().get()) as f32)
+        PhaseIncrement(f64::from(frequency.0) / sample_rate.into().get())
     }
 }
 
@@ -298,10 +298,10 @@ unit! {
     /// An angle in radians — the argument `sin`/`cos` actually take.
     ///
     /// Distinct from [`Phase`] (turns) and [`Azimuth`] (degrees) because all
-    /// three are bare `f32` at the call site, and feeding one where another is
+    /// three are bare `f64` at the call site, and feeding one where another is
     /// expected is silent: the oscillator keeps running, just at the wrong
     /// rate. It sounds like detuning, not like a bug.
-    pub struct Radians(pub f32): Unit, Additive, Signed, Scalable;
+    pub struct Radians(pub f64): Unit, Additive, Signed, Scalable;
 }
 // NOT `Ordered` / `Bounded`, for the reason `Azimuth` gives: a
 // circle has no ends, so `Radians(6.2) < Radians(0.1)` is false while the two
@@ -311,31 +311,31 @@ unit! {
 
 impl Radians {
     /// Full circle, `2·pi`.
-    pub const TAU: Radians = Radians(core::f32::consts::TAU);
+    pub const TAU: Radians = Radians(core::f64::consts::TAU);
 
     /// `sin` of this angle.
     #[inline]
     #[must_use]
-    pub fn sin(self) -> f32 {
-        libm::sinf(self.0)
+    pub fn sin(self) -> f64 {
+        libm::sin(self.0)
     }
 
     /// `cos` of this angle.
     #[inline]
     #[must_use]
-    pub fn cos(self) -> f32 {
-        libm::cosf(self.0)
+    pub fn cos(self) -> f64 {
+        libm::cos(self.0)
     }
 
     /// The equivalent [`Phase`] in turns, wrapped into `[0, 1)`.
     #[inline]
     #[must_use]
     pub fn to_phase(self) -> Phase {
-        Phase::wrapped(self.0 / core::f32::consts::TAU)
+        Phase::wrapped(self.0 / core::f64::consts::TAU)
     }
 
     /// Wrapped into `[-pi, pi)` — the signed-deviation form, with `pi` the
-    /// `f32` constant, for every finite input.
+    /// `f64` constant, for every finite input.
     ///
     /// Half-open at `+pi`, which lands on `-pi`: the same convention
     /// [`Phase::wrapped`] uses at the top of its cycle, and the same reason —
@@ -350,16 +350,14 @@ impl Radians {
     ///
     /// Constant time, not a `while` loop with one iteration per turn of input:
     /// a phase accumulated over minutes of audio would stall the audio thread.
-    /// The reduction is in `f64` modulo the true `2pi`, so it is accurate to
-    /// about `1e-7` rad up to `2^24` and degrades with `|x|` after that
-    /// (`f64` holds `2pi` to `2e-16` relative, and the error is that times the
-    /// turn count); the range holds regardless. NaN and the infinities give
+    /// The reduction is modulo `2pi` held to `2e-16` relative, so the error is
+    /// that times the turn count; the range holds regardless. NaN and the infinities give
     /// NaN. Wrapping *before* comparing is also why [`Ord`] on this type is a
     /// trap — see the omission note above.
     #[inline]
     #[must_use]
     pub fn wrapped_signed(self) -> Radians {
-        use core::f32::consts::PI;
+        use core::f64::consts::PI;
         let x = self.0;
         if (-PI..PI).contains(&x) {
             return self;
@@ -368,21 +366,19 @@ impl Radians {
             return Radians(-PI);
         }
         if !x.is_finite() {
-            return Radians(f32::NAN);
+            return Radians(f64::NAN);
         }
         Radians(Self::wrap_out_of_range(x))
     }
 
     /// The reduction for a finite `x` outside `[-pi, pi)`.
-    fn wrap_out_of_range(x: f32) -> f32 {
+    fn wrap_out_of_range(x: f64) -> f64 {
         use core::f64::consts::{PI, TAU};
-        let x = f64::from(x);
-        // `2^24` is not a tested accuracy boundary: `f64` holds the quotient to
-        // about `2^53`, and raising this to `1e12` passes every test. It only
-        // picks where `rem_euclid` takes over.
+        // `2^24` is not an accuracy boundary: `f64` holds the quotient to
+        // about `2^53`. It only picks where `rem_euclid` takes over.
         // The turn count multiplies by `1 / TAU`: a divide is the longest link
         // in this chain, and the vocoder's per-bin wraps wait on it. Every
-        // `f32` input gives the same bits as dividing (swept).
+        // input gives the same bits as dividing (swept).
         let s = if x.abs() < 16_777_216.0 {
             x - TAU * libm::floor((x + PI) * (1.0 / TAU))
         } else {
@@ -391,12 +387,11 @@ impl Radians {
             let r = crate::maths::rem_euclid_f64(x, TAU);
             if r >= PI { r - TAU } else { r }
         };
-        // The true `pi` is a hair under the `f32` one, so a value just below
+        // The true `pi` is a hair under the `f64` one, so a value just below
         // it can round up to the constant; that is the excluded end, and the
         // same point as `-pi`.
-        let s = s as f32;
-        if s >= core::f32::consts::PI {
-            -core::f32::consts::PI
+        if s >= core::f64::consts::PI {
+            -core::f64::consts::PI
         } else {
             s
         }
