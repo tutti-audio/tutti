@@ -54,7 +54,7 @@ fn mid_side_process_is_allocation_free() {
 #[test]
 fn stereo_width_process_is_allocation_free_with_the_width_moving() {
     gate(
-        StereoWidthNode::from(StereoWidthConfig::new()),
+        StereoWidthNode::<f32>::from(StereoWidthConfig::new()),
         |controls, i| {
             let w = if i.is_multiple_of(2) { 0.2 } else { 1.8 };
             controls.set(UnitParam::StereoWidth, w);

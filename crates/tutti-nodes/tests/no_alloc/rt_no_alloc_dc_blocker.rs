@@ -9,7 +9,7 @@ use tutti_units::{SampleRate, UnitParam};
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the corner moved before each.
 #[test]
 fn dc_blocker_process_is_allocation_free_with_the_corner_moving() {
-    let node = DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO));
+    let node = DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
         let ch = ch.into_samples_mut();

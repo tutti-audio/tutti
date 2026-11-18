@@ -1,7 +1,7 @@
 //! [`StereoWidthNode`]: the side of a stereo pair scaled by a width.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, WidthBank, WidthControls};
+use tutti_dsp::{COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{SampleRate, StereoWidth, Tail};
@@ -21,7 +21,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// Memoryless past the glide: no latency and no tail. Made from the width it starts at
 /// ([`StereoWidthConfig`], `StereoWidthNode::from`).
-pub type StereoWidthNode = KernelNode<StereoWidthKernel>;
+///
+/// `F` is the precision of the width's glide and of the mid/side arithmetic, `f64` by default.
+pub type StereoWidthNode<F = f64> = KernelNode<StereoWidthKernel<F>>;
 
 /// What a [`StereoWidthNode`] is made from: the width it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,9 +55,13 @@ impl Default for StereoWidthConfig {
     }
 }
 
-impl From<StereoWidthConfig> for StereoWidthNode {
+impl<F: Float + Lerp> From<StereoWidthConfig> for StereoWidthNode<F> {
     fn from(config: StereoWidthConfig) -> Self {
-        Self::with_kernel(StereoWidthKernel::new(), StereoWidthSet, config.controls)
+        Self::with_kernel(
+            StereoWidthKernel::<F>::new(),
+            StereoWidthSet,
+            config.controls,
+        )
     }
 }
 
@@ -75,23 +81,23 @@ control_set! {
 
 /// The width as a [`Kernel`]: a [`WidthBank`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct StereoWidthKernel {
-    bank: WidthBank,
+pub struct StereoWidthKernel<F: Float> {
+    bank: WidthBank<F>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl StereoWidthKernel {
+impl<F: Float + Lerp> StereoWidthKernel<F> {
     /// A bank at a placeholder rate: an unprepared node renders nothing.
     fn new() -> Self {
         Self {
-            bank: WidthBank::new(SampleRate::SR_48K),
+            bank: WidthBank::<F>::new(SampleRate::SR_48K),
             landed: false,
         }
     }
 }
 
-impl Kernel for StereoWidthKernel {
+impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
     type Set = StereoWidthSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -101,7 +107,7 @@ impl Kernel for StereoWidthKernel {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = WidthBank::new(rate);
+        self.bank = WidthBank::<F>::new(rate);
         self.landed = false;
     }
 
@@ -138,13 +144,14 @@ impl Kernel for StereoWidthKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{assert_cell_glides, drive_block, prepared};
+    use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    fn node(width: f32) -> StereoWidthNode {
-        prepared(StereoWidthNode::from(
+    // The node tests run `F = f32`, the session's audio format.
+    fn node(width: f32) -> StereoWidthNode<f32> {
+        prepared(StereoWidthNode::<f32>::from(
             StereoWidthConfig::new().width(StereoWidth(width)),
         ))
     }
@@ -152,7 +159,7 @@ mod tests {
     /// A fork starts from the width last set through the `ParamSet` and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(StereoWidthNode::from(
+        assert_param_fork(StereoWidthNode::<f32>::from(
             StereoWidthConfig::new().width(StereoWidth(0.5)),
         ));
     }
@@ -161,7 +168,7 @@ mod tests {
     /// width built with.
     #[test]
     fn the_shape_declares_the_width_param() {
-        let n = StereoWidthNode::from(StereoWidthConfig::new().width(StereoWidth(1.5)));
+        let n = StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth(1.5)));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -189,13 +196,45 @@ mod tests {
     /// right, and `0.25` after the glide.
     #[test]
     fn a_written_width_glides_and_lands_on_the_formula() {
-        let make = || StereoWidthNode::from(StereoWidthConfig::new());
-        let change = |n: &StereoWidthNode| assert!(n.param_set().set(UnitParam::StereoWidth, 0.25));
+        let make = || StereoWidthNode::<f32>::from(StereoWidthConfig::new());
+        let change =
+            |n: &StereoWidthNode<f32>| assert!(n.param_set().set(UnitParam::StereoWidth, 0.25));
         let (l, r) = (vec![1.0f32; 64], vec![-1.0f32; 64]);
         let (la, ra) = (vec![1.0f32; 600], vec![-1.0f32; 600]);
         assert_cell_glides(make, change, &[&l, &r], &[&la, &ra], "width");
         let (_, out) = crate::test_support::render_change(make, change, &[&l, &r], &[&la, &ra], 64);
         assert!(out[0][599] == 0.25 && out[1][599] == -0.25);
         assert!(out[0][0] < 1.0 && out[0][0] > 0.9, "starts down the line");
+    }
+
+    /// An `f64` block through a `StereoWidthKernel::<f64>` built at width 1 is the pair
+    /// exactly (a 29-bit signal, which `f32` cannot hold), and at width `w` is
+    /// `L' = M + w S`, `R' = M - w S` with `M = (L + R) / 2` and `S = (L - R) / 2` in `f64`,
+    /// to 2^-45.
+    #[test]
+    fn an_f64_kernel_is_the_identity_at_unity_and_the_mid_side_matrix_at_other_widths() {
+        use crate::test_support::drive_kernel;
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        use tutti_units::Samples;
+        let len = 100;
+        let l = wide_signal(len);
+        let r: Vec<f64> = l.iter().rev().map(|v| v * 0.75).collect();
+        let run = |w: f32| {
+            let mut k = StereoWidthKernel::<f64>::new();
+            k.prepare(RATE, MaxBlock::of(Samples(len)));
+            let controls = WidthControls {
+                width: StereoWidth(w),
+            };
+            drive_kernel(&mut k, &[(0, controls)], &[l.clone(), r.clone()])
+        };
+        let out = run(1.0);
+        assert_close_f64(&out[0], &l, 0.0);
+        assert_close_f64(&out[1], &r, 0.0);
+        let w = f64::from(0.3f32);
+        let out = run(0.3);
+        for (n, (a, b)) in out[0].iter().zip(&out[1]).enumerate() {
+            let (mid, side) = ((l[n] + r[n]) / 2.0, w * (l[n] - r[n]) / 2.0);
+            assert_close_f64(&[*a, *b], &[mid + side, mid - side], 2.0f64.powi(-45));
+        }
     }
 }

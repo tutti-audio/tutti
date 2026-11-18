@@ -72,21 +72,21 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "distortion",
-            Box::new(DistortionNode::new(ShapeKind::Tanh, Drive(4.0))),
+            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(4.0))),
         ),
         // The antialiasing's history is the shaper's own state: a non-finite sample enters it
         // as 0, so it is heard at its own frame.
         (
             "distortion first order",
             Box::new(
-                DistortionNode::new(ShapeKind::Tanh, Drive(4.0))
+                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(4.0))
                     .antialiasing(Antialiasing::FirstOrder),
             ),
         ),
         (
             "distortion second order",
             Box::new(
-                DistortionNode::new(ShapeKind::Softsign, Drive(4.0))
+                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive(4.0))
                     .antialiasing(Antialiasing::SecondOrder),
             ),
         ),
@@ -99,7 +99,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             // past the block's end: the node's reset is what ends it. The reset matters for NaN only;
             // an infinity quantizes to +-1, which is finite, and the next capture replaces it.
             "bit crusher",
-            Box::new(BitCrusherNode::from(
+            Box::new(BitCrusherNode::<f32>::from(
                 BitCrusherConfig::new(ChannelLayout::STEREO)
                     .bits(BitDepth::new(12.0))
                     .hold(HoldFactor::new(91.0)),
@@ -107,7 +107,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "dc blocker",
-            Box::new(DcBlockerNode::from(DcBlockerConfig::new(
+            Box::new(DcBlockerNode::<f32>::from(DcBlockerConfig::new(
                 ChannelLayout::STEREO,
             ))),
         ),
@@ -403,8 +403,8 @@ mod logged {
         assert_eq!(r.repeats(), 0, "no repeat of the one reset");
     }
 
-    fn dc_blocker() -> DcBlockerNode {
-        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+    fn dc_blocker() -> DcBlockerNode<f32> {
+        DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO))
     }
 
     #[test]

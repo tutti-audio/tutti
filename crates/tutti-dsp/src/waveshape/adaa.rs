@@ -4,7 +4,7 @@
 
 use core::f64::consts::{FRAC_PI_2, LN_2};
 
-use tutti_buffers::{Float, Sample};
+use tutti_buffers::Float;
 
 use super::{Antialiasing, ShapeKind, smooth9};
 
@@ -178,20 +178,22 @@ impl ShapeKind {
     /// as 0: it is heard at its own frame only, and the next frame (the next two at second
     /// order) reads its segment from 0.
     #[inline(always)]
-    pub(super) fn adaa_each<S: Float>(
+    pub(super) fn adaa_each<F: Float, S: Float>(
         self,
         order: Antialiasing,
-        hardness: &[f32],
+        hardness: &[F],
         input: &[S],
         output: &mut [S],
-        history: &mut [f64; 2],
+        history: &mut [F; 2],
     ) {
         with_kind!(self, |K| {
             for ((o, x), &h) in output.iter_mut().zip(input).zip(hardness) {
-                let x = x.convert_to::<f64>();
-                let y = K.step(order, f64::from(h), x, *history);
-                *o = y.convert_to::<S>();
-                *history = [if x.is_finite() { x } else { 0.0 }, history[0]];
+                // The quotients are formed in f64 whatever `F` is: the antiderivatives' cancellation
+                // needs it. The history is kept in `F`.
+                let x = x.to_f64();
+                let past = [history[0].to_f64(), history[1].to_f64()];
+                *o = S::from_f64(K.step(order, h.to_f64(), x, past));
+                *history = [F::from_f64(if x.is_finite() { x } else { 0.0 }), history[0]];
             }
         })
     }
