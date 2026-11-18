@@ -23,7 +23,7 @@ use tutti_graph::{
     RtTarget, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::widen_velocity;
-use tutti_plugin_host::{HostedNode, InProcClient, NodeControls, load_client};
+use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
@@ -459,9 +459,9 @@ fn tempo(to_90: Option<f64>) -> TempoReader {
 }
 
 /// The node over `rig`, prepared for blocks of up to `block`.
-fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<HostedNode<Rec>>, NodeControls) {
+fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Rec>>, NodeControls) {
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -475,7 +475,7 @@ fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<HostedNode<Re
 
 /// The block of `len` frames starting at global frame `frame`, rolling at
 /// 120 BPM from beat 4 at frame 0.
-fn run_block(unit: &mut Direct<HostedNode<Rec>>, frame: u64, len: usize) {
+fn run_block(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize) {
     run_block_at(
         unit,
         frame,
@@ -488,12 +488,12 @@ fn run_block(unit: &mut Direct<HostedNode<Rec>>, frame: u64, len: usize) {
 /// The block of `len` frames at global frame `frame`, with the transport's own
 /// tempo and playhead given: a test with a tempo step needs a playhead that
 /// follows the map, or the block after the step is a seek.
-fn run_block_at(unit: &mut Direct<HostedNode<Rec>>, frame: u64, len: usize, bpm: Bpm, beat: Beat) {
+fn run_block_at(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize, bpm: Bpm, beat: Beat) {
     run_block_with(unit, frame, len, true, bpm, beat);
 }
 
 fn run_block_with(
-    unit: &mut Direct<HostedNode<Rec>>,
+    unit: &mut Direct<PluginNode<Rec>>,
     frame: u64,
     len: usize,
     playing: bool,
@@ -865,7 +865,7 @@ fn a_node_built_over_an_activated_plugin_has_no_origin_to_fork_from() {
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the recording plugin activates");
     };
-    let client = tutti_plugin_host::client_over::<Rec>(
+    let client = tutti_plugin_host::client_over::<Rec, f32>(
         processor,
         controller,
         prepare,
@@ -919,7 +919,7 @@ fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
 
     let rig = Rig::new(None, Features::TRANSPORT);
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (_client, handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+    let (_client, handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -984,7 +984,7 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
     };
     let (controls, _reports) =
         tutti_plugin_host::PluginControls::new(Samples(0), PluginTail::None, SR);
-    let client = tutti_plugin_host::client_over::<Rec>(
+    let client = tutti_plugin_host::client_over::<Rec, f32>(
         processor,
         controller,
         prepare,
@@ -1035,7 +1035,7 @@ fn the_chunked_audio_path_does_not_allocate() {
     Arc::get_mut(&mut rig).expect("unshared").record = false;
     let (mut unit, _) = node(&rig, 100, tempo(Some(4.0 + 79.5 * BEATS_PER_FRAME)));
     let mut frame = 0;
-    let mut one = |unit: &mut Direct<HostedNode<Rec>>| {
+    let mut one = |unit: &mut Direct<PluginNode<Rec>>| {
         unit.events(0, &[note_on(5, 100)]);
         unit.param_events(
             0,
@@ -1069,7 +1069,7 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     rig.lose.store(3, Ordering::Relaxed);
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -1234,7 +1234,7 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
         let rig = Rig::new(None, Features::empty());
         rig.key_bus.store(key_bus, Ordering::Relaxed);
         ROUTE.with(|r| *r.borrow_mut() = Some(rig));
-        let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+        let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
             main_thread(),
             &tutti_fixtures::detached_work(),
             Path::new("rec"),

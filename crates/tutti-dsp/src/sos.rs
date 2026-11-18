@@ -81,11 +81,11 @@ pub(crate) fn svf_form(b: &Biquad) -> SvfCoeffs {
         let m2 = (d0 * b.b0 - m0 * d0 - m1 * g) / (g * g);
         (g, k, [m0, m1, m2])
     };
-    let [a1, a2, a3] = integrator_gains(g, k);
+    let [d, a2, a3] = integrator_gains(g, k);
     SvfCoeffs {
         g,
         k,
-        a1,
+        d,
         a2,
         a3,
         m0,

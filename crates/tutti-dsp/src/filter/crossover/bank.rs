@@ -45,19 +45,19 @@ impl<F: Float + Lanes> CrossoverBank<F> {
     ///
     /// A channel past the bank's width, the input's or [`MAX_CHANNELS`], and a band's plane
     /// past the output's, is not touched. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         coefficients: &mut Glide<CrossoverCoefficients>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = self.state.len();
         let bands = coefficients.target().bands();
         let channels = width.min(input.channels()).min(MAX_CHANNELS);
         // Every channel's band planes, taken from the output once per block.
-        let mut planes: [[&mut [S]; MAX_BANDS]; MAX_CHANNELS] =
-            core::array::from_fn(|_| core::array::from_fn(|_| <&mut [S]>::default()));
+        let mut planes: [[&mut [F]; MAX_BANDS]; MAX_CHANNELS] =
+            core::array::from_fn(|_| core::array::from_fn(|_| <&mut [F]>::default()));
         let mut reached = [0usize; MAX_CHANNELS];
         for (p, plane) in output.iter_mut().enumerate().take(width * bands) {
             let (band, channel) = (p / width, p % width);
@@ -71,7 +71,7 @@ impl<F: Float + Lanes> CrossoverBank<F> {
         for (i, step) in (0..blended).zip(coefficients.taken().saturating_add(1)..) {
             let c = coefficients.at(step).narrowed::<F>();
             for (ch, state) in self.state.iter_mut().enumerate().take(channels) {
-                let x = input.plane(ch).samples()[i].convert_to::<F>();
+                let x = input.plane(ch).samples()[i];
                 put(state, &c, x, &mut planes[ch][..reached[ch]], i);
             }
         }
@@ -81,7 +81,7 @@ impl<F: Float + Lanes> CrossoverBank<F> {
             let x = &input.plane(ch).samples()[..frames];
             let ys = &mut planes[ch][..reached[ch]];
             for (i, v) in x.iter().enumerate().skip(blended) {
-                put(state, &c, v.convert_to::<F>(), ys, i);
+                put(state, &c, *v, ys, i);
             }
         }
         coefficients.advance(u32::try_from(frames).unwrap_or(u32::MAX));
@@ -90,16 +90,16 @@ impl<F: Float + Lanes> CrossoverBank<F> {
 
 /// Frame `i` of a channel's bands: `x` through `state` at `c`, into the planes it reaches.
 #[inline]
-fn put<S: Float, F: Float + Lanes>(
+fn put<F: Float + Lanes>(
     state: &mut CrossoverState<F>,
     c: &Narrowed<F>,
     x: F,
-    ys: &mut [&mut [S]],
+    ys: &mut [&mut [F]],
     i: usize,
 ) {
     let split = state.tick(c, x);
     for (y, &band) in ys.iter_mut().zip(&split) {
-        y[i] = band.convert_to::<S>();
+        y[i] = band;
     }
 }
 

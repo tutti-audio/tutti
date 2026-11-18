@@ -28,13 +28,14 @@
 use std::num::NonZeroUsize;
 
 use arrayvec::ArrayVec;
+use tutti_buffers::Float;
 use tutti_graph::{
     BusOut, Cx, Event, EventKind, Harmony, HarmonyKind, InBus, IntoNode, Io, MAX_BUSES, Node,
     NodeParts, Offset, OutBus, Prepare, RtLevel, Shape, SortedEvents, Status,
 };
 use tutti_units::{Latency, Samples, Tail};
 
-use super::client::{HostedNode, InProcClient, Inputs, Rendered, render_with};
+use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
@@ -46,16 +47,16 @@ use tutti_plugin_types::{
 type Handles<H> = ArrayVec<H, { MAX_BUSES + 1 }>;
 
 /// Every input channel, a bus at a time in port order.
-fn channels_in<'s>(
-    inputs: &tutti_graph::Inputs<'s>,
+fn channels_in<'s, F: Float>(
+    inputs: &tutti_graph::Inputs<'s, F>,
     buses: &[InBus],
-) -> impl Iterator<Item = &'s [f32]> {
+) -> impl Iterator<Item = &'s [F]> {
     buses.iter().flat_map(|&bus| inputs.bus(bus).channels())
 }
 
-impl<F: Loaded + 'static> Node for HostedNode<F>
+impl<L: Loaded + 'static, F: Float> Node<F> for PluginNode<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
     /// The plugin's channels, one event input (MIDI and parameter events),
     /// and a MIDI event output for a plugin that declared MIDI out; its
@@ -138,7 +139,7 @@ where
         let _ = self.client.rt.poll(Processor::stop);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let Self {
             client: this,
             tempo,
@@ -297,11 +298,11 @@ where
                 }
 
                 let piece_midi = this.midi.len();
-                let ins: ChannelTable<&[f32]> = channels_in(&inputs, &ins_by_bus)
+                let ins: ChannelTable<&[F]> = channels_in(&inputs, &ins_by_bus)
                     .take(n_in)
                     .map(|ch| &ch[at..at + n])
                     .collect();
-                let mut outs: ChannelTable<&mut [f32]> = outputs
+                let mut outs: ChannelTable<&mut [F]> = outputs
                     .buses(&outs_by_bus)
                     .flat_map(BusOut::into_channels)
                     .take(n_out)
@@ -448,7 +449,7 @@ where
         this.params.count_midi_dropped(midi_dropped);
         this.params.losses().harmony.add(harmony_dropped);
         io.count_lost(midi_dropped);
-        // Built before the plugin is entered: `drive_f32` publishes it to the
+        // Built before the plugin is entered: the Processor publishes it to the
         // cell `audioMasterGetTime` reads, then calls `process`.
         let transport = this.transport.block(cx, size, features, &mut view);
         // The graph's buffers go to the plugin as they are: the Processor
@@ -457,11 +458,11 @@ where
         let block_midi = this.midi.len();
         let rendered = {
             let (inputs, mut outputs) = io.split();
-            let ins: ChannelTable<&[f32]> = channels_in(&inputs, &ins_by_bus)
+            let ins: ChannelTable<&[F]> = channels_in(&inputs, &ins_by_bus)
                 .take(n_in)
                 .map(|ch| &ch[..size])
                 .collect();
-            let mut outs: ChannelTable<&mut [f32]> = outputs
+            let mut outs: ChannelTable<&mut [F]> = outputs
                 .buses(&outs_by_bus)
                 .flat_map(BusOut::into_channels)
                 .take(n_out)
@@ -574,10 +575,10 @@ where
 /// say so too: CLAP's *sleep* means the output is silent, and the executor
 /// writes silence for a node it parks, so a plugin that sleeps over sound is
 /// not believed.
-fn asleep(out: &ProcessOutput, outs: &[&mut [f32]]) -> bool {
+fn asleep<F: Float>(out: &ProcessOutput, outs: &[&mut [F]]) -> bool {
     out.status() == BlockStatus::Sleep
         && out.midi_events.is_empty()
-        && outs.iter().all(|c| c.iter().all(|&x| x == 0.0))
+        && outs.iter().all(|c| c.iter().all(|&x| x == F::lit(0.0)))
 }
 
 /// The status a block ends with. A plugin that slept
@@ -589,7 +590,7 @@ fn asleep(out: &ProcessOutput, outs: &[&mut [f32]]) -> bool {
 /// leave the declared ceiling standing (a call that reports nothing restores
 /// it, which is what a tail status would report), and a format with no
 /// per-block status never says anything.
-fn slept_status(io: &Io<'_>, slept: bool) -> Status {
+fn slept_status<F: Float>(io: &Io<'_, F>, slept: bool) -> Status {
     if slept {
         io.report_tail(Tail::None);
         Status::Idle
@@ -658,17 +659,17 @@ fn push_harmony(
 /// parameter delivery's counters, as an out-of-process plugin's
 /// `PluginControls` are. Its [`ForkSource`] forks it **by state transfer**: a
 /// second instance of the plugin from the same library, restored from this
-/// one's saved state ([`HostedNode::fork_instance`]). So `Editor::fork` (an
+/// one's saved state ([`PluginNode::fork_instance`]). So `Editor::fork` (an
 /// offline export) renders a graph holding it.
 ///
 /// [`ForkSource`]: tutti_graph::ForkSource
-impl<F: InProcess + 'static> IntoNode for HostedNode<F>
+impl<L: InProcess + 'static, F: Float> IntoNode<F> for PluginNode<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
     type Controls = NodeControls;
 
-    fn into_parts(self) -> NodeParts<NodeControls> {
+    fn into_parts(self) -> NodeParts<NodeControls, F> {
         // A plugin with no origin to load again has no fork.
         let fork = super::fork::Fork::of(&self).map(|fork| Box::new(fork) as _);
         let controls = self.client.controls();
@@ -680,7 +681,7 @@ where
     }
 }
 
-impl<F: InProcess> InProcClient<F> {
+impl<L: InProcess, F: Float> InProcClient<L, F> {
     /// The node's controls: its meter cell and its parameter delivery's
     /// counters, the same [`NodeControls`] inserting it hands back. Its block
     /// is the out-of-process node's chunk: a block's points all count as sent,
@@ -717,13 +718,14 @@ mod owed_tests {
         path: &std::path::Path,
         rate: SampleRate,
     ) -> tutti_plugin_types::BridgeResult<(InProcClient<Vst2Loaded>, PluginHandle)> {
-        crate::load_client::<Vst2Loaded>(
+        crate::load_client::<Vst2Loaded, f32>(
             main,
             &tutti_fixtures::pumped_work(),
             path,
             &Load::new(),
             rate,
         )
+        .map_err(|e| e.into_bridge(path))
     }
 
     const BLOCK: usize = 64;

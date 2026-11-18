@@ -12,7 +12,7 @@ use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
 use crate::plugin::HostedPlugin;
-use crate::{Clock, Key, PluginNode, Session};
+use crate::{AnyPlugin, Clock, Key, Session};
 use tutti_plugin::catalog::PluginRef;
 
 mod editor;
@@ -27,7 +27,7 @@ pub(super) fn host<K: crate::AppKey, C: Clock<Float = f32>>(
     node: impl Into<NodeKey>,
     handle: PluginHandle,
     plugin: PluginRef,
-) -> Key<PluginNode> {
+) -> Key<AnyPlugin> {
     let node = node.into();
     let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session
@@ -46,7 +46,7 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     node: impl Into<NodeKey>,
     handle: PluginHandle,
     plugin: PluginRef,
-) -> Key<PluginNode> {
+) -> Key<AnyPlugin> {
     let node = node.into();
     let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    DetachedSession, Key, PluginChange, PluginEvent, PluginNode, PluginParamError, Session,
+    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamError, Session,
     SessionEvent,
 };
 use tutti_graph::{ForkByClone, NodeKey};
@@ -150,7 +150,7 @@ fn session() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
 }
 
 /// [`session`], with the plugin's key.
-fn session_keyed() -> (DetachedSession, Key<PluginNode>, Arc<Fake>, RefreshSink) {
+fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) {
     let fake = Fake::new();
     let refresh = RefreshSink::default();
     let handle = PluginHandle::from_backend(

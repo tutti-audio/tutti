@@ -10,7 +10,7 @@
 #
 # step  R1/S7 dsp: banks to one float, then PolySynth, SoundFont and GM generic over F
 #       B2/B3 graph: param cells, ranges, ramps and segments at f64
-#       plugins step 7 plugins: HostedNode<F>, ABI width negotiation
+#       plugins step 7 plugins: PluginNode<F>, ABI width negotiation
 #       dsp S7/instruments  the instruments' f32 engines
 #       midi units  the MIDI crates' f32 units
 #       foundation  units, types, curve and plumbing: the last f32 unit families
@@ -21,7 +21,6 @@ crates/tutti-codec/src/format.rs  2  migrating: foundation
 crates/tutti-curve/src/raw.rs  1  migrating: foundation
 crates/tutti-dsp/src/bit_crush.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/convolver.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/dc_block.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/delay/bank.rs  4  migrating: R1/S7
 crates/tutti-dsp/src/dither.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/dynamics/brickwall.rs  1  migrating: R1/S7
@@ -34,12 +33,6 @@ crates/tutti-dsp/src/dynamics/shared.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/dynamics/transient.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/fft/real.rs  4  migrating: R1/S7
 crates/tutti-dsp/src/fft/scratch.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/crossover/coefficients.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/filter/envelope.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/ladder/bank.rs  3  migrating: R1/S7
-crates/tutti-dsp/src/filter/ladder/kernel.rs  6  migrating: R1/S7
-crates/tutti-dsp/src/filter/lanes.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/filter/svf/kernel.rs  9  migrating: R1/S7
 crates/tutti-dsp/src/follower.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/glide.rs  5  migrating: R1/S7
 crates/tutti-dsp/src/level.rs  1  migrating: R1/S7
@@ -97,7 +90,7 @@ crates/tutti-nodes/src/modulation/mod_delay.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/sweep_clock.rs  1  migrating: B2/B3
 crates/tutti-nodes/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
-crates/tutti-plugin-host/src/node/graph.rs  1  migrating: plugins step 7
+crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
 crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
 crates/tutti-polysynth/src/bank.rs  17  migrating: dsp S7/instruments
 crates/tutti-polysynth/src/mpe.rs  2  migrating: dsp S7/instruments

@@ -6,6 +6,7 @@
 
 use tutti_buffers::Float;
 
+use crate::design::{along, prewarp};
 use crate::{Complex64, Lanes, Lerp};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
@@ -50,9 +51,9 @@ pub enum SvfType {
 /// Pure SVF coefficient set computed from filter parameters.
 ///
 /// The per-sample recurrence these coefficients feed is
-/// `v3 = v0 - ic2; v1 = a1*ic1 + a2*v3; v2 = ic2 + a2*ic1 + a3*v3;
+/// `v3 = v0 - ic2; v1 = ic1 + (a2*v3 - d*ic1); v2 = ic2 + (a2*ic1 + a3*v3);
 /// ic1 = 2*v1 - ic1; ic2 = 2*v2 - ic2; y = m0*v0 + m1*v1 + m2*v2`
-/// (Simper's trapezoidal SVF).
+/// (Simper's trapezoidal SVF, with `a1 = 1 - d`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SvfCoeffs {
     /// The prewarped integrator gain, `tan(pi * fc / sr)` (a shelf's divided or
@@ -60,11 +61,12 @@ pub struct SvfCoeffs {
     pub g: f64,
     /// The damping, `1 / Q` (a bell's `1 / (Q * A)`).
     pub k: f64,
-    /// `1 / (1 + g*(g + k))`, with `g = tan(pi * fc / sr)` and `k = 1 / Q`.
-    /// A bell uses `k = 1 / (Q * A)`; a low (high) shelf divides (multiplies)
-    /// `g` by `sqrt(A)`, `A = 10^(dB / 40)`.
-    pub a1: f64,
-    /// `g * a1`.
+    /// `1 - a1` for Simper's `a1 = 1 / (1 + g*(g + k))`: `g*(g + k) / (1 + g*(g + k))`, with
+    /// `g = tan(pi * fc / sr)` and `k = 1 / Q`. A bell uses `k = 1 / (Q * A)`; a low (high)
+    /// shelf divides (multiplies) `g` by `sqrt(A)`, `A = 10^(dB / 40)`. `a1` is within
+    /// `g*(g + k)` of 1 at a low cutoff, so the set keeps the small complement.
+    pub d: f64,
+    /// `g / (1 + g*(g + k))`.
     pub a2: f64,
     /// `g * a2`.
     pub a3: f64,
@@ -96,16 +98,14 @@ impl SvfCoeffs {
         gain_db: impl Into<Db>,
         sample_rate: impl Into<SampleRate>,
     ) -> SvfCoeffs {
-        let (freq, q, gain_db) = (freq.into().get(), q.into().get(), gain_db.into());
+        let (freq, q, gain_db) = (freq.into(), q.into().get(), gain_db.into());
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
         let fc = freq.clamp(
-            1.0,
-            sample_rate
-                .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
-                .get(),
+            Hz(1.0),
+            sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
-        let g0 = libm::tan(core::f64::consts::PI * fc / sample_rate.get());
+        let g0 = prewarp(fc, sample_rate);
         let q = q.max(0.01);
         // A gain past `MAX_GAIN` either way is that gain: `10^(dB / 40)`
         // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
@@ -132,7 +132,7 @@ impl SvfCoeffs {
             _ => g0,
         };
 
-        let [a1, a2, a3] = integrator_gains(g, k);
+        let [d, a2, a3] = integrator_gains(g, k);
 
         let (m0, m1, m2) = match filter_type {
             SvfType::LowPass => (0.0, 0.0, 1.0),
@@ -149,7 +149,7 @@ impl SvfCoeffs {
         SvfCoeffs {
             g,
             k,
-            a1,
+            d,
             a2,
             a3,
             m0,
@@ -169,8 +169,8 @@ impl SvfCoeffs {
     }
 }
 
-/// The coefficients [`svf_step`] reads, in the arithmetic `L` it runs in: a filter
-/// node's state precision, or the lane bank's `f32x8`.
+/// The coefficients [`svf_step`] reads, in the arithmetic `L` it runs in: the graph's float
+/// or the lane bank's `f32x8`.
 ///
 /// One set serves every channel of a node: the controls are one linked surface, so
 /// widening replicates only the integrator state. The fields are named, so a set
@@ -178,9 +178,10 @@ impl SvfCoeffs {
 /// [`SvfCoeffs`] solves them from the controls.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SvfCoefficients<L: Lanes> {
-    /// `1 / (1 + g (g + k))`.
-    pub a1: L,
-    /// `g * a1`.
+    /// `1 - a1` for `a1 = 1 / (1 + g (g + k))`: `g (g + k) / (1 + g (g + k))`, stored as the
+    /// small term it is, so it keeps its relative precision at a low cutoff.
+    pub d: L,
+    /// `g / (1 + g (g + k))`.
     pub a2: L,
     /// `g * a2`.
     pub a3: L,
@@ -193,15 +194,16 @@ pub struct SvfCoefficients<L: Lanes> {
 }
 
 impl<F: Float + Lanes> From<&SvfCoeffs> for SvfCoefficients<F> {
-    /// The solve's `f64` set narrowed once to `F`.
+    /// The solve's `f64` set narrowed once to `F`: the one crossing of an SVF design.
     fn from(c: &SvfCoeffs) -> Self {
+        let [d, a2, a3, m0, m1, m2] = [c.d, c.a2, c.a3, c.m0, c.m1, c.m2].map(F::from_design);
         Self {
-            a1: F::from_f64(c.a1),
-            a2: F::from_f64(c.a2),
-            a3: F::from_f64(c.a3),
-            m0: F::from_f64(c.m0),
-            m1: F::from_f64(c.m1),
-            m2: F::from_f64(c.m2),
+            d,
+            a2,
+            a3,
+            m0,
+            m1,
+            m2,
         }
     }
 }
@@ -219,9 +221,9 @@ impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
     /// ever used for one sample and never stored.
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        let t = F::from_f64(f64::from(k)) / F::from_f64(f64::from(n));
+        let t = along::<F>(k, n);
         Self {
-            a1: crate::lerp(self.a1, to.a1, t),
+            d: crate::lerp(self.d, to.d, t),
             a2: crate::lerp(self.a2, to.a2, t),
             a3: crate::lerp(self.a3, to.a3, t),
             m0: crate::lerp(self.m0, to.m0, t),
@@ -244,30 +246,38 @@ impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
 /// voices at a time.
 #[inline(always)]
 pub fn svf_step<L: Lanes>(c: &SvfCoefficients<L>, s: &mut [L; 2], v0: L) -> L {
-    let [v1, v2] = svf_taps([c.a1, c.a2, c.a3], s, v0);
+    let [v1, v2] = svf_taps([c.d, c.a2, c.a3], s, v0);
     c.m0 * v0 + c.m1 * v1 + c.m2 * v2
 }
 
-/// The integrator coefficients `[a1, a2, a3]` of a trapezoidal state-variable filter at the
-/// prewarped gain `g = tan(pi fc / fs)` and the damping `k = 1 / Q`: `a1 = 1 / (1 + g (g +
-/// k))`, `a2 = g a1`, `a3 = g a2`. The one solve of [`SvfCoeffs`] and the crossover's sections.
+/// The integrator coefficients `[d, a2, a3]` of a trapezoidal state-variable filter at the
+/// prewarped gain `g = tan(pi fc / fs)` and the damping `k = 1 / Q`: with Simper's `a1 = 1 /
+/// (1 + g (g + k))`, `d = 1 - a1 = g (g + k) / (1 + g (g + k))`, `a2 = g a1` and `a3 = g a2`.
+/// The one solve of [`SvfCoeffs`] and the crossover's sections.
 pub(crate) fn integrator_gains(g: f64, k: f64) -> [f64; 3] {
-    let a1 = 1.0 / (1.0 + g * (g + k));
+    let h = g * (g + k);
+    let a1 = 1.0 / (1.0 + h);
     let a2 = g * a1;
-    [a1, a2, g * a2]
+    [h * a1, a2, g * a2]
 }
 
-/// One integrator step over the state `[ic1eq, ic2eq]` with the coefficients `[a1, a2, a3]`:
+/// One integrator step over the state `[ic1eq, ic2eq]` with the coefficients `[d, a2, a3]`:
 /// the band-pass and low-pass taps `[v1, v2]` the filter's responses are mixed from. The
 /// recurrence of [`svf_step`] and of the crossover's sections.
+///
+/// Each tap is its state plus a sum of small terms, and the sum is formed first: `v1 = ic1 +
+/// (a2 v3 - d ic1)` is Simper's `a1 ic1 + a2 v3` with `a1 = 1 - d`, and `v2 = ic2 + (a2 ic1 +
+/// a3 v3)`. At a low cutoff `d`, `a2` and `a3` are within `g (g + k)`, `g` and `g^2` of zero,
+/// so a term added to the state one at a time is lost whenever it is under half the state's
+/// ulp (`a3 v3` is `0.1` ulp at 5 Hz and 192 kHz in `f32`), while the sum of the terms keeps
+/// its relative precision and rounds into the state once.
 #[inline(always)]
-pub(crate) fn svf_taps<L: Lanes>([a1, a2, a3]: [L; 3], s: &mut [L; 2], v0: L) -> [L; 2] {
-    let two = L::from_f32(2.0);
+pub(crate) fn svf_taps<L: Lanes>([d, a2, a3]: [L; 3], s: &mut [L; 2], v0: L) -> [L; 2] {
     let [ic1eq, ic2eq] = *s;
     let v3 = v0 - ic2eq;
-    let v1 = a1 * ic1eq + a2 * v3;
-    let v2 = ic2eq + a2 * ic1eq + a3 * v3;
-    *s = [two * v1 - ic1eq, two * v2 - ic2eq];
+    let v1 = ic1eq + (a2 * v3 - d * ic1eq);
+    let v2 = ic2eq + (a2 * ic1eq + a3 * v3);
+    *s = [v1 + v1 - ic1eq, v2 + v2 - ic2eq];
     [v1, v2]
 }
 

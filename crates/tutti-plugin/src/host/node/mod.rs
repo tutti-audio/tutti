@@ -1,5 +1,5 @@
 //! The client of a served plugin ([`PluginClient`]): the generic plugin node
-//! (`tutti_plugin_host::HostedNode`) over the served hosting
+//! (`tutti_plugin_host::PluginNode`) over the served hosting
 //! (`tutti_plugin_ipc::Ipc`), with the control surface the host keeps beside it.
 //!
 //! There is one node. `PluginClient` is what loads and launches the
@@ -103,7 +103,7 @@ use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
-    HostedNode, InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle,
+    InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
     Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
@@ -139,7 +139,7 @@ pub struct Unbound {
 pub struct Bound {
     /// The generic node over the served hosting: what the graph runs. Boxed
     /// for the reason [`Unbound`]'s client is.
-    node: Box<HostedNode<Ipc>>,
+    node: Box<PluginNode<Ipc>>,
     /// The project's tempo map reader the node was bound to, kept so a fork
     /// clones it on the control side (its own registration on the same cell).
     tempo: tutti_transport::TempoReader,
@@ -427,7 +427,7 @@ impl PluginClient<Unbound> {
         let (processor, controller) = ipc
             .activate_anywhere(prepare)
             .map_err(|refused| failed(refused.reason.to_string()))?;
-        let client = client_over::<Ipc>(
+        let client = client_over::<Ipc, f32>(
             processor,
             controller,
             prepare,
@@ -712,7 +712,7 @@ impl<S> PluginClient<S> {
 }
 
 /// A bound plugin as a graph node: the node itself (the generic
-/// `HostedNode<Ipc>`), the [`PluginControls`] a host drives it through from
+/// `PluginNode<Ipc>`), the [`PluginControls`] a host drives it through from
 /// then on, and a [`ForkSource`](tutti_graph::ForkSource) that forks it by state
 /// transfer (a fresh instance in its own subprocess, loaded with the live
 /// instance's saved state).

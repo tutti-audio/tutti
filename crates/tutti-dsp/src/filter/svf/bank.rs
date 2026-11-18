@@ -9,7 +9,7 @@ use crate::control::lane_group;
 use crate::{Glide, Lanes};
 
 /// The state of an SVF per channel: Simper's trapezoidal integrator pair
-/// `[ic1eq, ic2eq]` in precision `F`, every channel read through one shared
+/// `[ic1eq, ic2eq]` in the float `F`, every channel read through one shared
 /// [`SvfCoefficients`].
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of
@@ -44,11 +44,11 @@ impl<F: Float + Lanes> SvfBank<F> {
     /// width, or past the narrower of the two views, is not touched. Channels run in
     /// groups of up to eight, each group's planes taken once per block; while the glide
     /// moves, a group reads the coefficients once per frame. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         coefficients: &mut Glide<SvfCoefficients<F>>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = self
@@ -61,7 +61,7 @@ impl<F: Float + Lanes> SvfBank<F> {
             let n = lane_group(width - first);
             macro_rules! group {
                 ($n:literal) => {
-                    group::<F, S, $n>(
+                    group::<F, $n>(
                         coefficients,
                         &mut self.state[first..first + $n],
                         first,
@@ -91,19 +91,19 @@ impl<F: Float + Lanes> SvfBank<F> {
 /// states in registers: the frames the glide blends at a coefficient set per frame, the
 /// rest at its target.
 #[inline]
-fn group<F: Float + Lanes, S: Float, const N: usize>(
+fn group<F: Float + Lanes, const N: usize>(
     glide: &Glide<SvfCoefficients<F>>,
     state: &mut [[F; 2]],
     first: usize,
-    input: &Planes<'_, S>,
-    output: &mut PlanesMut<'_, '_, S>,
+    input: &Planes<'_, F>,
+    output: &mut PlanesMut<'_, '_, F>,
     frames: usize,
 ) {
-    let xs: [&[S]; N] = core::array::from_fn(|k| &input.plane(first + k).samples()[..frames]);
+    let xs: [&[F]; N] = core::array::from_fn(|k| &input.plane(first + k).samples()[..frames]);
     let mut outs = output.iter_mut().skip(first);
     // The group is within the width the caller took from both views, so every one of
     // its `N` channels has a plane.
-    let ys: [&mut [S]; N] = core::array::from_fn(|_| {
+    let ys: [&mut [F]; N] = core::array::from_fn(|_| {
         let plane = outs
             .next()
             .expect("a group's channels are below the output's width");
@@ -113,8 +113,7 @@ fn group<F: Float + Lanes, S: Float, const N: usize>(
     macro_rules! frame {
         ($i:expr, $c:expr) => {
             for k in 0..N {
-                let y = svf_step($c, &mut st[k], xs[k][$i].convert_to::<F>());
-                ys[k][$i] = y.convert_to::<S>();
+                ys[k][$i] = svf_step($c, &mut st[k], xs[k][$i]);
             }
         };
     }

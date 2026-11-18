@@ -30,9 +30,13 @@ pub const MIN_DC_CORNER: Hz = Hz(1.0);
 /// finite as [`DC_CORNER`].
 #[must_use]
 pub fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
+    cutoff_pole(held_corner(corner, rate), rate)
+}
+
+/// The corner as a blocker reads it: finite, within [`MIN_DC_CORNER`] and the Nyquist.
+fn held_corner(corner: Hz, rate: SampleRate) -> Hz {
     let corner = finite_or(corner.get(), DC_CORNER.get());
-    let corner = corner.clamp(MIN_DC_CORNER.get(), rate.nyquist().get());
-    cutoff_pole(Hz(corner), rate)
+    Hz(corner.clamp(MIN_DC_CORNER.get(), rate.nyquist().get()))
 }
 
 /// The control of a [`DcBlocker`].
@@ -58,16 +62,23 @@ impl DcBlockerControls {
     }
 }
 
+/// The complement `1 - R` of the pole of a blocker with `corner` at `rate`: the small term the
+/// recursion runs on, solved in `f64`.
+fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
+    -libm::expm1(-std::f64::consts::TAU * held_corner(corner, rate).get() / rate.get())
+}
+
 /// A DC blocker of any width in the float `F`: one `(x[n-1], y[n-1])` pair per channel, one
 /// pole for all.
 ///
-/// The pole is designed in `f64` and narrowed to `F` once per aim. Built on the control side
-/// for one rate; nothing it holds grows.
+/// The pole `R` is within `1 - R` of 1 at a low corner, so the blocker holds `c = 1 - R`, designed
+/// in `f64` and narrowed to `F` once per aim, and runs `y = y1 + ((x - x1) - c y1)`. Built on
+/// the control side for one rate; nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct DcBlocker<F: Float> {
     rate: SampleRate,
-    /// The pole, gliding over [`COEFF_INTERVAL`] frames.
-    pole: Glide<F>,
+    /// The complement `1 - R` of the pole, gliding over [`COEFF_INTERVAL`] frames.
+    complement: Glide<F>,
     /// `(x[n-1], y[n-1])` of each channel: per-sample values in `F`.
     state: Vec<(F, F)>,
 }
@@ -78,7 +89,7 @@ impl<F: Float + Lerp> DcBlocker<F> {
     pub fn new(width: ChannelLayout, rate: SampleRate) -> Self {
         Self {
             rate,
-            pole: Glide::landed(F::from_f64(dc_pole(DC_CORNER, rate))),
+            complement: Glide::landed(F::from_design(dc_complement(DC_CORNER, rate))),
             state: vec![(F::ZERO, F::ZERO); usize::from(width.count())],
         }
     }
@@ -86,19 +97,21 @@ impl<F: Float + Lerp> DcBlocker<F> {
     /// Aims at the pole for `controls`: the pole moves in a line from the one in force over
     /// the next [`COEFF_INTERVAL`] frames. The state is kept. No allocation.
     pub fn aim(&mut self, controls: &DcBlockerControls) {
-        let to = F::from_f64(dc_pole(controls.corner, self.rate));
-        self.pole.aim_by(to, Steps::Fixed(COEFF_INTERVAL as u32));
+        let to = F::from_design(dc_complement(controls.corner, self.rate));
+        self.complement
+            .aim_by(to, Steps::Fixed(COEFF_INTERVAL as u32));
     }
 
     /// Lands on the aimed pole now.
     pub fn settle(&mut self) {
-        self.pole.settle();
+        self.complement.settle();
     }
 
-    /// The pole in force: the aimed one once the glide has run.
+    /// The pole in force, `1 - c` formed in `f64`: the aimed one once the glide has run.
     #[must_use]
     pub fn pole(&self) -> F {
-        self.pole.now()
+        let c: f64 = self.complement.now().into();
+        F::from_design(1.0 - c)
     }
 
     /// Back to silence, the pole landed.
@@ -110,28 +123,28 @@ impl<F: Float + Lerp> DcBlocker<F> {
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels
     /// rendered are the fewest of the two views' and the blocker's, the frames the fewer of
     /// the two views'. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input
             .channels()
             .min(output.channels())
             .min(self.state.len());
-        let first = self.pole.taken().saturating_add(1);
-        for (c, state) in self.state.iter_mut().enumerate().take(width) {
-            let x = &input.plane(c).samples()[..frames];
-            let mut plane = output.plane_mut(c);
+        let first = self.complement.taken().saturating_add(1);
+        for (ch, state) in self.state.iter_mut().enumerate().take(width) {
+            let x = &input.plane(ch).samples()[..frames];
+            let mut plane = output.plane_mut(ch);
             let y = &mut plane.samples_mut()[..frames];
             let (mut x1, mut y1) = *state;
             for (i, (y, &x)) in y.iter_mut().zip(x).enumerate() {
-                let r = self.pole.at(first.saturating_add(i as u32));
-                let x = x.convert_to::<F>();
-                let out = x - x1 + r * y1;
+                let comp = self.complement.at(first.saturating_add(i as u32));
+                let out = y1 + ((x - x1) - comp * y1);
                 (x1, y1) = (x, out);
-                *y = out.convert_to::<S>();
+                *y = out;
             }
             *state = (x1, y1);
         }
-        self.pole.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        self.complement
+            .advance(u32::try_from(frames).unwrap_or(u32::MAX));
     }
 }
 

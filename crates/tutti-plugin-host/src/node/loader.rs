@@ -1,8 +1,9 @@
-//! Construct the `(InProcClient<F>, PluginHandle)` pair for an in-process
-//! plugin of format `F`.
+//! Construct the `(InProcClient<L, F>, PluginHandle)` pair for an in-process
+//! plugin of format `L`.
 
 use std::path::Path;
 use std::sync::Arc;
+use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_types::ParkedSampleRate;
 
@@ -11,6 +12,7 @@ use parking_lot::Mutex;
 use super::client::{Declared, InProcClient, Reload};
 use super::control_backend::{ControlBackend, Reporting};
 use super::instance::Instance;
+use super::width_error::WidthError;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
@@ -30,88 +32,173 @@ use tutti_units::ParamId;
 /// on to have happened before the first block.
 const MAX_BLOCK_SIZE: usize = 4096;
 
-/// Loads a plugin of format `F` in the host process, returning its graph node
-/// and control handle.
+/// Why [`load_client`] returned no client. `Debug` is written by hand so that
+/// the format `L` need not be `Debug`.
+#[derive(thiserror::Error)]
+pub enum LoadClientError<L: Loaded + 'static> {
+    /// The plugin did not load.
+    #[error(transparent)]
+    Failed(#[from] BridgeError),
+    /// The plugin does not process the width asked for. It is loaded and
+    /// activated at 32-bit: [`WidthError::into_inner`] returns it, with its
+    /// handle, to host in a 32-bit graph (boxed, to keep the error small).
+    #[error(transparent)]
+    Width(Box<WidthError<(InProcClient<L, f32>, PluginHandle)>>),
+}
+
+impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(e) => f.debug_tuple("Failed").field(e).finish(),
+            Self::Width(e) => f.debug_tuple("Width").field(e).finish(),
+        }
+    }
+}
+
+impl<L: Loaded + 'static> LoadClientError<L> {
+    /// The failure as a [`BridgeError`] for the plugin at `path`, for a host of one width, where a
+    /// width refusal cannot come: the load's own failure, or the refusal as a
+    /// failed activation that drops the plugin.
+    #[must_use]
+    pub fn into_bridge(self, path: &Path) -> BridgeError {
+        match self {
+            Self::Failed(e) => e,
+            Self::Width(e) => BridgeError::LoadFailed {
+                path: Some(path.to_path_buf()),
+                stage: LoadStage::Activation,
+                reason: e.to_string(),
+            },
+        }
+    }
+}
+
+/// Loads a plugin of format `L` in the host process, activated at the width
+/// of the graph `F` it will be a node of, returning its client and control
+/// handle.
 ///
 /// `tutti-plugin`'s `Plugin::open` calls this for `.vst` files
 /// when the `vst2` feature is on; call it directly for another [`InProcess`]
 /// format, or to get the concrete [`InProcClient`] type. `load` names the
-/// plugin in a file that holds several. Insert the node with `Editor::insert`
-/// (it is a `tutti_graph::Node`). The node and handle share the plugin
+/// plugin in a file that holds several. Insert the client's node
+/// ([`bind`](InProcClient::bind), then `Editor::insert`). The node and handle
+/// share the plugin
 /// instance; drop both to drop the plugin. Editors are opened through the
 /// handle, and audio runs on whatever thread the graph's executor runs on.
 /// `work` is the collector of the plugin's owner: what an off-main call through
 /// the handle waits on, and where a drop off the main thread hands its close.
 /// Blocks while the plugin loads, so call it off the audio thread.
 ///
+/// The width is [`Widths::negotiate`](tutti_plugin_types::Widths::negotiate) of `F::WIDTH`, once, at the activation.
+///
 /// # Errors
 ///
-/// Returns [`BridgeError::LoadFailed`] when the library cannot be opened or
-/// the plugin fails to initialize.
-pub fn load_client<F>(
+/// [`LoadClientError::Failed`] when the library cannot be opened or the plugin
+/// fails to initialize; [`LoadClientError::Width`] when the plugin does not
+/// process `F`'s width, which never happens for `f32`.
+pub fn load_client<L, F>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     path: &Path,
     load: &Load,
     sample_rate: impl Into<tutti_units::SampleRate>,
-) -> BridgeResult<(InProcClient<F>, PluginHandle)>
+) -> Result<(InProcClient<L, F>, PluginHandle), LoadClientError<L>>
 where
-    F: InProcess + 'static,
-    F::Processor: 'static,
+    L: InProcess + 'static,
+    L::Processor: 'static,
+    F: Float,
 {
     load_client_restoring(main, work, path, load, sample_rate, None)
         .map(|(client, handle, _)| (client, handle))
 }
 
 /// [`load_client`], with `restore` run on the plugin before it is activated
-/// (see the instance's `load`). The outcome is returned as the third value.
+/// (see the instance's `load`). The outcome is returned as the third value;
+/// a width refusal carries the plugin without it.
 ///
 /// # Errors
 ///
 /// As [`load_client`].
-pub fn load_client_restoring<F>(
+pub fn load_client_restoring<L, F>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     path: &Path,
     load: &Load,
     sample_rate: impl Into<tutti_units::SampleRate>,
-    restore: Option<&mut dyn FnMut(&mut F) -> std::result::Result<(), StateError>>,
-) -> BridgeResult<(
-    InProcClient<F>,
-    PluginHandle,
-    Option<std::result::Result<(), StateError>>,
-)>
+    restore: Option<&mut dyn FnMut(&mut L) -> std::result::Result<(), StateError>>,
+) -> Result<
+    (
+        InProcClient<L, F>,
+        PluginHandle,
+        Option<std::result::Result<(), StateError>>,
+    ),
+    LoadClientError<L>,
+>
 where
-    F: InProcess + 'static,
-    F::Processor: 'static,
+    L: InProcess + 'static,
+    L::Processor: 'static,
+    F: Float,
 {
     let sample_rate = sample_rate.into();
-    let (inner, rt, restored) =
-        Instance::<F>::load(main, work, path, load, sample_rate, MAX_BLOCK_SIZE, restore).map_err(
-            |(stage, reason)| BridgeError::LoadFailed {
-                path: Some(path.to_path_buf()),
-                stage,
-                reason,
-            },
-        )?;
-
+    let (inner, rt, restored) = Instance::<L>::load(
+        main,
+        work,
+        path,
+        load,
+        sample_rate,
+        MAX_BLOCK_SIZE,
+        F::WIDTH,
+        restore,
+    )
+    .map_err(|(stage, reason)| BridgeError::LoadFailed {
+        path: Some(path.to_path_buf()),
+        stage,
+        reason,
+    })?;
+    let (settled, widths) = (inner.width(), inner.widths());
     let origin = inner.origin().cloned().map(|origin| Reload {
         origin,
         work: work.clone(),
     });
+    if settled == F::WIDTH {
+        let (client, handle) = assemble::<L, F>(main, work, path, inner, rt, origin, sample_rate)?;
+        return Ok((client, handle, restored));
+    }
+    // `negotiate` only lowers a request to 32-bit: the plugin runs at `f32`.
+    let plugin = assemble::<L, f32>(main, work, path, inner, rt, origin, sample_rate)?;
+    Err(LoadClientError::Width(Box::new(WidthError::new(
+        plugin,
+        F::WIDTH,
+        widths,
+    ))))
+}
+
+/// The client and handle over a plugin activated at `F`'s width.
+fn assemble<L, F>(
+    main: MainThreadMarker,
+    work: &MainWorkHandle,
+    path: &Path,
+    inner: Instance<L>,
+    rt: tutti_rt::Rt<L::Processor>,
+    origin: Option<Reload>,
+    sample_rate: tutti_units::SampleRate,
+) -> BridgeResult<(InProcClient<L, F>, PluginHandle)>
+where
+    L: InProcess + 'static,
+    L::Processor: 'static,
+    F: Float,
+{
+    let failed = |(stage, reason)| BridgeError::LoadFailed {
+        path: Some(path.to_path_buf()),
+        stage,
+        reason,
+    };
     let Wired {
         mut client,
         inner,
         pending_sample_rate,
         descriptor,
         loaded,
-    } = wire(main, inner, rt, origin, sample_rate, 0).map_err(|(stage, reason)| {
-        BridgeError::LoadFailed {
-            path: Some(path.to_path_buf()),
-            stage,
-            reason,
-        }
-    })?;
+    } = wire(main, inner, rt, origin, sample_rate, 0).map_err(failed)?;
     let param_sink = ParameterChangeSink::new();
     let invalidate_sink = crate::InvalidateSink::new();
     let transport_sink = crate::TransportSink::new();
@@ -140,14 +227,14 @@ where
         .with_invalidate_sink(invalidate_sink)
         .with_transport_sink(transport_sink);
 
-    Ok((client, handle, restored))
+    Ok((client, handle))
 }
 
 /// What [`wire`] builds around an activated plugin.
-struct Wired<H: Loaded> {
-    client: InProcClient<H>,
+struct Wired<L: Loaded, F: Float> {
+    client: InProcClient<L, F>,
     /// The control side the client and a handle both reach.
-    inner: Arc<Mutex<Instance<H>>>,
+    inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
     pending_sample_rate: Arc<ParkedSampleRate>,
@@ -160,17 +247,18 @@ struct Wired<H: Loaded> {
 /// parameter addresses read now, and the cells the node and a handle share.
 /// `spares` is how many parameter addresses beyond the plugin's list the
 /// node's delivery may learn.
-fn wire<H>(
+fn wire<L, F>(
     main: MainThreadMarker,
-    mut inner: Instance<H>,
-    rt: tutti_rt::Rt<H::Processor>,
+    mut inner: Instance<L>,
+    rt: tutti_rt::Rt<L::Processor>,
     origin: Option<Reload>,
     sample_rate: tutti_units::SampleRate,
     spares: usize,
-) -> Result<Wired<H>, (LoadStage, String)>
+) -> Result<Wired<L, F>, (LoadStage, String)>
 where
-    H: Loaded + 'static,
-    H::Processor: 'static,
+    L: Loaded + 'static,
+    L::Processor: 'static,
+    F: Float,
 {
     let Some(control) = inner.control() else {
         return Err((
@@ -235,6 +323,23 @@ where
     })
 }
 
+/// Why [`client_over`] built no client.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClientOverError {
+    /// The wiring has more channels in a direction than a block serves.
+    #[error(transparent)]
+    TooWide(#[from] PluginTooWide),
+    /// The plugin was activated at one width and the client is for a graph of
+    /// another.
+    #[error("the plugin was activated at {activated:?}, not the {hosted:?} of the graph")]
+    Width {
+        /// The width the Processor was activated at.
+        activated: FloatWidth,
+        /// The width of the graph the client was asked for.
+        hosted: FloatWidth,
+    },
+}
+
 /// A client over a plugin the caller activated itself, with no main thread
 /// ([`Lifecycle::adopt`](tutti_plugin_types::Lifecycle::adopt)): the generic
 /// node for a hosting whose activation reads no token, as `tutti-plugin`
@@ -249,26 +354,38 @@ where
 /// latency figures are those of the served plugin's [`PluginControls`], and
 /// `retune` keeps its pipeline chunk and rate current.
 ///
+/// `F` is the width of the graph the client's node will join, and `prepare`
+/// must have activated the plugin at it ([`Prepare::format`]): the halves are
+/// the caller's activation, so a plugin of another width is no `F` client.
+///
 /// # Errors
 ///
-/// [`PluginTooWide`] when `wiring` has more channels in a direction than a
-/// block serves: no node is built over it.
-pub fn client_over<H>(
-    processor: H::Processor,
-    controller: H::Controller,
+/// [`ClientOverError::TooWide`] when `wiring` has more channels in a direction
+/// than a block serves; [`ClientOverError::Width`] when `prepare` is not at
+/// `F`'s width. No node is built over it, and the halves are dropped.
+pub fn client_over<L, F>(
+    processor: L::Processor,
+    controller: L::Controller,
     prepare: Prepare,
     descriptor: PluginDescriptor,
     wiring: &LoadedPlugin,
     parameters: impl IntoIterator<Item = ParamId>,
     spares: usize,
     controls: Option<PluginControls>,
-) -> Result<InProcClient<H>, PluginTooWide>
+) -> Result<InProcClient<L, F>, ClientOverError>
 where
-    H: Loaded + 'static,
-    H::Processor: 'static,
+    L: Loaded + 'static,
+    L::Processor: 'static,
+    F: Float,
 {
+    if prepare.format() != F::WIDTH {
+        return Err(ClientOverError::Width {
+            activated: prepare.format(),
+            hosted: F::WIDTH,
+        });
+    }
     let declared = Declared::of(wiring)?;
-    let (inner, rt) = Instance::<H>::adopt(processor, controller, prepare, wiring);
+    let (inner, rt) = Instance::<L>::adopt(processor, controller, prepare, wiring);
     Ok(InProcClient::new(
         Arc::new(Mutex::new(inner)),
         rt,

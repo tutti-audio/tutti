@@ -29,7 +29,7 @@ use crate::{
     Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
     SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edits,
 };
-use tutti_buffers::Float;
+use tutti_buffers::{Float, FloatWidth};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -231,6 +231,13 @@ struct Shared {
     ring: AtomicUsize,
     /// Whether the fake says it is asleep over sound (`FakePlugin::sleep_over_sound`).
     sleeps_over_sound: AtomicBool,
+    /// The plugin processes 32-bit audio only ([`FakePlugin::only_32_bit`]).
+    only_32_bit: AtomicBool,
+    /// The width of the last activation: 0 before one, else 1 (32-bit) or 2.
+    activated: AtomicU8,
+    /// Blocks processed at 32-bit, and at 64-bit.
+    blocks_32: AtomicU64,
+    blocks_64: AtomicU64,
     /// Whether the fake has an editor (`FakePlugin::with_editor`).
     editor: AtomicBool,
     /// Whether the editor takes a new scale live (`FakePlugin::with_editor_scale`).
@@ -319,6 +326,10 @@ impl FakePlugin {
             state: Mutex::new(Vec::new()),
             ring: AtomicUsize::new(0),
             sleeps_over_sound: AtomicBool::new(false),
+            only_32_bit: AtomicBool::new(false),
+            activated: AtomicU8::new(0),
+            blocks_32: AtomicU64::new(0),
+            blocks_64: AtomicU64::new(0),
             editor: AtomicBool::new(false),
             takes_scale: AtomicBool::new(false),
             resize_request: AtomicU64::new(0),
@@ -417,6 +428,33 @@ impl FakePlugin {
     /// otherwise. `0`, the default, is a silent fake that says nothing.
     pub fn ring_out(&self, frames: usize) {
         self.0.ring.store(frames, Ordering::Relaxed);
+    }
+
+    /// Makes the fake process 32-bit audio only, as a plugin that declares no
+    /// 64-bit support ([`Loaded::widths`]).
+    pub fn only_32_bit(&self) {
+        self.0.only_32_bit.store(true, Ordering::Relaxed);
+    }
+
+    /// The width the host activated the fake at, as it sent it: `None` before
+    /// an activation.
+    #[must_use]
+    pub fn activated_width(&self) -> Option<FloatWidth> {
+        match self.0.activated.load(Ordering::Relaxed) {
+            1 => Some(FloatWidth::F32),
+            2 => Some(FloatWidth::F64),
+            _ => None,
+        }
+    }
+
+    /// How many blocks the host sent the fake at `width`, as the block's own
+    /// sample type said.
+    #[must_use]
+    pub fn blocks_at(&self, width: FloatWidth) -> u64 {
+        match width {
+            FloatWidth::F32 => self.0.blocks_32.load(Ordering::Relaxed),
+            FloatWidth::F64 => self.0.blocks_64.load(Ordering::Relaxed),
+        }
     }
 
     /// Makes the fake say *sleep* every block, sounding or not: a plugin
@@ -801,7 +839,7 @@ impl Loaded for FakeLoaded {
     const RESTARTS: RestartRules = RestartRules::CLAP;
 
     fn widths(&self) -> Widths {
-        Widths::BOTH
+        Widths::new(!self.shared.only_32_bit.load(Ordering::Relaxed))
     }
 
     fn activate(
@@ -810,6 +848,13 @@ impl Loaded for FakeLoaded {
         prepare: Prepare,
     ) -> Result<(FakeProcessor, FakeController), Refused<Self>> {
         let shared = self.shared.clone();
+        shared.activated.store(
+            match prepare.format() {
+                FloatWidth::F32 => 1,
+                FloatWidth::F64 => 2,
+            },
+            Ordering::Relaxed,
+        );
         shared.log.push(Call::Activate(
             prepare.rate(),
             prepare.max_block().samples(),
@@ -923,6 +968,11 @@ impl Processor for FakeProcessor {
 
     fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let log = &self.shared.log;
+        match S::WIDTH {
+            FloatWidth::F32 => &self.shared.blocks_32,
+            FloatWidth::F64 => &self.shared.blocks_64,
+        }
+        .fetch_add(1, Ordering::Relaxed);
         self.drain.drain(|edit| {
             if let crate::Edit::Param { id, value } = edit {
                 log.push(Call::Edit(id, value));

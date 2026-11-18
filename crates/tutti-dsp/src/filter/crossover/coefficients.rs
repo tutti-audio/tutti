@@ -13,12 +13,13 @@ use crate::{Biquad, Lerp};
 pub(super) const DAMPING: f64 = SQRT_2;
 
 /// One split's section coefficients at one integrator gain `g = tan(pi fc / fs)`: the
-/// trapezoidal state-variable filter's `1 / (1 + g (g + k))`, `g` times it and `g` times
-/// that, with `k` [`DAMPING`] (the same set as [`SvfCoeffs`](crate::SvfCoeffs)).
+/// trapezoidal state-variable filter's `d = 1 - 1 / (1 + g (g + k))`, `g / (1 + g (g + k))`
+/// and `g` times that, with `k` [`DAMPING`] (the same set as
+/// [`SvfCoeffs`](crate::SvfCoeffs)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Tpt {
     pub(super) g: f64,
-    pub(super) a1: f64,
+    pub(super) d: f64,
     pub(super) a2: f64,
     pub(super) a3: f64,
 }
@@ -26,8 +27,13 @@ pub(super) struct Tpt {
 impl Tpt {
     /// The coefficients at `g`.
     pub(super) fn new(g: f64) -> Self {
-        let [a1, a2, a3] = integrator_gains(g, DAMPING);
-        Self { g, a1, a2, a3 }
+        let [d, a2, a3] = integrator_gains(g, DAMPING);
+        Self { g, d, a2, a3 }
+    }
+
+    /// Simper's `a1 = 1 / (1 + g (g + k))`.
+    fn a1(&self) -> f64 {
+        1.0 - self.d
     }
 
     /// The section's low-pass as a biquad (the bilinear transform at `g`).
@@ -45,10 +51,11 @@ impl Tpt {
     /// The section's high-pass as a biquad.
     pub(super) fn high(&self) -> Biquad {
         let (a1, a2) = self.feedback();
+        let b0 = self.a1();
         Biquad {
-            b0: self.a1,
-            b1: -2.0 * self.a1,
-            b2: self.a1,
+            b0,
+            b1: -2.0 * b0,
+            b2: b0,
             a1,
             a2,
         }
@@ -71,8 +78,8 @@ impl Tpt {
     fn feedback(&self) -> (f64, f64) {
         let g2 = self.g * self.g;
         (
-            2.0 * (g2 - 1.0) * self.a1,
-            (1.0 - DAMPING * self.g + g2) * self.a1,
+            2.0 * (g2 - 1.0) * self.a1(),
+            (1.0 - DAMPING * self.g + g2) * self.a1(),
         )
     }
 }
@@ -121,28 +128,28 @@ impl Lerp for CrossoverCoefficients {
     }
 }
 
-/// A split's section coefficients at the state's precision `F`: the integrator gains and the
-/// damping with its double, what a section runs a frame at.
+/// A split's section coefficients in the float `F`: the integrator gains and the damping with
+/// its double, what a section runs a frame at.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Gains<F> {
-    /// `[a1, a2, a3]`.
+    /// `[d, a2, a3]`.
     pub(super) a: [F; 3],
     pub(super) k: F,
     pub(super) two_k: F,
 }
 
 impl Tpt {
-    /// These coefficients at precision `F`: the design is in `f64`, narrowed here once.
+    /// These coefficients in `F`: the design is in `f64`, narrowed here once.
     pub(super) fn narrowed<F: Float>(&self) -> Gains<F> {
         Gains {
-            a: [self.a1, self.a2, self.a3].map(F::from_f64),
-            k: F::from_f64(DAMPING),
-            two_k: F::from_f64(2.0 * DAMPING),
+            a: [self.d, self.a2, self.a3].map(F::from_design),
+            k: F::from_design(DAMPING),
+            two_k: F::from_design(2.0 * DAMPING),
         }
     }
 }
 
-/// [`CrossoverCoefficients`] narrowed to the state's precision `F`, once per design: what a
+/// [`CrossoverCoefficients`] narrowed to the float `F`, once per design: what a
 /// [`CrossoverState<F>`](super::CrossoverState) runs a frame at.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Narrowed<F> {
@@ -151,7 +158,7 @@ pub(super) struct Narrowed<F> {
 }
 
 impl CrossoverCoefficients {
-    /// These coefficients at precision `F`.
+    /// These coefficients in `F`.
     pub(super) fn narrowed<F: Float>(&self) -> Narrowed<F> {
         Narrowed {
             bands: self.bands,

@@ -39,7 +39,7 @@ use tutti_rt::LockExt;
 use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
-use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
+use super::{AnyPlugin, HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded};
 use crate::PluginPresets;
 use crate::peer::{ResourceIds, sealed};
 use crate::{
@@ -706,7 +706,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// call leaves alone);
     /// [`AddPluginError::Lost`] when the plugin is lost (it stays so until
     /// [`retry`](Self::retry)).
-    pub fn add_pooled_plugin<P>(&mut self, key: &P) -> Result<Key<PluginNode>, AddPluginError<P>>
+    pub fn add_pooled_plugin<P>(&mut self, key: &P) -> Result<Key<AnyPlugin>, AddPluginError<P>>
     where
         P: crate::AppKey,
     {
@@ -747,7 +747,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// node's now, so the entry's handle to it is let go.
     fn link_pooled(
         &mut self,
-        node: Key<PluginNode>,
+        node: Key<AnyPlugin>,
         key: PoolKey,
         hold: Hold,
         standing: Arc<Standing>,

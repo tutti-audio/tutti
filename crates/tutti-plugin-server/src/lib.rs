@@ -10,7 +10,7 @@
 //! Unix socket (a named pipe on Windows), and moves audio through a shared-memory
 //! slab. A plugin that crashes takes down this process and nothing else.
 //!
-//! It is one generic shell, `Served<F: OutOfProcess>`, over what each served
+//! It is one generic shell, `Served<L: OutOfProcess>`, over what each served
 //! format's host crate implements (`Loaded`, `Processor`, `Controller`, `Control`):
 //! a format is a row of the `served!` table, which calls `F::load_served`, so a row
 //! for a format that cannot be served from another process does not compile. VST2

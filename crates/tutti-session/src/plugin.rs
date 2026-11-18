@@ -1253,17 +1253,16 @@ impl HostedPlugin {
 /// and [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
-/// A marker only: no value of it exists, and every plugin format, in or out
-/// of process, is a `Key<PluginNode>`. It names the *kind* of node, as
-/// [`Key::erase`] names none; the view of the plugin is [`Plugin`].
-/// It is the session's name for a hosted plugin's node; the node itself is
-/// `tutti_plugin_host::HostedNode`, below the session.
+/// A marker only: no value of it exists. It names the kind of node, any
+/// plugin format, in or out of process, as [`Key::erase`] names none; the
+/// node below the session is `tutti_plugin_host::PluginNode`, and the view of
+/// the plugin is [`Plugin`].
 /// `key.param(id)` is a plugin parameter's
 /// `ParamRef` (see `Key::param`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginNode {}
+pub enum AnyPlugin {}
 
-impl Key<PluginNode> {
+impl Key<AnyPlugin> {
     /// Parameter `id` of the plugin, as the reference a modulation route or an
     /// automation lane targets: the same one
     /// [`Param::target`](crate::Param::target) gives and a native node's param
@@ -1557,7 +1556,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         plugin: HostPlugin,
         mirror: Option<Mirror>,
         origin: Origin,
-    ) -> (Key<PluginNode>, tutti_plugin::catalog::PluginRebinder) {
+    ) -> (Key<AnyPlugin>, tutti_plugin::catalog::PluginRebinder) {
         let handle = plugin.handle().clone();
         let loaded_ref = plugin.plugin().clone();
         let meter = self.transport.settings().project_meter().clone();

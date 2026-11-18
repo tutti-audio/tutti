@@ -24,22 +24,22 @@ fn landed(model: &CrossoverModel) -> Glide<CrossoverCoefficients> {
 
 /// Runs `input` (one `Vec` per channel) through `bank` at the glide `at` in blocks of the
 /// lengths in `blocks`, cycled, and returns the output planes, `bands * channels` of them.
-fn run_glide<S: Float>(
+fn run_glide(
     bank: &mut CrossoverBank<f64>,
     glide: &mut Glide<CrossoverCoefficients>,
-    input: &[Vec<S>],
+    input: &[Vec<f64>],
     blocks: &[usize],
-) -> Vec<Vec<S>> {
+) -> Vec<Vec<f64>> {
     let frames = input[0].len();
-    let mut out = vec![vec![S::ZERO; frames]; input.len() * glide.target().bands()];
+    let mut out = vec![vec![0.0; frames]; input.len() * glide.target().bands()];
     let mut at = 0;
     for &len in blocks.iter().cycle() {
         if at >= frames {
             break;
         }
         let end = (at + len).min(frames);
-        let ins: Vec<&[S]> = input.iter().map(|c| &c[at..end]).collect();
-        let mut outs: Vec<&mut [S]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        let ins: Vec<&[f64]> = input.iter().map(|c| &c[at..end]).collect();
+        let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             glide,
             Planes::new(&ins).expect("equal planes"),
@@ -51,17 +51,16 @@ fn run_glide<S: Float>(
 }
 
 /// [`run_glide`] at `model`, held.
-fn run<S: Float>(
+fn run(
     bank: &mut CrossoverBank<f64>,
     model: &CrossoverModel,
-    input: &[Vec<S>],
+    input: &[Vec<f64>],
     blocks: &[usize],
-) -> Vec<Vec<S>> {
+) -> Vec<Vec<f64>> {
     run_glide(bank, &mut landed(model), input, blocks)
 }
 
-/// The unit impulse response of every band of a mono tree, in `f64` audio so the output is
-/// the state's, unrounded.
+/// The unit impulse response of every band of a mono tree.
 fn impulse_response(freqs: &[f64], frames: usize) -> Vec<Vec<f64>> {
     let m = model(freqs);
     let mut x = vec![0.0f64; frames];
@@ -185,9 +184,9 @@ fn each_band_is_the_product_of_the_splits_sections() {
 #[test]
 fn the_planes_are_band_major_and_each_channel_is_its_own_tree() {
     let m = model(&[300.0, 3_000.0]);
-    let noise = |seed: usize| -> Vec<f32> {
+    let noise = |seed: usize| -> Vec<f64> {
         (0..700)
-            .map(|i| (((i + 1) * (seed + 3)) % 41) as f32 / 20.0 - 1.0)
+            .map(|i| (((i + 1) * (seed + 3)) % 41) as f64 / 20.0 - 1.0)
             .collect()
     };
     let input = vec![noise(1), vec![0.0; 700], noise(5)];
@@ -228,20 +227,20 @@ fn any_split_renders_the_frames_of_the_whole() {
         model(&[300.0, 9_000.0]),
     ];
     let cuts = [0usize, 200, 1_000, 1_501];
-    let input: Vec<Vec<f32>> = (0..2)
+    let input: Vec<Vec<f64>> = (0..2)
         .map(|c| {
             (0..1_501)
-                .map(|i| ((i * 7 + c * 13) % 101) as f32 / 50.0 - 1.0)
+                .map(|i| ((i * 7 + c * 13) % 101) as f64 / 50.0 - 1.0)
                 .collect()
         })
         .collect();
     let render = |blocks: &[usize]| {
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::STEREO);
         let mut glide = landed(&models[0]);
-        let mut out = vec![vec![0.0f32; 1_501]; 6];
+        let mut out = vec![vec![0.0f64; 1_501]; 6];
         for (w, m) in cuts.windows(2).zip(&models) {
             glide.aim(m.coefficients());
-            let ins: Vec<Vec<f32>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
+            let ins: Vec<Vec<f64>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
             for (plane, piece) in out
                 .iter_mut()
                 .zip(run_glide(&mut bank, &mut glide, &ins, blocks))
@@ -319,12 +318,12 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
 #[test]
 fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
     let (lo, hi) = (model(&[1.0]), model(&[23_952.0]));
-    // The cap's gain, with 0.1% for the `f32` rounding of the cap's frequency.
-    let section = tutti_fixtures::tpt::tpt_section_bound((PI * SOLVE_CEILING).tan() * 1.001);
+    // The cap's gain.
+    let section = tutti_fixtures::tpt::tpt_section_bound((PI * SOLVE_CEILING).tan());
     let bound = section.tap * section.tap;
     let frames = 200_000;
     for (name, alternate) in [("constant", false), ("alternating", true)] {
-        let input: Vec<f32> = (0..frames)
+        let input: Vec<f64> = (0..frames)
             .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
             .collect();
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
@@ -333,10 +332,7 @@ fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
         for (period, chunk) in input.chunks(16).enumerate() {
             glide.aim(if period.is_multiple_of(2) { &hi } else { &lo }.coefficients());
             let out = run_glide(&mut bank, &mut glide, &[chunk.to_vec()], &[chunk.len()]);
-            peak = out
-                .iter()
-                .flatten()
-                .fold(peak, |p, &s| p.max(f64::from(s.abs())));
+            peak = out.iter().flatten().fold(peak, |p, &s| p.max(s.abs()));
         }
         assert!(
             peak.is_finite() && peak <= bound,
@@ -350,12 +346,12 @@ fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
 fn a_reset_bank_is_silent() {
     let m = model(&[200.0, 2_000.0, 8_000.0]);
     let mut bank = CrossoverBank::<f64>::new(ChannelLayout::STEREO);
-    let noise: Vec<f32> = (0..512)
-        .map(|i| ((i * 31) % 17) as f32 / 8.0 - 1.0)
+    let noise: Vec<f64> = (0..512)
+        .map(|i| ((i * 31) % 17) as f64 / 8.0 - 1.0)
         .collect();
     run(&mut bank, &m, &[noise.clone(), noise], &[512]);
     bank.reset();
-    let out = run(&mut bank, &m, &[vec![0.0f32; 64], vec![0.0; 64]], &[64]);
+    let out = run(&mut bank, &m, &[vec![0.0f64; 64], vec![0.0; 64]], &[64]);
     assert!(out.iter().flatten().all(|&s| s == 0.0));
 }
 
@@ -365,10 +361,10 @@ fn a_reset_bank_is_silent() {
 #[test]
 fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let m = model(&[500.0, 4_000.0]);
-    let input: Vec<Vec<f32>> = (0..2)
+    let input: Vec<Vec<f64>> = (0..2)
         .map(|c| {
             (0..300)
-                .map(|i| ((i + c * 5) % 23) as f32 / 11.0 - 1.0)
+                .map(|i| ((i + c * 5) % 23) as f64 / 11.0 - 1.0)
                 .collect()
         })
         .collect();
@@ -379,9 +375,9 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
         &[300],
     );
     // Planes 0..=3: bands 0 and 1 of both channels; band 2 is missing.
-    let mut out = vec![vec![9.0f32; 300]; 4];
-    let ins: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
-    let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    let mut out = vec![vec![9.0f64; 300]; 4];
+    let ins: Vec<&[f64]> = input.iter().map(|c| &c[..]).collect();
+    let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut landed(&m),
         Planes::new(&ins).unwrap(),
@@ -389,8 +385,8 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     );
     assert_eq!(out, full[..4]);
     // One input channel into a stereo bank: channel 1's planes are not touched.
-    let mut out = vec![vec![9.0f32; 300]; 6];
-    let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    let mut out = vec![vec![9.0f64; 300]; 6];
+    let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut landed(&m),
         Planes::new(&ins[..1]).unwrap(),
@@ -413,8 +409,8 @@ fn the_bands_stay_within_the_models_bound() {
             frequencies: [Hz(set[0]), Hz(set[1]), Hz::ZERO, Hz::ZERO, Hz::ZERO],
         };
         let m = CrossoverModel::designed(3, &controls, RATE).unwrap();
-        let noise: Vec<f32> = (0..20_000)
-            .map(|i| ((i * 7919) % 2003) as f32 / 1001.0 - 1.0)
+        let noise: Vec<f64> = (0..20_000)
+            .map(|i| ((i * 7919) % 2003) as f64 / 1001.0 - 1.0)
             .collect();
         let out = run(
             &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
@@ -422,17 +418,14 @@ fn the_bands_stay_within_the_models_bound() {
             &[noise],
             &[64],
         );
-        let peak = out.iter().flatten().fold(0.0f32, |p, &s| p.max(s.abs()));
-        assert!(
-            peak.is_finite() && f64::from(peak) <= m.l1_norm(),
-            "{set:?}: {peak}"
-        );
+        let peak = out.iter().flatten().fold(0.0f64, |p, &s| p.max(s.abs()));
+        assert!(peak.is_finite() && peak <= m.l1_norm(), "{set:?}: {peak}");
     }
 }
 
 /// The bands of an `f64` tree on a signal of more than 24 bits sum to the Butterworth all-pass
 /// of each split in turn: the recursion of `(s^2 - sqrt2 s + 1) / (s^2 + sqrt2 s + 1)` in
-/// `f64` direct form I, from rest, frame for frame to 1e-12 (an `f32` state is off by 1e-8).
+/// `f64` direct form I, from rest, frame for frame to 1e-12.
 #[test]
 fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
     use crate::testing::butterworth_all_pass;
@@ -451,5 +444,50 @@ fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
             .iter()
             .fold(x.clone(), |y, &fc| butterworth_all_pass(&y, fc, RATE.get()));
         assert_close_f64(&got, &want, 1e-12);
+    }
+}
+
+/// A 5 Hz split at 192 kHz, the crossover's range extreme, run in `f32`: both bands at the
+/// split are `-6.02 dB` (`LP^2` and `HP^2` of the Butterworth pair, each `(1 / (j k))^2 =
+/// -1 / 2` at `W = 1`, `k = sqrt 2`), in phase with each other.
+///
+/// Noise: a section's state words are at most `1 / sqrt 2` and each is rounded to `2^-24` a
+/// step (uniform, standard deviation `2^-24 / sqrt 12 = 1.7e-8`); the pair's poles leak at
+/// `g k / 2` a frame, `g = tan(pi fc / fs) = 8.2e-5`, so the injections add as a random walk of
+/// `tau = 1 / (g k)` = 8 643 frames, and the section's output deviates by `2^-24 / sqrt 12 *
+/// sqrt((k^2 + 1) tau) = 2.8e-6` (`k^2 + 1` the squared gain from the states to the taps).
+/// A band is two sections in a row, the second's gain at the split at most 1, so its deviation
+/// is at most two of those, `5.6e-6`. The test measures `N = 192 000` frames, whose expected
+/// maximum is `sqrt(2 ln N) = 4.9` standard deviations; the bound is 1.5 times that, 7.4 of them,
+/// for the non-Gaussian rounding tails and the correlated state noise.
+#[test]
+fn a_five_hz_split_at_192_khz_holds_its_bands_and_noise_in_f32() {
+    use crate::testing::{sine_fit, steady_deviation};
+    const FS: f64 = 192_000.0;
+    const FC: f64 = 5.0;
+    let whole = FS as usize;
+    let w = 2.0 * PI * FC / FS;
+    let model = CrossoverModel::new(&[Hz(FC)], SampleRate::of(FS)).unwrap();
+    let input: Vec<f32> = (0..2 * whole)
+        .map(|n| libm::sin(w * n as f64) as f32)
+        .collect();
+    let mut out = vec![vec![0.0f32; 2 * whole]; 2];
+    let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    CrossoverBank::<f32>::new(ChannelLayout::MONO).process(
+        &mut landed(&model),
+        Planes::new(&[&input[..]]).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    let g = libm::tan(PI * FC / FS);
+    let tau = 1.0 / (g * SQRT_2);
+    let sigma = 2.0 * 2f64.powi(-24) / 12f64.sqrt() * (3.0 * tau).sqrt();
+    let bound = 1.5 * (2.0 * (whole as f64).ln()).sqrt() * sigma;
+    let want = Complex64::new(-0.5, 0.0);
+    for (band, plane) in out.iter().enumerate() {
+        let y: Vec<f64> = plane.iter().map(|&v| f64::from(v)).collect();
+        let fit = sine_fit(&y, w, whole);
+        assert!((fit - want).norm() < bound, "band {band}: {fit}");
+        let worst = steady_deviation(&y, w, whole, want);
+        assert!(worst < bound, "band {band}: {worst:e} over {bound:e}");
     }
 }

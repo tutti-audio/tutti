@@ -60,14 +60,12 @@ fn detached() -> DetachedSession {
 }
 
 /// Loads the probe into `s` and puts it on the outputs.
-fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::PluginNode> {
+fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPlugin> {
     add_probe_keyed(s).1
 }
 
 /// As [`add_probe`], with the pool key of the plugin's entry.
-fn add_probe_keyed(
-    s: &mut DetachedSession,
-) -> (u64, tutti_session::Key<tutti_session::PluginNode>) {
+fn add_probe_keyed(s: &mut DetachedSession) -> (u64, tutti_session::Key<tutti_session::AnyPlugin>) {
     let (key, node) = s
         .load_plugin_keyed(
             tutti_fixtures::main_thread(),

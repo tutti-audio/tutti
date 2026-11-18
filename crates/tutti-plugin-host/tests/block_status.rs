@@ -8,18 +8,18 @@
 //! `client_over` as a served plugin is. No format and no server is involved.
 
 use std::sync::Arc;
-use tutti_buffers::Planes;
+use tutti_buffers::{Float, FloatWidth, Planes};
 
 use tutti_fixtures::main_thread;
 
 use tutti_fixtures::midi;
-use tutti_graph::contract::{self, assert_honest_tail, drive_input};
+use tutti_graph::contract::{self, Direct, assert_honest_tail, drive_input};
 use tutti_graph::{
     Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, Node,
     NodeKey, OutPort, PlayClock, Prepare as GraphPrepare, Source, Status, TransportChanges,
     TransportPosition, Unforkable,
 };
-use tutti_plugin_host::{HostedNode, client_over};
+use tutti_plugin_host::{ClientOverError, PluginNode, client_over};
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
 use tutti_plugin_types::{
     ChannelLayout, Control, Loaded, MAX_BLOCK_CHANNELS, PluginBus, PluginTooWide, Prepare,
@@ -34,18 +34,28 @@ const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
 /// The fake's node: a voice of `ring` frames declaring `tail` as its ceiling.
-fn node(ring: usize, tail: usize) -> (HostedNode<FakeLoaded>, FakePlugin) {
+fn node(ring: Samples, tail: Samples) -> (PluginNode<FakeLoaded>, FakePlugin) {
+    node_at(ring, tail, FloatWidth::F32)
+}
+
+/// [`node`], activated at `width` and hosted at the graph float `F`.
+fn node_at<F: Float>(
+    ring: Samples,
+    tail: Samples,
+    width: FloatWidth,
+) -> (PluginNode<FakeLoaded, F>, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
-    fake.ring_out(ring);
-    fake.set_tail(Samples(tail));
+    fake.ring_out(ring.0);
+    fake.set_tail(tail);
     let main = main_thread();
     let wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+    let prepare =
+        Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block")).with_format(width);
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };
-    let client = client_over::<FakeLoaded>(
+    let client = client_over::<FakeLoaded, F>(
         processor,
         controller,
         prepare,
@@ -96,7 +106,7 @@ fn processed(fake: &FakePlugin) -> usize {
 /// plugin's *sleep* (`Idle`, `Tail::None`).
 #[test]
 fn a_sleeping_plugin_reports_no_tail_and_idles() {
-    let (node, _fake) = node(100, 128);
+    let (node, _fake) = node(Samples(100), Samples(128));
     let mut node = contract::prepared(node, SR, BLOCK);
     for (block, impulse) in [(0u64, true), (1, false)] {
         let d = drive(&mut node, block * BLOCK as u64, impulse);
@@ -115,7 +125,7 @@ fn a_sleeping_plugin_reports_no_tail_and_idles() {
 /// what it reports (its ceiling, since the sounding blocks say nothing).
 #[test]
 fn the_plugin_node_passes_the_honest_tail_contract() {
-    let (node, _fake) = node(100, 128);
+    let (node, _fake) = node(Samples(100), Samples(128));
     let mut node = contract::prepared(node, SR, BLOCK);
     assert_honest_tail(&mut node, SR);
 }
@@ -124,7 +134,7 @@ fn the_plugin_node_passes_the_honest_tail_contract() {
 /// heard, the node reports nothing and is not idle.
 #[test]
 fn a_plugin_that_sleeps_over_sound_is_not_idled() {
-    let (node, fake) = node(100, 128);
+    let (node, fake) = node(Samples(100), Samples(128));
     fake.sleep_over_sound(true);
     let mut node = contract::prepared(node, SR, BLOCK);
     let d = drive(&mut node, 0, true);
@@ -135,8 +145,8 @@ fn a_plugin_that_sleeps_over_sound_is_not_idled() {
 
 /// A voice of 100 frames behind the executor: an event inlet into the node's
 /// event input, the node's two channels to the outputs.
-fn graph(fake_ring: usize) -> (Editor, Executor, tutti_graph::EventInletWriter, FakePlugin) {
-    let (node, fake) = node(fake_ring, 128);
+fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter, FakePlugin) {
+    let (node, fake) = node(fake_ring, Samples(128));
     let (mut ed, mut exec) = Editor::new(GraphPrepare::new(SR, MaxBlock::of(Samples(BLOCK))));
     let (inlet, writer) = EventInletNode::pair(EventCapacity::of(64));
     let (inlet_key, plugin) = (NodeKey(1), NodeKey(2));
@@ -184,7 +194,7 @@ fn note() -> tutti_ump::Ump {
 /// 0.5, and silent before.
 #[test]
 fn a_parked_plugin_is_woken_by_a_note_on_its_frame() {
-    let (_ed, mut exec, mut tx, fake) = graph(100);
+    let (_ed, mut exec, mut tx, fake) = graph(Samples(100));
     let mut heard = Vec::new();
     let mut calls = Vec::new();
     let (first, second) = (8 * BLOCK as u64, 20 * BLOCK as u64 + 17);
@@ -219,7 +229,7 @@ fn a_parked_plugin_is_woken_by_a_note_on_its_frame() {
 /// once even though the ceiling is 128 frames.
 #[test]
 fn a_sleep_parks_before_the_ceiling_has_elapsed() {
-    let (_ed, mut exec, _tx, fake) = graph(100);
+    let (_ed, mut exec, _tx, fake) = graph(Samples(100));
     for _ in 0..10 {
         render(&mut exec);
     }
@@ -245,7 +255,7 @@ fn a_plugin_wider_than_a_block_is_refused_by_name() {
     wiring.outputs = vec![PluginBus::main(ChannelLayout::clamped(
         MAX_BLOCK_CHANNELS + 1,
     ))];
-    let refused = client_over::<FakeLoaded>(
+    let refused = client_over::<FakeLoaded, f32>(
         processor,
         controller,
         prepare,
@@ -257,9 +267,72 @@ fn a_plugin_wider_than_a_block_is_refused_by_name() {
     );
     assert_eq!(
         refused.err(),
-        Some(PluginTooWide {
+        Some(ClientOverError::TooWide(PluginTooWide {
             direction: "output",
             channels: MAX_BLOCK_CHANNELS + 1
+        }))
+    );
+}
+
+/// **An `f64` graph hosts a plugin that processes 64-bit audio natively**: the
+/// node is a `Node<f64>`, and the voice the fake starts on the impulse sounds
+/// 0.5 for its ring of 100 frames, so a 64-frame block is 0.5 throughout and
+/// the next one 0.5 for 36 frames and silence after.
+#[test]
+fn a_64_bit_graph_renders_a_64_bit_plugin_natively() {
+    let (node, fake) = node_at::<f64>(Samples(100), Samples(128), FloatWidth::F64);
+    let mut unit = Direct::with_format(node, SR, BLOCK);
+    for channel in 0..2 {
+        let mut input = unit.inputs_mut();
+        let mut plane = input.plane_mut(channel);
+        let samples = plane.samples_mut();
+        samples.fill(0.0);
+        samples[0] = 1.0;
+    }
+    assert_eq!(unit.block(), Status::Modified);
+    assert!(unit.output().plane(0).samples().iter().all(|&x| x == 0.5));
+    for channel in 0..2 {
+        unit.inputs_mut().plane_mut(channel).samples_mut().fill(0.0);
+    }
+    unit.block();
+    let second = unit.output().plane(0).samples().to_vec();
+    assert!(second[..36].iter().all(|&x| x == 0.5), "36 frames remain");
+    assert!(second[36..].iter().all(|&x| x == 0.0), "then silence");
+    assert_eq!(processed(&fake), 2);
+    // What the host sent, as the plugin recorded it: activated at 64-bit, and
+    // both blocks of the sample type `f64`, none of `f32`.
+    assert_eq!(fake.activated_width(), Some(FloatWidth::F64));
+    assert_eq!(fake.blocks_at(FloatWidth::F64), 2);
+    assert_eq!(fake.blocks_at(FloatWidth::F32), 0);
+}
+
+/// **A client is for the width its plugin was activated at**: one activated at
+/// 32-bit is no 64-bit client, and the refusal names both widths.
+#[test]
+fn a_client_over_a_plugin_of_another_width_is_refused_by_name() {
+    let (_fake, loaded) = FakePlugin::new();
+    let main = main_thread();
+    let wiring = loaded.wiring(main);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the fake activates");
+    };
+    let refused = client_over::<FakeLoaded, f64>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        None,
+    );
+    assert_eq!(
+        refused.err(),
+        Some(ClientOverError::Width {
+            activated: FloatWidth::F32,
+            hosted: FloatWidth::F64,
         })
     );
 }

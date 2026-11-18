@@ -31,7 +31,7 @@ use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_host::{HostedNode, load_client};
+use tutti_plugin_host::{PluginNode, load_client};
 use tutti_units::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -106,7 +106,7 @@ fn read_capture(path: &PathBuf) -> ProcessCapture {
 /// The graph node plus the handle that keeps it alive, loaded against the
 /// reference probe with its capture zeroed.
 struct Loaded {
-    unit: HostedNode<Vst2Loaded>,
+    unit: PluginNode<Vst2Loaded>,
     handle: PluginHandle,
     path: PathBuf,
 }
@@ -114,7 +114,7 @@ struct Loaded {
 fn load() -> Loaded {
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
-    let (unit, handle) = load_client::<Vst2Loaded>(
+    let (unit, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         &path,
@@ -130,7 +130,7 @@ fn load() -> Loaded {
 }
 
 /// `unit` prepared at `rate`, for blocks of up to [`BLOCK`].
-fn prepare_at(unit: &mut HostedNode<Vst2Loaded>, rate: SampleRate) {
+fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
     tutti_graph::Node::prepare(
         unit,
         &tutti_graph::Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
@@ -140,12 +140,12 @@ fn prepare_at(unit: &mut HostedNode<Vst2Loaded>, rate: SampleRate) {
 /// Render one block through the node, prepared as a graph prepares it
 /// (`Node::prepare`, which sizes its scratch and parks its rate), then
 /// `Node::process` by hand (`tutti_graph::contract::drive_input`).
-fn drive_block(unit: &mut HostedNode<Vst2Loaded>) {
+fn drive_block(unit: &mut PluginNode<Vst2Loaded>) {
     drive_blocks(unit, BLOCK, BLOCK);
 }
 
 /// One block of `frames` through `unit` prepared for blocks of up to `max`.
-fn drive_blocks(unit: &mut HostedNode<Vst2Loaded>, max: usize, frames: usize) {
+fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     use tutti_graph::{Node, Prepare};
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
@@ -156,7 +156,7 @@ fn drive_blocks(unit: &mut HostedNode<Vst2Loaded>, max: usize, frames: usize) {
 }
 
 /// One block of `frames` through `unit` as it is prepared now: no prepare.
-fn process_block(unit: &mut HostedNode<Vst2Loaded>, frames: usize) {
+fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
     use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
     let rate = SampleRate::of(SAMPLE_RATE);
     let silence = vec![0.0f32; frames];
@@ -246,7 +246,7 @@ fn blocks_past_64_frames_reach_the_plugin_after_a_prepare() {
 
 /// [`prepare_at`], on a thread that is not the main thread: where a graph's
 /// `prepare` runs when its commit is off the main thread.
-fn prepare_off_main_thread(unit: &mut HostedNode<Vst2Loaded>, rate: SampleRate) {
+fn prepare_off_main_thread(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
     std::thread::scope(|s| {
         s.spawn(|| prepare_at(unit, rate))
             .join()
@@ -485,7 +485,7 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
         std::env::set_var("TUTTI_VST2_PROBE_INPUTS", WIDE.to_string());
         std::env::set_var("TUTTI_VST2_PROBE_OUTPUTS", WIDE.to_string());
     }
-    let loaded = load_client::<Vst2Loaded>(
+    let loaded = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         &path,
@@ -496,7 +496,12 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
         std::env::remove_var("TUTTI_VST2_PROBE_INPUTS");
         std::env::remove_var("TUTTI_VST2_PROBE_OUTPUTS");
     }
-    let Err(BridgeError::LoadFailed { stage, reason, .. }) = loaded else {
+    let Err(tutti_plugin_host::LoadClientError::Failed(BridgeError::LoadFailed {
+        stage,
+        reason,
+        ..
+    })) = loaded
+    else {
         panic!("a plugin of {WIDE} channels has no node");
     };
     assert_eq!(stage, LoadStage::Activation);
@@ -713,4 +718,43 @@ fn main() {
         the_shape_declares_the_plugins_buses,
         a_refused_block_with_no_midi_is_counted,
     ]);
+}
+
+/// **A plugin that does not process 64-bit audio fails a 64-bit load with its
+/// widths, and hands back the plugin activated at 32-bit**: the reference
+/// plugin declares no double-precision processing, so the error names
+/// `Widths::F32`, and `into_inner` is a client that hosts in a 32-bit graph.
+#[test]
+fn a_plugin_without_64_bit_audio_fails_a_64_bit_load_and_returns_at_32() {
+    let _probe = lock_probe();
+    let path = tutti_fixtures::vst2_probe().to_path_buf();
+    reset_probe(&path);
+    let loaded = load_client::<Vst2Loaded, f64>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        &path,
+        &Load::new(),
+        SampleRate::of(SAMPLE_RATE),
+    );
+    let Err(tutti_plugin_host::LoadClientError::Width(refused)) = loaded else {
+        panic!("a 32-bit plugin loads at 64-bit");
+    };
+    assert_eq!(refused.requested(), tutti_buffers::FloatWidth::F64);
+    assert_eq!(refused.widths(), tutti_plugin_types::Widths::F32);
+    let (client, handle) = refused.into_inner();
+    let mut node: PluginNode<Vst2Loaded, f32> = client.bind(tutti_fixtures::tempo());
+    // The plugin came back whole: its handle is live, and the node renders a
+    // block through the 32-bit entry point.
+    assert!(
+        !handle.descriptor().id.is_empty(),
+        "the handle reads the plugin"
+    );
+    drive_block(&mut node);
+    let capture = read_capture(&path);
+    assert!(capture.valid);
+    assert_eq!(capture.process_calls, 1);
+    assert_eq!(
+        capture.entry,
+        tutti_vst2_test_plugin::ProcessEntry::Replacing
+    );
 }

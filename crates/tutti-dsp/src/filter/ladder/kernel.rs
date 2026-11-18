@@ -15,6 +15,7 @@
 use tutti_buffers::Float;
 
 use crate::Lanes;
+use crate::design::prewarp;
 use tutti_units::{Hz, Resonance, SampleRate};
 
 /// Which tap of the four-stage ladder is taken as the output, and so what
@@ -67,21 +68,19 @@ impl LadderCoeffs {
         sample_rate: impl Into<SampleRate>,
     ) -> LadderCoeffs {
         let (freq, resonance, sample_rate) = (freq.into(), resonance.into(), sample_rate.into());
-        let fc = freq.get().clamp(
-            1.0,
-            sample_rate
-                .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
-                .get(),
+        let fc = freq.clamp(
+            Hz(1.0),
+            sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
         LadderCoeffs {
-            g: libm::tan(core::f64::consts::PI * fc / sample_rate.get()),
+            g: prewarp(fc, sample_rate),
             k: 4.0 * resonance.get().clamp(0.0, 1.0),
         }
     }
 }
 
 /// The ladder's two coefficients [`ladder_step`] reads, in the arithmetic `L` it runs
-/// in (a node's state precision, shared by every channel, or the lane bank's `f32x8`).
+/// in (the graph's float, shared by every channel, or the lane bank's `f32x8`).
 /// The fields are named, so a set built by hand cannot swap them.
 ///
 /// `g1` is the one-pole stage gain `G = g / (1 + g)` with `g = tan(π·fc/sr)`, solved
@@ -97,12 +96,12 @@ pub struct LadderCoefficients<L: Lanes> {
 }
 
 impl<F: Float + Lanes> From<&LadderCoeffs> for LadderCoefficients<F> {
-    /// The solve's `f64` set, with the stage gain divided out in `F`.
+    /// The solve's `f64` set, the stage gain `g / (1 + g)` divided out in `f64`, narrowed once
+    /// to `F`: the one crossing of a ladder design.
     fn from(c: &LadderCoeffs) -> Self {
-        let g = F::from_f64(c.g);
         Self {
-            g1: g / (F::ONE + g),
-            k: F::from_f64(c.k),
+            g1: F::from_design(c.g / (1.0 + c.g)),
+            k: F::from_design(c.k),
         }
     }
 }
@@ -149,7 +148,7 @@ pub fn ladder_step<L: Lanes>(
     let (g1, k) = (c.g1, c.k);
     let g2 = g1 * g1;
     let g4 = g2 * g2;
-    let one = L::from_f32(1.0);
+    let one = L::lit(1.0);
     let tail = (one - g1) * (g1 * (g1 * (g1 * s[0] + s[1]) + s[2]) + s[3]);
     let u = saturate((x - k * tail) / (one + k * g4));
 
@@ -173,8 +172,6 @@ pub fn ladder_step<L: Lanes>(
         LadderType::LP12 => lp2,
         LadderType::LP24 => lp4,
         LadderType::HP12 => u - lp1 - lp1 + lp2,
-        LadderType::HP24 => {
-            u - lp1 * L::from_f32(4.0) + lp2 * L::from_f32(6.0) - lp3 * L::from_f32(4.0) + lp4
-        }
+        LadderType::HP24 => u - lp1 * L::lit(4.0) + lp2 * L::lit(6.0) - lp3 * L::lit(4.0) + lp4,
     }
 }
