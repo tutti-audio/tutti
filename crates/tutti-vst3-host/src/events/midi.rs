@@ -357,6 +357,10 @@ fn on_bus(mut event: Event, bus: i32) -> Event {
 }
 
 /// A `PolyPressure` of the note `id` on `note`.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's pressure word is `f32`"
+)]
 fn pressure_event(
     offset: i32,
     channel: MidiChannel,
@@ -369,7 +373,6 @@ fn pressure_event(
         Payload::PolyPressure(PolyPressure::new(
             channel.get().into(),
             note.get().into(),
-            // VST3's pressure word is `f32`: narrowed once here.
             pressure.get() as f32,
             plugin_note_id(id),
         )),
@@ -424,6 +427,10 @@ fn control_event(
     }
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's velocity word is `f32`"
+)]
 fn note_on(
     offset: i32,
     channel: MidiChannel,
@@ -436,7 +443,6 @@ fn note_on(
         Payload::NoteOn(NoteOn::new(
             channel.get().into(),
             note.get().into(),
-            // VST3's velocity word is `f32`: narrowed once here.
             NoteVelocity::new(velocity).normalized().get() as f32,
             note_id,
         )),
@@ -444,13 +450,16 @@ fn note_on(
 }
 
 /// A note-off naming no note (`-1`).
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's velocity word is `f32`"
+)]
 fn note_off(offset: i32, channel: MidiChannel, note: NoteNumber, velocity: u16) -> Event {
     Event::at(
         offset,
         Payload::NoteOff(NoteOff::new(
             channel.get().into(),
             note.get().into(),
-            // VST3's velocity word is `f32`: narrowed once here.
             NoteVelocity::new(velocity).normalized().get() as f32,
             -1,
         )),
