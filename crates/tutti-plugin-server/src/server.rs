@@ -75,7 +75,7 @@ impl PluginServer {
     /// Creates a server for `config`, and starts the watch on the spawning host:
     /// a host that ends is told to the main loop, which shuts down as it does
     /// when the control connection ends. A server that has not done so within
-    /// [`HOST_GONE_GRACE`] (blocked in an accept, a plugin's modal dialog, a
+    /// two seconds (blocked in an accept, a plugin's modal dialog, a
     /// block) is ended outright, without running a plugin library's exit
     /// handlers, and its socket file is removed.
     ///
