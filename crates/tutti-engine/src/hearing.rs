@@ -32,10 +32,10 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved};
 use tutti_graph::{TapReader, TapWriter};
 use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Opens that can be in flight at once. The install queue holds one more: a

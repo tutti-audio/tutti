@@ -31,7 +31,7 @@
 //! Only 5.1 comes out right, and only because bits 0–5 happen to be contiguous
 //! and in SMPTE order. A quad bus would ask the plugin for a centre and an LFE.
 
-use tutti_types::{Bed, ChannelTopology, Speaker, Speakers};
+use tutti_buffers::{Bed, ChannelTopology, Speaker, Speakers};
 // The individual speaker bits live directly in `Vst`; only the named
 // arrangements (`kStereo`, `k51`, …) are in the `SpeakerArr` submodule.
 use vst3::Steinberg::Vst::{
@@ -134,7 +134,7 @@ pub(crate) fn from_arrangement(arr: SpeakerArrangement) -> ChannelTopology {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
     use vst3::Steinberg::Vst::{SpeakerArr, kSpeakerLfe2};
 
     /// Every speaker bit decodes to its speaker, with the bit positions written
@@ -272,12 +272,12 @@ mod tests {
         let vst3_four = from_arrangement(SpeakerArr::k40Music);
         assert_eq!(
             vst3_four.width(),
-            tutti_types::Bed::Quad.topology().width(),
+            tutti_buffers::Bed::Quad.topology().width(),
             "both are four channels"
         );
         assert_ne!(
             vst3_four,
-            tutti_types::Bed::Quad.topology(),
+            tutti_buffers::Bed::Quad.topology(),
             "but they name different speakers"
         );
         assert_eq!(Bed::from_topology(&vst3_four), Some(Bed::Quad));

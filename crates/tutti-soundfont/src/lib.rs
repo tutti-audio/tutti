@@ -31,7 +31,7 @@
 //! This needs a `.sf2` on disk, so it is `no_run`.
 //!
 //! ```rust,no_run
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::NodeKey;

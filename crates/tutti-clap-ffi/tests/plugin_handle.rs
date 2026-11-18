@@ -19,6 +19,7 @@ use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_param_value,
 };
 use tutti_buffers::FloatWidth;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_clap_ffi::{
     ActivateError, Bundle, CallError, EventRef, EventSink, EventSource, Host, HostCallbacks,
@@ -26,7 +27,6 @@ use tutti_clap_ffi::{
     TaskPool, ThreadRoles, header_size,
 };
 use tutti_clap_test_plugin::{PLUGIN_ID, REPORTED_LATENCY_SAMPLES, probe_tag};
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 fn probe_path() -> &'static str {

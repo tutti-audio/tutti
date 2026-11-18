@@ -40,12 +40,11 @@ bytemuck = "1.16"
 # `QueryPerformanceCounter` on Windows.
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true, features = ["std"] }
-# `Sample`: the formats `PosRing` is generic over.
+# `Sample`, the formats `PosRing` is generic over, and `ChannelLayout`, the width it is written in.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
 # `ranged!`, which writes `RequestBit`.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

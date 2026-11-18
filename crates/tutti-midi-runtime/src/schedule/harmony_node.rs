@@ -117,7 +117,7 @@ impl FromIterator<TimedHarmony> for HarmonyChanges {
 /// See the module docs.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Harmony, Prepare};

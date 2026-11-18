@@ -6,7 +6,7 @@
 //! MIDI mapping, the edit ring).
 //!
 //! This crate names nothing of tutti's except the value and plumbing crates
-//! `tutti-units`, `tutti-types`, `tutti-plugin-types`, `tutti-ump` and `tutti-rt`, and, on
+//! `tutti-units`, `tutti-types`, `tutti-buffers`, `tutti-plugin-types`, `tutti-ump` and `tutti-rt`, and, on
 //! Linux, `tutti-plugin-ipc-ffi` for the run loop's descriptors.
 //!
 //! ## What is here

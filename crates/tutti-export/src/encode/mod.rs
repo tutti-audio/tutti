@@ -24,12 +24,12 @@ use crate::process::dither_shape;
 use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
 use crate::{Error, Written};
 use std::path::Path;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
     Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
 };
 use tutti_codec::{Encoder, Finalized, IntDepth, Spec};
 use tutti_dsp::{DitherSink, FftFloat, StreamingResampler, needs_resampling, resampled_frames};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The encoder of a file made beside its path.
@@ -115,7 +115,7 @@ pub(crate) fn written(
     path: &Path,
     closed: Landed,
     dropped_events: u64,
-    placement: tutti_types::Placement,
+    placement: tutti_buffers::Placement,
 ) -> Written {
     Written {
         path: path.to_path_buf(),

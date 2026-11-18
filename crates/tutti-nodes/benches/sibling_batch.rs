@@ -35,9 +35,10 @@
 //! its own order (no fused multiply-add), so the three render the same.
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition,
@@ -45,7 +46,6 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{ForkByClone, Unforkable};
 use tutti_nodes::BusStripNode;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, SampleRate, Samples};
 use wide::f32x8;
 

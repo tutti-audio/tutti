@@ -692,9 +692,9 @@ mod tests {
     /// rendered: 100 frames at 120 BPM and 48 kHz are 100 / 24 000 beats.
     #[test]
     fn a_block_rendered_at_f64_keeps_its_figure_and_advances_the_clock_by_its_frames() {
+        use tutti_buffers::{ChannelLayout, MaxBlock};
         use tutti_buffers::{Planes, PlanesMut};
         use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
-        use tutti_types::{ChannelLayout, MaxBlock};
 
         // One part in 2^40 above one: inside `f64`'s significand, past `f32`'s.
         const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
@@ -735,9 +735,9 @@ mod tests {
     /// was: the output keeps what it held and the playhead does not move.
     #[test]
     fn a_zero_frame_block_renders_nothing_and_leaves_the_clock() {
+        use tutti_buffers::{ChannelLayout, MaxBlock};
         use tutti_buffers::{Planes, PlanesMut};
         use tutti_graph::{GraphBuilder, Prepare};
-        use tutti_types::{ChannelLayout, MaxBlock};
 
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
         g.set_output(0, tutti_graph::Source::Zero);

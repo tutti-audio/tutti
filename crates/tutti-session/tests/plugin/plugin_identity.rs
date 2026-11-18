@@ -5,12 +5,12 @@
 
 use crate::pooled::{LoadPlugin, Spec, catalog_of};
 use crate::support::{clap_probe, plugin_server};
+use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::{PluginId, PluginRef};
 use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
 use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
-use tutti_types::MaxBlock;
 use tutti_units::Samples;
 
 /// The plugin a state names.

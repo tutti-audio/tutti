@@ -5,12 +5,13 @@
 //! `SessionNode`.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
 use tutti_session::{DetachedSession, Session, ValueErrorKind};
-use tutti_types::{BusTopology, ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {

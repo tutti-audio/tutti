@@ -2,9 +2,9 @@
 //! FDN's three decays, and the tail each declares to the graph (the FDN's
 //! unbounded where it can freeze).
 
+use tutti_buffers::MaxBlock;
 use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
 use tutti_session::{Session, ValueErrorKind};
-use tutti_types::MaxBlock;
 use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
 fn session() -> Session {

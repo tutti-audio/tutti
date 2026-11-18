@@ -30,13 +30,13 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tutti_buffers::ChannelLayout;
 use tutti_plugin::catalog::{
     AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
 };
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_rt::LockExt;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 use super::{AnyPlugin, HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded};

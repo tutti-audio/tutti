@@ -11,7 +11,7 @@
 //! [`Routing::swap`] (a ping-pong) and any other width by [`Routing::none`], until
 //! [`with_routing`](DelayLayout::with_routing) says otherwise.
 
-use tutti_types::BusTopology;
+use tutti_buffers::BusTopology;
 use tutti_units::{Feedback, Seconds};
 
 use super::max_delay::MaxDelay;

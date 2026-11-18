@@ -9,12 +9,12 @@
 //! and a restart's republication by `device.rs`'s
 //! `a_rerate_keeps_the_published_compensation_in_step_with_the_plan`.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{DetachedSession, InPort, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;

@@ -12,10 +12,10 @@
 //! [`ParamNode`], inserted through [`tutti_graph::param_parts`], so a fork
 //! starts from the values last set through the set (see `src/fork.rs`).
 
+use tutti_buffers::BusTopology;
 use tutti_graph::{
     Chase, Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::BusTopology;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, CentsSpan, Spread};
 use tutti_voicing::Voicing;

@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, NodeKey, NodeMode, OutPort, Prepare, Shape, Source, Status,
     TransportPosition, Unforkable,
 };
 use tutti_rt::{Hand, Rt, handoff};
-use tutti_types::ChannelLayout;
 
 const NODE: NodeKey = NodeKey(1);
 const BLOCK: usize = 32;

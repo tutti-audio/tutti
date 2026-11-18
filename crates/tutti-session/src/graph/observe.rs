@@ -55,7 +55,7 @@ pub struct NotReopened(pub RootReader);
 #[derive(Debug)]
 pub(super) struct Held<F: Float> {
     reader: Reopened<F>,
-    topology: tutti_types::ChannelTopology,
+    topology: tutti_buffers::ChannelTopology,
     announced: bool,
 }
 
@@ -422,7 +422,7 @@ impl<'g, F: Float> Meters<'g, F> {
     /// the engine's fold and declick. Declared and **on** when the graph is
     /// built, so a host that reads it needs to ask for nothing; it follows
     /// the outputs as they are re-wired or widened (up to
-    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)). `None` once a
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). `None` once a
     /// host has taken it ([`take_master`](Self::take_master)). A
     /// block the engine refuses runs no op and does not touch it.
     ///
@@ -501,7 +501,7 @@ impl<F: Float> Graph<F> {
         &mut self,
         id: RootReader,
         reader: Reopened<F>,
-        topology: &tutti_types::ChannelTopology,
+        topology: &tutti_buffers::ChannelTopology,
     ) {
         self.reopened.insert(
             id,
@@ -515,7 +515,9 @@ impl<F: Float> Graph<F> {
 
     /// The ids reopened since the last call, each with the root's topology it
     /// was opened for, once each until the reader under it is replaced.
-    pub(crate) fn announce_reopened(&mut self) -> Vec<(RootReader, tutti_types::ChannelTopology)> {
+    pub(crate) fn announce_reopened(
+        &mut self,
+    ) -> Vec<(RootReader, tutti_buffers::ChannelTopology)> {
         self.reopened
             .iter_mut()
             .filter(|(_, held)| !held.announced)

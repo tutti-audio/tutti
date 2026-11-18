@@ -28,6 +28,7 @@ use std::hint::black_box;
 use tutti_units::Seconds;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph,
@@ -36,7 +37,6 @@ use tutti_export::{
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

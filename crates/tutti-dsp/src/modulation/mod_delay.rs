@@ -32,8 +32,8 @@
 //! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
 //! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`.
 
+use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{BusTopology, MAX_CHANNELS};
 use tutti_units::{
     Bipolar, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
 };

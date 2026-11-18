@@ -146,9 +146,8 @@ pub use tutti_rt::PushError;
 pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
 
 // Units, channels, buffers and the musical meter.
-pub use tutti_buffers::{Interleaved, InterleavedMut};
+pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
-pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
     Q, SampleRate, Samples, Seconds, Semitones,
@@ -293,6 +292,11 @@ pub mod nodes {
 /// `Sink`, `Pull`), channel folds and the range errors.
 pub mod types {
     pub use tutti_buffers::{
+        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+        AmbisonicOrdering, Bed, BusTooWide, BusTopology, ChannelIndex, ChannelIndexOutOfRange,
+        InvalidMaxBlock, LayoutError, MAX_CHANNELS, Placement, Speaker, Speakers, TopologyError,
+    };
+    pub use tutti_buffers::{
         BlockMut, BlockSide, ByWidth, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter,
         PlaneIterMut, Planes, PlanesMut,
     };
@@ -312,13 +316,7 @@ pub mod types {
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{
-        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, AtomicSampleRate, Bed, BusTooWide, BusTopology, ChannelIndex,
-        ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError, MAX_CHANNELS, Param, Param64,
-        ParamCell, Speaker, Speakers, TopologyError,
-    };
-    pub use tutti_types::{Mint, Placement};
+    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,

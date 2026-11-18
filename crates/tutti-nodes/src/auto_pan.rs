@@ -1,9 +1,9 @@
 //! [`AutoPanNode`]: an LFO places a stereo pair between left and right.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{AutoPan, AutoPanControls, COEFF_INTERVAL, OscillatorWave, PanLaw};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

@@ -49,12 +49,12 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::WorkerError;

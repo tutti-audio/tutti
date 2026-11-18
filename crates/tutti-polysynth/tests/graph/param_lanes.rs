@@ -4,7 +4,7 @@
 //!
 //! A note at frame 0 into a saw synth, 120 BPM at 48 kHz.
 
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{

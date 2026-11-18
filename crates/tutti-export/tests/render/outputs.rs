@@ -14,6 +14,8 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::{Bed, ChannelTopology};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, Error, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement,
@@ -25,8 +27,6 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
-use tutti_types::{Bed, ChannelTopology};
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -809,11 +809,11 @@ fn a_file_reports_whether_its_placement_was_assumed_or_stated() {
     };
     assert_eq!(
         placement(file_of(&dir.path().join("a.wav"), 6)),
-        tutti_types::Placement::Assumed
+        tutti_buffers::Placement::Assumed
     );
     assert_eq!(
         placement(file_of(&dir.path().join("b.wav"), 6).topology(Bed::Surround51.topology())),
-        tutti_types::Placement::Stated
+        tutti_buffers::Placement::Stated
     );
 }
 
@@ -922,7 +922,7 @@ fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     .next()
     .and_then(Produced::into_file)
     .unwrap();
-    assert_eq!(written.placement, tutti_types::Placement::Assumed);
+    assert_eq!(written.placement, tutti_buffers::Placement::Assumed);
     let lufs = written.measured.expect("a placed loudness").lufs.get();
     let analytic = Db::from_power(0.5f64.powi(2) / 2.0 * 5.82).get();
     assert!((lufs - analytic).abs() < 0.1, "{lufs} vs {analytic}");

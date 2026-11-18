@@ -23,8 +23,8 @@ use tutti_buffers::{Planes, PlanesMut};
 // The live side waits for the server's answer to each block; the fork is *not*: it waits for each
 // block, which is the property under test.
 use clap_probe::{BLOCK, ProbeEnv, Rig, SAMPLE_RATE, load_probe, load_probe_with, render};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
-use tutti_types::MaxBlock;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
@@ -644,7 +644,7 @@ fn fork_graph(live: &Editor, rate: SampleRate) -> tutti_export::RenderGraph {
 /// a control nobody cancels.
 fn render_to_buffers(
     mut graph: tutti_export::RenderGraph,
-    config: &(tutti_export::Job, tutti_types::ChannelLayout),
+    config: &(tutti_export::Job, tutti_buffers::ChannelLayout),
     clock: &dyn tutti_transport::RenderClock,
 ) -> tutti_export::Result<tutti_export::Outcome<tutti_export::Rendered>> {
     tutti_export::render_one(
@@ -671,7 +671,7 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
             Samples(0),
         )
         .expect("a render"),
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     );
     render_to_buffers(graph, &config, &tutti_transport::FrozenClock).map(|outcome| {
         outcome
@@ -757,7 +757,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
             Samples(0),
         )
         .expect("a render"),
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     );
     let rendered = render_to_buffers(graph, &config, timeline.as_ref())
         .expect("the fork exports")
@@ -852,7 +852,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
             )
             .expect("a render")
             .event_loss(policy),
-            tutti_types::ChannelLayout::MONO,
+            tutti_buffers::ChannelLayout::MONO,
         );
         render_to_buffers(graph, &config, timeline.as_ref()).map(|outcome| {
             outcome
@@ -1067,7 +1067,7 @@ struct MidiSink(Arc<std::sync::Mutex<Vec<(u64, u32)>>>);
 
 impl tutti_graph::Node for MidiSink {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(tutti_types::ChannelLayout::MONO).with_events(1, 0)
+        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(
@@ -1202,7 +1202,7 @@ fn ramp(t: u64) -> f32 {
 
 impl tutti_graph::Node for RampSource {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(tutti_types::ChannelLayout::MONO)
+        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO)
             .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -1279,7 +1279,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
             Samples(0),
         )
         .expect("a render"),
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     );
     let rendered = render_to_buffers(graph, &config, &tutti_transport::FrozenClock)
         .expect("a fork whose latency settled exports without a fault")
@@ -1454,7 +1454,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
                 Samples(0),
             )
             .expect("a render"),
-            tutti_types::ChannelLayout::STEREO,
+            tutti_buffers::ChannelLayout::STEREO,
         );
         let rendered = render_to_buffers(graph, &config, &tutti_transport::FrozenClock)
             .expect("the fork exports")

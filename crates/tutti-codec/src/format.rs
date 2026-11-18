@@ -5,7 +5,7 @@ use crate::pcm::IntDepth;
 #[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
 use crate::pcm::Pcm;
 use std::path::Path;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 /// The container to write, carrying that format's own settings.
 ///

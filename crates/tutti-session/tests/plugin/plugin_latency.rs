@@ -14,9 +14,10 @@ use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::Instant;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use support::{clap_probe, plugin_server};
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
@@ -25,7 +26,6 @@ use tutti_session::{
     Phase, PhaseCx, Range, Root, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

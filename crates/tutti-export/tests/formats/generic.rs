@@ -5,10 +5,10 @@
 //! then little-endian samples), so no reader of ours stands between the file
 //! and the figure.
 
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{EventLossPolicy, FileTarget, Rendered, Resample, write_buffers};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;

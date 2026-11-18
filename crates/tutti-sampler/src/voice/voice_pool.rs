@@ -19,10 +19,10 @@ use super::types::*;
 use crate::streamer::StreamId;
 use crossbeam_channel::bounded;
 use std::sync::{Arc, Mutex};
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::SampleRate;
 use tutti_units::{Amplitude, Beat, Cents, Seconds, StretchFactor};
 
@@ -2143,7 +2143,7 @@ fn reader_and_voice_node_default_to_stereo() {
 /// outputs its read never writes.
 #[test]
 fn a_pool_wider_than_the_sampler_reads_is_refused() {
-    let ceiling = tutti_types::MAX_CHANNELS;
+    let ceiling = tutti_buffers::MAX_CHANNELS;
     assert!(
         VoicePool::<f32>::with_channels(
             ChannelLayout::try_from(ceiling).expect("a test width is small")
@@ -2169,7 +2169,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let sampler = MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
-    let wide = tutti_types::MAX_CHANNELS + 2;
+    let wide = tutti_buffers::MAX_CHANNELS + 2;
     let node = VoiceNode::with_channels(
         Voice {
             source: VoiceSource::Memory(sampler),
@@ -2183,7 +2183,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
         ch.fill(7.0);
     }
     direct.block_in(&transport.env(64, SampleRate::of(SR)));
-    for c in tutti_types::MAX_CHANNELS..wide {
+    for c in tutti_buffers::MAX_CHANNELS..wide {
         for i in 0..64 {
             assert_eq!(
                 direct.output().plane(c).samples()[i],

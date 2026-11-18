@@ -188,7 +188,7 @@ impl GraphTail {
     /// ```
     /// use tutti_graph::{NodeSpec, OutPort, Source};
     /// use tutti_units::{SampleRate, Samples, Tail};
-    /// use tutti_types::ChannelLayout;
+    /// use tutti_buffers::ChannelLayout;
     /// use tutti_graph::{graph_tail, NodeKey, Topology};
     ///
     /// let verb = NodeKey(1);

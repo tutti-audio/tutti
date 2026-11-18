@@ -5,7 +5,7 @@
 //! Beat Clock, timecode and Machine Control on the frames the transport reaches, a
 //! start inside a block included.
 
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common;
 use tutti_graph::{Stamp, UmpAt};

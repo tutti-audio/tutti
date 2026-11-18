@@ -62,7 +62,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::NodeKey;
 use crate::NodeMix;
 use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, Sink, Source};
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
 use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};

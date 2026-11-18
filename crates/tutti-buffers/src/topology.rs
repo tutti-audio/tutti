@@ -237,7 +237,7 @@ pub enum TopologyError {
 /// sixteen `Unassigned`.
 ///
 /// ```
-/// use tutti_types::{Speaker, Speakers, TopologyError};
+/// use tutti_buffers::{Speaker, Speakers, TopologyError};
 ///
 /// let stereo = Speakers::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
 /// assert_eq!(stereo.index_of(Speaker::FrontRight), Some(1));
@@ -391,7 +391,7 @@ impl From<Speakers> for Vec<Speaker> {
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Bed, ChannelLayout, ChannelTopology, Speaker};
+/// use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Speaker};
 ///
 /// let bed = ChannelTopology::assumed(ChannelLayout::from(6u16));
 /// assert_eq!(bed, Bed::Surround51.topology());

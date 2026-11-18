@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Solo, TransportPosition};
 use tutti_sampler::testing::settle;
 use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, MemorySource, MemorySourceConfig, Placement,
     Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
 };
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

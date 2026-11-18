@@ -12,7 +12,8 @@ members = [
     "crates/tutti-curve",
     # The sample formats (`Sample`, `Float`, `I24`) and the borrowed mono, interleaved
     # and planar views over them, with the conversions between formats and layouts:
-    # layer 2, `tutti-units` and `tutti-types` alone (and `libm`).
+    # layer 1, `tutti-units` alone (and `libm`). It also holds the channel family: `ChannelLayout`,
+    # `ChannelTopology`, `Speaker`, `MaxBlock`.
     "crates/tutti-buffers",
     "crates/tutti-cpal",
     "crates/tutti-units",

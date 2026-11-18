@@ -8,12 +8,12 @@
 //! limiter takes the channel it fed to silence, and with nothing
 //! latency-bearing left the published latency is nothing at all.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{InPort, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate, Samples};
 
 #[test]

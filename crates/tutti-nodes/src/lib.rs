@@ -102,7 +102,7 @@
 //!
 //! ```rust
 //! # use tutti_buffers::Planes;
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, Q, UnitParam};
 //! use tutti_graph::{Prepare, Solo};
 //! use tutti_nodes::{SvfFilterNode, SvfType};

@@ -19,9 +19,9 @@
 //! # Examples
 //!
 //! ```
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_graph::{GraphBuilder, Prepare};
 //! use tutti_nodes::testing::Osc;
 //!
@@ -49,10 +49,10 @@ pub use vbap_mix::{bass_send, vbap_mix};
 use tutti_buffers::{Float, Sample};
 use tutti_dsp::OscillatorWave;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, ForkByClone, IntoNode, Io, Node, NodeParts, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Azimuth, Elevation, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, SampleRate,
     UnitParam,
@@ -405,9 +405,9 @@ impl Node for Sink {
 mod tests {
     use super::*;
     use std::f64::consts::TAU;
+    use tutti_buffers::MaxBlock;
     use tutti_buffers::Planes;
     use tutti_graph::Solo;
-    use tutti_types::MaxBlock;
     use tutti_units::Samples;
 
     /// `node` alone in a graph at `rate`, in blocks of `block` frames.

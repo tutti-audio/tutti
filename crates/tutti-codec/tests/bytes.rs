@@ -15,9 +15,9 @@
 ))]
 
 use std::io::Cursor;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_codec::{Encoder, Format, Spec};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per

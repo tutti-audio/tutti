@@ -13,7 +13,7 @@
 use super::host;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 use crate::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
 use crate::{PluginChange, PluginEvent};

@@ -7,8 +7,8 @@ use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::{Context, SubscriberExt};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Io, Node, Prepare, RtLevel, RtValue, Shape, Status};
-use tutti_types::ChannelLayout;
 use tutti_units::Tail;
 
 pub static SITE: &str = "non-finite sample";

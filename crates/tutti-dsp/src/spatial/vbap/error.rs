@@ -16,7 +16,7 @@ pub enum SpeakerGeometryError {
         required: usize,
     },
 
-    /// More speakers than [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS).
+    /// More speakers than [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
     #[error("{provided} speakers given, at most {max} are supported")]
     TooManySpeakers {
         /// How many speakers were given.

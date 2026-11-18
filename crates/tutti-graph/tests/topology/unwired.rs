@@ -9,13 +9,13 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
     EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InPort, Io, Node, NodeKey, OutPort,
     Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapSpec, TransportPosition, Unforkable,
     Unwired,
 };
-use tutti_types::{BusTopology, ChannelLayout, Speaker};
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 /// A node of a given shape that writes silence: the editor's view of it is

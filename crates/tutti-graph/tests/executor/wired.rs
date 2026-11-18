@@ -10,12 +10,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, prepare, test_pool};
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
     FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, Prepare, Rewired, Shape, Sink, Source,
     Status, TapAlign, TapId, TransportPosition, Unforkable, Wired, WiredMask,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Samples, Tail};
 
 const SRC: NodeKey = NodeKey(1);

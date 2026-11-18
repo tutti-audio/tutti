@@ -63,9 +63,9 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
 /// use tutti_session::{OutPort, Root, Session};

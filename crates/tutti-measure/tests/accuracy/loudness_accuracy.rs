@@ -14,8 +14,8 @@
 //! the defect `LoudnessConfig` makes unrepresentable.
 
 use tutti_buffers::Interleaved;
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_measure::{LoudnessConfig, measure_loudness};
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::{Amplitude, Db, SampleRate};
 
 /// Interleaved stereo sine, both channels identical.

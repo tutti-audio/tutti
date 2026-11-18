@@ -15,9 +15,10 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Mono, Planes};
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
@@ -26,7 +27,7 @@ use tutti_nodes::{
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
-use tutti_types::{BusTopology, ChannelLayout, ParamCell};
+use tutti_types::ParamCell;
 use tutti_units::{
     CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
     UnitParam,
