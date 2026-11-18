@@ -206,7 +206,7 @@ pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "capture"))]
