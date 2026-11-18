@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 use tutti_graph::Losses;
-use tutti_rt::LockExt;
+use tutti_rt::{Counter, CounterWriter, LockExt, counter};
 
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
@@ -29,6 +29,9 @@ pub struct AlsaOutput {
     /// thread's output drain, never the audio thread, so a lock costs nothing
     /// that matters here.
     inner: Mutex<Sender>,
+    /// The packets of messages the destination took in part, read without the
+    /// send lock.
+    losses: Counter<Losses>,
 }
 
 struct Sender {
@@ -37,8 +40,9 @@ struct Sender {
     /// The client's own queue, started when the output opened, which holds an
     /// event until its time.
     queue: QueueClock,
-    /// The packets of a message the destination took in part, and so lost.
-    lost: u64,
+    /// Counts the packets of a message the destination took in part, and so
+    /// lost.
+    lost: CounterWriter<Losses>,
 }
 
 impl Sender {
@@ -53,7 +57,7 @@ impl Sender {
         };
         let pairing = match *paired {
             Some(pairing) => pairing,
-            None => *paired.insert(Paired::read(|| self.queue.now(&self.seq))?),
+            None => *paired.insert(super::client::pair(&mut self.queue, &self.seq)?),
         };
         match pairing.departure(instant) {
             Some(time) => self
@@ -84,18 +88,6 @@ impl AlsaOutput {
             .seq
             .output_free()
             .expect("the pool to be readable")
-    }
-
-    /// Poisons the send lock, as a panic inside a send would.
-    pub(super) fn poison(&self) {
-        std::thread::scope(|scope| {
-            let panicked = scope.spawn(|| {
-                let _held = self.inner.lock().unwrap();
-                panic!("poisoning the output lock on purpose");
-            });
-            assert!(panicked.join().is_err());
-        });
-        assert!(self.inner.is_poisoned());
     }
 }
 
@@ -141,14 +133,14 @@ impl MidiOut for AlsaOutput {
             }
             Ok(())
         });
-        sender.lost += sent.lost;
+        sender.lost.add(Losses::lost(sent.lost));
         sent.taken
     }
 }
 
 impl DeviceOut for AlsaOutput {
     fn losses(&self) -> Losses {
-        Losses::lost(self.sender().lost)
+        self.losses.get()
     }
 }
 
@@ -162,15 +154,18 @@ pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
     Ok(Box::new(connect(id)?))
 }
 
+/// The name of the engine's output client and of its one port.
+pub(super) const CLIENT: &str = "tutti-out";
+
 /// [`open`], as the concrete type.
 pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
     let dest = super::address_of(id).ok_or(NotFound::Endpoint(id))?;
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
-    let seq = super::client::open("tutti-out", Blocking::NonBlock, UmpVersion::Midi2)?;
+    let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
     let port = seq.open_port(
-        "tutti-out",
+        CLIENT,
         // Not subscribable by others, so never listed as a device (see
         // `input::open`); this client subscribes its own port to the
         // destination.
@@ -188,12 +183,14 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
     // send addresses `SUBSCRIBERS` rather than the endpoint by name. Keeping the
     // address around would invite exactly the explicit-`dest` send that ALSA
     // rejects.
+    let (lost, losses) = counter();
     Ok(AlsaOutput {
         inner: Mutex::new(Sender {
             seq,
             port,
             queue,
-            lost: 0,
+            lost,
         }),
+        losses,
     })
 }

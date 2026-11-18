@@ -110,6 +110,33 @@ pub struct Client {
     seq: *mut sys::snd_seq_t,
     /// The client's number: what a sent event names as its source.
     pub(crate) id: ClientId,
+    /// A test's stand-in for a failing or a held sequencer, run before each
+    /// read ([`set_read_hook`](Self::set_read_hook)).
+    #[cfg(feature = "testing")]
+    read_hook: std::cell::RefCell<Option<ReadHook>>,
+}
+
+/// What [`Client::set_read_hook`] holds.
+#[cfg(feature = "testing")]
+struct ReadHook(Box<dyn FnMut() -> std::io::Result<()> + Send>);
+
+#[cfg(feature = "testing")]
+impl std::fmt::Debug for ReadHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReadHook")
+    }
+}
+
+/// Clients this process has opened, for a test that a path opens none.
+#[cfg(feature = "testing")]
+static OPENED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many clients this process has opened.
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+#[must_use]
+pub fn clients_opened() -> usize {
+    OPENED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 // SAFETY: a `Client` owns its `snd_seq_t` outright (no other copy of the
@@ -183,9 +210,13 @@ impl Client {
             unsafe { sys::snd_seq_open(&mut seq, device.as_ptr(), sys::SND_SEQ_OPEN_DUPLEX, mode) };
         check(rc, Operation::Open)?;
         // Owned from here: any failure below closes it by `Drop`.
+        #[cfg(feature = "testing")]
+        OPENED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut client = Self {
             seq,
             id: ClientId::of(0),
+            #[cfg(feature = "testing")]
+            read_hook: std::cell::RefCell::new(None),
         };
 
         let cname = c_name(name)?;
@@ -197,6 +228,15 @@ impl Client {
         let id = check(rc, Operation::ClientId)?;
         client.id = ClientId::from_int(id).ok_or(Error::Number { what: "client", id })?;
         Ok(client)
+    }
+
+    /// Runs `hook` before each [`read_event`](Self::read_event) on this client,
+    /// on the reading thread: an `Err` is that read's failure, and a hook that
+    /// blocks holds the reader.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
+    pub fn set_read_hook(&self, hook: impl FnMut() -> std::io::Result<()> + Send + 'static) {
+        *self.read_hook.borrow_mut() = Some(ReadHook(Box::new(hook)));
     }
 
     /// This client's sequencer id, for addressing events back to it.
@@ -280,6 +320,13 @@ impl Client {
     /// `snd_seq_ump_event_input`'s code for anything but an empty queue, an
     /// overrun among them.
     pub fn read_event(&self) -> Result<Read> {
+        #[cfg(feature = "testing")]
+        if let Some(ReadHook(hook)) = self.read_hook.borrow_mut().as_mut() {
+            hook().map_err(|source| Error::Call {
+                operation: Operation::UmpEventInput,
+                source,
+            })?;
+        }
         loop {
             let mut ev: *mut sys::snd_seq_ump_event_t = std::ptr::null_mut();
             // SAFETY: `self.seq` is open; `ev` is a valid out-pointer. On

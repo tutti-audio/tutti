@@ -43,7 +43,9 @@
 //! sequencer: a legacy (non-UMP) client with its byte events (`Client::open_legacy`,
 //! `Client::send_legacy_to_subscribers`, `LegacyEvent`), a rename
 //! (`Client::rename`), a change of a port's capabilities (`Client::set_port_caps`)
-//! and the client's own id (`Client::id`). Off in a production build;
+//! the client's own id (`Client::id`), a hook run before each read
+//! (`Client::set_read_hook`: a failing or a held sequencer) and the count of clients
+//! opened (`clients_opened`). Off in a production build;
 //! `tutti-midi-hardware` turns it on only through its `sequencer-tests` feature.
 // The whole crate is the ALSA UMP backend's FFI: `build.rs` sets `alsa_ump` on
 // Linux when alsa-lib is 1.2.10 or newer, and otherwise there is nothing to link.
@@ -65,9 +67,9 @@ mod sys;
 mod ump;
 
 pub use address::{Address, ClientId, PortCaps, PortId, PortKind};
-#[cfg(feature = "testing")]
-pub use client::LegacyEvent;
 pub use client::{Blocking, Client, Packet, QueueClock, Read, UmpVersion};
+#[cfg(feature = "testing")]
+pub use client::{LegacyEvent, clients_opened};
 pub use error::{Error, Operation, Result};
 pub use event::{Announced, Event};
 pub use poll::{Poller, Wait};

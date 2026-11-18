@@ -15,7 +15,7 @@ mod tests;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tutti_buffers::Wave;
+use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, Meter};
 use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{SampleRate, Samples};
@@ -29,50 +29,51 @@ use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
 /// Frames decoded, and pushed to the meter, at a time.
 const CHUNK_FRAMES: Samples = Samples(16_384);
 
-/// The audio an analysis reads: a wave in memory or a file on disk.
+/// The audio an analysis reads, in the sample format `S` the measure asks for:
+/// a wave in memory or a file on disk.
 ///
-/// Converts from what the session already holds: an [`Arc<Wave>`](Wave) or a
-/// [`Wave`]; with a decoder, a path; and with a decoder and feature `sampler`,
-/// a pooled `AudioEntry`. A path, and a streamed entry, are decoded
-/// chunk by chunk on the job's worker.
+/// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
+/// a [`Wave<S>`]; with a decoder, a path; and with a decoder and feature
+/// `sampler`, a pooled `AudioEntry`. A path, and a streamed entry, are decoded
+/// chunk by chunk on the job's worker into `S`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub enum Audio {
-    /// A wave in memory.
-    Wave(Arc<Wave>),
+pub enum Audio<S: Float = f32> {
+    /// A wave in memory, read in its own format.
+    Wave(Arc<Wave<S>>),
     /// A file, decoded on the worker as the analysis folds it.
     #[cfg(codec)]
     File(std::path::PathBuf),
 }
 
-impl From<Wave> for Audio {
-    fn from(wave: Wave) -> Self {
+impl<S: Float> From<Wave<S>> for Audio<S> {
+    fn from(wave: Wave<S>) -> Self {
         Self::Wave(Arc::new(wave))
     }
 }
 
-impl From<Arc<Wave>> for Audio {
-    fn from(wave: Arc<Wave>) -> Self {
+impl<S: Float> From<Arc<Wave<S>>> for Audio<S> {
+    fn from(wave: Arc<Wave<S>>) -> Self {
         Self::Wave(wave)
     }
 }
 
 #[cfg(codec)]
-impl From<std::path::PathBuf> for Audio {
+impl<S: Float> From<std::path::PathBuf> for Audio<S> {
     fn from(path: std::path::PathBuf) -> Self {
         Self::File(path)
     }
 }
 
 #[cfg(codec)]
-impl From<&std::path::Path> for Audio {
+impl<S: Float> From<&std::path::Path> for Audio<S> {
     fn from(path: &std::path::Path) -> Self {
         Self::File(path.to_path_buf())
     }
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl From<crate::AudioEntry> for Audio {
+impl From<crate::AudioEntry> for Audio<f32> {
     fn from(entry: crate::AudioEntry) -> Self {
         match entry {
             crate::AudioEntry::Resident(wave) => Self::Wave(wave),
@@ -119,14 +120,14 @@ pub enum AnalyzeError {
 /// The kind of [`Session::analyze`]: the job lands the meter's
 /// [`Output`](Meter::Output) over the whole audio.
 #[derive(Debug)]
-pub struct Analyze<A>(PhantomData<fn() -> A>);
+pub struct Analyze<A, S: Float = f32>(PhantomData<fn() -> (A, S)>);
 
-impl<A: Measure + 'static> sealed::Sealed for Analyze<A> where
+impl<S: Float, A: Measure<S> + 'static> sealed::Sealed for Analyze<A, S> where
     <A::Meter as Meter>::Output: Send + 'static
 {
 }
 
-impl<A: Measure + 'static> JobKind for Analyze<A>
+impl<S: Float, A: Measure<S> + 'static> JobKind for Analyze<A, S>
 where
     <A::Meter as Meter>::Output: Send + 'static,
 {
@@ -144,8 +145,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// not held in memory. Dropping the [`Job`] cancels the analysis between
     /// chunks.
     ///
-    /// The analysis reads `f32` (`A: Measure` is `Measure<f32>`): a [`Wave`] and
-    /// a decoded file both hold `f32`.
+    /// The analysis reads the measure's own format `S` (`A: Measure<S>`): a
+    /// [`Wave<S>`] is read through its own planes, and a file is decoded into
+    /// `S`, with no detour through another format. `S` is a float format: the
+    /// fold of a wide audio to a mono analysis ([`Fold`](tutti_buffers::Fold))
+    /// is defined over floats. A path names no format, so a call that passes
+    /// one states `S` (`analyze::<f32, _>`).
     ///
     /// The analysis is generic, never boxed: [`Meter`] is not object-safe.
     ///
@@ -158,12 +163,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// fold from the audio's topology, [`AnalyzeError::Buffer`] when a chunk
     /// is not a valid view, and [`AnalyzeError::Worker`] or
     /// [`AnalyzeError::Wait`] when the job's worker fails or is dropped.
-    pub fn analyze<A>(&mut self, audio: impl Into<Audio>, analysis: A) -> Job<Analyze<A>>
+    pub fn analyze<S, A>(&mut self, audio: impl Into<Audio<S>>, analysis: A) -> Job<Analyze<A, S>>
     where
-        A: Measure + Send + 'static,
+        S: Float,
+        A: Measure<S> + Send + 'static,
         A::Context: AudioContext,
         <A::Meter as Meter>::Output: Send + 'static,
-        for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a>,
+        for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
     {
         let audio = audio.into();
         self.jobs.submit_job(
@@ -179,24 +185,24 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 }
 
 /// Where the chunks come from.
-enum Reader<'w> {
+enum Reader<'w, S: Float> {
     Wave {
-        wave: &'w Wave,
+        wave: &'w Wave<S>,
         at: Samples,
     },
     #[cfg(codec)]
-    File(Box<tutti_codec::FileIn>),
+    File(Box<tutti_codec::FileIn<S>>),
 }
 
-impl<'w> Reader<'w> {
-    fn open(audio: &'w Audio) -> Result<Self, AnalyzeError> {
+impl<'w, S: Float> Reader<'w, S> {
+    fn open(audio: &'w Audio<S>) -> Result<Self, AnalyzeError> {
         Ok(match audio {
             Audio::Wave(wave) => Self::Wave {
                 wave,
                 at: Samples::ZERO,
             },
             #[cfg(codec)]
-            Audio::File(path) => Self::File(Box::new(tutti_codec::FileIn::open(path)?)),
+            Audio::File(path) => Self::File(Box::new(tutti_codec::FileIn::<S>::open(path)?)),
         })
     }
 
@@ -217,10 +223,10 @@ impl<'w> Reader<'w> {
     }
 
     /// Fills `chunk` with the next frames; it is left empty at the end.
-    fn next(&mut self, chunk: &mut Chunk<'w>) -> Result<(), AnalyzeError> {
+    fn next(&mut self, chunk: &mut Chunk<'w, S>) -> Result<(), AnalyzeError> {
         match self {
             Self::Wave { wave, at } => {
-                let wave: &'w Wave = wave;
+                let wave: &'w Wave<S> = wave;
                 let frames = CHUNK_FRAMES.min(Samples(wave.len().get() - at.get()));
                 let span = at.get()..at.get() + frames.get();
                 chunk.hold_planes(
@@ -239,15 +245,16 @@ impl<'w> Reader<'w> {
 }
 
 /// The worker's whole job: bind, fold every chunk, finish.
-fn run<A>(
-    audio: &Audio,
+fn run<S, A>(
+    audio: &Audio<S>,
     analysis: &A,
     cancel: &Cancel,
 ) -> Result<<A::Meter as Meter>::Output, AnalyzeError>
 where
-    A: Measure,
+    S: Float,
+    A: Measure<S>,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a>,
+    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
 {
     let mut reader = Reader::open(audio)?;
     let topology = reader.topology();
@@ -263,7 +270,10 @@ where
         if chunk.is_empty() {
             return Ok(meter.finish());
         }
-        meter.push(<A::Meter as Meter>::Input::view(&mut chunk)?, &mut Discard)?;
+        meter.push(
+            <<A::Meter as Meter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
+            &mut Discard,
+        )?;
     }
 }
 

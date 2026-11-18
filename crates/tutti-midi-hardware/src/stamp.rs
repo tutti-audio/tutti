@@ -48,16 +48,14 @@ impl Paired {
         Self { os, clock }
     }
 
-    /// Reads `clock` between two readings of `Instant`; the pairing is at their
-    /// midpoint, so the reading's own delay is split between the two sides.
-    pub(crate) fn read<E>(clock: impl FnOnce() -> Result<Duration, E>) -> Result<Self, E> {
-        let before = Instant::now();
-        let reading = clock()?;
-        let after = Instant::now();
-        Ok(Self::new(
-            before + after.duration_since(before) / 2,
+    /// The pairing of `reading` with the midpoint of `before` and `after`, the
+    /// two readings of `Instant` the clock was read between: the reading's own
+    /// delay is split between the two sides.
+    pub(crate) fn midpoint(before: Instant, after: Instant, reading: Duration) -> Self {
+        Self::new(
+            before + after.saturating_duration_since(before) / 2,
             reading,
-        ))
+        )
     }
 
     /// The clock's reading at `at` ([`departure`]).
