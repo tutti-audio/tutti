@@ -2,17 +2,17 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{note, track, unsorted};
+use crate::common::{note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, TextKind, Tick,
+    SmfParseError, TextKind,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
-const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
 fn file(events: Vec<RawEvent>) -> Vec<u8> {
     build_smf(0, Division::Metrical(TPQ), &[events])
@@ -31,13 +31,13 @@ fn raw_track(body: &[u8]) -> Vec<u8> {
 
 fn ticks(bytes: &[u8]) -> Vec<u64> {
     let file = MidiFile::from_bytes(bytes).expect("reads");
-    file.tracks()[0].events.iter().map(|(t, _)| t.0).collect()
+    file.tracks()[0].events().iter().map(|(t, _)| t.0).collect()
 }
 
 fn voices(bytes: &[u8]) -> Vec<Voice1> {
     let file = MidiFile::from_bytes(bytes).expect("reads");
     file.tracks()[0]
-        .events
+        .events()
         .iter()
         .filter_map(|(_, e)| match e {
             FileEvent::Message(Message::Midi1(_, v)) => Some(*v),
@@ -80,8 +80,8 @@ fn a_quantity_writes_to_its_bytes() {
         let written = MidiFile::smf(
             SmfFormat::SingleTrack,
             SMF_DIVISION,
-            vec![unsorted(vec![(
-                Tick(u64::from(value)),
+            vec![track(vec![(
+                u64::from(value),
                 FileEvent::Meta(Meta::Text {
                     kind: TextKind::Text,
                     bytes: Box::default(),
@@ -273,7 +273,7 @@ fn a_longer_header_is_read() {
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert_eq!(
         MidiFile::from_bytes(&bytes).unwrap().ticks_per_quarter(),
-        DIVISION
+        Some(DIVISION)
     );
 }
 
@@ -292,7 +292,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
     ]);
     let file = MidiFile::from_bytes(&bytes).unwrap();
     let metas: Vec<&Meta> = file.tracks()[0]
-        .events
+        .events()
         .iter()
         .filter_map(|(_, e)| match e {
             FileEvent::Meta(m) => Some(m),
@@ -473,7 +473,7 @@ fn a_written_file_reads_back_equal() {
     .unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
-    assert_eq!(back.ticks_per_quarter(), DIVISION);
+    assert_eq!(back.ticks_per_quarter(), Some(DIVISION));
 }
 
 /// SMF 1.0 section 3.3: Set Tempo is `FF 51 03`, Time Signature `FF 58 04`, Key
@@ -499,7 +499,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         body.extend_from_slice(data);
         body.extend_from_slice(&[0x00, 0x90, 60, 100, 0x00, 0xFF, 0x2F, 0x00]);
         let read = MidiFile::from_bytes(&raw_track(&body)).expect("reads");
-        let events = &read.tracks()[0].events;
+        let events = &read.tracks()[0].events();
         // The note after it is read.
         assert_eq!(events.len(), 2, "{kind:#04x} {data:?}");
         let FileEvent::Meta(Meta::Malformed(malformed)) = &events[0].1 else {
@@ -557,10 +557,9 @@ fn a_header_shorter_than_six_bytes_is_refused() {
     ));
 }
 
-/// Format 0 is one track, and the header's format word is 0, 1 or 2 (SMF 1.0
-/// section 2.1).
+/// A format 0 file is one track (SMF 1.0 section 2.1).
 #[test]
-fn a_header_with_the_wrong_format_or_track_count_is_refused_at_the_header() {
+fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
     assert!(matches!(
         MidiFile::from_bytes(&two),
@@ -568,15 +567,6 @@ fn a_header_with_the_wrong_format_or_track_count_is_refused_at_the_header() {
             track: None,
             offset: 0,
             cause: SmfParseError::FormatZeroTracks
-        })
-    ));
-    let three = build_smf(3, Division::Metrical(TPQ), &[vec![]]);
-    assert!(matches!(
-        MidiFile::from_bytes(&three),
-        Err(ReadError::Smf {
-            track: None,
-            offset: 0,
-            cause: SmfParseError::UnknownSmfFormat
         })
     ));
 }
@@ -599,7 +589,7 @@ fn every_text_meta_type_reads_and_writes_back() {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
         let read = MidiFile::from_bytes(&bytes).unwrap();
         assert_eq!(
-            read.tracks()[0].events[0].1,
+            read.tracks()[0].events()[0].1,
             FileEvent::Meta(Meta::text(kind, "x")),
             "{meta_type:#x}"
         );

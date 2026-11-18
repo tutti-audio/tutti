@@ -42,8 +42,6 @@ tutti-buffers  ctor-result  crates/tutti-buffers/src/stereo.rs::StereoPlanes::ne
 
 # tutti-clap-host
 tutti-clap-host  setter  crates/tutti-clap-host/src/events.rs::InputEventList::set_note_ports
-tutti-clap-host  setter  crates/tutti-clap-host/src/events.rs::InputEventList::set_param_point_room
-tutti-clap-host  setter  crates/tutti-clap-host/src/events.rs::OutputEventList::set_param_room
 tutti-clap-host  setter  crates/tutti-clap-host/src/instance/controller.rs::ClapController::set_task_pool
 tutti-clap-host  setter  crates/tutti-clap-host/src/instance/controller.rs::ClapController::set_thread_pool
 tutti-clap-host  setter  crates/tutti-clap-host/src/instance/params.rs::ClapLoaded::set_param_automation

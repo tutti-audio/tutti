@@ -328,10 +328,6 @@ impl ClapProcessor {
             });
         }
 
-        debug_assert!(
-            self.scratch.input_events.is_reserved(),
-            "activation reserves the input events before the first block"
-        );
         self.scratch.input_events.clear();
         if !midi_events.is_empty() {
             self.scratch.input_events.add_midi_events(midi_events);

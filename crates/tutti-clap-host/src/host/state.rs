@@ -74,14 +74,11 @@ pub(crate) const NO_RESIZE: [u32; 2] = [0, 0];
 
 impl GuiState {
     /// The pending resize request, once: `None` after it, until the plugin
-    /// asks again. A request raised between the read and the clear is lost.
+    /// asks again. One atomic swap, so a request raised after the take waits
+    /// for the next one.
     pub(crate) fn take_resize(&self) -> Option<[u32; 2]> {
-        let asked = self.resize_request.load();
-        if asked == NO_RESIZE {
-            return None;
-        }
-        self.resize_request.store(NO_RESIZE);
-        Some(asked)
+        let asked = self.resize_request.swap(NO_RESIZE);
+        (asked != NO_RESIZE).then_some(asked)
     }
 
     fn new() -> Self {

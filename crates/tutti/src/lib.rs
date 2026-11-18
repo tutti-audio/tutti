@@ -263,7 +263,8 @@ pub mod nodes {
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
-        TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode, VolumeOutOfRange,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerNode, VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -271,12 +272,13 @@ pub mod nodes {
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
         FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
         LimiterKernel, ModDelayKernel, PhaserKernel, PlateKernel, ReconcileError, SvfKernel,
-        TiltFilterKernel,
+        TiltFilterKernel, TransientShaperKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
         HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, PlateSet, SvfSet, TiltFilterSet,
+        TransientShaperSet,
     };
 }
 
@@ -667,10 +669,12 @@ pub mod midi {
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
-        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
-        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
-        TextKind, Timeline, TimelineDrop, WriteOptions,
+        Altered, Converted, DropReason, Dropped, FileTime, LyricChange, MalformedMeta,
+        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind,
+        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
+        SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
+        SmfTicksPerQuarterOutOfRange, TextKind, Timeline, TimelineDrop, TimelineError,
+        WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,

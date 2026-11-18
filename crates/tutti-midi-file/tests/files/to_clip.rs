@@ -22,7 +22,7 @@ use tutti_ump::{
 };
 
 const TPQ: u16 = 480;
-const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
 fn meta(m: Meta) -> FileEvent {
     FileEvent::Meta(m)
@@ -41,7 +41,7 @@ fn format0(events: Vec<(u64, FileEvent)>) -> MidiFile {
 }
 
 fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
-    &file.tracks()[0].events
+    file.tracks()[0].events()
 }
 
 const DEFAULT_TEMPO: u32 = 50_000_000;
@@ -353,7 +353,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
         .collect();
     assert_eq!(notes, [(50, c), (100, a.0), (100, a.1), (100, b)]);
     // The end is the longest track's.
-    assert_eq!(clip.tracks()[0].end, Tick(100));
+    assert_eq!(clip.tracks()[0].end(), Tick(100));
 }
 
 #[test]
@@ -450,7 +450,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
         ]
     );
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
-    assert_eq!(clip.seconds_at(Beat(4.0)), Seconds(1.5));
+    assert_eq!(clip.seconds_at(Tick(4 * u64::from(TPQ))), Seconds(1.5));
 }
 
 #[test]
@@ -477,27 +477,23 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
 fn the_division_and_the_end_carry_over() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        SmfDivision::of(96),
+        SmfDivision::per_quarter(96),
         vec![
-            Track {
-                header: vec![],
-                header_end: Tick(0),
-                events: vec![(Tick(10), note(0, 60))],
-                end: Tick(400),
-            },
-            Track {
-                header: vec![],
-                header_end: Tick(0),
-                events: vec![(Tick(10), note(1, 60))],
-                end: Tick(250),
-            },
+            Track::new()
+                .push(Tick(10), note(0, 60))
+                .unwrap()
+                .ending_at(Tick(400)),
+            Track::new()
+                .push(Tick(10), note(1, 60))
+                .unwrap()
+                .ending_at(Tick(250)),
         ],
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
-    assert_eq!(clip.ticks_per_quarter().get(), 96);
-    assert_eq!(clip.tracks()[0].end, Tick(400));
-    assert!(clip.tracks()[0].header.is_empty());
+    assert_eq!(clip.ticks_per_quarter().unwrap().get(), 96);
+    assert_eq!(clip.tracks()[0].end(), Tick(400));
+    assert!(clip.tracks()[0].header().is_empty());
 }
 
 /// Each event with no UMP form, with its tick and reason, in clip order.
@@ -837,7 +833,7 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
 fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(100),
+        SmfDivision::per_quarter(100),
         vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
     )
     .unwrap();
@@ -853,13 +849,8 @@ fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
 fn a_tempo_does_not_move_past_the_end_of_the_clip() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(96),
-        vec![Track {
-            header: vec![],
-            header_end: Tick(0),
-            events: vec![(Tick(90), tempo_event(400_000))],
-            end: Tick(90),
-        }],
+        SmfDivision::per_quarter(96),
+        vec![Track::new().push(Tick(90), tempo_event(400_000)).unwrap()],
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
@@ -914,7 +905,7 @@ fn events_on_their_grids_are_not_moved() {
 fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
     MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(tpq),
+        SmfDivision::per_quarter(tpq),
         vec![track(events)],
     )
     .unwrap()
@@ -1311,7 +1302,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         .collect();
     assert_eq!(signatures, [pickup, bar]);
     // The pickup is one beat: the second bar begins a quarter note in.
-    assert_eq!(done.clip.beat_at(Tick(480)), Beat(1.0));
+    assert_eq!(done.clip.beat_at(Tick(480)), Some(Beat(1.0)));
 }
 
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of
