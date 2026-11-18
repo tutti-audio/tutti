@@ -274,3 +274,87 @@ fn exp_midpoint_and_fractional_power_meet_their_closed_forms() {
     let want = 2f64.powf(-2.5);
     assert!((got - want).abs() < 1e-16, "0.5^2.5: {got} vs {want}");
 }
+
+/// Every shape of law at both extremes of its parameter, for the lane tests.
+const LANE_LAWS: [Law; 14] = [
+    Law::Linear,
+    Law::Hold,
+    Law::PowerIn(Exponent::of(2.0)),
+    Law::PowerIn(Exponent::of(0.5)),
+    Law::PowerIn(Exponent::of(1.7)),
+    Law::PowerOut(Exponent::of(3.0)),
+    Law::PowerOut(Exponent::of(5.0)),
+    Law::PowerInOut(Exponent::of(2.0)),
+    Law::PowerInOut(Exponent::of(7.3)),
+    Law::Exp(Curvature::of(3.0)),
+    Law::Exp(Curvature::of(-2.5)),
+    Law::Exp(Curvature::of(64.0)),
+    Law::Exp(Curvature::of(-64.0)),
+    Law::Smootherstep,
+];
+
+const GRID: usize = 1024;
+
+fn grid() -> impl Iterator<Item = f32> {
+    (0..=GRID).map(|i| i as f32 / GRID as f32)
+}
+
+#[test]
+fn an_f32_lane_meets_the_closed_forms() {
+    assert_eq!(Law::Linear.eval_in(0.25_f32), 0.25);
+    assert_eq!(Law::PowerIn(Exponent::of(2.0)).eval_in(0.5_f32), 0.25);
+    assert_eq!(Law::PowerOut(Exponent::of(2.0)).eval_in(0.5_f32), 0.75);
+    assert_eq!(Law::Smootherstep.eval_in(0.5_f32), 0.5);
+}
+
+#[test]
+fn an_f32_lane_runs_from_0_to_1_for_every_law() {
+    for law in LANE_LAWS {
+        assert_eq!(law.eval_in(0.0_f32), 0.0, "{law:?} at 0");
+        assert_eq!(law.eval_in(1.0_f32), 1.0, "{law:?} at 1");
+    }
+}
+
+#[test]
+fn an_f32_lane_pins_nan_to_0_and_clamps_out_of_range() {
+    for law in LANE_LAWS {
+        assert_eq!(law.eval_in(f32::NAN), 0.0, "{law:?} at NaN");
+        assert_eq!(law.eval_in(-3.0_f32), 0.0, "{law:?} below 0");
+        assert_eq!(law.eval_in(f32::NEG_INFINITY), 0.0, "{law:?} at -inf");
+        assert_eq!(law.eval_in(7.0_f32), 1.0, "{law:?} above 1");
+        assert_eq!(law.eval_in(f32::INFINITY), 1.0, "{law:?} at inf");
+    }
+}
+
+#[test]
+fn an_f32_lane_is_monotone_within_0_and_1() {
+    for law in LANE_LAWS {
+        let mut prev = 0.0_f32;
+        for t in grid() {
+            let y = law.eval_in(t);
+            assert!((0.0..=1.0).contains(&y), "{law:?} at {t} left 0..=1: {y}");
+            assert!(y >= prev, "{law:?} fell at {t}: {y} < {prev}");
+            prev = y;
+        }
+    }
+}
+
+/// Each `f32` operation rounds to half an ulp and each `libm` function is
+/// within an ulp, and a law is a handful of them on values within `0..=1`, so
+/// the `f32` figure is within `BOUND` (8 ulps of 1.0) of the `f64` one over
+/// the grid; `Exp(±64)` is the widest case, its exponent argument `k·t` up to
+/// 64 being exact on this dyadic grid.
+#[test]
+fn an_f32_lane_is_within_8_ulps_of_the_f64_law() {
+    const BOUND: f64 = 8.0 * f32::EPSILON as f64;
+    for law in LANE_LAWS {
+        for t in grid() {
+            let wide = law.eval_in(f64::from(t));
+            let narrow = f64::from(law.eval_in(t));
+            assert!(
+                (narrow - wide).abs() <= BOUND,
+                "{law:?} at {t}: f32 {narrow} vs f64 {wide}"
+            );
+        }
+    }
+}

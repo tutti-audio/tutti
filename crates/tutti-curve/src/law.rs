@@ -1,4 +1,4 @@
-use tutti_units::Normalized;
+use tutti_units::{Normalized, Real, Unit};
 
 use crate::{Curvature, Exponent};
 
@@ -70,67 +70,116 @@ impl Law {
     /// position on `0..=1`, so an out-of-range or NaN progress is pinned where
     /// it is built (`Normalized::clamped`), never inside the law. The result
     /// is pinned onto `0..=1` once more, which trims the rounding overshoot of
-    /// the polynomial and exponential forms.
+    /// the polynomial and exponential forms. It is [`eval_in`](Self::eval_in)
+    /// at `f64`.
     #[inline]
     #[must_use]
     pub fn eval(self, t: Normalized) -> Normalized {
-        let t = t.get();
+        Normalized::clamped(self.eval_in(t.get()))
+    }
+
+    /// The law over data: a lane or an LFO sample at the graph's width.
+    ///
+    /// `t` is pinned onto `0..=1` (a NaN is 0) and so is the result, which
+    /// trims the rounding overshoot of the polynomial and exponential forms.
+    /// This is the one copy of the maths; [`eval`](Self::eval) is its `f64`
+    /// instantiation, and an `f32` lane computes in `f32` with no round trip
+    /// through `f64`.
+    ///
+    /// ```
+    /// use tutti_curve::{Exponent, Law};
+    ///
+    /// assert_eq!(Law::PowerIn(Exponent::of(2.0)).eval_in(0.5_f32), 0.25);
+    /// assert_eq!(Law::Linear.eval_in(f32::NAN), 0.0);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn eval_in<R: Real>(self, t: R) -> R {
+        let zero = R::ZERO;
+        let one = R::ONE;
+        let t = if t.is_nan() { zero } else { t.clamp(zero, one) };
         let g = match self {
             Self::Linear => t,
             Self::Hold => {
-                if t < 1.0 {
-                    0.0
+                if t < one {
+                    zero
                 } else {
-                    1.0
+                    one
                 }
             }
-            Self::PowerIn(p) => pow(t, p.get()),
-            Self::PowerOut(p) => 1.0 - pow(1.0 - t, p.get()),
+            Self::PowerIn(p) => pow(t, param(p.get())),
+            Self::PowerOut(p) => one - pow(one - t, param(p.get())),
             Self::PowerInOut(p) => {
-                let p = p.get();
+                let p: R = param(p.get());
+                let two = R::lit(2.0);
+                let half = R::lit(0.5);
                 // `2^(p-1) · t^p` is `(2t)^p / 2`, which keeps the integer
                 // exponents on multiplications.
-                if t < 0.5 {
-                    pow(2.0 * t, p) / 2.0
+                if t < half {
+                    pow(two * t, p) / two
                 } else {
-                    1.0 - pow(2.0 - 2.0 * t, p) / 2.0
+                    one - pow(two - two * t, p) / two
                 }
             }
-            Self::Smootherstep => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
+            Self::Smootherstep => t * t * t * (t * (t * R::lit(6.0) - R::lit(15.0)) + R::lit(10.0)),
             Self::Exp(k) => {
-                let k = k.get();
+                let k: R = param(k.get());
                 // `expm1` is accurate down to the smallest `k`; only 0 is `0 / 0`.
-                if k == 0.0 {
+                if k == zero {
                     t
                 } else {
-                    libm::expm1(k * t) / libm::expm1(k)
+                    (k * t).exp_m1() / k.exp_m1()
                 }
             }
         };
-        Normalized::clamped(g)
+        if g.is_nan() { zero } else { g.clamp(zero, one) }
     }
 }
 
-/// `x^p` for `x` in `[0, 1]`: the integer exponents up to 5 and the square
-/// root by IEEE-exact operations, anything else through `libm::pow`.
+/// A checked law parameter (an `Exponent` or `Curvature` raw) as a quantity, so it
+/// crosses into the lane's float with `R::from_unit`, saturating like any
+/// quantity. `from_raw` is the identity: the value was checked when the
+/// `Exponent` or `Curvature` was built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shape(f64);
+
+impl Unit for Shape {
+    type Raw = f64;
+    #[inline]
+    fn from_raw(v: f64) -> Self {
+        Self(v)
+    }
+    #[inline]
+    fn to_raw(self) -> f64 {
+        self.0
+    }
+}
+
 #[inline]
-fn pow(x: f64, p: f64) -> f64 {
-    if p == 1.0 {
+fn param<R: Real>(raw: f64) -> R {
+    R::from_unit(Shape(raw))
+}
+
+/// `x^p` for `x` in `[0, 1]`: the integer exponents up to 5 and the square
+/// root by IEEE-exact operations, anything else through `Real::powf`.
+#[inline]
+fn pow<R: Real>(x: R, p: R) -> R {
+    if p == R::lit(1.0) {
         x
-    } else if p == 2.0 {
+    } else if p == R::lit(2.0) {
         x * x
-    } else if p == 3.0 {
+    } else if p == R::lit(3.0) {
         x * x * x
-    } else if p == 4.0 {
+    } else if p == R::lit(4.0) {
         let x2 = x * x;
         x2 * x2
-    } else if p == 5.0 {
+    } else if p == R::lit(5.0) {
         let x2 = x * x;
         x2 * x2 * x
-    } else if p == 0.5 {
-        libm::sqrt(x)
+    } else if p == R::lit(0.5) {
+        x.sqrt()
     } else {
-        libm::pow(x, p)
+        x.powf(p)
     }
 }
 
