@@ -431,7 +431,7 @@ pub enum Error {
     /// enumeration or the device watch failed.
     #[cfg(feature = "midi-hardware")]
     #[error("MIDI hardware: {0}")]
-    MidiHardware(tutti_midi_hardware::Error),
+    MidiHardware(tutti_midi_hardware::MidiHardwareError),
 
     /// [`Session::instrument`](crate::Session::instrument) (or
     /// `add_instrument`) was given a node that cannot be played as an

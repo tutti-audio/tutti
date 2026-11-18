@@ -19,7 +19,7 @@ use tutti_ump::BlockDirection;
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
 use crate::block::RawBlock;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
 /// The sequencer's version for a protocol.
@@ -36,7 +36,7 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
     let name = spec.name().as_str();
     match super::client::open(name, blocking, version_of(spec.protocol())) {
         Ok(client) => Ok((client, spec.protocol())),
-        Err(Error::Os(tutti_alsa_ffi::Error::Call {
+        Err(MidiHardwareError::Os(tutti_alsa_ffi::Error::Call {
             operation: Operation::SetClientMidiVersion,
             source,
         })) if spec.protocol() == VirtualProtocol::Midi2 => {

@@ -44,7 +44,7 @@
 //!         DeviceEvent::Changed(device) => println!("changed: {}", device.name),
 //!     }
 //! }
-//! # Ok::<(), tutti_midi_hardware::Error>(())
+//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
 //! ```
 //!
 //! - **Linux:** a thread subscribes to the sequencer's `System:Announce` port, so a
@@ -65,7 +65,7 @@
 //!   that long. A [`DeviceId`](tutti_midi_device::DeviceId) is the device interface path the driver reports,
 //!   or the product name and ids when it reports none, with the direction.
 //! - **Linux without alsa-lib 1.2.10:** the list is empty and stays so, as
-//!   enumeration is; opening reports [`Error::Unsupported`].
+//!   enumeration is; opening reports [`MidiHardwareError::Unsupported`].
 //!
 //! A [`DeviceId`](tutti_midi_device::DeviceId) built on the UMP Product Instance Id is in the types, but no
 //! backend reads one yet: alsa-lib exposes none, and CoreMIDI's unique id stands in.
@@ -77,9 +77,9 @@
 //! [`VirtualSpec`] gives the name, the [`VirtualProtocol`] and the Function
 //! Blocks. A destination delivers into an [`InputProducerHandle`], so its events
 //! take the path a device input's do. Where the platform cannot publish what the
-//! spec asks, opening says so: [`Error::Unsupported`] where there is no backend
+//! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
 //! or the API has no virtual ports (Windows Multimedia),
-//! [`Error::VirtualBlocksUnsupported`] for Function Blocks on macOS, where an
+//! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS, where an
 //! endpoint carries a name and a protocol only. On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
@@ -129,7 +129,7 @@
 //! let mut output = session.connect_output("iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
 //! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
-//! # Ok::<(), tutti_midi_hardware::Error>(())
+//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
 //! ```
 //!
 //! ## Main types
@@ -150,7 +150,7 @@
 //!   (`MidiSession::poll` steps it, `MidiSession::stream` reads it).
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
 //!   platform's implementation.
-//! - [`Error`]: what opening, connecting and sending can fail with.
+//! - [`MidiHardwareError`]: what opening, connecting and sending can fail with.
 //!
 //! ## Matching by name picks a device you did not choose
 //!
@@ -160,7 +160,7 @@
 //! a disconnect the match is over the open inputs, and the lowest id among them is
 //! the one closed. Connect by [`DeviceId`](tutti_midi_device::DeviceId) when the choice matters, and
 //! [`MidiSession::disconnect_all_inputs`] closes every one. A name that matches
-//! nothing is [`Error::NoDeviceNamed`], listing the names it searched.
+//! nothing is [`MidiHardwareError::NoDeviceNamed`], listing the names it searched.
 //!
 //! ## Backends
 //!
@@ -169,7 +169,7 @@
 //! | macOS | CoreMIDI | `MIDIInputPortCreateWithProtocol` / `MIDISendEventList`. |
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
 //! | Windows | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and widened as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Windows MIDI Services (UMP-native) is not used. |
-//! | Elsewhere | stub | Enumerates nothing, [`Error::Unsupported`] on open. |
+//! | Elsewhere | stub | Enumerates nothing, [`MidiHardwareError::Unsupported`] on open. |
 //!
 //! [`MidiSession::open`] picks one, once, at construction; nothing downstream learns
 //! which OS it is talking to.
@@ -177,7 +177,7 @@
 //! **A build may have no backend, and it is not an error.** On Linux, the
 //! `tutti-alsa-ffi` build script probes alsa-lib via `pkg-config`; below 1.2.10 (or with no alsa-lib) it emits a
 //! `cargo:warning` naming the version and compiles the stub:
-//! zero endpoints, and [`Error::Unsupported`] naming the reason. So code using this
+//! zero endpoints, and [`MidiHardwareError::Unsupported`] naming the reason. So code using this
 //! crate compiles everywhere and simply enumerates nothing where there is no
 //! backend.
 //!
@@ -273,7 +273,7 @@ pub use devices::{
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-pub use error::{Error, NotFound, Result};
+pub use error::{MidiHardwareError, NotFound, Result};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{

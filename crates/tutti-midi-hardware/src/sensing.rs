@@ -20,6 +20,7 @@ use tutti_rt::{StopToken, ThreadHandle, spawn_named};
 use tutti_ump::{MidiGroup, Protocol, Ump};
 
 use crate::endpoints::DeviceOut;
+use crate::error::MidiHardwareError;
 
 /// How long dropping a heartbeat waits for its thread: the thread sleeps on
 /// its stop token, so it ends at once unless the sink is stuck in a send.
@@ -77,12 +78,16 @@ impl Heartbeat {
     ///
     /// # Errors
     ///
-    /// The OS's error when the thread cannot start.
-    pub(crate) fn start(sink: Arc<dyn DeviceOut>, protocol: Protocol) -> std::io::Result<Self> {
+    /// [`MidiHardwareError::Spawn`] when the thread cannot start.
+    pub(crate) fn start(sink: Arc<dyn DeviceOut>, protocol: Protocol) -> crate::Result<Self> {
         let pulse = Arc::new(Pulse::new(protocol, Instant::now()));
         let thread = spawn_named("tutti-midi-sense", None, {
             let pulse = Arc::clone(&pulse);
             move |stop| beat(&sink, &pulse, stop)
+        })
+        .map_err(|source| MidiHardwareError::Spawn {
+            thread: "tutti-midi-sense",
+            source,
         })?;
         Ok(Self {
             pulse,

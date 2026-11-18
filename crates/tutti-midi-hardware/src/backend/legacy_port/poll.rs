@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use tutti_midi_device::OsDevice;
 use tutti_rt::{ThreadHandle, spawn_named};
 
@@ -49,8 +49,8 @@ impl Drop for PollWatch {
 ///
 /// # Errors
 ///
-/// [`Error::MidiDevice`] if the thread cannot be spawned, or the sink was
-/// already seeded.
+/// [`MidiHardwareError::Spawn`] if the thread cannot be spawned, and
+/// [`MidiHardwareError::Seed`] if the sink was already seeded.
 pub(in crate::backend) fn start(
     sink: ChangeSink,
     snapshot: fn() -> Vec<OsDevice>,
@@ -58,9 +58,7 @@ pub(in crate::backend) fn start(
 ) -> Result<PollWatch> {
     let failures = sink.clone();
     let mut reporter = Reporter::new(sink);
-    reporter
-        .seed(snapshot())
-        .map_err(|e| Error::device_from("seed the MIDI device list", e))?;
+    reporter.seed(snapshot())?;
     let thread = spawn_named("tutti-devwatch", None, move |stop| {
         while !stop.wait(interval) {
             let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -72,7 +70,10 @@ pub(in crate::backend) fn start(
             }
         }
     })
-    .map_err(|e| Error::device_from("spawn the MIDI device watch", e))?;
+    .map_err(|source| MidiHardwareError::Spawn {
+        thread: "tutti-devwatch",
+        source,
+    })?;
     Ok(PollWatch {
         thread: Some(thread),
     })

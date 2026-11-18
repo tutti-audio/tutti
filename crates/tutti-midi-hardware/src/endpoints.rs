@@ -114,7 +114,7 @@ pub trait MidiEndpoints: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`Error::NotFound`](crate::Error::NotFound) when `id` names no current
+    /// [`MidiHardwareError::NotFound`](crate::MidiHardwareError::NotFound) when `id` names no current
     /// endpoint of this platform, or the platform error from opening the port.
     /// (The caller, `Devices::open_input`, has already refused an id that is not
     /// a present input.)
@@ -133,7 +133,7 @@ pub trait MidiEndpoints: Send + Sync {
     /// # Errors
     ///
     /// As [`open_input`](Self::open_input), plus
-    /// [`Error::Unsupported`](crate::Error::Unsupported) from the stub backend
+    /// [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported) from the stub backend
     /// on a platform with no backend.
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>>;
 }

@@ -29,7 +29,7 @@ impl InputConnection for WinMmInput {
 ///
 /// # Errors
 ///
-/// [`Error::Os`](crate::Error::Os) from the port's opening, such as
+/// [`MidiHardwareError::Os`] from the port's opening, such as
 /// [`MmResult::Allocated`](tutti_winmm_ffi::MmResult::Allocated) when another
 /// application holds it.
 pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {

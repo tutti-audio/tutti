@@ -31,7 +31,7 @@
 //!   take it.
 //! - **The device watch** lists again once a second.
 //! - **Virtual ports** do not exist in winmm: they are
-//!   [`Error::Unsupported`](crate::Error::Unsupported).
+//!   [`MidiHardwareError::Unsupported`].
 
 mod input;
 mod output;

@@ -48,7 +48,7 @@ use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::guard::Guard;
 use tutti_coremidi_ffi::{
     Operation, OsStatus, UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints,
@@ -245,7 +245,7 @@ impl CoreMidiEndpoints {
 
     fn client(&self) -> Result<&'static Client> {
         self.client.map_err(|status| {
-            Error::Os(tutti_coremidi_ffi::Error::call(
+            MidiHardwareError::Os(tutti_coremidi_ffi::Error::call(
                 Operation::CreateClient,
                 status,
             ))

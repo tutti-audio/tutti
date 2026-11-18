@@ -874,11 +874,8 @@ fn a_dead_device_watch_is_reported_once() {
             .collect::<Vec<_>>()
     };
     assert!(failed(&s.update()).is_empty());
-    fake.fail_watch("the sequencer went away");
-    assert_eq!(
-        failed(&s.update()),
-        ["MIDI port error: the sequencer went away"]
-    );
+    fake.fail_watch();
+    assert_eq!(failed(&s.update()), ["the sequencer descriptor failed"]);
     assert!(failed(&s.update()).is_empty(), "once");
 }
 

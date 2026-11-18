@@ -1,6 +1,6 @@
-//! The crate's [`Error`](enum@Error) and [`Result`].
+//! The crate's [`MidiHardwareError`] and [`Result`].
 //!
-//! One enum for every OS edge. [`Error::Os`] carries the platform's own FFI
+//! One enum for every OS edge. [`MidiHardwareError::Os`] carries the platform's own FFI
 //! error (the call that failed and the status it returned), because that pair
 //! is what makes a driver failure diagnosable — a bare string loses the code a
 //! caller may want to match on.
@@ -24,22 +24,36 @@ pub enum NotFound {
 /// What can go wrong opening or driving an OS MIDI endpoint.
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
-    /// A filesystem or descriptor error surfaced from `std::io`.
-    #[error("IO error")]
-    Io(#[from] std::io::Error),
-
-    /// Opening, configuring or connecting a port failed, with the backend's own
-    /// description and, when there was one, the error under it
-    /// ([`source`](std::error::Error::source)). Raised directly by the CoreMIDI
-    /// and ALSA backends; made with [`Error::port`] and [`Error::port_from`].
-    #[error("MIDI port error: {what}")]
-    MidiPort {
-        /// What failed, in words.
-        what: String,
-        /// The error under it, if the failure came from one.
+pub enum MidiHardwareError {
+    /// A thread could not start: the OS refused it.
+    #[error("cannot start the {thread} thread")]
+    Spawn {
+        /// The thread's name.
+        thread: &'static str,
+        /// The OS's refusal.
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: std::io::Error,
+    },
+
+    /// A system call outside the platform's MIDI API failed.
+    #[error("cannot {step}")]
+    Io {
+        /// What the call was for, as a verb phrase.
+        step: &'static str,
+        /// The OS's error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The sequencer's descriptor failed while the watch waited on it.
+    #[error("the sequencer descriptor failed")]
+    DescriptorBroken,
+
+    /// A thread ended before it reported that it was ready.
+    #[error("the {thread} thread ended before it was ready")]
+    ThreadEnded {
+        /// The thread's name.
+        thread: &'static str,
     },
 
     /// What was asked for is not there: a stale or foreign id.
@@ -68,18 +82,9 @@ pub enum Error {
         searched: Vec<String>,
     },
 
-    /// The named device could not be driven, with the backend's own
-    /// description and, when there was one, the error under it
-    /// ([`source`](std::error::Error::source)). Made with [`Error::device`]
-    /// and [`Error::device_from`].
-    #[error("MIDI device error: {what}")]
-    MidiDevice {
-        /// What failed, in words.
-        what: String,
-        /// The error under it, if the failure came from one.
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    /// The endpoint is already open: the OS lets one connection hold it.
+    #[error("MIDI endpoint {} is in use", .0.raw())]
+    InUse(tutti_midi_device::EndpointId),
 
     /// A call into the platform's MIDI API failed: ALSA's, CoreMIDI's or
     /// winmm's own error, with the call that failed and the status it
@@ -99,7 +104,7 @@ pub enum Error {
     },
 
     /// A backend seeded its device list twice, or after reporting a change.
-    #[error(transparent)]
+    #[error("a backend could not seed its device list")]
     Seed(#[from] crate::SeedError),
 
     /// No MIDI backend exists for this build.
@@ -144,52 +149,8 @@ pub(crate) fn chain(error: &dyn std::error::Error) -> String {
     text
 }
 
-impl Error {
-    /// A [`MidiPort`](Self::MidiPort) error with no error under it.
-    #[must_use]
-    pub fn port(what: impl Into<String>) -> Self {
-        Self::MidiPort {
-            what: what.into(),
-            source: None,
-        }
-    }
-
-    /// A [`MidiPort`](Self::MidiPort) error caused by `source`.
-    #[must_use]
-    pub fn port_from(
-        what: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::MidiPort {
-            what: what.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// A [`MidiDevice`](Self::MidiDevice) error with no error under it.
-    #[must_use]
-    pub fn device(what: impl Into<String>) -> Self {
-        Self::MidiDevice {
-            what: what.into(),
-            source: None,
-        }
-    }
-
-    /// A [`MidiDevice`](Self::MidiDevice) error caused by `source`.
-    #[must_use]
-    pub fn device_from(
-        what: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> Self {
-        Self::MidiDevice {
-            what: what.into(),
-            source: Some(Box::new(source)),
-        }
-    }
-}
-
-/// The crate's result type: [`Error`](enum@Error) on the failure side.
-pub type Result<T> = std::result::Result<T, Error>;
+/// The crate's result type: [`MidiHardwareError`] on the failure side.
+pub type Result<T> = std::result::Result<T, MidiHardwareError>;
 
 #[cfg(test)]
 mod tests;

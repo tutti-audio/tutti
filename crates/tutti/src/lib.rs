@@ -690,7 +690,7 @@ pub mod midi {
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::Error as HardwareError;
+    pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, Reporter,
