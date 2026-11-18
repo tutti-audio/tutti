@@ -118,7 +118,7 @@ use crate::stage::OutputStage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tutti_buffers::{FoldError, InterleavedMut, Planes};
+use tutti_buffers::{FoldError, Interleaved, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
 use tutti_rt::{AudioThreadCell, Reader, RtScope};
 #[cfg(doc)]
@@ -687,6 +687,7 @@ impl Engine {
         // on Windows.
         let start = Instant::now();
         let out_ch = output.channels();
+        let output_layout = output.layout();
         let frames = output.frames().get();
         let output = output.samples_mut();
         // A free in a block is a debug panic: the hand-over of the heard tap
@@ -705,7 +706,7 @@ impl Engine {
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
             output.fill(0.0);
-            self.hearing.borrow_mut().write(output, out_ch);
+            self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
                 load.record_silenced();
             }
@@ -752,9 +753,7 @@ impl Engine {
                 stage: &stage,
             };
             unplaced |= !g.render(output, lent, out_ch, done, len, &t, &ahead.changes);
-            self.hearing
-                .borrow_mut()
-                .write(&output[done * out_ch..(done + len) * out_ch], out_ch);
+            self.heard(output, output_layout, done, len);
             g.dates.advance(len, rate);
             done += len;
         }
@@ -795,11 +794,22 @@ impl Engine {
         self.process_stamped(output, Some(os_ns));
     }
 
+    /// Writes frames `done..done + len` of the rendered `output` to the heard
+    /// tap. Audio thread.
+    #[inline]
+    fn heard(&self, output: &[f32], layout: ChannelLayout, done: usize, len: usize) {
+        if let Ok(block) = Interleaved::new(output, layout) {
+            let block = block.slice(Samples(done)..Samples(done + len));
+            self.hearing.borrow_mut().write(block);
+        }
+    }
+
     #[inline]
     fn process_stamped(&self, output: &mut InterleavedMut<'_>, stamp: Option<i64>) {
         // Timed for the load meter (`load_meter`): see `process_segment`.
         let start = Instant::now();
         let out_ch = output.channels();
+        let output_layout = output.layout();
         let frames = output.frames().get();
         let output = output.samples_mut();
         // A free in a block is a debug panic: the hand-over of the heard tap
@@ -819,7 +829,7 @@ impl Engine {
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
             output.fill(0.0);
-            self.hearing.borrow_mut().write(output, out_ch);
+            self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
                 load.record_silenced();
             }
@@ -868,9 +878,7 @@ impl Engine {
             let mut fader = self.fader.borrow_mut();
             fader.fade = fade_frames(rate);
             fader.apply(&walk.gain, frame0, output, out_ch, done, len);
-            self.hearing
-                .borrow_mut()
-                .write(&output[done * out_ch..(done + len) * out_ch], out_ch);
+            self.heard(output, output_layout, done, len);
             g.dates.advance(len, rate);
             done += len;
         }
@@ -1752,7 +1760,11 @@ mod tests {
             );
         }
         let mut got = vec![f32::NAN; 96 * 2];
-        assert_eq!(tap.pop_into(&mut got), Samples(96));
+        assert_eq!(
+            tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+                .unwrap(),
+            Samples(96)
+        );
         assert!(got.iter().all(|&x| x == 0.0), "silence, whole frames");
         assert_eq!(tap.take_lost(), Samples(0));
     }

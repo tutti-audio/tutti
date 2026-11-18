@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tutti_buffers::InterleavedMut;
 
 use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};
 use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
@@ -52,7 +53,12 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     stream.render_block(64).expect("the stream is open");
     let mut frames = 0;
     let mut one = [0.0f32; 2];
-    while tap.pop_into(&mut one).get() == 1 {
+    while tap
+        .pop_into(InterleavedMut::new(&mut one, tap.layout()).unwrap())
+        .unwrap()
+        .get()
+        == 1
+    {
         assert_eq!(one, [0.5, 0.0]);
         frames += 1;
     }

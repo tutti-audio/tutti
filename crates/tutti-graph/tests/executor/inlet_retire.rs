@@ -3,6 +3,7 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
+use tutti_buffers::Interleaved;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
 use tutti_graph::{OutPort, Source};
@@ -42,7 +43,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     outputs(&mut ed);
     ed.commit().expect("compiles");
     exec.apply_pending();
-    w1.push_interleaved(&[0.5; 128]);
+    w1.push_interleaved(Interleaved::new(&[0.5; 128], w1.layout()).unwrap());
     render(&mut exec, 2);
     ed.collect();
 
@@ -55,7 +56,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
         ed.replace(KEY, next, fade).expect("replaces");
         ed.commit().expect("compiles");
         exec.apply_pending();
-        w.push_interleaved(&[0.25; 128]);
+        w.push_interleaved(Interleaved::new(&[0.25; 128], w.layout()).unwrap());
         render(&mut exec, 4);
         ed.collect();
     }

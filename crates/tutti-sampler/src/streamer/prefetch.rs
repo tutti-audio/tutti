@@ -48,12 +48,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_buffers::{Interleaved, Wave};
+use tutti_buffers::{Interleaved, InterleavedMut, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
-#[cfg(codec)]
-use tutti_buffers::InterleavedMut;
 #[cfg(codec)]
 use tutti_codec::FileIn;
 
@@ -389,10 +387,14 @@ impl RegionOut {
     /// Fill `out` with what straight positions `pos..` hold under `mapping`,
     /// reading the file. `false` when any read of the file failed (a decode
     /// fault: the frames before it are kept, the rest is silence).
-    pub(crate) fn fill_with(&mut self, mapping: &Mapping, pos: u64, out: &mut [f32]) -> bool {
-        let ch = usize::from(self.writer.layout().count());
+    pub(crate) fn fill_with(
+        &mut self,
+        mapping: &Mapping,
+        pos: u64,
+        out: InterleavedMut<'_>,
+    ) -> bool {
         let mut read_ok = true;
-        mapping.fill(pos, out, ch, &mut |at, run| {
+        mapping.fill(pos, out, &mut |at, run| {
             read_ok &= self.read_file(at, run);
         });
         read_ok

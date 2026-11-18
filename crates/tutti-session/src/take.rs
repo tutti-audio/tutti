@@ -49,7 +49,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
-use tutti_buffers::{Interleaved, Sink, SinkFailed};
+use tutti_buffers::{Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
@@ -933,9 +933,8 @@ struct Pump {
 impl Pump {
     fn run(mut self, landings: &Landings<Started>) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
-        let width = usize::from(layout.count());
-        let mut scratch = vec![0.0f32; PASS_FRAMES * width];
-        let silence = vec![0.0f32; PASS_FRAMES * width];
+        let mut scratch = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
+        let silence = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
         // A whole number of frames at the tap's width, so the view builds; a
         // zero-width tap has nothing to take.
         let Ok(silence) = Interleaved::new(&silence, layout) else {
@@ -964,7 +963,18 @@ impl Pump {
                 continue;
             }
             let first = self.reader.next_frame();
-            let popped = self.reader.pop_into(&mut scratch[..run * width]).get();
+            // `run` whole frames at the tap's width, so the view builds.
+            let Ok(window) =
+                InterleavedMut::new(&mut scratch[..layout.interleaved_len(Samples(run))], layout)
+            else {
+                failed = true;
+                break 'pump;
+            };
+            let Ok(popped) = self.reader.pop_into(window) else {
+                failed = true;
+                break 'pump;
+            };
+            let popped = popped.get();
             let past = first + Samples(popped);
             // The window of this pass: [lo, hi).
             let lo = first.max(self.window.start);
@@ -992,7 +1002,9 @@ impl Pump {
                 let from = lo.since(first).map_or(0, Samples::get);
                 let to = hi.since(first).map_or(0, Samples::get);
                 // `popped` whole frames at the tap's width, so the view builds.
-                let Ok(popped_view) = Interleaved::new(&scratch[..popped * width], layout) else {
+                let Ok(popped_view) =
+                    Interleaved::new(&scratch[..layout.interleaved_len(Samples(popped))], layout)
+                else {
                     failed = true;
                     break 'pump;
                 };
@@ -1132,9 +1144,9 @@ mod tests {
     fn a_lost_gap_is_silence_in_place_and_counted() {
         let (reader, mut writer) = TapReader::pair(1, Samples(4096));
         let ramp = |from: usize, to: usize| (from..to).map(|i| i as f32 + 1.0).collect::<Vec<_>>();
-        writer.push_interleaved(&ramp(0, 100));
+        writer.push_interleaved(Interleaved::new(&ramp(0, 100), writer.layout()).unwrap());
         writer.skip(50);
-        writer.push_interleaved(&ramp(150, 250));
+        writer.push_interleaved(Interleaved::new(&ramp(150, 250), writer.layout()).unwrap());
 
         let kept = Arc::new(Mutex::new(Vec::new()));
         let map = Arc::new(TempoMap::constant(Bpm::of(120.0)).unwrap());

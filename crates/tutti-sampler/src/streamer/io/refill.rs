@@ -22,7 +22,9 @@ use super::super::prefetch::{HISTORY_FRAMES, RegionOut};
 use super::super::record::Record;
 use rayon::prelude::*;
 use std::sync::Arc;
+use tutti_buffers::InterleavedMut;
 use tutti_rt::MAX_POS_RING_POSITION;
+use tutti_types::Samples;
 
 /// The fraction of a ring ahead of its reader below which the streamer refills
 /// it, and at which a stream counts as primed and healthy.
@@ -257,11 +259,13 @@ fn refill_one(
     let chunk = varifill_chunk(fill, base_chunk_size, read_rate, speed);
     let n = (chunk as u64).min(room) as usize;
     let (_, to) = writer.window();
-    let ch = writer.channels().count() as usize;
+    let layout = writer.channels();
     buffer.clear();
-    buffer.resize(n * ch, 0.0);
+    buffer.resize(layout.interleaved_len(Samples(n)), 0.0);
     let mapping = writer.content().current.clone();
-    let read_ok = writer.fill_with(&mapping, to, buffer);
+    // The buffer is whole frames of the ring's width, so the view is built.
+    let read_ok = InterleavedMut::new(buffer.as_mut_slice(), layout)
+        .is_ok_and(|view| writer.fill_with(&mapping, to, view));
     writer.push_interleaved(buffer);
     Refilled {
         read_ok,

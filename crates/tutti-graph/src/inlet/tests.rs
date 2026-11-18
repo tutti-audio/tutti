@@ -3,6 +3,7 @@ use crate::contract::{drive_input, prepared};
 use crate::event::{EventWriter, SortedEvents};
 use crate::node::{ConstantMask, Env, InPlaceMask, SilenceMask};
 use crate::{PlayClock, TransportChanges, TransportPosition};
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 use tutti_types::{Frame, SampleRate};
@@ -11,7 +12,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 fn ring_with(frames: &[[f32; 2]]) -> (InletNode, TapWriter) {
     let (node, mut writer) = InletNode::pair(ChannelLayout::STEREO, Samples(64));
-    writer.push_interleaved(frames.as_flattened());
+    writer.push_interleaved(Interleaved::new(frames.as_flattened(), writer.layout()).unwrap());
     (node, writer)
 }
 
@@ -87,10 +88,14 @@ fn reset_does_not_consume_the_ring() {
 fn a_block_reads_across_the_ring_wrap() {
     let (node, mut prod) = InletNode::pair(ChannelLayout::STEREO, Samples(4));
     let mut node = prepared_node(node);
-    prod.push_interleaved(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0]);
+    prod.push_interleaved(
+        Interleaved::new(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0], prod.layout()).unwrap(),
+    );
     assert_eq!(block(&mut node, 3)[0], [1.0, 2.0, 3.0]);
     // Three more: the fourth slot, then the first two, wrapped.
-    prod.push_interleaved(&[4.0, -4.0, 5.0, -5.0, 6.0, -6.0]);
+    prod.push_interleaved(
+        Interleaved::new(&[4.0, -4.0, 5.0, -5.0, 6.0, -6.0], prod.layout()).unwrap(),
+    );
     let out = block(&mut node, 5);
     assert_eq!(out[0], [4.0, 5.0, 6.0, 0.0, 0.0]);
     assert_eq!(out[1], [-4.0, -5.0, -6.0, 0.0, 0.0]);
@@ -147,10 +152,16 @@ fn the_inlet_refuses_to_fork() {
 #[test]
 fn a_ring_of_six_is_six_outputs_in_the_order_pushed() {
     let (node, mut writer) = InletNode::pair(ChannelLayout::from(6u16), Samples(64));
-    writer.push_interleaved(&[
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, //
-        -1.0, -2.0, -3.0, -4.0, -5.0, -6.0,
-    ]);
+    writer.push_interleaved(
+        Interleaved::new(
+            &[
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, //
+                -1.0, -2.0, -3.0, -4.0, -5.0, -6.0,
+            ],
+            writer.layout(),
+        )
+        .unwrap(),
+    );
     assert_eq!(node.shape().audio_out(), ChannelLayout::from(6u16));
     let mut node = prepared_node(node);
     let out = block(&mut node, 3);
@@ -167,7 +178,13 @@ fn a_ring_of_six_is_six_outputs_in_the_order_pushed() {
 #[test]
 fn a_full_ring_refuses_whole_frames() {
     let (node, mut writer) = InletNode::pair(ChannelLayout::from(3u16), Samples(2));
-    writer.push_interleaved(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    writer.push_interleaved(
+        Interleaved::new(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+            writer.layout(),
+        )
+        .unwrap(),
+    );
     let mut node = prepared_node(node);
     let out = block(&mut node, 4);
     assert_eq!(out[0], [1.0, 4.0, 0.0, 0.0]);

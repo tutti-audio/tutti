@@ -27,6 +27,8 @@ use tutti_types::{
     Amplitude, Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth,
 };
 
+use crate::delay::finite_or;
+use crate::reverb::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, pre_delay_frames,
@@ -108,7 +110,7 @@ impl FdnControls {
         decay: [Seconds(2.0), Seconds(2.4), Seconds(1.2)],
         size: Mix(0.5),
         diffusion: Mix(0.8),
-        pre_delay: Seconds(0.0),
+        pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.3),
         rate: Hz(0.5),
         width: StereoWidth::NATURAL,
@@ -208,8 +210,7 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     else {
         return a;
     };
-    let pole = crossover
-        .map(|f| libm::exp(-std::f64::consts::TAU * f64::from(f.get()) / rate.get()) as f32);
+    let pole = crossover.map(|f| cutoff_pole(f, rate) as f32);
     let [low, mid, high] =
         crate::reverb::fdn::bank::rescale_bands([low.get(), mid.get(), high.get()], pole);
     Absorption::Bands {
@@ -218,11 +219,6 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
         high: Amplitude(high),
         crossover,
     }
-}
-
-/// `v` if finite, else `default`.
-fn finite(v: f32, default: f32) -> f32 {
-    if v.is_finite() { v } else { default }
 }
 
 /// `v` if finite, else `default`, exactly: a time is not narrowed.
@@ -252,12 +248,12 @@ impl FdnLayout {
         } else {
             rt60
         };
-        let size = finite(c.size.get(), d.size.get()).clamp(0.0, 1.0);
-        let diffusion = finite(c.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
-        let pre = finite_secs(c.pre_delay, Seconds(0.0)).clamp(Seconds(0.0), MAX_PRE_DELAY);
-        let depth = finite(c.modulation.get(), 0.0).abs().min(1.0);
-        let mod_rate = finite(c.rate.get(), d.rate.get()).clamp(RATES.0, RATES.1);
-        let width = finite(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);
+        let size = finite_or(c.size.get(), d.size.get()).clamp(0.0, 1.0);
+        let diffusion = finite_or(c.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
+        let pre = finite_secs(c.pre_delay, Seconds::ZERO).clamp(Seconds::ZERO, MAX_PRE_DELAY);
+        let depth = finite_or(c.modulation.get(), 0.0).abs().min(1.0);
+        let mod_rate = finite_or(c.rate.get(), d.rate.get()).clamp(RATES.0, RATES.1);
+        let width = finite_or(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);
         let wet = {
             let w = c.wet;
             if w.get().is_nan() {

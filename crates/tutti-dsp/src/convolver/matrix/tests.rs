@@ -79,8 +79,8 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
             })
             .collect();
         let x: Vec<Vec<f32>> = (0..ni).map(|c| noise(7 + u32::from(c), 900)).collect();
-        let mut m = MatrixConvolver::new(layout(ni), layout(no), &refs(&irs), 32).unwrap();
-        let want = definition(&irs, &x, usize::from(no), m.latency());
+        let mut m = MatrixConvolver::new(layout(ni), layout(no), &refs(&irs), Samples(32)).unwrap();
+        let want = definition(&irs, &x, usize::from(no), m.latency().get());
         let got = render(&mut m, &x, &[64]);
         for (o, (g, w)) in got.iter().zip(&want).enumerate() {
             for (n, (&g, &w)) in g.iter().zip(w).enumerate() {
@@ -99,8 +99,8 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
 #[test]
 fn an_impulse_on_an_input_is_each_outputs_path_response() {
     let irs = [tap(3, 0.5), tap(7, -0.25), tap(11, 0.75), tap(5, 0.125)];
-    let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), 16).unwrap();
-    let lat = m.latency();
+    let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
+    let lat = m.latency().get();
     for j in 0..2 {
         m.reset();
         let mut x = vec![vec![0.0f32; 128]; 2];
@@ -125,7 +125,7 @@ fn both_inputs_together_are_the_sum_of_each_alone() {
     let silent = vec![0.0f32; 300];
     let run = |x: [&Vec<f32>; 2]| {
         let x = [x[0].clone(), x[1].clone()];
-        let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), 16).unwrap();
+        let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
         render(&mut m, &x, &[50])
     };
     let both = run([&a, &b]);
@@ -146,10 +146,10 @@ fn any_call_length_gives_the_same_bits() {
         .map(|p| noise(30 + p, 2500 + 100 * p as usize))
         .collect();
     let x: Vec<Vec<f32>> = (0..3).map(|c| noise(9 + c, 1500)).collect();
-    let mut whole = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), 32).unwrap();
+    let mut whole = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut whole, &x, &[1500]);
     for lens in [&[1usize][..], &[7, 61, 64, 65], &[31, 33], &[300, 5]] {
-        let mut m = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), 32).unwrap();
+        let mut m = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
         let got = render(&mut m, &x, lens);
         assert!(
             got.iter()
@@ -167,7 +167,7 @@ fn any_call_length_gives_the_same_bits() {
 fn reset_and_fresh_equal_a_new_matrix() {
     let irs: Vec<Vec<f32>> = (0..4).map(|p| noise(60 + p, 700)).collect();
     let x: Vec<Vec<f32>> = (0..2).map(|c| noise(3 + c, 600)).collect();
-    let make = || MatrixConvolver::new(layout(2), layout(2), &refs(&irs), 32).unwrap();
+    let make = || MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut make(), &x, &[64]);
     let mut used = make();
     render(&mut used, &[noise(80, 500), noise(81, 500)], &[64]);
@@ -183,14 +183,14 @@ fn reset_and_fresh_equal_a_new_matrix() {
 fn f64_views_render_the_f32_result() {
     let irs: Vec<Vec<f32>> = (0..4).map(|p| noise(5 + p, 200)).collect();
     let x: Vec<Vec<f32>> = (0..2).map(|c| noise(2 + c, 400)).collect();
-    let mut m32 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), 32).unwrap();
+    let mut m32 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut m32, &x, &[400]);
     let x64: Vec<Vec<f64>> = x
         .iter()
         .map(|c| c.iter().map(|&v| f64::from(v)).collect())
         .collect();
     let mut out = vec![vec![0.0f64; 400]; 2];
-    let mut m64 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), 32).unwrap();
+    let mut m64 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     m64.process(
         Planes::from_vecs(&x64).unwrap(),
         PlanesMut::from_vecs(&mut out).unwrap(),
@@ -207,7 +207,7 @@ fn f64_views_render_the_f32_result() {
 fn a_bad_shape_is_refused_by_name() {
     let one = [1.0f32];
     assert_eq!(
-        MatrixConvolver::new::<f32>(ChannelLayout::EMPTY, layout(2), &[], 16).err(),
+        MatrixConvolver::new::<f32>(ChannelLayout::EMPTY, layout(2), &[], Samples(16)).err(),
         Some(MatrixConvolverError::NoChannels)
     );
     assert_eq!(
@@ -215,7 +215,7 @@ fn a_bad_shape_is_refused_by_name() {
             layout(2),
             layout(3),
             &[Mono::new(&one), Mono::new(&one)],
-            16
+            Samples(16)
         )
         .err(),
         Some(MatrixConvolverError::IrCount {
