@@ -44,9 +44,21 @@ mod tests {
     /// The most a test waits for an event: a guard against a hang.
     const HANG_GUARD: Duration = Duration::from_secs(600);
 
-    /// **The end of the host runs the function**: a child is watched, killed,
-    /// and its end reaches the function. The wait outlasts the test harness's
-    /// limit, so a watch that never wakes fails.
+    /// **The OS wakes a watch on a running process at its end.** The watch is
+    /// registered before the process is killed, so the wake is the OS's and not
+    /// a look afterwards: it outlasts the test harness's limit if it never comes.
+    #[test]
+    fn the_os_wakes_a_watch_on_a_running_process_at_its_end() {
+        let mut child = Command::new("sleep").arg("600").spawn().expect("sleep");
+        let watch = Imp::of_pid(child.id()).expect("a running process can be watched");
+        child.kill().expect("kill");
+        assert!(watch.wait_ended(), "its end wakes the watch");
+        child.wait().expect("reaped");
+    }
+
+    /// **The end of the host runs the function.** The child is reaped, so the
+    /// function runs whether the thread registered its watch before the end or
+    /// found the process gone.
     #[test]
     fn the_end_of_the_host_runs_the_function() {
         let mut child = Command::new("sleep").arg("600").spawn().expect("sleep");
@@ -55,8 +67,8 @@ mod tests {
             .expect("the watch starts");
 
         child.kill().expect("kill");
-        ended.recv_timeout(HANG_GUARD).expect("its end is learned");
         child.wait().expect("reaped");
+        ended.recv_timeout(HANG_GUARD).expect("its end is learned");
     }
 
     /// **A host that ended before the watch began runs the function too.**
