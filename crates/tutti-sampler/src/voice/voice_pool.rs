@@ -581,7 +581,7 @@ fn a_stretched_placed_voice_holds_its_pitch_across_blocks() {
     const BLOCK: usize = 64;
     const BLOCKS: usize = 750;
 
-    for factor in [0.5f32, 1.5, 2.0] {
+    for factor in [0.5f64, 1.5, 2.0] {
         let (mut pool, handle) = VoicePool::new().with_handle();
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
@@ -708,7 +708,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
     // (`Ring::play`, what the streamer fills ahead of), so this measures
     // where the reader actually read rather than what anything claims it
     // should have.
-    let consumed = |factor: f32| -> u64 {
+    let consumed = |factor: f64| -> u64 {
         let (mut pool, handle) = VoicePool::new().with_handle();
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 

@@ -23,7 +23,7 @@
 //! streamer follows it, so there is nothing to request and nothing to flush.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_types::{AtomicF32, AtomicF64, Param64};
+use tutti_types::{AtomicF64, Param64};
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SrcRatio};
 
 /// A stream's scalar controls and counts: see the module docs for who writes
@@ -43,7 +43,7 @@ pub struct Cells {
 #[repr(align(64))]
 #[derive(Debug)]
 struct PlaybackParams {
-    speed: AtomicF32,
+    speed: Param64<PlaybackRate>,
     /// file_sample_rate / session_sample_rate. 1.0 = no conversion.
     ///
     /// A [`Param64`]: [`SrcRatio`] is `f64`, so the cell keeps the bits a
@@ -64,8 +64,8 @@ struct PlaybackParams {
     /// behind the streamer's `SharedReader`. This is the cell both already
     /// share, and it is where the other two rate factors compose.
     ///
-    /// A [`Param64`], not an `AtomicF32` like its neighbours: [`ReadRate`] is
-    /// `f64`, and why the width matters is stated on [`Param64`].
+    /// A [`Param64`]: [`ReadRate`] is `f64`, and why the width matters is stated
+    /// on [`Param64`].
     stretch_rate: Param64<ReadRate>,
 }
 
@@ -89,7 +89,7 @@ impl Cells {
     pub fn new() -> Self {
         Self {
             playback: PlaybackParams {
-                speed: AtomicF32::new(1.0),
+                speed: Param64::new(PlaybackRate::UNITY),
                 src_ratio: Param64::new(SrcRatio::UNITY),
                 gain: AtomicF64::new(1.0),
                 stretch_rate: Param64::new(ReadRate::UNITY),
@@ -119,18 +119,18 @@ impl Cells {
     /// The current varispeed. [`PlaybackRate::UNITY`] is normal speed.
     #[inline]
     pub fn speed(&self) -> PlaybackRate {
-        PlaybackRate::new(self.playback.speed.load(Ordering::Acquire))
+        self.playback.speed.load()
     }
 
     /// Publish a new varispeed.
     ///
-    /// Takes the already-bounded [`PlaybackRate`] rather than a raw `f32` so the
+    /// Takes the already-bounded [`PlaybackRate`] rather than a raw `f64` so the
     /// range is enforced where the value is *built*. A clamp applied here
     /// instead would bind only this tier — the in-memory sampler never calls
     /// this setter, so the same command would produce different audio depending
     /// on which tier happened to be playing.
     pub fn set_speed(&self, speed: PlaybackRate) {
-        self.playback.speed.store(speed.get(), Ordering::Release);
+        self.playback.speed.store(speed);
     }
 
     /// The voice's linear output gain.
@@ -230,37 +230,16 @@ impl Cells {
 mod tests {
     use super::*;
 
-    /// The stretch rate survives the cell bit-for-bit.
-    ///
-    /// Narrowing it through an `AtomicF32` would make every load return a value
-    /// the control thread never wrote. That matters here and not for the
-    /// neighbouring `speed`/`src_ratio` cells because this is the term a disk
-    /// voice accumulates into its read position once per sample: the error does
-    /// not average out, it integrates.
-    ///
-    /// The magnitude is modest — the f32 round-trip costs ~3e-8 relative, so a
-    /// triplet stretch drifts about 0.03 frames per minute and 1.7 frames per
-    /// hour at 48 kHz. Inaudible in a pop song, a real seek offset in a long
-    /// installation piece, and free to avoid.
+    /// The stretch rate survives the cell bit-for-bit: the term a disk voice
+    /// accumulates into its read position once per sample, where an error in
+    /// the stored rate integrates.
     #[test]
-    fn the_stretch_rate_cell_does_not_narrow_what_it_is_given() {
+    fn the_stretch_rate_cell_returns_what_it_is_given() {
         let state = Cells::new();
-        // Not representable in f32 — 1/3 at f64 width, the ratio a triplet
-        // stretch actually produces.
+        // 1/3, the ratio a triplet stretch produces.
         let rate = ReadRate::new(1.0 / 3.0);
         state.set_stretch_rate(rate);
         assert_eq!(state.stretch_rate(), rate);
-
-        // An hour at 48 kHz: the stored rate still advances the read position
-        // exactly, where the narrowed one is over a frame out.
-        let frames = tutti_units::Samples(48_000 * 3600);
-        let exact = rate.advance(frames);
-        assert_eq!(state.stretch_rate().advance(frames), exact);
-        let narrowed = ReadRate::new(f64::from(rate.get() as f32)).advance(frames);
-        assert!(
-            (narrowed.get() - exact.get()).abs() > 1.0,
-            "expected the f32 round-trip to cost more than a frame over an hour"
-        );
     }
 
     #[test]

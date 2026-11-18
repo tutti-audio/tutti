@@ -901,7 +901,7 @@ mod tests {
     fn both_tier_splits_agree_on_the_same_position() {
         let session = 44_100.0;
         for (file_rate, speed) in [
-            (44_100.0f64, 1.0f32),
+            (44_100.0f64, 1.0f64),
             (48_000.0, 1.0),
             (48_000.0, 0.5),
             (22_050.0, 2.0),
@@ -933,7 +933,7 @@ mod tests {
             .expect("inside the window");
 
             // Beat 4 at 120 BPM is 2 seconds.
-            let expected = 2.0 * file_rate * speed as f64;
+            let expected = 2.0 * file_rate * speed;
             assert!(
                 (memory.get() - expected).abs() < 1.0,
                 "memory split at {file_rate} Hz x{speed}: want ~{expected}, got {}",

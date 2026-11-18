@@ -331,7 +331,7 @@ fn a_one_to_one_feed_stays_bounded_and_audible_at_every_stretch() {
     // frames share no samples and there is no phase continuity to
     // reconstruct from; the output ripples between 0.003 and 0.60 rather
     // than holding a steady level. That is geometry, not a regression.
-    for factor in [0.5f32, 1.5, 2.0, 4.0] {
+    for factor in [0.5f64, 1.5, 2.0, 4.0] {
         let mut u = Unit::with_fft_size_and_channels(SampleRate::SR_44K1, FftSize::N1024, 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
         assert!(u.is_processing(), "factor {factor} should not bypass");
@@ -400,7 +400,7 @@ fn the_intake_loop_is_bounded_by_the_pitch_clamp() {
     u.set_pitch_cents(Cents::new(12_000.0));
     assert_eq!(u.pitch_cents(), MAX_PITCH);
     assert!(
-        u.intake_rate() <= 4.0 + 1e-6,
+        u.intake_rate() <= 4.0 * (1.0 + 4.0 * f64::EPSILON),
         "intake rate {} would run the per-tick loop more than 4 times",
         u.intake_rate()
     );
@@ -420,9 +420,8 @@ fn the_intake_loop_is_bounded_by_the_pitch_clamp() {
 fn a_degenerate_factor_or_transposition_never_reaches_the_hops() {
     let u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
     let (_, synthesis) = u.hops();
-    let longest = (synthesis as f64
-        / (f64::from(StretchFactor::MIN.get()) * MIN_PITCH.to_pitch_ratio()))
-    .round() as usize;
+    let longest = (synthesis as f64 / (StretchFactor::MIN.get() * MIN_PITCH.to_pitch_ratio()))
+        .round() as usize;
     let bad = [
         0.0,
         -0.0,
@@ -435,8 +434,7 @@ fn a_degenerate_factor_or_transposition_never_reaches_the_hops() {
     for stretch in bad {
         for pitch in bad {
             let mut u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
-            // The stretch factor is an `f32` control.
-            u.set_stretch_factor(StretchFactor::new(stretch as f32));
+            u.set_stretch_factor(StretchFactor::new(stretch));
             u.set_pitch_cents(Cents::new(pitch));
             let f = u.stretch_factor().get();
             assert!(
@@ -471,7 +469,7 @@ fn the_callers_read_rate_is_bounded_by_the_stretch_clamp() {
 
     u.set_stretch_factor(StretchFactor::new(0.001));
     assert_eq!(u.stretch_factor(), StretchFactor::MIN);
-    assert!(u.input_rate().get() <= 4.0 + 1e-6);
+    assert!(u.input_rate().get() <= 4.0 * (1.0 + 4.0 * f64::EPSILON));
 
     u.set_stretch_factor(StretchFactor::new(100.0));
     assert_eq!(u.stretch_factor(), StretchFactor::MAX);
@@ -514,8 +512,9 @@ fn a_clone_is_a_fresh_filter_on_the_shared_tables() {
     let c = u.clone();
     assert_eq!(c.width, ChannelLayout::from(6u16), "the width carries");
     assert_eq!(c.ch.vocoders.len(), 6, "one vocoder per channel");
-    assert!(
-        (c.stretch_factor().get() - 1.5).abs() < 0.001,
+    assert_eq!(
+        c.stretch_factor(),
+        StretchFactor::new(1.5),
         "the parameters carry"
     );
     for (ch, v) in c.ch.vocoders.iter().enumerate() {
@@ -660,7 +659,7 @@ fn filter_lanes_is_tick_per_frame() {
     type Lane = [f32; LANE_FRAMES];
     let src = sine(440.0, 44_100.0, 160 * LANE_FRAMES);
     // (unit width, caller width, stretch, cents)
-    let rows: &[(usize, usize, f32, f64)] = &[
+    let rows: &[(usize, usize, f64, f64)] = &[
         (2, 2, 2.0, 0.0),
         (2, 2, 0.5, 0.0),
         (2, 2, 1.0, 700.0),
@@ -864,7 +863,7 @@ fn pitch_shift_transposes_by_the_requested_interval() {
 #[test]
 fn a_one_per_tick_feed_makes_stretch_behave_as_varispeed() {
     let sr = 48_000.0f64;
-    for &(factor, want) in &[(0.5f32, 220.0f64), (1.0, 440.0), (2.0, 880.0)] {
+    for &(factor, want) in &[(0.5f64, 220.0f64), (1.0, 440.0), (2.0, 880.0)] {
         let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
@@ -889,7 +888,7 @@ fn a_one_per_tick_feed_makes_stretch_behave_as_varispeed() {
 #[test]
 fn stretching_a_placed_read_changes_duration_not_pitch() {
     let sr = 48_000.0f64;
-    for &factor in &[0.5f32, 1.0, 1.5, 2.0] {
+    for &factor in &[0.5f64, 1.0, 1.5, 2.0] {
         let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
@@ -913,7 +912,7 @@ fn stretching_a_placed_read_changes_duration_not_pitch() {
 fn pitch_and_stretch_are_independent_on_a_placed_read() {
     let sr = 48_000.0f64;
     for &(factor, cents) in &[
-        (2.0f32, 1200.0f64),
+        (2.0f64, 1200.0f64),
         (2.0, -700.0),
         (0.5, 1200.0),
         (0.5, -1200.0),
@@ -1044,7 +1043,7 @@ fn the_slowest_factor_ripples_because_its_frames_do_not_overlap() {
 fn stretching_preserves_the_signals_level() {
     // Faster-than-unity factors keep >=75% analysis overlap, so the phase
     // vocoder has the continuity it needs to reconstruct exactly.
-    for factor in [1.0f32, 1.5, 2.0, 4.0] {
+    for factor in [1.0f64, 1.5, 2.0, 4.0] {
         let mut u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
@@ -1100,7 +1099,7 @@ fn stretching_preserves_the_signals_level() {
 /// bounded property rather than something a later change silently deepens.
 #[test]
 fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
-    for (factor, floor) in [(0.5f32, 0.85f32), (0.25, 0.75)] {
+    for (factor, floor) in [(0.5f64, 0.85f32), (0.25, 0.75)] {
         let mut u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
@@ -1229,7 +1228,7 @@ fn parameters_round_trip_and_clamp() {
     let unit = Unit::new(SampleRate::SR_44K1);
 
     unit.set_stretch_factor(StretchFactor::new(2.0));
-    assert!((unit.stretch_factor().get() - 2.0).abs() < 0.001);
+    assert_eq!(unit.stretch_factor(), StretchFactor::new(2.0));
     unit.set_pitch_cents(Cents::new(-200.0));
     assert!((unit.pitch_cents().get() + 200.0).abs() < 0.001);
 
@@ -1292,11 +1291,11 @@ fn clone_carries_parameters_and_width() {
 
     let c = u.clone();
     assert_eq!(c.channels(), ChannelLayout::from(6u16));
-    assert!((c.stretch_factor().get() - 1.5).abs() < 0.001);
+    assert_eq!(c.stretch_factor(), StretchFactor::new(1.5));
 
     // The atomics are independent after the clone.
     u.set_stretch_factor(StretchFactor::new(2.0));
-    assert!((c.stretch_factor().get() - 1.5).abs() < 0.001);
+    assert_eq!(c.stretch_factor(), StretchFactor::new(1.5));
 }
 
 #[test]
@@ -1563,7 +1562,7 @@ fn six_channel_stretch_reaches_every_channel() {
 fn stretch_factor_changes_the_source_consumption_rate() {
     const TICKS: usize = 16_384;
 
-    let consumed = |factor: f32| {
+    let consumed = |factor: f64| {
         let mut u = Unit::with_fft_size_and_channels(SampleRate::SR_44K1, FftSize::N1024, 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
         let input = sine(440.0, 44_100.0, TICKS);

@@ -86,8 +86,8 @@
 //! Every voice type is generic over the graph's float format, `f32` by default
 //! (`MemorySource<F>`, `DiskVoice<F>`, `Voice<F>`, `VoicePool<F>`, `VoiceNode<F>`,
 //! `Clip<F>`), and plays in a graph of that format; a disk voice's stream is
-//! opened by a [`DiskStreamer`] of the same format. Params and controls are
-//! `f32` whatever the format.
+//! opened by a [`DiskStreamer`] of the same format. Playback controls (speed,
+//! stretch factor, gain) are `f64` units whatever the format.
 //! A stretched voice runs the time-stretch vocoder in `f32`: the signal is
 //! narrowed to `f32` through it, so stretched playback has `f32` precision in
 //! an `f64` graph; unstretched playback keeps the graph's format end to end.
