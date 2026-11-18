@@ -268,7 +268,7 @@ fn distinctness(
         .map(value)
         .reduce(f32::max)
         .map_or(Confidence::NONE, |second| {
-            Confidence::new_clamped(1.0 - second.max(0.0) / peak)
+            Confidence::new_clamped(f64::from(1.0 - second.max(0.0) / peak))
         })
 }
 

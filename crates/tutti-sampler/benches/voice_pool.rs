@@ -108,7 +108,7 @@ fn tone(freq: f64, frames: usize) -> Arc<Wave> {
 }
 
 /// A pool with `n` voices resident, each on its own slot and pitch.
-fn pool_with(n: usize, stretch: f32, cents: f64) -> Rig {
+fn pool_with(n: usize, stretch: f64, cents: f64) -> Rig {
     let (pool, handle) = VoicePool::new().with_handle();
     // Generous length: at a slow stretch the source is consumed much faster
     // than it is emitted, and a short wave would run dry mid-measurement and
@@ -169,7 +169,7 @@ fn bench_voices(c: &mut Criterion) {
 fn bench_stretch(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/stretch");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for factor in [1.0f32, 0.5, 2.0] {
+    for factor in [1.0f64, 0.5, 2.0] {
         let mut pool = pool_with(8, factor, 0.0);
         group.bench_with_input(
             BenchmarkId::from_parameter(format!("{factor:.1}x")),
@@ -246,7 +246,7 @@ fn tone_frame(i: usize) -> [f32; 2] {
     ]
 }
 
-fn pool64(tier: Tier, n: usize, speed: f32, stretch: f32) -> Pool64 {
+fn pool64(tier: Tier, n: usize, speed: f64, stretch: f64) -> Pool64 {
     pool_blocks(tier, n, speed, stretch, BLOCK)
 }
 
@@ -277,7 +277,7 @@ fn looped() -> Option<Loop> {
 }
 
 /// [`pool64`] driven in `block`-frame blocks (the pool prepared for them).
-fn pool_blocks(tier: Tier, n: usize, speed: f32, stretch: f32, block: usize) -> Pool64 {
+fn pool_blocks(tier: Tier, n: usize, speed: f64, stretch: f64, block: usize) -> Pool64 {
     pool_knobs(tier, n, speed, stretch, block, Knobs::default())
 }
 
@@ -285,8 +285,8 @@ fn pool_blocks(tier: Tier, n: usize, speed: f32, stretch: f32, block: usize) -> 
 fn pool_knobs(
     tier: Tier,
     n: usize,
-    speed: f32,
-    stretch: f32,
+    speed: f64,
+    stretch: f64,
     block: usize,
     knobs: Knobs,
 ) -> Pool64 {
@@ -405,7 +405,7 @@ fn drive64(p: &mut Pool64) -> f32 {
 fn bench_pool64(c: &mut Criterion) {
     let mut group = c.benchmark_group("pool64");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    let cases: &[(&str, Tier, usize, f32, f32)] = &[
+    let cases: &[(&str, Tier, usize, f64, f64)] = &[
         ("memory/1", Tier::Memory, 1, 1.0, 1.0),
         ("memory/64", Tier::Memory, 64, 1.0, 1.0),
         ("memory-varispeed/64", Tier::Memory, 64, 1.37, 1.0),
@@ -429,7 +429,7 @@ fn bench_pool64(c: &mut Criterion) {
         loop_: looped(),
         ..Knobs::default()
     };
-    let knobbed: &[(&str, Tier, f32, Knobs)] = &[
+    let knobbed: &[(&str, Tier, f64, Knobs)] = &[
         ("memory-silent/64", Tier::Memory, 1.0, silent),
         ("disk-silent/64", Tier::Disk, 1.0, silent),
         ("memory-loop/64", Tier::Memory, 1.0, looped),
@@ -450,7 +450,7 @@ fn bench_pool512(c: &mut Criterion) {
     const BLOCK512: usize = 512;
     let mut group = c.benchmark_group("pool512");
     group.throughput(Throughput::Elements(BLOCK512 as u64));
-    let cases: &[(&str, Tier, usize, f32, f32)] = &[
+    let cases: &[(&str, Tier, usize, f64, f64)] = &[
         ("memory/64", Tier::Memory, 64, 1.0, 1.0),
         ("memory-varispeed/64", Tier::Memory, 64, 1.37, 1.0),
         ("memory-stretch/64", Tier::Memory, 64, 1.0, 0.5),

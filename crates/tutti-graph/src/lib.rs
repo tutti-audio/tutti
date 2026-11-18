@@ -537,7 +537,7 @@
 //!
 //! A control value (a param's base, an edge weight, a mix, a fade's gain
 //! law) is a quantity; the graph renders it into a per-sample lane in `F`
-//! once per block or segment ([`control_in`], [`ramp_in`], [`fade_gains`],
+//! once per block or segment ([`ramp_in`], [`fade_gains`],
 //! [`fade_in`]), so a param lane ([`ParamInput::frames`]), an edge weight's
 //! ramp, a mix and a crossfade all run in the graph's float. A meter
 //! accumulates a block's figures in `F` over chunks of at most 256 frames, each
@@ -660,7 +660,7 @@ pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
-pub use lane::{control_in, fade_gains, fade_in, ramp_in};
+pub use lane::{fade_gains, fade_in, ramp_in};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.

@@ -656,7 +656,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
     struct Case {
         what: &'static str,
         file_rate: u32,
-        speed: f32,
+        speed: f64,
         loop_: Option<Loop>,
         reverse: bool,
         paged: bool,

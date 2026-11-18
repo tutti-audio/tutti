@@ -186,29 +186,9 @@ fn narrow(v: f64) -> f32 {
     v as f32
 }
 
-/// `PlainUnit` for a unit read from exactly one [`ParamUnit`] by a plain
-/// narrowing, and written back by a widening.
-macro_rules! one_to_one {
-    ($ty:ty, $unit:expr) => {
-        impl PlainUnit for $ty {
-            fn reads(unit: ParamUnit) -> bool {
-                unit == $unit
-            }
-            fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
-                (unit == $unit).then(|| Self::new(narrow(plain)))
-            }
-            fn to_plain(self, _unit: ParamUnit) -> f64 {
-                f64::from(self.get())
-            }
-        }
-    };
-}
-
-one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
-
-/// `PlainUnit` for an `f64` unit read from exactly one [`ParamUnit`]: the plain
+/// `PlainUnit` for a unit read from exactly one [`ParamUnit`]: the plain
 /// figure is the unit's own width and passes whole.
-macro_rules! whole_one_to_one {
+macro_rules! one_to_one {
     ($ty:ty, $unit:expr) => {
         impl PlainUnit for $ty {
             fn reads(unit: ParamUnit) -> bool {
@@ -224,12 +204,13 @@ macro_rules! whole_one_to_one {
     };
 }
 
-whole_one_to_one!(Db, ParamUnit::Decibels);
-whole_one_to_one!(Amplitude, ParamUnit::LinearGain);
-whole_one_to_one!(Hz, ParamUnit::Hertz);
-whole_one_to_one!(Cents, ParamUnit::Cents);
-whole_one_to_one!(Semitones, ParamUnit::Semitones);
-whole_one_to_one!(ArcDegrees, ParamUnit::Degrees);
+one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
+one_to_one!(Db, ParamUnit::Decibels);
+one_to_one!(Amplitude, ParamUnit::LinearGain);
+one_to_one!(Hz, ParamUnit::Hertz);
+one_to_one!(Cents, ParamUnit::Cents);
+one_to_one!(Semitones, ParamUnit::Semitones);
+one_to_one!(ArcDegrees, ParamUnit::Degrees);
 
 impl PlainUnit for Seconds {
     fn reads(unit: ParamUnit) -> bool {

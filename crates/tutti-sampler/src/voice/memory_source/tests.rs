@@ -183,7 +183,7 @@ fn one_block_matches_single_frames_across_a_loop_wrap() {
 // all. A read deriving position without the rate plays a placed voice at
 // 1x no matter what speed was set, and the equivalence pair stays green.
 
-fn placed_unit(wave: &Arc<Wave>, rate: f32) -> MemorySource {
+fn placed_unit(wave: &Arc<Wave>, rate: f64) -> MemorySource {
     MemorySource::with_config(
         Arc::clone(wave),
         MemorySourceConfig {
@@ -677,7 +677,7 @@ fn speed_2x_advances_twice_as_fast() {
 
     let normal_pos = normal.position().get();
     let fast_pos = fast.position().get();
-    assert!((fast_pos - normal_pos * 2.0).abs() < 1e-6);
+    assert_eq!(fast_pos, normal_pos * 2.0);
 }
 
 /// The placement gate must apply `src_ratio` exactly once — at the unit,
@@ -759,15 +759,15 @@ fn window_rate_matches_the_gate_and_excludes_src_ratio() {
     sampler.set_render_rate(SampleRate::SR_44K1);
 
     // Varispeed alone: the gate already resolved the file rate.
-    assert!((sampler.window_rate().get() - 2.0).abs() < 1e-6);
+    assert_eq!(sampler.window_rate(), ReadRate::new(2.0));
 
     // The free-running rate DOES carry the conversion — different question,
     // different quantity, and the two must not be conflated.
     let free = 2.0 * (48_000.0 / 44_100.0);
-    assert!(
-        (sampler.read_rate().get() - free).abs() < 1e-4,
-        "read_rate should still be varispeed x conversion, got {}",
-        sampler.read_rate().get()
+    assert_eq!(
+        sampler.read_rate().get(),
+        free,
+        "read_rate should still be varispeed x conversion"
     );
 }
 
@@ -1060,7 +1060,7 @@ fn prepare_updates_src_ratio() {
     let mut out = [0.0f32; 2];
     frame_into(&mut sampler, None, &mut out);
     let pos = sampler.position().get();
-    assert!((pos - 2.0).abs() < 1e-6, "48k/24k = 2x advance");
+    assert_eq!(pos, 2.0, "48k/24k = 2x advance");
 }
 
 // --- Interpolation at end of sample ---

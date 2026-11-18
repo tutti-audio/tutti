@@ -71,7 +71,7 @@ fn cmndf_dips_below_threshold_at_the_true_period() {
     let mut det = detector();
     fill_cmndf(&mut det, &sine(freq, 1.0));
     assert!(
-        det.cumulative_mean[tau] < det.cfg.threshold.get(),
+        f64::from(det.cumulative_mean[tau]) < det.cfg.threshold.get(),
         "d'({tau}) = {} was not below threshold {}",
         det.cumulative_mean[tau],
         det.cfg.threshold.get()
@@ -99,7 +99,7 @@ fn first_local_minimum_beats_a_deeper_later_dip() {
         "precondition: the 2T dip ({dip_2t}) must be deeper than the T dip ({dip_t})"
     );
     assert!(
-        dip_t < det.cfg.threshold.get(),
+        f64::from(dip_t) < det.cfg.threshold.get(),
         "precondition: the fundamental dip {dip_t} must be below threshold"
     );
 

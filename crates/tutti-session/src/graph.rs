@@ -47,6 +47,8 @@ use crate::fork::PendingExport;
 
 use tutti_graph::Compensation;
 use tutti_graph::FadeLaw;
+#[cfg(feature = "testing")]
+use tutti_graph::fade_gains;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
@@ -3764,7 +3766,7 @@ fn render<F: Float>(
     // With no device there is no fold: the root's channels are the output's
     // by index, and a root change crossfades channel by channel, the old
     // root's channels after the new root's.
-    let gains = fade.map(|f| f.fade.law.gains(f.done, f.fade.duration));
+    let gains = fade.map(|f| fade_gains::<F>(f.fade.law, f.done, f.fade.duration));
     for (c, o) in output.iter_mut().enumerate() {
         let new = scratch
             .get(c)
@@ -3777,7 +3779,7 @@ fn render<F: Float>(
                 } else {
                     F::ZERO
                 };
-                old * F::from_f64(go.get()) + new * F::from_f64(gn.get())
+                old * go + new * gn
             }
             _ => new,
         };

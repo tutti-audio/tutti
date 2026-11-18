@@ -96,14 +96,3 @@ pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: Samples, len: Sampl
     let (out, inn) = fade_gains::<F>(law, j, len);
     start * out + goal * inn
 }
-
-/// A control value (a param cell's, an edge weight's, a mix's) as the lane's
-/// float: the one place a node-side control is read into a lane. It widens
-/// exactly and narrows once.
-///
-/// Foundation's `F::from_unit` replaces this once it lands; nothing new builds
-/// on it.
-#[inline]
-pub fn control_in<F: Float>(value: impl Into<f64>) -> F {
-    F::from_f64(value.into())
-}
