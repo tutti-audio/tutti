@@ -122,12 +122,9 @@ fn vst2(main: MainThreadMarker, path: &Path) -> Result<Vec<PluginDescriptor>, Pr
 /// the registry's component, none created.
 #[cfg(all(feature = "au", target_os = "macos"))]
 fn au(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeRefusal> {
-    use tutti_au_host::AuError;
+    use tutti_plugin_types::PluginError;
     tutti_au_host::AuLoaded::describe_all(path).map_err(|e| match e {
-        AuError::LoadFailed(failure) => ProbeRefusal::Load {
-            stage: failure.stage,
-            reason: failure.reason,
-        },
+        PluginError::Load { stage, reason } => ProbeRefusal::Load { stage, reason },
         other => ProbeRefusal::Describe(other.to_string()),
     })
 }
