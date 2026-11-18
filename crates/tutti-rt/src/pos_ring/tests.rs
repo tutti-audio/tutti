@@ -6,12 +6,18 @@ fn indexed(frames: usize, channels: usize) -> Vec<f32> {
 
 /// A ring of `frames` slots of `stride`, keeping `keep` behind.
 fn ring(frames: usize, stride: usize, keep: u64) -> (PosWriter, PosReader) {
-    PosRing::new(frames, stride, keep)
+    PosRing::new(frames, ChannelLayout::clamped(stride), keep).expect("a non-empty layout")
+}
+
+/// Pushes whole frames of `samples` and returns how many landed.
+fn push(writer: &mut PosWriter, samples: &[f32]) -> usize {
+    let frames = Interleaved::new(samples, writer.layout()).expect("whole frames");
+    writer.push(frames).expect("the ring's width").get()
 }
 
 /// Position `s` through a claim of exactly its frame.
 fn frame_at(reader: &mut PosReader, s: u64) -> Vec<f32> {
-    let stride = reader.stride();
+    let stride = usize::from(reader.layout().count());
     let claim = reader.claim(s, [(s, s + 1), (0, 0)]);
     (0..stride).map(|c| claim.sample(s, c)).collect()
 }
@@ -81,14 +87,12 @@ fn the_slot_map_is_the_position_mod_the_ring() {
 }
 
 /// **Frames land at the window's end and read back by position**, every
-/// channel in its place at six channels, a trailing partial frame
-/// dropped.
+/// channel in its place at six channels.
 #[test]
 fn frames_land_at_the_windows_end_and_read_back_by_position() {
     let (mut writer, mut reader) = ring(64, 6, 4);
-    let mut data = indexed(10, 6);
-    data.extend_from_slice(&[99.0, 99.0, 99.0]);
-    assert_eq!(writer.push(&data), 10);
+    let data = indexed(10, 6);
+    assert_eq!(push(&mut writer, &data), 10);
     assert_eq!(writer.window(), RingWindow { from: 0, to: 10 });
     for s in 0..10 {
         let want: Vec<f32> = (0..6).map(|c| (s as usize * 6 + c) as f32).collect();
@@ -102,9 +106,9 @@ fn frames_land_at_the_windows_end_and_read_back_by_position() {
 #[test]
 fn a_write_never_goes_round_the_ring_onto_the_reader() {
     let (mut writer, mut reader) = ring(4_096, 1, 4);
-    let _ = writer.push(&indexed(1_000, 1));
+    let _ = push(&mut writer, &indexed(1_000, 1));
     writer.set_play(1_000);
-    assert_eq!(writer.push(&indexed(8_000, 1)), 4_096 - 4);
+    assert_eq!(push(&mut writer, &indexed(8_000, 1)), 4_096 - 4);
     assert_eq!(writer.window().to, 1_000 - 4 + 4_096);
     assert_eq!(frame_at(&mut reader, 996), [996.0]);
 }
@@ -118,10 +122,10 @@ fn a_write_never_goes_round_the_ring_onto_the_reader() {
 #[test]
 fn a_write_never_reuses_a_slot_the_block_in_flight_reads() {
     let (mut writer, mut reader) = ring(4_096, 1, 4);
-    let _ = writer.push(&indexed(4_000, 1));
+    let _ = push(&mut writer, &indexed(4_000, 1));
     let claim = reader.claim(3_997, [(3_997, 4_069), (100, 200)]);
     assert_eq!(claim.window(), RingWindow { from: 0, to: 4_000 });
-    assert_eq!(writer.push(&[-1.0; 300]), 196, "stops at 4 196");
+    assert_eq!(push(&mut writer, &[-1.0; 300]), 196, "stops at 4 196");
     assert_eq!(claim.sample(150, 0), 150.0);
     assert!(writer.window().holds(150), "the jump copy left the window");
 }
@@ -137,16 +141,16 @@ fn a_capped_write_keeps_what_it_did_not_overwrite() {
     for retract in [false, true] {
         let (mut writer, mut reader) = ring(16, 1, 0);
         writer.set_play(10);
-        assert_eq!(writer.push(&indexed(16, 1)), 16);
+        assert_eq!(push(&mut writer, &indexed(16, 1)), 16);
         let claim = reader.claim(10, [(10, 14), (2, 5)]);
-        assert_eq!(writer.push(&[-1.0; 8]), 2);
+        assert_eq!(push(&mut writer, &[-1.0; 8]), 2);
         assert_eq!(writer.window(), RingWindow { from: 2, to: 18 });
         if retract {
             writer.retract_to(2);
         } else {
             writer.reset(2);
         }
-        let _ = writer.push(&[-9.0; 3]);
+        let _ = push(&mut writer, &[-9.0; 3]);
         assert_eq!(claim.sample(3, 0), 3.0, "retract {retract}: rewritten");
     }
 }
@@ -163,7 +167,7 @@ fn a_capped_write_keeps_what_it_did_not_overwrite() {
 fn a_shrink_does_not_free_what_a_block_in_flight_holds() {
     for reset in [false, true] {
         let (mut writer, mut reader) = ring(4_096, 1, 4);
-        let _ = writer.push(&indexed(1_000, 1));
+        let _ = push(&mut writer, &indexed(1_000, 1));
         {
             let claim = reader.claim(600, [(600, 680), (0, 0)]);
             assert!(claim.holds(650));
@@ -173,7 +177,7 @@ fn a_shrink_does_not_free_what_a_block_in_flight_holds() {
                 writer.retract_to(620);
             }
             assert_eq!(
-                writer.push(&[-1.0; 100]),
+                push(&mut writer, &[-1.0; 100]),
                 0,
                 "reset {reset}: wrote under the claim"
             );
@@ -182,18 +186,22 @@ fn a_shrink_does_not_free_what_a_block_in_flight_holds() {
         // The next claim sees the shrink: the rewrite may land.
         let claim = reader.claim(600, [(600, 680), (0, 0)]);
         assert!(!claim.holds(650));
-        assert_eq!(writer.push(&[-1.0; 100]), 100, "reset {reset}");
+        assert_eq!(push(&mut writer, &[-1.0; 100]), 100, "reset {reset}");
     }
     // A reset away from a claim (a seek back, below the old window) frees
     // the new place at once: the old window was `[5 000, 6 000)`.
     let (mut writer, mut reader) = ring(4_096, 1, 4);
     writer.reset(5_000);
     writer.set_play(5_000);
-    let _ = writer.push(&indexed(1_000, 1));
+    let _ = push(&mut writer, &indexed(1_000, 1));
     let _claim = reader.claim(1_000, [(997, 1_069), (0, 0)]);
     writer.reset(996);
     writer.set_play(1_000);
-    assert_eq!(writer.push(&[-1.0; 100]), 100, "a seek's refill was held");
+    assert_eq!(
+        push(&mut writer, &[-1.0; 100]),
+        100,
+        "a seek's refill was held"
+    );
 }
 
 /// **Raising the window's start drops the positions below it**, so a
@@ -203,7 +211,7 @@ fn a_shrink_does_not_free_what_a_block_in_flight_holds() {
 #[test]
 fn raising_the_start_drops_what_lies_below() {
     let (mut writer, mut reader) = ring(4_096, 1, 4);
-    let _ = writer.push(&indexed(1_000, 1));
+    let _ = push(&mut writer, &indexed(1_000, 1));
     writer.raise_from(400);
     assert_eq!(
         writer.window(),
@@ -218,7 +226,7 @@ fn raising_the_start_drops_what_lies_below() {
     let _claim = reader.claim(100, [(97, 169), (0, 0)]);
     writer.reset(96);
     writer.set_play(100);
-    assert_eq!(writer.push(&[-1.0; 100]), 100, "the refill was held");
+    assert_eq!(push(&mut writer, &[-1.0; 100]), 100, "the refill was held");
 }
 
 /// **A reader that stops claiming holds nothing back**: a block claims `[97, 169)`, the reader goes idle, the
@@ -234,12 +242,16 @@ fn raising_the_start_drops_what_lies_below() {
 #[test]
 fn an_idle_reader_holds_nothing_back() {
     let (mut writer, mut reader) = ring(1_024, 1, 4);
-    let _ = writer.push(&indexed(1_000, 1));
+    let _ = push(&mut writer, &indexed(1_000, 1));
     let _ = reader.claim(100, [(97, 169), (0, 0)]);
     reader.idle();
     writer.reset(97 + 1_024);
     writer.set_play(97 + 1_024 + 4);
-    assert_eq!(writer.push(&[-1.0; 500]), 500, "held by an idle reader");
+    assert_eq!(
+        push(&mut writer, &[-1.0; 500]),
+        500,
+        "held by an idle reader"
+    );
     assert_eq!(writer.in_flight_end(), 0);
 }
 
@@ -396,7 +408,7 @@ fn a_writer_and_a_reader_thread_never_tear() {
                     buf.push(tag(to + i, generation, 0));
                     buf.push(tag(to + i, generation, 1));
                 }
-                let _ = writer.push(&buf);
+                let _ = push(&mut writer, &buf);
             }
         }
     }
@@ -418,9 +430,9 @@ fn a_window_never_passes_the_position_limit() {
     let (mut w, mut r) = ring(256, 1, 0);
     w.reset(near);
     drop(r.claim(near, [(0, 0), (0, 0)]));
-    assert_eq!(w.push(&[1.0; 100]), 10, "stops at the limit");
+    assert_eq!(push(&mut w, &[1.0; 100]), 10, "stops at the limit");
     assert_eq!(w.window().to, MAX_POS_RING_POSITION);
-    assert_eq!(w.push(&[1.0; 100]), 0);
+    assert_eq!(push(&mut w, &[1.0; 100]), 0);
     assert_eq!(w.window().to, MAX_POS_RING_POSITION);
 
     w.reset(u64::MAX);
@@ -433,8 +445,120 @@ fn a_window_never_passes_the_position_limit() {
     );
     drop(r.claim(u64::MAX, [(u64::MAX - 5, u64::MAX), (0, 0)]));
     assert_eq!(
-        w.push(&[1.0; 8]),
+        push(&mut w, &[1.0; 8]),
         0,
         "an unbounded play position lands nothing"
+    );
+}
+
+/// Pushes `frames` of `stride` channels of `S` valued `value(i)` and reads
+/// every one back by position.
+fn round_trips<S: RingSample>(stride: usize, value: impl Fn(usize) -> S, bits: impl Fn(S) -> u64) {
+    let layout = ChannelLayout::clamped(stride);
+    let (mut writer, mut reader) = PosRing::<S>::new(16, layout, 0).expect("a non-empty layout");
+    let data: Vec<S> = (0..9 * stride).map(&value).collect();
+    let view = Interleaved::new(&data, layout).expect("whole frames");
+    assert_eq!(writer.push(view), Ok(Samples(9)));
+    let claim = reader.claim(0, [(0, 9), (0, 0)]);
+    for s in 0..9u64 {
+        for c in 0..stride {
+            assert_eq!(
+                bits(claim.sample(s, c)),
+                bits(data[s as usize * stride + c]),
+                "position {s} channel {c}"
+            );
+        }
+    }
+}
+
+/// **A pushed frame reads back bit-exactly in every format**: an `f32` and an
+/// `f64` that no narrower word holds (a payload in the low and the high bits
+/// of the mantissa, a negative zero, a signalling-range NaN pattern), and
+/// each integer format at its extremes.
+#[test]
+fn a_pushed_frame_reads_back_bit_exactly_in_every_format() {
+    let f32s = [
+        0.0,
+        -0.0,
+        f32::MIN_POSITIVE / 3.0,
+        f32::from_bits(0x7fa0_0001),
+        1.000_000_1,
+        -3.5e30,
+    ];
+    let f64s = [
+        0.0,
+        -0.0,
+        f64::from_bits(0x0000_0000_0000_0001),
+        f64::from_bits(0x7ff4_0000_dead_beef),
+        1.0 + f64::EPSILON,
+        -3.5e300,
+    ];
+    let i8s = [i8::MIN, -1, 0, 1, 77, i8::MAX];
+    let i16s = [i16::MIN, -1, 0, 1, 12_345, i16::MAX];
+    let i24s = [I24::MIN, I24::of(-1), I24::ZERO, I24::of(1), I24::MAX];
+    let i32s = [i32::MIN, -1, 0, 1, 0x1234_5678, i32::MAX];
+    for stride in [1, 2, 3] {
+        round_trips::<f32>(
+            stride,
+            |i| f32s[i % f32s.len()],
+            |x: f32| u64::from(x.to_bits()),
+        );
+        round_trips::<f64>(stride, |i| f64s[i % f64s.len()], f64::to_bits);
+        round_trips::<i8>(stride, |i| i8s[i % i8s.len()], |x: i8| x as u64);
+        round_trips::<i16>(stride, |i| i16s[i % i16s.len()], |x: i16| x as u64);
+        round_trips::<I24>(stride, |i| i24s[i % i24s.len()], |x: I24| x.get() as u64);
+        round_trips::<i32>(stride, |i| i32s[i % i32s.len()], |x: i32| x as u64);
+    }
+}
+
+/// **A slot no write reached reads silence** in every format.
+#[test]
+fn an_unwritten_slot_reads_silence() {
+    fn silent<S: RingSample>() {
+        let (_writer, mut reader) = PosRing::<S>::new(4, ChannelLayout::STEREO, 0).expect("stereo");
+        let claim = reader.claim(0, [(0, 0), (0, 0)]);
+        let slots = &claim.ring.slots;
+        assert!(slots.iter().all(|a| S::load(a) == S::SILENCE));
+    }
+    silent::<f32>();
+    silent::<f64>();
+    silent::<i8>();
+    silent::<i16>();
+    silent::<I24>();
+    silent::<i32>();
+}
+
+/// **A view of another width is refused and writes nothing**: a stereo view
+/// into a mono ring and a mono view into a stereo one both name the two
+/// widths and leave the window empty.
+#[test]
+fn a_view_of_the_wrong_width_is_refused() {
+    let data = [1.0f32; 8];
+    for (ring_width, view_width) in [
+        (ChannelLayout::MONO, ChannelLayout::STEREO),
+        (ChannelLayout::STEREO, ChannelLayout::MONO),
+        (ChannelLayout::STEREO, ChannelLayout::QUAD),
+    ] {
+        let (mut writer, _reader) =
+            PosRing::<f32>::new(16, ring_width, 0).expect("a non-empty layout");
+        let view = Interleaved::new(&data, view_width).expect("whole frames");
+        assert_eq!(
+            writer.push(view),
+            Err(BufferError::WidthMismatch {
+                src: view_width,
+                dst: ring_width
+            })
+        );
+        assert_eq!(writer.window(), RingWindow { from: 0, to: 0 });
+    }
+}
+
+/// **The empty layout is refused**: a ring of no channels has no frame to
+/// hold, so building one names the zero width rather than making a mono ring.
+#[test]
+fn an_empty_layout_is_refused() {
+    assert_eq!(
+        PosRing::<f32>::new(16, ChannelLayout::EMPTY, 0).map(|_| ()),
+        Err(BufferError::ZeroWidth)
     );
 }
