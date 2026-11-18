@@ -25,7 +25,7 @@ trait Cutoff: Node + ParamNode + Clone + 'static {
     const NAME: &'static str;
     fn build() -> Self;
     fn set_cutoff(&self, hz: f32) -> bool;
-    fn cutoff(&self) -> Option<f64>;
+    fn cutoff(&self) -> Option<f32>;
 }
 
 impl Cutoff for LadderFilterNode<f64> {
@@ -41,7 +41,7 @@ impl Cutoff for LadderFilterNode<f64> {
     fn set_cutoff(&self, hz: f32) -> bool {
         self.param_set().set(UnitParam::Cutoff, hz)
     }
-    fn cutoff(&self) -> Option<f64> {
+    fn cutoff(&self) -> Option<f32> {
         self.param_base(0)
     }
 }
@@ -55,7 +55,7 @@ impl Cutoff for CrossoverNode<f32> {
         self.param_set()
             .set(UnitAddr::new(UnitParam::Cutoff, 0), hz)
     }
-    fn cutoff(&self) -> Option<f64> {
+    fn cutoff(&self) -> Option<f32> {
         self.param_base(0)
     }
 }

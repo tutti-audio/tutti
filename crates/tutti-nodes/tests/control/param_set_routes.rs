@@ -108,7 +108,7 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, _: usize) -> Option<f64> {
+    fn param_base(&self, _: usize) -> Option<f32> {
         Some(0.0)
     }
 }

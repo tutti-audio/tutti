@@ -381,7 +381,7 @@ impl tutti_graph::Node for ParamProbe {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         (port == 0).then_some(0.0)
     }
 }
@@ -631,7 +631,7 @@ impl tutti_graph::Node for Probe8 {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         (port < PROBE8.len()).then_some(0.0)
     }
 }

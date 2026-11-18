@@ -50,8 +50,8 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, _: usize) -> Option<f64> {
-        Some(f64::from(self.0))
+    fn param_base(&self, _: usize) -> Option<f32> {
+        Some(self.0)
     }
 }
 
@@ -295,7 +295,7 @@ impl Node for Heavy {
         self.0.process(cx, io)
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         self.0.param_base(port)
     }
 }

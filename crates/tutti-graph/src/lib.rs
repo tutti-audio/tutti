@@ -262,7 +262,7 @@
 //!         Status::Modified
 //!     }
 //!     fn reset(&mut self) {}
-//!     fn param_base(&self, port: usize) -> Option<f64> {
+//!     fn param_base(&self, port: usize) -> Option<f32> {
 //!         self.declared_base(port)
 //!     }
 //! }

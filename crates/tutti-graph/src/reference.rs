@@ -1848,7 +1848,7 @@ impl<F: Float> Reference<F> {
         let mut out = Vec::new();
         for (k, &param) in declared.as_slice().iter().enumerate() {
             let at = ParamIn { node: key, param };
-            let Some(b1) = unit.param_base(k).map(F::from_f64) else {
+            let Some(b1) = unit.param_base(k).map(F::from_f32) else {
                 self.params.remove(&at);
                 out.push(None);
                 continue;

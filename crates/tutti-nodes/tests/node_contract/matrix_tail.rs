@@ -58,7 +58,7 @@ impl<N: Node> Node for Recording<N> {
     fn shape(&self) -> Shape {
         self.inner.shape()
     }
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.inner.param_base(k)
     }
     fn prepare(&mut self, p: &Prepare) {

@@ -1554,7 +1554,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// whatever the graph connects — rather than riding on a base of 0,
     /// which would silence it. Audio thread:
     /// must not allocate, lock or block.
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         let _ = port;
         None
     }

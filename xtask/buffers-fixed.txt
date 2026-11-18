@@ -18,11 +18,6 @@ crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-au
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
 crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights
 crates/tutti-graph/src/contract.rs::Detect.Exact  pending
-crates/tutti-graph/src/contract.rs::Direct::feed  spec-f32: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/contract.rs::drive  spec-f32: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/contract.rs::drive_input  spec-f32: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/param.rs::ParamInput.Frames  spec-f32: control values are f32 by spec
-crates/tutti-graph/src/param.rs::ParamInput::frames  spec-f32: control values are f32 by spec
 crates/tutti-measure/src/features.rs::spectral_centroid  not-audio: a magnitude spectrum
 crates/tutti-measure/src/features.rs::spectral_flatness  not-audio: a magnitude spectrum
 crates/tutti-measure/src/features.rs::spectral_rolloff  not-audio: a magnitude spectrum

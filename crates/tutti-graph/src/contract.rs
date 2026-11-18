@@ -1285,7 +1285,7 @@ impl Node for ParamEcho {
 
     fn reset(&mut self) {}
 
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         (port == 0).then_some(0.0)
     }
 }
@@ -1536,7 +1536,7 @@ impl Node for Recorder {
         self.inner.reset();
     }
 
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         self.inner.param_base(port)
     }
 }

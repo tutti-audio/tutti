@@ -148,7 +148,7 @@ impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 pub trait Cells<U: ParamUnit> {
     /// The cell's value as an `f32`, or `None` where the node has no such
     /// param.
-    fn base(&self) -> Option<f64>;
+    fn base(&self) -> Option<f32>;
 
     /// The cell, shared. Clones the `Arc`: control thread.
     fn cell(&self) -> Option<ParamCell>;
@@ -159,8 +159,8 @@ where
     U: Scalar,
     Arc<<U::Raw as ParamRaw>::Atomic>: Into<ParamCell>,
 {
-    fn base(&self) -> Option<f64> {
-        Some(self.load().to_wide())
+    fn base(&self) -> Option<f32> {
+        Some(self.load().to_cell())
     }
 
     fn cell(&self) -> Option<ParamCell> {
@@ -169,8 +169,8 @@ where
 }
 
 impl Cells<bool> for &Arc<AtomicF32> {
-    fn base(&self) -> Option<f64> {
-        Some(f64::from(self.load(Ordering::Acquire)))
+    fn base(&self) -> Option<f32> {
+        Some(self.load(Ordering::Acquire))
     }
 
     fn cell(&self) -> Option<ParamCell> {
@@ -179,7 +179,7 @@ impl Cells<bool> for &Arc<AtomicF32> {
 }
 
 impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
-    fn base(&self) -> Option<f64> {
+    fn base(&self) -> Option<f32> {
         self.as_ref().and_then(Cells::base)
     }
 
@@ -193,7 +193,7 @@ impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
 pub struct Row<'a> {
     addr: UnitAddr,
     port: bool,
-    base: f64,
+    base: f32,
     cell: &'a dyn Fn() -> Option<ParamCell>,
 }
 
@@ -263,7 +263,7 @@ pub fn set(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamSet {
 /// Port `k`'s cell value: what [`Node::param_base`](crate::Node::param_base)
 /// answers.
 #[doc(hidden)]
-pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f64> {
+pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f32> {
     let (mut next, mut found) = (0, None);
     walk(&mut |row| {
         if !row.port {
@@ -575,7 +575,7 @@ macro_rules! declare_params {
 
             /// Port `k`'s cell value.
             #[allow(dead_code)]
-            fn declared_base(&self, k: usize) -> Option<f64> {
+            fn declared_base(&self, k: usize) -> Option<f32> {
                 $crate::__private::base(|visit| self.declared_visit(visit), k)
             }
 

@@ -291,7 +291,7 @@ impl Node for LfoNode {
         self.position = 0.0;
     }
 
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.declared_base(k)
     }
 }

@@ -89,3 +89,10 @@ pub(crate) fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: 
     let (out, inn) = fade_gains::<F>(law, j, len);
     start * out + goal * inn
 }
+
+/// A control value (a param cell's, an edge weight's, a mix's) as the lane's
+/// float: the one place a node-side control is read into a lane.
+#[inline]
+pub(crate) fn control_in<F: Float>(value: f32) -> F {
+    F::from_f32(value)
+}

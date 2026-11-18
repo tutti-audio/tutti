@@ -89,8 +89,8 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
-        (port == 0).then(|| f64::from(self.knob.load(std::sync::atomic::Ordering::Acquire)))
+    fn param_base(&self, port: usize) -> Option<f32> {
+        (port == 0).then(|| self.knob.load(std::sync::atomic::Ordering::Acquire))
     }
 }
 

@@ -97,10 +97,10 @@ impl Node for ProbeUnit {
 
     fn reset(&mut self) {}
 
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         match port {
-            0 => Some(f64::from(self.knob.load(Ordering::Acquire))),
-            1 if self.extra.is_some() => Some(f64::from(self.other.load(Ordering::Acquire))),
+            0 => Some(self.knob.load(Ordering::Acquire)),
+            1 if self.extra.is_some() => Some(self.other.load(Ordering::Acquire)),
             _ => None,
         }
     }

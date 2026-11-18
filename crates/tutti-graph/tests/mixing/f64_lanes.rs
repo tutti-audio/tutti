@@ -1,7 +1,7 @@
 //! A param lane carries the graph's float: in an `f64` graph a driven param
 //! reaches its node as `&[f64]`, the port ramps in `f64`, and the range clamps
-//! in `f64`. The lane's event words (a ramp's target) are `f32` by spec; the
-//! base cell holds the unit's `f64`.
+//! in `f64`; the edge-weight and mix lanes ramp in `f64`. The lane's event
+//! words (a ramp's target) are `f32` by spec.
 
 use tutti_buffers::Float;
 use tutti_graph::testing as common;
@@ -17,6 +17,9 @@ use tutti_units::{Hz, ParamKey, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
 const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
+
+/// The lane node's base: a quarter, exact in every float.
+const BASE: f64 = 0.25;
 
 /// Writes its `Cutoff` lane (its base where nothing drives it) to its one
 /// output, in the graph's float.
@@ -41,7 +44,7 @@ impl<F: Float> Node<F> for Lane {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.declared_base(k)
     }
 }
@@ -88,12 +91,11 @@ const LANE: NodeKey = NodeKey(1);
 const SRC: NodeKey = NodeKey(2);
 const FRAMES: usize = 16;
 
-/// Renders one block of `Lane` (base [`FINE`]) in an `f64` graph, its `Cutoff`
+/// Renders one block of `Lane` (base 0.25) in an `f64` graph, its `Cutoff`
 /// driven by `ramp` and held to `range`.
 fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
-    assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
-    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz(FINE)))));
+    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz(BASE)))));
     ed.insert(SRC, "ramp", ForkByClone(ramp));
     let at = ParamIn {
         node: LANE,
@@ -121,44 +123,55 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     out
 }
 
+/// The ramp's analytic value at its `k`th frame (1-based): `BASE + (target -
+/// BASE) * k / len`.
+fn analytic(target: f64, len: usize, k: usize) -> f64 {
+    BASE + (target - BASE) * (k as f64 / len as f64)
+}
+
 /// **A ramp in an `f64` graph moves along `base + (target - base) * k / len`
-/// in `f64`.** The base is [`FINE`]; before the ramp the lane holds it, which
-/// `f32` cannot, and the ramp lands on its target on its last frame.
+/// in `f64`.** With `len` 3 the progress `k / 3` is a figure `f32` cannot
+/// hold; the lane holds the base before the ramp and lands on the target on
+/// the ramp's last frame.
 #[test]
-fn an_f64_lane_ramps_from_its_f64_base_in_f64() {
-    let (at, len, target) = (4, 8, 3.0);
+fn an_f64_lane_ramps_in_f64() {
+    assert_ne!(
+        f64::from((1.0f64 / 3.0) as f32),
+        1.0 / 3.0,
+        "f32 loses a third"
+    );
+    let (at, len, target) = (4, 3, 3.0);
     let out = render(Ramp { at, target, len }, None);
     for (frame, &v) in out.iter().enumerate().take(at) {
-        assert_eq!(v, FINE, "frame {frame}: the base, before the ramp");
+        assert_eq!(v, BASE, "frame {frame}: the base, before the ramp");
     }
     for k in 1..=len {
-        let want = FINE + (target - FINE) * (k as f64 / len as f64);
-        let got = out[at + k - 1];
+        let (got, want) = (out[at + k - 1], analytic(target, len, k));
         assert!(
             (got - want).abs() <= 4.0 * f64::EPSILON,
             "frame {}: {got} vs {want}",
             at + k - 1
         );
     }
+    assert_ne!(
+        out[at],
+        f64::from(out[at] as f32),
+        "the first step is past f32"
+    );
     assert_eq!(out[at + len - 1], target, "the ramp lands on its target");
 }
 
-/// **A range clamps an `f64` lane in `f64`.** The range `0..=2 - 2^-20` holds a
-/// ramp to 3 at its upper bound, and the frames below it keep their `f64`
-/// values.
+/// **A range clamps an `f64` lane in `f64`.** The range `0..=2` holds a ramp
+/// to 3 at its upper bound, and the frame below it keeps its `f64` value.
 #[test]
 fn a_range_clamps_an_f64_lane_in_f64() {
-    let (at, len, target) = (4, 8, 3.0);
-    // The range's bounds are `f32` words; 2 - 2^-20 is exact in `f32` and in `f64`.
-    let hi = 2.0 - 2f64.powi(-20);
-    assert_eq!(f64::from(hi as f32), hi);
+    let (at, len, target, hi) = (4, 3, 3.0, 2.0);
     let out = render(
         Ramp { at, target, len },
         Some(ParamRange::new(0.0, hi as f32)),
     );
     for k in 1..=len {
-        let want = (FINE + (target - FINE) * (k as f64 / len as f64)).min(hi);
-        let got = out[at + k - 1];
+        let (got, want) = (out[at + k - 1], analytic(target, len, k).min(hi));
         assert!(
             (got - want).abs() <= 4.0 * f64::EPSILON,
             "frame {}: {got} vs {want}",
@@ -166,7 +179,7 @@ fn a_range_clamps_an_f64_lane_in_f64() {
         );
     }
     assert_eq!(out[at + len - 1], hi, "the last frame is held at the bound");
-    assert_eq!(out[0], FINE, "before the ramp the base is inside the range");
+    assert_eq!(out[0], BASE, "before the ramp the base is inside the range");
 }
 
 /// A constant source in any float.

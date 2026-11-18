@@ -416,7 +416,7 @@ impl<F: RingFloat> Node<F> for VoiceNode<F> {
         self.clock.reset();
     }
 
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.declared_base(k)
     }
 }

@@ -67,8 +67,8 @@ impl Node for Bands {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
-        self.thr.get(port).map(|p| f64::from(p.load().0))
+    fn param_base(&self, port: usize) -> Option<f32> {
+        self.thr.get(port).map(|p| p.load().0)
     }
 }
 
@@ -435,7 +435,7 @@ impl Node for Wide {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, _: usize) -> Option<f64> {
+    fn param_base(&self, _: usize) -> Option<f32> {
         Some(0.0)
     }
 }

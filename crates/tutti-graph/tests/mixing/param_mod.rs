@@ -183,8 +183,8 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f64> {
-        (self.answers && port < 2).then(|| f64::from(self.bases[port].get()))
+    fn param_base(&self, port: usize) -> Option<f32> {
+        (self.answers && port < 2).then(|| self.bases[port].get())
     }
 }
 

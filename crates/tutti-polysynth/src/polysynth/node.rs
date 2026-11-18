@@ -143,7 +143,7 @@ impl Node for PolySynth {
         });
     }
 
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.declared_base(k)
     }
 }

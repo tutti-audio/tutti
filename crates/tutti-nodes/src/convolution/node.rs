@@ -793,7 +793,7 @@ impl Node for ConvolverNode {
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
-    fn param_base(&self, k: usize) -> Option<f64> {
+    fn param_base(&self, k: usize) -> Option<f32> {
         self.declared_base(k)
     }
 

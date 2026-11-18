@@ -588,7 +588,7 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
         }
     }
 
-    fn param_base(&self, port: usize) -> Option<f64> {
+    fn param_base(&self, port: usize) -> Option<f32> {
         self.declared_base(port)
     }
 }
@@ -1400,7 +1400,7 @@ mod tests {
                 assert!(set.set(addr, v));
                 assert_eq!(
                     n.param_base(k),
-                    Some(f64::from(v)),
+                    Some(v),
                     "{bands} bands, port {k}: {addr:?}"
                 );
             }

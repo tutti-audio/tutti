@@ -358,7 +358,7 @@ mod tests {
         let set = node.param_set();
         assert_eq!(set.params().collect::<Vec<_>>(), want);
         for (i, hz) in [200.0, 2_000.0, 9_000.0].into_iter().enumerate() {
-            assert_eq!(node.param_base(i), Some(f64::from(hz)));
+            assert_eq!(node.param_base(i), Some(hz));
             assert_eq!(set.get(want[i]), Some(hz));
         }
         assert_eq!(node.param_base(3), None);
