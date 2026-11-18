@@ -3277,7 +3277,6 @@ name = "tutti-rt"
 version = "0.0.1"
 dependencies = [
  "arc-lend",
- "arrayvec",
  "assert_no_alloc",
  "bytemuck",
  "libc",

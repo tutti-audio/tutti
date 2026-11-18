@@ -8,7 +8,7 @@
 //! crates, `tutti-units` (the units a [`Gauge`] reads, and [`RequestBit`]'s range),
 //! `tutti-types` (the `ChannelLayout` a [`PosRing`] is written in)
 //! and `tutti-buffers` (the `Sample` formats [`PosRing`] is generic over);
-//! its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
+//! its other dependencies are `arc-lend` and `bytemuck` (and `loom`
 //! under `--cfg loom`).
 //!
 //! **Cells and collections**
@@ -129,6 +129,9 @@
 //!   published it.
 //! - `handoff` (`handoff.rs`): one `MaybeUninit` slot moved between the two ends
 //!   under a state word.
+//! - `RtVec` (`vec.rs`): `N` inline `MaybeUninit` slots under a length, so
+//!   [`RtVec::boxed`] can build a large one in its box with no stack copy; the
+//!   slots `..len` are the initialised ones.
 //! - `with_no_denormals` (`denormals.rs`): saves, sets and restores the FPU
 //!   control register with `asm!`, which has no safe spelling; its `# Soundness`
 //!   docs say what it does and does not guarantee.

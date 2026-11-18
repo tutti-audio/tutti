@@ -189,19 +189,25 @@ impl Node for Probe {
 }
 
 /// A step of `param` to `value` (a zero-length ramp) at `offset`.
-fn step(offset: tutti_graph::Offset, param: UnitParam, value: f32) -> Event {
+fn step(offset: tutti_graph::Offset, param: UnitParam, value: f64) -> Event {
     let ramp = match param {
-        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value), Samples(0)),
-        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(value)), Samples(0)),
+        // `Q` is an `f32` unit: it narrows at its param write.
+        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value as f32), Samples(0)),
+        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(value), Samples(0)),
     };
     Event::ramp(offset, ramp)
 }
 
 /// A deterministic signal in `[-1, 1]` of the absolute frame, stepping
 /// every frame (so a mistimed read shows).
-fn signal_at(seed: u64, frame: u64) -> f32 {
+fn signal_at(seed: u64, frame: u64) -> f64 {
     let h = frame.wrapping_add(1).wrapping_mul(seed | 1).rotate_left(17) ^ seed;
-    (h % 201) as f32 / 100.0 - 1.0
+    (h % 201) as f64 / 100.0 - 1.0
+}
+
+/// The `f32` word a port hears of `signal_at`: the one narrowing.
+fn signal_word(seed: u64, frame: u64) -> f32 {
+    signal_at(seed, frame) as f32
 }
 
 /// A source stepping `Cutoff` and `Q` to `signal_at(seed, frame)` on every
@@ -223,7 +229,8 @@ impl Node for Signal {
         let start = cx.env.frame.get();
         for i in 0..io.frames() {
             let v = signal_at(self.seed, start + i as u64);
-            io.output(0)[i] = v;
+            // The audio output is an `f32` sample.
+            io.output(0)[i] = v as f32;
             let o = io.offset(i).expect("inside");
             for p in [UnitParam::Cutoff, UnitParam::Q] {
                 let _ = io.event_out(0).push(step(o, p, v));
@@ -238,7 +245,7 @@ impl Node for Signal {
 /// (a constant a port hears whenever it starts listening).
 #[derive(Clone)]
 struct Hold {
-    value: f32,
+    value: f64,
 }
 
 impl Node for Hold {
@@ -305,7 +312,7 @@ impl Node for Lag {
 /// the plans' order.
 #[derive(Clone)]
 struct Ramps {
-    plan: Vec<(u64, UnitParam, f32, usize)>,
+    plan: Vec<(u64, UnitParam, f64, usize)>,
     /// Curve segments, each on its absolute frame (after the frame's
     /// ramps).
     segs: Vec<(u64, ParamSegment)>,
@@ -316,7 +323,7 @@ struct Ramps {
 
 impl Ramps {
     /// Steps (zero-length ramps) only.
-    fn steps(steps: &[(u64, UnitParam, f32)]) -> Self {
+    fn steps(steps: &[(u64, UnitParam, f64)]) -> Self {
         Self {
             plan: steps.iter().map(|&(at, p, v)| (at, p, v, 0)).collect(),
             segs: Vec::new(),
@@ -341,8 +348,8 @@ impl Node for Ramps {
                 continue;
             }
             let ramp = match param {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target as f32), Samples(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
             events.push(Event::ramp(offset, ramp));
@@ -466,7 +473,7 @@ fn an_event_sources_value_is_clamped_to_the_range() {
     let out = render(&mut exec, &mut ed, 500, 64);
     #[allow(clippy::needless_range_loop, reason = "three outputs at one frame")]
     for i in 0..500 {
-        let a = signal_at(7, i as u64);
+        let a = signal_word(7, i as u64);
         assert_eq!(out[0][i], a, "frame {i}: the source, unbounded");
         assert_eq!(out[1][i], a.clamp(-0.5, 0.5), "frame {i}: clamped");
         assert_eq!(out[2][i], 3.0, "both params read frames");
@@ -986,7 +993,7 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
 /// A source of [`Hold`]'s steps that declares processing latency: its
 /// events are about frames `latency` earlier than the block's.
 struct LatentHold {
-    value: f32,
+    value: f64,
     latency: usize,
 }
 
@@ -1051,8 +1058,8 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
 /// the fork requirement (doc 014 §10).
 #[derive(Clone)]
 struct OnFirstBlock {
-    cutoff: f32,
-    q: f32,
+    cutoff: f64,
+    q: f64,
     pending: bool,
 }
 
@@ -1230,7 +1237,7 @@ fn segment_schedules(total: usize) -> Vec<Vec<usize>> {
 /// A probe whose `Cutoff` (base 0) is driven by one `Ramps` source sending
 /// `plan` and `segs`, rendered under `blocks`: the cutoff per frame.
 fn render_segments(
-    plan: Vec<(u64, UnitParam, f32, usize)>,
+    plan: Vec<(u64, UnitParam, f64, usize)>,
     segs: Vec<(u64, ParamSegment)>,
     blocks: &[usize],
 ) -> Vec<f32> {
@@ -1239,7 +1246,7 @@ fn render_segments(
 
 /// [`render_segments`], with whole ramps (`shaped`) sent too.
 fn render_moves(
-    plan: Vec<(u64, UnitParam, f32, usize)>,
+    plan: Vec<(u64, UnitParam, f64, usize)>,
     shaped: Vec<(u64, ParamRamp)>,
     segs: Vec<(u64, ParamSegment)>,
     blocks: &[usize],
@@ -1429,8 +1436,8 @@ fn an_interrupted_segment_hands_over_on_the_frame() {
 fn a_shaped_ramp_hits_its_analytic_values_per_frame() {
     const TOL: f64 = 1e-5;
     let key = ParamKey::<Hz>::CUTOFF;
-    let ramp = |target: f32, len: usize, shape| {
-        ParamRamp::new(key, Hz(f64::from(target)), Samples(len)).with_shape(shape)
+    let ramp = |target: f64, len: usize, shape| {
+        ParamRamp::new(key, Hz(target), Samples(len)).with_shape(shape)
     };
     let shaped = vec![
         (100, ramp(1.0, 4, Law::PowerIn(Exponent::of(2.0)))),
@@ -1841,7 +1848,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
     let mut frame = 0u64;
     let check = |out: &[Vec<f32>; 3], frame: &mut u64, range: (f32, f32), what: &str| {
         for (i, &v) in out[0].iter().enumerate() {
-            let want = stepped(signal_at(SEED, *frame + i as u64), range);
+            let want = stepped(signal_word(SEED, *frame + i as u64), range);
             assert_eq!(
                 v.to_bits(),
                 want.to_bits(),
@@ -2046,7 +2053,7 @@ fn a_bad_range_move_is_refused() {
 #[test]
 fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     const BASE: f32 = 0.5;
-    const TARGET: f32 = 2.0;
+    const TARGET: f64 = 2.0;
     const LEN: usize = 640;
     let (cutoff, q) = (Cell::new(BASE), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
@@ -2070,12 +2077,14 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     ed.commit().expect("commits");
     // The ramp's value at absolute frame `f`: `Ramp::step`'s arithmetic,
     // from the base (the port's value before its first event).
+    // The port's ramp arithmetic is `f32`: the target narrows once.
+    let target = TARGET as f32;
     let ramp = |f: u64| {
         let done = f as usize + 1;
         if done >= LEN {
-            TARGET
+            target
         } else {
-            BASE + (TARGET - BASE) * (done as f32 / LEN as f32)
+            BASE + (target - BASE) * (done as f32 / LEN as f32)
         }
     };
     let unbounded = (f32::NEG_INFINITY, f32::INFINITY);
@@ -2108,7 +2117,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
         .expect("a range");
     let out = block(&mut exec, &mut ed, 64);
     assert!(
-        out[0][0] > ramp(63) && out[0][0] < TARGET,
+        out[0][0] > ramp(63) && out[0][0] < target,
         "back on the ramp, mid-flight: {}",
         out[0][0]
     );
@@ -2127,7 +2136,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
 #[derive(Clone, Debug)]
 struct Gen {
     signals: Vec<u64>,
-    ramps: Vec<Vec<(u64, UnitParam, f32, usize)>>,
+    ramps: Vec<Vec<(u64, UnitParam, f64, usize)>>,
     /// Per ramp source: the curve segments it sends as well (every shape,
     /// some resumed part-way), interleaved with its ramps.
     segs: Vec<Vec<(u64, ParamSegment)>>,
@@ -2188,8 +2197,8 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
     (
         0u64..500,
         0usize..2,
-        -3.0f32..3.0,
-        -3.0f32..3.0,
+        -3.0f64..3.0,
+        -3.0f64..3.0,
         0usize..60,
         any::<u8>(),
         prop::option::of((0.0f64..30.0, 0.5f64..80.0)),
@@ -2197,13 +2206,17 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
         .prop_map(|(at, p, from, to, len, k, resumed)| {
             let shape = gen_shape(k);
             let seg = match PARAMS[p] {
-                UnitParam::Q => {
-                    ParamSegment::new(ParamKey::<Q>::Q, Q(from), Q(to), Samples(len), shape)
-                }
+                UnitParam::Q => ParamSegment::new(
+                    ParamKey::<Q>::Q,
+                    Q(from as f32),
+                    Q(to as f32),
+                    Samples(len),
+                    shape,
+                ),
                 _ => ParamSegment::new(
                     ParamKey::<Hz>::CUTOFF,
-                    Hz(f64::from(from)),
-                    Hz(f64::from(to)),
+                    Hz(from),
+                    Hz(to),
                     Samples(len),
                     shape,
                 ),
@@ -2218,11 +2231,11 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
 
 /// One generated shaped ramp: its frame and the ramp (every shape).
 fn gen_shaped_ramp() -> impl Strategy<Value = (u64, ParamRamp)> {
-    (0u64..500, 0usize..2, -3.0f32..3.0, 0usize..60, any::<u8>()).prop_map(
+    (0u64..500, 0usize..2, -3.0f64..3.0, 0usize..60, any::<u8>()).prop_map(
         |(at, p, target, len, k)| {
             let ramp = match PARAMS[p] {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target as f32), Samples(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
             };
             (at, ramp.with_shape(gen_shape(k)))
         },
@@ -2234,7 +2247,7 @@ fn generator() -> impl Strategy<Value = Gen> {
         let signals = prop::collection::vec(1u64..10_000, ns);
         let ramps = prop::collection::vec(
             prop::collection::vec(
-                (0u64..1_500, 0usize..2, -3.0f32..3.0, 0usize..40)
+                (0u64..1_500, 0usize..2, -3.0f64..3.0, 0usize..40)
                     .prop_map(|(at, p, t, l)| (at, PARAMS[p], t, l)),
                 0..6,
             ),
@@ -2551,7 +2564,7 @@ fn a_range_cell_handle_is_the_ports_own() {
     let out = block(&mut exec, &mut ed, 64);
     assert!(out[0].contains(&0.25) && out[0].contains(&-0.25));
     for (i, &v) in out[0].iter().enumerate() {
-        let want = signal_at(SEED, frame + i as u64).clamp(-0.25, 0.25);
+        let want = signal_word(SEED, frame + i as u64).clamp(-0.25, 0.25);
         assert_eq!(v.to_bits(), want.to_bits(), "cutoff, frame {i}");
     }
     // Q's port keeps its own (unbounded) range.

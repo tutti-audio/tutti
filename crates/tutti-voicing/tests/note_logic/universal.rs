@@ -44,9 +44,9 @@ fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
     let all = say(&mut core, Addressee::All, FINE(0));
     let r = retunes(&all);
     assert_eq!(r.len(), 16, "every channel");
-    assert!(r.iter().all(|&(_, b)| (b + 1.0).abs() < 1e-6), "-100 cents");
+    assert!(r.iter().all(|&(_, b)| b == -1.0), "-100 cents");
     let r = retunes(&say(&mut core, Addressee::All, FINE(0x3FFF)));
-    assert!((r[0].1 - 8191.0 / 8192.0).abs() < 1e-6);
+    assert_eq!(r[0].1, 8191.0 / 8192.0);
     let r = retunes(&say(&mut core, Addressee::All, FINE(0x2000)));
     assert!(r.iter().all(|&(_, b)| b == 0.0), "A440");
 }
