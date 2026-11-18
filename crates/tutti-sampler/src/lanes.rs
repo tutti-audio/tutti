@@ -28,8 +28,7 @@
 //! never enters.
 
 use tutti_buffers::Float;
-use tutti_types::MAX_CHANNELS;
-use tutti_types::SamplePosition;
+use tutti_types::{Amplitude, MAX_CHANNELS, SamplePosition};
 
 /// Frames of scratch a node holds before any `prepare` (its constructor's
 /// size, a few KiB), and the piece length of a source's unprepared stack
@@ -255,6 +254,13 @@ pub(crate) fn audible<F: Float>(gain: F) -> F {
     if gain.is_finite() { gain } else { F::ZERO }
 }
 
+/// A voice's gain cell as the sample-domain scalar its block multiplies by:
+/// widened to `F`, and silence when it is NaN or infinite ([`audible`]).
+#[inline]
+pub(crate) fn audible_gain<F: Float>(gain: Amplitude) -> F {
+    audible(F::from_f32(gain.get()))
+}
+
 /// `lane[i] *= gain`: one voice gain over a lane.
 #[inline]
 pub(crate) fn scale<F: Float>(lane: &mut [F], gain: F) {
@@ -369,7 +375,7 @@ mod tests {
             VoiceWindow::from(Beat::new(0.0)),
         )
         .expect("a placeable wave");
-        let mut pool = VoicePool::new();
+        let mut pool = VoicePool::<f32>::new();
         let mut node = VoiceNode::new(Voice {
             source: VoiceSource::Memory(source.clone()),
             play: Default::default(),

@@ -31,7 +31,8 @@ use tutti_types::Samples;
 const PARALLEL_SCRATCH_SAMPLES: usize = 16384;
 
 /// The fraction of a ring ahead of its reader below which the streamer refills
-/// it, and at which a stream counts as primed and healthy.
+/// it, and at which a stream counts as primed and healthy. A ring occupancy,
+/// not audio, so no sample format or unit applies.
 pub(in crate::streamer) const FILL_THRESHOLD: f32 = 0.75;
 
 /// How many frames to read this cycle, under the varifill strategy.

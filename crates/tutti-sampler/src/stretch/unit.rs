@@ -506,7 +506,7 @@ impl Unit {
     ///   `tick` leaves them.
     ///
     /// Allocation-free.
-    pub(crate) fn filter_lanes<I: AsRef<[f32]>, O: AsMut<[f32]>>(
+    pub(crate) fn filter_lanes<F: Float, I: AsRef<[F]>, O: AsMut<[F]>>(
         &mut self,
         input: &[I],
         output: &mut [O],
@@ -520,7 +520,7 @@ impl Unit {
         let stride = self.stride();
         let n_out = stride.min(n);
         for lane in &mut output[n_out..n] {
-            lane.as_mut()[frames.clone()].fill(0.0);
+            lane.as_mut()[frames.clone()].fill(F::ZERO);
         }
         if !self.is_processing() {
             for (c, lane) in output[..n_out].iter_mut().enumerate() {
@@ -541,13 +541,13 @@ impl Unit {
                 debt += rate;
                 while debt >= 1.0 {
                     debt -= 1.0;
-                    v.input.push(&[src[i]]);
+                    v.input.push(&[src[i].convert_to::<f32>()]);
                     v.process(analysis_hop, synthesis_hop);
                 }
                 if c < n_out {
                     one[0] = 0.0;
                     v.output.drain(&mut one);
-                    output[c].as_mut()[i] = one[0];
+                    output[c].as_mut()[i] = one[0].convert_to::<F>();
                 }
             }
             end = debt;

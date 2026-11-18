@@ -42,7 +42,7 @@ pub(crate) use config::BufferConfig;
 pub(crate) use loops::GUARD_FRAMES;
 #[cfg(test)]
 pub(crate) use loops::RingControl;
-pub(crate) use loops::{Arrangement, RingMap};
+pub(crate) use loops::{Arrangement, RingMap, straight};
 pub(crate) use prefetch::SharedReader;
 #[cfg(any(test, feature = "testing"))]
 pub use thread::ByHand;
