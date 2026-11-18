@@ -5,8 +5,8 @@ use super::*;
 use crate::MaxDecay;
 use crate::reverb::network::{Fdn, Network, Stage};
 
-// The tests other than the `f64` ones run the `f32` instantiation, so their tolerances are
-// `f32`'s.
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn controls(f: impl FnOnce(&mut FdnControls)) -> FdnControls {

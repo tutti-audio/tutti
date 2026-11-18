@@ -4,8 +4,8 @@ use tutti_units::{Db, Mix, Samples};
 use super::*;
 use crate::TAIL_FLOOR;
 
-// The helpers and tests other than the `f64` ones run the `f32` instantiation, so their
-// tolerances are `f32`'s.
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
 const RATE: SampleRate = SampleRate::SR_44K1;
 
 fn controls(room: f32, damp: f32) -> FreeverbControls {

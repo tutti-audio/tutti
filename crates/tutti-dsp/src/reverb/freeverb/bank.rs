@@ -285,13 +285,14 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each channel's combs and
     /// all-passes into `left` and `right`, which are overwritten.
     fn run(&mut self, input: &[F], left: &mut [F], right: &mut [F]) {
+        let gain = F::from_f32(Self::FIXED_GAIN.get());
         for (out, (combs, all_passes)) in [left, right]
             .into_iter()
             .zip(self.combs.iter_mut().zip(self.all_passes.iter_mut()))
         {
             out.fill(F::ZERO);
             for cf in combs {
-                cf.process(input, F::from_f32(Self::FIXED_GAIN.get()), out);
+                cf.process(input, gain, out);
             }
             for apf in all_passes {
                 apf.process(out);

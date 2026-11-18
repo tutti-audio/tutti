@@ -27,7 +27,7 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
+use tutti_units::{Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::delay::DelayRing;
@@ -180,7 +180,7 @@ struct TapAt<F> {
     half: usize,
     point: Point,
     at: F,
-    sign: Gain,
+    sign: F,
 }
 
 /// The state of one tank half.
@@ -213,6 +213,11 @@ pub struct PlateBank<F: Float> {
     shape: Shape,
     /// The output taps, left then right, at the rate's offsets.
     taps: [[TapAt<F>; 7]; 2],
+    /// The output gain, narrowed once.
+    output_gain: F,
+    /// The input diffusers' lengths and each half's, as frames in `F`, narrowed once.
+    input_len: [F; 4],
+    half_len: [[F; 4]; 2],
     /// How long it rings at its worst.
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
@@ -263,7 +268,7 @@ impl<F: Float + Lerp> PlateBank<F> {
                     half: k.half,
                     point: k.point,
                     at: F::from_f64(scaled(k.offset, rate)),
-                    sign: k.sign,
+                    sign: F::from_f32(k.sign.get()),
                 })
             }),
             ceiling: tail_of(
@@ -275,6 +280,10 @@ impl<F: Float + Lerp> PlateBank<F> {
                 },
                 rate,
             ),
+            // `OUTPUT_GAIN` and a tap's sign are `f32` units: they narrow through them, once.
+            output_gain: F::from_f32(OUTPUT_GAIN.get()),
+            input_len: shape.input.map(|n| F::from_f64(n.get() as f64)),
+            half_len: shape.halves.map(|h| h.map(|n| F::from_f64(n.get() as f64))),
             into: Samples::ZERO,
             pre: line(shape.pre),
             bandwidth: F::ZERO,
@@ -461,19 +470,15 @@ impl<F: Float + Lerp> PlateBank<F> {
         self.pre.advance();
         self.bandwidth += (F::ONE - k.bandwidth) * (delayed - self.bandwidth);
         let mut u = self.bandwidth;
-        for ((line, &n), &g) in self.input.iter_mut().zip(&self.shape.input).zip(&k.input) {
-            u = lattice(line, u, g, F::from_f64(n.get() as f64));
+        for ((line, &n), &g) in self.input.iter_mut().zip(&self.input_len).zip(&k.input) {
+            u = lattice(line, u, g, n);
             line.advance();
         }
 
         // Each half reads the other's last delay before either writes this frame.
-        let ends = [0, 1].map(|h| {
-            self.halves[h]
-                .delay2
-                .at(F::from_f64(self.shape.halves[h][3].get() as f64))
-        });
+        let ends = [0, 1].map(|h| self.halves[h].delay2.at(self.half_len[h][3]));
         for h in 0..2 {
-            let [d1, l1, d2, _] = self.shape.halves[h].map(|n| F::from_f64(n.get() as f64));
+            let [d1, l1, d2, _] = self.half_len[h];
             let half = &mut self.halves[h];
             let input = u + k.decay * ends[1 - h];
             let sweep = crate::lerp(c.prev[h], c.next[h], t);
@@ -490,14 +495,13 @@ impl<F: Float + Lerp> PlateBank<F> {
             half.delay2.put(y);
         }
 
-        // `OUTPUT_GAIN` and a tap's sign are `f32` units: they narrow through them.
         let [left, right] = self.taps.map(|side| {
-            F::from_f32(OUTPUT_GAIN.get())
+            self.output_gain
                 * side
                     .iter()
                     .map(|k| {
                         let half = &self.halves[k.half];
-                        F::from_f32(k.sign.get())
+                        k.sign
                             * match k.point {
                                 Point::Delay1 => half.delay1.at(k.at),
                                 Point::Lattice2 => half.lattice2.at(k.at),

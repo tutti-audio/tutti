@@ -684,9 +684,7 @@ fn set_poles<F>(t: &mut Target<F>, crossover: [f32; 2], rate: SampleRate) {
 /// The gains of a line's absorption, scaled if their response would peak above 1.
 fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [f32; 3] {
     let g = [Band::Low, Band::Mid, Band::High].map(|b| a.gain(b).get());
-    // The network's design rescales with the poles narrowed to `f32`, so the gains it carries
-    // are the ones run here.
-    rescale_bands(g, pole.map(|p| p as f32))
+    rescale_bands(g, pole)
 }
 
 /// The gains `g = [low, mid, high]` of a three-band absorption whose one-poles are
@@ -694,7 +692,7 @@ fn absorption_gains(a: Absorption, pole: [f64; 2]) -> [f32; 3] {
 /// if their response would exceed 1 anywhere; NaN, infinite or negative gains
 /// are silence. The model's design applies it too, so the gains a network
 /// carries are the ones the bank runs.
-pub(crate) fn rescale_bands(g: [f32; 3], pole: [f32; 2]) -> [f32; 3] {
+pub(crate) fn rescale_bands(g: [f32; 3], pole: [f64; 2]) -> [f32; 3] {
     if !g.iter().all(|x| x.is_finite() && *x >= 0.0) {
         return [0.0; 3];
     }
@@ -709,7 +707,7 @@ pub(crate) fn rescale_bands(g: [f32; 3], pole: [f32; 2]) -> [f32; 3] {
 
 /// The largest `|y(w)|` of the absorption with gains `g = [low, mid, high]`,
 /// over a grid of frequencies.
-pub(crate) fn peak_response(g: [f32; 3], pole: [f32; 2]) -> f64 {
+pub(crate) fn peak_response(g: [f32; 3], pole: [f64; 2]) -> f64 {
     let (low, mid, high) = (f64::from(g[0]), f64::from(g[1]), f64::from(g[2]));
     let (c2, c1) = (mid - high, low - mid);
     // |L1|, |L2| <= 1, so the response is at most the sum of the magnitudes
@@ -719,7 +717,6 @@ pub(crate) fn peak_response(g: [f32; 3], pole: [f32; 2]) -> f64 {
     if bound <= 1.0 {
         return bound;
     }
-    let pole = pole.map(f64::from);
     // |L(w)|: ((1 - p) / (1 - p e^-jw))^2.
     let l = |p: f64, w: f64| -> (f64, f64) {
         let (re, im) = (1.0 - p * libm::cos(w), p * libm::sin(w));
