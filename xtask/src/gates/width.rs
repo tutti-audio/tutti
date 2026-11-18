@@ -7,8 +7,9 @@
 //! `testing` or `test_support` module (`contract.rs`, `testing.rs`, `test_support.rs` or a
 //! directory of that name). Its text
 //! is read with comments and literals blanked (so `//`, `///` and `//!` lines and doc
-//! examples are not code) and cut at the file's first `#[cfg(test)]`: everything after it
-//! is test code.
+//! examples are not code) with every test-only item blanked: the item behind a
+//! `#[cfg(test)]` (or `#[cfg(all(.., test, ..))]`), up to its `;` for an out-of-line `mod
+//! tests;` or to its matching `}` for an inline one. Code after that item is library code.
 //!
 //! **What it refuses** in library code, each hit one site:
 //!
@@ -34,6 +35,9 @@
 //! `bare_f32` are not refused in an edge file. The `*-ffi` crates are edges by their name. An edge file's
 //! `plain_node` and `f32_cell` sites are still refused.
 //!
+//! An [`EDGES`] path (a file, or a directory ending in `/`) that matches no library file
+//! fails like a stale baseline row, so the list names only files that exist.
+//!
 //! **Baseline.** [`BASELINE`] holds `<path>  <max>  migrating: <PR or step>` rows, one per
 //! file, `#` lines and blank lines aside. A file fails when it holds more sites than its
 //! max (a file with no row has max 0), naming each site. A row whose file holds no site
@@ -47,7 +51,7 @@
 //! unit (review holds that one).
 
 use super::buffers::{scan_with, squash};
-use super::lex::{blank, find_word_from, line_of, matching};
+use super::lex::{blank, find_word_from, line_of, matching, test_ranges};
 use super::{Report, Tree};
 use std::collections::BTreeMap;
 
@@ -93,10 +97,6 @@ pub(super) const EDGES: &[(&str, &str)] = &[
     (
         "crates/tutti-cpal/src/edge.rs",
         "an external edge: the device's sample format",
-    ),
-    (
-        "crates/tutti-plugin-types/src/audio.rs",
-        "an external edge: the plugin ABI's audio width",
     ),
     (
         "crates/tutti-plugin-types/src/param_unit.rs",
@@ -270,7 +270,9 @@ fn library_files(tree: &dyn Tree) -> Vec<String> {
             let parts: Vec<&str> = p.split('/').collect();
             p.ends_with(".rs")
                 && parts.get(2) == Some(&"src")
-                && !parts.last().is_some_and(|f| f.ends_with("tests.rs"))
+                && !parts
+                    .last()
+                    .is_some_and(|f| *f == "tests.rs" || f.ends_with("_tests.rs"))
                 && !parts.iter().any(|s| {
                     matches!(
                         *s,
@@ -418,8 +420,16 @@ fn f32_cells(code: &str) -> Vec<usize> {
 /// Every refused site of one library file; `src` is the file's text.
 fn scan(path: &str, src: &str) -> Vec<Hit> {
     let blanked = blank(src);
-    let cut = blanked.find("#[cfg(test)]").unwrap_or(blanked.len());
-    let code = &blanked[..cut];
+    let mut bytes = blanked.clone().into_bytes();
+    for (from, to) in test_ranges(&blanked) {
+        for b in &mut bytes[from..to.min(blanked.len())] {
+            if *b != b'\n' {
+                *b = b' ';
+            }
+        }
+    }
+    let code = String::from_utf8(bytes).unwrap_or(blanked);
+    let code = code.as_str();
     let mut hits = Vec::new();
     let mut add = |form: Form, at: usize| {
         hits.push(Hit {
@@ -466,7 +476,7 @@ fn scan(path: &str, src: &str) -> Vec<Hit> {
     let named = |text: &str, _generic: bool| {
         find_word_from(&squash(text), "f32", 0).map(|_| "f32".to_owned())
     };
-    for s in scan_with(path, &src[..cut], &named) {
+    for s in scan_with(path, src, &named) {
         hits.push(Hit {
             form: Form::BareF32,
             at: s.key,
@@ -546,6 +556,19 @@ pub(super) fn check(
     }
     let mut over = Vec::new();
     let mut stale = Vec::new();
+    let missing: Vec<&str> = edges
+        .iter()
+        .map(|(p, _)| *p)
+        .filter(|p| {
+            !files.iter().any(|f| {
+                if p.ends_with('/') {
+                    f.starts_with(p)
+                } else {
+                    f == p
+                }
+            })
+        })
+        .collect();
     let mut slack = Vec::new();
     let mut by_form: BTreeMap<Form, usize> = BTreeMap::new();
     let mut total = 0;
@@ -583,7 +606,7 @@ pub(super) fn check(
             stale.push(format!("  {path} ({BASELINE}:{})", row.line));
         }
     }
-    if over.is_empty() && stale.is_empty() {
+    if over.is_empty() && stale.is_empty() && missing.is_empty() {
         r.say(format!("{GATE}: OK"));
     }
     if !over.is_empty() {
@@ -593,6 +616,12 @@ pub(super) fn check(
              or the file is a row of {BASELINE}):"
         ));
         over.into_iter().for_each(|l| r.fail(l));
+    }
+    if !missing.is_empty() {
+        r.fail(format!(
+            "{GATE}: FAIL (an edge of EDGES names no library file; delete it or fix its path):"
+        ));
+        missing.iter().for_each(|p| r.fail(format!("  {p}")));
     }
     if !stale.is_empty() {
         r.fail(format!(
@@ -637,6 +666,16 @@ mod tests {
     fn run(baseline: &str, files: &[(&str, &str)]) -> Report {
         let mut all = vec![(BASELINE, baseline)];
         all.extend_from_slice(files);
+        for (edge, _) in E {
+            let path = if edge.ends_with('/') {
+                format!("{edge}x.rs")
+            } else {
+                (*edge).to_owned()
+            };
+            if !files.iter().any(|(p, _)| *p == path) {
+                all.push((Box::leak(path.into_boxed_str()), "fn ok() {}\n"));
+            }
+        }
         check(&Mem::with(&all), E, 0)
     }
 
@@ -689,10 +728,10 @@ mod tests {
     }
 
     #[test]
-    fn everything_after_the_first_cfg_test_is_not_library_code() {
+    fn an_inline_cfg_test_item_is_not_library_code_but_the_code_after_it_is() {
         let src = "fn a() { x as f32; }\n#[cfg(test)]\nmod tests { fn t() { y as f32; } }\n\
                    fn after() { z as f32; w.to_f32(); }\n";
-        assert_eq!(forms(src), ["as_f32"]);
+        assert_eq!(forms(src), ["to_f32", "as_f32", "as_f32"]);
         let src = "pub fn a(x: f32) {}\n#[cfg(test)]\nmod tests { pub fn t(x: f32) {} }\n";
         assert_eq!(forms(src), ["bare_f32"]);
     }
@@ -714,10 +753,51 @@ mod tests {
             ("crates/a/benches/x.rs", bad),
             ("crates/a/examples/x.rs", bad),
             ("testing/b/src/lib.rs", bad),
+            ("crates/a/src/edge.rs", "fn ok() {}\n"),
+            ("crates/d/src/x.rs", "fn ok() {}\n"),
         ]);
         let r = check(&mem, E, 0);
         assert!(r.passed(), "{:?}", r.findings);
         assert!(r.out[1].contains("0 sites in 0 files"), "{:?}", r.out);
+    }
+
+    #[test]
+    fn an_out_of_line_cfg_test_mod_hides_only_itself() {
+        let src = "#[cfg(test)]\nmod tests;\nfn a() { x as f32; }\n";
+        assert_eq!(forms(src), ["as_f32"]);
+        assert_eq!(scan(F, src)[0].at, "line 3");
+        let src = "#[cfg(test)]\nmod t { fn a() { y as f32; } }\nfn b() { z.to_f32(); }\n\
+                   #[cfg(test)]\nuse x::y;\nfn c() { w as f32; }\n";
+        assert_eq!(forms(src), ["to_f32", "as_f32"]);
+    }
+
+    #[test]
+    fn only_tests_rs_and_a_suffix_tests_rs_are_test_files() {
+        let bad = "fn f() { x as f32; }\n";
+        let r = run(
+            "",
+            &[
+                ("crates/a/src/contests.rs", bad),
+                ("crates/a/src/tests.rs", bad),
+                ("crates/a/src/x_tests.rs", bad),
+            ],
+        );
+        assert_eq!(r.findings[1], "  crates/a/src/contests.rs: 1 sites, max 0");
+    }
+
+    #[test]
+    fn an_edge_that_names_no_library_file_fails() {
+        let mem = Mem::with(&[
+            (BASELINE, ""),
+            (F, "fn f() {}\n"),
+            ("crates/a/src/edge.rs", "fn f() {}\n"),
+        ]);
+        let r = check(&mem, E, 0);
+        assert!(!r.passed());
+        assert!(r.findings[0].contains("names no library file"));
+        assert_eq!(r.findings[1], "  crates/d/src/");
+        let r = check(&mem, &[("crates/a/src/gone.rs", "gone")], 0);
+        assert_eq!(r.findings[1], "  crates/a/src/gone.rs");
     }
 
     #[test]
