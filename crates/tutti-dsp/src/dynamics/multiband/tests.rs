@@ -8,14 +8,17 @@ use super::*;
 use crate::testing::{amplitude_at, lock_in};
 use crate::{Complex32, Complex64, Lti, RealFft};
 
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 /// Frames a glide takes at [`RATE`]: `ceil(0.005 * 48000)`.
 const GLIDE: usize = 240;
 /// Frames for the crossover's sections and the followers to settle on a constant.
 const SETTLE: usize = 24_000;
 
-fn bank(width: u16, bands: usize) -> MultibandBank {
-    MultibandBank::new(ChannelLayout::from_count(width), bands, RATE).unwrap()
+fn bank(width: u16, bands: usize) -> MultibandBank<f32> {
+    MultibandBank::<f32>::new(ChannelLayout::from_count(width), bands, RATE).unwrap()
 }
 
 fn hz(freqs: &[f32]) -> CrossoverControls {
@@ -60,7 +63,7 @@ fn unity(freqs: &[f32]) -> MultibandSettings {
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
 /// threshold lane `lanes[b]` where given.
 fn run_in(
-    k: &mut MultibandBank,
+    k: &mut MultibandBank<f32>,
     audio: &[&[f32]],
     lanes: [Option<&[f32]>; MAX_BANDS],
     chunk: usize,
@@ -86,7 +89,7 @@ fn run_in(
     out
 }
 
-fn run(k: &mut MultibandBank, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+fn run(k: &mut MultibandBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
     run_in(k, audio, [None; MAX_BANDS], 256)
 }
 
@@ -177,14 +180,14 @@ fn a_bank_has_two_to_four_bands_over_a_width() {
     for bands in [0, 1, 5, 6] {
         assert!(
             matches!(
-                MultibandBank::new(ChannelLayout::STEREO, bands, RATE),
+                MultibandBank::<f32>::new(ChannelLayout::STEREO, bands, RATE),
                 Err(CrossoverError::Bands { min: 2, max: 4, .. })
             ),
             "{bands}"
         );
     }
     assert_eq!(
-        MultibandBank::new(ChannelLayout::from_count(0), 3, RATE).unwrap_err(),
+        MultibandBank::<f32>::new(ChannelLayout::from_count(0), 3, RATE).unwrap_err(),
         CrossoverError::Channels { channels: 0 }
     );
     for bands in 2..=4 {
@@ -376,7 +379,8 @@ fn a_bypassed_band_passes_unprocessed() {
     k.aim(&set);
     let x = vec![0.5f32; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
-    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-6);
+    // The state is `f32`: the DC of 0.5 through the crossover's sections rounds to a few 1e-6.
+    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-5);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     set.bands[0].bypass = false;
     k.aim(&set);
@@ -813,4 +817,28 @@ fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
             "knee {knee}: {got} vs {want}"
         );
     }
+}
+
+/// An `f64` multiband whose bands all sit under their thresholds is the crossover's sum: the
+/// Butterworth all-pass of the split, as the recursion of `(s^2 - sqrt2 s + 1) / (s^2 + sqrt2 s
+/// + 1)` in `f64`, frame for frame to 1e-12 on a signal of more than 24 bits.
+#[test]
+fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
+    use crate::testing::butterworth_all_pass;
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let n = 4_800;
+    let x = wide_signal(n);
+    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 2, RATE).unwrap();
+    // The signal is near 0.25 (-12 dB), 12 dB under the threshold of every band.
+    k.aim(&MultibandSettings {
+        crossover: hz(&[1_000.0]),
+        bands: [band(0.0, 0.0, 8.0, 0.01, 0.1, 0.0); MAX_BANDS],
+    });
+    let mut out = vec![0.0f64; n];
+    k.process(
+        MultibandLanes::default(),
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    assert_close_f64(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
 }

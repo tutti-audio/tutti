@@ -1,4 +1,4 @@
-use tutti_units::{Amplitude, Ballistics, SampleRate, Seconds};
+use tutti_units::{Ballistics, SampleRate, Seconds};
 
 use super::Follower;
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -26,7 +26,7 @@ fn an_f64_attack_step_from_zero_is_the_coefficient_times_the_target() {
     let targets = wide_signal(64);
     let got: Vec<f64> = targets
         .iter()
-        .map(|&t| follower.follow(Seconds(0.0), Seconds(t)).get())
+        .map(|&t| follower.follow_raw(0.0, t))
         .collect();
     let want: Vec<f64> = targets.iter().map(|&t| closed(ATTACK) * t).collect();
     assert_close_f64(&got, &want, 1e-12);
@@ -40,7 +40,7 @@ fn an_f64_release_step_to_zero_keeps_one_minus_the_coefficient() {
     let states = wide_signal(64);
     let got: Vec<f64> = states
         .iter()
-        .map(|&s| follower.follow(Seconds(s), Seconds(0.0)).get())
+        .map(|&s| follower.follow_raw(s, 0.0))
         .collect();
     let want: Vec<f64> = states
         .iter()
@@ -55,11 +55,7 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
     let held = wide_signal(16);
     let got: Vec<f64> = held
         .iter()
-        .map(|&s| {
-            Follower::<f64>::NEUTRAL
-                .follow(Seconds(s), Seconds(0.0))
-                .get()
-        })
+        .map(|&s| Follower::<f64>::NEUTRAL.follow_raw(s, 0.0))
         .collect();
     assert_close_f64(&got, &held, 0.0);
 }
@@ -70,9 +66,9 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
 fn the_f32_follower_takes_the_same_one_step_values() {
     let follower = follower::<f32>();
     let (attack, release) = (closed(ATTACK) as f32, closed(RELEASE) as f32);
-    let up = follower.follow(Amplitude(0.0), Amplitude(0.5)).get();
+    let up = follower.follow_raw(0.0, 0.5);
     assert_eq!(up, attack * 0.5);
-    let down = follower.follow(Amplitude(0.5), Amplitude(0.0)).get();
+    let down = follower.follow_raw(0.5, 0.0);
     assert!(
         (down - 0.5 * (1.0 - release)).abs() <= 0.5 * 2f32.powi(-24),
         "{down}"

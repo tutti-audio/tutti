@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_units::{Amplitude, Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
 use crate::testing::noise;
@@ -166,14 +166,8 @@ fn the_design_holds_the_figures_of_its_definition() {
         Seconds(0.001).one_pole_coeff(RATE) as f32,
         Seconds(0.1).one_pole_coeff(RATE) as f32,
     );
-    assert_eq!(
-        m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),
-        Amplitude(attack)
-    );
-    assert_eq!(
-        m.ballistics.follow(Amplitude(1.0), Amplitude::SILENT),
-        Amplitude(1.0 - release)
-    );
+    assert_eq!(m.ballistics.follow_raw(0.0, 1.0), attack);
+    assert_eq!(m.ballistics.follow_raw(1.0, 0.0), 1.0 - release);
     assert_eq!(m.range, Db(-12.0));
 
     let m = Design::<f32>::of(
@@ -187,13 +181,13 @@ fn the_design_holds_the_figures_of_its_definition() {
         RATE,
     );
     assert_eq!(
-        m.ballistics.follow(Amplitude::SILENT, Amplitude(1.0)),
-        Amplitude(1.0),
+        m.ballistics.follow_raw(0.0, 1.0),
+        1.0,
         "an attack under 0 is instant"
     );
     assert_eq!(
-        m.ballistics.follow(Amplitude(1.0), Amplitude::SILENT),
-        Amplitude::SILENT,
+        m.ballistics.follow_raw(1.0, 0.0),
+        0.0,
         "a release under 0 is instant"
     );
     assert_eq!(m.hold_samples, 0);

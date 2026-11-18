@@ -44,9 +44,9 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode> {
 }
 
 /// A node whose `Seconds` params are `f64` cells.
-fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode> {
+fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph()
-        .add(MultibandCompressorNode::new(ChannelLayout::STEREO, 2).unwrap())
+        .add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap())
         .0
 }
 

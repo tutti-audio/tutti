@@ -347,7 +347,8 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
         Box::new(move |block| {
             let lanes = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap(),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)])
+                    .unwrap(),
                 block,
                 &inputs,
                 &lanes,
@@ -359,7 +360,8 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap(),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)])
+                    .unwrap(),
                 block,
                 &inputs,
                 &[None, Some(sweep(2_500.0, 9_000.0))],
@@ -388,7 +390,7 @@ fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone()))];
-        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(old)]).unwrap();
+        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(old)]).unwrap();
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };

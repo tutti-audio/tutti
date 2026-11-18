@@ -55,7 +55,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "crossover",
-            Box::new(CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
+            Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
         ),
         (
             // A feedback line of a whole number of frames: one sample circulating in it falls
@@ -138,20 +138,20 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "dynamic eq",
-            Box::new(DynamicEqNode::from(
+            Box::new(DynamicEqNode::<f32>::from(
                 DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
             )),
         ),
         (
             "envelope filter",
-            Box::new(EnvelopeFilterNode::from(
+            Box::new(EnvelopeFilterNode::<f32>::from(
                 EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::BandPass)
                     .depth(Semitones(24.0)),
             )),
         ),
         (
             "transient shaper",
-            Box::new(TransientShaperNode::from(
+            Box::new(TransientShaperNode::<f32>::from(
                 TransientShaperConfig::new(ChannelLayout::STEREO)
                     .attack(Db(12.0))
                     .sustain(Db(-6.0)),
@@ -225,7 +225,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "multiband",
-            Box::new(MultibandCompressorNode::new(ChannelLayout::STEREO, 3).unwrap()),
+            Box::new(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap()),
         ),
     ]
 }
@@ -428,7 +428,7 @@ mod logged {
 
     #[test]
     fn the_multiband_compressor_logs_its_reset_once() {
-        let node = MultibandCompressorNode::new(ChannelLayout::STEREO, 3).unwrap();
+        let node = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap();
         let records = records(node, f32::NAN, Some(1), 8);
         assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
     }

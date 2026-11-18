@@ -2,7 +2,9 @@
 //! band-passed key, and its de-esser configuration.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource};
+use tutti_dsp::{
+    COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lanes, Lerp,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -146,9 +148,12 @@ impl DynamicEqConfig {
 /// into blocks; the curve and the times land whole and the bell glides to a new centre or Q.
 ///
 /// The tail is unknown: a bell rings for as long as its Q says.
-pub type DynamicEqNode = KernelNode<DynamicEqKernel>;
+///
+/// `F` is the state precision of the detector and the bell, `f64` by default: an `f64` graph
+/// runs them in `f64`, and a view of the other sample format is converted at the edges.
+pub type DynamicEqNode<F = f64> = KernelNode<DynamicEqKernel<F>>;
 
-impl From<DynamicEqConfig> for DynamicEqNode {
+impl<F: Float + Lanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// # Panics
     ///
     /// Past 16 channels: a band is one bus.
@@ -187,17 +192,17 @@ control_set! {
 /// The band as a [`Kernel`]: a [`DynamicEqBank`] sized at the prepared rate, its detector on
 /// the [`KeySource`] it was built with.
 #[derive(Clone, Debug)]
-pub struct DynamicEqKernel {
+pub struct DynamicEqKernel<F: Float + Lanes> {
     input: BusTopology,
     key: KeySource,
     mode: DynamicMode,
     /// `None` until [`prepare`](Kernel::prepare).
-    bank: Option<DynamicEqBank>,
+    bank: Option<DynamicEqBank<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl DynamicEqKernel {
+impl<F: Float + Lanes + Lerp> DynamicEqKernel<F> {
     fn new(input: BusTopology, key: KeySource, mode: DynamicMode) -> Self {
         Self {
             input,
@@ -209,7 +214,7 @@ impl DynamicEqKernel {
     }
 }
 
-impl Kernel for DynamicEqKernel {
+impl<F: Float + Lanes + Lerp> Kernel for DynamicEqKernel<F> {
     type Set = DynamicEqSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -274,5 +279,39 @@ impl Kernel for DynamicEqKernel {
     /// so the graph's tail fold never reads it as none.
     fn tail(&self) -> Tail {
         Tail::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_fixtures::signal::wide_signal;
+
+    /// An `f64` kernel keeps the bell in `f64`: with a range of 0 dB the band never leaves
+    /// flat, so a signal of more than 24 bits comes out exactly as it went in (an `f32` state
+    /// narrows it by 1e-8).
+    #[test]
+    fn an_f64_kernel_with_zero_range_returns_a_wide_signal_unchanged() {
+        let controls = DynamicEqControls {
+            threshold: Db(-60.0),
+            ratio: CompressionRatio(4.0),
+            range: Db(0.0),
+            ..DynamicEqControls::DEFAULT
+        };
+        let mut k =
+            DynamicEqKernel::<f64>::new(BusTopology::MONO, KeySource::Own, DynamicMode::Downward);
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples(2_000)),
+        );
+        k.retarget(&controls);
+        let x = wide_signal(2_000);
+        let mut y = vec![0.0f64; x.len()];
+        k.render(
+            Planes::new(&[&x[..]]).unwrap(),
+            ControlLanes::<f64>::NONE,
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        );
+        assert_eq!(y, x);
     }
 }

@@ -25,7 +25,7 @@ fn landed(model: &CrossoverModel) -> Glide<CrossoverCoefficients> {
 /// Runs `input` (one `Vec` per channel) through `bank` at the glide `at` in blocks of the
 /// lengths in `blocks`, cycled, and returns the output planes, `bands * channels` of them.
 fn run_glide<S: Float>(
-    bank: &mut CrossoverBank,
+    bank: &mut CrossoverBank<f64>,
     glide: &mut Glide<CrossoverCoefficients>,
     input: &[Vec<S>],
     blocks: &[usize],
@@ -52,7 +52,7 @@ fn run_glide<S: Float>(
 
 /// [`run_glide`] at `model`, held.
 fn run<S: Float>(
-    bank: &mut CrossoverBank,
+    bank: &mut CrossoverBank<f64>,
     model: &CrossoverModel,
     input: &[Vec<S>],
     blocks: &[usize],
@@ -67,7 +67,7 @@ fn impulse_response(freqs: &[f32], frames: usize) -> Vec<Vec<f64>> {
     let mut x = vec![0.0f64; frames];
     x[0] = 1.0;
     run(
-        &mut CrossoverBank::new(ChannelLayout::MONO),
+        &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
         &m,
         &[x],
         &[frames],
@@ -195,7 +195,7 @@ fn the_planes_are_band_major_and_each_channel_is_its_own_tree() {
     };
     let input = vec![noise(1), vec![0.0; 700], noise(5)];
     let all = run(
-        &mut CrossoverBank::new(ChannelLayout::from(3u16)),
+        &mut CrossoverBank::<f64>::new(ChannelLayout::from(3u16)),
         &m,
         &input,
         &[700],
@@ -203,7 +203,7 @@ fn the_planes_are_band_major_and_each_channel_is_its_own_tree() {
     assert_eq!(all.len(), 9);
     for c in 0..3 {
         let alone = run(
-            &mut CrossoverBank::new(ChannelLayout::MONO),
+            &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &m,
             std::slice::from_ref(&input[c]),
             &[700],
@@ -239,7 +239,7 @@ fn any_split_renders_the_frames_of_the_whole() {
         })
         .collect();
     let render = |blocks: &[usize]| {
-        let mut bank = CrossoverBank::new(ChannelLayout::STEREO);
+        let mut bank = CrossoverBank::<f64>::new(ChannelLayout::STEREO);
         let mut glide = landed(&models[0]);
         let mut out = vec![vec![0.0f32; 1_501]; 6];
         for (w, m) in cuts.windows(2).zip(&models) {
@@ -282,7 +282,7 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
         let mut glide = landed(&from);
         glide.aim(to.coefficients());
         let out = run_glide(
-            &mut CrossoverBank::new(ChannelLayout::MONO),
+            &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &mut glide,
             &[x],
             &[m + 1],
@@ -303,7 +303,7 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
     let mut x = vec![0.0f64; 40];
     x[39] = 1.0;
     let out = run_glide(
-        &mut CrossoverBank::new(ChannelLayout::MONO),
+        &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
         &mut glide,
         &[x],
         &[40],
@@ -330,7 +330,7 @@ fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
         let input: Vec<f32> = (0..frames)
             .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
             .collect();
-        let mut bank = CrossoverBank::new(ChannelLayout::MONO);
+        let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut glide = landed(&lo);
         let mut peak = 0.0f64;
         for (period, chunk) in input.chunks(16).enumerate() {
@@ -352,7 +352,7 @@ fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
 #[test]
 fn a_reset_bank_is_silent() {
     let m = model(&[200.0, 2_000.0, 8_000.0]);
-    let mut bank = CrossoverBank::new(ChannelLayout::STEREO);
+    let mut bank = CrossoverBank::<f64>::new(ChannelLayout::STEREO);
     let noise: Vec<f32> = (0..512)
         .map(|i| ((i * 31) % 17) as f32 / 8.0 - 1.0)
         .collect();
@@ -376,7 +376,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
         })
         .collect();
     let full = run(
-        &mut CrossoverBank::new(ChannelLayout::STEREO),
+        &mut CrossoverBank::<f64>::new(ChannelLayout::STEREO),
         &m,
         &input,
         &[300],
@@ -385,7 +385,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let mut out = vec![vec![9.0f32; 300]; 4];
     let ins: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    CrossoverBank::new(ChannelLayout::STEREO).process(
+    CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut landed(&m),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
@@ -394,7 +394,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     // One input channel into a stereo bank: channel 1's planes are not touched.
     let mut out = vec![vec![9.0f32; 300]; 6];
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    CrossoverBank::new(ChannelLayout::STEREO).process(
+    CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut landed(&m),
         Planes::new(&ins[..1]).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
@@ -420,7 +420,7 @@ fn the_bands_stay_within_the_models_bound() {
             .map(|i| ((i * 7919) % 2003) as f32 / 1001.0 - 1.0)
             .collect();
         let out = run(
-            &mut CrossoverBank::new(ChannelLayout::MONO),
+            &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &m,
             &[noise],
             &[64],
@@ -430,5 +430,29 @@ fn the_bands_stay_within_the_models_bound() {
             peak.is_finite() && f64::from(peak) <= m.l1_norm(),
             "{set:?}: {peak}"
         );
+    }
+}
+
+/// The bands of an `f64` tree on a signal of more than 24 bits sum to the Butterworth all-pass
+/// of each split in turn: the recursion of `(s^2 - sqrt2 s + 1) / (s^2 + sqrt2 s + 1)` in
+/// `f64` direct form I, from rest, frame for frame to 1e-12 (an `f32` state is off by 1e-8).
+#[test]
+fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
+    use crate::testing::butterworth_all_pass;
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let n = 4_800;
+    let x = wide_signal(n);
+    for splits in [&[1_000.0f32][..], &[500.0, 4_000.0]] {
+        let bands = run(
+            &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
+            &model(splits),
+            &[x.clone()],
+            &[n],
+        );
+        let got: Vec<f64> = (0..n).map(|i| bands.iter().map(|b| b[i]).sum()).collect();
+        let want = splits.iter().fold(x.clone(), |y, &fc| {
+            butterworth_all_pass(&y, f64::from(fc), RATE.get())
+        });
+        assert_close_f64(&got, &want, 1e-12);
     }
 }

@@ -47,7 +47,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 
 #[test]
 fn crossover_node_process_is_allocation_free() {
-    let node = CrossoverNode::new(
+    let node = CrossoverNode::<f32>::new(
         ChannelLayout::STEREO,
         &[Hz(120.0), Hz(1_000.0), Hz(6_000.0)],
     )
@@ -57,7 +57,7 @@ fn crossover_node_process_is_allocation_free() {
 
 #[test]
 fn crossover_node_with_a_moving_frequency_is_allocation_free() {
-    let node = CrossoverNode::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(3_000.0)]).unwrap();
+    let node = CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(3_000.0)]).unwrap();
     let mut hz = 200.0f32;
     gate(node, move |controls, _| {
         hz = if hz > 2_000.0 { 200.0 } else { hz + 3.0 };
@@ -69,7 +69,7 @@ fn crossover_node_with_a_moving_frequency_is_allocation_free() {
 #[test]
 fn multiband_compressor_process_is_allocation_free() {
     for bands in 2..=4 {
-        let node = MultibandCompressorNode::new(ChannelLayout::STEREO, bands).unwrap();
+        let node = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, bands).unwrap();
         let set = node.param_set();
         for b in 0..bands as u8 {
             assert!(set.set(UnitAddr::new(UnitParam::Threshold, b), -24.0));
@@ -84,7 +84,7 @@ fn multiband_compressor_process_is_allocation_free() {
 fn multiband_compressor_with_moving_params_is_allocation_free() {
     // Four bands: every band param, every crossover and both toggles are
     // written each block (27 ports and 8 toggle cells).
-    let node = MultibandCompressorNode::new(ChannelLayout::from_count(6), 4).unwrap();
+    let node = MultibandCompressorNode::<f32>::new(ChannelLayout::from_count(6), 4).unwrap();
     let mut hz = 120.0f32;
     gate(node, move |controls, i| {
         let set = controls.params();

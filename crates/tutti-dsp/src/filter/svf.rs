@@ -9,4 +9,6 @@ mod model;
 pub use bank::SvfBank;
 pub use kernel::{SvfCoefficients, SvfCoeffs, SvfType, svf_step};
 pub(crate) use kernel::{integrator_gains, svf_taps};
+#[cfg(test)]
+pub(crate) use model::tests::rbj;
 pub use model::{SvfControls, SvfModel};

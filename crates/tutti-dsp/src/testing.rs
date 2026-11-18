@@ -2,4 +2,4 @@
 
 mod signals;
 
-pub(crate) use signals::{amplitude_at, lock_in, noise};
+pub(crate) use signals::{amplitude_at, butterworth_all_pass, direct_form, lock_in, noise};

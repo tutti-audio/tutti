@@ -18,8 +18,11 @@ fn feed(rig: &mut BlockRig) {
 #[test]
 fn transient_shaper_process_is_allocation_free_with_the_amounts_moving() {
     let config = TransientShaperConfig::new(ChannelLayout::STEREO).attack(Db(6.0));
-    let (mut rig, controls) =
-        BlockRig::new(TransientShaperNode::from(config), SampleRate::SR_48K, 64);
+    let (mut rig, controls) = BlockRig::new(
+        TransientShaperNode::<f32>::from(config),
+        SampleRate::SR_48K,
+        64,
+    );
     feed(&mut rig);
     let amount = |i: usize| if i.is_multiple_of(2) { -12.0 } else { 12.0 };
     for i in 0..16 {

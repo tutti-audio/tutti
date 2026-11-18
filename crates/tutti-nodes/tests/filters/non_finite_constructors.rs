@@ -213,16 +213,17 @@ fn sweep() {
         }));
         add(probe("crossover", b, || {
             Box::new(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(b)]).unwrap_or_else(|_| {
-                    CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(b)]).unwrap_or_else(|_| {
+                    CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
                 }),
             )
         }));
         add(probe("crossover2", b, || {
             Box::new(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(b)]).unwrap_or_else(
-                    |_| CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap(),
-                ),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(b)])
+                    .unwrap_or_else(|_| {
+                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                    }),
             )
         }));
         // The longest delay is a `MaxDelay`, which refuses a non-finite, negative or

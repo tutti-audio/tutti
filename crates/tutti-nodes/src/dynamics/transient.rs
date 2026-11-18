@@ -1,7 +1,7 @@
 //! [`TransientShaperNode`]: raises or lowers a signal's attacks and its sustain apart.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, TransientBank, TransientControls};
+use tutti_dsp::{COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
@@ -32,7 +32,7 @@ impl TransientShaperConfig {
     }
 
     /// The most the gain adds while the signal's attack is on (the fast envelope above the slow
-    /// one), at the start; read within [`TransientBank::MAX_AMOUNT`] either way.
+    /// one), at the start; read within [`TransientControls::MAX_AMOUNT`] either way.
     #[must_use]
     pub fn attack(mut self, amount: Db) -> Self {
         self.controls.attack = amount;
@@ -70,19 +70,22 @@ impl TransientShaperConfig {
 /// the loudest channel, so the stereo image does not move.
 ///
 /// The two amounts are live [`Db`] cells, both [`UnitParam::GainDb`](tutti_units::UnitParam::GainDb): index 0 is the
-/// attack and index 1 the sustain, each read within [`TransientBank::MAX_AMOUNT`]. They are
+/// attack and index 1 the sustain, each read within [`TransientControls::MAX_AMOUNT`]. They are
 /// sampled on the stream grid (16 frames) and glide over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
 /// The two envelope times are the build's.
 ///
 /// No latency and no tail: the gain only scales, so a silent input is a silent output. A
 /// [`KernelNode`]; made from a [`TransientShaperConfig`] (`TransientShaperNode::from`).
 ///
+/// `F` is the state precision of the envelopes and the gain, `f64` by default: an `f64` graph
+/// runs them in `f64`, and a view of the other sample format is converted at the edges.
+///
 /// # Panics
 ///
 /// `TransientShaperNode::from` panics past 16 channels: a shaper is one bus.
-pub type TransientShaperNode = KernelNode<TransientShaperKernel>;
+pub type TransientShaperNode<F = f64> = KernelNode<TransientShaperKernel<F>>;
 
-impl From<TransientShaperConfig> for TransientShaperNode {
+impl<F: Float + Lerp> From<TransientShaperConfig> for TransientShaperNode<F> {
     fn from(config: TransientShaperConfig) -> Self {
         Self::with_kernel(
             TransientShaperKernel::new(&config),
@@ -109,17 +112,17 @@ control_set! {
 
 /// The shaper as a [`Kernel`]: a [`TransientBank`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct TransientShaperKernel {
+pub struct TransientShaperKernel<F: Float + Lerp> {
     input: BusTopology,
     fast: Seconds,
     slow: Seconds,
     /// `None` until [`prepare`](Kernel::prepare).
-    bank: Option<TransientBank>,
+    bank: Option<TransientBank<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl TransientShaperKernel {
+impl<F: Float + Lerp> TransientShaperKernel<F> {
     fn new(config: &TransientShaperConfig) -> Self {
         Self {
             input: BusTopology::assumed(config.width)
@@ -132,7 +135,7 @@ impl TransientShaperKernel {
     }
 }
 
-impl Kernel for TransientShaperKernel {
+impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
     type Set = TransientShaperSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -179,5 +182,46 @@ impl Kernel for TransientShaperKernel {
 
     fn tail(&self) -> Tail {
         Tail::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_fixtures::signal::wide_signal;
+
+    /// An `f64` kernel keeps its envelopes and gain in `f64`: a constant `c` from silence has
+    /// `f_n = c (1 - af^n)` and `s_n = c (1 - as^n)` with `a = exp(-1 / (tau rate))`, so at an
+    /// attack of `A` dB (and 0 sustain) frame `n` is `c 10^(A (1 - s_n / f_n) / 20)`, to 1e-12
+    /// (an `f32` state is off by 1e-7).
+    #[test]
+    fn an_f64_kernel_follows_the_step_onset_closed_form_in_f64() {
+        let rate = SampleRate::SR_48K;
+        let config = TransientShaperConfig::new(ChannelLayout::MONO)
+            .attack(Db(12.0))
+            .fast(Seconds(0.002))
+            .slow(Seconds(0.02));
+        let mut k = TransientShaperKernel::<f64>::new(&config);
+        k.prepare(rate, MaxBlock::of(tutti_units::Samples(2_000)));
+        k.retarget(&config.controls);
+        let c = wide_signal(1)[0];
+        let x = vec![c; 2_000];
+        let mut y = vec![0.0f64; x.len()];
+        k.render(
+            Planes::new(&[&x[..]]).unwrap(),
+            ControlLanes::<f64>::NONE,
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        );
+        let pole = |tau: f64| (-1.0 / (tau * rate.get())).exp();
+        let (af, asl) = (pole(0.002), pole(0.02));
+        for (i, &got) in y.iter().enumerate() {
+            let n = (i + 1) as i32;
+            let (f, s) = (1.0 - af.powi(n), 1.0 - asl.powi(n));
+            let want = c * 10f64.powf(12.0 * (1.0 - s / f) / 20.0);
+            assert!(
+                (got - want).abs() < 1e-12,
+                "frame {i}: {got} against {want}"
+            );
+        }
     }
 }

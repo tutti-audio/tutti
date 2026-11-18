@@ -268,8 +268,8 @@ fn tilt_filter() {
 
 #[test]
 fn dynamic_eq() {
-    IsolateRow::new("DynamicEqNode (stereo, side-chain)", || {
-        DynamicEqNode::from(
+    IsolateRow::new("DynamicEqNode<f32> (stereo, side-chain)", || {
+        DynamicEqNode::<f32>::from(
             DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).key(KeySource::Sidechain),
         )
     })
@@ -299,8 +299,8 @@ fn cut_filter() {
 
 #[test]
 fn envelope_filter() {
-    IsolateRow::new("EnvelopeFilterNode (stereo)", || {
-        EnvelopeFilterNode::from(
+    IsolateRow::new("EnvelopeFilterNode<f32> (stereo)", || {
+        EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::LowPass)
                 .depth(Semitones(24.0)),
         )
@@ -317,8 +317,8 @@ fn envelope_filter() {
 
 #[test]
 fn transient_shaper() {
-    IsolateRow::new("TransientShaperNode (stereo)", || {
-        TransientShaperNode::from(
+    IsolateRow::new("TransientShaperNode<f32> (stereo)", || {
+        TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::STEREO)
                 .attack(Db(6.0))
                 .sustain(Db(-3.0)),

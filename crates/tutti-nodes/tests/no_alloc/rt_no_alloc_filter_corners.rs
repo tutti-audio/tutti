@@ -283,7 +283,8 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
         set.set(UnitParam::Cutoff, 100.0 + 50.0 * (i % 200) as f32);
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
-    let crossover = CrossoverNode::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(2_000.0)]).unwrap();
+    let crossover =
+        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(2_000.0)]).unwrap();
     let fork = crossover.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -344,7 +345,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let initial: Vec<Hz> = (0..bands - 1)
                     .map(|i| Hz(150.0 * 3f32.powi(i as i32)))
                     .collect();
-                let node = CrossoverNode::new(ChannelLayout::from(width), &initial).unwrap();
+                let node = CrossoverNode::<f32>::new(ChannelLayout::from(width), &initial).unwrap();
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
@@ -386,7 +387,7 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
     ] {
         for shape in [1usize, 3, 4] {
             let hz = [Hz(set[0]), Hz(set[1])];
-            let node = CrossoverNode::new(ChannelLayout::STEREO, &hz).unwrap();
+            let node = CrossoverNode::<f32>::new(ChannelLayout::STEREO, &hz).unwrap();
             let cells = node.param_set();
             let mut rig = Direct::new(node, SR, FRAMES);
             fill(&mut rig);
