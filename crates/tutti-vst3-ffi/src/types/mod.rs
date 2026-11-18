@@ -10,8 +10,8 @@ mod transport;
 pub use audio::{K_SAMPLE_32_INT, K_SAMPLE_64_INT, ProcessMode, SampleWidth};
 pub use events::{
     Chord, Data, Event, EventHeader, EventKind, ExpressionInt, ExpressionText, ExpressionValue,
-    K_DATA_TYPE_MIDI_SYSEX, LegacyCcOut, NoteOff, NoteOn, Payload, PolyPressure, Scale, TextArena,
-    TextRef, UnknownEventKind,
+    K_DATA_TYPE_MIDI_SYSEX, LegacyCcOut, MAX_EVENT_TEXT_LEN, NoteOff, NoteOn, Payload,
+    PolyPressure, Scale, TextArena, TextRef, UnknownEventKind,
 };
 pub use info::{
     AutomationStates, BusInfo, BusType, KeyswitchKind, NoteExpressionFlags, ParameterFlags,

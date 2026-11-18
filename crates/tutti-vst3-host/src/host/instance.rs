@@ -425,16 +425,23 @@ impl<T: Vst3Sample> Staged<T> {
         ] {
             for i in 0..plugin.bus_count(main, media, direction) {
                 let info = plugin.bus_info(main, media, direction, i);
-                // A bus whose info cannot be read is activated anyway. That
-                // restores the pre-policy behaviour for exactly the plugins
-                // that cannot answer the question the policy asks, rather than
-                // silently dropping a bus over a failed query.
-                let wants = match &info {
-                    Ok(bus) => super::wants_activation(bus.bus_type(), bus.flags()),
-                    Err(_) => true,
+                // A bus whose info cannot be read is activated anyway: a plugin
+                // that over-reports its bus count has no bus there, and its
+                // refusal is the answer. A bus whose info reads and that the
+                // plugin refuses to activate fails the activation.
+                let refused = match &info {
+                    Ok(bus) if !super::wants_activation(bus.bus_type(), bus.flags()) => None,
+                    Ok(_) => plugin.activate_bus(main, media, direction, i).err(),
+                    Err(_) => {
+                        let _ = plugin.activate_bus(main, media, direction, i);
+                        None
+                    }
                 };
-                if wants {
-                    let _ = plugin.activate_bus(main, media, direction, i);
+                if let Some(error) = refused {
+                    return Err(Vst3Error::PluginError {
+                        stage: LoadStage::Activation,
+                        code: error.code(),
+                    });
                 }
             }
         }

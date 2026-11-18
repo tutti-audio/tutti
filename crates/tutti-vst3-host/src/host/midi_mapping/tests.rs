@@ -108,6 +108,36 @@ fn pitch_bend_center_is_half() {
     assert!((value.get() - 0.5).abs() < 0.01);
 }
 
+/// Polyphonic pressure and program change have no `IMidiMapping` slot: they
+/// are not mapped controllers, and a poly pressure reaches the plugin as MIDI
+/// with its note.
+#[test]
+fn poly_pressure_and_program_change_stay_midi_with_their_note() {
+    let pressure = (at(5), midi::poly_pressure(MidiChannel::FIRST, 60, u32::MAX));
+    let program = (at(7), midi::program_change(MidiChannel::FIRST, 5, None));
+    assert_eq!(mapped(&pressure), None);
+    assert_eq!(mapped(&program), None);
+
+    let events = [pressure, program];
+    let mut filtered = FilteredMidi::new();
+    let mut params = ParameterChanges::reserved(1, 1);
+    route_cc_events(&mod_wheel_mapping(500), &events, &mut filtered, &mut params);
+    assert_eq!(filtered.len(), 2, "both stay in the MIDI stream");
+    assert!(params.queue(ParamId::new(500u32)).is_none());
+
+    // The pressure is for a sounding note: its Note On goes through the same encoder.
+    let mut encoder = crate::events::MidiEncoder::default();
+    encoder.encode(&(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
+    let staged = encoder.encode(&filtered[0]).to_vec();
+    match staged.as_slice() {
+        [event] => match event.payload {
+            crate::events::Payload::PolyPressure(p) => assert_eq!(p.pitch, 60),
+            other => panic!("expected a poly pressure, got {other:?}"),
+        },
+        other => panic!("expected one event, got {other:?}"),
+    }
+}
+
 #[test]
 fn note_on_is_not_a_mapped_controller() {
     assert_eq!(

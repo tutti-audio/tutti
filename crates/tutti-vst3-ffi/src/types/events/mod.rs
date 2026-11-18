@@ -24,9 +24,7 @@ pub use payload::{
     Chord, Data, ExpressionInt, ExpressionText, ExpressionValue, LegacyCcOut, NoteOff, NoteOn,
     PolyPressure, Scale,
 };
-pub use text::{TextArena, TextRef};
-
-pub(crate) use text::MAX_EVENT_TEXT_LEN;
+pub use text::{MAX_EVENT_TEXT_LEN, TextArena, TextRef};
 
 /// `DataEvent.type` subtype marking the payload as a MIDI SysEx message.
 ///
