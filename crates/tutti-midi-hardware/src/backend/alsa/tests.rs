@@ -362,10 +362,13 @@ fn the_engines_own_clients_are_not_listed() {
     drop(device);
     // Announcements are in order: whatever the opens announced is before this.
     until_in(&devices, &mut backlog, removed(id));
-    // The engine's ports are named like their clients; the stand-in devices of
-    // other tests are not.
+    // The engine's clients carry exactly these names, in this process and in
+    // any other copy of the suite running beside it; another test's device
+    // (`tutti-loop-<pid>-source`, `tutti-in-<pid>`) is a device and is listed.
     let engine = |i: &DeviceInfo| match i.id.identity() {
-        Identity::Alsa { client, port } => client.starts_with("tutti-") && client == port,
+        Identity::Alsa { client, .. } => {
+            client == super::input::CLIENT || client == super::output::CLIENT
+        }
         _ => false,
     };
     assert!(!backlog.iter().any(|e| engine(e.info())), "{backlog:?}");

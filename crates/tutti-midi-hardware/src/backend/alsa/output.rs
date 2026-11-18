@@ -154,15 +154,18 @@ pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
     Ok(Box::new(connect(id)?))
 }
 
+/// The name of the engine's output client and of its one port.
+pub(super) const CLIENT: &str = "tutti-out";
+
 /// [`open`], as the concrete type.
 pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
     let dest = super::address_of(id).ok_or(NotFound::Endpoint(id))?;
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
-    let seq = super::client::open("tutti-out", Blocking::NonBlock, UmpVersion::Midi2)?;
+    let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
     let port = seq.open_port(
-        "tutti-out",
+        CLIENT,
         // Not subscribable by others, so never listed as a device (see
         // `input::open`); this client subscribes its own port to the
         // destination.
