@@ -22,7 +22,8 @@ use std::sync::{Arc, Mutex, Weak};
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, PropertyAsk, ReportAsk,
+    Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, ProfileSwitch, PropertyAsk,
+    ReportAsk,
 };
 use tutti_midi_runtime::{
     DeviceEpochs, EpochWriter, InputReaders, InputWriters, JrStream, MidiIngestControls,
@@ -44,6 +45,13 @@ use crate::{
     ResourceId, Session, SessionEvent,
 };
 
+/// Why a port whose input could not be reopened is lost: the fault the reader
+/// died of, or [`PortCause::ReopenFailed`] when the input was not held and read
+/// none.
+fn reader_loss(fault: Option<InputFault>) -> PortCause {
+    fault.map_or(PortCause::ReopenFailed, PortCause::ReaderFailed)
+}
+
 // --- Vocabulary ---
 
 /// Why a MIDI port is not live.
@@ -59,11 +67,11 @@ pub enum PortCause {
     /// The device returned and is the one a load would bind, but opening it failed.
     /// It is tried again when its device next appears in the device list.
     ReopenFailed,
-    /// The reader of an open input died while its device stayed listed. The
-    /// session reopens it at once, and the port reads this only when that
-    /// failed; it is tried again when its device next appears in the device
-    /// list.
-    ReaderFailed,
+    /// The reader of an open input died while its device stayed listed, for
+    /// the [`InputFault`] it carries. The session reopens it at once, and the
+    /// port reads this only when that failed; it is tried again when its device
+    /// next appears in the device list.
+    ReaderFailed(InputFault),
 }
 
 /// What an output port is opened with. Part of the entry's identity: declaring
@@ -743,7 +751,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, MidiInputEntry>(key)
+        self.pool.entries.handle::<P, MidiInputEntry>(key)
     }
 
     /// The output port of the `midi_output` entry under `key`.
@@ -755,7 +763,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, MidiOutputEntry>(key)
+        self.pool.entries.handle::<P, MidiOutputEntry>(key)
     }
 }
 
@@ -1391,6 +1399,9 @@ impl Ports {
             if io.is_input_connected(&id) {
                 continue;
             }
+            // Not held at all reads no fault: a failed reopen is then the
+            // port's own.
+            let fault = io.input_fault(&id);
             let Some(device) = io.devices().list().into_iter().find(|d| d.id == id) else {
                 continue;
             };
@@ -1401,7 +1412,7 @@ impl Ports {
                 set_presence(
                     &shared.cell,
                     shared.id,
-                    Presence::Lost(PortCause::ReaderFailed),
+                    Presence::Lost(reader_loss(fault)),
                     out,
                 );
             }

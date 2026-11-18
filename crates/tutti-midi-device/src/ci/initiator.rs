@@ -50,9 +50,8 @@
 //!   fields), and for a Set or a Details request by the Profile Id in its five detail bytes
 //!   (§5.10.3; zeroes from a peer with none to give, as for a NAK). A Profile Inquiry names no
 //!   Profile, so its details are not read; it is matched on the Function Block address it was sent
-//!   to. The deadline becomes `now + wait` if that is later: a wait asks for more time, never
-//!   less, so a wait of 0 leaves the deadline where it is, and each new wait counts from when it
-//!   arrives. An ACK for nothing in flight, and an ACK with any other status, resolve and extend
+//!   to. The wait is added to the transaction's current deadline (M2-103 §12.2.1): a wait of 0
+//!   leaves the deadline where it is, and each new wait adds again. An ACK for nothing in flight, and an ACK with any other status, resolve and extend
 //!   nothing: a success ACK (`0x00`) does not end a Set, because the answer to a Set is the
 //!   Enabled or Disabled Report (the Enabled Report is the acknowledgement of a Set Profile On,
 //!   §7.10; M2-102 §2.6, §2.7), and §5.10 reserves the ACK for new mechanisms that other
@@ -592,13 +591,13 @@ impl ProfileInitiator {
                     });
                 }
             }
-            CiMessage::ProfileSpecificData {
-                to, profile, data, ..
-            } if from_peer && (*to == Destination::Broadcast || to_us) => {
+            CiMessage::ProfileSpecificData(specific)
+                if from_peer && (specific.to() == Destination::Broadcast || to_us) =>
+            {
                 actions.push(ProfileAction::SpecificData {
                     address,
-                    profile: *profile,
-                    data: data.clone(),
+                    profile: specific.profile(),
+                    data: specific.data().clone(),
                 });
             }
             CiMessage::Ack { ack, .. } if from_peer && to_us => {
@@ -672,8 +671,8 @@ impl ProfileInitiator {
         }
     }
 
-    /// A Timeout Wait: the transaction it names waits until `now` plus the time asked,
-    /// when that is later than it already would.
+    /// A Timeout Wait: the time asked is added to the deadline of the transaction it
+    /// names.
     fn on_wait(&mut self, address: CiDeviceId, ack: &Ack, wait: TimeoutWait) {
         let original = ack.ack_sub_id2.get();
         if original == SUB_ID2_PROFILE_INQUIRY {

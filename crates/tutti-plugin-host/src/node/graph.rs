@@ -58,7 +58,8 @@ impl<L: Loaded + 'static, F: Float> Node<F> for PluginNode<L, F>
 where
     L::Processor: 'static,
 {
-    /// The plugin's channels, one event input (MIDI and parameter events),
+    /// The plugin's channels, one event input (MIDI and parameter events; a
+    /// param ramp or segment scheduled to the node arrives here),
     /// and a MIDI event output for a plugin that declared MIDI out; its
     /// latency and tail as the control side last read them. The plugin reports its tail apart from
     /// its latency, so the tail excludes latency as [`Shape::tail`] asks.
@@ -82,6 +83,7 @@ where
         this.declared
             .ports
             .with_events(1, midi_out)
+            .with_param_events()
             .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
@@ -225,6 +227,7 @@ where
                 let mut midi_dropped = 0u64;
                 param_input::take(
                     events.as_slice(),
+                    events.params(),
                     at,
                     n,
                     phase,
@@ -244,7 +247,7 @@ where
                             harmony_dropped +=
                                 push_harmony(chords, scales, features, h, frame - phase);
                         }
-                        EventKind::Ramp(_) | EventKind::Segment(_) | EventKind::Resync => {}
+                        EventKind::Resync => {}
                     },
                 );
                 this.params.count_midi_dropped(midi_dropped);
@@ -423,6 +426,7 @@ where
         let mut harmony_dropped = 0u64;
         param_input::take(
             events.as_slice(),
+            events.params(),
             0,
             size,
             0,
@@ -441,7 +445,7 @@ where
                 }
                 // The walk keeps parameter events for itself; a plugin
                 // re-sends nothing.
-                EventKind::Ramp(_) | EventKind::Segment(_) | EventKind::Resync => {}
+                EventKind::Resync => {}
             },
         );
         this.params.count_midi_dropped(midi_dropped);
@@ -703,7 +707,7 @@ mod owed_tests {
     use tutti_vst2_host::Vst2Loaded;
 
     use tutti_graph::contract::Direct;
-    use tutti_graph::{Event, Offset, ParamRamp};
+    use tutti_graph::{Event, Offset, ParamEvent, ParamRamp};
     use tutti_units::SampleRate;
 
     use crate::InProcClient;
@@ -728,11 +732,11 @@ mod owed_tests {
 
     const BLOCK: usize = 64;
 
-    fn read(handle: &PluginHandle, i: i32) -> Option<f32> {
+    fn read(handle: &PluginHandle, i: i32) -> Option<f64> {
         handle
             .any_thread()
             .parameter_value(ParamId::new(i as u32))
-            .map(|v| v.get() as f32)
+            .map(|v| v.get())
     }
 
     /// **A fork told its rate off the main thread is refused, not left at the
@@ -816,9 +820,9 @@ mod owed_tests {
         unit.block();
 
         recall(&inner);
-        unit.events(
+        unit.param_events(
             0,
-            &[Event::ramp(
+            &[ParamEvent::ramp(
                 Offset::of(tutti_units::Samples(0), tutti_units::Samples(BLOCK)),
                 ParamRamp::foreign(ParamId::new(1), 0.75, tutti_units::Samples(0)),
             )],

@@ -32,7 +32,7 @@ fn delivery(n: u32) -> (ParamDelivery, Arc<DeliveryCounters>) {
 /// values step through sevenths of a cycle shifted by `phase`, so every point
 /// is a change. Writes each lane's latest value into `latest` (one a lane).
 #[cfg(feature = "clap")]
-fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f32], phase: usize) {
+fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f64], phase: usize) {
     let lanes = latest.len() as u32;
     let mut k = 0;
     d.begin();
@@ -42,7 +42,7 @@ fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f32], phase: usize) {
             continue;
         }
         for id in 0..lanes {
-            let v = ((k + id as usize + 3 * phase) % 7 + 1) as f32 / 8.0;
+            let v = ((k + id as usize + 3 * phase) % 7 + 1) as f64 / 8.0;
             if grid {
                 d.grid_point(op(id), f, v);
             } else {
@@ -96,7 +96,7 @@ fn a_pool_spent_chunk_reaches_a_clap_plugin_whole() {
         last[p.param_id as usize] = Some((p.header.time, p.value));
     }
     for (id, &v) in latest.iter().enumerate() {
-        assert_eq!(last[id], Some((511, f64::from(v))), "lane {id}");
+        assert_eq!(last[id], Some((511, v)), "lane {id}");
     }
 }
 
@@ -129,7 +129,7 @@ fn a_buffer_of_the_room_before_a_re_prepare_is_dropped_not_reused() {
         d.begin();
         for f in 0..512i32 {
             for id in 0..lanes {
-                let v = ((f as usize + id as usize + phase) % 7 + 1) as f32 / 8.0;
+                let v = ((f as usize + id as usize + phase) % 7 + 1) as f64 / 8.0;
                 let address = ParamId::new(id);
                 if f % 32 == 0 {
                     d.grid_point(address, f, v);

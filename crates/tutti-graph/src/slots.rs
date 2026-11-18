@@ -16,6 +16,7 @@ use tutti_rt::RwView;
 
 use crate::arena::{Arena, Line, Role, borrow_sorted};
 use crate::event::Event;
+use crate::param_event::ParamEvent;
 use crate::plan::Direct;
 
 /// The per-slot silence/constant flags an op reads and writes: a plain
@@ -122,37 +123,80 @@ impl<F: Float> AudioSlots<F> for Arena<F> {
     }
 }
 
+/// One event slot: the events a port holds in a block, and the param events
+/// beside them (empty of room in a slot no param-writing node reaches).
+#[derive(Debug, Default)]
+pub(crate) struct EventSlot {
+    pub(crate) events: Vec<Event>,
+    pub(crate) params: Vec<ParamEvent>,
+}
+
+impl EventSlot {
+    /// A slot with room for `events` events and `params` param events.
+    /// Control side: allocates.
+    pub(crate) fn with_capacity(events: usize, params: usize) -> Self {
+        Self {
+            events: Vec::with_capacity(events),
+            params: Vec::with_capacity(params),
+        }
+    }
+
+    /// Empties both lists; their room is kept.
+    pub(crate) fn clear(&mut self) {
+        self.events.clear();
+        self.params.clear();
+    }
+}
+
 /// The event slots an op borrows.
 pub(crate) trait EventSlots {
-    /// Slot `s`.
+    /// Slot `s`'s events.
     fn ev(&self, s: u32) -> &Vec<Event>;
-    /// Slot `s`, mutably.
+    /// Slot `s`'s events, mutably.
     fn ev_mut(&mut self, s: u32) -> &mut Vec<Event>;
+    /// Slot `s`'s param events.
+    fn pev(&self, s: u32) -> &Vec<ParamEvent>;
+    /// Slot `s`.
+    fn slot(&self, s: u32) -> &EventSlot;
+    /// Slot `s`, mutably.
+    fn slot_mut(&mut self, s: u32) -> &mut EventSlot;
     /// Several slots at once, by requests sorted by slot (see
     /// `arena::borrow_sorted`).
     fn borrow_sorted<'a>(
         &'a mut self,
         reqs: &[(u32, Role)],
-        read: impl FnMut(u8, &'a Vec<Event>),
-        write: impl FnMut(u8, &'a mut Vec<Event>),
+        read: impl FnMut(u8, &'a EventSlot),
+        write: impl FnMut(u8, &'a mut EventSlot),
     );
 }
 
-impl EventSlots for [Vec<Event>] {
+impl EventSlots for [EventSlot] {
     #[inline(always)]
     fn ev(&self, s: u32) -> &Vec<Event> {
-        &self[s as usize]
+        &self[s as usize].events
     }
     #[inline(always)]
     fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
+        &mut self[s as usize].events
+    }
+    #[inline(always)]
+    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
+        &self[s as usize].params
+    }
+    #[inline(always)]
+    fn slot(&self, s: u32) -> &EventSlot {
+        &self[s as usize]
+    }
+    #[inline(always)]
+    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
         &mut self[s as usize]
     }
     #[inline(always)]
     fn borrow_sorted<'a>(
         &'a mut self,
         reqs: &[(u32, Role)],
-        mut read: impl FnMut(u8, &'a Vec<Event>),
-        mut write: impl FnMut(u8, &'a mut Vec<Event>),
+        mut read: impl FnMut(u8, &'a EventSlot),
+        mut write: impl FnMut(u8, &'a mut EventSlot),
     ) {
         borrow_sorted(
             self,
@@ -169,8 +213,8 @@ impl EventSlots for [Vec<Event>] {
 pub(crate) fn borrow_events<'a, E: EventSlots + ?Sized>(
     events: &'a mut E,
     reqs: &mut [(u32, Role)],
-    read: impl FnMut(u8, &'a Vec<Event>),
-    write: impl FnMut(u8, &'a mut Vec<Event>),
+    read: impl FnMut(u8, &'a EventSlot),
+    write: impl FnMut(u8, &'a mut EventSlot),
 ) {
     reqs.sort_unstable();
     events.borrow_sorted(reqs, read, write);
@@ -181,12 +225,17 @@ pub(crate) fn event_pair<E: EventSlots + ?Sized>(
     events: &mut E,
     src: u32,
     dst: u32,
-) -> (&[Event], &mut Vec<Event>) {
+) -> (&EventSlot, &mut EventSlot) {
     let mut reqs = [(src, Role::Read(0)), (dst, Role::Write(0))];
-    let mut input: &[Event] = &[];
-    let mut output: Option<&mut Vec<Event>> = None;
-    borrow_events(events, &mut reqs, |_, v| input = v, |_, v| output = Some(v));
-    (input, output.expect("dst borrowed"))
+    let mut input: Option<&EventSlot> = None;
+    let mut output: Option<&mut EventSlot> = None;
+    borrow_events(
+        events,
+        &mut reqs,
+        |_, v| input = Some(v),
+        |_, v| output = Some(v),
+    );
+    (input.expect("src borrowed"), output.expect("dst borrowed"))
 }
 
 fn is_write(r: Role) -> bool {
@@ -312,23 +361,35 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
 
 /// One op's claimed view of the event slots, for the parallel executor.
 pub(crate) struct EventsView<'v> {
-    pub(crate) view: RwView<'v, Vec<Event>>,
+    pub(crate) view: RwView<'v, EventSlot>,
 }
 
 impl EventSlots for EventsView<'_> {
     #[inline]
     fn ev(&self, s: u32) -> &Vec<Event> {
-        &self.view.get(s as usize)[0]
+        &self.view.get(s as usize)[0].events
     }
     #[inline]
     fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
+        &mut self.view.get_mut(s as usize)[0].events
+    }
+    #[inline]
+    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
+        &self.view.get(s as usize)[0].params
+    }
+    #[inline]
+    fn slot(&self, s: u32) -> &EventSlot {
+        &self.view.get(s as usize)[0]
+    }
+    #[inline]
+    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
         &mut self.view.get_mut(s as usize)[0]
     }
     fn borrow_sorted<'a>(
         &'a mut self,
         reqs: &[(u32, Role)],
-        mut read: impl FnMut(u8, &'a Vec<Event>),
-        mut write: impl FnMut(u8, &'a mut Vec<Event>),
+        mut read: impl FnMut(u8, &'a EventSlot),
+        mut write: impl FnMut(u8, &'a mut EventSlot),
     ) {
         self.view.split(
             reqs,

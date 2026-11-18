@@ -12,6 +12,7 @@
 use super::state::{HostState, PosixFdEntry, TRANSPORT_QUEUE, TimerEntry};
 use std::sync::atomic::Ordering;
 use tutti_clap_ffi::{AudioPortsRescanFlags, HostCallbacks, LogSeverity, ParamsRescanFlags};
+use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::{Request, RescanScope, TrackInfo, TransportRequest};
 
 impl HostCallbacks for HostState {
@@ -185,6 +186,11 @@ impl HostCallbacks for HostState {
     }
 
     fn posix_fd_register(&self, fd: i32, flags: u32) -> bool {
+        // A negative number names no descriptor; the plugin's registration is
+        // refused, as CLAP's "invalid fd".
+        if FdId::new(fd).is_none() {
+            return false;
+        }
         let Ok(mut fds) = self.posix_fds.entries.lock() else {
             return false;
         };

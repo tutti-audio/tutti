@@ -1,10 +1,10 @@
-//! Timestamped control commands: an event, or a parameter ramp, delivered into
-//! a node's event input **on an exact frame**.
+//! Timestamped control commands: an event, or a param ramp or segment,
+//! delivered into a node's event input **on an exact frame**.
 //!
 //! # The path
 //!
 //! ```text
-//!   Editor::schedule(At, EventIn, EventKind)
+//!   Editor::schedule(At, EventIn, EventKind | ParamKind)
 //!       │  checked against the plan sent last; stamped with its sequence
 //!       ▼
 //!   [ command ring, COMMAND_CAPACITY ]   plain `Copy` values: nothing boxed,
@@ -60,10 +60,18 @@
 //! source *after* the port's edges (and after events flushed from a vanished
 //! delay): on a tie at one offset, the graph's events come first, then
 //! scheduled ones by their timeline position, then in the order they were
-//! scheduled. The position is unrounded, so two frames that a rate change
+//! scheduled. A scheduled param event joins the port's param events the same
+//! way; the two lists are ordered apart, as a node reads them apart. The position is unrounded, so two frames that a rate change
 //! rounds to one frame keep their order (frames 1 000 and 1 001, halved,
 //! both land on 500 — 1 000 first); a late command's position is its past
 //! frame, so it sorts before one due exactly at that offset.
+//!
+//! **Param events.** A [`ParamKind`] command lands in the port's param buffer
+//! ([`SortedEvents::params`](crate::SortedEvents::params)), and only on a node
+//! whose shape declares [`Shape::param_events`](crate::Shape::param_events):
+//! [`Editor::schedule`](crate::Editor::schedule) refuses any other with
+//! [`ScheduleError::NoParamEvents`]. A bypassed node is sent none, as it is
+//! sent no scheduled event.
 //!
 //! **Timing and PDC.** A time is a **timeline** time, compensated like any
 //! upstream event: a sink with compiled arrival latency `a` hears timeline
@@ -90,9 +98,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
-use crate::event::{Event, EventKind, merge_into, merge_walk};
+use crate::event::{Event, EventKind, merge_into, merge_params, merge_walk};
+use crate::node::Env;
 use crate::node::MAX_PORTS;
-use crate::node::{Env, Resolution};
+use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::Plan;
 use crate::spec::EventIn;
 use crate::time::{Due, Offset, Playhead};
@@ -135,23 +144,19 @@ pub enum ScheduleError {
         /// The port asked for.
         to: EventIn,
     },
+    /// The node has an event input of that number but does not declare
+    /// [`Shape::param_events`](crate::Shape::param_events), so a param ramp or
+    /// segment sent there would reach no one. Nothing was sent.
+    #[error("node {} does not take param events: its shape does not declare them", .to.node.0)]
+    NoParamEvents {
+        /// The port asked for.
+        to: EventIn,
+    },
     /// [`COMMAND_CAPACITY`] commands are outstanding (or, for a cancel,
     /// [`CANCEL_CAPACITY`] cancels are queued). Nothing was sent; retry once
     /// some have landed.
     #[error("{} commands outstanding", COMMAND_CAPACITY)]
     Backpressure,
-    /// A parameter ramp was addressed to a node that does not honour event
-    /// offsets sample-accurately: automation would land at the wrong time,
-    /// silently. The same rule as
-    /// [`CompileError::ResolutionTooCoarse`](crate::CompileError::ResolutionTooCoarse)
-    /// for a marked edge.
-    #[error("a ramp into node {} port {}, which honours events only at {sink:?}", .to.node.0, .to.port)]
-    ResolutionTooCoarse {
-        /// The port asked for.
-        to: EventIn,
-        /// What its node declares.
-        sink: Resolution,
-    },
     /// The editor is poisoned (see
     /// [`CommitError::Poisoned`](crate::CommitError::Poisoned)).
     #[error("the editor is poisoned; build a new pair")]
@@ -173,23 +178,50 @@ impl ScheduleError {
         match self {
             Self::NoPlan | Self::Backpressure => true,
             Self::NoSuchPort { .. }
-            | Self::ResolutionTooCoarse { .. }
+            | Self::NoParamEvents { .. }
             | Self::Poisoned
             | Self::UnknownCommand { .. } => false,
         }
     }
 }
 
+/// What a command delivers: an event, or a param ramp or segment. `Copy`,
+/// so the command ring moves it without a box.
+///
+/// [`Editor::schedule`](crate::Editor::schedule) takes either kind through
+/// `Into`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Scheduled {
+    /// An event, delivered into the port's events.
+    Event(EventKind),
+    /// A param ramp or segment, delivered into the port's param events. Only
+    /// a node that declares [`Shape::param_events`](crate::Shape::param_events)
+    /// takes one.
+    Param(ParamKind),
+}
+
+impl From<EventKind> for Scheduled {
+    fn from(kind: EventKind) -> Self {
+        Self::Event(kind)
+    }
+}
+
+impl From<ParamKind> for Scheduled {
+    fn from(kind: ParamKind) -> Self {
+        Self::Param(kind)
+    }
+}
+
 /// A command as it travels: `Copy`, so the ring moves it without a box.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Scheduled {
+pub(crate) struct Command {
     /// Scheduling order, for ties at one offset.
     seq: u64,
     /// The commit it was checked against: it waits until that is applied.
     plan_seq: u64,
     at: At,
     to: EventIn,
-    kind: EventKind,
+    payload: Scheduled,
     /// Its timeline position, unrounded — the tie-break after the offset:
     /// the frame it was scheduled for (rescaled, unrounded, on a rate
     /// change, so two frames that round to one keep their order), where a
@@ -212,35 +244,61 @@ enum Cancel {
 pub(crate) struct CommandTx {
     /// This pair's identity, stamped into every `CommandId`.
     pair: u64,
-    tx: RingWriter<Scheduled>,
+    tx: RingWriter<Command>,
     cancel: RingWriter<Cancel>,
     sent: u64,
     done: Arc<AtomicU64>,
 }
 
-/// One command falling due this block, resolved to a plan unit.
+/// One command falling due this block, resolved to a plan unit: `T` is
+/// the [`EventKind`] or [`ParamKind`] it delivers.
 #[derive(Clone, Copy, Debug)]
-struct DueItem {
+struct DueItem<T> {
     unit: u32,
     port: u16,
     seq: u64,
-    /// `Scheduled::pos`, as bits (non-negative, so they sort like the value).
+    /// `Command::pos`, as bits (non-negative, so they sort like the value).
     pos: u64,
-    event: Event,
+    offset: Offset,
+    kind: T,
+}
+
+impl<T> DueItem<T> {
+    /// `cmd` landing on plan unit `unit` at `offset`.
+    fn of(cmd: &Command, unit: usize, offset: Offset, kind: T) -> Self {
+        Self {
+            unit: unit as u32,
+            port: cmd.to.port,
+            seq: cmd.seq,
+            pos: cmd.pos.to_bits(),
+            offset,
+            kind,
+        }
+    }
+
+    /// The order ties at one offset go in: by unit and port, then offset,
+    /// then timeline position, then scheduling order. Unique (`seq` is), so
+    /// the unstable sort is deterministic, and it sorts in place, where the
+    /// stable one would allocate.
+    fn order(&self) -> (u32, u16, Offset, u64, u64) {
+        (self.unit, self.port, self.offset, self.pos, self.seq)
+    }
 }
 
 /// The executor's end: the ring, the commands waiting for their frame, and
 /// this block's deliveries. Every buffer is sized at construction.
 pub(crate) struct CommandRx {
-    rx: RingReader<Scheduled>,
+    rx: RingReader<Command>,
     cancel: RingReader<Cancel>,
     /// Cancels that arrived before the commands they name (see `pull`).
     held: Vec<Cancel>,
     /// One past the highest `seq` pulled so far.
     next_seq: u64,
-    pending: Vec<Scheduled>,
-    due: Vec<DueItem>,
+    pending: Vec<Command>,
+    due: Vec<DueItem<EventKind>>,
     due_events: Vec<Event>,
+    due_params: Vec<DueItem<ParamKind>>,
+    due_param_events: Vec<ParamEvent>,
     done: Arc<AtomicU64>,
     late: u64,
     unrouted: u64,
@@ -259,7 +317,7 @@ impl CommandTx {
 
 /// Build the command ring pair.
 pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
-    let (tx, rx) = ring::<Scheduled>(COMMAND_CAPACITY, Overflow::Refuse);
+    let (tx, rx) = ring::<Command>(COMMAND_CAPACITY, Overflow::Refuse);
     let (cancel_tx, cancel_rx) = ring::<Cancel>(CANCEL_CAPACITY, Overflow::Refuse);
     let done = Arc::new(AtomicU64::new(0));
     (
@@ -278,6 +336,8 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
             pending: Vec::with_capacity(COMMAND_CAPACITY),
             due: Vec::with_capacity(COMMAND_CAPACITY),
             due_events: Vec::with_capacity(COMMAND_CAPACITY),
+            due_params: Vec::with_capacity(COMMAND_CAPACITY),
+            due_param_events: Vec::with_capacity(COMMAND_CAPACITY),
             done,
             late: 0,
             unrouted: 0,
@@ -300,7 +360,7 @@ impl CommandTx {
         plan_seq: u64,
         at: At,
         to: EventIn,
-        kind: EventKind,
+        payload: Scheduled,
     ) -> Result<CommandId, ScheduleError> {
         if self.outstanding() >= COMMAND_CAPACITY as u64 {
             return Err(ScheduleError::Backpressure);
@@ -309,12 +369,12 @@ impl CommandTx {
             At::Frame(f) => f.get() as f64,
             _ => 0.0,
         };
-        let cmd = Scheduled {
+        let cmd = Command {
             seq: self.sent,
             plan_seq,
             at,
             to,
-            kind,
+            payload,
             pos,
         };
         // Full cannot happen: at most `outstanding` commands sit in the ring,
@@ -467,10 +527,13 @@ impl CommandRx {
         self.playhead.observe(env);
         self.due.clear();
         self.due_events.clear();
+        self.due_params.clear();
+        self.due_param_events.clear();
         if self.pending.is_empty() {
             return;
         }
-        let (due, late, unrouted) = (&mut self.due, &mut self.late, &mut self.unrouted);
+        let (due, due_params) = (&mut self.due, &mut self.due_params);
+        let (late, unrouted) = (&mut self.late, &mut self.unrouted);
         let playhead = &self.playhead;
         let mut finished = 0u64;
         // `retain` keeps arrival order and shifts in place: no allocation.
@@ -490,7 +553,13 @@ impl CommandRx {
             // port is gone (the reference does the same); none when the node
             // is — either way it is counted unrouted when its time comes.
             let arrival = node.map_or(Latency::ZERO, |u| plan.units[u].arrival);
-            let target = node.filter(|&u| cmd.to.port < plan.units[u].shape.event_in);
+            // A param command lands only on a node that declares param
+            // events: the node a commit replaced may not.
+            let target = node.filter(|&u| {
+                let shape = &plan.units[u].shape;
+                cmd.to.port < shape.event_in
+                    && (shape.param_events || matches!(cmd.payload, Scheduled::Event(_)))
+            });
             let was_beat = matches!(cmd.at, At::Beat(_));
             let resolved = env.due_at_arrival(&mut cmd.at, arrival, playhead);
             match cmd.at {
@@ -507,21 +576,16 @@ impl CommandRx {
                 }
             };
             finished += 1;
-            match target {
-                Some(u) => {
+            match (target, cmd.payload) {
+                (Some(u), Scheduled::Event(kind)) => {
                     has_due[u] = true;
-                    due.push(DueItem {
-                        unit: u as u32,
-                        port: cmd.to.port,
-                        seq: cmd.seq,
-                        pos: cmd.pos.to_bits(),
-                        event: Event {
-                            offset,
-                            kind: cmd.kind,
-                        },
-                    });
+                    due.push(DueItem::of(cmd, u, offset, kind));
                 }
-                None => *unrouted += 1,
+                (Some(u), Scheduled::Param(kind)) => {
+                    has_due[u] = true;
+                    due_params.push(DueItem::of(cmd, u, offset, kind));
+                }
+                (None, _) => *unrouted += 1,
             }
             false
         });
@@ -529,11 +593,17 @@ impl CommandRx {
             self.done.fetch_add(finished, Ordering::Release);
         }
         // Ties at one offset go by timeline position, then scheduling order.
-        // Unique keys (`seq` is), so the unstable sort is deterministic —
-        // and it sorts in place, where the stable one would allocate.
-        self.due
-            .sort_unstable_by_key(|d| (d.unit, d.port, d.event.offset, d.pos, d.seq));
-        self.due_events.extend(self.due.iter().map(|d| d.event));
+        self.due.sort_unstable_by_key(DueItem::order);
+        self.due_params.sort_unstable_by_key(DueItem::order);
+        self.due_events.extend(self.due.iter().map(|d| Event {
+            offset: d.offset,
+            kind: d.kind,
+        }));
+        self.due_param_events
+            .extend(self.due_params.iter().map(|d| ParamEvent {
+                offset: d.offset,
+                kind: d.kind,
+            }));
     }
 
     /// This block's deliveries, as a `Sync` view the executor's workers
@@ -542,6 +612,8 @@ impl CommandRx {
         Deliveries {
             due: &self.due,
             events: &self.due_events,
+            due_params: &self.due_params,
+            param_events: &self.due_param_events,
         }
     }
 }
@@ -551,8 +623,10 @@ impl CommandRx {
 /// slices, so every worker of a parallel block can read them at once.
 #[derive(Clone, Copy)]
 pub(crate) struct Deliveries<'a> {
-    due: &'a [DueItem],
+    due: &'a [DueItem<EventKind>],
     events: &'a [Event],
+    due_params: &'a [DueItem<ParamKind>],
+    param_events: &'a [ParamEvent],
 }
 
 impl Deliveries<'_> {
@@ -581,6 +655,39 @@ impl Deliveries<'_> {
             let from = buf.len() as u32;
             let room = buf.capacity();
             dropped += merge_into(&[base(port), &self.events[i..run]], buf, room);
+            views[n] = (port, from, buf.len() as u32);
+            n += 1;
+            i = run;
+        }
+        (n, dropped)
+    }
+}
+
+impl Deliveries<'_> {
+    /// Merge this block's scheduled param events for plan unit `unit` into
+    /// `buf`, each port's after `base(port)` (the port's param events as the
+    /// executor would otherwise hand them), and record `(port, range in buf)`
+    /// in `views`. Returns how many views were written, and how many param
+    /// events did not fit: never grows `buf`.
+    pub(crate) fn overlay_params<'e>(
+        &self,
+        unit: u32,
+        base: impl Fn(u16) -> &'e [ParamEvent],
+        buf: &mut Vec<ParamEvent>,
+        views: &mut [(u16, u32, u32)],
+    ) -> (usize, u32) {
+        buf.clear();
+        let start = self.due_params.partition_point(|d| d.unit < unit);
+        let end = self.due_params.partition_point(|d| d.unit <= unit);
+        let mut n = 0;
+        let mut dropped = 0;
+        let mut i = start;
+        while i < end {
+            let port = self.due_params[i].port;
+            let run = self.due_params[i..end].partition_point(|d| d.port == port) + i;
+            let from = buf.len() as u32;
+            let room = buf.capacity();
+            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf, room);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -640,6 +747,28 @@ impl Deliveries<'_> {
     }
 }
 
+/// Where a node's scheduled events and param events are merged into its
+/// inputs: preallocated, and never grown.
+pub(crate) struct Overlay {
+    pub(crate) events: Vec<Event>,
+    pub(crate) params: Vec<ParamEvent>,
+}
+
+impl Overlay {
+    /// Room for `capacity` of each ([`overlay_capacity`]). Allocates.
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            events: Vec::with_capacity(capacity),
+            params: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// The room of each list.
+    pub(crate) fn capacity(&self) -> usize {
+        self.events.capacity()
+    }
+}
+
 /// Capacity of the executor's overlay buffer for `plan`: enough for the
 /// widest node's event inputs at full slots, every flushed event, and every
 /// outstanding command — so [`Deliveries::overlay`] can never be short.
@@ -677,13 +806,7 @@ mod tests {
         assert!(ScheduleError::NoPlan.is_transient());
         assert!(ScheduleError::Backpressure.is_transient());
         assert!(!ScheduleError::NoSuchPort { to }.is_transient());
-        assert!(
-            !ScheduleError::ResolutionTooCoarse {
-                to,
-                sink: Resolution::Frames(64)
-            }
-            .is_transient()
-        );
+        assert!(!ScheduleError::NoParamEvents { to }.is_transient());
         assert!(!ScheduleError::Poisoned.is_transient());
     }
 
@@ -695,7 +818,7 @@ mod tests {
                 node: NodeKey(1),
                 port: 0,
             },
-            EventKind::Midi(Ump([0; 4])),
+            Scheduled::Event(EventKind::Midi(Ump([0; 4]))),
         )
         .expect("room")
     }

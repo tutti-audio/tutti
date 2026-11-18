@@ -15,8 +15,8 @@ use tutti_units::ParamId;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamSegment, Prepare, ScheduleError, Shape, Status,
-    TransportChanges, TransportPosition,
+    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare, ScheduleError, Shape,
+    Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
@@ -26,7 +26,7 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::testing::Through;
 use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::{AtomicF64, ChannelLayout};
 use tutti_ump::{Message, Voice1};
 use tutti_units::{
     Amplitude, At, Beat, Bpm, Depth, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,
@@ -53,15 +53,15 @@ const fn key(n: u64) -> NodeKey {
 struct Probe {
     param: UnitParam,
     extra: Option<UnitParam>,
-    knob: Arc<AtomicF32>,
+    knob: Arc<AtomicF64>,
 }
 
 impl Probe {
-    fn new(knob: f32) -> Self {
+    fn new(knob: f64) -> Self {
         Self {
             param: UnitParam::Cutoff,
             extra: None,
-            knob: Arc::new(AtomicF32::new(knob)),
+            knob: Arc::new(AtomicF64::new(knob)),
         }
     }
 }
@@ -83,14 +83,14 @@ impl Node for Probe {
             }
             None => {
                 let k = self.knob.load(std::sync::atomic::Ordering::Acquire);
-                io.output(0).fill(k);
+                io.output(0).fill(k as f32);
             }
         }
         Status::Modified
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        (port == 0).then(|| f64::from(self.knob.load(std::sync::atomic::Ordering::Acquire)))
+        (port == 0).then(|| self.knob.load(std::sync::atomic::Ordering::Acquire))
     }
 }
 
@@ -214,8 +214,8 @@ impl Node for Capture {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("unpoisoned");
-        for e in io.events(0).as_slice() {
-            if let EventKind::Segment(s) = e.kind {
+        for e in io.events(0).params() {
+            if let ParamKind::Segment(s) = e.kind {
                 log.push((cx.env.frame_at(e.offset).get(), s));
             }
         }
@@ -231,7 +231,7 @@ impl Node for Capture {
 /// sources' feeds.
 #[derive(Default, Clone)]
 struct Host {
-    targets: BTreeMap<u64, (NodeKey, Arc<AtomicF32>)>,
+    targets: BTreeMap<u64, (NodeKey, Arc<AtomicF64>)>,
     foreign: BTreeMap<u64, NodeKey>,
     /// A foreign target's event input; 0 where absent.
     foreign_port: BTreeMap<u64, u16>,
@@ -378,7 +378,7 @@ fn editor(max: usize) -> (Editor, Executor) {
 /// A probe at `key(id)` with knob `knob`, its output appended to the
 /// graph's, and the host told it is target node `id`. Committed, so its
 /// range cell exists.
-fn probe(ed: &mut Editor, host: &mut Host, id: u64, knob: f32) {
+fn probe(ed: &mut Editor, host: &mut Host, id: u64, knob: f64) {
     probe_of(ed, host, id, Probe::new(knob));
 }
 
@@ -1468,7 +1468,7 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
         Probe {
             param: UnitParam::Balance,
             extra: None,
-            knob: Arc::new(AtomicF32::new(0.0)),
+            knob: Arc::new(AtomicF64::new(0.0)),
         },
     );
     let mut decl = Decl::default();
@@ -1510,10 +1510,10 @@ fn reapply(r: &mut Rig) -> tutti_nodes::Applied {
 }
 
 /// A frozen constant: an automation curve.
-struct Flat(f32);
+struct Flat(f64);
 
 impl tutti_modulation::Curve for Flat {
-    fn value_at(&self, _: Beat) -> Option<f32> {
+    fn value_at(&self, _: Beat) -> Option<f64> {
         Some(self.0)
     }
 }
@@ -1636,7 +1636,7 @@ fn a_new_knob_cell_after_a_steady_state_rebuilds_the_lane() {
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     r.host
         .targets
-        .insert(1, (key(1), Arc::new(AtomicF32::new(700.0))));
+        .insert(1, (key(1), Arc::new(AtomicF64::new(700.0))));
     assert!(reapply(&mut r).commit);
     assert_ne!(r.m.lane(cutoff_of(1)).expect("a lane").0, lane);
 }

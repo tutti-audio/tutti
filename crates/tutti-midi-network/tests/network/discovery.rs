@@ -1,7 +1,8 @@
 //! Discovery: the TXT keys and the service instance name.
 
 use tutti_midi_network::{
-    KEY_ENDPOINT_NAME, KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, instance_name, txt_properties,
+    DiscoveryError, KEY_ENDPOINT_NAME, KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, identity_from_txt,
+    instance_name, txt_properties,
 };
 
 use crate::sim::identity;
@@ -35,4 +36,21 @@ fn the_instance_name_is_the_id_a_dash_and_the_name_and_fits_a_dns_label() {
     let long = instance_name(&identity(&"é".repeat(49), &"i".repeat(42)));
     assert!(long.len() <= 63);
     assert!(long.is_char_boundary(long.len()));
+}
+
+/// Spec: m2-124/4.4#5, m2-124/4.4#10
+#[test]
+fn a_txt_record_with_an_empty_name_or_instance_id_is_not_a_host() {
+    assert_eq!(
+        identity_from_txt("MIDI Workbench", "173ACE").unwrap(),
+        identity("MIDI Workbench", "173ACE")
+    );
+    assert!(matches!(
+        identity_from_txt("", "173ACE"),
+        Err(DiscoveryError::Empty(KEY_ENDPOINT_NAME))
+    ));
+    assert!(matches!(
+        identity_from_txt("MIDI Workbench", ""),
+        Err(DiscoveryError::Empty(KEY_PRODUCT_INSTANCE_ID))
+    ));
 }

@@ -28,9 +28,10 @@
 //! Validity is therefore answered *in the slab*, by `SlabHeader`'s per-slot
 //! sequence numbers, and the two directions occupy disjoint regions:
 //!
-//! - A writer fills every channel of a slot, then calls `publish_*` **once**.
+//! - A writer fills every channel of a slot, then calls `publish` **once**. Its
+//!   first write of a block marks the slot busy.
 //! - A reader calls `*_sequence` first and only copies if it matches the block
-//!   it wants; otherwise it substitutes silence.
+//!   it wants, then rechecks; otherwise it substitutes silence.
 //!
 //! `read_*_into` still returns a copy count, but that count means only "how many
 //! samples I copied" — **it is not evidence that anyone wrote them**. The
@@ -58,8 +59,9 @@
 //! # A read is evidence
 //!
 //! A `read_*_into` copies a slot only between two loads of its sequence that
-//! both name the block asked for. If either does not, the peer had not
-//! published that block or was rewriting the slot during the copy, and the
+//! both name the block asked for, with an acquire fence before the second. If
+//! either does not, the peer had not published that block or was rewriting the
+//! slot (a busy slot names no block) during the copy, and the
 //! read fills the destination with silence and returns 0. So a non-zero count
 //! means "these are block `seq`'s samples", and torn audio cannot leak out.
 //!
@@ -232,14 +234,14 @@ impl AudioSlab {
     /// makes before reading a block back.
     #[inline]
     pub fn has_output(&self, seq: u64) -> bool {
-        self.output_sequence(seq) == seq
+        seq != 0 && self.output_sequence(seq) == seq
     }
 
     /// True when the input ring holds block `seq` — the server's check before
     /// feeding the plugin.
     #[inline]
     pub fn has_input(&self, seq: u64) -> bool {
-        self.input_sequence(seq) == seq
+        seq != 0 && self.input_sequence(seq) == seq
     }
 
     // ---- Internal helpers ----
@@ -248,6 +250,7 @@ impl AudioSlab {
     fn write_region<T: Float>(
         &self,
         writer: &mut MappingWriter,
+        open: &mut Option<u64>,
         direction: Direction,
         seq: u64,
         channel: usize,
@@ -258,10 +261,19 @@ impl AudioSlab {
         if data.len() > self.layout.samples_per_channel {
             return Err(SlabAccessError::Length);
         }
+        if *open != Some(seq) {
+            self.mapping.header().begin(direction, slot_for(seq));
+            *open = Some(seq);
+        }
         writer.write(offset, bytemuck::cast_slice(data));
         Ok(())
     }
 
+    /// The slot is a seqlock (`header.rs`): the copy sits between a load of
+    /// the sequence that names `seq` and a `recheck`
+    /// that still does. The writer marks a slot busy before it rewrites it, so
+    /// a copy overtaken by a later block, whether the peer finished it or is
+    /// still mid-write, fails the recheck.
     fn read_region<T: Float>(
         &self,
         direction: Direction,
@@ -269,39 +281,19 @@ impl AudioSlab {
         channel: usize,
         output: &mut [T],
     ) -> Result<usize, SlabAccessError> {
-        self.read_region_then(direction, seq, channel, output, || {})
-    }
-
-    /// [`read_region`](Self::read_region), running `between` after the copy
-    /// and before the recheck: the window a peer's rewrite of the slot falls
-    /// in. Production passes nothing; a test republishes there, which is how
-    /// the recheck is pinned without a race.
-    fn read_region_then<T: Float>(
-        &self,
-        direction: Direction,
-        seq: u64,
-        channel: usize,
-        output: &mut [T],
-        between: impl FnOnce(),
-    ) -> Result<usize, SlabAccessError> {
         self.check_width::<T>()?;
         let offset = self.offset_of(direction, seq, channel)?;
         let copy_samples = self.layout.samples_per_channel.min(output.len());
         let slot = slot_for(seq);
         let header = self.mapping.header();
-        // The recheck is what makes the count evidence: with two slots, the
-        // peer reuses this one two blocks later, and a reader preempted
-        // between the first load and the end of the copy would otherwise
-        // return half of one block and half of the next.
-        let held = header.sequence(direction, slot) == seq;
+        let held = seq != 0 && header.sequence(direction, slot) == seq;
         if held {
             self.mapping.read(
                 offset,
                 bytemuck::cast_slice_mut(&mut output[..copy_samples]),
             );
         }
-        between();
-        if !held || header.sequence(direction, slot) != seq {
+        if !held || !header.recheck(direction, slot, seq) {
             output.fill(T::default());
             return Ok(0);
         }
@@ -378,6 +370,9 @@ pub struct SlabWriter {
     slab: Arc<AudioSlab>,
     writer: MappingWriter,
     direction: Direction,
+    /// The block whose slot this writer has marked busy and not yet
+    /// published; `None` between blocks.
+    open: Option<u64>,
 }
 
 impl SlabWriter {
@@ -386,6 +381,7 @@ impl SlabWriter {
             slab: Arc::new(slab),
             writer,
             direction,
+            open: None,
         }
     }
 
@@ -397,8 +393,9 @@ impl SlabWriter {
 
     /// Copies `data` into one channel of this direction's slot for block `seq`.
     ///
-    /// Call once per channel, then [`publish`](Self::publish) once.
-    /// Allocation-free.
+    /// Call once per channel, then [`publish`](Self::publish) once. The first
+    /// write of a block marks its slot busy, so the block's previous occupant
+    /// is not readable while the new samples land. Allocation-free.
     ///
     /// # Errors
     ///
@@ -410,8 +407,14 @@ impl SlabWriter {
         channel: usize,
         data: &[T],
     ) -> Result<(), SlabAccessError> {
-        self.slab
-            .write_region(&mut self.writer, self.direction, seq, channel, data)
+        self.slab.write_region(
+            &mut self.writer,
+            &mut self.open,
+            self.direction,
+            seq,
+            channel,
+            data,
+        )
     }
 
     /// Announces that block `seq` is complete in this direction.
@@ -421,6 +424,7 @@ impl SlabWriter {
     /// slot marked valid while later channels are still being copied.
     #[inline]
     pub fn publish(&mut self, seq: u64) {
+        self.open = None;
         self.slab
             .mapping
             .header()
@@ -717,50 +721,93 @@ mod tests {
         );
     }
 
-    /// **The recheck.** A slot republished for a later block while it was
-    /// being copied (the peer is two blocks ahead; with two slots it reuses
-    /// this one) is a torn read: half of each block. It must be discarded,
-    /// with silence in its place, though the first sequence load matched.
-    ///
-    /// Deterministic: the republish runs in the window between the copy and
-    /// the recheck, through `read_region_then`'s seam.
+    /// **Sequence 0 is no block.** Real sequences start at 1 and a never-written
+    /// slot reads 0, so a peer-supplied 0 must not match one; a write of block 0
+    /// still marks its slot busy, so it cannot be read half-written either.
     #[test]
-    fn a_slot_republished_during_the_copy_is_discarded() {
-        let (host, mut server) = pair("torn", stereo_layout(64, FloatWidth::F32));
-        server.write(1, 0, &[1.0f32; 64]).unwrap();
-        server.publish(1);
-        assert_eq!(slot_for(3), slot_for(1));
-
+    fn block_zero_is_never_held_and_marks_its_slot_busy() {
+        let (host, mut server) = pair("zero", stereo_layout(64, FloatWidth::F32));
+        assert!(
+            !host.has_output(0) && !host.has_input(0),
+            "a fresh slab holds no block 0"
+        );
         let mut out = vec![9.0f32; 64];
-        let got = host
-            .read_region_then(Direction::Output, 1, 0, &mut out, || {
-                server.publish(3);
-            })
-            .unwrap();
-        assert_eq!(got, 0, "a copy the peer overtook is not block 1");
-        assert!(out.iter().all(|&s| s == 0.0), "and leaves silence");
+        assert_eq!(host.read_output_into(0, 0, &mut out).unwrap(), 0);
+        assert!(out.iter().all(|&s| s == 0.0));
+
+        server.write(2, 0, &[2.0f32; 64]).unwrap();
+        server.publish(2);
+        assert!(host.has_output(2));
+        assert_eq!(slot_for(0), slot_for(2));
+        server.write(0, 0, &[7.0f32; 64]).unwrap();
+        assert!(!host.has_output(2), "block 0's write marked the slot busy");
     }
 
-    /// **The first sequence load.** A block the peer publishes while the copy
-    /// runs was being written during it, so the copy is half the old block and
-    /// half the new; the recheck alone would see the right sequence and pass it.
-    /// The load before the copy refuses it: the slot did not hold the block
-    /// when the copy began.
+    /// **The busy mark.** The peer's first write of block 3 reuses block 1's
+    /// slot, and until it publishes, the slot's sequence must stop naming
+    /// block 1: a reader that began on block 1 would otherwise accept half of
+    /// each block.
     #[test]
-    fn a_block_published_during_the_copy_is_not_read() {
-        let (host, mut server) = pair("late", stereo_layout(64, FloatWidth::F32));
+    fn a_slot_being_rewritten_is_not_read() {
+        let (host, mut server) = pair("busy", stereo_layout(64, FloatWidth::F32));
         server.write(1, 0, &[1.0f32; 64]).unwrap();
         server.publish(1);
         assert_eq!(slot_for(3), slot_for(1));
+        server.write(3, 0, &[3.0f32; 64]).unwrap();
 
+        assert!(!host.has_output(1), "the slot is half block 3");
+        assert!(!host.has_output(3), "block 3 is not published");
         let mut out = vec![9.0f32; 64];
-        let got = host
-            .read_region_then(Direction::Output, 3, 0, &mut out, || {
-                server.publish(3);
-            })
-            .unwrap();
-        assert_eq!(got, 0, "the slot did not hold block 3 when the copy began");
+        assert_eq!(host.read_output_into(1, 0, &mut out).unwrap(), 0);
         assert!(out.iter().all(|&s| s == 0.0), "and the read leaves silence");
+
+        server.write(3, 1, &[3.0f32; 64]).unwrap();
+        server.publish(3);
+        assert_eq!(host.read_output_into(3, 0, &mut out).unwrap(), 64);
+        assert!(out.iter().all(|&s| s == 3.0));
+    }
+
+    /// A reader racing a writer that laps the ring never accepts a torn block:
+    /// every block's samples are all its own sequence, so a copy that spans two
+    /// blocks shows two values. The busy mark and the reader's fenced recheck
+    /// are what keep it out; the reader must accept some blocks, or the test
+    /// proves nothing.
+    #[test]
+    fn a_reader_racing_a_lapping_writer_never_accepts_a_torn_block() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        const SAMPLES: usize = 2048;
+        const BLOCKS: u64 = 20_000;
+        let (host, mut server) = pair("lap", stereo_layout(SAMPLES, FloatWidth::F32));
+        let slab = Arc::clone(host.slab());
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                let mut block = vec![0.0f32; SAMPLES];
+                for seq in 1..=BLOCKS {
+                    block.fill(seq as f32);
+                    server.write(seq, 0, &block).unwrap();
+                    server.write(seq, 1, &block).unwrap();
+                    server.publish(seq);
+                }
+                done.store(true, Ordering::Release);
+            })
+        };
+        let (mut accepted, mut torn) = (0u64, 0u64);
+        let mut out = vec![0.0f32; SAMPLES];
+        while !done.load(Ordering::Acquire) {
+            for slot in 0..RING_SLOTS as u64 {
+                let seq = slab.output_sequence(slot);
+                if seq == 0 || slab.read_output_into(seq, 0, &mut out).unwrap() == 0 {
+                    continue;
+                }
+                accepted += 1;
+                torn += u64::from(out.iter().any(|&s| s != seq as f32));
+            }
+        }
+        writer.join().expect("writer thread");
+        assert!(accepted > 0, "the reader never caught a block");
+        assert_eq!(torn, 0, "{torn} of {accepted} accepted reads were torn");
     }
 
     /// Consecutive blocks occupy different slots, which is what lets one be read

@@ -133,7 +133,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     {
         let mut set = PoolSet::new();
         parts.into_pool(&mut set);
-        let starts = self.pool.declare(set)?;
+        let starts = self.pool.entries.declare(set)?;
         self.pool_start(starts);
         Ok(())
     }
@@ -158,7 +158,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        let start = self.pool.retry(key)?;
+        let start = self.pool.entries.retry(key)?;
         self.pool_start(start.into_iter().collect());
         Ok(())
     }
@@ -176,7 +176,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         P: crate::AppKey,
     {
         let (job, ticket) = self.jobs.new_job();
-        self.pool.wait_loaded(ticket);
+        self.pool.entries.wait_loaded(ticket);
         job
     }
 
@@ -210,7 +210,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.when_loaded(key, Box::new(then))
+        self.pool.entries.when_loaded(key, Box::new(then))
     }
 
     /// Checks the files the pool's entries read, on a worker, and loads again
@@ -233,7 +233,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
     /// Dropping the job cancels the reloads the check would start.
     pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
-        let files = self.pool.stamped_files();
+        let files = self.pool.entries.stamped_files();
         self.jobs.submit_job(
             move |_| refresh::check(files),
             move |session, done, ticket| match done {
@@ -251,7 +251,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.state(&PoolKey::new(key))
+        self.pool.entries.state(&PoolKey::new(key))
     }
 }
 
@@ -272,7 +272,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, AudioFile>(key)
+        self.pool.entries.handle::<P, AudioFile>(key)
     }
 }
 
@@ -290,6 +290,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, SoundFontFile>(key)
+        self.pool.entries.handle::<P, SoundFontFile>(key)
     }
 }

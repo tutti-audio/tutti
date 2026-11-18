@@ -8,6 +8,7 @@ use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};
 use crate::NodeKey;
 use crate::arena::Arena;
+use crate::command::Overlay;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
@@ -17,6 +18,7 @@ use crate::meter::MeterWriter;
 use crate::mode::ModeState;
 use crate::par::Par;
 use crate::param::ParamState;
+use crate::slots::EventSlot;
 use crate::tap::TapWriter;
 
 pub(crate) struct Unit<F: Float = f32> {
@@ -206,7 +208,7 @@ pub(super) struct State<F: Float = f32> {
     /// built with a load and two shifts per channel. The parallel executor
     /// runs on a shared atomic copy (`par.rs`).
     pub(super) flags: Vec<u8>,
-    pub(super) events: Vec<Vec<Event>>,
+    pub(super) events: Vec<EventSlot>,
     pub(super) rings: Vec<Option<Ring<F>>>,
     pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
     pub(super) event_fb: Vec<Option<EventFifo>>,
@@ -225,7 +227,7 @@ pub(super) struct State<F: Float = f32> {
     pub(super) has_due: Vec<bool>,
     /// Where a node's scheduled events are merged into its inputs; sized
     /// when applying so the merge never grows (`command::overlay_capacity`).
-    pub(super) overlay: Vec<Event>,
+    pub(super) overlay: Overlay,
     /// The parallel executor's state for this plan, when the executor has a
     /// pool and the plan has tasks to spread (`par.rs`).
     pub(super) par: Option<Par>,
@@ -247,7 +249,7 @@ impl<F: Float> State<F> {
             inject: Vec::new(),
             has_inject: Vec::new(),
             has_due: Vec::new(),
-            overlay: Vec::new(),
+            overlay: Overlay::with_capacity(0),
             par: None,
         }
     }

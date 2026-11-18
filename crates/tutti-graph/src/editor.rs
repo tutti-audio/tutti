@@ -58,16 +58,15 @@ use tutti_units::At;
 use crate::EdgeId;
 use crate::Fade;
 use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
-use crate::command::{CommandId, ScheduleError, command_channel};
+use crate::command::{CommandId, ScheduleError, Scheduled, command_channel};
 use crate::compile::{CompileError, Shapes};
-use crate::event::EventKind;
 use crate::event_tap::EventTapWriter;
 use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
 use crate::fork::{ForkHealth, ForkSource};
 use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
 use crate::mode::NodeMix;
-use crate::node::{Prepare, Resolution};
+use crate::node::Prepare;
 use crate::param::{ParamIn, ParamRange};
 use crate::plan::{Delta, Plan};
 use crate::spec::{EventIn, GraphSpec, ValidGraph};
@@ -665,11 +664,13 @@ impl<F: Float> Editor<F> {
     pub(crate) fn event_capacity(&self) -> usize {
         self.event_capacity
     }
-    /// Delivers `kind` into event input `to` at time `at` — a note, or a
-    /// [`ParamRamp`](crate::ParamRamp) as `EventKind::Ramp` — on its exact
-    /// frame. Control thread; the command crosses to the executor over a
-    /// preallocated ring of plain values, so nothing is freed on the audio
-    /// thread. The rules:
+    /// Delivers `payload` into event input `to` at time `at` on its exact
+    /// frame: an [`EventKind`](crate::EventKind) (a note, a chord) into the port's events, or a
+    /// [`ParamKind`](crate::ParamKind) (a ramp or a segment) into its param
+    /// events ([`SortedEvents::params`](crate::SortedEvents::params)), both
+    /// through [`Scheduled`]. Control thread; the command crosses to the
+    /// executor over a preallocated ring of plain values, so nothing is freed
+    /// on the audio thread. The rules:
     ///
     /// - **`at` is required.** [`At::NextBlock`] is the untimed case, and it
     ///   has to be spelled.
@@ -679,6 +680,12 @@ impl<F: Float> Editor<F> {
     ///   that block and is counted
     ///   ([`Executor::late_command_count`](crate::Executor::late_command_count)) —
     ///   never dropped. Beats follow a different rule; see below.
+    /// - A param ramp or segment goes only to a node that declares
+    ///   [`Shape::param_events`](crate::Shape::param_events); any other is
+    ///   refused ([`ScheduleError::NoParamEvents`]). It is merged into the
+    ///   port's param events by the order rules of the events: after the
+    ///   port's own at a tie, by timeline position, then by scheduling
+    ///   order. A bypassed node is sent none.
     /// - At most [`COMMAND_CAPACITY`](crate::COMMAND_CAPACITY) commands are
     ///   outstanding; past that this returns
     ///   [`ScheduleError::Backpressure`] and sends nothing. A command holds
@@ -686,10 +693,6 @@ impl<F: Float> Editor<F> {
     ///   beat-timed one can wait indefinitely (a stopped transport, a beat
     ///   past the loop end, one a seek jumped over), so cancel what you no
     ///   longer want.
-    /// - A [`ParamRamp`](crate::ParamRamp) or a
-    ///   [`ParamSegment`](crate::ParamSegment) into a node that does not honour
-    ///   offsets sample-accurately is refused
-    ///   ([`ScheduleError::ResolutionTooCoarse`]), as a marked edge would be.
     ///
     /// **Frames and beats fall due differently.** A frame is
     /// never dropped: already past, it lands at offset 0 of the next block
@@ -705,14 +708,16 @@ impl<F: Float> Editor<F> {
     ///
     /// Nothing is sent on [`ScheduleError::NoPlan`] (nothing committed yet),
     /// [`ScheduleError::NoSuchPort`] (`to` is not an event input of the plan
-    /// sent last), [`ScheduleError::ResolutionTooCoarse`],
+    /// sent last), [`ScheduleError::NoParamEvents`] (a ramp or segment to a
+    /// node that does not declare param events),
     /// [`ScheduleError::Backpressure`] or [`ScheduleError::Poisoned`].
     pub fn schedule(
         &mut self,
         at: At,
         to: EventIn,
-        kind: EventKind,
+        payload: impl Into<Scheduled>,
     ) -> Result<CommandId, ScheduleError> {
+        let payload = payload.into();
         if self.poison_cause().is_some() {
             return Err(ScheduleError::Poisoned);
         }
@@ -721,13 +726,10 @@ impl<F: Float> Editor<F> {
         let Some(unit) = unit else {
             return Err(ScheduleError::NoSuchPort { to });
         };
-        let sink = unit.shape.event_resolution;
-        if matches!(kind, EventKind::Ramp(_) | EventKind::Segment(_))
-            && !sink.honours(Resolution::Sample)
-        {
-            return Err(ScheduleError::ResolutionTooCoarse { to, sink });
+        if matches!(payload, Scheduled::Param(_)) && !unit.shape.param_events {
+            return Err(ScheduleError::NoParamEvents { to });
         }
-        self.link.schedule(at, to, kind)
+        self.link.schedule(at, to, payload)
     }
 
     /// Takes back scheduled command `id`, if it has not landed — freeing its

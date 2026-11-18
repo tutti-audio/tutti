@@ -112,6 +112,7 @@ use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
 use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
 
+use crate::command::Scheduled;
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
 use crate::io::Io;
@@ -121,6 +122,7 @@ use crate::node::{
     TransportPosition,
 };
 use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
+use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
@@ -143,7 +145,7 @@ struct RefParam<F: Float> {
     /// Frames of the declick left to run.
     fading: usize,
     /// Its event source's ramp.
-    ramp: RefRamp<F>,
+    ramp: RefRamp,
     /// Frames this port has run, to place its ramps.
     clock: u64,
 }
@@ -164,10 +166,10 @@ impl<F: Float> Default for RefParam<F> {
 }
 
 /// The move an event source is on: where it started, where it goes, and
-/// how — evaluated from its start frame.
-struct RefRamp<F: Float> {
-    from: F,
-    target: F,
+/// how — evaluated from its start frame, in the unit's `f64`.
+struct RefRamp {
+    from: f64,
+    target: f64,
     /// The absolute frame of its event.
     at: u64,
     /// A ramp's length, in frames.
@@ -176,36 +178,44 @@ struct RefRamp<F: Float> {
     shape: tutti_curve::Law,
     /// A curve segment's `(position, length)`; `None`: a ramp. Its law is
     /// `shape`.
-    curve: Option<(f32, f32)>,
+    curve: Option<crate::param_event::Timing>,
     /// Its value on the last frame evaluated.
-    value: F,
+    value: f64,
     /// Whether the source has sent an event yet: until it has, the port
     /// reads its base.
     started: bool,
-    /// The absolute frame it arrives on and holds its end from (`None`: not
-    /// within `u32::MAX` frames of its event).
+    /// The absolute frame it arrives on and holds its end from.
     arrives: Option<u64>,
 }
 
-impl<F: Float> Default for RefRamp<F> {
+impl Default for RefRamp {
     fn default() -> Self {
         Self {
-            from: F::ZERO,
-            target: F::ZERO,
+            from: 0.0,
+            target: 0.0,
             at: 0,
             len: 0,
             shape: tutti_curve::Law::default(),
             curve: None,
-            value: F::ZERO,
+            value: 0.0,
             started: false,
             arrives: None,
         }
     }
 }
 
+/// What an event output wrote in a block: its events and its param events.
+#[derive(Clone, Default)]
+struct RefOut {
+    events: Vec<Event>,
+    params: Vec<ParamEvent>,
+}
+
 #[derive(Debug)]
 struct RefFifo {
     pending: Vec<(u64, Event)>,
+    /// The param events in flight, as `pending` holds the events.
+    params: Vec<(u64, ParamEvent)>,
     len: u64,
     clock: u64,
 }
@@ -256,6 +266,8 @@ pub struct Reference<F: Float = f32> {
     /// This block's scheduled deliveries, per port, each with its timeline
     /// position (the tie-break after the offset), in scheduling order.
     landing: BTreeMap<EventIn, Vec<(f64, Event)>>,
+    /// The same for scheduled param events.
+    landing_params: BTreeMap<EventIn, Vec<(f64, ParamEvent)>>,
     late: u64,
     unrouted: u64,
     /// Events a node's writer refused past its declared capacity.
@@ -419,6 +431,7 @@ impl<F: Float> Reference<F> {
             playhead: RefPlayhead::default(),
             suspended: None,
             landing: BTreeMap::new(),
+            landing_params: BTreeMap::new(),
             late: 0,
             unrouted: 0,
             dropped: 0,
@@ -433,13 +446,13 @@ impl<F: Float> Reference<F> {
         }
     }
 
-    /// Delivers `kind` into `to` at `at` — the same contract as
+    /// Delivers `payload` into `to` at `at` — the same contract as
     /// `Editor::schedule`, without the queue: a time already past lands at
     /// offset 0 of the next block and is counted late; one whose port is gone
     /// when it falls due is counted unrouted.
     ///
     /// Returns the command's id, for [`cancel`](Self::cancel).
-    pub fn schedule(&mut self, at: At, to: EventIn, kind: EventKind) -> u64 {
+    pub fn schedule(&mut self, at: At, to: EventIn, payload: impl Into<Scheduled>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         let pos = match at {
@@ -450,7 +463,7 @@ impl<F: Float> Reference<F> {
             id,
             at,
             to,
-            kind,
+            payload: payload.into(),
             pos,
         });
         id
@@ -978,6 +991,7 @@ impl<F: Float> Reference<F> {
                 list.sort_by_key(|e| e.offset);
             }
         };
+        let mut param_lost = 0u64;
         // After a rate change nothing time-based survives, so every event
         // line and event feedback FIFO is flushed as if it had vanished.
         let reset = std::mem::take(&mut self.reset_time);
@@ -986,13 +1000,22 @@ impl<F: Float> Reference<F> {
                 && (reset || !delays.contains_key(k))
             {
                 flush(at, relative(f));
+                // The param events in flight go no further, as the
+                // executor's FIFO counts them.
+                if survives(&at) {
+                    param_lost += f.params.len() as u64;
+                }
             }
         }
         for (k, f) in &self.fb_event {
             if reset || !fb_event_keys.contains(k) {
                 flush(k.0, relative(f));
+                if survives(&k.0) {
+                    param_lost += f.params.len() as u64;
+                }
             }
         }
+        self.dropped += param_lost;
         // Keys held on an edge that ended go to the sink that lost it, after
         // everything flushed to it.
         let old_edges = self.graph.as_ref().map(edges_of).unwrap_or_default();
@@ -1053,6 +1076,7 @@ impl<F: Float> Reference<F> {
             ) {
                 let f = self.event_lines.entry(key).or_insert(RefFifo {
                     pending: Vec::new(),
+                    params: Vec::new(),
                     len: 0,
                     clock: 0,
                 });
@@ -1090,6 +1114,7 @@ impl<F: Float> Reference<F> {
         for k in fb_event_keys {
             self.fb_event.entry(k).or_insert(RefFifo {
                 pending: Vec::new(),
+                params: Vec::new(),
                 len: k.3.get() as u64,
                 clock: 0,
             });
@@ -1201,6 +1226,7 @@ impl<F: Float> Reference<F> {
             // scheduling order per port; the gather below appends them after the
             // port's own events.
             self.landing.clear();
+            self.landing_params.clear();
             for &(_, len, t) in &pieces {
                 self.playhead
                     .observe(&t, self.prepare.sample_rate().get(), len);
@@ -1220,24 +1246,33 @@ impl<F: Float> Reference<F> {
                         Offset::ZERO
                     }
                 };
-                let (to, kind, pos) = (cmd.to, cmd.kind, cmd.pos);
-                let has_port = self
-                    .units
-                    .get(&to.node)
-                    .is_some_and(|(_, u)| to.port < u.shape().event_in);
-                if has_port {
-                    self.landing
+                let (to, payload, pos) = (cmd.to, cmd.payload, cmd.pos);
+                let has_port = self.units.get(&to.node).is_some_and(|(_, u)| {
+                    let shape = u.shape();
+                    to.port < shape.event_in
+                        && (shape.param_events || matches!(payload, Scheduled::Event(_)))
+                });
+                if !has_port {
+                    self.unrouted += 1;
+                    continue;
+                }
+                match payload {
+                    Scheduled::Event(kind) => self
+                        .landing
                         .entry(to)
                         .or_default()
-                        .push((pos, Event { offset, kind }));
-                } else {
-                    self.unrouted += 1;
+                        .push((pos, Event { offset, kind })),
+                    Scheduled::Param(kind) => self
+                        .landing_params
+                        .entry(to)
+                        .or_default()
+                        .push((pos, ParamEvent { offset, kind })),
                 }
             }
             self.scheduled = waiting;
 
             let mut audio: BTreeMap<OutPort, Vec<F>> = BTreeMap::new();
-            let mut events: BTreeMap<EventOut, Vec<Event>> = BTreeMap::new();
+            let mut events: BTreeMap<EventOut, RefOut> = BTreeMap::new();
             let mut done: BTreeSet<NodeKey> = BTreeSet::new();
 
             let direct_preds = |k: NodeKey| -> Vec<NodeKey> {
@@ -1360,6 +1395,13 @@ impl<F: Float> Reference<F> {
                 let start = f.clock;
                 f.pending.extend(
                     events[from]
+                        .events
+                        .iter()
+                        .map(|e| (start + u64::from(e.offset.get()), *e)),
+                );
+                f.params.extend(
+                    events[from]
+                        .params
                         .iter()
                         .map(|e| (start + u64::from(e.offset.get()), *e)),
                 );
@@ -1378,7 +1420,7 @@ impl<F: Float> Reference<F> {
         env: &Env,
         inputs: &[&[F]],
         audio: &mut BTreeMap<OutPort, Vec<F>>,
-        events: &mut BTreeMap<EventOut, Vec<Event>>,
+        events: &mut BTreeMap<EventOut, RefOut>,
         targets: &BTreeMap<EdgeId, Amplitude>,
     ) {
         let t = graph.topology();
@@ -1416,6 +1458,7 @@ impl<F: Float> Reference<F> {
         }
 
         let mut ev_ins: Vec<Vec<Event>> = Vec::new();
+        let mut pm_ins: Vec<Vec<ParamEvent>> = Vec::new();
         for port in 0..shape.event_in {
             let at = EventIn { node: key, port };
             // Flushed events first: they are older than anything this block.
@@ -1428,6 +1471,7 @@ impl<F: Float> Reference<F> {
             // most the node's declared input capacity, whatever the node
             // later does with its events.
             let mut edges: Vec<Event> = Vec::new();
+            let mut param_edges: Vec<ParamEvent> = Vec::new();
             // Source order is `(NodeKey, port)` of the source, whatever order
             // the spec lists them in: re-keyed by source here, where the
             // compiler sorts its list.
@@ -1441,8 +1485,17 @@ impl<F: Float> Reference<F> {
                     EventEdge::Direct(from) => {
                         let src = events[&from].clone();
                         match self.event_lines.get_mut(&DelayKey::Event { at, from }) {
-                            Some(f) => edges.extend(fifo_run(f, &src, frames)),
-                            None => edges.extend(src),
+                            Some(f) => {
+                                // One clock for both lists.
+                                let start = f.clock;
+                                edges.extend(fifo_run(f, &src.events, frames));
+                                f.clock = start;
+                                param_edges.extend(fifo_run_params(f, &src.params, frames));
+                            }
+                            None => {
+                                edges.extend(src.events);
+                                param_edges.extend(src.params);
+                            }
                         }
                     }
                     EventEdge::Feedback { from, delay } => {
@@ -1451,10 +1504,20 @@ impl<F: Float> Reference<F> {
                             .get_mut(&(at, from, graph.generation(from.node), delay))
                             .expect("built by set_graph");
                         edges.extend(fifo_due(f, frames));
+                        param_edges.extend(fifo_due_params(f, frames));
                     }
                 }
             }
             edges.sort_by_key(|e| e.offset);
+            // Scheduled param events: one more source, after the edges, by
+            // timeline position at a tie, then scheduling order.
+            let mut landed_params = self.landing_params.remove(&at).unwrap_or_default();
+            landed_params.sort_by(|a, b| a.1.offset.cmp(&b.1.offset).then(a.0.total_cmp(&b.0)));
+            param_edges.sort_by_key(|e| e.offset);
+            param_edges.extend(landed_params.into_iter().map(|(_, e)| e));
+            // Stable: the edges' param events keep their place at a tie.
+            param_edges.sort_by_key(|e| e.offset);
+            pm_ins.push(param_edges);
             if let Some(n) = shape.event_input_capacity {
                 self.dropped += bound_inputs(std::slice::from_mut(&mut edges), n.get() as usize);
             }
@@ -1529,6 +1592,10 @@ impl<F: Float> Reference<F> {
                     *events = held.close_upto(Offset::ZERO, budget);
                     budget -= events.len();
                 }
+                // A bypassed node is sent no param events either.
+                for params in &mut pm_ins {
+                    params.clear();
+                }
             } else {
                 self.dropped += bound_all(&mut ev_ins, shape.event_input_capacity);
                 for (held, events) in m.held_in.iter_mut().zip(&ev_ins) {
@@ -1579,7 +1646,7 @@ impl<F: Float> Reference<F> {
                 o
             });
         let mut outs: Vec<Vec<F>> = vec![vec![F::ZERO; frames]; n_out];
-        let mut ev_bufs: Vec<Vec<Event>> = vec![Vec::new(); shape.event_out as usize];
+        let mut ev_bufs: Vec<RefOut> = vec![RefOut::default(); shape.event_out as usize];
         if parked {
             // Not called: the aligned input, and the close of what the node
             // held on its event outputs when it was parked.
@@ -1601,7 +1668,7 @@ impl<F: Float> Reference<F> {
             }
             for (port, buf) in ev_bufs.iter_mut().enumerate() {
                 if let Some(held) = m.owed.remove(&(port as u16)) {
-                    *buf = held.closing(Offset::ZERO);
+                    buf.events = held.closing(Offset::ZERO);
                 }
             }
         }
@@ -1612,7 +1679,10 @@ impl<F: Float> Reference<F> {
             let mut out_refs: Vec<&mut [F]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
             let ev_refs: Vec<SortedEvents<'_>> = ev_ins
                 .iter()
-                .map(|v| SortedEvents::new(v, frames).expect("the reference sorted them"))
+                .zip(&pm_ins)
+                .map(|(v, p)| {
+                    SortedEvents::with_both(v, p, frames).expect("the reference sorted them")
+                })
                 .collect();
             let drops = crate::event::PortCount::default();
             // The node's declared capacity bounds its writers here as in the
@@ -1622,7 +1692,18 @@ impl<F: Float> Reference<F> {
                 .map_or(usize::MAX, |n| n.get() as usize);
             let mut writers: Vec<EventWriter<'_>> = ev_bufs
                 .iter_mut()
-                .map(|b| EventWriter::new(b, cap, frames as u32, &drops))
+                .map(|b| {
+                    let RefOut { events, params } = b;
+                    // The room a param-writing node's port has, and none for
+                    // another's: `Shape::param_events`. An undeclared
+                    // capacity is as large as a node writes.
+                    params.reserve_exact(if shape.param_events {
+                        cap.min(1 << 16)
+                    } else {
+                        0
+                    });
+                    EventWriter::new(events, params, cap, frames as u32, &drops)
+                })
                 .collect();
             let io = Io::new(
                 self.prepare.max_block(),
@@ -1716,7 +1797,7 @@ impl<F: Float> Reference<F> {
                 port: port as u16,
             };
             if self.tracked.contains(&from) && !parked {
-                self.held.entry(from).or_default().observe(&e);
+                self.held.entry(from).or_default().observe(&e.events);
             }
             events.insert(from, e);
         }
@@ -1735,16 +1816,16 @@ impl<F: Float> Reference<F> {
         id: EdgeId,
         targets: &BTreeMap<EdgeId, Amplitude>,
         frames: usize,
-        events: &BTreeMap<EventOut, Vec<Event>>,
+        events: &BTreeMap<EventOut, RefOut>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
         let to = F::from_unit(targets[&id]);
         let ran = self.lane_prev.contains_key(&id);
-        let evs: Vec<Event> = match gain.source {
+        let evs: Vec<ParamEvent> = match gain.source {
             Some(from) => {
-                let src = events[&from].clone();
+                let src = events[&from].params.clone();
                 match self.event_lines.get_mut(&DelayKey::EdgeGain { id, from }) {
-                    Some(f) => fifo_run(f, &src, frames),
+                    Some(f) => fifo_run_params(f, &src, frames),
                     None => src,
                 }
             }
@@ -1789,7 +1870,7 @@ impl<F: Float> Reference<F> {
         key: NodeKey,
         graph: &ValidGraph,
         frames: usize,
-        events: &BTreeMap<EventOut, Vec<Event>>,
+        events: &BTreeMap<EventOut, RefOut>,
         base: F,
         fresh: bool,
     ) -> Option<Vec<F>> {
@@ -1808,11 +1889,11 @@ impl<F: Float> Reference<F> {
             .copied()
             .or(entry.map(|m| m.range))
             .unwrap_or(NodeMix::DEFAULT_RANGE);
-        let evs: Vec<Event> = match source {
+        let evs: Vec<ParamEvent> = match source {
             Some(from) => {
-                let src = events[&from].clone();
+                let src = events[&from].params.clone();
                 match self.event_lines.get_mut(&DelayKey::ParamEvent { at, from }) {
-                    Some(f) => fifo_run(f, &src, frames),
+                    Some(f) => fifo_run_params(f, &src, frames),
                     None => src,
                 }
             }
@@ -1843,7 +1924,7 @@ impl<F: Float> Reference<F> {
         key: NodeKey,
         graph: &ValidGraph,
         frames: usize,
-        events: &BTreeMap<EventOut, Vec<Event>>,
+        events: &BTreeMap<EventOut, RefOut>,
     ) -> Vec<Option<(Vec<F>, Vec<u32>)>> {
         let unit = &self.units[&key].1;
         let declared = unit.shape().params;
@@ -1862,11 +1943,11 @@ impl<F: Float> Reference<F> {
                 .unwrap_or_default();
             let range = self.ranges.get(&at).copied().unwrap_or(range);
             // The source's events this block, through its PDC delay.
-            let evs: Vec<Event> = match source {
+            let evs: Vec<ParamEvent> = match source {
                 Some(from) => {
-                    let src = events[&from].clone();
+                    let src = events[&from].params.clone();
                     match self.event_lines.get_mut(&DelayKey::ParamEvent { at, from }) {
-                        Some(f) => fifo_run(f, &src, frames),
+                        Some(f) => fifo_run_params(f, &src, frames),
                         None => src,
                     }
                 }
@@ -1900,8 +1981,8 @@ struct RefPortIn<'a, F> {
     b1: F,
     range: ParamRange,
     source: Option<EventOut>,
-    /// The source's events, through its PDC delay.
-    events: &'a [Event],
+    /// The source's param events, through its PDC delay.
+    events: &'a [ParamEvent],
     frames: usize,
     /// The declick's length in frames.
     declick: usize,
@@ -1980,17 +2061,17 @@ fn ref_port<F: Float>(
         let want = tutti_units::ParamAddr::unit(param);
         while let Some(e) = evs.next_if(|e| e.offset.index() <= i) {
             match e.kind {
-                EventKind::Ramp(r) if r.addr() == want => {
+                ParamKind::Ramp(r) if r.addr() == want => {
                     // A first ramp starts from the base at this frame.
                     let cur = if st.ramp.started {
                         st.ramp.value
                     } else {
-                        base(i)
+                        base(i).into()
                     };
                     let len = r.duration().get() as u64;
                     st.ramp = RefRamp {
                         from: cur,
-                        target: F::from_f32(r.raw_target()),
+                        target: r.raw_target(),
                         at: now,
                         len,
                         shape: r.shape(),
@@ -2003,40 +2084,39 @@ fn ref_port<F: Float>(
                     };
                     corner(i, &mut corners);
                 }
-                EventKind::Segment(s) if s.addr() == want => {
+                ParamKind::Segment(s) if s.addr() == want => {
                     let piece = s.piece();
-                    let (position, length) = s.timing();
+                    let timing = s.timing();
                     // What a ramp replacing it on this frame starts
                     // from: the held value, or (a first event) the
                     // base at this frame, as for a first ramp.
                     let cur = if st.ramp.started {
                         st.ramp.value
                     } else {
-                        base(i)
+                        base(i).into()
                     };
-                    let arrives =
-                        crate::event::arrival(position, length).map(|j| now + u64::from(j));
+                    let arrives = Some(now + u64::from(crate::param_event::arrival(timing)));
                     // The piece in flight, sent again: the same values and
                     // law, bit for bit, arriving on the same frame, or both
                     // already at rest on their end. No corner.
                     let old = &st.ramp;
-                    let bits = |f: F, t: F, l| (f.to_f64().to_bits(), t.to_f64().to_bits(), l);
+                    let bits = |f: f64, t: f64, l| (f.to_bits(), t.to_bits(), l);
                     let rested = old.started && matches!(old.arrives, Some(a) if a < now);
                     let continues = old.started
                         && old.curve.is_some()
                         && bits(old.from, old.target, old.shape)
-                            == bits(F::from_f32(piece.from), F::from_f32(piece.to), piece.law)
+                            == bits(piece.from, piece.to, piece.law)
                         && match old.arrives {
                             Some(a) if a < now => arrives == Some(now),
                             a => a == arrives,
                         };
                     st.ramp = RefRamp {
-                        from: F::from_f32(piece.from),
-                        target: F::from_f32(piece.to),
+                        from: piece.from,
+                        target: piece.to,
                         at: now,
                         len: 0,
                         shape: piece.law,
-                        curve: Some((position, length)),
+                        curve: Some(timing),
                         value: cur,
                         started: true,
                         arrives,
@@ -2046,25 +2126,20 @@ fn ref_port<F: Float>(
                     }
                     at_rest = continues && rested;
                 }
-                // Another param's, MIDI, a chord, or a resync: a port re-sends
-                // nothing.
-                EventKind::Ramp(_)
-                | EventKind::Segment(_)
-                | EventKind::Midi(_)
-                | EventKind::Harmony(_)
-                | EventKind::Resync => {}
+                // Another param's: a port re-sends nothing.
+                ParamKind::Ramp(_) | ParamKind::Segment(_) => {}
             }
         }
         let r = &st.ramp;
         let value = if !r.started {
-            base(i)
+            base(i).into()
         } else if now < r.at {
             r.value
-        } else if let Some((position, length)) = r.curve {
+        } else if let Some(timing) = r.curve {
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
-            match crate::event::segment_progress(position, length, j) {
-                Some(t) => ref_line(r.from, r.target, r.shape, t),
+            match crate::param_event::segment_progress(timing, j) {
+                Some(t) => ref_line(param.param, r.from, r.target, r.shape, t),
                 None => r.target,
             }
         } else {
@@ -2076,7 +2151,7 @@ fn ref_port<F: Float>(
                     Samples(usize::try_from(into).unwrap_or(usize::MAX)),
                     Samples(usize::try_from(r.len).unwrap_or(usize::MAX)),
                 );
-                ref_line(r.from, r.target, r.shape, t)
+                ref_line(param.param, r.from, r.target, r.shape, t)
             }
         };
         st.ramp.value = value;
@@ -2084,7 +2159,7 @@ fn ref_port<F: Float>(
             // It arrives on this frame, and holds its end from here.
             corner(i, &mut corners);
         }
-        *v = value.clamp(lo, hi);
+        *v = F::from_unit(CellValue(value)).clamp(lo, hi);
     }
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
@@ -2102,17 +2177,28 @@ fn ref_port<F: Float>(
 
 /// `k / n` as the progress a lane's ramp reads, narrowed once to `F`.
 fn progress_in<F: Float>(k: usize, n: usize) -> F {
-    F::from_f64(Normalized::progress(Samples(k), Samples(n)).get())
+    F::from_unit(Normalized::progress(Samples(k), Samples(n)))
 }
 
-/// `from + (to - from) * law(t)` in `F`: the law is read in `f64` and narrows
-/// once.
-fn ref_line<F: Float>(from: F, to: F, law: tutti_curve::Law, t: Normalized) -> F {
-    from + (to - from) * F::from_f64(law.eval(t).get())
+/// `from + (to - from) * law(t)` in the unit's `f64`; a circular param takes
+/// the short arc, `wrap(from + arc(from, to) * law(t))`.
+fn ref_line(
+    param: tutti_units::UnitParam,
+    from: f64,
+    to: f64,
+    law: tutti_curve::Law,
+    t: Normalized,
+) -> f64 {
+    let g = law.eval(t).get();
+    if param.is_circular() {
+        param.wrap(from + param.arc(from, to) * g)
+    } else {
+        from + (to - from) * g
+    }
 }
 
 /// The frame a started move arrives on.
-fn r_started_arrives<F: Float>(r: &RefRamp<F>) -> Option<u64> {
+fn r_started_arrives(r: &RefRamp) -> Option<u64> {
     r.started.then_some(r.arrives).flatten()
 }
 
@@ -2508,7 +2594,7 @@ struct RefCommand {
     id: u64,
     at: At,
     to: EventIn,
-    kind: EventKind,
+    payload: Scheduled,
     /// Its timeline position, unrounded: the frame it was scheduled for
     /// (rescaled on a rate change), or where a beat resolved. The tie-break
     /// after the offset.
@@ -2800,6 +2886,21 @@ fn fifo_due(f: &mut RefFifo, frames: usize) -> Vec<Event> {
         .collect()
 }
 
+/// A FIFO's param events that fall due in the block starting at its clock,
+/// without queueing or advancing (a feedback read).
+fn fifo_due_params(f: &mut RefFifo, frames: usize) -> Vec<ParamEvent> {
+    let start = f.clock;
+    let end = start + frames as u64;
+    let due = f.params.iter().take_while(|(t, _)| t + f.len < end).count();
+    f.params
+        .drain(..due)
+        .map(|(t, e)| ParamEvent {
+            offset: Offset::raw((t + f.len).saturating_sub(start) as u32),
+            ..e
+        })
+        .collect()
+}
+
 /// [`bound_inputs`] under a declared bound, if any.
 fn bound_all(ports: &mut [Vec<Event>], cap: Option<std::num::NonZeroU32>) -> u64 {
     cap.map_or(0, |n| bound_inputs(ports, n.get() as usize))
@@ -2863,6 +2964,28 @@ fn fifo_run(f: &mut RefFifo, input: &[Event], frames: usize) -> Vec<Event> {
         .pending
         .drain(..due)
         .map(|(t, e)| Event {
+            offset: Offset::raw((t + f.len).saturating_sub(start) as u32),
+            ..e
+        })
+        .collect();
+    f.clock = end;
+    out
+}
+
+/// [`fifo_run`] for the param events: the FIFO's clock moves to the block's end.
+fn fifo_run_params(f: &mut RefFifo, input: &[ParamEvent], frames: usize) -> Vec<ParamEvent> {
+    let start = f.clock;
+    let end = start + frames as u64;
+    f.params.extend(
+        input
+            .iter()
+            .map(|e| (start + u64::from(e.offset.get()), *e)),
+    );
+    let due = f.params.iter().take_while(|(t, _)| t + f.len < end).count();
+    let out = f
+        .params
+        .drain(..due)
+        .map(|(t, e)| ParamEvent {
             offset: Offset::raw((t + f.len).saturating_sub(start) as u32),
             ..e
         })

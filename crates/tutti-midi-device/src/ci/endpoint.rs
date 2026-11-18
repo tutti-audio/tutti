@@ -7,8 +7,6 @@
 //! Status it echoes (§5.8.1), so the two are one value, [`EndpointInfo`]: a reply
 //! cannot carry data that disagrees with its status.
 
-use std::fmt;
-
 use tutti_ump::{U7, U14};
 
 use crate::name::ProductInstanceId;
@@ -45,62 +43,14 @@ impl EndpointStatus {
     }
 }
 
-/// A Product Instance Id as MIDI-CI carries it: at most 16 bytes.
-///
-/// M2-101 §5.8.3.1: a Product Instance Id is ASCII text in the range 32 to 126
-/// and at most 16 bytes long.
-/// M2-104's UMP Stream notification of the same Id allows 42 bytes, which is
-/// [`ProductInstanceId`]'s own limit; the CI message is the narrower, and the
-/// Id it carries must match the Stream's, so only an Id that fits both is one
-/// MIDI-CI can carry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct CiInstanceId(ProductInstanceId);
-
-impl CiInstanceId {
-    /// The most bytes MIDI-CI carries (§5.8.3.1).
-    pub(crate) const MAX_LEN: usize = 16;
-
-    /// The Id, or `None` when it is longer than 16 bytes.
-    #[must_use]
-    pub fn new(id: ProductInstanceId) -> Option<Self> {
-        (id.as_str().len() <= Self::MAX_LEN).then_some(Self(id))
-    }
-
-    /// The Id.
-    #[must_use]
-    pub fn get(&self) -> &ProductInstanceId {
-        &self.0
-    }
-
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() > Self::MAX_LEN {
-            return None;
-        }
-        Self::new(ProductInstanceId::from_bytes(bytes)?)
-    }
-}
-
-impl fmt::Display for CiInstanceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl TryFrom<ProductInstanceId> for CiInstanceId {
-    type Error = ProductInstanceId;
-
-    fn try_from(id: ProductInstanceId) -> Result<Self, ProductInstanceId> {
-        Self::new(id).ok_or(id)
-    }
-}
-
 /// The Status and Information Data of a Reply to Endpoint (§5.8): the data is
 /// the kind the status names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum EndpointInfo {
-    /// Status `0x00` with the Endpoint Product Instance Id (§5.8.3.1).
-    ProductInstanceId(CiInstanceId),
+    /// Status `0x00` with the Endpoint Product Instance Id (§5.8.3.1): ASCII
+    /// text of at most 42 bytes, the length of the UMP Stream's.
+    ProductInstanceId(ProductInstanceId),
 }
 
 impl EndpointInfo {
@@ -118,7 +68,7 @@ impl EndpointInfo {
         out.extend([self.status().get().get()]);
         match self {
             Self::ProductInstanceId(id) => {
-                let text = id.get().as_str().as_bytes();
+                let text = id.as_str().as_bytes();
                 out.extend(
                     U14::from_len(text.len())
                         .expect("an Instance Id is 42 bytes at most")

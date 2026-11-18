@@ -60,21 +60,20 @@ fn the_fdn_aims_and_renders_without_allocating() {
     let input = vec![0.25f32; 64];
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
     for block in 0..200u32 {
-        let k = (block % 7) as f32 / 6.0;
-        let k64 = f64::from(block % 7) / 6.0;
+        let k = f64::from(block % 7) / 6.0;
         let c = FdnControls {
             decay: [
-                Seconds::from_f32(0.2 + 7.0 * k),
-                Seconds::from_f32(1.0 + k),
-                Seconds::from_f32(0.5 + 3.0 * k),
+                Seconds(0.2 + 7.0 * k),
+                Seconds(1.0 + k),
+                Seconds(0.5 + 3.0 * k),
             ],
-            size: Mix(k64),
-            diffusion: Mix(1.0 - k64),
-            pre_delay: Seconds::from_f32(0.05 * k),
-            modulation: Depth::of(k64),
-            rate: Hz(0.1 + k64),
-            width: StereoWidth(2.0 * k64),
-            wet: Db(-12.0 * f64::from(k)),
+            size: Mix(k),
+            diffusion: Mix(1.0 - k),
+            pre_delay: Seconds(0.05 * k),
+            modulation: Depth::of(k),
+            rate: Hz(0.1 + k),
+            width: StereoWidth(2.0 * k),
+            wet: Db(-12.0 * k),
             freeze: block % 11 == 0,
         };
         let n = allocations(|| {

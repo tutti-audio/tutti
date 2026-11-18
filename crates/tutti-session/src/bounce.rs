@@ -1755,7 +1755,7 @@ where
         if self.bounce.in_flight() {
             return Err(BounceError::InFlight);
         }
-        let pending = self.pool.pending();
+        let pending = self.pool.entries.pending();
         if !pending.is_empty() {
             return Err(BounceError::PoolPending(pending));
         }

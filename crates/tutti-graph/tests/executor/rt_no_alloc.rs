@@ -29,7 +29,8 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Buses, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, FadeLaw, Io, Law, Node,
-    ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
+    ParamKind, ParamRamp, ParamSegment, Prepare, Scheduled, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
 use tutti_types::ChannelLayout;
@@ -205,14 +206,15 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         port,
     };
     for k in 0..200u64 {
-        let kind = if k % 3 == 0 {
-            EventKind::Ramp(ParamRamp::foreign(
+        let kind: Scheduled = if k % 3 == 0 {
+            ParamKind::Ramp(ParamRamp::foreign(
                 tutti_units::ParamId::new(1),
                 0.5,
                 Samples(16),
             ))
+            .into()
         } else {
-            EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)))
+            EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100))).into()
         };
         ed.schedule(
             At::Frame(Frame::new(2_000 + k * 700)),
@@ -828,6 +830,7 @@ impl Node for RampEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -839,7 +842,7 @@ impl Node for RampEvery {
                 let o = io.offset(i).expect("inside");
                 let event = match (f / 37) % 3 {
                     // A linear ramp, from wherever the source is.
-                    0 => tutti_graph::Event::ramp(
+                    0 => tutti_graph::ParamEvent::ramp(
                         o,
                         ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
@@ -863,17 +866,14 @@ impl Node for RampEvery {
                             shape,
                         );
                         let seg = if k == 2 {
-                            seg.resumed(
-                                tutti_units::SamplePosition(3.5),
-                                tutti_units::SamplePosition(41.25),
-                            )
+                            seg.resumed(Samples(3), Samples(41))
                         } else {
                             seg
                         };
-                        tutti_graph::Event::segment(o, seg)
+                        tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push(event);
+                let _ = io.event_out(0).push_param(event);
             }
         }
         Status::Silent
@@ -998,6 +998,234 @@ fn parallel_modulated_params_are_allocation_free() {
     modulated_params_are_allocation_free_on(4);
 }
 
+/// Counts the param events on each of its two event inputs; one audio input,
+/// no outputs.
+struct ParamTally([Arc<AtomicU64>; 2]);
+
+impl Node for ParamTally {
+    fn shape(&self) -> Shape {
+        Shape::sink_unassigned(ChannelLayout::MONO)
+            .with_events(2, 0)
+            .with_param_events()
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        for (p, n) in self.0.iter().enumerate() {
+            n.fetch_add(io.events(p).params().len() as u64, Ordering::Relaxed);
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Param events never allocate on the audio thread in the buffer beside the
+/// events: two sources fan into one event input (a merge of param lists),
+/// each early behind a latent audio path so the plan delays it (a FIFO of
+/// param events), and a third arrives through a feedback edge (a FIFO read
+/// before it is written). Blocks of every length, and the events counted at the
+/// consumer to show the lists carried them.
+fn param_events_are_allocation_free_on(workers: usize) {
+    let counts = [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))];
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    use_pool(&mut exec, workers);
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.insert(
+        NodeKey(1),
+        "consumer",
+        Unforkable(ParamTally([Arc::clone(&counts[0]), Arc::clone(&counts[1])])),
+    );
+    ed.insert(
+        NodeKey(2),
+        "lag",
+        Unforkable(TestNode::new(Kind::Lag { latency: 31 })),
+    );
+    for k in [4, 5, 6] {
+        ed.insert(NodeKey(k), "ramps", Unforkable(RampEvery));
+    }
+    {
+        let t = &mut ed.spec_mut().topology;
+        t.edges
+            .insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
+        t.edges.insert(at(1, 0), vec![from(2, 0)]);
+        t.set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(2),
+            port: 0,
+        })]);
+    }
+    let port = |p| EventIn {
+        node: NodeKey(1),
+        port: p,
+    };
+    let out = |k| EventOut {
+        node: NodeKey(k),
+        port: 0,
+    };
+    ed.spec_mut()
+        .connect_events(port(0), EventEdge::Direct(out(4)));
+    ed.spec_mut()
+        .connect_events(port(0), EventEdge::Direct(out(5)));
+    ed.spec_mut().connect_events(
+        port(1),
+        EventEdge::Feedback {
+            from: out(6),
+            delay: Samples(256),
+        },
+    );
+    ed.commit().expect("commits");
+
+    let input: Vec<f32> = (0..256).map(|i| (i % 13) as f32 / 13.0).collect();
+    let mut audio = vec![0.0f32; 256];
+    let transport = TransportPosition::default();
+    let sizes = [256usize, 1, 7, 64, 100, 255, 33];
+    apply(&mut exec);
+    assert_eq!(
+        exec.is_parallel(),
+        workers > 1,
+        "the gate runs the mode it names"
+    );
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..400 {
+            let n = sizes[i % sizes.len()];
+            exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
+        }
+    });
+    let plan = exec.plan().expect("a plan");
+    let event_delays = plan
+        .delays()
+        .iter()
+        .filter(|d| matches!(d.key, tutti_graph::DelayKey::Event { .. }))
+        .count();
+    assert_eq!(event_delays, 2, "both fan-in sources are delayed by PDC");
+    assert!(
+        counts[0].load(Ordering::Relaxed) > 100 && counts[1].load(Ordering::Relaxed) > 100,
+        "the consumer read param events on both inputs: {counts:?}"
+    );
+    assert_eq!(exec.dropped_event_count(), 0, "nothing was refused");
+}
+
+/// Scheduled param commands never allocate on the audio thread as they land:
+/// a ramp or a segment into each of a consumer's two event inputs on
+/// frames spread over blocks of every length, one already late, and one on a
+/// beat a stopped transport never reaches. Each lands in the param list the
+/// consumer counts, so the merge into the overlay ran.
+fn scheduled_params_are_allocation_free_on(workers: usize) {
+    let counts = [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))];
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    use_pool(&mut exec, workers);
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.insert(
+        NodeKey(1),
+        "consumer",
+        Unforkable(ParamTally([Arc::clone(&counts[0]), Arc::clone(&counts[1])])),
+    );
+    ed.insert(
+        NodeKey(2),
+        "lag",
+        Unforkable(TestNode::new(Kind::Lag { latency: 31 })),
+    );
+    // Heavy tasks beside the consumer's chain, which the pool spreads.
+    for k in [4, 5, 6] {
+        ed.insert(NodeKey(k), "ramps", Unforkable(RampEvery));
+    }
+    {
+        let t = &mut ed.spec_mut().topology;
+        t.edges
+            .insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
+        t.edges.insert(at(1, 0), vec![from(2, 0)]);
+        t.set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(2),
+            port: 0,
+        })]);
+    }
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    let consumer = |port| EventIn {
+        node: NodeKey(1),
+        port,
+    };
+    let id = tutti_units::ParamId::new(1);
+    for k in 0..200u64 {
+        let kind: ParamKind = if k % 2 == 0 {
+            ParamKind::Ramp(ParamRamp::foreign(id, 0.5, Samples(16)))
+        } else {
+            ParamKind::Segment(ParamSegment::foreign(
+                id,
+                0.0,
+                1.0,
+                Samples(50),
+                Law::Linear,
+            ))
+        };
+        ed.schedule(
+            At::Frame(Frame::new(2_000 + k * 700)),
+            consumer((k % 2) as u16),
+            kind,
+        )
+        .expect("under capacity");
+    }
+    let input: Vec<f32> = (0..256).map(|i| (i % 13) as f32 / 13.0).collect();
+    let mut audio = vec![0.0f32; 256];
+    let transport = TransportPosition::default();
+    let sizes = [256usize, 1, 7, 64, 100, 255, 33];
+    for &n in &sizes {
+        exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
+    }
+    // After the warm-up, so frame 0 is past: it lands late, inside the gate.
+    ed.schedule(
+        At::Frame(Frame::new(0)),
+        consumer(0),
+        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples(0))),
+    )
+    .expect("under capacity");
+    ed.schedule(
+        At::Beat(Beat(4.0)),
+        consumer(1),
+        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples(0))),
+    )
+    .expect("under capacity");
+    assert_eq!(
+        exec.is_parallel(),
+        workers > 1,
+        "the gate runs the mode it names"
+    );
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..2_000 {
+            let n = sizes[i % sizes.len()];
+            exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
+        }
+    });
+    let landed: u64 = counts.iter().map(|c| c.load(Ordering::Relaxed)).sum();
+    assert_eq!(
+        landed, 201,
+        "200 on time and the late one reached the consumer"
+    );
+    assert_eq!(exec.late_command_count(), 1);
+    assert_eq!(exec.dropped_event_count(), 0);
+    assert_eq!(ed.commands_outstanding(), 1, "the beat still waits");
+}
+
+#[test]
+fn scheduled_params_are_allocation_free() {
+    scheduled_params_are_allocation_free_on(1);
+}
+
+/// The same on the parallel executor, four participants.
+#[test]
+fn parallel_scheduled_params_are_allocation_free() {
+    scheduled_params_are_allocation_free_on(4);
+}
+
+#[test]
+fn param_events_are_allocation_free() {
+    param_events_are_allocation_free_on(1);
+}
+
+/// The same on the parallel executor, four participants.
+#[test]
+fn parallel_param_events_are_allocation_free() {
+    param_events_are_allocation_free_on(4);
+}
+
 /// Declares `Azimuth` (base 0) and writes what it reads.
 struct AzimuthSink;
 
@@ -1027,6 +1255,7 @@ impl Node for SeamEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -1050,7 +1279,9 @@ impl Node for SeamEvery {
                     Samples(40),
                     shape,
                 );
-                let _ = io.event_out(0).push(tutti_graph::Event::segment(o, seg));
+                let _ = io
+                    .event_out(0)
+                    .push_param(tutti_graph::ParamEvent::segment(o, seg));
             }
         }
         Status::Silent

@@ -10,7 +10,7 @@ use tutti_units::{Samples, Tail};
 use super::state::{Inject, Unit};
 use super::tail_elapsed;
 use crate::arena::Role;
-use crate::command::Deliveries;
+use crate::command::{Deliveries, Overlay};
 use crate::event::PortCount;
 use crate::event::{Event, EventWriter, SortedEvents, merge_into};
 use crate::history::TransportHistory;
@@ -21,7 +21,7 @@ use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMa
 use crate::param::{CellValue, ParamInput};
 use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
-use crate::slots::{AudioSlots, EventSlots, SlotFlags};
+use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
@@ -129,7 +129,7 @@ pub(super) fn run_node_op<
             node_op(u, head, st, ports, |call, node, st| {
                 let a = rec.ain.max(rec.aout);
                 let e = rec.ein.max(rec.eout);
-                let (inject, overlay) = (&*st.inject, &st.overlay[..]);
+                let (inject, overlay) = (&*st.inject, &*st.overlay);
                 let extra = Extra { inject, overlay };
                 let (arena, events) = (&mut *st.arena, &mut *st.events);
                 let dropped = &mut *st.dropped;
@@ -248,7 +248,7 @@ pub(super) fn fading_node_op<
         [ain, aout, ein, eout],
         !modulated,
         |call, node, st| {
-            let (inject, overlay) = (&*st.inject, &st.overlay[..]);
+            let (inject, overlay) = (&*st.inject, &*st.overlay);
             let extra = Extra { inject, overlay };
             let (arena, events) = (&mut *st.arena, &mut *st.events);
             let dropped = &mut *st.dropped;
@@ -339,7 +339,7 @@ pub(crate) struct OpState<'s, A: ?Sized, Fl: ?Sized, E: ?Sized> {
     /// This unit's index into `has_inject` and `has_due`.
     pub(crate) at: usize,
     /// Where a node's scheduled events are merged into its inputs.
-    pub(crate) overlay: &'s mut Vec<Event>,
+    pub(crate) overlay: &'s mut Overlay,
     pub(crate) due: Deliveries<'s>,
     pub(crate) dropped: &'s mut Dropped,
     /// The slots a node's [`Io::log`](crate::Io::log) fills, and where they
@@ -400,7 +400,7 @@ pub(super) fn run_params<
         let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
-                let events = st.events.ev(p.slot);
+                let events = st.events.pev(p.slot);
                 params.port(k, param, frames, Some((p.from, events)), base);
             }
             None => params.port(k, param, frames, None, base),
@@ -441,7 +441,9 @@ pub(super) fn node_op_with<
         && !injected
         && !scheduled
         && in_silent.covers(ain.len())
-        && ein.iter().all(|&s| st.events.ev(s).is_empty());
+        && ein
+            .iter()
+            .all(|&s| st.events.ev(s).is_empty() && st.events.pev(s).is_empty());
 
     // See the module docs: a node with event inputs parks only on its own
     // say-so (`Status::Idle`); one without parks when its inputs, its last
@@ -481,7 +483,7 @@ pub(super) fn node_op_with<
             st.flags.set(s, SILENT | CONSTANT);
         }
         for &s in eout {
-            st.events.ev_mut(s).clear();
+            st.events.slot_mut(s).clear();
         }
         return;
     }
@@ -508,6 +510,8 @@ pub(super) fn node_op_with<
 
     let mut views = [(0u16, 0u32, 0u32); MAX_PORTS];
     let mut n_views = 0;
+    let mut param_views = [(0u16, 0u32, 0u32); MAX_PORTS];
+    let mut n_param_views = 0;
     let mut cut = false;
     // A node declaring an input bound is sent at most that many events on its
     // inputs together, whatever the edges, flushed events and scheduled
@@ -521,7 +525,7 @@ pub(super) fn node_op_with<
             ein.len(),
             bound.get() as usize,
             base,
-            st.overlay,
+            &mut st.overlay.events,
             &mut views,
         ) {
             n_views = n;
@@ -534,22 +538,35 @@ pub(super) fn node_op_with<
     if scheduled && !cut {
         let (inject, events) = (&*st.inject, &*st.events);
         let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
-        let (n, lost) = st.due.overlay(unit, base, st.overlay, &mut views);
+        let (n, lost) = st
+            .due
+            .overlay(unit, base, &mut st.overlay.events, &mut views);
         n_views = n;
+        st.dropped.at_node(rec.unit, lost);
+    }
+    // Scheduled param events: one more source per port, after the port's
+    // own, however the events were bounded (a bound counts events only).
+    if scheduled {
+        let events = &*st.events;
+        let base = |port: u16| &events.pev(ein[port as usize])[..];
+        let (n, lost) = st
+            .due
+            .overlay_params(unit, base, &mut st.overlay.params, &mut param_views);
+        n_param_views = n;
         st.dropped.at_node(rec.unit, lost);
     }
     if discards {
         // Every event input is replaced by what it must close, as far as
         // the overlay takes (the rest next block).
-        st.overlay.clear();
+        st.overlay.events.clear();
         for (port, held) in u.mode.held_in().iter_mut().enumerate() {
-            let from = st.overlay.len() as u32;
+            let from = st.overlay.events.len() as u32;
             // A node with an input bound is sent at most that many closes a
             // block, all its inputs together; the rest stays held for the
             // next block.
-            let budget = bound.map_or(usize::MAX, |n| n.get() as usize - st.overlay.len());
-            held.drain_upto(st.overlay, budget);
-            views[n_views] = (port as u16, from, st.overlay.len() as u32);
+            let budget = bound.map_or(usize::MAX, |n| n.get() as usize - st.overlay.events.len());
+            held.drain_upto(&mut st.overlay.events, budget);
+            views[n_views] = (port as u16, from, st.overlay.events.len() as u32);
             n_views += 1;
         }
         st.has_due[st.at] = false;
@@ -560,7 +577,7 @@ pub(super) fn node_op_with<
         for (port, held) in u.mode.held_in().iter_mut().enumerate() {
             let view = views[..n_views].iter().find(|v| usize::from(v.0) == port);
             let events: &[Event] = match view {
-                Some(&(_, a, b)) => &st.overlay[a as usize..b as usize],
+                Some(&(_, a, b)) => &st.overlay.events[a as usize..b as usize],
                 None => input_events(st.inject, st.events, unit, ein[port], port as u16),
             };
             held.observe(events);
@@ -590,7 +607,9 @@ pub(super) fn node_op_with<
         constant: in_constant,
         cap: rec.event_capacity.map_or(h.cap, |n| n.get() as usize),
         injected,
+        discards,
         scheduled: &views[..n_views],
+        scheduled_params: &param_views[..n_param_views],
         params,
     };
     let status = call_node(&call, &mut *u.node, st);
@@ -625,7 +644,9 @@ pub(super) fn node_op_with<
     // sink, called for its side effects, and a skip would starve them.
     u.last_quiet = !(aout.is_empty() && eout.is_empty())
         && aout.iter().all(|&s| st.flags.get(s) & SILENT != 0)
-        && eout.iter().all(|&s| st.events.ev(s).is_empty());
+        && eout
+            .iter()
+            .all(|&s| st.events.ev(s).is_empty() && st.events.pev(s).is_empty());
     if u.keys.is_closing() {
         // A replace took over from a unit that held keys: close them ahead
         // of this block's events, as many as the slot takes; the rest next
@@ -689,7 +710,7 @@ fn input_events<'a, E: EventSlots + ?Sized>(
 #[derive(Clone, Copy)]
 pub(super) struct Extra<'s> {
     inject: &'s [Inject],
-    overlay: &'s [Event],
+    overlay: &'s Overlay,
 }
 
 /// One node call's constants, shared by every borrow form.
@@ -706,9 +727,14 @@ pub(super) struct Call<'p, 'e, F: Float> {
     cap: usize,
     /// Whether flushed events wait for this call (see the module docs).
     injected: bool,
+    /// Whether the node is bypassed: its event inputs carry only what it
+    /// must close.
+    discards: bool,
     /// `(port, start, end)` into the overlay buffer: ports whose events this
     /// block include scheduled commands.
     scheduled: &'p [(u16, u32, u32)],
+    /// The same into the overlay's param events.
+    scheduled_params: &'p [(u16, u32, u32)],
     /// What each declared param reads this block.
     params: &'p [ParamInput<'p, F>],
     /// Where the node's [`Io::report_tail`] lands.
@@ -806,19 +832,39 @@ impl<'p, F: Float> Call<'p, '_, F> {
         arena.borrow(frames, &borrows[rec.borrows.range()], &mut ins, &mut outs);
 
         let mut evin: [SortedEvents<'_>; M] = [SortedEvents::EMPTY; M];
-        let mut evout_bufs: [Option<&mut Vec<Event>>; M] = std::array::from_fn(|_| None);
+        let mut evout_bufs: [Option<&mut EventSlot>; M] = std::array::from_fn(|_| None);
         events.borrow_sorted(
             &borrows[rec.event_borrows.range()],
-            |port, v| evin[port as usize] = SortedEvents::trusted(v, frames),
+            |port, v| {
+                evin[port as usize] =
+                    SortedEvents::trusted(&v.events, frames).trusted_params(&v.params, frames);
+            },
             |port, v| evout_bufs[port as usize] = Some(v),
         );
+        // Flushed events and scheduled commands replace a port's events; its
+        // param events are the slot's.
         if self.injected {
             for inj in inject.iter().filter(|i| i.live && i.unit == rec.unit) {
-                evin[inj.port as usize] = SortedEvents::trusted(&inj.merged, frames);
+                let port = inj.port as usize;
+                evin[port] = SortedEvents::trusted(&inj.merged, frames)
+                    .trusted_params(evin[port].params(), frames);
             }
         }
         for &(port, a, b) in self.scheduled {
-            evin[port as usize] = SortedEvents::trusted(&overlay[a as usize..b as usize], frames);
+            let port = port as usize;
+            // A bypassed node is sent no param events either.
+            let params = if self.discards {
+                &[]
+            } else {
+                evin[port].params()
+            };
+            evin[port] = SortedEvents::trusted(&overlay.events[a as usize..b as usize], frames)
+                .trusted_params(params, frames);
+        }
+        for &(port, a, b) in self.scheduled_params {
+            let port = port as usize;
+            evin[port] = SortedEvents::trusted(evin[port].as_slice(), frames)
+                .trusted_params(&overlay.params[a as usize..b as usize], frames);
         }
         // One count per port, so a loss is charged to the port that had it.
         let drops: [PortCount; M] = std::array::from_fn(|_| PortCount::default());
@@ -829,9 +875,10 @@ impl<'p, F: Float> Call<'p, '_, F> {
             .zip(&drops)
             .take(e_out)
         {
-            let b = b.take().expect("event output borrowed");
-            b.clear();
-            *w = EventWriter::new(b, self.cap, frames as u32, d);
+            let slot = b.take().expect("event output borrowed");
+            slot.clear();
+            let EventSlot { events, params } = slot;
+            *w = EventWriter::new(events, params, self.cap, frames as u32, d);
         }
         let unplaced = Cell::new(0u32);
         let io = Io::new(
@@ -901,7 +948,13 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
                 let buf = arena.slot_mut(s, frames);
                 let v = buf[0];
                 buf.fill(v);
-                flags.set(s, flag(v == F::ZERO && v.to_f64().is_sign_positive(), true));
+                flags.set(
+                    s,
+                    flag(
+                        v == F::ZERO && Into::<f64>::into(v).is_sign_positive(),
+                        true,
+                    ),
+                );
             }
         }
         Status::Bypass => {

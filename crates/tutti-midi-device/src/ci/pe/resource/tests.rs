@@ -694,7 +694,7 @@ fn resource_list_reads_table_82() {
     let text = r#"[{"resource":"DeviceInfo"},{"resource":"ChannelList","canSubscribe":true},
         {"resource":"ProgramList"},
         {"resource":"X-Buffer","canSet":"full","mediaTypes":["application/octet-stream"],
-         "encodings":["MCoded7"],"schema":{"title":"Buffer"}}]"#;
+         "encodings":["MCoded7"],"schema":{"title":"Buffer","type":"string"}}]"#;
     let PeData::ResourceList(list) = ok(PeResource::ResourceList, text) else {
         panic!("not ResourceList");
     };
@@ -829,7 +829,7 @@ fn resource_list_does_not_list_itself_or_repeat() {
 #[test]
 fn only_a_list_resource_paginates_and_has_columns() {
     let x_song = custom("X-Song");
-    let schema = json(r#"{"title":"Song"}"#);
+    let schema = json(r#"{"title":"Song","type":"object"}"#);
     let entry = || ResourceEntry::builder(x_song.clone()).schema(schema.clone());
     assert!(matches!(
         entry().can_paginate(true).build(),
@@ -849,21 +849,31 @@ fn only_a_list_resource_paginates_and_has_columns() {
 }
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
-// a title.
+// a title and a type.
 /// Spec: m2-103/14.4#2, m2-103/14.4#3
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");
     assert!(matches!(
         ResourceEntry::builder(wifi.clone()).build(),
-        Err(EntryError::SchemaWithoutTitle(_))
+        Err(EntryError::SchemaIncomplete(_))
     ));
-    assert!(matches!(
-        ResourceEntry::builder(wifi.clone())
-            .schema(json(r#"{"type":"boolean"}"#))
-            .build(),
-        Err(EntryError::SchemaWithoutTitle(_))
-    ));
+    for incomplete in [
+        r#"{"type":"boolean"}"#,
+        r#"{"title":"WIFI Enabled"}"#,
+        r#"{"title":"WIFI Enabled","type":7}"#,
+        r#"{"title":3,"type":"boolean"}"#,
+    ] {
+        assert!(
+            matches!(
+                ResourceEntry::builder(wifi.clone())
+                    .schema(json(incomplete))
+                    .build(),
+                Err(EntryError::SchemaIncomplete(_))
+            ),
+            "{incomplete}"
+        );
+    }
     let schema =
         json(r#"{"title":"WIFI Enabled","description":"Turn WIFI on or Off","type":"boolean"}"#);
     let entry = ResourceEntry::builder(wifi)
@@ -1039,7 +1049,7 @@ fn a_get_is_checked_against_its_entry() {
     assert!(matches!(
         ResourceGet::new(ResourceTarget::try_from(custom("X-A")).unwrap()).check_get(
             &ResourceEntry::builder(custom("X-A"))
-                .schema(json(r#"{"title":"A"}"#))
+                .schema(json(r#"{"title":"A","type":"string"}"#))
                 .require_res_id(true)
                 .build()
                 .unwrap()
@@ -1079,7 +1089,7 @@ fn a_set_is_checked_against_its_entry() {
     ));
     let x = custom("X-Edit");
     let editable = ResourceEntry::builder(x.clone())
-        .schema(json(r#"{"title":"Edit"}"#))
+        .schema(json(r#"{"title":"Edit","type":"string"}"#))
         .can_set(CanSet::Partial)
         .build()
         .unwrap();
@@ -1129,7 +1139,26 @@ fn a_received_entry_is_taken_where_a_built_one_is_refused() {
     assert!(from_json(r#"{"resource":"X-NoSchema"}"#).is_ok());
     assert!(matches!(
         ResourceEntry::builder(custom("X-NoSchema")).build(),
-        Err(EntryError::SchemaWithoutTitle(_))
+        Err(EntryError::SchemaIncomplete(_))
+    ));
+    // A schema is the sender's to complete, and a standard Resource's entry in
+    // M2-107's example carries one.
+    assert!(from_json(r#"{"resource":"X-A","schema":{"title":"A"}}"#).is_ok());
+    assert!(
+        from_json(r#"{"resource":"ProgramList","schema":{"type":"array","title":"Program List"}}"#)
+            .is_ok()
+    );
+    assert!(matches!(
+        ResourceEntry::builder(custom("X-A"))
+            .schema(json(r#"{"title":"A"}"#))
+            .build(),
+        Err(EntryError::SchemaIncomplete(_))
+    ));
+    assert!(matches!(
+        ResourceEntry::builder(PeResource::ProgramList)
+            .schema(json(r#"{"type":"array","title":"Program List"}"#))
+            .build(),
+        Err(EntryError::NotOverridable { .. })
     ));
     assert!(from_json(r#"{"resource":"ResourceList"}"#).is_ok());
     assert_eq!(

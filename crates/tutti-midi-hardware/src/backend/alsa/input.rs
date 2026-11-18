@@ -5,7 +5,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::poll::ErrorRun;
+use super::poll::{ErrorRun, read_fault, wait_fault};
+use crate::InputFault;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, MidiThread, Result};
@@ -35,13 +36,13 @@ pub struct AlsaInput {
     /// closing this one is the shutdown signal, and wakes the pump at once.
     stop: Option<UnixStream>,
     /// Raised by the pump when it ends on an error, never on a stop.
-    died: Arc<FaultLatch>,
+    died: Arc<FaultLatch<InputFault>>,
     thread: Option<ThreadHandle<()>>,
 }
 
 impl InputConnection for AlsaInput {
-    fn is_alive(&self) -> bool {
-        !self.died.is_raised()
+    fn fault(&self) -> Option<InputFault> {
+        self.died.cause()
     }
 }
 
@@ -160,7 +161,7 @@ pub(super) fn start(
         source,
     })?;
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
-    let died = Arc::new(FaultLatch::new());
+    let died = Arc::new(FaultLatch::<InputFault>::new());
     let flag = Arc::clone(&died);
     let thread = spawn_named(MidiThread::MidiIn.name(), None, move |_| {
         // A panic in the pump ends it with the input held, so it is caught
@@ -192,7 +193,7 @@ pub(super) fn start(
 pub(super) fn pump(
     mut seq: Poller,
     clock: QueueClock,
-    died: &FaultLatch,
+    died: &FaultLatch<InputFault>,
     mut producer: InputProducerHandle,
 ) {
     let mut errors = ErrorRun::default();
@@ -202,17 +203,22 @@ pub(super) fn pump(
         let received = match seq.client().read_event() {
             Ok(Read::Event(event)) => event,
             // Empty queue is the common case, not a failure.
-            Ok(Read::Empty) => match seq.wait() {
-                Ok(Wait::Ready) => continue,
-                Ok(Wait::Stopped) => return,
-                // The descriptor failed: the port is silent from here.
-                Ok(Wait::Broken) | Err(_) => return died.raise(()),
-            },
-            Err(_) => {
+            Ok(Read::Empty) => {
+                let waited = seq.wait();
+                // The wait failed: the port is silent from here.
+                if let Some(fault) = wait_fault(&waited) {
+                    return died.raise(fault);
+                }
+                if matches!(waited, Ok(Wait::Stopped)) {
+                    return;
+                }
+                continue;
+            }
+            Err(e) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
                 if errors.failed() {
-                    return died.raise(());
+                    return died.raise(read_fault(e.errno()));
                 }
                 continue;
             }

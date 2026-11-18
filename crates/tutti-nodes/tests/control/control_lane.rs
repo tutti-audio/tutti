@@ -13,9 +13,9 @@ use tutti_types::MaxBlock;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Law, Node, Offset, ParamIn, ParamRange, ParamSegment, Prepare, Shape, Status,
-    TransportChanges, TransportPosition, declick_frames,
+    Cx, Editor, EventEdge, EventIn, EventOut, Executor, ForkByClone, ForkMode, ForkTarget, Io, Law,
+    Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
+    TransportChanges, TransportPosition, control_in, declick_frames,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::{
@@ -24,7 +24,7 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::{AtomicF64, ChannelLayout};
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
@@ -84,11 +84,11 @@ impl Node for SegSink {
         let base = cx.env.frame.get();
         let events: Vec<(usize, ParamSegment)> = io
             .events(0)
-            .as_slice()
+            .params()
             .iter()
             .filter_map(|e| match e.kind {
-                EventKind::Segment(s) => Some((e.offset.index(), s)),
-                _ => None,
+                ParamKind::Segment(s) => Some((e.offset.index(), s)),
+                ParamKind::Ramp(_) => None,
             })
             .collect();
         let (mut vals, mut marks) = (vec![0.0f32; n], vec![0.0f32; n]);
@@ -99,9 +99,9 @@ impl Node for SegSink {
                 marks[i] = if s.shape() == Law::Linear { 1.0 } else { 2.0 };
                 k += 1;
             }
-            vals[i] = self.last.map_or(0.0, |(s, at)| {
+            vals[i] = control_in(self.last.map_or(0.0, |(s, at)| {
                 s.raw_value_after(Samples((base + i as u64 - at) as usize))
-            });
+            }));
         }
         io.output(0).copy_from_slice(&vals);
         io.output(1).copy_from_slice(&marks);
@@ -121,13 +121,15 @@ struct Feed {
 
 impl Node for Feed {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY.with_events(0, 1).with_param_events()
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(at, seg) in &self.plan {
             if let Some(o) = cx.env.offset_of(Frame::new(at)) {
-                io.event_out(0).push(Event::segment(o, seg)).expect("room");
+                io.event_out(0)
+                    .push_param(ParamEvent::segment(o, seg))
+                    .expect("room");
             }
         }
         Status::Modified
@@ -172,11 +174,11 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
 
 /// A native lane for `probe`'s cutoff: knob `knob` (its own cell, as a
 /// node's `Param` cell would be), the port's own range cell.
-fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f32>) -> ControlLaneNode {
+fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f64>) -> ControlLaneNode {
     ControlLaneNode::for_unit(
         ParamKey::<Hz>::CUTOFF.addr(),
         program,
-        knob.map(|k| Arc::new(AtomicF32::new(k)).into()),
+        knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
         Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
     )
 }
@@ -819,7 +821,7 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
         assert_eq!(marks[f], 1.0, "frame {f}: a grid point");
         let want = curve.value_at(Beat(f as f64 / FPB)).expect("a value");
         assert!(
-            (values[f] - want).abs() <= 1e-6,
+            (f64::from(values[f]) - want).abs() <= 1e-6,
             "frame {f}: {} vs {want}",
             values[f]
         );
@@ -1049,7 +1051,7 @@ fn an_input_offset_is_exact_from_its_frame() {
     wire(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::foreign(ParamId::new(7), v, v, Samples(0), Law::Linear);
     let ramp = ParamSegment::foreign(ParamId::new(7), 0.25, 1.0, Samples(200), Law::Linear);
-    let arrive = 600 + ramp.arrives_after().expect("arrives").get();
+    let arrive = 600 + ramp.arrives_after().get();
     ed.insert(
         NodeKey(5),
         "feed",
@@ -1110,7 +1112,7 @@ fn a_republished_program_reads_a_new_source() {
     let lane = native(&ed, 2, p, Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
     let step =
-        |src: u32, v: f32| ParamSegment::foreign(ParamId::new(src), v, v, Samples(0), Law::Linear);
+        |src: u32, v: f64| ParamSegment::foreign(ParamId::new(src), v, v, Samples(0), Law::Linear);
     let mut plan: Vec<(u64, ParamSegment)> = (1..=8).map(|k| (0, step(k, 0.0))).collect();
     plan.push((640, step(9, 0.5)));
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
@@ -1200,7 +1202,7 @@ fn an_unread_source_is_no_point() {
     let lane = ControlLaneNode::for_foreign(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::foreign(ParamId::new(99), v, v, Samples(0), Law::Linear);
-    let plan = (1..60).map(|k| (k * 10, step(k as f32 / 100.0))).collect();
+    let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");

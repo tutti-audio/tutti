@@ -9,8 +9,8 @@ use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
-use tutti_midi_hardware::UmpCapability;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
+use tutti_midi_hardware::{InputFault, UmpCapability};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
@@ -328,15 +328,19 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     let _ = s.update();
     let port = s.midi_input(&"keys").unwrap();
 
-    fake.kill_input_reader(EndpointId::from_raw(1));
+    fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live, "reopened at once");
     assert!(!fake.connected_inputs().is_empty());
 
     fake.refuse_input_opens(true);
-    fake.kill_input_reader(EndpointId::from_raw(1));
+    fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
     let events = s.update();
-    assert_eq!(port.presence(), Presence::Lost(PortCause::ReaderFailed));
+    assert_eq!(
+        port.presence(),
+        Presence::Lost(PortCause::ReaderFailed(InputFault::PortBroken)),
+        "the cause the backend's reader died of"
+    );
     assert_eq!(changed(&events, port.id()), [ResourceFact::Presence]);
 
     fake.refuse_input_opens(false);

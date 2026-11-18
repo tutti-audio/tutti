@@ -295,7 +295,7 @@ struct Slot {
     /// ([`ParamDelivery::frame_start`]).
     start_key: Option<(u64, usize)>,
     /// Where the parameter stood before that frame's first event.
-    start: Option<f32>,
+    start: Option<f64>,
 }
 
 impl Slot {
@@ -673,18 +673,17 @@ impl ParamDelivery {
     /// handed over. `None` until the node has given it one. The host's
     /// value, not the plugin's: an edit in the plugin's editor is not in it
     /// (see the module docs). Allocation-free; learns no slot.
-    pub(crate) fn current(&self, address: ParamId) -> Option<f32> {
+    pub(crate) fn current(&self, address: ParamId) -> Option<f64> {
         let i = self
             .slots
             .binary_search_by(|s| s.address.cmp(&address))
             .ok()?;
         let slot = &self.slots[i];
-        let value = if slot.queue != NO_QUEUE || slot.owed {
+        if slot.queue != NO_QUEUE || slot.owed {
             Some(slot.staged)
         } else {
             slot.sent
-        };
-        value.map(|v| v as f32)
+        }
     }
 
     /// A walk over one call's events begins (`param_input::take`): what
@@ -704,8 +703,8 @@ impl ParamDelivery {
         &mut self,
         address: ParamId,
         frame: usize,
-        stood: impl FnOnce(&Self) -> Option<f32>,
-    ) -> Option<f32> {
+        stood: impl FnOnce(&Self) -> Option<f64>,
+    ) -> Option<f64> {
         let Some(i) = self.slot(address) else {
             return stood(self);
         };
@@ -728,22 +727,22 @@ impl ParamDelivery {
     /// its latest point replaced, counted as merged: the latest value wins,
     /// so a chunk spanning several blocks ends exact.
     /// `false` when `address` has no slot (counted). Allocation-free.
-    pub fn point(&mut self, address: ParamId, offset: i32, value: f32) -> bool {
+    pub fn point(&mut self, address: ParamId, offset: i32, value: f64) -> bool {
         self.point_kind(address, offset, value, false)
     }
 
     /// [`point`](Self::point) for a grid point (a frame whose play count is
     /// a multiple of 32): dropped first when its queue is full, and counted.
-    pub fn grid_point(&mut self, address: ParamId, offset: i32, value: f32) -> bool {
+    pub fn grid_point(&mut self, address: ParamId, offset: i32, value: f64) -> bool {
         self.point_kind(address, offset, value, true)
     }
 
-    fn point_kind(&mut self, address: ParamId, offset: i32, value: f32, grid: bool) -> bool {
+    fn point_kind(&mut self, address: ParamId, offset: i32, value: f64, grid: bool) -> bool {
         let Some(i) = self.slot(address) else {
             self.counters.dropped.add(1);
             return false;
         };
-        self.place(i, offset, Normalized::clamped(f64::from(value)).get(), grid);
+        self.place(i, offset, Normalized::clamped(value).get(), grid);
         true
     }
 
@@ -1026,7 +1025,7 @@ mod tests {
         let room = d.changes.capacity();
         d.begin();
         for id in 0..200 {
-            assert!(d.point(op(id), 0, id as f32 / 400.0));
+            assert!(d.point(op(id), 0, f64::from(id) / 400.0));
         }
         assert_eq!(chunk(&d).len(), 200);
         assert_eq!(d.changes.capacity(), room, "the chunk never grew");
@@ -1211,7 +1210,7 @@ mod tests {
                     // from the last chunk's last point (321 points: a cycle
                     // of 8 would end each chunk where the next starts, and
                     // changes-only would skip that point).
-                    let v = ((k + id as usize) % 7) as f32 / 8.0;
+                    let v = ((k + id as usize) % 7) as f64 / 8.0;
                     d.point(op(id), (k * 30) as i32, v);
                 }
             }
@@ -1232,7 +1231,7 @@ mod tests {
         // Past the budget: the last point replaced, counted.
         d.begin();
         for k in 0..budget + 3 {
-            d.point(op(0), k as i32, (k % 2) as f32 / 4.0 + 0.5);
+            d.point(op(0), k as i32, (k % 2) as f64 / 4.0 + 0.5);
         }
         let q = &d.changes.queues[0];
         assert_eq!(q.points.len(), budget);
@@ -1343,7 +1342,7 @@ mod tests {
                     // Distinct from point to point, and a chunk's first
                     // from the last chunk's last (else it is unchanged and
                     // not sent).
-                    let v = ((k + id as usize + 4 * phase) % 8) as f32 / 8.0;
+                    let v = ((k + id as usize + 4 * phase) % 8) as f64 / 8.0;
                     d.point(op(id), (k * 28) as i32, v);
                 }
             }
@@ -1377,7 +1376,7 @@ mod tests {
         d.begin();
         for k in 0..3 {
             for id in 0..=moving {
-                d.point(op(id), k, (2 * k + 1) as f32 / 16.0);
+                d.point(op(id), k, (2 * k + 1) as f64 / 16.0);
             }
         }
         let last = d.changes.queue(op(moving)).expect("queued");
@@ -1395,7 +1394,7 @@ mod tests {
     /// values step through sevenths of a cycle shifted by `phase`, so every
     /// point is a change (from its predecessor and from the last chunk's
     /// last). Writes each lane's latest value into `latest` (one a lane).
-    fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f32], phase: usize) {
+    fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f64], phase: usize) {
         let lanes = latest.len() as u32;
         let mut k = 0;
         d.begin();
@@ -1405,7 +1404,7 @@ mod tests {
                 continue;
             }
             for id in 0..lanes {
-                let v = ((k + id as usize + 3 * phase) % 7 + 1) as f32 / 8.0;
+                let v = ((k + id as usize + 3 * phase) % 7 + 1) as f64 / 8.0;
                 if grid {
                     d.grid_point(op(id), f, v);
                 } else {
@@ -1446,14 +1445,14 @@ mod tests {
         );
         let spent = LANES as usize - pooled;
         let mut spare = ParameterChanges::reserved_bridged(d.room(), d.points());
-        let check = |d: &mut ParamDelivery, latest: &[f32]| {
+        let check = |d: &mut ParamDelivery, latest: &[f64]| {
             for (id, &v) in latest.iter().enumerate() {
                 let q = &d.changes.queues[id];
                 assert_eq!(q.param_id, op(id as u32));
                 let last = q.points.last().expect("a point");
                 assert_eq!(
                     (last.sample_offset, last.value.get()),
-                    (511, f64::from(v)),
+                    (511, v),
                     "lane {id} ends on its latest value"
                 );
                 let offsets: Vec<i32> = q.points.iter().map(|p| p.sample_offset).collect();

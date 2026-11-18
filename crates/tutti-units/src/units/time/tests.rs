@@ -373,3 +373,30 @@ fn a_frequency_narrows_to_the_f32_closed_form() {
         assert_eq!(nyquist, hz / 2.0);
     }
 }
+
+/// A sample rate crosses into data as its rate in hertz.
+#[test]
+fn a_sample_rate_is_a_quantity_of_its_hertz() {
+    assert_eq!(
+        <f64 as crate::Real>::from_unit(SampleRate::SR_48K),
+        48_000.0
+    );
+}
+
+/// **The leave of a one-pole is `exp(-1 / (τ rate))`, held to the exponential's digits**: a time
+/// constant of a twentieth of a frame leaves `exp(-20) = 2.06e-9` of the gap, and instant and
+/// holding times are 0 and 1.
+#[test]
+fn one_pole_leave_is_the_exponential_and_is_not_cancelled() {
+    let sr = SampleRate::SR_48K;
+    let tau = Seconds(0.05 / 48_000.0);
+    assert_eq!(tau.one_pole_leave(sr), (-20.0f64).exp());
+    for t in [0.0, -1.0, f64::NAN, f64::NEG_INFINITY] {
+        assert_eq!(Seconds(t).one_pole_leave(sr), 0.0, "τ {t}");
+    }
+    assert_eq!(Seconds(f64::INFINITY).one_pole_leave(sr), 1.0);
+    for t in [1e-6, 1e-3, 0.1, 10.0] {
+        let (c, r) = (Seconds(t).one_pole_coeff(sr), Seconds(t).one_pole_leave(sr));
+        assert!((c + r - 1.0).abs() < 1e-15, "τ {t}: {c} + {r}");
+    }
+}

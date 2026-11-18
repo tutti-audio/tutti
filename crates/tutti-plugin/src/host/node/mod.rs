@@ -551,6 +551,7 @@ impl<S> PluginClient<S> {
         Shape::EMPTY
             .with_ports(width(self.inputs), width(self.outputs))
             .with_events(1, midi_out)
+            .with_param_events()
             .with_latency(self.controls.declared_latency())
             .with_tail(self.controls.tail())
     }

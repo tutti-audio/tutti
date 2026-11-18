@@ -55,24 +55,6 @@ impl Seconds {
         if hz.is_finite() { Some(Hz(hz)) } else { None }
     }
 
-    /// This time as an `f32`, for a kernel that runs in `f32`: the one place a
-    /// control time narrows. A short time (a delay, an attack, a lookahead) is
-    /// exact enough in `f32`; a position or a long span is not, so keep those
-    /// as `Seconds`.
-    #[inline]
-    #[must_use]
-    pub fn to_f32(self) -> f32 {
-        self.0 as f32
-    }
-
-    /// A time held as an `f32` (a kernel's own state, a modulation lane's
-    /// value), widened exactly.
-    #[inline]
-    #[must_use]
-    pub fn from_f32(v: f32) -> Self {
-        Self(f64::from(v))
-    }
-
     /// Frames in this span at `sample_rate`, rounded to nearest.
     ///
     /// The *measurement* form: how long is this, in frames. Three named
@@ -154,6 +136,21 @@ impl Seconds {
     #[inline]
     pub fn one_pole_coeff(self, rate: impl Into<SampleRate>) -> f64 {
         Self::one_pole(self.0 * rate.into().get())
+    }
+
+    /// The fraction of the gap a one-pole smoother with this time constant leaves each sample
+    /// at `rate`: `r = exp(−1 / (τ · rate))`, the complement of
+    /// [`one_pole_coeff`](Self::one_pole_coeff) (`y = x + r · (y − x)`; 0 is instant, 1 holds).
+    ///
+    /// Designed directly, never as `1 − c`: for a time constant under a frame `c` is within
+    /// rounding of 1 and `1 − c` loses `r`'s digits, where `exp` keeps them. A decay length
+    /// that is not above zero (a zero, negative or NaN time constant) is instant: 0. An
+    /// infinite one holds: 1. A design figure, in `f64`; a bank narrows it once.
+    #[inline]
+    #[must_use]
+    pub fn one_pole_leave(self, rate: impl Into<SampleRate>) -> f64 {
+        let n = self.0 * rate.into().get();
+        if n > 0.0 { libm::exp(-1.0 / n) } else { 0.0 }
     }
 
     /// The coefficient of a one-pole smoother with this time constant
@@ -238,6 +235,13 @@ impl Seconds {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
 pub struct SampleRate(f64);
+
+impl crate::Quantity for SampleRate {
+    #[inline]
+    fn value(self) -> f64 {
+        self.0
+    }
+}
 
 impl SampleRate {
     /// The rate, or `None` when `raw` is NaN, infinite, zero or negative.

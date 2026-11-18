@@ -192,3 +192,13 @@ fn a_random_product_instance_id_is_32_lowercase_hex_digits() {
     ];
     assert_eq!(id(mixed).as_str(), "00010f107e7f80ffdeadbeef09a0005c");
 }
+
+#[test]
+fn product_instance_ids_order_by_their_text() {
+    let id = |text| ProductInstanceId::new(text).unwrap();
+    assert!(id("a") < id("ab"));
+    assert!(id("ab") < id("b"));
+    assert!(id("") < id("a"));
+    assert!(id("Z") < id("a"));
+    assert_eq!(id("x").cmp(&id("x")), std::cmp::Ordering::Equal);
+}

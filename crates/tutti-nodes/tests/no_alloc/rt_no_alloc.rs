@@ -123,7 +123,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
         .map(|c| {
             decay_ir(
                 1024,
-                tutti_units::Seconds::from_f32(0.2 + 0.05 * c as f32),
+                tutti_units::Seconds(0.2 + 0.05 * c as f64),
                 SampleRate::SR_48K,
             )
         })

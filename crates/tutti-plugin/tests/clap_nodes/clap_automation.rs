@@ -20,15 +20,14 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventKind, EventOut, ForkMode, ForkTarget, Law, ParamRamp,
+    Editor, EventEdge, EventIn, EventOut, ForkMode, ForkTarget, Law, ParamKind, ParamRamp,
     ParamSegment, Prepare,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_units::{At, Frame};
-use tutti_units::{Beat, SampleRate, Samples};
+use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -38,10 +37,10 @@ const GAIN: ParamId = ParamId::new(77);
 const GAIN_DB: (f64, f64) = (-60.0, 12.0);
 
 /// A curve holding one value at every beat.
-struct Constant(f32);
+struct Constant(f64);
 
 impl Curve for Constant {
-    fn value_at(&self, _beat: Beat) -> Option<f32> {
+    fn value_at(&self, _beat: Beat) -> Option<f64> {
         Some(self.0)
     }
 }
@@ -123,15 +122,15 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// The probe's output (channel 0, its tag scaled by its gain), `blocks`
 /// blocks of an export of a graph with the probe at [`PLUGIN`] fed by
 /// `feeder` (inserted at key 1, its event output on the plugin's event
-/// input) when there is one, the `schedule` commands sent to the fork
-/// before it renders. Also the delay through the plugin: output frame
-/// `f + delay` plays input frame `f`. That is the pipeline's chunk, which
+/// input) when there is one, and with the `schedule` commands sent to the fork
+/// before it renders. Also the delay through the plugin:
+/// output frame `f + delay` plays input frame `f`. That is the pipeline's chunk, which
 /// an offline fork sets to its `MaxBlock` ([`BLOCK`]); the probe's own
 /// declared latency is not rendered in `TAG_ONLY` mode, so the figure is
 /// the chunk, not `declared_latency`.
 fn render_gain(
     feeder: Option<ControlLaneNode>,
-    schedule: &[(u64, EventKind)],
+    schedule: &[(u64, ParamKind)],
     blocks: usize,
 ) -> (Vec<f32>, usize) {
     let _lock = machine_lock();
@@ -204,8 +203,8 @@ fn render_gain(
 const PLUGIN: NodeKey = NodeKey(9);
 
 /// Whether `got` is the gain normalized `v` sets, to an `f32`'s precision.
-fn is_gain(got: f32, v: f32) -> bool {
-    (got - gained(f64::from(v))).abs() <= 1e-5 * gained(f64::from(v)).max(1e-3)
+fn is_gain(got: f32, v: f64) -> bool {
+    (got - gained(v)).abs() <= 1e-5 * gained(v).max(1e-3)
 }
 
 /// The output frames `L + start .. L + end` (input frames `start..end`)
@@ -233,8 +232,8 @@ fn follows(
     start: usize,
     end: usize,
     piece: usize,
-    curve: impl Fn(usize) -> f32,
-    to: f32,
+    curve: impl Fn(usize) -> f64,
+    to: f64,
 ) {
     // The play clock's grid (doc 014 §5.3): a point at least every 32
     // frames, plus the chunk's last frame.
@@ -242,8 +241,8 @@ fn follows(
     let mut distinct = 0;
     for f in start..end {
         let got = out[f + latency];
-        let hi = gained(f64::from(curve(f.next_multiple_of(piece).min(end))));
-        let lo = gained(f64::from(curve(f.saturating_sub(SPACING).max(start))));
+        let hi = gained(curve(f.next_multiple_of(piece).min(end)));
+        let lo = gained(curve(f.saturating_sub(SPACING).max(start)));
         assert!(
             got <= hi * (1.0 + 1e-5) && got >= lo * (1.0 - 1e-5),
             "input frame {f}: {got} not between {lo} and {hi}"
@@ -282,8 +281,8 @@ fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
         Samples(1000),
         Law::PowerIn(Exponent::of(2.0)),
     );
-    let (out, latency) = render_gain(None, &[(AT, EventKind::Segment(seg))], 10);
-    let end = AT as usize + seg.arrives_after().expect("arrives").get();
+    let (out, latency) = render_gain(None, &[(AT, ParamKind::Segment(seg))], 10);
+    let end = AT as usize + seg.arrives_after().get();
     follows(
         &out,
         latency,
@@ -308,7 +307,7 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
         ParamRamp::foreign(GAIN, 0.75, Samples(1000)).with_shape(Law::PowerIn(Exponent::of(2.0)));
     let (out, latency) = render_gain(
         None,
-        &[(100, EventKind::Ramp(step)), (AT, EventKind::Ramp(ramp))],
+        &[(100, ParamKind::Ramp(step)), (AT, ParamKind::Ramp(ramp))],
         10,
     );
     let seg = ParamSegment::foreign(
@@ -345,7 +344,7 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
     let ramp = ParamRamp::foreign(GAIN, 0.25, Samples(0));
     let (out, latency) = render_gain(
         None,
-        &[(AT, EventKind::Segment(seg)), (CUT, EventKind::Ramp(ramp))],
+        &[(AT, ParamKind::Segment(seg)), (CUT, ParamKind::Ramp(ramp))],
         10,
     );
     assert!(!is_gain(out[CUT as usize - 1 + latency], 0.25));
@@ -386,8 +385,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
         0,
         1500,
         32,
-        // The followed value is an `f32` lane word.
-        |f| env.value_at(beat(f)).expect("a value").get() as f32,
+        |f| env.value_at(beat(f)).expect("a value").get(),
         0.75,
     );
 }

@@ -22,16 +22,9 @@
 //! has no opinion on how targets are addressed, so it holds no registry and
 //! carries no target trait.
 
-use tutti_curve::{Breakpoint, CurveRaw, Law, Trajectory};
+use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_modulation::Curve;
 use tutti_units::{Beat, BeatDuration, Unit};
-
-/// A unit a [`Recorder`] records: its raw float is a width a trajectory accepts.
-///
-/// The transitional width seam: deleted with the last `f32` unit, like `CurveRaw`.
-pub trait Automatable: Unit<Raw: CurveRaw> + Send + Sync {}
-
-impl<U: Unit<Raw: CurveRaw> + Send + Sync> Automatable for U {}
 
 // ───────────────────────────── mode ──────────────────────────────
 
@@ -129,14 +122,14 @@ enum Take<U> {
 /// checker does the job for free. A recorder has no concurrent reader to
 /// share it with.
 #[derive(Debug, Clone)]
-pub struct Recorder<U: Unit<Raw: CurveRaw>> {
+pub struct Recorder<U: Unit<Raw = f64>> {
     trajectory: Trajectory<U>,
     mode: RecordMode,
     take: Option<Take<U>>,
     config: RecordingConfig,
 }
 
-impl<U: Unit<Raw: CurveRaw>> Recorder<U> {
+impl<U: Unit<Raw = f64>> Recorder<U> {
     /// A recorder over an empty trajectory clamped to `[min, max]`.
     #[must_use]
     pub fn new(mode: RecordMode, min: U, max: U) -> Self {
@@ -272,8 +265,7 @@ impl<U: Unit<Raw: CurveRaw>> Recorder<U> {
     #[must_use]
     pub fn finish(mut self) -> Trajectory<U> {
         if self.config.auto_simplify {
-            self.trajectory
-                .simplify(U::Raw::narrow(self.config.simplify_tolerance));
+            self.trajectory.simplify(self.config.simplify_tolerance);
         }
         self.trajectory
     }
@@ -296,10 +288,9 @@ impl<U: Unit<Raw: CurveRaw>> Recorder<U> {
 /// `None` when no take is open, preserving the empty-vs-zero distinction
 /// [`Curve`] requires: between takes the recorder contributes *nothing* and the
 /// saved trajectory shows through, rather than pinning the param to `0.0`.
-impl<U: Automatable> Curve for Recorder<U> {
-    fn value_at(&self, beat: Beat) -> Option<f32> {
-        // A curve's value is a lane's `f32`: a wider unit narrows once here.
-        let lane = |u: U| f32::narrow(u.to_raw().widen());
+impl<U: tutti_graph::Scalar> Curve for Recorder<U> {
+    fn value_at(&self, beat: Beat) -> Option<f64> {
+        let lane = |u: U| u.to_raw();
         match self.take {
             Some(Take::Held { value }) => Some(lane(value)),
             Some(Take::Capturing { .. }) => self.trajectory.value_at(beat).map(lane),

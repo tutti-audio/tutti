@@ -25,12 +25,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use tutti_rt::LockExt;
 
-use crate::InputProducerHandle;
 use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, MidiThread, NotFound, Result};
+use crate::{InputFault, InputProducerHandle};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
 use tutti_rt::PushError;
@@ -76,7 +76,7 @@ struct FakeDevices {
     /// Whether opening an input fails.
     refuse_inputs: bool,
     /// The inputs whose reader has ended on an error: open, and silent.
-    dead_inputs: Vec<EndpointId>,
+    dead_inputs: Vec<(EndpointId, InputFault)>,
     watches: Vec<(u64, Sender<Delivery>)>,
     next_watch: u64,
 }
@@ -262,9 +262,10 @@ impl FakeCounters {
 
     /// Ends the reader of the open input of device `id` on an error, as a
     /// backend's does: the connection is still held and the device still listed,
-    /// and [`InputConnection::is_alive`] reads `false` until it is opened again.
-    pub fn kill_input_reader(&self, id: EndpointId) {
-        self.devices().dead_inputs.push(id);
+    /// and [`InputConnection::is_alive`] reads `false` and
+    /// [`InputConnection::fault`] reads `fault` until it is opened again.
+    pub fn kill_input_reader(&self, id: EndpointId, fault: InputFault) {
+        self.devices().dead_inputs.push((id, fault));
     }
 
     /// Unplugs the device with `id` from both lists and tells every running
@@ -317,8 +318,13 @@ struct FakeConn {
 }
 
 impl InputConnection for FakeConn {
-    fn is_alive(&self) -> bool {
-        !self.devices.lock_recover().dead_inputs.contains(&self.id)
+    fn fault(&self) -> Option<InputFault> {
+        let devices = self.devices.lock_recover();
+        devices
+            .dead_inputs
+            .iter()
+            .find(|(id, _)| *id == self.id)
+            .map(|&(_, fault)| fault)
     }
 }
 
@@ -523,7 +529,7 @@ impl MidiEndpoints for FakeBackend {
                 return Err(NotFound::Endpoint(id).into());
             }
             // A new connection has a reader of its own.
-            devices.dead_inputs.retain(|dead| *dead != id);
+            devices.dead_inputs.retain(|(dead, _)| *dead != id);
         }
         self.opens.fetch_add(1, Ordering::SeqCst);
         self.producers.lock_recover().push((id, producer));

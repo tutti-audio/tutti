@@ -14,9 +14,9 @@ use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamRange, ParamSegment, Prepare, Shape, Status,
-    TransportChanges, TransportPosition,
+    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, ForkByClone, ForkMode, ForkTarget,
+    Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
+    TransportChanges, TransportPosition, control_in,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
@@ -26,7 +26,7 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::{AtomicF64, ChannelLayout};
 use tutti_ump::NoteVelocity;
 use tutti_units::{
     Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,
@@ -211,11 +211,11 @@ impl Node for Tap {
         let base = cx.env.frame.get();
         let events: Vec<(usize, ParamSegment)> = io
             .events(0)
-            .as_slice()
+            .params()
             .iter()
             .filter_map(|e| match e.kind {
-                EventKind::Segment(s) => Some((e.offset.index(), s)),
-                _ => None,
+                ParamKind::Segment(s) => Some((e.offset.index(), s)),
+                ParamKind::Ramp(_) => None,
             })
             .collect();
         let mut out = vec![vec![0.0f32; n]; 4];
@@ -229,13 +229,13 @@ impl Node for Tap {
                     a => panic!("a source sends foreign segments, got {a:?}"),
                 };
                 out[1][i] = 1.0;
-                out[2][i] = s.foreign_start(id).expect("foreign");
-                out[3][i] = s.foreign_target(id).expect("foreign");
+                out[2][i] = control_in(s.foreign_start(id).expect("foreign"));
+                out[3][i] = control_in(s.foreign_target(id).expect("foreign"));
                 k += 1;
             }
-            out[0][i] = self.last.map_or(0.0, |(s, at)| {
+            out[0][i] = control_in(self.last.map_or(0.0, |(s, at)| {
                 s.raw_value_after(Samples((base + i as u64 - at) as usize))
-            });
+            }));
         }
         for (c, v) in out.iter().enumerate() {
             io.output(c).copy_from_slice(v);
@@ -340,7 +340,7 @@ fn lane_to_probe(
     from: u64,
     source: u32,
     depth: f64,
-    knob: f32,
+    knob: f64,
     lane: u64,
     probe: u64,
 ) {
@@ -362,7 +362,7 @@ fn lane_to_probe(
     let node = ControlLaneNode::for_unit(
         ParamKey::<Hz>::CUTOFF.addr(),
         program,
-        Some(Arc::new(AtomicF32::new(knob)).into()),
+        Some(Arc::new(AtomicF64::new(knob)).into()),
         Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
     ed.insert(NodeKey(lane), "lane", node);
@@ -466,20 +466,20 @@ fn pole(tau: f32) -> f64 {
     (-1.0 / (f64::from(tau) * RATE)).exp()
 }
 
-fn follower(source: u32, attack: f32, release: f32, width: ChannelLayout) -> EnvelopeFollowerNode {
+fn follower(source: u32, attack: f64, release: f64, width: ChannelLayout) -> EnvelopeFollowerNode {
     EnvelopeFollowerNode::new(
         SourceId(source),
-        Ballistics::new(Seconds::from_f32(attack), Seconds::from_f32(release)).unwrap(),
+        Ballistics::new(Seconds(attack), Seconds(release)).unwrap(),
         width,
     )
 }
 
-fn adsr(a: f32, d: f32, s: f32, r: f32) -> Adsr {
+fn adsr(a: f64, d: f64, s: f64, r: f64) -> Adsr {
     Adsr {
-        attack: Seconds::from_f32(a),
-        decay: Seconds::from_f32(d),
-        sustain: Amplitude(f64::from(s)),
-        release: Seconds::from_f32(r),
+        attack: Seconds(a),
+        decay: Seconds(d),
+        sustain: Amplitude(s),
+        release: Seconds(r),
     }
 }
 
@@ -764,7 +764,7 @@ fn a_note_envelopes_stages_land_on_their_frames() {
         assert_eq!(at(f), want, "frame {f}");
     }
     // A's note-off at 23 000 changed nothing: the decay from 22 480 runs on.
-    let decay = |f: usize| 1.0 + (0.5 - 1.0) * ((f - 22_480) as f32 / 960.0);
+    let decay = |f: usize| control_in::<f32>(1.0 + (0.5 - 1.0) * ((f - 22_480) as f64 / 960.0));
     assert_eq!(at(23_000), decay(23_000));
     // The second A off at 26 000 sent nothing (in the marks above).
     for sizes in [&[1][..], &[37], &ragged(28_000, 128)] {
