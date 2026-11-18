@@ -473,7 +473,7 @@ fn the_renderer_declares_its_params() {
     let bases: Vec<_> = (0..4).map(|k| node.param_base(k)).collect();
     assert_eq!(
         bases,
-        [Some(10.0), Some(20.0), Some(f64::from(0.3f32)), None],
+        [Some(10.0), Some(20.0), Some(0.3), None],
         "each port's base is its cell"
     );
 }

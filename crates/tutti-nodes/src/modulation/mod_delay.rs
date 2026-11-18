@@ -385,7 +385,7 @@ mod tests {
             "the rate's base is its cell"
         );
         assert_eq!(chorus.param_base(1), Some(0.005));
-        assert_eq!(chorus.param_base(2), Some(f64::from(0.3f32)));
+        assert_eq!(chorus.param_base(2), Some(0.3));
         assert_eq!(chorus.param_base(3), None, "no fourth param");
         let flanger = ModDelayNode::<f32>::flanger(BusTopology::MONO);
         assert_eq!(flanger.shape().tail, Tail::Unknown);
@@ -910,10 +910,7 @@ mod tests {
         // The cells are shared by a clone (it is the same param set) but a fork is not.
         let fork = a.fork_fresh();
         assert!(set.set(UnitParam::Feedback, 0.1));
-        assert_eq!(
-            fork.param_set().get(UnitParam::Feedback),
-            Some(f64::from(0.7f32))
-        );
+        assert_eq!(fork.param_set().get(UnitParam::Feedback), Some(0.7));
     }
 
     /// The rate is **floored at 0.01 Hz, a lane's value and a cell's alike**: a rate of
