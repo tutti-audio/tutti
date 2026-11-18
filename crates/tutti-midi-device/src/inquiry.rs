@@ -25,7 +25,7 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_ump::{DeviceIdentity, MidiGroup, Sysex7Packets, Ump};
+use tutti_ump::{DeviceIdentity, IDENTITY_REQUEST, MidiGroup, Sysex7Packets, Ump};
 
 /// How long a request waits for its reply before it is sent again. One second
 /// is ours: a reply is 15 bytes, under 5 ms on a 31.25 kbaud DIN cable, so a
@@ -35,12 +35,6 @@ pub const INQUIRY_TIMEOUT: Duration = Duration::from_secs(1);
 /// How many times the request is sent in all, the first included: the request
 /// and at most one retry.
 pub const INQUIRY_ATTEMPTS: u8 = 2;
-
-/// The payload of an Identity Request to every device, between `F0` and `F7`:
-/// Universal Non-Real Time, device id `7F` (every device should respond, whatever its own
-/// device ID is set to),
-/// General Information `06`, Identity Request `01`.
-const REQUEST: [u8; 4] = [0x7E, 0x7F, 0x06, 0x01];
 
 /// What the driver does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +86,7 @@ impl IdentityInquiry {
     /// The Identity Request as one SysEx7 packet.
     fn request(&self) -> Ump {
         // Four 7-bit bytes are one complete packet (at most six fit).
-        Sysex7Packets::from_payload(self.group, &REQUEST)
+        Sysex7Packets::from_payload(self.group, &IDENTITY_REQUEST)
             .ok()
             .and_then(|mut packets| packets.next())
             .expect("the Identity Request is four 7-bit bytes")

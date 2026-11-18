@@ -175,6 +175,19 @@ impl<const N: usize> FromStr for Name<N> {
 #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
 pub struct ProductInstanceId(Name<42>);
 
+impl PartialOrd for ProductInstanceId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProductInstanceId {
+    /// By text.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
 impl From<ProductInstanceId> for String {
     fn from(id: ProductInstanceId) -> Self {
         id.as_str().to_owned()

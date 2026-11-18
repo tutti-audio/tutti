@@ -11,7 +11,7 @@
 //! The MPE Channel Response (M2-120 §3.6.3) and Optional Features (§3.7) are not
 //! in a Dialect: they come from a Profile Specific Data notification and a Profile
 //! Details inquiry reply, which the Endpoint and the [`ProfileTable`] do not carry
-//! (`tutti-midi-runtime` reads the features).
+//! (a host reads the features from those).
 //!
 //! The MPE Profile is enabled by a Set Profile On sent to the Manager Channel
 //! with a number of Channels, so a zone is a Manager Channel and a count

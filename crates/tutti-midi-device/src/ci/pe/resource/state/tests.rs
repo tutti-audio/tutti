@@ -683,12 +683,12 @@ fn a_set_without_a_device_clears_the_stale_revision_and_lists_a_new_state() {
     assert_eq!(listed(&link, "fresh").size.unwrap().get(), 9);
 }
 
-// M2-111 §3.3: a Responder that finds the body wrong while it comes sends Terminate
-// Inquiry; the Initiator's Set ends terminated, the body sent stops short, and the
+// M2-111 §3.3: a Responder that finds the body wrong while it comes ends the Set with
+// a Terminate Transaction NAK (M2-103 §12.1.1); the Initiator's Set ends terminated, the body sent stops short, and the
 // state it held stays.
 /// Spec: m2-111/3.3#4
 #[test]
-fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
+fn a_refused_body_is_ended_midway_with_a_terminate_nak() {
     let (mut device, asked, _) = Device::new();
     device.refuse_prefix_from = Some(40);
     let mut link = big_link(Some(Box::new(device)));
@@ -760,10 +760,11 @@ fn a_body_refused_at_the_end_is_answered_400() {
 }
 
 // M2-111 §3.2: a State with no declared size that grows past the Initiator's limit is
-// ended with Terminate Inquiry, and the call says it was too large.
+// ended with a Terminate Transaction NAK (M2-103 §12.1.2), and the call says it was
+// too large.
 /// Spec: m2-111/3.2#2
 #[test]
-fn a_state_that_outgrows_the_limit_is_ended_with_terminate_inquiry() {
+fn a_state_that_outgrows_the_limit_is_ended_with_a_terminate_nak() {
     let mut link = big_link(None);
     let whole = {
         let mut other = big_link(None);

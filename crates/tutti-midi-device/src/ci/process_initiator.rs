@@ -32,8 +32,7 @@
 //!   hand it out.
 //! - Timeout Wait (§5.10, Table 14): an ACK with Status Code `0x10` from the
 //!   peer, to this device, names the transaction by its Original Transaction
-//!   Sub-ID#2 and the Device ID it is on, and moves the deadline to
-//!   `now + wait` if that is later (a wait asks for more time, never less).
+//!   Sub-ID#2 and the Device ID it is on, and adds the wait to its deadline.
 //!
 //! A message from another source, or one not addressed to this device, is not
 //! this peer's and changes nothing.
@@ -291,8 +290,8 @@ impl ProcessInitiator {
         actions
     }
 
-    /// A Timeout Wait: the transaction it names waits until `now` plus the time
-    /// asked, when that is later than it already would.
+    /// A Timeout Wait: the time asked is added to the deadline of the transaction
+    /// it names.
     fn on_wait(&mut self, address: CiDeviceId, original: u8, wait: TimeoutWait) {
         match original {
             SUB_ID2_PROCESS_CAPABILITIES_INQUIRY if address == CiDeviceId::FunctionBlock => {

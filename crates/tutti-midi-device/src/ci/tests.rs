@@ -439,3 +439,32 @@ fn the_muid_is_a_range_checked_value() {
         ],
     });
 }
+
+/// M2-101 Appendix E: Property Exchange messages are Sub-ID#2 `30` to `3F` under
+/// Universal Non-Real Time and Sub-ID#1 `0D`, on any Device ID; Set Profile On
+/// is `22`.
+#[test]
+fn the_preamble_tells_property_exchange_and_set_profile_on() {
+    let message = |device: u8, sub_id1: u8, sub_id2: u8| [0x7E, device, sub_id1, sub_id2, 0x02];
+    for device in [0x00, 0x0F, 0x7E, 0x7F] {
+        for sub_id2 in 0x30..=0x3F {
+            assert!(is_property_exchange(&message(device, 0x0D, sub_id2)));
+            assert!(!is_set_profile_on(&message(device, 0x0D, sub_id2)));
+        }
+        assert!(is_set_profile_on(&message(device, 0x0D, 0x22)));
+        assert!(!is_property_exchange(&message(device, 0x0D, 0x22)));
+    }
+    // The edges of the range, another Sub-ID#1, Real Time, and too short.
+    assert!(!is_property_exchange(&message(0x7F, 0x0D, 0x2F)));
+    assert!(!is_property_exchange(&message(0x7F, 0x0D, 0x40)));
+    assert!(!is_property_exchange(&message(0x7F, 0x0C, 0x34)));
+    assert!(!is_set_profile_on(&message(0x7F, 0x0C, 0x22)));
+    let mut real_time = message(0x7F, 0x0D, 0x34);
+    real_time[0] = 0x7F;
+    assert!(!is_property_exchange(&real_time));
+    assert!(!is_set_profile_on(&[0x7E, 0x7F, 0x0D]));
+    assert!(!is_property_exchange(&[]));
+    // Only the preamble is read: a first packet's data can stop at it.
+    assert!(is_property_exchange(&[0x7E, 0x7F, 0x0D, 0x34]));
+    assert!(is_set_profile_on(&[0x7E, 0x7F, 0x0D, 0x22]));
+}
