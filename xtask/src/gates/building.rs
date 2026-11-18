@@ -486,13 +486,13 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-sampler/",
         "DiskStreamer::start",
         CTOR,
-        "starting the streamer thread for a chosen format: the failure is the OS's, not a value's",
+        "the streamer generic over its float format beside the f32 `new` (std's `HashMap::new`/`with_hasher` split); it starts a thread, so the OS can refuse",
     ),
     ty(
         "crates/tutti-sampler/",
         "DiskStreamer::by_hand",
         CTOR,
-        "building the hand-stepped streamer for a chosen format: the failure is the OS's, not a value's",
+        "the hand-stepped streamer generic over its float format beside the f32 `manual` (std's `HashMap::new`/`with_hasher` split); the OS can refuse its worker",
     ),
     ty(
         "crates/tutti-plugin-types/",
