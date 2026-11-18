@@ -76,7 +76,7 @@ pub trait ActiveExt<T: Float> {
     /// One block through the Processor.
     fn process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>>;
     /// [`ClapProcessor::reset`].
@@ -122,7 +122,7 @@ pub trait ActiveExt<T: Float> {
 impl<T: Float> ActiveExt<T> for Active<T> {
     fn process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>> {
         self.processor().process(buffer, ctx)

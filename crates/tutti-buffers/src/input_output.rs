@@ -39,10 +39,10 @@ use crate::{BufferError, ByWidth, Float, OverFloat, Planes, PlanesMut, Sample};
 /// assert_eq!(block.frames(), Samples(4));
 /// ```
 #[derive(Debug)]
-pub struct InputOutput<'i, 's, 'a, S: Sample = f32> {
+pub struct InputOutput<'data, S: Sample = f32> {
     frames: Samples,
-    input: Planes<'i, S>,
-    output: PlanesMut<'s, 'a, S>,
+    input: Planes<'data, S>,
+    output: PlanesMut<'data, 'data, S>,
 }
 
 /// Which view of a block a [`BufferError::BlockLengthMismatch`] names.
@@ -63,7 +63,7 @@ impl core::fmt::Display for BlockSide {
     }
 }
 
-impl<'a, S: Sample> InputOutput<'a, 'a, 'a, S> {
+impl<'data, S: Sample> InputOutput<'data, S> {
     /// The block of `frames` over tables of slices, one slice per channel. No
     /// inputs is an empty `inputs`; no outputs an empty `outputs`, and the
     /// block still has its `frames`.
@@ -74,8 +74,8 @@ impl<'a, S: Sample> InputOutput<'a, 'a, 'a, S> {
     /// direction with channels does not hold `frames`.
     pub fn from_slices(
         frames: Samples,
-        inputs: &'a [&'a [S]],
-        outputs: &'a mut [&'a mut [S]],
+        inputs: &'data [&'data [S]],
+        outputs: &'data mut [&'data mut [S]],
     ) -> Result<Self, BufferError> {
         let input = if inputs.is_empty() {
             Planes::default()
@@ -94,26 +94,24 @@ impl<'a, S: Sample> InputOutput<'a, 'a, 'a, S> {
 /// The shape of a borrowed [`InputOutput`] over a float width: what
 /// [`InputOutput::by_width`] holds at `f32` and at `f64`.
 #[derive(Debug)]
-pub struct BlockMut<'x, 'i, 's, 'a>(
-    core::marker::PhantomData<&'x mut InputOutput<'i, 's, 'a, f32>>,
-);
+pub struct BlockMut<'x, 'data>(core::marker::PhantomData<&'x mut InputOutput<'data, f32>>);
 
-impl<'x, 'i, 's, 'a> OverFloat for BlockMut<'x, 'i, 's, 'a> {
-    type At<S: Float> = &'x mut InputOutput<'i, 's, 'a, S>;
+impl<'x, 'data> OverFloat for BlockMut<'x, 'data> {
+    type At<S: Float> = &'x mut InputOutput<'data, S>;
 }
 
-impl<'i, 's, 'a, S: Float> InputOutput<'i, 's, 'a, S> {
+impl<'data, S: Float> InputOutput<'data, S> {
     /// This block as its `f32` or its `f64` self, borrowed: the type-level
     /// fact that `S` is one of the two, for code written for one width (a
     /// plugin format's ABI) that takes the graph's. Nothing is converted or
     /// copied.
     #[must_use]
-    pub fn by_width(&mut self) -> ByWidth<BlockMut<'_, 'i, 's, 'a>> {
-        S::by_width::<BlockMut<'_, 'i, 's, 'a>>(self)
+    pub fn by_width(&mut self) -> ByWidth<BlockMut<'_, 'data>> {
+        S::by_width::<BlockMut<'_, 'data>>(self)
     }
 }
 
-impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
+impl<'data, S: Sample> InputOutput<'data, S> {
     /// The block of `frames` frames over `input` and `output`.
     ///
     /// # Errors
@@ -122,8 +120,8 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
     /// frame count other than `frames`; the input is checked first.
     pub fn new(
         frames: Samples,
-        input: Planes<'i, S>,
-        output: PlanesMut<'s, 'a, S>,
+        input: Planes<'data, S>,
+        output: PlanesMut<'data, 'data, S>,
     ) -> Result<Self, BufferError> {
         let check = |side, channels, found| {
             if channels > 0 && found != frames {
@@ -153,27 +151,27 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
 
     /// The input planes; empty for a processor with no input.
     #[must_use]
-    pub const fn input(&self) -> Planes<'i, S> {
+    pub const fn input(&self) -> Planes<'data, S> {
         self.input
     }
 
     /// The output planes, reborrowed: their samples are writable, the views
     /// themselves are not replaceable, so the frame counts stay equal.
     #[must_use]
-    pub fn output(&mut self) -> PlanesMut<'_, 'a, S> {
+    pub fn output(&mut self) -> PlanesMut<'_, 'data, S> {
         self.output.reborrow()
     }
 
     /// The input and the output at once, for a processor that reads one while
     /// it writes the other.
     #[must_use]
-    pub fn split(&mut self) -> (Planes<'i, S>, PlanesMut<'_, 'a, S>) {
+    pub fn split(&mut self) -> (Planes<'data, S>, PlanesMut<'_, 'data, S>) {
         (self.input, self.output.reborrow())
     }
 
     /// The frame count, the input and the output, taken apart.
     #[must_use]
-    pub fn into_parts(self) -> (Samples, Planes<'i, S>, PlanesMut<'s, 'a, S>) {
+    pub fn into_parts(self) -> (Samples, Planes<'data, S>, PlanesMut<'data, 'data, S>) {
         (self.frames, self.input, self.output)
     }
 }

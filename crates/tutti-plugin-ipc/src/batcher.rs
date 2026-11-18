@@ -774,7 +774,7 @@ impl Batcher {
     pub fn process<S: Float>(
         &mut self,
         bridge: &PluginBridge,
-        io: &mut InputOutput<'_, '_, '_, S>,
+        io: &mut InputOutput<'_, S>,
         host: &mut impl Chunks,
     ) {
         let frames = io.frames().0;

@@ -58,8 +58,8 @@ fn check<S: Sample, P: AsRef<[S]>>(planes: &[P]) -> Result<(ChannelLayout, Sampl
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
 #[derive(Clone, Copy)]
-pub struct Planes<'a, S: Sample = f32> {
-    planes: Table<'a, S>,
+pub struct Planes<'data, S: Sample = f32> {
+    planes: Table<'data, S>,
     layout: ChannelLayout,
     start: usize,
     frames: usize,
@@ -67,10 +67,10 @@ pub struct Planes<'a, S: Sample = f32> {
 
 /// The channel slices a [`Planes`] reads: its own shared ones, a
 /// [`PlanesMut`]'s read through a shared borrow of them, or a caller's `Vec`s.
-enum Table<'a, S> {
-    Shared(&'a [&'a [S]]),
-    Unique(&'a [&'a mut [S]]),
-    Vecs(&'a [Vec<S>]),
+enum Table<'data, S> {
+    Shared(&'data [&'data [S]]),
+    Unique(&'data [&'data mut [S]]),
+    Vecs(&'data [Vec<S>]),
 }
 
 impl<S> Clone for Table<'_, S> {
@@ -82,10 +82,10 @@ impl<S> Clone for Table<'_, S> {
 
 impl<S> Copy for Table<'_, S> {}
 
-impl<'a, S> Table<'a, S> {
+impl<'data, S> Table<'data, S> {
     /// Channel `c`, whole, or `None` past the last.
     #[inline]
-    fn get(self, c: usize) -> Option<&'a [S]> {
+    fn get(self, c: usize) -> Option<&'data [S]> {
         match self {
             Self::Shared(p) => p.get(c).copied(),
             Self::Unique(p) => p.get(c).map(|p| &**p),
@@ -103,7 +103,7 @@ impl<'a, S> Table<'a, S> {
     }
 }
 
-impl<'a, S: Sample> Planes<'a, S> {
+impl<'data, S: Sample> Planes<'data, S> {
     /// Wraps `planes`, one slice per channel.
     ///
     /// # Errors
@@ -111,7 +111,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     /// [`BufferError::ZeroWidth`] for no planes, [`BufferError::Layout`] for
     /// more than `u16::MAX`, and [`BufferError::RaggedPlane`] for a plane whose
     /// length differs from the first's. Nothing is truncated.
-    pub fn new(planes: &'a [&'a [S]]) -> Result<Self, BufferError> {
+    pub fn new(planes: &'data [&'data [S]]) -> Result<Self, BufferError> {
         let (layout, frames) = check(planes)?;
         Ok(Self {
             planes: Table::Shared(planes),
@@ -127,7 +127,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     /// # Errors
     ///
     /// The same as [`new`](Self::new).
-    pub fn from_vecs(planes: &'a [Vec<S>]) -> Result<Self, BufferError> {
+    pub fn from_vecs(planes: &'data [Vec<S>]) -> Result<Self, BufferError> {
         let (layout, frames) = check(planes)?;
         Ok(Self {
             planes: Table::Vecs(planes),
@@ -174,7 +174,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn plane(&self, c: usize) -> Mono<'a, S> {
+    pub fn plane(&self, c: usize) -> Mono<'data, S> {
         match self.get_plane(c) {
             Some(plane) => plane,
             None => panic!(
@@ -187,7 +187,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     /// Returns channel `c`, or `None` past the last.
     #[inline]
     #[must_use]
-    pub fn get_plane(&self, c: usize) -> Option<Mono<'a, S>> {
+    pub fn get_plane(&self, c: usize) -> Option<Mono<'data, S>> {
         let plane = self.planes.get(c)?;
         Some(Mono(&plane[self.start..self.start + self.frames]))
     }
@@ -195,7 +195,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     /// Iterates the channels in order.
     #[inline]
     #[must_use]
-    pub fn iter(&self) -> PlaneIter<'a, S> {
+    pub fn iter(&self) -> PlaneIter<'data, S> {
         PlaneIter {
             table: self.planes,
             channels: 0..self.planes.len(),
@@ -213,7 +213,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn slice(&self, frames: Range<Samples>) -> Planes<'a, S> {
+    pub fn slice(&self, frames: Range<Samples>) -> Planes<'data, S> {
         self.run(&bounds::slice(&frames, self.frames))
     }
 
@@ -221,13 +221,13 @@ impl<'a, S: Sample> Planes<'a, S> {
     /// the range is out of bounds.
     #[inline]
     #[must_use]
-    pub fn get_slice(&self, frames: Range<Samples>) -> Option<Planes<'a, S>> {
+    pub fn get_slice(&self, frames: Range<Samples>) -> Option<Planes<'data, S>> {
         bounds::get(&frames, self.frames).map(|r| self.run(&r))
     }
 
     /// The sub-run of an in-bounds frame range.
     #[inline]
-    fn run(&self, r: &Range<usize>) -> Planes<'a, S> {
+    fn run(&self, r: &Range<usize>) -> Planes<'data, S> {
         Planes {
             start: self.start + r.start,
             frames: r.end - r.start,
@@ -243,7 +243,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn split_at(&self, at: Samples) -> (Planes<'a, S>, Planes<'a, S>) {
+    pub fn split_at(&self, at: Samples) -> (Planes<'data, S>, Planes<'data, S>) {
         let at = bounds::split(at, self.frames);
         (self.run(&(0..at)), self.run(&(at..self.frames)))
     }
@@ -280,19 +280,19 @@ impl<S: Sample> fmt::Debug for Planes<'_, S> {
     }
 }
 
-impl<'a, S: Sample> IntoIterator for Planes<'a, S> {
-    type Item = Mono<'a, S>;
-    type IntoIter = PlaneIter<'a, S>;
+impl<'data, S: Sample> IntoIterator for Planes<'data, S> {
+    type Item = Mono<'data, S>;
+    type IntoIter = PlaneIter<'data, S>;
 
     #[inline]
-    fn into_iter(self) -> PlaneIter<'a, S> {
+    fn into_iter(self) -> PlaneIter<'data, S> {
         self.iter()
     }
 }
 
-impl<'s, 'a, S: Sample> From<PlanesMut<'s, 'a, S>> for Planes<'s, S> {
+impl<'list, 'data, S: Sample> From<PlanesMut<'list, 'data, S>> for Planes<'list, S> {
     #[inline]
-    fn from(view: PlanesMut<'s, 'a, S>) -> Self {
+    fn from(view: PlanesMut<'list, 'data, S>) -> Self {
         Self {
             planes: match view.planes {
                 MutTable::Slices(p) => Table::Unique(&*p),
@@ -311,17 +311,17 @@ impl<'s, 'a, S: Sample> From<PlanesMut<'s, 'a, S>> for Planes<'s, S> {
 /// A named type so a struct can hold one; it knows its remaining length and
 /// runs from either end.
 #[derive(Clone)]
-pub struct PlaneIter<'a, S: Sample = f32> {
-    table: Table<'a, S>,
+pub struct PlaneIter<'data, S: Sample = f32> {
+    table: Table<'data, S>,
     channels: Range<usize>,
     start: usize,
     frames: usize,
 }
 
-impl<'a, S: Sample> PlaneIter<'a, S> {
+impl<'data, S: Sample> PlaneIter<'data, S> {
     /// Channel `c` over the covered frames. `c` is within the table.
     #[inline]
-    fn plane(&self, c: usize) -> Option<Mono<'a, S>> {
+    fn plane(&self, c: usize) -> Option<Mono<'data, S>> {
         let plane = self.table.get(c)?;
         Some(Mono(&plane[self.start..self.start + self.frames]))
     }
@@ -335,11 +335,11 @@ impl<S: Sample> fmt::Debug for PlaneIter<'_, S> {
     }
 }
 
-impl<'a, S: Sample> Iterator for PlaneIter<'a, S> {
-    type Item = Mono<'a, S>;
+impl<'data, S: Sample> Iterator for PlaneIter<'data, S> {
+    type Item = Mono<'data, S>;
 
     #[inline]
-    fn next(&mut self) -> Option<Mono<'a, S>> {
+    fn next(&mut self) -> Option<Mono<'data, S>> {
         let c = self.channels.next()?;
         self.plane(c)
     }
@@ -350,7 +350,7 @@ impl<'a, S: Sample> Iterator for PlaneIter<'a, S> {
     }
 
     #[inline]
-    fn nth(&mut self, n: usize) -> Option<Mono<'a, S>> {
+    fn nth(&mut self, n: usize) -> Option<Mono<'data, S>> {
         let c = self.channels.nth(n)?;
         self.plane(c)
     }
@@ -370,12 +370,12 @@ impl<S: Sample> FusedIterator for PlaneIter<'_, S> {}
 
 /// The channel slices a [`PlanesMut`] writes: a table of slices, or the `Vec`s
 /// a caller already holds.
-enum MutTable<'s, 'a, S> {
-    Slices(&'s mut [&'a mut [S]]),
-    Vecs(&'s mut [Vec<S>]),
+enum MutTable<'list, 'data, S> {
+    Slices(&'list mut [&'data mut [S]]),
+    Vecs(&'list mut [Vec<S>]),
 }
 
-impl<'a, S> MutTable<'_, 'a, S> {
+impl<'data, S> MutTable<'_, 'data, S> {
     #[inline]
     fn shared(&self) -> Table<'_, S> {
         match self {
@@ -385,7 +385,7 @@ impl<'a, S> MutTable<'_, 'a, S> {
     }
 
     #[inline]
-    fn reborrow(&mut self) -> MutTable<'_, 'a, S> {
+    fn reborrow(&mut self) -> MutTable<'_, 'data, S> {
         match self {
             Self::Slices(p) => MutTable::Slices(p),
             Self::Vecs(p) => MutTable::Vecs(p),
@@ -410,7 +410,7 @@ impl<'a, S> MutTable<'_, 'a, S> {
 ///
 /// `default` is the view of no channels and no frames.
 ///
-/// Two lifetimes: `'s` borrows the table of channel slices and `'a` is the
+/// Two lifetimes: `'list` borrows the table of channel slices and `'data` is the
 /// slices' own, so a sub-view can borrow the table for less time than the
 /// audio. There is no `split_at_mut`: two disjoint views of one table of
 /// slices need a second table, which allocates.
@@ -429,20 +429,20 @@ impl<'a, S> MutTable<'_, 'a, S> {
 /// assert_eq!((l, r), ([0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 2.0, 2.0]));
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
-pub struct PlanesMut<'s, 'a, S: Sample = f32> {
-    planes: MutTable<'s, 'a, S>,
+pub struct PlanesMut<'list, 'data, S: Sample = f32> {
+    planes: MutTable<'list, 'data, S>,
     layout: ChannelLayout,
     start: usize,
     frames: usize,
 }
 
-impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
+impl<'list, 'data, S: Sample> PlanesMut<'list, 'data, S> {
     /// Wraps `planes`, one writable slice per channel.
     ///
     /// # Errors
     ///
     /// The same as [`Planes::new`].
-    pub fn new(planes: &'s mut [&'a mut [S]]) -> Result<Self, BufferError> {
+    pub fn new(planes: &'list mut [&'data mut [S]]) -> Result<Self, BufferError> {
         let (layout, frames) = check(planes)?;
         Ok(Self {
             planes: MutTable::Slices(planes),
@@ -458,7 +458,7 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     /// # Errors
     ///
     /// The same as [`Planes::new`].
-    pub fn from_vecs(planes: &'s mut [Vec<S>]) -> Result<Self, BufferError> {
+    pub fn from_vecs(planes: &'list mut [Vec<S>]) -> Result<Self, BufferError> {
         let (layout, frames) = check(planes)?;
         Ok(Self {
             planes: MutTable::Vecs(planes),
@@ -512,7 +512,7 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     /// again.
     #[inline]
     #[must_use]
-    pub fn reborrow(&mut self) -> PlanesMut<'_, 'a, S> {
+    pub fn reborrow(&mut self) -> PlanesMut<'_, 'data, S> {
         PlanesMut {
             planes: self.planes.reborrow(),
             layout: self.layout,
@@ -576,7 +576,7 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     /// others.
     #[inline]
     #[must_use]
-    pub fn iter_mut(&mut self) -> PlaneIterMut<'_, 'a, S> {
+    pub fn iter_mut(&mut self) -> PlaneIterMut<'_, 'data, S> {
         let (start, end) = (self.start, self.start + self.frames);
         let inner = match &mut self.planes {
             MutTable::Slices(p) => Inner::Slices(p.iter_mut()),
@@ -621,7 +621,7 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn slice_mut(&mut self, frames: Range<Samples>) -> PlanesMut<'_, 'a, S> {
+    pub fn slice_mut(&mut self, frames: Range<Samples>) -> PlanesMut<'_, 'data, S> {
         let r = bounds::slice(&frames, self.frames);
         self.run_mut(&r)
     }
@@ -630,13 +630,13 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     /// out of bounds.
     #[inline]
     #[must_use]
-    pub fn get_slice_mut(&mut self, frames: Range<Samples>) -> Option<PlanesMut<'_, 'a, S>> {
+    pub fn get_slice_mut(&mut self, frames: Range<Samples>) -> Option<PlanesMut<'_, 'data, S>> {
         bounds::get(&frames, self.frames).map(|r| self.run_mut(&r))
     }
 
     /// The sub-view of an in-bounds frame range.
     #[inline]
-    fn run_mut(&mut self, r: &Range<usize>) -> PlanesMut<'_, 'a, S> {
+    fn run_mut(&mut self, r: &Range<usize>) -> PlanesMut<'_, 'data, S> {
         PlanesMut {
             planes: self.planes.reborrow(),
             layout: self.layout,
@@ -669,9 +669,9 @@ impl<S: Sample> fmt::Debug for PlanesMut<'_, '_, S> {
 }
 
 /// The table's own iterator: slices of slices, or `Vec`s.
-enum Inner<'x, 'a, S> {
-    Slices(core::slice::IterMut<'x, &'a mut [S]>),
-    Vecs(core::slice::IterMut<'x, Vec<S>>),
+enum Inner<'list, 'data, S> {
+    Slices(core::slice::IterMut<'list, &'data mut [S]>),
+    Vecs(core::slice::IterMut<'list, Vec<S>>),
 }
 
 /// The channels of a [`PlanesMut`], in order: each item is one channel's
@@ -679,8 +679,8 @@ enum Inner<'x, 'a, S> {
 ///
 /// A named type so a struct can hold one; it knows its remaining length and
 /// runs from either end.
-pub struct PlaneIterMut<'x, 'a, S: Sample = f32> {
-    inner: Inner<'x, 'a, S>,
+pub struct PlaneIterMut<'list, 'data, S: Sample = f32> {
+    inner: Inner<'list, 'data, S>,
     start: usize,
     end: usize,
 }
@@ -693,11 +693,11 @@ impl<S: Sample> fmt::Debug for PlaneIterMut<'_, '_, S> {
     }
 }
 
-impl<'x, S: Sample> Iterator for PlaneIterMut<'x, '_, S> {
-    type Item = MonoMut<'x, S>;
+impl<'list, S: Sample> Iterator for PlaneIterMut<'list, '_, S> {
+    type Item = MonoMut<'list, S>;
 
     #[inline]
-    fn next(&mut self) -> Option<MonoMut<'x, S>> {
+    fn next(&mut self) -> Option<MonoMut<'list, S>> {
         let (start, end) = (self.start, self.end);
         match &mut self.inner {
             Inner::Slices(it) => it.next().map(|p| MonoMut(&mut p[start..end])),
