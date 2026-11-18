@@ -279,6 +279,7 @@ impl<F: Float> TestNode<F> {
                 .with_event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)
+                .with_param_events()
                 .with_tail(Tail::Unbounded),
             Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)

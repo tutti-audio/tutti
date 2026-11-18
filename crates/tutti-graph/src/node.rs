@@ -109,7 +109,9 @@ pub struct Shape {
     /// compiler reserves a param buffer, as large as the port's event
     /// capacity, on each slot an output of such a node can reach; an output of
     /// a node that does not declare it refuses every
-    /// [`push_param`](crate::EventWriter::push_param). Set it with
+    /// [`push_param`](crate::EventWriter::push_param). A node that declares it
+    /// is also the one [`Editor::schedule`](crate::Editor::schedule) takes a
+    /// param ramp or segment for, into its event inputs. Set it with
     /// [`with_param_events`](Self::with_param_events).
     pub param_events: bool,
     /// The most events per block this node accepts on its event inputs,

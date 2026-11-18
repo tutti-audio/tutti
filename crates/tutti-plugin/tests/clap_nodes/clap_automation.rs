@@ -1,6 +1,6 @@
 //! Parameter automation reaches a hosted plugin through the graph: a
 //! foreign control lane on the plugin node's event input, a curve segment
-//! and a shaped ramp sent into it, and a lane sending a trajectory's
+//! and a shaped ramp scheduled into it, and a lane sending a trajectory's
 //! segments, against
 //! the reference CLAP plugin's gain parameter.
 //!
@@ -20,14 +20,14 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventOut, ForkByClone, ForkMode, ForkTarget, Io, Law, Node,
-    ParamEvent, ParamKind, ParamRamp, ParamSegment, Prepare, Shape, Status,
+    Editor, EventEdge, EventIn, EventOut, ForkMode, ForkTarget, Law, ParamKind, ParamRamp,
+    ParamSegment, Prepare,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_units::{Beat, SampleRate, Samples};
+use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -122,15 +122,15 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// The probe's output (channel 0, its tag scaled by its gain), `blocks`
 /// blocks of an export of a graph with the probe at [`PLUGIN`] fed by
 /// `feeder` (inserted at key 1, its event output on the plugin's event
-/// input) when there is one, and `sends` (a node at key 2, its event output on
-/// the same input) sent on their frames. Also the delay through the plugin:
+/// input) when there is one, the `schedule` commands sent to the fork
+/// before it renders. Also the delay through the plugin:
 /// output frame `f + delay` plays input frame `f`. That is the pipeline's chunk, which
 /// an offline fork sets to its `MaxBlock` ([`BLOCK`]); the probe's own
 /// declared latency is not rendered in `TAG_ONLY` mode, so the figure is
 /// the chunk, not `declared_latency`.
 fn render_gain(
     feeder: Option<ControlLaneNode>,
-    sends: &[(u64, ParamKind)],
+    schedule: &[(u64, ParamKind)],
     blocks: usize,
 ) -> (Vec<f32>, usize) {
     let _lock = machine_lock();
@@ -160,19 +160,6 @@ fn render_gain(
             }),
         );
     }
-    if !sends.is_empty() {
-        live.insert(NodeKey(2), "send", ForkByClone(Send(sends.to_vec())));
-        live.spec_mut().connect_events(
-            EventIn {
-                node: PLUGIN,
-                port: 0,
-            },
-            EventEdge::Direct(EventOut {
-                node: NodeKey(2),
-                port: 0,
-            }),
-        );
-    }
     live.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -186,6 +173,18 @@ fn render_gain(
     let (mut fork_ed, mut fork_exec) = live
         .fork(ForkTarget::Master, ForkMode::Offline, prepare)
         .expect("the graph forks");
+    for &(frame, kind) in schedule {
+        fork_ed
+            .schedule(
+                At::Frame(Frame::new(frame)),
+                EventIn {
+                    node: PLUGIN,
+                    port: 0,
+                },
+                kind,
+            )
+            .expect("scheduled");
+    }
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK];
     for _ in 0..blocks {
@@ -202,34 +201,6 @@ fn render_gain(
 }
 
 const PLUGIN: NodeKey = NodeKey(9);
-
-/// Sends each `(absolute frame, ramp or segment)` on its frame, in frame
-/// order, to the plugin's event input.
-#[derive(Clone)]
-struct Send(Vec<(u64, ParamKind)>);
-
-impl Node for Send {
-    fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"))
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let start = cx.env.frame.get();
-        for &(at, kind) in &self.0 {
-            if at >= start && at < start + io.frames() as u64 {
-                let offset = io.offset((at - start) as usize).expect("inside");
-                io.event_out(0)
-                    .push_param(ParamEvent { offset, kind })
-                    .expect("room");
-            }
-        }
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
 
 /// Whether `got` is the gain normalized `v` sets, to an `f32`'s precision.
 fn is_gain(got: f32, v: f64) -> bool {
