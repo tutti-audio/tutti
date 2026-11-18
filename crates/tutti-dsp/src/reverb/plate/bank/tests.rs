@@ -267,7 +267,7 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
         ..still(2.0)
     };
     // The bandwidth one-pole spreads an impulse: its mean delay is `p / (1 - p)`.
-    let pole = (-std::f64::consts::TAU * f64::from(c.bandwidth_at(rate).get()) / fs).exp();
+    let pole = (-std::f64::consts::TAU * c.bandwidth_at(rate).get() / fs).exp();
     let smear = pole / (1.0 - pole);
     let input: f64 = [142, 107, 379, 277].into_iter().map(scaled).sum();
     // (output channel, the half it hears, that half's first lattice, the tap, the quadrature)

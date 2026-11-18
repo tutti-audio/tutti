@@ -62,7 +62,7 @@ fn yin_track(cfg: &YinConfig, samples: &[f32], hop: Samples) -> Result<Vec<Pitch
 }
 
 /// Detected frequency, or `None` if unvoiced.
-fn detect(samples: &[f32]) -> Option<f32> {
+fn detect(samples: &[f32]) -> Option<f64> {
     let cfg = YinConfig::new();
     yin(&cfg, samples)
         .expect("buffer long enough")
@@ -80,7 +80,7 @@ fn detect(samples: &[f32]) -> Option<f32> {
 fn pure_tones_are_detected_across_the_range() {
     for &f in &[55.0f64, 110.0, 220.0, 440.0, 880.0, 1320.0, 1975.0] {
         let got = detect(&sine(f, 0.5, 0.5)).unwrap_or_else(|| panic!("{f} Hz read as unvoiced"));
-        let err = (got as f64 - f).abs() / f * 100.0;
+        let err = (got - f).abs() / f * 100.0;
         assert!(
             err < 0.1,
             "{f} Hz detected as {got} ({err:.3}% error) — beyond the 0.1% \
@@ -111,11 +111,11 @@ fn harmonic_tones_report_the_fundamental_not_an_octave() {
 
             for (mult, name) in [(2.0, "an octave up"), (0.5, "an octave down")] {
                 assert!(
-                    (got as f64 - f * mult).abs() > f * mult * 0.02,
+                    (got - f * mult).abs() > f * mult * 0.02,
                     "{label} at {f} Hz came back as {got} — {name}"
                 );
             }
-            let err = (got as f64 - f).abs() / f * 100.0;
+            let err = (got - f).abs() / f * 100.0;
             assert!(err < 0.5, "{label} at {f} Hz detected as {got} ({err:.3}%)");
         }
     }
@@ -132,7 +132,7 @@ fn a_missing_fundamental_is_still_found() {
     for &f in &[220.0f64, 440.0] {
         let got = detect(&tone(f, &[0.0, 1.0, 0.7, 0.5], 0.5, 0.4))
             .unwrap_or_else(|| panic!("missing-fundamental {f} Hz read as unvoiced"));
-        let err = (got as f64 - f).abs() / f * 100.0;
+        let err = (got - f).abs() / f * 100.0;
         assert!(
             err < 0.5,
             "a tone with partials 2,3,4 of {f} Hz was read as {got} — \
@@ -211,7 +211,7 @@ fn a_rising_sweep_reads_as_rising() {
         .collect();
 
     let tracked = yin_track(&cfg, &sweep, Samples(frame)).expect("track");
-    let freqs: Vec<f32> = tracked
+    let freqs: Vec<f64> = tracked
         .iter()
         .map(|e| e.pitch().map(|p| p.frequency.get()).unwrap_or(0.0))
         .collect();

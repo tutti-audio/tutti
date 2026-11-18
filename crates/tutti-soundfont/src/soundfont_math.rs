@@ -36,15 +36,16 @@ impl SoundFontMath {
     /// A time in absolute timecents as seconds: `2^(x / 1200)`, the 1200th root
     /// of two per timecent.
     pub(crate) fn timecents_to_seconds(x: f32) -> f32 {
-        Cents(x).to_pitch_ratio()
+        // The voice runs in `f32`: the converter's ratio narrows once per call.
+        Cents(f64::from(x)).to_pitch_ratio() as f32
     }
 
     pub(crate) fn cents_to_hertz(x: f32) -> f32 {
-        8.176_f32 * Cents(x).to_pitch_ratio()
+        8.176_f32 * Cents(f64::from(x)).to_pitch_ratio() as f32
     }
 
     pub(crate) fn cents_to_multiplying_factor(x: f32) -> f32 {
-        Cents(x).to_pitch_ratio()
+        Cents(f64::from(x)).to_pitch_ratio() as f32
     }
 
     pub(crate) fn decibels_to_linear(x: f32) -> f32 {

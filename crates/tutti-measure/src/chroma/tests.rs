@@ -155,7 +155,7 @@ fn the_tuning_of_a_sine_is_its_distance_from_the_grid() {
         let freq = 440.0 * (cents / 1200.0f64).exp2();
         let got = run(&sine(freq, 8192, 0.5), &cfg()).tuning().get();
         let want = if cents > 50.0 { cents - 100.0 } else { cents };
-        assert!((f64::from(got) - want).abs() <= tolerance, "{cents}: {got}");
+        assert!((got - want).abs() <= tolerance, "{cents}: {got}");
     }
 }
 
@@ -164,7 +164,7 @@ fn the_tuning_of_a_sine_is_its_distance_from_the_grid() {
 #[test]
 fn a_fixed_tuning_moves_the_fold() {
     let x = sine(440.0 * (30.0f64 / 1200.0).exp2(), 8192, 0.5);
-    let at = |cents: f32| {
+    let at = |cents: f64| {
         let cfg = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents(cents)).unwrap()));
         let c = run(&x, &cfg);
         assert_eq!(c.tuning(), Cents(cents));
@@ -288,9 +288,9 @@ fn the_framing_and_band_are_validated() {
     for (lo, hi) in [
         (500.0, 100.0),
         (0.0, 1000.0),
-        (f32::NAN, 1000.0),
-        (100.0, f32::NAN),
-        (100.0, f32::INFINITY),
+        (f64::NAN, 1000.0),
+        (100.0, f64::NAN),
+        (100.0, f64::INFINITY),
     ] {
         assert!(
             matches!(

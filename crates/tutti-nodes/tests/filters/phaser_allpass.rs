@@ -17,12 +17,12 @@ use tutti_types::BusTopology;
 use tutti_units::{Amplitude, Depth, Feedback, Hz, SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
-const F0: f32 = 1_000.0;
+const F0: f64 = 1_000.0;
 const LEN: usize = 6_000;
 
 /// The wet output of a depth-0 phaser of `stages` stages parked at `F0`, over a
 /// sine of `hz`, in ragged blocks.
-fn wet(stages: usize, hz: f32) -> Vec<f32> {
+fn wet(stages: usize, hz: f64) -> Vec<f32> {
     let node = PhaserNode::new(
         BusTopology::MONO,
         Stages::of(stages),
@@ -57,7 +57,7 @@ fn wet(stages: usize, hz: f32) -> Vec<f32> {
 
 /// The phase of one stage at `hz`, from the textbook `H` on the unit circle.
 fn stage_phase(hz: f64) -> f64 {
-    let t = (std::f64::consts::PI * f64::from(F0) / SR.get()).tan();
+    let t = (std::f64::consts::PI * F0 / SR.get()).tan();
     let c = (t - 1.0) / (t + 1.0);
     let w = std::f64::consts::TAU * hz / SR.get();
     let (zr, zi) = (w.cos(), -w.sin()); // z^-1 on the unit circle
@@ -72,10 +72,10 @@ fn stage_phase(hz: f64) -> f64 {
 #[test]
 fn a_parked_phaser_is_unit_gain_with_the_textbook_all_pass_phase() {
     for stages in [2, 4, 6] {
-        for hz in [250.0f32, 1_000.0, 3_000.0] {
+        for hz in [250.0f64, 1_000.0, 3_000.0] {
             let out = wet(stages, hz);
-            let w = std::f64::consts::TAU * f64::from(hz) / SR.get();
-            let phase = stages as f64 * stage_phase(f64::from(hz));
+            let w = std::f64::consts::TAU * hz / SR.get();
+            let phase = stages as f64 * stage_phase(hz);
             let worst = (LEN - 1_000..LEN)
                 .map(|n| (f64::from(out[n]) - (w * n as f64 + phase).sin()).abs())
                 .fold(0.0, f64::max);

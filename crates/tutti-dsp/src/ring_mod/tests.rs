@@ -4,7 +4,7 @@ use core::f64::consts::TAU;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn modulator(frequency: f32) -> RingModulator {
+fn modulator(frequency: f64) -> RingModulator {
     let mut m = RingModulator::new(RATE);
     m.aim(&RingModControls {
         frequency: Hz(frequency),

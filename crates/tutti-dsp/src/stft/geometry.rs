@@ -217,32 +217,23 @@ impl StftGeometry {
     #[inline]
     #[must_use]
     pub fn bin_frequency(self, bin: BinIndex) -> Hz {
-        Hz((bin.get() as f64 * self.sample_rate.get() / self.window.get() as f64) as f32)
+        Hz(bin.get() as f64 * self.sample_rate.get() / self.window.get() as f64)
     }
 
-    /// The fractional bin `frequency` falls on, `frequency * window / sample_rate`,
-    /// computed in `f64`: bin `k` is centred on `bin_of(bin_frequency(k)) == k`,
+    /// The fractional bin `frequency` falls on, `frequency * window / sample_rate`:
+    /// bin `k` is centred on `bin_of(bin_frequency(k)) == k`,
     /// and a frequency on a bin boundary gives a whole number.
     #[inline]
     #[must_use]
     pub fn bin_of(self, frequency: Hz) -> f64 {
-        self.bin_of_f64(f64::from(frequency.get()))
+        frequency.get() * self.window.get() as f64 / self.sample_rate.get()
     }
 
-    /// [`bin_of`](Self::bin_of) for a frequency in hertz held in `f64`, such as a band edge
-    /// designed at `f64` precision, which an `f32` [`Hz`] would round before the index is taken.
-    #[inline]
-    #[must_use]
-    pub fn bin_of_f64(self, frequency: f64) -> f64 {
-        frequency * self.window.get() as f64 / self.sample_rate.get()
-    }
-
-    /// The frequency of a fractional bin, the inverse of [`bin_of`](Self::bin_of):
-    /// computed in `f64` and narrowed once.
+    /// The frequency of a fractional bin, the inverse of [`bin_of`](Self::bin_of).
     #[inline]
     #[must_use]
     pub fn frequency_of(self, bin: f64) -> Hz {
-        Hz((bin * self.sample_rate.get() / self.window.get() as f64) as f32)
+        Hz(bin * self.sample_rate.get() / self.window.get() as f64)
     }
 
     /// The time between frames, `hop / sample_rate`.

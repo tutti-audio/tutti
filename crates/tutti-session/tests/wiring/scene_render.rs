@@ -41,7 +41,7 @@ const RATE: f64 = 48_000.0;
 fn saw() -> ForkByClone<Osc> {
     ForkByClone(Osc::saw(Hz(110.0)))
 }
-fn low_pass(cutoff: f32) -> SvfFilterNode<f64> {
+fn low_pass(cutoff: f64) -> SvfFilterNode<f64> {
     SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
 }
 fn shaper(drive: f32) -> DistortionNode {

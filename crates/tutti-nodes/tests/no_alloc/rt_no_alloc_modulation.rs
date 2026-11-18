@@ -59,7 +59,7 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
 #[test]
 fn lfo_node_process_is_allocation_free() {
     gate(
-        LfoNode::new(LfoShape::Sine).with_rate(Hz::new(2.0_f32)),
+        LfoNode::new(LfoShape::Sine).with_rate(Hz::new(2.0_f64)),
         0.0,
         5_000,
         |_| {},
@@ -71,7 +71,7 @@ fn lfo_random_shape_process_is_allocation_free() {
     // RandomSmooth hashes its cycle index on its own path. Fast enough
     // to step inside the warm-up, so the node is audible there.
     gate(
-        LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz::new(200.0_f32)),
+        LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz::new(200.0_f64)),
         0.0,
         5_000,
         |_| {},
@@ -658,7 +658,7 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
         phase: PhaseIncrement(0.0),
     };
     let seconds = Clock::Seconds {
-        rate: Hz(1.0 + (k % 11) as f32),
+        rate: Hz(1.0 + (k % 11) as f64),
         phase: PhaseIncrement(0.0),
         anchor: None,
     };

@@ -170,7 +170,7 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    fn node(width: u16, corner: f32) -> DcBlockerNode {
+    fn node(width: u16, corner: f64) -> DcBlockerNode {
         prepared(DcBlockerNode::from(
             DcBlockerConfig::new(width).corner(Hz(corner)),
         ))

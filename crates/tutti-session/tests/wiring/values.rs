@@ -23,7 +23,7 @@ fn detached() -> DetachedSession {
         .expect("builds")
 }
 
-fn filter(s: &mut DetachedSession, cutoff: f32) -> tutti_session::Key<SvfFilterNode<f32>> {
+fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph()
         .add(SvfFilterNode::<f32>::new(
             SvfType::LowPass,
@@ -138,7 +138,7 @@ fn a_failing_item_lands_nothing_and_at_counts_a_none() {
 fn a_non_finite_value_is_refused_and_lands_nothing() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let e = s
             .set((lp.q().to(Q(2.0)), lp.cutoff().to(Hz(bad))))
             .unwrap_err();
@@ -151,7 +151,7 @@ fn a_non_finite_value_is_refused_and_lands_nothing() {
         );
     }
     // An edit that builds a non-finite value is refused too.
-    let e = s.set(lp.cutoff().modify(|_| Hz(f32::NAN))).unwrap_err();
+    let e = s.set(lp.cutoff().modify(|_| Hz(f64::NAN))).unwrap_err();
     assert_eq!(e.kind, ValueErrorKind::Refused(SetRefusal::NotFinite));
     assert_eq!(s.get(lp.cutoff()).unwrap(), Hz(1_000.0));
 }
@@ -468,8 +468,8 @@ fn an_f32_param_round_trips_bit_for_bit() {
     let lp = filter(&mut s, 1_000.0);
     for bits in [0x3f80_0001u32, 0x0000_0001, 0x7f7f_ffff, 0x1234_5678] {
         let v = f32::from_bits(bits);
-        s.set(lp.cutoff().to(Hz(v))).unwrap();
-        assert_eq!(s.get(lp.cutoff()).unwrap().0.to_bits(), bits);
+        s.set(lp.q().to(Q(v))).unwrap();
+        assert_eq!(s.get(lp.q()).unwrap().0.to_bits(), bits);
     }
 }
 
@@ -513,7 +513,7 @@ fn an_erased_non_finite_assignment_is_refused() {
     let e = s
         .set(vec![
             lp.q().to(Q(2.0)).erase(),
-            lp.cutoff().to(Hz(f32::NAN)).erase(),
+            lp.cutoff().to(Hz(f64::NAN)).erase(),
         ])
         .unwrap_err();
     assert_eq!(

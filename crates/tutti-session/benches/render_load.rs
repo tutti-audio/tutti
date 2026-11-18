@@ -277,7 +277,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                 MemorySource::placed(Arc::clone(&tone), VoiceWindow::from(Beat(0.0)))
                     .expect("a placeable wave"),
                 {
-                    let k = (t * SAMPLER_VOICES + v) as f32;
+                    let k = (t * SAMPLER_VOICES + v) as f64;
                     let interval = Cents::new(-350.0 + 25.0 * k + 3.0);
                     let play = Playback {
                         gain: Amplitude(0.1),
@@ -290,7 +290,8 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                         }
                     } else {
                         Playback {
-                            speed: PlaybackRate::new_clamped(interval.to_pitch_ratio()),
+                            // A playback rate is an `f32`.
+                            speed: PlaybackRate::new_clamped(interval.to_pitch_ratio() as f32),
                             ..play
                         }
                     }

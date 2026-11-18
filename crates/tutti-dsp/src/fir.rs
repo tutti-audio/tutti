@@ -117,8 +117,8 @@ impl FirDesign {
     /// - [`FirError::TooLong`] when the filter would exceed `2^20` taps.
     pub fn design(&self, rate: SampleRate) -> Result<Fir, FirError> {
         let nyquist_hz = rate.nyquist();
-        let nyquist = f64::from(nyquist_hz.get());
-        let transition = f64::from(self.transition.get());
+        let nyquist = nyquist_hz.get();
+        let transition = self.transition.get();
         let attenuation = f64::from(self.attenuation.get());
         if !(transition.is_finite() && transition > 0.0) {
             return Err(FirError::NonPositiveTransition(self.transition));
@@ -134,7 +134,7 @@ impl FirDesign {
         }
 
         let inside = |f: Hz| {
-            let f = f64::from(f.get());
+            let f = f.get();
             f > 0.0 && f < nyquist
         };
         let edges: Vec<f64> = match self.response {
@@ -145,7 +145,7 @@ impl FirDesign {
                         nyquist: nyquist_hz,
                     });
                 }
-                vec![f64::from(cutoff.get())]
+                vec![cutoff.get()]
             }
             FirResponse::BandPass { low, high } | FirResponse::BandStop { low, high } => {
                 for cutoff in [low, high] {
@@ -159,7 +159,7 @@ impl FirDesign {
                 if low >= high {
                     return Err(FirError::CutoffsUnordered { low, high });
                 }
-                vec![f64::from(low.get()), f64::from(high.get())]
+                vec![low.get(), high.get()]
             }
             FirResponse::HalfBand => vec![nyquist / 2.0],
         };
@@ -176,7 +176,7 @@ impl FirDesign {
         if transition > widest {
             return Err(FirError::TransitionTooWide {
                 transition: self.transition,
-                widest: Hz(widest as f32),
+                widest: Hz(widest),
             });
         }
 

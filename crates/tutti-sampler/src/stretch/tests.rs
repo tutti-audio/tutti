@@ -9,9 +9,11 @@ use super::vocoder::*;
 use super::*;
 use tutti_fixtures::signal::rms;
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, Cents, Hz, Radians, ReadRate, SampleRate, Samples, StretchFactor};
+use tutti_units::{
+    Amplitude, Cents, Hz, Phase, PhaseIncrement, Radians, ReadRate, SampleRate, Samples,
+    StretchFactor,
+};
 
-use std::f32::consts::PI;
 use std::sync::Arc;
 use tutti_dsp::CosineWindow;
 
@@ -22,7 +24,7 @@ fn planar(u: &mut Unit, size: usize, input: &[Vec<f32>], output: &mut [Vec<f32>]
     u.process(size, &ins, &mut outs);
 }
 
-fn sine(freq: f32, sample_rate: f32, len: usize) -> Vec<f32> {
+fn sine(freq: f64, sample_rate: f32, len: usize) -> Vec<f32> {
     tutti_fixtures::signal::sine(
         Hz(freq),
         Amplitude(0.5),
@@ -418,21 +420,23 @@ fn the_intake_loop_is_bounded_by_the_pitch_clamp() {
 fn a_degenerate_factor_or_transposition_never_reaches_the_hops() {
     let u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
     let (_, synthesis) = u.hops();
-    let longest = (synthesis as f32 / (StretchFactor::MIN.get() * MIN_PITCH.to_pitch_ratio()))
-        .round() as usize;
+    let longest = (synthesis as f64
+        / (f64::from(StretchFactor::MIN.get()) * MIN_PITCH.to_pitch_ratio()))
+    .round() as usize;
     let bad = [
         0.0,
         -0.0,
         -1.0,
-        f32::MIN_POSITIVE,
-        f32::NAN,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
+        f64::from(f32::MIN_POSITIVE),
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
     ];
     for stretch in bad {
         for pitch in bad {
             let mut u = Unit::with_channels(SampleRate::SR_44K1, 1u16);
-            u.set_stretch_factor(StretchFactor::new(stretch));
+            // The stretch factor is an `f32` control.
+            u.set_stretch_factor(StretchFactor::new(stretch as f32));
             u.set_pitch_cents(Cents::new(pitch));
             let f = u.stretch_factor().get();
             assert!(
@@ -656,7 +660,7 @@ fn filter_lanes_is_tick_per_frame() {
     type Lane = [f32; LANE_FRAMES];
     let src = sine(440.0, 44_100.0, 160 * LANE_FRAMES);
     // (unit width, caller width, stretch, cents)
-    let rows: &[(usize, usize, f32, f32)] = &[
+    let rows: &[(usize, usize, f32, f64)] = &[
         (2, 2, 2.0, 0.0),
         (2, 2, 0.5, 0.0),
         (2, 2, 1.0, 700.0),
@@ -732,15 +736,16 @@ fn filter_lanes_is_tick_per_frame() {
 /// surface and does not need one. Scans 40..4000 Hz at 1 Hz, Hann-windowed
 /// so a partial that falls between probe frequencies does not split.
 #[cfg(test)]
-fn dominant_hz(x: &[f32], sample_rate: f32) -> f32 {
+fn dominant_hz(x: &[f32], sample_rate: f64) -> f64 {
     let n = x.len();
-    let mut best = (0.0f32, 0.0f32);
-    let mut f = 40.0f32;
+    let mut best = (0.0f64, 0.0f64);
+    let mut f = 40.0f64;
     while f < 4000.0 {
-        let (mut re, mut im) = (0.0f32, 0.0f32);
+        let (mut re, mut im) = (0.0f64, 0.0f64);
         for (i, &s) in x.iter().enumerate() {
-            let w = 0.5 - 0.5 * (core::f32::consts::TAU * i as f32 / n as f32).cos();
-            let p = core::f32::consts::TAU * f * i as f32 / sample_rate;
+            let w = 0.5 - 0.5 * (core::f64::consts::TAU * i as f64 / n as f64).cos();
+            let p = core::f64::consts::TAU * f * i as f64 / sample_rate;
+            let s = f64::from(s);
             re += s * w * p.cos();
             im -= s * w * p.sin();
         }
@@ -764,11 +769,12 @@ fn dominant_hz(x: &[f32], sample_rate: f32) -> f32 {
 /// Advancing a source cursor by [`Unit::input_rate`] here instead would
 /// scale the read *and* the intake, resampling twice so the halves cancel.
 #[cfg(test)]
-fn render_440(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
+fn render_440(u: &Unit, sample_rate: f64, out_len: usize) -> Vec<f32> {
     let mut au = u.clone();
     let mut out = Vec::with_capacity(out_len);
     for i in 0..out_len {
-        let s = (core::f32::consts::TAU * 440.0 * i as f32 / sample_rate).sin();
+        // The unit's input is an `f32` sample.
+        let s = (core::f64::consts::TAU * 440.0 * i as f64 / sample_rate).sin() as f32;
         let mut o = [0.0f32];
         au.tick(&[s], &mut o);
         out.push(o[0]);
@@ -787,21 +793,21 @@ fn render_440(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
 /// table read is what `MemorySource::sample_into` does, and it is the only
 /// form that can observe the effect.
 #[cfg(test)]
-fn render_440_placed(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
+fn render_440_placed(u: &Unit, sample_rate: f64, out_len: usize) -> Vec<f32> {
     let table: Vec<f32> = (0..400_000)
-        .map(|i| (core::f32::consts::TAU * 440.0 * i as f32 / sample_rate).sin())
+        .map(|i| (core::f64::consts::TAU * 440.0 * f64::from(i) / sample_rate).sin() as f32)
         .collect();
-    let rate = u.input_rate().get() as f32;
+    let rate = u.input_rate().get();
     let mut au = u.clone();
     let mut out = Vec::with_capacity(out_len);
-    let mut pos = 0.0f32;
+    let mut pos = 0.0f64;
     for _ in 0..out_len {
         let j = pos.floor() as usize;
-        let frac = pos - j as f32;
-        let a = table.get(j).copied().unwrap_or(0.0);
-        let b = table.get(j + 1).copied().unwrap_or(0.0);
+        let frac = pos - j as f64;
+        let a = f64::from(table.get(j).copied().unwrap_or(0.0));
+        let b = f64::from(table.get(j + 1).copied().unwrap_or(0.0));
         let mut o = [0.0f32];
-        au.tick(&[a + (b - a) * frac], &mut o);
+        au.tick(&[(a + (b - a) * frac) as f32], &mut o);
         out.push(o[0]);
         pos += rate;
     }
@@ -820,9 +826,9 @@ fn render_440_placed(u: &Unit, sample_rate: f32, out_len: usize) -> Vec<f32> {
 /// bug taught here: `!= 0.0` is satisfied by almost any defect.
 #[test]
 fn pitch_shift_transposes_by_the_requested_interval() {
-    let sr = 48_000.0f32;
-    for &cents in &[0.0f32, 1200.0, -1200.0, 700.0, -500.0] {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+    let sr = 48_000.0f64;
+    for &cents in &[0.0f64, 1200.0, -1200.0, 700.0, -500.0] {
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_pitch_cents(Cents::new(cents));
 
         let out = render_440(&u, sr, 48_000);
@@ -857,9 +863,9 @@ fn pitch_shift_transposes_by_the_requested_interval() {
 /// them.
 #[test]
 fn a_one_per_tick_feed_makes_stretch_behave_as_varispeed() {
-    let sr = 48_000.0f32;
-    for &(factor, want) in &[(0.5f32, 220.0f32), (1.0, 440.0), (2.0, 880.0)] {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+    let sr = 48_000.0f64;
+    for &(factor, want) in &[(0.5f32, 220.0f64), (1.0, 440.0), (2.0, 880.0)] {
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
         let out = render_440(&u, sr, 48_000);
@@ -882,9 +888,9 @@ fn a_one_per_tick_feed_makes_stretch_behave_as_varispeed() {
 /// than by comment.
 #[test]
 fn stretching_a_placed_read_changes_duration_not_pitch() {
-    let sr = 48_000.0f32;
+    let sr = 48_000.0f64;
     for &factor in &[0.5f32, 1.0, 1.5, 2.0] {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
 
         let out = render_440_placed(&u, sr, 48_000);
@@ -905,15 +911,15 @@ fn stretching_a_placed_read_changes_duration_not_pitch() {
 /// combination drifted.
 #[test]
 fn pitch_and_stretch_are_independent_on_a_placed_read() {
-    let sr = 48_000.0f32;
+    let sr = 48_000.0f64;
     for &(factor, cents) in &[
-        (2.0f32, 1200.0f32),
+        (2.0f32, 1200.0f64),
         (2.0, -700.0),
         (0.5, 1200.0),
         (0.5, -1200.0),
         (1.5, 500.0),
     ] {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_stretch_factor(StretchFactor::new(factor));
         u.set_pitch_cents(Cents::new(cents));
 
@@ -938,16 +944,16 @@ fn pitch_and_stretch_are_independent_on_a_placed_read() {
 /// would show up only as "sounds a bit quiet".
 #[test]
 fn pitch_shift_preserves_level() {
-    let sr = 48_000.0f32;
+    let sr = 48_000.0f64;
     let dry = {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_pitch_cents(Cents::new(0.0));
         rms(&render_440(&u, sr, 48_000)[24_000..24_000 + 8192])
     };
     assert!(dry > 0.1, "reference render was silent ({dry:.4})");
 
-    for &cents in &[1200.0f32, -1200.0, 700.0] {
-        let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+    for &cents in &[1200.0f64, -1200.0, 700.0] {
+        let u = Unit::with_channels(SampleRate::of(sr), 1u16);
         u.set_pitch_cents(Cents::new(cents));
         let wet = rms(&render_440(&u, sr, 48_000)[24_000..24_000 + 8192]);
         let db = 20.0 * (wet / dry).log10();
@@ -1045,8 +1051,8 @@ fn stretching_preserves_the_signals_level() {
         let size = 64;
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
-        let mut phase = 0.0f32;
-        let inc = 2.0 * PI * 440.0 / 44_100.0;
+        let mut phase = Phase::START;
+        let inc = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
@@ -1055,8 +1061,9 @@ fn stretching_preserves_the_signals_level() {
         const WARM: usize = 500;
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                let s = phase.sin() * 0.5;
-                phase += inc;
+                // The unit's input is an `f32` sample.
+                let s = (phase.sin() * 0.5) as f32;
+                phase = phase.advance(inc);
                 *slot = s;
                 if blk >= WARM {
                     in_sq += (s as f64).powi(2);
@@ -1100,15 +1107,16 @@ fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
         let size = 64;
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
-        let mut phase = 0.0f32;
-        let inc = 2.0 * PI * 440.0 / 44_100.0;
+        let mut phase = Phase::START;
+        let inc = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                let s = phase.sin() * 0.5;
-                phase += inc;
+                // The unit's input is an `f32` sample.
+                let s = (phase.sin() * 0.5) as f32;
+                phase = phase.advance(inc);
                 *slot = s;
                 if blk >= 500 {
                     in_sq += (s as f64).powi(2);
@@ -1699,11 +1707,11 @@ fn a_block_past_the_scratch_is_rendered_in_runs() {
 /// same frequency invariant as `pitch_shift_transposes_by_the_requested_interval`).
 #[test]
 fn a_rate_change_keeps_a_non_default_fft_size() {
-    let sr = 96_000.0f32;
+    let sr = 96_000.0f64;
     for size in [FftSize::N1024, FftSize::N4096, FftSize::N8192] {
         let mut u = Unit::with_fft_size_and_channels(SampleRate::SR_48K, size, ChannelLayout::MONO);
         u.set_pitch_cents(Cents::new(1200.0));
-        u.set_sample_rate(SampleRate::of(f64::from(sr)));
+        u.set_sample_rate(SampleRate::of(sr));
         assert_eq!(
             u.latency_samples(),
             size.size().get(),
@@ -1726,13 +1734,13 @@ fn a_rate_change_keeps_a_non_default_fft_size() {
 /// FFT), and a flush clears that.
 #[test]
 fn a_nan_source_does_not_panic_and_a_reset_recovers() {
-    let sr = 48_000.0f32;
-    let u = Unit::with_channels(SampleRate::of(sr as f64), 1u16);
+    let sr = 48_000.0f64;
+    let u = Unit::with_channels(SampleRate::of(sr), 1u16);
     u.set_stretch_factor(StretchFactor::new(1.5));
     u.set_pitch_cents(Cents::new(300.0));
     let mut au = u.clone();
     let mut o = [0.0f32];
-    let tone = |i: usize| (core::f32::consts::TAU * 440.0 * i as f32 / sr).sin() * 0.5;
+    let tone = |i: usize| ((core::f64::consts::TAU * 440.0 * i as f64 / sr).sin() * 0.5) as f32;
 
     for i in 0..4096 {
         au.tick(&[tone(i)], &mut o);

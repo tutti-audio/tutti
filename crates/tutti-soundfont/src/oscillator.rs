@@ -114,11 +114,13 @@ impl Oscillator {
 
     pub(crate) fn process(&mut self, data: SamplePool<'_>, block: &mut [f32], pitch: f32) -> bool {
         let pitch_change = self.pitch_change_scale * (pitch - self.root_key as f32) + self.tune;
-        let pitch_ratio = self.sample_rate_ratio * Semitones(pitch_change).to_pitch_ratio();
+        // The ratio narrows once per block; the position advance runs in `f64`.
+        let pitch_ratio =
+            f64::from(self.sample_rate_ratio) * Semitones(f64::from(pitch_change)).to_pitch_ratio();
         // The pool's width is matched once per block, not per point.
         match data {
-            SamplePool::Pcm16(points) => self.fill_block(points, block, pitch_ratio as f64),
-            SamplePool::Pcm24(points) => self.fill_block(points, block, pitch_ratio as f64),
+            SamplePool::Pcm16(points) => self.fill_block(points, block, pitch_ratio),
+            SamplePool::Pcm24(points) => self.fill_block(points, block, pitch_ratio),
         }
     }
 

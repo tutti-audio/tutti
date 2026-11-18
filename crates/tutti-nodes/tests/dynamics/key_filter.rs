@@ -101,7 +101,7 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
     CompressorControls {
         threshold: Db::new(THRESHOLD as f32),
         ratio: CompressionRatio::new(RATIO as f32),
-        key_cutoff: Hz(cutoff as f32),
+        key_cutoff: Hz(cutoff),
         key_q: Q(q as f32),
         ..CompressorControls::DEFAULT
     }
@@ -294,7 +294,7 @@ fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
     GateControls {
         threshold: Db::new(threshold as f32),
         range: Db(-80.0),
-        key_cutoff: Hz(cutoff as f32),
+        key_cutoff: Hz(cutoff),
         key_q: Q(q as f32),
         ..GateControls::DEFAULT
     }

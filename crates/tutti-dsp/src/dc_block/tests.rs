@@ -12,7 +12,7 @@ fn run(blocker: &mut DcBlocker, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     out
 }
 
-fn at(corner: f32, rate: SampleRate) -> DcBlocker {
+fn at(corner: f64, rate: SampleRate) -> DcBlocker {
     let mut b = DcBlocker::new(ChannelLayout::MONO, rate);
     b.aim(&DcBlockerControls { corner: Hz(corner) });
     b.settle();
@@ -26,7 +26,7 @@ fn the_pole_is_the_exponential_of_the_corner_over_the_rate() {
     for rate in [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K] {
         for fc in [1.0f64, 10.0, 20.0, 100.0] {
             let want = (-2.0 * std::f64::consts::PI * fc / rate.get()).exp();
-            assert_eq!(dc_pole(Hz(fc as f32), rate), want, "{fc} Hz at {rate:?}");
+            assert_eq!(dc_pole(Hz(fc), rate), want, "{fc} Hz at {rate:?}");
         }
     }
     assert!((dc_pole(DC_CORNER, RATE) - 0.998_691_8).abs() < 1e-7);
@@ -40,7 +40,7 @@ fn the_corner_is_held_within_its_bounds() {
     assert_eq!(dc_pole(Hz::ZERO, RATE), dc_pole(MIN_DC_CORNER, RATE));
     assert_eq!(dc_pole(Hz(-5.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
     assert_eq!(dc_pole(Hz(1e9), RATE), dc_pole(Hz(24_000.0), RATE));
-    assert_eq!(dc_pole(Hz(f32::NAN), RATE), dc_pole(DC_CORNER, RATE));
+    assert_eq!(dc_pole(Hz(f64::NAN), RATE), dc_pole(DC_CORNER, RATE));
 }
 
 /// A constant input `c` decays as `y[n] = c R^n` (the step response of the difference
@@ -64,7 +64,7 @@ fn a_constant_decays_as_the_pole_to_the_n() {
 #[test]
 fn the_gain_is_the_closed_form_of_the_difference_equation() {
     let fs = RATE.get();
-    for corner in [10.0f32, 40.0] {
+    for corner in [10.0f64, 40.0] {
         for f in [1.0f64, 10.0, 40.0, 200.0, 1000.0, 10_000.0] {
             let mut b = at(corner, RATE);
             let r = b.pole();
@@ -102,7 +102,7 @@ fn the_gain_is_the_closed_form_of_the_difference_equation() {
 #[test]
 fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
     let floor = 10f64.powf(-3.0);
-    for corner in [1.0f32, 10.0, 100.0] {
+    for corner in [1.0f64, 10.0, 100.0] {
         let controls = DcBlockerControls { corner: Hz(corner) };
         let n = DcBlocker::tail(&controls, RATE).get();
         let settle = 20 * n;

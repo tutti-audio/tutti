@@ -208,7 +208,7 @@ fn non_finite_controls_are_the_default_and_wild_ones_are_clamped() {
     let wild = PlateControls {
         decay: Seconds(f64::NAN),
         damping: Mix(f32::INFINITY),
-        bandwidth: Hz(f32::NAN),
+        bandwidth: Hz(f64::NAN),
         pre_delay: Seconds(f64::NAN),
         diffusion: Mix(f32::NAN),
         ..PlateControls::DEFAULT

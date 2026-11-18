@@ -478,7 +478,7 @@ fn stages_keep_the_range_checked_shape() {
 /// 0.90-of-Nyquist cap is not here: it depends on the rate, and is the member's.
 #[test]
 fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
-    let ok = |lo: f32, hi: f32| SweepRange::new(Hz(lo), Hz(hi));
+    let ok = |lo: f64, hi: f64| SweepRange::new(Hz(lo), Hz(hi));
     assert!(ok(20.0, 20.0).is_ok(), "the floor, a range of one value");
     assert!(ok(200.0, 4_000.0).is_ok());
     assert!(ok(20.0, 1e9).is_ok(), "the top is the rate's to cap");
@@ -495,11 +495,11 @@ fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
         })
     );
     for (lo, hi) in [
-        (f32::NAN, 100.0),
-        (100.0, f32::NAN),
-        (100.0, f32::INFINITY),
-        (f32::INFINITY, f32::INFINITY),
-        (f32::NEG_INFINITY, 100.0),
+        (f64::NAN, 100.0),
+        (100.0, f64::NAN),
+        (100.0, f64::INFINITY),
+        (f64::INFINITY, f64::INFINITY),
+        (f64::NEG_INFINITY, 100.0),
     ] {
         assert!(
             matches!(ok(lo, hi), Err(SweepRangeError::NotFinite { .. })),

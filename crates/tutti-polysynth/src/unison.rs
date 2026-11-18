@@ -135,7 +135,7 @@ pub struct UnisonVoiceParams {
     /// Pitch ratio against the note's pitch; 1.0 is the center pitch. A bare
     /// ratio: it is the output of `Semitones::to_pitch_ratio`, and a
     /// multiplier is not one of the units.
-    pub freq_ratio: f32,
+    pub freq_ratio: f64,
     /// Stereo position of this sub-voice.
     pub pan: Pan,
     /// Start phase from the last random draw; `Phase::START` when
@@ -208,9 +208,13 @@ impl UnisonEngine {
         // A lane's value is any float; the span saturates it (a negative
         // detune is no detune), so the comparison against the stored config
         // never recomputes a block for an out-of-range lane.
-        let detune = detune.map_or_else(|| self.detune.load(), CentsSpan::clamped);
+        let detune = detune.map_or_else(
+            || self.detune.load(),
+            |lane| CentsSpan::clamped(f64::from(lane)),
+        );
         let spread = Spread::new_clamped(spread.unwrap_or_else(|| self.spread.load().get()));
-        let changed = (detune.get() - self.config.detune_cents.get()).abs() > f32::EPSILON
+        let changed = (detune.get() - self.config.detune_cents.get()).abs()
+            > f64::from(f32::EPSILON)
             || (spread.get() - self.config.stereo_spread.get()).abs() > f32::EPSILON;
         if changed {
             self.config.detune_cents = detune;
@@ -234,10 +238,10 @@ impl UnisonEngine {
                 (i as f32 / (count - 1) as f32) * 2.0 - 1.0
             };
 
-            // `Semitones * f32` is opted in, so spreading the detune across the
+            // `Semitones * f64` is opted in, so spreading the detune across the
             // voice's position stays in the unit, and the exponent conversion
             // happens once at the end.
-            let freq_ratio = (detune_semitones * position).to_pitch_ratio();
+            let freq_ratio = (detune_semitones * f64::from(position)).to_pitch_ratio();
             let pan = Pan(position * self.config.stereo_spread.get());
 
             // The phase offset is kept: it is the last `randomize_phases`

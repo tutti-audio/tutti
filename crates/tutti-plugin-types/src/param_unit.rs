@@ -204,25 +204,32 @@ macro_rules! one_to_one {
     };
 }
 
-one_to_one!(Hz, ParamUnit::Hertz);
 one_to_one!(Db, ParamUnit::Decibels);
-one_to_one!(Cents, ParamUnit::Cents);
-one_to_one!(Semitones, ParamUnit::Semitones);
 one_to_one!(Amplitude, ParamUnit::LinearGain);
 one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
 
-/// An `f64` unit takes the plain figure whole.
-impl PlainUnit for ArcDegrees {
-    fn reads(unit: ParamUnit) -> bool {
-        unit == ParamUnit::Degrees
-    }
-    fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
-        (unit == ParamUnit::Degrees).then(|| Self::new(plain))
-    }
-    fn to_plain(self, _unit: ParamUnit) -> f64 {
-        self.get()
-    }
+/// `PlainUnit` for an `f64` unit read from exactly one [`ParamUnit`]: the plain
+/// figure is the unit's own width and passes whole.
+macro_rules! whole_one_to_one {
+    ($ty:ty, $unit:expr) => {
+        impl PlainUnit for $ty {
+            fn reads(unit: ParamUnit) -> bool {
+                unit == $unit
+            }
+            fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
+                (unit == $unit).then(|| Self::new(plain))
+            }
+            fn to_plain(self, _unit: ParamUnit) -> f64 {
+                self.get()
+            }
+        }
+    };
 }
+
+whole_one_to_one!(Hz, ParamUnit::Hertz);
+whole_one_to_one!(Cents, ParamUnit::Cents);
+whole_one_to_one!(Semitones, ParamUnit::Semitones);
+whole_one_to_one!(ArcDegrees, ParamUnit::Degrees);
 
 impl PlainUnit for Seconds {
     fn reads(unit: ParamUnit) -> bool {

@@ -3,7 +3,7 @@ use core::f64::consts::PI;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn render(wave: OscillatorWave, hz: f32, len: usize) -> Vec<f32> {
+fn render(wave: OscillatorWave, hz: f64, len: usize) -> Vec<f32> {
     let mut osc = Oscillator::new(wave);
     (0..len).map(|_| osc.step(Hz(hz), RATE)).collect()
 }
@@ -136,7 +136,7 @@ fn a_frequency_that_is_not_finite_holds_the_phase() {
     let mut osc = Oscillator::new(OscillatorWave::Saw);
     osc.step(Hz(1_000.0), RATE);
     let held = osc;
-    osc.step(Hz(f32::NAN), RATE);
+    osc.step(Hz(f64::NAN), RATE);
     assert_eq!(osc, held);
     osc.step(Hz(-5.0), RATE);
     assert_eq!(osc, held);

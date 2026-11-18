@@ -39,12 +39,12 @@ const FPB: usize = 24_000;
 
 /// The tone's frame `i`: 440 Hz at `SR`.
 fn tone_at(i: usize) -> f32 {
-    (std::f32::consts::TAU * 440.0 * i as f32 / SR as f32).sin()
+    (std::f64::consts::TAU * 440.0 * i as f64 / SR).sin() as f32
 }
 
 /// A pool with one voice placed at beat 0, pitched by `cents`, playing four
 /// seconds of the tone.
-fn pool(cents: f32) -> VoicePool {
+fn pool(cents: f64) -> VoicePool {
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..4 * SR as usize {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
@@ -160,7 +160,7 @@ fn plays_in_time(n: usize) {
     // Half a second, whatever the block.
     let blocks = 24_000 / n;
     let frames = blocks * n;
-    for cents in [0.0f32, 700.0] {
+    for cents in [0.0f64, 700.0] {
         let what = format!("{n}-frame blocks, {cents} cents");
         let t = Transport::new(SampleRate::of(SR));
         let (graph, _ed) = graph_engine(&t, vec![pool(cents)]);

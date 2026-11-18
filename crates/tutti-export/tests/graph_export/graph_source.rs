@@ -112,7 +112,7 @@ fn assert_same(what: &str, a: &[Vec<f32>], b: &[Vec<f32>]) {
 }
 
 /// A stereo sine at half scale, `Osc` wired to both outputs.
-fn sine(freq: f32) -> GraphBuilder {
+fn sine(freq: f64) -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let k = g.add(
         Osc::sine(Hz(freq))
@@ -688,7 +688,7 @@ fn timeline() -> Arc<OfflineTimeline> {
 /// A voice placed at beat 0, pitched by `cents`, in a `VoicePool` (the node a
 /// clip track renders). It reads whatever transport its blocks' `Env` carry:
 /// here, the render clock's.
-fn placed_pool(cents: f32) -> tutti_sampler::VoicePool {
+fn placed_pool(cents: f64) -> tutti_sampler::VoicePool {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     let source =
         MemorySource::placed(tone(), VoiceWindow::from(Beat(0.0))).expect("a placeable wave");
@@ -776,7 +776,7 @@ fn assert_the_tone(what: &str, plane: &[f32]) {
 #[test]
 fn a_sampler_voice_renders_in_time_at_the_graph_block() {
     assert_eq!(GRAPH_MAX_BLOCK.get(), 1024, "the block this pins");
-    for cents in [0.0f32, 700.0] {
+    for cents in [0.0f64, 700.0] {
         let clock = timeline();
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let (k, _handle) = g.add_with_controls(placed_pool(cents));

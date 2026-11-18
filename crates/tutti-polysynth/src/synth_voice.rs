@@ -110,8 +110,8 @@ fn channel_level(channel: &ChannelState) -> f32 {
 }
 
 /// The cutoff factor of a control `x` off its centre: `4^x`, two octaves per unit.
-fn two_octave_factor(x: f32) -> f32 {
-    (Semitones::OCTAVE * (2.0 * x)).to_pitch_ratio()
+fn two_octave_factor(x: f32) -> f64 {
+    (Semitones::OCTAVE * (2.0 * f64::from(x))).to_pitch_ratio()
 }
 
 /// The channel's pan (CC 10) as a pair of gains on a voice's own: RP-036's
@@ -335,7 +335,7 @@ impl SynthVoice {
 
     /// The factor the glide puts on the voice's pitch: 1 when it is not
     /// gliding.
-    pub(crate) fn glide_ratio(&self) -> f32 {
+    pub(crate) fn glide_ratio(&self) -> f64 {
         self.glide.ratio()
     }
 
@@ -476,23 +476,22 @@ impl SynthVoice {
         channel: &ChannelState,
     ) -> Hz {
         let fm = &self.filter_mod;
-        let mut cutoff = self.base_filter_cutoff.get();
+        let mut cutoff = self.base_filter_cutoff;
 
-        // `cutoff` is a bare `f32` multiplier chain, so each depth comes off its
-        // type at the multiply rather than the struct carrying bare floats for
-        // the arithmetic's sake.
+        // The cutoff is a `Hz` scaled by a chain of multipliers; each depth, an
+        // `f32` control reading, is widened exactly at its multiply.
         if fm.mod_wheel_depth > Depth::of(0.0) {
             // The channel's wheel: its depth over the Modulation Depth Range
             // (RPN 5, CA-026) the depth is measured in, so at the default range
             // a full wheel is `mod_wheel_depth` and a range twice that opens
             // twice as far.
             let wheel = channel.modulation_depth().get() / DEFAULT_MODULATION_RANGE.get();
-            cutoff *= 1.0 + wheel * fm.mod_wheel_depth.get();
+            cutoff *= 1.0 + wheel * f64::from(fm.mod_wheel_depth.get());
         }
 
         if fm.velocity_depth > Depth::of(0.0) {
-            let vel_mult = 1.0 - fm.velocity_depth.get() * 0.5
-                + self.velocity_mod_value * fm.velocity_depth.get() * 0.5;
+            let depth = f64::from(fm.velocity_depth.get());
+            let vel_mult = 1.0 - depth * 0.5 + f64::from(self.velocity_mod_value) * depth * 0.5;
             cutoff *= vel_mult;
         }
 
@@ -503,9 +502,8 @@ impl SynthVoice {
             // dividend's sign, so it is not a wrap for a negative phase.
             let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f64;
             self.lfo_phase = self.lfo_phase.advance(step);
-            // The cutoff is `f32`: the sine narrows once per block.
-            let lfo_val = self.lfo_phase.sin() as f32;
-            cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
+            let lfo_val = self.lfo_phase.sin();
+            cutoff *= 1.0 + lfo_val * f64::from(fm.lfo_depth.get()) * 0.5;
         }
 
         if self.cc_cutoff_value != 0.5 {
@@ -517,7 +515,7 @@ impl SynthVoice {
             cutoff *= two_octave_factor(slide.get() - SLIDE_CENTER.get());
         }
 
-        Hz(cutoff)
+        cutoff
     }
 
     /// The ladder resonance after CC71, which blends the base toward a 0.95

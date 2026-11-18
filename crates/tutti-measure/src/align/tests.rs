@@ -58,7 +58,7 @@ fn align_at(
     super::align(Mono::new(reference), Mono::new(take), config, rate, fft)
 }
 
-fn band(low: f32, high: f32) -> FrequencyBand {
+fn band(low: f64, high: f64) -> FrequencyBand {
     FrequencyBand::new(Hz(low), Hz(high)).unwrap()
 }
 

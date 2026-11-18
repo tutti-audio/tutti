@@ -47,7 +47,7 @@ impl PitchBendSensitivity {
 
     /// Whole-semitone sensitivity (the common MPE case, e.g. 48), or `None`
     /// above `MAX_SEMITONES`. A `u8` count, not
-    /// `Semitones`: that is an `f32`, and this is an exact integer count.
+    /// `Semitones`: this is an exact integer count.
     #[inline]
     #[must_use]
     pub const fn new(semitones: u8) -> Option<Self> {
@@ -121,8 +121,8 @@ impl PitchBendSensitivity {
         )
     }
 
-    /// The sensitivity in semitones (integer and fractional parts). The `f32`
-    /// rounds the 32-bit word: a word near the top reads as 128.0.
+    /// The sensitivity in semitones (integer and fractional parts); the 32-bit
+    /// word is exact in `f64`.
     #[inline]
     #[must_use]
     pub fn semitones(self) -> Semitones {

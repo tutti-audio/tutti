@@ -35,7 +35,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
         })
     );
     assert!(matches!(
-        m.range(lp.cutoff(), Hz(f32::NAN)..Hz(100.0)),
+        m.range(lp.cutoff(), Hz(f64::NAN)..Hz(100.0)),
         Err(RangeError::NotANumber { .. })
     ));
     assert!(matches!(

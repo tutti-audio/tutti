@@ -665,7 +665,7 @@ fn split_run(
         }
     }
 
-    let cents: Vec<f32> = run
+    let cents: Vec<f64> = run
         .iter()
         .map(|&f| frames[f].map_or(0.0, |v| v.cents.get()))
         .collect();
@@ -705,16 +705,16 @@ fn split_run(
 ///
 /// Both windows slide, held sorted, so each step is a binary search and a
 /// shift of at most `span` values rather than a sort.
-fn pitch_changes(cents: &[f32], span: usize, split: f32) -> Vec<usize> {
-    let middle = |sorted: &[f32]| median_of_sorted(sorted).unwrap_or_default() as f32;
+fn pitch_changes(cents: &[f64], span: usize, split: f64) -> Vec<usize> {
+    let middle = |sorted: &[f64]| median_of_sorted(sorted).unwrap_or_default();
     let n = cents.len();
     let mut changes = Vec::new();
     if n < 2 * span {
         return changes;
     }
-    let sorted = |w: &[f32]| {
+    let sorted = |w: &[f64]| {
         let mut v = w.to_vec();
-        v.sort_unstable_by(f32::total_cmp);
+        v.sort_unstable_by(f64::total_cmp);
         v
     };
     let mut before = sorted(&cents[..span]);
@@ -740,7 +740,7 @@ fn pitch_changes(cents: &[f32], span: usize, split: f32) -> Vec<usize> {
 }
 
 /// Removes one `old` from the sorted `v` and inserts `new`, keeping it sorted.
-fn replace_sorted(v: &mut Vec<f32>, old: f32, new: f32) {
+fn replace_sorted(v: &mut Vec<f64>, old: f64, new: f64) {
     let at = v.partition_point(|x| x.total_cmp(&old).is_lt());
     v.remove(at);
     let at = v.partition_point(|x| x.total_cmp(&new).is_lt());
@@ -769,8 +769,8 @@ fn build_note(
     }
 
     let voiced = |f: usize| frames[f].expect("a run holds voiced frames");
-    let cents: Vec<f32> = mine.iter().map(|&f| voiced(f).cents.get()).collect();
-    let pitch = Cents(median(&cents)? as f32);
+    let cents: Vec<f64> = mine.iter().map(|&f| voiced(f).cents.get()).collect();
+    let pitch = Cents(median(&cents)?);
     let (note, bend) = Note::nearest_to(Note::A4.frequency() * pitch.to_pitch_ratio())?;
 
     // The loudest frame wholly inside the note; one that straddles a neighbour

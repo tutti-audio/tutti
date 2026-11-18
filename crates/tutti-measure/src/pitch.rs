@@ -112,7 +112,7 @@ impl PitchDetector {
         }
 
         let refined_period = self.parabolic_interpolation(period, max_period);
-        let frequency = Hz((self.cfg.sample_rate().get() / refined_period) as f32);
+        let frequency = Hz(self.cfg.sample_rate().get() / refined_period);
         // Clamped rather than wrapped raw: `Confidence` is a 0..=1 reading, and
         // this is the one place the aperiodicity inversion could leave the range.
         let confidence = Confidence::new_clamped(1.0 - aperiodicity);

@@ -18,7 +18,7 @@ fn bank(width: u16, bands: usize) -> MultibandBank {
     MultibandBank::new(ChannelLayout::from_count(width), bands, RATE).unwrap()
 }
 
-fn hz(freqs: &[f32]) -> CrossoverControls {
+fn hz(freqs: &[f64]) -> CrossoverControls {
     let mut frequencies = [Hz::ZERO; 5];
     for (f, &x) in frequencies.iter_mut().zip(freqs) {
         *f = Hz(x);
@@ -50,7 +50,7 @@ fn band(
 }
 
 /// Every band at unity ratio and no makeup, the splits at `freqs`: nothing is reduced.
-fn unity(freqs: &[f32]) -> MultibandSettings {
+fn unity(freqs: &[f64]) -> MultibandSettings {
     MultibandSettings {
         crossover: hz(freqs),
         bands: [band(-18.0, 0.0, 1.0, 0.01, 0.1, 0.0); MAX_BANDS],
@@ -201,7 +201,7 @@ fn unity_bands_sum_to_the_analytic_all_pass_response() {
     // Whole periods of every tone on the 5 Hz grid.
     const WINDOW: usize = 9_600;
     for (bands, freqs) in [
-        (2, vec![1_000.0f32]),
+        (2, vec![1_000.0f64]),
         (3, vec![200.0, 3_000.0]),
         (4, vec![120.0, 1_000.0, 6_000.0]),
     ] {
@@ -217,7 +217,7 @@ fn unity_bands_sum_to_the_analytic_all_pass_response() {
             let got = Complex64::new(yr, yi) / Complex64::new(xr, xi);
             let want = freqs
                 .iter()
-                .map(|&c| all_pass(f, f64::from(c)))
+                .map(|&c| all_pass(f, c))
                 .fold(Complex64::new(1.0, 0.0), |a, b| a * b);
             assert!(
                 (got - want).norm() < 3e-5,
@@ -240,7 +240,7 @@ fn unity_bands_have_a_flat_impulse_magnitude() {
     let mut impulse = vec![0.0f32; N];
     impulse[0] = 1.0;
     for (bands, freqs) in [
-        (2, vec![1_000.0f32]),
+        (2, vec![1_000.0f64]),
         (3, vec![200.0, 3_000.0]),
         (4, vec![120.0, 1_000.0, 6_000.0]),
     ] {
@@ -275,8 +275,7 @@ fn unity_bands_have_a_flat_impulse_magnitude() {
 fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
     // Whole periods of every tone in 2 s, over a dense set of sample phases.
     const WINDOW: usize = 96_000;
-    let splits = [200.0f32, 1_000.0, 5_000.0];
-    let fc = splits.map(f64::from);
+    let splits = [200.0f64, 1_000.0, 5_000.0];
     let tones = [100.5, 500.5, 2_500.5, 10_000.5];
     for (b, &f) in tones.iter().enumerate() {
         for (knee, over, ratio, makeup) in [
@@ -285,7 +284,7 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             (6.0, -2.0, 4.0, -3.0),
         ] {
             let a = 0.5f64;
-            let level = db(a * band_magnitude(b, &fc, f));
+            let level = db(a * band_magnitude(b, &splits, f));
             let threshold = level - over;
             let mut k = bank(1, 4);
             k.aim(&unity(&splits));
@@ -318,7 +317,7 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             }
             let gain = linear(f64::from(makeup) - want);
             let weighted: f64 = (0..4)
-                .map(|j| band_magnitude(j, &fc, f) * if j == b { gain } else { 1.0 })
+                .map(|j| band_magnitude(j, &splits, f) * if j == b { gain } else { 1.0 })
                 .sum();
             let amp = amplitude_at(&out[4_800..], f, RATE.get());
             assert!(
@@ -394,8 +393,7 @@ fn a_bypassed_band_passes_unprocessed() {
 /// magnitudes at the tone, which add because the bands are phase-aligned.
 #[test]
 fn solo_leaves_only_the_soloed_bands() {
-    let freqs = [300.0f32, 3_000.0];
-    let fc = freqs.map(f64::from);
+    let freqs = [300.0f64, 3_000.0];
     let (tone_hz, len) = (3_500.0f64, SETTLE + 9_600);
     let x = tone(tone_hz, 1.0, len);
     for soloed in [
@@ -410,7 +408,7 @@ fn solo_leaves_only_the_soloed_bands() {
         }
         let want: f64 = (0..3)
             .filter(|&b| soloed[b])
-            .map(|b| band_magnitude(b, &fc, tone_hz))
+            .map(|b| band_magnitude(b, &freqs, tone_hz))
             .sum();
         let mut k = bank(1, 3);
         k.aim(&set);
@@ -761,7 +759,7 @@ fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
 fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
     let tap = tutti_fixtures::tpt::tpt_section_bound((PI * crate::SOLVE_CEILING).tan() * 1.001).tap;
     for (bands, low, high) in [
-        (2usize, vec![1.0f32], vec![23_952.0f32]),
+        (2usize, vec![1.0f64], vec![23_952.0f64]),
         (3, vec![1.0, 2.0], vec![23_951.0, 23_952.0]),
         (4, vec![1.0, 2.0, 3.0], vec![23_950.0, 23_951.0, 23_952.0]),
     ] {

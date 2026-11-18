@@ -87,7 +87,7 @@ fn yin_track(yin: &YinPlan, x: &[f32], hop: Samples) -> Result<Vec<PitchEstimate
     yin_track_at(yin, x, hop)
 }
 
-fn config(rate: f64, min_freq: f32, hop_div: usize, onset_window: usize) -> NoteConfig {
+fn config(rate: f64, min_freq: f64, hop_div: usize, onset_window: usize) -> NoteConfig {
     let rate = SampleRate::of(rate);
     let yin = YinConfig::new().band(FrequencyBand::new(Hz(min_freq), Hz(1000.0)).unwrap());
     let onset = OnsetConfig::new(DetectionFunction::SpectralFlux).framing(Framing::new(
@@ -125,7 +125,7 @@ fn timing_tolerance(c: &NoteConfig) -> Samples {
     Samples(c.hop.get() + c.frame().get() / 2)
 }
 
-fn band(min: f32, max: f32) -> FrequencyBand {
+fn band(min: f64, max: f64) -> FrequencyBand {
     FrequencyBand::new(Hz(min), Hz(max)).unwrap()
 }
 
@@ -182,7 +182,7 @@ fn near(got: Samples, want: f64, rate: f64, tol: Samples) -> bool {
 }
 
 /// A hand-made track: `Some(hz)` voiced, `None` not.
-fn track(freqs: &[Option<f32>]) -> Vec<PitchEstimate> {
+fn track(freqs: &[Option<f64>]) -> Vec<PitchEstimate> {
     freqs
         .iter()
         .map(|f| match f {
@@ -371,14 +371,14 @@ fn pitch_changes_split_only_beyond_the_threshold() {
 fn a_fast_slide_splits_and_a_slow_one_does_not() {
     let c = cfg().min_length(NoteSpan::of(Seconds(0.0)));
     assert_eq!(c.smoothing_frames(), FrameCount(10));
-    let slide = |per_frame: f32| {
-        let t: Vec<Option<f32>> = (0..60)
-            .map(|i| Some(440.0 * (per_frame * i as f32 / 1200.0).exp2()))
+    let slide = |per_frame: Cents| {
+        let t: Vec<Option<f64>> = (0..60)
+            .map(|i| Some(440.0 * (per_frame * f64::from(i)).to_pitch_ratio()))
             .collect();
         notes_from_track(&c, &track(&t), &loud(60), &[]).unwrap()
     };
-    assert_eq!(slide(3.0).len(), 1);
-    let fast = slide(8.0);
+    assert_eq!(slide(Cents(3.0)).len(), 1);
+    let fast = slide(Cents(8.0));
     assert_eq!(fast.len(), 2, "{fast:?}");
     // Every position with the medians 10 frames apart more than 50 apart:
     // 8 c/frame * 10 = 80, so the stretch is the whole run of positions
@@ -389,8 +389,8 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
 
     // The split is the threshold: 80 cents over a span is under 200.
     let loose = c.pitch_split(PitchSplit::of(Cents(200.0)));
-    let t: Vec<Option<f32>> = (0..60)
-        .map(|i| Some(440.0 * (8.0 * i as f32 / 1200.0).exp2()))
+    let t: Vec<Option<f64>> = (0..60)
+        .map(|i| Some(440.0 * (Cents(8.0) * f64::from(i)).to_pitch_ratio()))
         .collect();
     assert_eq!(
         notes_from_track(&loose, &track(&t), &loud(60), &[])
@@ -406,7 +406,7 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
 fn the_sliding_median_matches_sorting_each_window() {
     let mut rng = StdRng::seed_from_u64(11);
     for span in [1, 2, 3, 7, 10] {
-        let cents: Vec<f32> = (0..200)
+        let cents: Vec<f64> = (0..200)
             .map(|_| match rng.random_range(0..6) {
                 0 => 0.0,
                 1 => -0.0,
@@ -417,7 +417,7 @@ fn the_sliding_median_matches_sorting_each_window() {
         let mut want = Vec::new();
         let mut stretch: Option<(usize, usize)> = None;
         for pos in span..=cents.len() - span {
-            let med = |w: &[f32]| median(w).unwrap() as f32;
+            let med = |w: &[f64]| median(w).unwrap();
             let diff = (med(&cents[pos..pos + span]) - med(&cents[pos - span..pos])).abs();
             if diff > 40.0 {
                 stretch = Some(stretch.map_or((pos, pos), |(f, _)| (f, pos)));
@@ -787,7 +787,7 @@ fn settings_and_inputs_are_validated() {
         notes_from_track(&c, &zero, &loud(10), &[]),
         Err(Error::NonPositiveFrequency)
     );
-    let nan = track(&[Some(f32::NAN); 10]);
+    let nan = track(&[Some(f64::NAN); 10]);
     assert_eq!(
         notes_from_track(&c, &nan, &loud(10), &[]),
         Err(Error::NonFiniteInput)

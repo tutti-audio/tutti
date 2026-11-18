@@ -1016,7 +1016,7 @@ fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
 fn lfo_scene(
     s: &mut DetachedSession,
     side: &mut AudioSide,
-    rate: f32,
+    rate: f64,
     depth: f32,
 ) -> (ParamRef, ModRouteId) {
     let (filter, _) = s.graph().add(ProbeUnit::new(500.0));
@@ -1134,9 +1134,9 @@ fn a_depth_slider_keeps_phase() {
     let start = 4 * 128;
     let before = render(&mut side, 2 * DECLICK, 128).swap_remove(0);
     let value = |depth: f64, f: usize| {
-        500.0 + 1000.0 * depth * (std::f64::consts::TAU * f64::from(rate) * f as f64 / RATE).sin()
+        500.0 + 1000.0 * depth * (std::f64::consts::TAU * rate * f as f64 / RATE).sin()
     };
-    let h = std::f64::consts::TAU * f64::from(rate) * STEP as f64 / RATE;
+    let h = std::f64::consts::TAU * rate * STEP as f64 / RATE;
     let tol = |depth: f64| h * h / 8.0 * 1000.0 * depth + 1e-3;
     for (i, &v) in before.iter().enumerate().skip(DECLICK) {
         let f = start + i;

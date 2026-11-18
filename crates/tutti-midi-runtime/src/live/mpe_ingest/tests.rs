@@ -6,6 +6,7 @@ use tutti_midi_protocol::{MpeZoneConfig, MpeZones, widen_bend, widen_value, wide
 use tutti_ump::{
     Address, CCNumber, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent, U7, U14, Voice2,
 };
+use tutti_units::Semitones;
 
 /// What the ingest sends, collected: the tests read it as a list.
 trait Collected {
@@ -285,7 +286,7 @@ fn mcm_with_zero_members_disables_the_zone() {
 /// What a receiver following RPN #00/00 (channel bend range) and
 /// #00/07 (per-note bend range) per channel ends with after `events`:
 /// `(channel, index) → semitones`, in order of arrival.
-fn ranges_after(events: impl IntoIterator<Item = UmpAt>) -> Vec<(u8, u8, f32)> {
+fn ranges_after(events: impl IntoIterator<Item = UmpAt>) -> Vec<(u8, u8, f64)> {
     events
         .into_iter()
         .map(|ev| {
@@ -400,20 +401,23 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     for ev in ingest.translated(&bend_sensitivity(13, 12)) {
         receiver.observe(&ev.1);
     }
-    assert_eq!(receiver.semitones(tutti_ump::MidiChannel::of(13)), 12.0);
+    assert_eq!(
+        receiver.semitones(tutti_ump::MidiChannel::of(13)),
+        Semitones(12.0)
+    );
     for ev in ingest.translated(&mcm) {
         receiver.observe(&ev.1);
     }
     for channel in 12..=14 {
         assert_eq!(
             receiver.semitones(tutti_ump::MidiChannel::of(channel)),
-            48.0,
+            Semitones(48.0),
             "channel {channel}"
         );
     }
     assert_eq!(
         receiver.semitones(tutti_ump::MidiChannel::of(1)),
-        12.0,
+        Semitones(12.0),
         "the lower zone keeps its range"
     );
 
@@ -497,9 +501,9 @@ fn a_member_channels_bend_range_becomes_every_members_per_note_range() {
     }
     for channel in 0..16u8 {
         let want = match channel {
-            1..=3 => 12.0,
-            12..=14 => 24.0,
-            _ => 48.0,
+            1..=3 => Semitones(12.0),
+            12..=14 => Semitones(24.0),
+            _ => Semitones(48.0),
         };
         assert_eq!(
             receiver.semitones(tutti_ump::MidiChannel::of(channel)),

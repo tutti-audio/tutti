@@ -19,7 +19,7 @@ use crate::{Complex64, Lti, Ring, System};
 /// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
 /// [`SOLVE_CEILING`] of the rate.
 fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
-    let hz = f64::from(hz.get()).min(SOLVE_CEILING * rate.get());
+    let hz = hz.get().min(SOLVE_CEILING * rate.get());
     Tpt::new(libm::tan(PI * hz / rate.get()))
 }
 
@@ -86,8 +86,8 @@ impl CrossoverModel {
         let cap = SOLVE_CEILING * rate.get();
         let mut floor = 1.0f64;
         for (f, hz) in self.freqs.iter_mut().zip(&controls.frequencies) {
-            floor = f64::from(hz.get()).max(floor).min(cap);
-            *f = Hz(floor as f32);
+            floor = hz.get().max(floor).min(cap);
+            *f = Hz(floor);
         }
         self.solve();
     }
@@ -166,7 +166,7 @@ impl Lti for CrossoverModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output < self.bands {
-                let w = 2.0 * PI * f64::from(f.get()) / self.rate.get();
+                let w = 2.0 * PI * f.get() / self.rate.get();
                 let mut h = Complex64::new(1.0, 0.0);
                 for (j, c) in self.coeffs[..self.splits()].iter().enumerate() {
                     if j < output {

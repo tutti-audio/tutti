@@ -49,7 +49,7 @@ fn automation(curve: impl Curve + 'static) -> ControlLaneNode {
 /// A tempo whose beat is not a whole number of frames, so breakpoints fall
 /// between frames.
 const TEMPO: Bpm = Bpm::of(113.0);
-const TOL: f32 = 2e-5;
+const TOL: f64 = 2e-5;
 const MAX: usize = 128;
 
 /// Declares `Cutoff` (base 0) and writes the value it reads, per frame.
@@ -149,7 +149,7 @@ fn check_rolling(
             let beat = clock.beat();
             let want = curve.value_at(beat).expect("a value").get();
             assert!(
-                (v - want).abs() <= TOL,
+                (f64::from(v) - want).abs() <= TOL,
                 "frame {} (block of {n}, frame {i}), beat {}: {v} vs the curve's {want}",
                 all.len() + i,
                 beat.get()
@@ -258,7 +258,7 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
             };
             let want = curve.value_at(Beat(beat)).expect("a value").get();
             assert!(
-                (v - want).abs() <= 1e-4,
+                (f64::from(v) - want).abs() <= 1e-4,
                 "case {k}, frame {i}, beat {beat}: {v} vs {want}"
             );
         }

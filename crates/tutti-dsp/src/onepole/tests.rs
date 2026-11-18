@@ -18,6 +18,6 @@ fn ring_frames_edges_are_instant_for_pole_zero_and_never_for_pole_one() {
 #[test]
 fn cutoff_pole_at_rate_over_two_pi_is_exp_minus_one() {
     let rate = SampleRate::SR_48K;
-    let fc = Hz((48_000.0 / std::f64::consts::TAU) as f32);
-    assert!((cutoff_pole(fc, rate) - (-1.0f64).exp()).abs() < 1e-6);
+    let fc = Hz(48_000.0 / std::f64::consts::TAU);
+    assert!((cutoff_pole(fc, rate) - (-1.0f64).exp()).abs() <= f64::EPSILON);
 }

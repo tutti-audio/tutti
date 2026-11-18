@@ -275,10 +275,9 @@ impl ChromaConfig {
         let geometry = self.framing.geometry(rate)?;
         check_window(geometry.window(), &WINDOWS)?;
         check_overlap(geometry.window(), geometry.hop())?;
-        let nyquist = rate.get() as f32 / 2.0;
         let (min_freq, max_freq) = match self.band {
             Some(band) => (band.min, band.max),
-            None => (Hz(100.0), Hz(5000.0f32.min(nyquist))),
+            None => (Hz(100.0), Hz(5000.0).min(rate.nyquist())),
         };
         let plan = ChromaPlan {
             geometry,
@@ -365,7 +364,7 @@ impl ChromaPlan {
             let (offset, peak) = interpolate(magnitudes[i - 1], m, magnitudes[i + 1]);
             let frequency = self.geometry.frequency_of(i as f64 + offset);
             if frequency >= self.min_freq && frequency <= self.max_freq {
-                visit(f64::from(frequency.get()), peak * peak);
+                visit(frequency.get(), peak * peak);
             }
         }
         true
@@ -374,7 +373,7 @@ impl ChromaPlan {
     /// Adds a peak's distance from the equal-tempered grid to `sums`.
     fn tune(frequency: f64, energy: f32, sums: &mut TuningSums) {
         let off = off_grid(frequency);
-        let turn = f64::from(off) * std::f64::consts::TAU;
+        let turn = off * std::f64::consts::TAU;
         let w = f64::from(energy);
         sums.cos += w * libm::cos(turn);
         sums.sin += w * libm::sin(turn);
@@ -385,7 +384,7 @@ impl ChromaPlan {
         let mut weight = energy;
         for order in 1..=self.harmonics.get() {
             let sub = frequency / order as f64;
-            if sub < f64::from(self.min_freq.get()) {
+            if sub < self.min_freq.get() {
                 break;
             }
             let class = class_of(sub, tuning);
@@ -397,19 +396,19 @@ impl ChromaPlan {
 
 /// The half-semitone-wide distance of `frequency` from the nearest
 /// equal-tempered pitch, in semitones, `-0.5..=0.5`.
-fn off_grid(frequency: f64) -> f32 {
+fn off_grid(frequency: f64) -> f64 {
     let s = semitones_from_a4(frequency).get();
     s - s.round()
 }
 
 /// `frequency`'s distance from A4.
 fn semitones_from_a4(frequency: f64) -> Semitones {
-    Semitones::from_pitch_ratio((frequency / f64::from(Note::A4.frequency().get())) as f32)
+    Semitones::from_pitch_ratio(frequency / Note::A4.frequency().get())
 }
 
 /// The class of `frequency` once `tuning` is taken out, as a column.
 fn class_of(frequency: f64, tuning: Semitones) -> usize {
-    let a = f32::from(Note::A4.class().semitones_above_c());
+    let a = f64::from(Note::A4.class().semitones_above_c());
     let position = a + semitones_from_a4(frequency).get() - tuning.get();
     (position.round() as i64).rem_euclid(CLASSES as i64) as usize
 }
@@ -436,7 +435,7 @@ impl TuningSums {
     /// within a half turn, so the offset is within a half semitone.
     fn offset(self) -> TuningOffset {
         let turns = libm::atan2(self.sin, self.cos) / std::f64::consts::TAU;
-        TuningOffset::new(Semitones(turns as f32).to_cents()).unwrap_or(TuningOffset::NONE)
+        TuningOffset::new(Semitones(turns).to_cents()).unwrap_or(TuningOffset::NONE)
     }
 
     fn cents(self) -> Cents {

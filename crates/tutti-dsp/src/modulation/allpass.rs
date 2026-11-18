@@ -13,16 +13,17 @@ use tutti_units::{Depth, Hz, SampleRate};
 #[inline]
 #[must_use]
 pub fn sweep_hz(min: Hz, max: Hz, lfo: f32, depth: Depth) -> Hz {
-    let lfo = lfo * 0.5 + 0.5;
+    // The oscillator's value and the depth are `f32` lane values; the sweep is in `Hz`'s `f64`.
+    let lfo = f64::from(lfo) * 0.5 + 0.5;
     let (min, max) = (min.get(), max.get());
-    Hz::new(min + (max - min) * lfo * depth.get())
+    Hz::new(min + (max - min) * lfo * f64::from(depth.get()))
 }
 
 /// The lowest frequency an all-pass stage is tuned to (see [`allpass_coeff`]).
 const SWEEP_FLOOR: Hz = Hz(1.0);
 
 /// The share of Nyquist an all-pass stage is tuned up to (see [`allpass_coeff`]).
-const SWEEP_CEILING: f32 = 0.98;
+const SWEEP_CEILING: f64 = 0.98;
 
 /// One first-order all-pass coefficient for a sweep position.
 ///
@@ -44,10 +45,10 @@ pub fn allpass_coeff(sweep: Hz, rate: SampleRate) -> f32 {
         .max(SWEEP_FLOOR)
         .min(rate.nyquist_scaled(SWEEP_CEILING))
         .get();
-    let sr = rate.get() as f32;
-    let w = core::f32::consts::PI * sweep_hz / sr;
-    let t = libm::tanf(w);
-    (t - 1.0) / (t + 1.0)
+    let w = core::f64::consts::PI * sweep_hz / rate.get();
+    let t = libm::tan(w);
+    // The coefficient narrows once to the stage's `f32`.
+    ((t - 1.0) / (t + 1.0)) as f32
 }
 
 #[cfg(test)]

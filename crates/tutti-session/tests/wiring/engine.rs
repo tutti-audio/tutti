@@ -150,7 +150,7 @@ fn tone_at(i: usize) -> f32 {
 
 /// One sampler voice on a second of the tone, placed at beat 0 and pitched
 /// by `cents`. It reads the transport from its blocks' `Env`.
-fn voice(cents: f32) -> tutti_sampler::VoicePool {
+fn voice(cents: f64) -> tutti_sampler::VoicePool {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize {
@@ -174,7 +174,7 @@ fn voice(cents: f32) -> tutti_sampler::VoicePool {
 /// An offline session with one sampler voice ([`voice`]) on both global
 /// outputs, the transport rolling from the first block: `frames` stereo
 /// frames in `block`-frame device blocks.
-fn render_voice(cents: f32, frames: usize, block: usize) -> Vec<f32> {
+fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
     let mut s = offline();
     let (voice, _handle) = s.graph().add(tutti_graph::Unforkable(voice(cents)));
     for port in 0..2 {
@@ -221,7 +221,7 @@ fn a_voice_plays_in_time(block: usize) {
     let frames = 24_000;
     // The dry voice is pinned to the tone itself, the pitched one to its
     // fifth up and to its render at 64-frame blocks.
-    for cents in [0.0f32, 700.0] {
+    for cents in [0.0f64, 700.0] {
         let rendered = render_voice(cents, frames, block);
         let peak = rendered.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak > 0.5, "{block}-frame blocks, {cents} cents: silent");

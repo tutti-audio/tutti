@@ -65,7 +65,7 @@ impl LadderControls {
     /// through `LastGood`, which does.
     #[must_use]
     pub fn moved_from(&self, applied: &Self) -> bool {
-        const FREQ_EPS: f32 = 0.01;
+        const FREQ_EPS: f64 = 0.01;
         const RES_EPS: f32 = 0.0001;
         self.ty != applied.ty
             || self.drive != applied.drive
@@ -77,9 +77,10 @@ impl LadderControls {
     /// A cutoff, resonance or drive out of range is the coefficients' to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        let finite_hz = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
             ty: self.ty,
-            freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
+            freq: Hz(finite_hz(self.freq.get(), Self::DEFAULT.freq.get())),
             res: Resonance(finite(self.res.get(), Self::DEFAULT.res.get())),
             drive: Drive(finite(self.drive.get(), Self::DEFAULT.drive.get()).max(0.0)),
         }
@@ -223,7 +224,7 @@ impl System for LadderModel {
 impl Lti for LadderModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = 2.0 * PI * f64::from(f.get()) / self.rate.get();
+            let w = 2.0 * PI * f.get() / self.rate.get();
             *g = if output == 0 {
                 self.at(Complex64::from_polar(1.0, -w))
             } else {
