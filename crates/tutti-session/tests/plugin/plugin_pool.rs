@@ -1139,19 +1139,35 @@ mod process {
     }
 }
 
-/// **A plugin's losses are cumulative across a reload at its node.** A block
-/// of 300 notes holds `MIDI_STACK_CAPACITY` of them: the rest are `lost`, and
-/// only those. The server is terminated and recovery reloads the plugin at the
-/// same key; the reloaded plugin's own count starts at zero, and the node's
-/// `losses()` keeps what the first one lost and adds what the second does.
+/// **The node's dropped events keep accumulating across a reload of the
+/// plugin at it.** A block of 300 notes is cut by the graph to the node's
+/// declared input bound (`MIDI_STACK_BOUND`): the rest is reported as
+/// `EventsDropped` at the node, and only that. The server is terminated and
+/// recovery reloads the plugin at the same key; a second block of 300 is cut
+/// the same, so the node's reports total twice the cut. The cut is the graph's,
+/// not the plugin's, so `losses()` stays empty throughout.
 #[test]
-fn losses_survive_a_reload_of_the_plugin_at_its_node() {
+fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     use tutti_fixtures::midi;
     use tutti_graph::EventCapacity;
     use tutti_session::{Losses, Root, Stamp};
     use tutti_ump::MidiChannel;
 
-    let past_capacity = Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64);
+    let cut = 300 - u64::from(tutti_plugin_types::MIDI_STACK_BOUND.get());
+    let dropped_at = |events: Vec<SessionEvent>, node: tutti_graph::NodeKey| -> u64 {
+        events
+            .into_iter()
+            .filter_map(|e| match e {
+                SessionEvent::EventsDropped {
+                    node: n,
+                    port: None,
+                    count,
+                    ..
+                } if n == node => Some(count),
+                _ => None,
+            })
+            .sum()
+    };
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
     s.graph().connect(node, Root).unwrap();
@@ -1164,9 +1180,17 @@ fn losses_survive_a_reload_of_the_plugin_at_its_node() {
     let _ = pump(&mut s);
     assert_eq!(losses(&s), Losses::NONE, "nothing sent yet");
 
+    // The cut is charged in the block that rendered it, reported by the next update.
+    let mut dropped = 0;
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
-    assert_eq!(losses(&s), past_capacity);
+    dropped += dropped_at(pump(&mut s), node.into());
+    assert_eq!(dropped, cut);
+    assert_eq!(
+        losses(&s),
+        Losses::NONE,
+        "the graph's cut, not the plugin's"
+    );
 
     let first = pid_of(&s, node).expect("served");
     s.plugin_view(node)
@@ -1180,17 +1204,16 @@ fn losses_survive_a_reload_of_the_plugin_at_its_node() {
         pid_of(s, node).is_some_and(|pid| pid != first)
             && matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running)
     });
-    assert_eq!(
-        losses(&s),
-        past_capacity,
-        "the reloaded plugin has lost nothing, and the first one's count stays"
-    );
+    dropped += dropped_at(pump(&mut s), node.into());
+    assert_eq!(dropped, cut, "the reload drops nothing more");
 
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
+    dropped += dropped_at(pump(&mut s), node.into());
     assert_eq!(
-        losses(&s),
-        past_capacity + past_capacity,
-        "the reloaded plugin's losses add to the first one's"
+        dropped,
+        cut + cut,
+        "the reloaded plugin's node is cut the same: the reports add"
     );
+    assert_eq!(losses(&s), Losses::NONE);
 }
