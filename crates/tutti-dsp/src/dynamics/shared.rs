@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_types::{Amplitude, Ballistics, Db, SampleRate, Seconds};
+use tutti_types::{Ballistics, SampleRate, Seconds, Unit};
 
 use crate::smoother::Smoother;
 
@@ -76,28 +76,17 @@ impl Follower {
         Self { attack, release }
     }
 
-    /// One step of `state` toward `target`, at the attack's coefficient while the target is
+    /// One step of `state` toward `target`, in any f32 unit, at the attack's coefficient while the target is
     /// above `state` and at the release's otherwise.
     #[inline]
-    pub(crate) fn follow(&self, state: f32, target: f32) -> f32 {
+    pub(crate) fn follow<U: Unit<Raw = f32>>(&self, state: U, target: U) -> U {
+        let (state, target) = (state.to_raw(), target.to_raw());
         let coeff = if target > state {
             self.attack
         } else {
             self.release
         };
-        Smoother::toward(state, target, coeff)
-    }
-
-    /// [`follow`](Self::follow) on a level in dB.
-    #[inline]
-    pub(crate) fn follow_db(&self, state: Db, target: Db) -> Db {
-        Db(self.follow(state.get(), target.get()))
-    }
-
-    /// [`follow`](Self::follow) on an amplitude.
-    #[inline]
-    pub(crate) fn follow_amplitude(&self, state: Amplitude, target: Amplitude) -> Amplitude {
-        Amplitude(self.follow(state.get(), target.get()))
+        U::from_raw(Smoother::toward(state, target, coeff))
     }
 }
 

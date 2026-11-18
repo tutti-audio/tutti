@@ -313,7 +313,7 @@ impl DynamicEqBank {
             }
             DynamicMode::Upward => compute_upward_gain_lift(level_db, d.threshold, d.ratio, d.knee),
         };
-        self.moved = d.ballistics.follow_db(self.moved, curve.min(d.range));
+        self.moved = d.ballistics.follow(self.moved, curve.min(d.range));
     }
 
     /// Runs `input` into `output`, its band moved by the gain the loudest channel of `key`

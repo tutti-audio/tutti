@@ -197,9 +197,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = self
-                    .follower
-                    .follow_amplitude(self.env, Amplitude::new(l.min(1.0)));
+                self.env = self.follower.follow(self.env, Amplitude::new(l.min(1.0)));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

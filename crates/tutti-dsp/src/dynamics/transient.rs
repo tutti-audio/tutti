@@ -192,8 +192,8 @@ impl TransientBank {
                     self.amounts.target()
                 };
                 let level = Amplitude::new(*g);
-                let fast = self.fast.follow_amplitude(self.envelopes.0, level);
-                let slow = self.slow.follow_amplitude(self.envelopes.1, level);
+                let fast = self.fast.follow(self.envelopes.0, level);
+                let slow = self.slow.follow(self.envelopes.1, level);
                 self.envelopes = (fast, slow);
                 *g = gain_db(fast, slow, a.attack, a.sustain)
                     .to_amplitude()
