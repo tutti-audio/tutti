@@ -9,14 +9,16 @@
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use tutti_buffers::{Float, SampleFormat};
+use std::time::Duration;
+
+use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
 use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
-use crate::edge;
+use crate::edge::{self, OffsetBinary};
 use crate::error::{Error, Result};
 use crate::owner::Owned;
 
@@ -144,60 +146,32 @@ impl RunningStream for CpalStream {
     }
 }
 
-/// The graph's float formats the device edge converts from: cpal's sample types
-/// convert from `f32` and `f64` (`cpal::FromSample`).
-macro_rules! stream_driver_for {
-    ($($float:ty),+) => {$(
-        impl StreamDriver<$float> for CpalDriver {
-            type Running = CpalStream;
-            type Error = Error;
+impl<F: Float> StreamDriver<F> for CpalDriver {
+    type Running = CpalStream;
+    type Error = Error;
 
-            fn open(
-                self,
-                spec: &OutputSpec,
-                block: OutputBlock<$float>,
-                faults: Arc<StreamFaults>,
-            ) -> Result<CpalStream> {
-                self.open_stream(spec, block, faults)
-            }
-        }
-    )+};
-}
-
-stream_driver_for!(f32, f64);
-
-impl CpalDriver {
-    /// Opens `block` on the device in the device's own sample type, converting
-    /// from the graph's `F` per sample at the edge.
-    fn open_stream<F>(
+    /// Opens `block` on the device in the device's own sample type. The
+    /// graph's `F` converts at the edge by the rule in `Sample`: a signed or
+    /// float format directly, an offset-binary one through the signed format of
+    /// its width with the sign bit flipped.
+    fn open(
         self,
         spec: &OutputSpec,
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<CpalStream>
-    where
-        F: Float,
-        i8: cpal::FromSample<F>,
-        i16: cpal::FromSample<F>,
-        i32: cpal::FromSample<F>,
-        u8: cpal::FromSample<F>,
-        u16: cpal::FromSample<F>,
-        u32: cpal::FromSample<F>,
-        f32: cpal::FromSample<F>,
-        f64: cpal::FromSample<F>,
-    {
+    ) -> Result<CpalStream> {
         let config = stream_config(spec);
         let format = self.format;
         Owned::spawn("tutti-output-stream", move || {
             let stream = match format {
-                cpal::SampleFormat::I8 => self.build::<i8, F>(&config, block, faults)?,
-                cpal::SampleFormat::I16 => self.build::<i16, F>(&config, block, faults)?,
-                cpal::SampleFormat::I32 => self.build::<i32, F>(&config, block, faults)?,
-                cpal::SampleFormat::U8 => self.build::<u8, F>(&config, block, faults)?,
-                cpal::SampleFormat::U16 => self.build::<u16, F>(&config, block, faults)?,
-                cpal::SampleFormat::U32 => self.build::<u32, F>(&config, block, faults)?,
-                cpal::SampleFormat::F32 => self.build::<f32, F>(&config, block, faults)?,
-                cpal::SampleFormat::F64 => self.build::<f64, F>(&config, block, faults)?,
+                cpal::SampleFormat::I8 => self.build(&config, block, faults, native::<F, i8>)?,
+                cpal::SampleFormat::I16 => self.build(&config, block, faults, native::<F, i16>)?,
+                cpal::SampleFormat::I32 => self.build(&config, block, faults, native::<F, i32>)?,
+                cpal::SampleFormat::U8 => self.build(&config, block, faults, offset::<F, u8>)?,
+                cpal::SampleFormat::U16 => self.build(&config, block, faults, offset::<F, u16>)?,
+                cpal::SampleFormat::U32 => self.build(&config, block, faults, offset::<F, u32>)?,
+                cpal::SampleFormat::F32 => self.build(&config, block, faults, native::<F, f32>)?,
+                cpal::SampleFormat::F64 => self.build(&config, block, faults, native::<F, f64>)?,
                 // Checked by `CpalDriver::new`.
                 _ => unreachable!("sample format checked at construction"),
             };
@@ -206,16 +180,40 @@ impl CpalDriver {
         })
         .map(CpalStream)
     }
+}
 
-    fn build<T, F: Float>(
+/// What one callback does with `block`: renders into the device's `T` buffer,
+/// recording `delay`.
+type Render<F, T> = fn(&mut OutputBlock<F>, &mut [T], Option<Duration>);
+
+/// A device format that is a [`Sample`]: converted by
+/// its rule.
+fn native<F: Float, S: Sample>(
+    block: &mut OutputBlock<F>,
+    data: &mut [S],
+    delay: Option<Duration>,
+) {
+    block.render_delayed(data, delay);
+}
+
+/// An offset-binary device format: the same rule on the signed format of its
+/// width, then the sign bit flipped (`Sample` covers no unsigned format).
+fn offset<F: Float, U: OffsetBinary>(
+    block: &mut OutputBlock<F>,
+    data: &mut [U],
+    delay: Option<Duration>,
+) {
+    block.render_delayed_with(data, delay, edge::to_offset::<F, U>);
+}
+
+impl CpalDriver {
+    fn build<T: cpal::SizedSample + 'static, F: Float>(
         &self,
         config: &cpal::StreamConfig,
         mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<cpal::Stream>
-    where
-        T: cpal::SizedSample + cpal::FromSample<F>,
-    {
+        render: Render<F, T>,
+    ) -> Result<cpal::Stream> {
         let channels = block.channels();
         let delivering = Arc::clone(&faults);
         self.device
@@ -232,11 +230,7 @@ impl CpalDriver {
                         "CPAL callback frames {} exceeds MAX_FRAMES {MAX_FRAMES}",
                         data.len() / channels
                     );
-                    block.render_delayed_with(
-                        data,
-                        edge::output_delay(&info.timestamp()),
-                        T::from_sample,
-                    );
+                    render(&mut block, data, edge::output_delay(&info.timestamp()));
                     delivering.delivered();
                 },
                 move |err| edge::record(&faults, &err),
@@ -246,5 +240,7 @@ impl CpalDriver {
     }
 }
 
+#[cfg(test)]
+mod format_tests;
 #[cfg(test)]
 mod quantum_tests;

@@ -1,85 +1,61 @@
 //! The sample-format conversion the device driver hands the output block, tested
 //! without a sound card.
 //!
-//! The block renders `f32`; a driver converts each sample to its device's type
-//! with `T::from_sample` (what `CpalDriver`'s callback passes to
-//! `OutputBlock::render_delayed_with`). The clamp, the zero-fill and the width
-//! are the block's, tested in `tutti-engine`.
+//! The block renders the graph's float format; the driver's callback writes the
+//! device's own sample type by the rule in `tutti_buffers::Sample`
+//! (`OutputBlock::render_delayed`), the one rule the codecs share. An
+//! offset-binary device is the same rule on the signed format of its width with
+//! the sign bit flipped, tested beside the driver (`driver_seam`'s
+//! `format_tests`). The clamp, the zero-fill and the width are the block's,
+//! tested in `tutti-engine`.
 //!
-//! Expected values are stated from **each format's own arithmetic**, never by
-//! calling `T::from_sample`: asking the function under test what it should
-//! have produced is not a second opinion.
+//! Expected values are stated from each format's own arithmetic, never by
+//! calling the conversion under test.
 
 use crate::support::{dc_state, dc_state_f64};
+use tutti_buffers::Sample;
 use tutti_engine::OutputBlock;
 use tutti_types::ChannelLayout;
 
-/// Full scale for an integer format, from the format's definition rather than
-/// from the conversion under test.
-fn dc_and_check<T: cpal::SizedSample + cpal::FromSample<f32> + PartialEq + std::fmt::Debug>(
-    level: f32,
-    expected: T,
-    label: &str,
-) {
+/// A constant `level` graph rendered into a device buffer of `S`.
+fn render<S: Sample>(level: f32) -> [S; 64] {
     let mut block = OutputBlock::new(dc_state(level, 2), ChannelLayout::STEREO);
-    let mut out = [T::from_sample(0.0f32); 64];
-    block.render_with(&mut out, T::from_sample);
-    for (i, s) in out.iter().enumerate() {
-        assert_eq!(
-            *s, expected,
-            "{label}: sample {i} of a constant {level} block should be \
-             {expected:?}, got {s:?}"
-        );
-    }
+    let mut out = [S::SILENCE; 64];
+    block.render_delayed(&mut out, None);
+    out
 }
 
-/// **The eight-way sample-format matrix, one constant level through each.**
+/// **A constant level through each native device format.**
 ///
-/// A constant-DC graph makes every sample in the block the same known value,
-/// so the expected result is a single number per format, derived from that
-/// format's range. `dasp`'s conversions are the thing being checked, so none
-/// of these numbers comes from asking it.
+/// The integer expectations are `0.5 * 2^(bits-1)`, with the positive extreme
+/// held: `i16` gives 16384, and the ends of the range are `MIN` for -1.0 and
+/// `MAX` for +1.0.
 #[test]
-fn every_sample_format_carries_the_dc_level_it_was_given() {
-    // Half of full scale. The integer expectations are `0.5 * 2^(bits-1)`,
-    // derived from each format's width rather than from the conversion: the
-    // scale factor is the *magnitude* 2^(bits-1), with the positive extreme
-    // clamped, which is why i16 gives 16384 and not 16383. Stating it this way
-    // is what makes a wrong scale factor visible.
-    dc_and_check::<f32>(0.5, 0.5, "f32");
-    dc_and_check::<f64>(0.5, 0.5, "f64");
-    dc_and_check::<i16>(0.5, 1 << 14, "i16"); // 0.5 * 2^15
-    dc_and_check::<i8>(0.5, 1 << 6, "i8"); //    0.5 * 2^7
-    dc_and_check::<i32>(0.5, 1 << 30, "i32"); // 0.5 * 2^31
-    // Unsigned formats are offset-binary: silence is mid-scale.
-    dc_and_check::<u8>(0.0, 128, "u8 silence");
-    dc_and_check::<u16>(0.0, 32768, "u16 silence");
-    dc_and_check::<u32>(0.0, 2_147_483_648, "u32 silence");
+fn every_native_format_carries_the_dc_level_the_sample_rule_gives() {
+    assert!(render::<f32>(0.5).iter().all(|&s| s == 0.5));
+    assert!(render::<f64>(0.5).iter().all(|&s| s == 0.5));
+    assert!(render::<i16>(0.5).iter().all(|&s| s == 1 << 14));
+    assert!(render::<i8>(0.5).iter().all(|&s| s == 1 << 6));
+    assert!(render::<i32>(0.5).iter().all(|&s| s == 1 << 30));
+    assert!(render::<i16>(-1.0).iter().all(|&s| s == i16::MIN));
+    assert!(render::<i16>(1.0).iter().all(|&s| s == i16::MAX));
 }
 
-/// **Silence is silence in every format**, including the offset-binary ones
-/// where "zero" is not zero. A conversion that emitted a literal 0 for `u16`
-/// would produce full-negative DC — a loud thump, not silence.
+/// **Silence is the format's own zero.**
 #[test]
-fn silence_is_the_formats_own_zero_not_a_literal_zero() {
-    dc_and_check::<i16>(0.0, 0, "i16");
-    dc_and_check::<u8>(0.0, 128, "u8");
-    dc_and_check::<u16>(0.0, 32768, "u16");
+fn silence_is_zero_in_every_signed_and_float_format() {
+    assert!(render::<i16>(0.0).iter().all(|&s| s == 0));
+    assert!(render::<i8>(0.0).iter().all(|&s| s == 0));
+    assert!(render::<f32>(0.0).iter().all(|&s| s == 0.0));
 }
 
-/// **The device edge converts an `f64` graph the same way.** `T::from_sample`
-/// takes the graph's `f64` straight to each device format: a constant 0.5 is
-/// `0.5 * 2^(bits-1)` in a signed integer, and mid-scale plus that in an
-/// offset-binary one.
+/// **The device edge converts an `f64` graph by the same rule.**
 #[test]
-fn an_f64_graph_reaches_every_device_format_by_the_same_rule() {
-    fn check<T: cpal::SizedSample + cpal::FromSample<f64> + PartialEq + std::fmt::Debug>(
-        expected: T,
-        label: &str,
-    ) {
+fn an_f64_graph_reaches_every_native_format_by_the_same_rule() {
+    fn check<S: Sample + std::fmt::Debug>(expected: S, label: &str) {
         let mut block = OutputBlock::new(dc_state_f64(0.5, 2), ChannelLayout::STEREO);
-        let mut out = [T::from_sample(0.0f64); 64];
-        block.render_with(&mut out, T::from_sample);
+        let mut out = [S::SILENCE; 64];
+        block.render_delayed(&mut out, None);
         assert!(
             out.iter().all(|s| *s == expected),
             "{label}: a constant 0.5 should be {expected:?}, got {:?}",
@@ -91,7 +67,4 @@ fn an_f64_graph_reaches_every_device_format_by_the_same_rule() {
     check::<i16>(1 << 14, "i16");
     check::<i8>(1 << 6, "i8");
     check::<i32>(1 << 30, "i32");
-    check::<u8>(128 + (1 << 6), "u8");
-    check::<u16>(32768 + (1 << 14), "u16");
-    check::<u32>(2_147_483_648 + (1 << 30), "u32");
 }

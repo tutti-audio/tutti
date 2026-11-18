@@ -4,6 +4,8 @@
 //! ([`BackendErrorKind`]) and its latency is a bare `Option<Duration>`. This
 //! module is where cpal's stream errors and callback timestamps are read into
 //! them, once, for the output driver and the capture stream alike.
+//! It also holds the offset-binary sample formats (`u8`, `u16`, `u32`), converted
+//! by the rule in `Sample` on the signed format of their width.
 //!
 //! cpal stamps each callback with two instants
 //! ([`OutputStreamTimestamp`](cpal::OutputStreamTimestamp): the callback and
@@ -15,7 +17,62 @@
 
 use std::time::{Duration, Instant};
 
+use tutti_buffers::{Float, Sample};
 use tutti_engine::{BackendErrorKind, StreamFaults};
+
+/// An offset-binary unsigned device format: the signed format of its width
+/// with the sign bit flipped, so silence is mid-scale.
+///
+/// The conversion between a graph's float and the device is `Sample`'s rule on
+/// the signed format, then the flip: one rule for every device format.
+pub(crate) trait OffsetBinary: cpal::SizedSample {
+    /// The signed format of the same width.
+    type Native: Sample;
+    /// The unsigned value of `signed`, its sign bit flipped.
+    fn from_signed(signed: Self::Native) -> Self;
+    /// The signed value of `self`, its sign bit flipped back.
+    #[cfg(any(feature = "capture", test))]
+    fn to_signed(self) -> Self::Native;
+}
+
+macro_rules! offset_binary {
+    ($($unsigned:ty => $signed:ty),+) => {$(
+        impl OffsetBinary for $unsigned {
+            type Native = $signed;
+            #[inline]
+            fn from_signed(signed: $signed) -> Self {
+                (signed as $unsigned) ^ (1 << (<$unsigned>::BITS - 1))
+            }
+            #[cfg(any(feature = "capture", test))]
+            #[inline]
+            fn to_signed(self) -> $signed {
+                (self ^ (1 << (<$unsigned>::BITS - 1))) as $signed
+            }
+        }
+    )+};
+}
+
+offset_binary!(u8 => i8, u16 => i16, u32 => i32);
+
+/// The offset-binary device sample of the graph's `x`.
+#[inline]
+pub(crate) fn to_offset<F: Float, U: OffsetBinary>(x: F) -> U {
+    U::from_signed(x.convert_to::<U::Native>())
+}
+
+/// The `f32` a native ([`Sample`]) device sample reads as.
+#[cfg(feature = "capture")]
+#[inline]
+pub(crate) fn from_native<S: Sample>(sample: S) -> f32 {
+    sample.convert_to::<f32>()
+}
+
+/// The `f32` an offset-binary device sample reads as.
+#[cfg(feature = "capture")]
+#[inline]
+pub(crate) fn from_offset<U: OffsetBinary>(sample: U) -> f32 {
+    sample.to_signed().convert_to::<f32>()
+}
 
 /// How a stream's faults read cpal's `err`: `DeviceNotAvailable` is the device
 /// gone; `DeviceChanged` and `RealtimeDenied` say the stream keeps playing;
