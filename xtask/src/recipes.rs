@@ -726,7 +726,7 @@ impl Planner<'_> {
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
-                r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi --all-targets -- -D warnings"#,
+                r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -900,6 +900,7 @@ const LOOM: &[&str] = &[
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-plugin-ipc-ffi --release --lib loom_model"#,
+    r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-winmm-ffi --release --lib loom_model"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test split_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
