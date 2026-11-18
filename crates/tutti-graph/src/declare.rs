@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_types::{AtomicF32, Param, ParamCell, ParamRaw};
+use tutti_types::{AtomicF64, Param, ParamCell};
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth, Drive,
     Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Q, Resonance, SampleSpan, Seconds,
@@ -42,17 +42,17 @@ pub trait ParamUnit: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
 
 /// A [`ParamUnit`] that is a number in a unit (not a switch): what a range
 /// (`Mods::range`) is a range of. Sealed.
-pub trait Scalar: ParamUnit + Unit<Raw: ParamRaw> {}
+pub trait Scalar: ParamUnit + Unit<Raw = f64> {}
 
 macro_rules! scalar_units {
     ($($unit:ty),+ $(,)?) => {$(
         impl sealed::Sealed for $unit {}
         impl ParamUnit for $unit {
             fn to_cell(self) -> f64 {
-                <<$unit as Unit>::Raw as ParamRaw>::to_f64(<$unit as Unit>::to_raw(self))
+                <$unit as Unit>::to_raw(self)
             }
             fn from_cell(cell: f64) -> Self {
-                <$unit as Unit>::from_raw(<<$unit as Unit>::Raw as ParamRaw>::from_f64(cell))
+                <$unit as Unit>::from_raw(cell)
             }
         }
         impl Scalar for $unit {}
@@ -120,7 +120,7 @@ impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 /// A cell a declaration names, whose value is in `U`: what makes the unit a
 /// declaration states agree with the cell's own type. Implemented for a
 /// `&Param<U>` (any unit but its own does not compile), for a switch's
-/// `&Arc<AtomicF32>` (`bool` only), and for an `Option` of either, where the
+/// `&Arc<AtomicF64>` (`bool` only: 0.0 off, 1.0 on), and for an `Option` of either, where the
 /// node has the param only sometimes.
 #[doc(hidden)]
 pub trait Cells<U: ParamUnit> {
@@ -132,11 +132,7 @@ pub trait Cells<U: ParamUnit> {
     fn cell(&self) -> Option<ParamCell>;
 }
 
-impl<U> Cells<U> for &Param<U>
-where
-    U: Scalar,
-    Arc<<U::Raw as ParamRaw>::Atomic>: Into<ParamCell>,
-{
+impl<U: Scalar> Cells<U> for &Param<U> {
     fn base(&self) -> Option<f64> {
         Some(self.load().to_cell())
     }
@@ -146,13 +142,13 @@ where
     }
 }
 
-impl Cells<bool> for &Arc<AtomicF32> {
+impl Cells<bool> for &Arc<AtomicF64> {
     fn base(&self) -> Option<f64> {
-        Some(f64::from(self.load(Ordering::Acquire)))
+        Some(self.load(Ordering::Acquire))
     }
 
     fn cell(&self) -> Option<ParamCell> {
-        Some(ParamCell::F32(Arc::clone(self)))
+        Some(ParamCell::F64(Arc::clone(self)))
     }
 }
 
@@ -336,7 +332,7 @@ pub fn input<'a, F: Float>(
 /// `declare_params!([generics] Type, n { rows })`, where `n` names the node in
 /// the rows' cell expressions. Each row is `Kind => Unit = cell`, a
 /// [`UnitParam`](tutti_units::UnitParam) kind, the unit its value is in, and
-/// the cell: a `&Param<Unit>`, a `&Arc<AtomicF32>` for a `bool` switch, or an
+/// the cell: a `&Param<Unit>`, a `&Arc<AtomicF64>` for a `bool` switch, or an
 /// `Option` of either for a param the node has only sometimes. The rows are
 /// the node's ports in this order, and its set in this order.
 ///

@@ -6,11 +6,11 @@
 //
 //     unit! {
 //         /// docs
-//         pub struct Db(pub f32): Unit, Ordered, Bounded, Additive, Signed;
+//         pub struct Db(pub f64): Unit, Ordered, Bounded, Additive, Signed;
 //     }
 //
-// The struct form picks the representation from the raw type. `f32` and `f64`
-// give a float quantity: derives `Copy, Clone, Debug, PartialEq, Default`,
+// The struct form picks the representation from the raw type. `f64` gives a
+// float quantity: derives `Copy, Clone, Debug, PartialEq, Default`,
 // serde `transparent` under `serde`. Any other raw type gives an integer
 // quantity: those derives plus `Eq, PartialOrd, Ord, Hash`, serde `transparent`.
 //
@@ -18,13 +18,7 @@
 // methods it gives. `Affine(Dur)` is the only one that takes an argument.
 
 macro_rules! unit {
-    // Float quantities. Every continuous unit becomes `f64`; the `f32` arm is
-    // deleted with the last `f32` unit.
-    (
-        $(#[$m:meta])* $v:vis struct $name:ident($fv:vis f32): $($abilities:tt)*
-    ) => {
-        unit!(@float $(#[$m])* $v struct $name($fv f32): $($abilities)*);
-    };
+    // Float quantities.
     (
         $(#[$m:meta])* $v:vis struct $name:ident($fv:vis f64): $($abilities:tt)*
     ) => {

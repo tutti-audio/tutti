@@ -19,7 +19,6 @@ crates/tutti-buffers/src/fold.rs  1  migrating: foundation
 crates/tutti-buffers/src/fold/ambisonic.rs  1  migrating: foundation
 crates/tutti-codec/src/format.rs  2  migrating: foundation
 crates/tutti-curve/src/piece.rs  6  migrating: foundation
-crates/tutti-curve/src/raw.rs  1  migrating: foundation
 crates/tutti-dsp/src/bit_crush.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/convolver.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/delay/bank.rs  4  migrating: R1/S7
@@ -60,7 +59,6 @@ crates/tutti-export/src/control.rs  5  migrating: foundation
 crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation
 crates/tutti-export/src/rendered.rs  1  migrating: foundation
-crates/tutti-graph/src/declare.rs  3  migrating: B2/B3
 crates/tutti-graph/src/event.rs  14  migrating: B2/B3
 crates/tutti-graph/src/exec/node_op.rs  1  migrating: B2/B3
 crates/tutti-graph/src/gain.rs  2  migrating: B2/B3
@@ -93,8 +91,8 @@ crates/tutti-modulation/src/source/follower.rs  5  migrating: B2/B3
 crates/tutti-modulation/src/source/note_adsr.rs  1  migrating: B2/B3
 crates/tutti-modulation/src/sources.rs  2  migrating: B2/B3
 crates/tutti-nodes/src/automation/lane.rs  2  migrating: R1/S7
+crates/tutti-nodes/src/automation/recording.rs  1  migrating: B2/B3
 crates/tutti-nodes/src/click.rs  3  migrating: R1/S7
-crates/tutti-nodes/src/dynamics/multiband.rs  8  migrating: B2/B3
 crates/tutti-nodes/src/lfo.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/mod_delay.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/sweep_clock.rs  1  migrating: B2/B3
@@ -137,7 +135,5 @@ crates/tutti-soundfont/src/soundfont_math.rs  6  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/voice.rs  23  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/volume_envelope.rs  3  migrating: dsp S7/instruments
 crates/tutti-types/src/lib.rs  1  migrating: foundation
-crates/tutti-types/src/value/param.rs  12  migrating: foundation
 crates/tutti-units/src/unit_param.rs  4  migrating: foundation
-crates/tutti-units/src/units/time.rs  5  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

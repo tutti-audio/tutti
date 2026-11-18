@@ -1396,7 +1396,7 @@ mod direct_sum {
             .map(|c| {
                 decay_ir(
                     200 + 90 * c,
-                    tutti_units::Seconds::from_f32(0.2 + 0.05 * c as f32),
+                    tutti_units::Seconds(0.2 + 0.05 * c as f64),
                     SampleRate::SR_48K,
                 )
             })

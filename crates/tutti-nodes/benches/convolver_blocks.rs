@@ -70,13 +70,9 @@ fn main() {
         let q = |p: usize| all[all.len() * p / 1000] as f64 / 1e3;
         (mean / 1e3, q(990), q(999), max_floor as f64 / 1e3)
     };
-    for secs in [0.5f32, 2.0, 5.0] {
+    for secs in [0.5f64, 2.0, 5.0] {
         let len = (secs * 48_000.0) as usize;
-        let ir = decay_ir(
-            len,
-            tutti_units::Seconds::from_f32(secs.min(1.0)),
-            SampleRate::SR_48K,
-        );
+        let ir = decay_ir(len, tutti_units::Seconds(secs.min(1.0)), SampleRate::SR_48K);
         for partition in [512usize] {
             for host in [64usize, 128, 512] {
                 let (mean, p99, p999, max) = run(&ir, partition, &[host]);
@@ -89,7 +85,7 @@ fn main() {
     }
     // The decision boundary.
     for (partition, secs) in [
-        (512usize, 0.7f32),
+        (512usize, 0.7f64),
         (512, 1.0),
         (512, 1.5),
         (128, 0.15),
@@ -98,7 +94,7 @@ fn main() {
     ] {
         let ir = decay_ir(
             (secs * 48_000.0) as usize,
-            tutti_units::Seconds::from_f32(secs.min(1.0)),
+            tutti_units::Seconds(secs.min(1.0)),
             SampleRate::SR_48K,
         );
         let (mean, p99, p999, max) = run(&ir, partition, &[64]);

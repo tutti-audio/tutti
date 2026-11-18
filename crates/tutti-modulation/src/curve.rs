@@ -7,7 +7,7 @@
 //! this crate. The trajectory's impl is here too, so `tutti-curve` stays free of
 //! the trait.
 
-use tutti_curve::{CurveRaw, Law, Trajectory};
+use tutti_curve::{Law, Trajectory};
 use tutti_units::{Beat, Unit};
 
 /// The piece of a [`Curve`] a beat falls in, between two breakpoints: what a
@@ -90,13 +90,13 @@ pub trait Curve: Send + Sync {
 }
 
 /// A unit's value as the lane's `f32`.
-fn lane<U: Unit<Raw: CurveRaw>>(value: U) -> f32 {
-    value.to_raw().widen() as f32
+fn lane<U: Unit<Raw = f64>>(value: U) -> f32 {
+    value.to_raw() as f32
 }
 
 /// A trajectory of any unit reads at its raw value, narrowed to the lane's
 /// `f32`: the lane that consumes a `Curve` knows its target's unit.
-impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
+impl<U: Unit<Raw = f64> + Send + Sync> Curve for Trajectory<U> {
     fn value_at(&self, beat: Beat) -> Option<f32> {
         Trajectory::value_at(self, beat).map(lane)
     }
@@ -113,8 +113,8 @@ impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
         }
         let inside = |v: U| {
             self.range().is_none_or(|(min, max)| {
-                let v = v.to_raw().widen();
-                v >= min.to_raw().widen() && v <= max.to_raw().widen()
+                let v = v.to_raw();
+                v >= min.to_raw() && v <= max.to_raw()
             })
         };
         // The first point after `beat`: the piece is the one before it.

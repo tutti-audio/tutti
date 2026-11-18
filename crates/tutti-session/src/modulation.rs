@@ -39,9 +39,9 @@ use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
-use tutti_nodes::automation::{Automatable, LaneControls, RecordMode, Recorder};
+use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
+use tutti_units::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -463,13 +463,13 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// A take is typed over the unit `U` of the value it records, which is the unit
 /// of the target it is opened on.
 #[derive(Debug)]
-pub struct AutomationTake<U: Automatable> {
+pub struct AutomationTake<U: Unit<Raw = f64> + Send + Sync> {
     recorder: Recorder<U>,
     touched: bool,
     closed: bool,
 }
 
-impl<U: Automatable> AutomationTake<U> {
+impl<U: Unit<Raw = f64> + Send + Sync> AutomationTake<U> {
     /// A take recording into `recorder` (a fresh one, or
     /// `Recorder::overdub` over the lane's trajectory).
     #[must_use]
@@ -533,7 +533,7 @@ trait OpenTake: std::fmt::Debug + Send {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-impl<U: Automatable + 'static> OpenTake for AutomationTake<U> {
+impl<U: Unit<Raw = f64> + Send + Sync + 'static> OpenTake for AutomationTake<U> {
     fn is_done(&mut self) -> bool {
         AutomationTake::is_done(self)
     }
@@ -1633,7 +1633,7 @@ impl Mods<'_> {
         take: AutomationTake<T::Unit>,
     ) -> Result<(), NoAutomation>
     where
-        T::Unit: Automatable + 'static,
+        T::Unit: Unit<Raw = f64> + Send + Sync + 'static,
     {
         let target = target.into();
         let key = self.own.key_of(target);
@@ -1651,7 +1651,7 @@ impl Mods<'_> {
     /// take is in the target's own unit, so the take read back is in that unit.
     pub fn take_mut<T: Ranged>(&mut self, target: T) -> Option<&mut AutomationTake<T::Unit>>
     where
-        T::Unit: Automatable + 'static,
+        T::Unit: Unit<Raw = f64> + Send + Sync + 'static,
     {
         let key = self.own.key_of(target.into());
         self.own

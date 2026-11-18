@@ -18,7 +18,7 @@ use tutti_buffers::Float;
 /// The last finite value a control cell held — what a non-finite write reads
 /// as.
 ///
-/// A raw `Arc<AtomicF32>` cell accepts anything, and a NaN or ±∞ that reaches
+/// A raw `Arc<AtomicF64>` cell accepts anything, and a NaN or ±∞ that reaches
 /// a recursive node's state (a filter integrator, a delay line, an LFO phase,
 /// an envelope follower) stays there for good: every later sample is computed
 /// from it. So each per-block read goes through one of these, and a

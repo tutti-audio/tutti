@@ -239,8 +239,8 @@ pub mod nodes {
     };
     pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        Automatable, AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls,
-        LiveAutomationLane, RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
+        RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -316,7 +316,7 @@ pub mod types {
         AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
         AmbisonicOrdering, AtomicSampleRate, Bed, BusTooWide, BusTopology, ChannelIndex,
         ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError, MAX_CHANNELS, Param, Param64,
-        ParamCell, ParamRaw, Speaker, Speakers, TopologyError,
+        ParamCell, Speaker, Speakers, TopologyError,
     };
     pub use tutti_types::{Mint, Placement};
     pub use tutti_units::{
