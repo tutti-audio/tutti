@@ -10,19 +10,25 @@
 //! probe did not finish (a crash or a hang), which the reader tells from the
 //! process, not from the file.
 
-use crate::{PluginDescriptor, ResultError};
+use crate::{PluginDescriptor, ProbeRefusal, ResultError};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-/// Leads every result file; the last byte is the format version (4: a
-/// descriptor carries what a measuring probe found, `measured`, and postcard has
-/// no defaults, so a version 3 file is refused; 3: a file's outcome is every
-/// plugin it holds; 2 held one descriptor, and its payload was postcard as this
-/// is; 1 was bincode).
-const MAGIC: [u8; 5] = *b"TPRB\x04";
-/// Magic, then the payload length as a little-endian `u64`.
-const HEADER: usize = MAGIC.len() + 8;
+/// Leads every result file: [`TAG`], then the format version.
+const TAG: [u8; 4] = *b"TPRB";
+
+/// The format version, the byte after [`TAG`]. **Bump it in the same change as
+/// any change to what [`ProbeOutcome`] holds** (a field, a variant, a type
+/// inside a descriptor): postcard has no field names and no defaults, so a
+/// reader of another shape decodes garbage or fails far from the cause. A
+/// version mismatch is [`ResultError::ProtocolMismatch`] and not a decode
+/// error. Nothing derives the version from the types; a test that pinned the
+/// bytes of a value would pin tutti's own output, which is no spec.
+const VERSION: u8 = 5;
+
+/// Magic, the version, then the payload length as a little-endian `u64`.
+const HEADER: usize = TAG.len() + 1 + 8;
 
 /// What a probe that finished found.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,9 +40,8 @@ pub enum ProbeOutcome {
     /// declares, each sub-plugin of a VST2 shell. Never empty: a file that holds
     /// no plugin is a [`Failed`](Self::Failed).
     Described(Vec<PluginDescriptor>),
-    /// The probe ran to its end and the plugin could not be read. The message is
-    /// the loader's own reason.
-    Failed(String),
+    /// The probe ran to its end and refused the plugin.
+    Failed(ProbeRefusal),
 }
 
 /// The bytes of a result file for `outcome`.
@@ -48,7 +53,8 @@ pub enum ProbeOutcome {
 pub(crate) fn encode_result(outcome: &ProbeOutcome) -> Vec<u8> {
     let payload = postcard::to_allocvec(outcome).expect("a ProbeOutcome serializes to a Vec");
     let mut bytes = Vec::with_capacity(HEADER + payload.len());
-    bytes.extend_from_slice(&MAGIC);
+    bytes.extend_from_slice(&TAG);
+    bytes.push(VERSION);
     bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
     bytes.extend_from_slice(&payload);
     bytes
@@ -59,18 +65,28 @@ pub(crate) fn encode_result(outcome: &ProbeOutcome) -> Vec<u8> {
 /// # Errors
 ///
 /// [`ResultError::Truncated`] if the file is cut short, [`ResultError::BadMagic`]
-/// if it is not a result, [`ResultError::Malformed`] if the payload does not
+/// if it is not a result, [`ResultError::ProtocolMismatch`] if it is a result of
+/// another version, [`ResultError::Malformed`] if the payload does not
 /// decode or is followed by more bytes.
 ///
 /// # Panics
 ///
 /// Never: the eight-byte slice converts to an array by construction.
 pub(crate) fn decode_result(bytes: &[u8]) -> Result<ProbeOutcome, ResultError> {
-    let Some((magic, rest)) = bytes.split_at_checked(MAGIC.len()) else {
+    let Some((tag, rest)) = bytes.split_at_checked(TAG.len()) else {
         return Err(ResultError::Truncated);
     };
-    if magic != MAGIC {
+    if tag != TAG {
         return Err(ResultError::BadMagic);
+    }
+    let Some((&version, rest)) = rest.split_first() else {
+        return Err(ResultError::Truncated);
+    };
+    if version != VERSION {
+        return Err(ResultError::ProtocolMismatch {
+            expected: VERSION,
+            found: version,
+        });
     }
     let Some((len, payload)) = rest.split_at_checked(8) else {
         return Err(ResultError::Truncated);
@@ -176,7 +192,10 @@ mod tests {
     fn an_outcome_round_trips_through_its_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("result");
-        for outcome in [described(), ProbeOutcome::Failed("no factory".into())] {
+        for outcome in [
+            described(),
+            ProbeOutcome::Failed(ProbeRefusal::Describe("no factory".into())),
+        ] {
             write_result(&path, &outcome).unwrap();
             assert_eq!(read_result(&path).unwrap(), Some(outcome));
         }
@@ -231,7 +250,8 @@ mod tests {
     fn a_payload_with_bytes_after_the_outcome_is_refused() {
         let mut payload = postcard::to_allocvec(&described()).unwrap();
         payload.push(0);
-        let mut bytes = MAGIC.to_vec();
+        let mut bytes = TAG.to_vec();
+        bytes.push(VERSION);
         bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&payload);
         assert!(matches!(
@@ -240,16 +260,23 @@ mod tests {
         ));
     }
 
-    /// A file from an older probe (format 1, bincode; format 2, one descriptor;
-    /// format 3, a descriptor without `measured`)
-    /// is refused by its magic, not decoded as the current payload.
+    /// **A result of another format version is a version mismatch, not a bad
+    /// file**: it names both versions, so a host and a probe of different builds
+    /// read as that and not as a corrupt result.
     #[test]
-    fn an_older_format_file_is_refused_by_its_magic() {
-        for version in [1, 2, 3] {
-            let mut old = encode_result(&described());
-            old[MAGIC.len() - 1] = version;
-            assert_eq!(decode_result(&old), Err(ResultError::BadMagic), "{version}");
+    fn a_result_of_another_version_is_a_protocol_mismatch() {
+        for found in [VERSION - 1, VERSION + 1, 0] {
+            let mut other = encode_result(&described());
+            other[TAG.len()] = found;
+            assert_eq!(
+                decode_result(&other),
+                Err(ResultError::ProtocolMismatch {
+                    expected: VERSION,
+                    found
+                })
+            );
         }
+        assert_eq!(decode_result(&TAG), Err(ResultError::Truncated));
     }
 
     /// **A measuring probe's figures survive the file**: the descriptor's
@@ -302,6 +329,38 @@ mod tests {
             .collect();
         let outcome = ProbeOutcome::Described(plugins);
         assert_eq!(decode_result(&encode_result(&outcome)), Ok(outcome));
+    }
+
+    /// **Every refusal a probe can write survives
+    /// the file**: postcard has no defaults, so a variant a reader cannot decode
+    /// would read as a malformed result, and a host would mistake a refusal for a
+    /// broken probe.
+    #[test]
+    fn every_refusal_and_failure_survives_the_result_file() {
+        use crate::{LoadStage, PluginFormat};
+        let reason = || "the plugin's words".to_string();
+        let refusals = [
+            ProbeRefusal::Missing,
+            ProbeRefusal::UnsupportedFormat,
+            ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit),
+            ProbeRefusal::StateUnreadable(reason()),
+            ProbeRefusal::StateRefused {
+                plugin: "p".into(),
+                reason: reason(),
+            },
+            ProbeRefusal::Load {
+                stage: LoadStage::Activation,
+                reason: reason(),
+            },
+            ProbeRefusal::Describe(reason()),
+            ProbeRefusal::Usage,
+            ProbeRefusal::NotMainThread,
+            ProbeRefusal::Empty,
+        ];
+        for refusal in refusals {
+            let outcome = ProbeOutcome::Failed(refusal);
+            assert_eq!(decode_result(&encode_result(&outcome)), Ok(outcome));
+        }
     }
 
     /// Every plugin of a file, in order, is in the file: the list is the outcome.

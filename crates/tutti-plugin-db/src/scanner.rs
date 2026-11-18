@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat};
+use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat, ProbeError};
 use tutti_rt::{LockExt, StopToken, Tally, TallyWriter, ThreadHandle};
 
 /// How many progress updates wait for the owner before the scan drops the
@@ -79,7 +79,7 @@ type ProbeFn = dyn Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescr
 ///
 /// Each new or changed file is probed through the scanner's probe (the host's
 /// out-of-process one); unchanged ones (same modification time) are skipped. A
-/// plugin that fails to load, hangs or crashes its probe is blacklisted with the
+/// plugin that hangs or crashes its probe is blacklisted with the
 /// reason, and a sentinel file (the "dead-man's pedal") blacklists the plugin a
 /// crashed scan was probing on the next run.
 ///
@@ -526,13 +526,14 @@ impl Job {
 
     /// Probes one file with pedal protection and returns the row to record.
     ///
-    /// A failing probe is recorded, not merely warned about. Without a row the
-    /// file stays out of date and is re-probed at full cost (a 5 s hang, or a
-    /// crashing subprocess) on every scan, forever. A crash, a timeout and a
-    /// library that will not load are properties of the plugin: each recurs
-    /// identically, so each earns the blacklist, with the loader's own reason for
-    /// a UI to show. The pedal covers the other case, the scanning host itself
-    /// dying, which out-of-process probing cannot prevent.
+    /// A probe that crashed or hung is recorded, not merely warned about. Without
+    /// a row the file stays out of date and is re-probed at full cost (a 5 s hang,
+    /// or a crashing subprocess) on every scan, forever. A crash and a timeout are
+    /// properties of the plugin: each recurs identically, so each earns the
+    /// blacklist, with its reason for a UI to show. Every other failure says
+    /// nothing about the plugin and records nothing
+    /// ([`ProbeFailure::blacklistable`]). The pedal covers the other case, the
+    /// scanning host itself dying, which out-of-process probing cannot prevent.
     ///
     /// The row carries the file's time, so reinstalling or updating the plugin
     /// re-admits it without the user knowing the blacklist existed.
@@ -560,21 +561,21 @@ impl Job {
                 None,
             ),
             Err(failure) if failure.blacklistable() => {
-                warn!("failed to probe plugin {:?}: {}", path, failure.reason);
+                warn!("failed to probe plugin {:?}: {}", path, failure.reason());
                 (
                     ScanOutcome::NewlyBlacklisted,
                     Some(RowChange::put(
                         key,
-                        FileRow::blacklisted(failure.reason.clone(), facts),
+                        FileRow::blacklisted(failure.reason(), facts),
                     )),
                     Some(failure),
                 )
             }
-            // Environmental (no plugin-server, an IO error, a protocol
-            // mismatch): says nothing about the plugin, so record nothing and
-            // retry once the environment is fixed.
+            // A refusal or the environment's failure (no `plugin-probe`, a stale
+            // one, a bad command line): says nothing about the plugin, so record
+            // nothing and retry once it is fixed.
             Err(failure) => {
-                warn!("failed to probe plugin {:?}: {}", path, failure.reason);
+                warn!("failed to probe plugin {:?}: {}", path, failure.reason());
                 (ScanOutcome::Failed, None, Some(failure))
             }
         }
@@ -588,7 +589,7 @@ enum ScanOutcome {
     Failed,
     /// Already blacklisted before this scan; skipped.
     Blacklisted,
-    /// Blacklisted *by* this scan: a crash, a timeout, or a failed load.
+    /// Blacklisted *by* this scan: a crash or a timeout.
     NewlyBlacklisted,
     UpToDate,
 }
@@ -604,8 +605,7 @@ pub struct ScanResult {
     pub failed: usize,
     /// Plugins that were blacklisted (previously or newly).
     pub blacklisted: usize,
-    /// Plugins this scan added to the blacklist because they crashed, hung, or
-    /// failed to load. Surface this so a UI can tell the user something was hidden
+    /// Plugins this scan added to the blacklist because they crashed or hung. Surface this so a UI can tell the user something was hidden
     /// and point at [`PluginDb::unblacklist`] / [`PluginDb::clear_blacklist`].
     pub newly_blacklisted: usize,
     /// Every file whose probe failed, with the reason, in the order they were
@@ -613,50 +613,44 @@ pub struct ScanResult {
     pub failures: Vec<FileFailure>,
 }
 
-/// What went wrong in a probe.
+/// A probe failure: the typed account of what went wrong.
 ///
-/// The first three are properties of the plugin: each recurs identically on every
-/// future scan, at the same cost, so recording it beats re-probing forever
-/// ([`blacklistable`](Self::blacklistable)). The rest say nothing about the plugin
-/// and stay retryable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ProbeFailureKind {
-    /// The probe process died without a result.
-    Crashed,
-    /// The probe did not finish by its deadline.
-    TimedOut,
-    /// The probe ran to its end and the plugin would not load.
-    LoadFailed,
-    /// The probe executable could not be found, so nothing was looked at.
-    ProbeNotFound,
-    /// Anything else of the environment: an I/O error, a protocol mismatch.
-    Environment,
-}
-
-impl ProbeFailureKind {
-    /// Whether the failure is a property of the plugin, so a scan blacklists it.
-    #[must_use]
-    pub const fn blacklistable(self) -> bool {
-        matches!(self, Self::Crashed | Self::TimedOut | Self::LoadFailed)
-    }
-}
-
-/// A probe failure: what kind it was and why.
+/// A crash and a hang are properties of the plugin: each recurs identically on
+/// every future scan, at the same cost, so recording it beats re-probing forever
+/// ([`blacklistable`](Self::blacklistable)). Everything else says nothing about the
+/// plugin and stays retryable: a refusal (a missing file, a format the probe lacks,
+/// a state it would not take, a loader that said no), a missing or stale
+/// `plugin-probe`, a probe that exited by one of its own failing codes, a
+/// cancelled probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeFailure {
-    /// Why the probe failed; stored as the blacklist reason.
-    pub reason: String,
-    /// What kind of failure it was.
-    pub kind: ProbeFailureKind,
+    /// What went wrong.
+    pub error: ProbeError,
 }
 
 impl ProbeFailure {
-    /// Whether this failure earns a blacklist entry
-    /// ([`ProbeFailureKind::blacklistable`]).
+    /// Whether this failure earns a blacklist entry: the probe crashed, or hung
+    /// until its deadline. A probe that ended by one of its own failing codes did
+    /// not crash on the plugin.
     #[must_use]
     pub const fn blacklistable(&self) -> bool {
-        self.kind.blacklistable()
+        match &self.error {
+            ProbeError::Died(death) => !death.is_the_probes_own(),
+            ProbeError::TimedOut { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Why the probe failed, as text: what a blacklist row stores.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        self.error.to_string()
+    }
+}
+
+impl From<ProbeError> for ProbeFailure {
+    fn from(error: ProbeError) -> Self {
+        Self { error }
     }
 }
 
@@ -727,6 +721,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
     use tempfile::TempDir;
+    use tutti_plugin_types::{LoadStage, ProbeDeath, ProbeExit, ProbeRefusal, ResultError};
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);
@@ -798,11 +793,71 @@ mod tests {
         Ok(vec![probe_plugin_fallback(path, PluginFormat::Clap)])
     }
 
+    /// The failure of a probe whose process was killed by a segfault.
+    fn crashed() -> ProbeFailure {
+        ProbeError::Died(ProbeDeath::Signal(11)).into()
+    }
+
+    /// **Only a crash or a hang blacklists.** A refusal says nothing about the
+    /// plugin (a missing file, a format the probe lacks, a loader that said no), nor
+    /// does the probe's own failing exit or its absence: each stays retryable.
+    #[test]
+    fn only_a_crash_or_a_hang_is_blacklistable() {
+        let after = Duration::from_secs(15);
+        let blacklisted = [
+            ProbeError::Died(ProbeDeath::Signal(11)),
+            ProbeError::Died(ProbeDeath::Panicked),
+            ProbeError::Died(ProbeDeath::Status(7)),
+            ProbeError::Died(ProbeDeath::Exited(ProbeExit::Written)),
+            // A plugin's own `exit`, even by the codes the probe once used.
+            ProbeError::Died(ProbeDeath::Status(2)),
+            ProbeError::Died(ProbeDeath::Status(3)),
+            ProbeError::Died(ProbeDeath::Status(4)),
+            ProbeError::TimedOut { after },
+        ];
+        for error in blacklisted {
+            assert!(
+                ProbeFailure::from(error.clone()).blacklistable(),
+                "{error:?}"
+            );
+        }
+        let kept = [
+            ProbeError::Refused(ProbeRefusal::Missing),
+            ProbeError::Refused(ProbeRefusal::UnsupportedFormat),
+            ProbeError::Refused(ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit)),
+            ProbeError::Refused(ProbeRefusal::StateUnreadable("denied".into())),
+            ProbeError::Refused(ProbeRefusal::StateRefused {
+                plugin: "p".into(),
+                reason: "no".into(),
+            }),
+            ProbeError::Refused(ProbeRefusal::Load {
+                stage: LoadStage::Opening,
+                reason: "dlopen failed".into(),
+            }),
+            ProbeError::Refused(ProbeRefusal::Describe("no".into())),
+            ProbeError::Refused(ProbeRefusal::Empty),
+            ProbeError::Refused(ProbeRefusal::Usage),
+            ProbeError::Refused(ProbeRefusal::NotMainThread),
+            ProbeError::Died(ProbeDeath::Exited(ProbeExit::ResultUnwritable)),
+            ProbeError::ProbeNotFound,
+            ProbeError::Io(std::io::ErrorKind::PermissionDenied),
+            ProbeError::Result(ResultError::BadMagic),
+            ProbeError::Result(ResultError::ProtocolMismatch {
+                expected: 5,
+                found: 4,
+            }),
+            ProbeError::Cancelled,
+        ];
+        for error in kept {
+            assert!(
+                !ProbeFailure::from(error.clone()).blacklistable(),
+                "{error:?}"
+            );
+        }
+    }
+
     fn crashes(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-        Err(ProbeFailure {
-            reason: "crashed during probe".into(),
-            kind: ProbeFailureKind::Crashed,
-        })
+        Err(crashed())
     }
 
     fn plugins_dir(dir: &TempDir) -> PathBuf {
@@ -1178,37 +1233,33 @@ mod tests {
         assert_eq!(meta.id, "vst3.my_reverb");
     }
 
-    /// The consequence rather than the classification: once a load failure is
-    /// recorded, the scanner must stop re-probing it. `blacklistable: false`
-    /// once meant no write at all, so every scan paid a subprocess spawn to
-    /// rediscover the same broken library.
+    /// The consequence rather than the classification: once a crash is
+    /// recorded, the scanner must stop re-probing it. Not writing a row once
+    /// meant every scan paid a subprocess spawn to rediscover the same crash.
     #[test]
-    fn a_recorded_load_failure_is_not_reprobed() {
+    fn a_recorded_crash_is_not_reprobed() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let broken = create_fake_plugin(&plugins_dir, "Broken.vst3");
 
         let mut db = PluginDb::new();
-        // What `probe_one` does for a LoadFailed.
-        let failure = ProbeFailure {
-            reason: "failed to load during probe: dlopen failed".into(),
-            kind: ProbeFailureKind::LoadFailed,
-        };
-        db.blacklist(&broken, failure.reason, &FileFacts::read(&broken));
+        // What `probe_one` does for a crash.
+        let failure = crashed();
+        db.blacklist(&broken, failure.reason(), &FileFacts::read(&broken));
 
         assert!(
             matches!(
                 facts::classify(db.row(&broken), &FileFacts::read(&broken)),
                 ScanDecision::Blacklisted
             ),
-            "a recorded load failure must be skipped, not re-probed at full \
+            "a recorded crash must be skipped, not re-probed at full \
              subprocess cost on every scan"
         );
 
         // Hidden from `plugins()`, but not silently: the reason is retrievable.
         assert_eq!(db.plugins().count(), 0);
         let entry = db.blacklisted().next().expect("must be listed as hidden");
-        assert!(entry.reason.contains("dlopen"));
+        assert!(entry.reason.contains("signal 11"));
 
         // And it is not permanent: reinstalling the plugin re-admits it.
         let mut row = db.row(&broken).unwrap().clone();
@@ -1349,12 +1400,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let plugin = create_fake_plugin(&plugins_dir, "a.clap");
-        let (scanner, calls) = counting_scanner(dir.path(), |_| {
-            Err(ProbeFailure {
-                reason: "no plugin-server".into(),
-                kind: ProbeFailureKind::Environment,
-            })
-        });
+        let (scanner, calls) =
+            counting_scanner(dir.path(), |_| Err(ProbeError::ProbeNotFound.into()));
         let mut db = PluginDb::new();
 
         scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
@@ -1545,10 +1592,7 @@ mod tests {
     }
 
     fn environmental(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-        Err(ProbeFailure {
-            reason: "no plugin-server".into(),
-            kind: ProbeFailureKind::Environment,
-        })
+        Err(ProbeError::ProbeNotFound.into())
     }
 
     /// While a scan is parked mid-probe, nothing else may use its pedal: not a
@@ -1668,10 +1712,7 @@ mod tests {
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, stop| {
             let _ = probing_tx.try_send(());
             let _ = stop.wait(Duration::from_secs(600));
-            Err(ProbeFailure {
-                reason: "crashed during probe".into(),
-                kind: ProbeFailureKind::Crashed,
-            })
+            Err(crashed())
         });
         let mut db = PluginDb::new();
         scan_dirs(&scanner_for(dir.path()), &mut db, [&plugins_dir], no_save).unwrap();
