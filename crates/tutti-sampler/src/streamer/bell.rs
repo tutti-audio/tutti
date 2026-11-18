@@ -29,6 +29,7 @@ use crossbeam_channel::TrySendError;
 use crossbeam_channel::{SendError, Sender};
 use tutti_rt::{Doorbell, Sleeper, doorbell};
 
+use super::StreamFloat;
 use super::command::StreamerCommand;
 
 /// The streamer thread's wake-up, shared by every sender, every voice's
@@ -130,18 +131,21 @@ impl Bell {
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone)]
-pub(crate) struct StreamerSender {
-    tx: Sender<StreamerCommand>,
+pub(crate) struct StreamerSender<F: StreamFloat = f32> {
+    tx: Sender<StreamerCommand<F>>,
     bell: Arc<Bell>,
 }
 
-impl StreamerSender {
-    pub(crate) fn new(tx: Sender<StreamerCommand>, bell: Arc<Bell>) -> Self {
+impl<F: StreamFloat> StreamerSender<F> {
+    pub(crate) fn new(tx: Sender<StreamerCommand<F>>, bell: Arc<Bell>) -> Self {
         Self { tx, bell }
     }
 
     /// Queues `cmd` and rings the bell, waiting while the queue is full.
-    pub(crate) fn send(&self, cmd: StreamerCommand) -> Result<(), SendError<StreamerCommand>> {
+    pub(crate) fn send(
+        &self,
+        cmd: StreamerCommand<F>,
+    ) -> Result<(), SendError<StreamerCommand<F>>> {
         self.tx.send(cmd)?;
         self.bell.ring();
         Ok(())
@@ -151,8 +155,8 @@ impl StreamerSender {
     #[cfg(test)]
     pub(crate) fn try_send(
         &self,
-        cmd: StreamerCommand,
-    ) -> Result<(), TrySendError<StreamerCommand>> {
+        cmd: StreamerCommand<F>,
+    ) -> Result<(), TrySendError<StreamerCommand<F>>> {
         self.tx.try_send(cmd)?;
         self.bell.ring();
         Ok(())
@@ -168,13 +172,13 @@ impl StreamerSender {
 /// A sender whose bell nobody sleeps on: for a test that holds the receiving
 /// end itself.
 #[cfg(test)]
-impl From<Sender<StreamerCommand>> for StreamerSender {
-    fn from(tx: Sender<StreamerCommand>) -> Self {
+impl<F: StreamFloat> From<Sender<StreamerCommand<F>>> for StreamerSender<F> {
+    fn from(tx: Sender<StreamerCommand<F>>) -> Self {
         Self::new(tx, Bell::new().0)
     }
 }
 
-impl std::fmt::Debug for StreamerSender {
+impl<F: StreamFloat> std::fmt::Debug for StreamerSender<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamerSender").finish_non_exhaustive()
     }

@@ -76,7 +76,17 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_buffers::Float;
+use tutti_rt::RingSample;
 use tutti_types::{Mint, SampleRate};
+
+/// A [`Float`] a stream's ring can hold: `f32` or `f64`, the two with an atomic
+/// word of their width ([`RingSample`]).
+///
+/// Implemented for every such format; a stream is generic over it.
+pub trait StreamFloat: Float + RingSample {}
+
+impl<F: Float + RingSample> StreamFloat for F {}
 
 /// The disk-streaming engine: owns the streamer thread that reads files into
 /// per-stream rings for [`DiskVoice`](crate::DiskVoice)s to play.
@@ -150,9 +160,9 @@ use tutti_types::{Mint, SampleRate};
 /// # Ok(())
 /// # }
 /// ```
-pub struct DiskStreamer<D = Running> {
-    streamer_tx: StreamerSender,
-    shared: Handles,
+pub struct DiskStreamer<D = Running, F: StreamFloat = f32> {
+    streamer_tx: StreamerSender<F>,
+    shared: Handles<F>,
     /// The driver: the thread, which only its drop uses, or the caller's
     /// cycle.
     #[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
@@ -163,7 +173,7 @@ pub struct DiskStreamer<D = Running> {
 
 // The driver holds a thread handle or a cycle that can't derive `Debug`; print
 // the sample rate and note the live streamer.
-impl<D> std::fmt::Debug for DiskStreamer<D> {
+impl<D, F: StreamFloat> std::fmt::Debug for DiskStreamer<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskStreamer")
             .field("sample_rate", &self.shared.session_rate.get().get())
@@ -172,8 +182,21 @@ impl<D> std::fmt::Debug for DiskStreamer<D> {
 }
 
 impl DiskStreamer<Running> {
+    /// [`start`](DiskStreamer::start) for the `f32` streamer: the one a
+    /// path `DiskStreamer::new` names, with no format to spell.
+    ///
+    /// # Errors
+    ///
+    /// As [`start`](DiskStreamer::start).
+    pub fn new(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
+        Self::start(sample_rate, config)
+    }
+}
+
+impl<F: StreamFloat> DiskStreamer<Running, F> {
     /// Creates the streaming engine at `sample_rate` (the engine's rate) and
-    /// spawns the streamer thread.
+    /// spawns the streamer thread. Its streams decode into `F` and its rings
+    /// hold `F`.
     ///
     /// Configure with [`DiskStreamerConfig`] (`Default` + struct-update); pass
     /// `Default::default()` for the tuned defaults. Allocates and spawns a
@@ -185,7 +208,7 @@ impl DiskStreamer<Running> {
     /// streamer thread. Every stream and every refill depends on it, so there
     /// is no streamer to return: a stream command with no consumer would
     /// stall silently.
-    pub fn new(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
+    pub fn start(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
         Self::build(sample_rate.into(), config, Seams::default())
     }
 
@@ -196,7 +219,7 @@ impl DiskStreamer<Running> {
     }
 
     /// The streamer over `built`, its thread started.
-    fn from_built(built: Built) -> Result<Self> {
+    fn from_built(built: Built<F>) -> Result<Self> {
         let (streamer_tx, shared) = (built.command_sender(), built.shared());
 
         Ok(DiskStreamer {
@@ -210,19 +233,8 @@ impl DiskStreamer<Running> {
 
 #[cfg(any(test, feature = "testing"))]
 impl DiskStreamer<ByHand> {
-    /// Creates the streaming engine without spawning the streamer thread;
-    /// cycles are then run by hand with `step_once`.
-    /// Requires the `testing` feature.
-    ///
-    /// The step is the same one the thread runs, so this is the shipped path
-    /// with its sleeping removed rather than a parallel implementation. What it
-    /// buys is a streamer whose progress is *counted* instead of waited for: a
-    /// test can say "after this many cycles the ring holds audio", where the
-    /// threaded streamer only lets it say "after this long it probably does".
-    ///
-    /// # Errors
-    ///
-    /// None at present, as for [`new`](DiskStreamer::new).
+    /// [`by_hand`](DiskStreamer::by_hand) for the `f32` streamer, as
+    /// [`new`](DiskStreamer::new) is [`start`](DiskStreamer::start).
     ///
     /// # Examples
     ///
@@ -235,11 +247,35 @@ impl DiskStreamer<ByHand> {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`by_hand`](DiskStreamer::by_hand).
     pub fn manual(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
+        Self::by_hand(sample_rate, config)
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<F: StreamFloat> DiskStreamer<ByHand<F>, F> {
+    /// Creates the streaming engine without spawning the streamer thread;
+    /// cycles are then run by hand with `step_once`.
+    /// Requires the `testing` feature.
+    ///
+    /// The step is the same one the thread runs, so this is the shipped path
+    /// with its sleeping removed rather than a parallel implementation. What it
+    /// buys is a streamer whose progress is *counted* instead of waited for: a
+    /// test can say "after this many cycles the ring holds audio", where the
+    /// threaded streamer only lets it say "after this long it probably does".
+    ///
+    /// # Errors
+    ///
+    /// None at present, as for [`start`](DiskStreamer::start).
+    pub fn by_hand(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
         Self::manual_with(sample_rate.into(), config, Seams::default())
     }
 
-    /// [`manual`](Self::manual) with what a test replaces.
+    /// [`by_hand`](Self::by_hand) with what a test replaces.
     fn manual_with(
         sample_rate: SampleRate,
         config: DiskStreamerConfig,
@@ -296,7 +332,7 @@ impl DiskStreamer<ByHand> {
     }
 }
 
-impl<D> DiskStreamer<D> {
+impl<D, F: StreamFloat> DiskStreamer<D, F> {
     /// Opens `path` as a new stream, its reader starting at `place`, and
     /// answers with an [`Opening`]: poll it for the stream's [`Stream`] and its
     /// one [`StreamReader`]. The voice is as wide as the file
@@ -309,7 +345,7 @@ impl<D> DiskStreamer<D> {
     /// Control thread. It waits while the streamer's queue is full, as every
     /// stream command does. A streamer that is gone answers
     /// [`OpenError::StreamerGone`] at the first poll.
-    pub fn open(&self, path: &std::path::Path, place: Placement) -> Opening {
+    pub fn open(&self, path: &std::path::Path, place: Placement) -> Opening<F> {
         self.open_as(path, place, None)
     }
 
@@ -328,7 +364,7 @@ impl<D> DiskStreamer<D> {
         path: &std::path::Path,
         place: Placement,
         width: tutti_types::ChannelLayout,
-    ) -> Opening {
+    ) -> Opening<F> {
         self.open_as(path, place, Some(width))
     }
 
@@ -337,7 +373,7 @@ impl<D> DiskStreamer<D> {
         path: &std::path::Path,
         place: Placement,
         width: Option<tutti_types::ChannelLayout>,
-    ) -> Opening {
+    ) -> Opening<F> {
         let id = StreamId::mint(&self.next_stream);
         let (reply, answer) = crossbeam_channel::bounded(1);
         // A refused send drops the command and with it `reply`, which is how
@@ -389,7 +425,7 @@ impl<D> DiskStreamer<D> {
 
     /// The streamer's wave cache (tests).
     #[cfg(test)]
-    pub(crate) fn cache(&self) -> std::sync::Arc<cache::LruCache> {
+    pub(crate) fn cache(&self) -> std::sync::Arc<cache::LruCache<F>> {
         std::sync::Arc::clone(&self.shared.cache)
     }
 }

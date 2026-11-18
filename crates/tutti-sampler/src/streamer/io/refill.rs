@@ -13,6 +13,7 @@
 //! Every count here is denominated in frames. The `* ch` at each scratch
 //! resize is the only place the interleave stride enters.
 
+use super::super::StreamFloat;
 use super::super::cells::Cells;
 #[cfg(test)]
 use super::super::command::StreamId;
@@ -25,6 +26,9 @@ use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::MAX_POS_RING_POSITION;
 use tutti_types::Samples;
+
+/// Samples a parallel worker's scratch starts with; it grows to a chunk.
+const PARALLEL_SCRATCH_SAMPLES: usize = 16384;
 
 /// The fraction of a ring ahead of its reader below which the streamer refills
 /// it, and at which a stream counts as primed and healthy.
@@ -80,11 +84,11 @@ fn varifill_chunk(
 /// `interleave_buffer` is the streamer's reusable scratch, passed in so a refill
 /// does not allocate per cycle. Streamer thread throughout — this both blocks on
 /// disk and may grow that buffer, so it must never run on the audio thread.
-pub(crate) fn refill_all(
-    records: &mut [Record],
+pub(crate) fn refill_all<F: StreamFloat>(
+    records: &mut [Record<F>],
     metrics: &Metrics,
     base_chunk_size: usize,
-    interleave_buffer: &mut Vec<f32>,
+    interleave_buffer: &mut Vec<F>,
 ) {
     let read_rate = metrics.read_rate();
     for record in records.iter_mut().filter(|r| r.is_live()) {
@@ -94,11 +98,11 @@ pub(crate) fn refill_all(
 
 /// [`refill_one`] on `record` under its containment, then its status
 /// published.
-fn refill_contained(
-    record: &mut Record,
+fn refill_contained<F: StreamFloat>(
+    record: &mut Record<F>,
     base_chunk_size: usize,
     read_rate: f64,
-    buffer: &mut Vec<f32>,
+    buffer: &mut Vec<F>,
 ) {
     let refilled =
         record.contained(|r| refill_one(&mut r.out, &r.cells, base_chunk_size, read_rate, buffer));
@@ -112,10 +116,10 @@ fn refill_contained(
 ///
 /// `par_iter_mut` over the records hands each worker an exclusive `&mut` to a
 /// *different* one, whose mapping — loop included — travels with its writer, so
-/// a looped stream refills here exactly as it does serially. Scratch is a
-/// thread-local per worker.
-pub(crate) fn refill_all_parallel(
-    records: &mut [Record],
+/// a looped stream refills here exactly as it does serially. Each worker
+/// grows a scratch of its own, a [`Vec`] per rayon split, not per record.
+pub(crate) fn refill_all_parallel<F: StreamFloat>(
+    records: &mut [Record<F>],
     metrics: &Metrics,
     base_chunk_size: usize,
 ) {
@@ -123,15 +127,10 @@ pub(crate) fn refill_all_parallel(
     records
         .par_iter_mut()
         .filter(|r| r.is_live())
-        .for_each(|record| {
-            thread_local! {
-                static LOCAL_BUF: std::cell::RefCell<Vec<f32>> =
-                    std::cell::RefCell::new(Vec::with_capacity(16384));
-            }
-            LOCAL_BUF.with(|buf| {
-                refill_contained(record, base_chunk_size, read_rate, &mut buf.borrow_mut());
-            });
-        });
+        .for_each_init(
+            || Vec::with_capacity(PARALLEL_SCRATCH_SAMPLES),
+            |buffer, record| refill_contained(record, base_chunk_size, read_rate, buffer),
+        );
 }
 
 /// What a ring's window says about where its reader plays: the one decision the
@@ -214,12 +213,12 @@ pub(crate) fn needs_refill(
 /// Says whether a read of the file failed (a decode fault), whether the ring
 /// is primed (at or above its refill threshold, or holding all it can be
 /// given) and how full it was before this refill wrote anything.
-fn refill_one(
-    writer: &mut RegionOut,
+fn refill_one<F: StreamFloat>(
+    writer: &mut RegionOut<F>,
     cells: &Cells,
     base_chunk_size: usize,
     read_rate: f64,
-    buffer: &mut Vec<f32>,
+    buffer: &mut Vec<F>,
 ) -> Refilled {
     let ring = Arc::clone(writer.ring());
     let play = writer.play();
@@ -261,7 +260,7 @@ fn refill_one(
     let (_, to) = writer.window();
     let layout = writer.channels();
     buffer.clear();
-    buffer.resize(layout.interleaved_len(Samples(n)), 0.0);
+    buffer.resize(layout.interleaved_len(Samples(n)), F::ZERO);
     let mapping = writer.content().current.clone();
     // The buffer is whole frames of the ring's width, so the view is built.
     let read_ok = InterleavedMut::new(buffer.as_mut_slice(), layout)
@@ -496,7 +495,7 @@ mod tests {
         use std::path::PathBuf;
 
         let (mut writer, ring, mut reader) =
-            RegionBuffer::with_capacity(StreamId::of(1), PathBuf::from("t.wav"), 4096, 1u16);
+            RegionBuffer::with_capacity::<f32>(StreamId::of(1), PathBuf::from("t.wav"), 4096, 1u16);
         let cells = Cells::new();
         let mut buffer = Vec::new();
         for _ in 0..3 {

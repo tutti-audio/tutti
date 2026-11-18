@@ -35,11 +35,13 @@ use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 use tutti_rt::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
-use super::StreamerSender;
 use super::cache::LruCache;
+#[cfg(codec)]
+use super::cache::wave_bytes;
 use super::command::{Decoded, StreamId, StreamerCommand};
 use super::handlers::Handles;
 use super::metrics::{Metrics, ReadMeter};
+use super::{StreamFloat, StreamerSender};
 use crate::OpenError;
 
 /// How a thread is started: the seam a test replaces to see a spawn fail.
@@ -107,15 +109,15 @@ struct Job {
 }
 
 /// The decode thread's queue, started on first use. Streamer-thread-local.
-pub(super) struct DecodeLane {
+pub(super) struct DecodeLane<F: StreamFloat = f32> {
     /// The streamer's own queue, where a result is sent.
-    reports: StreamerSender,
+    reports: StreamerSender<F>,
     /// The job queue, once the thread has started.
     jobs: Option<Sender<Job>>,
 }
 
-impl DecodeLane {
-    pub(super) fn new(reports: StreamerSender) -> Self {
+impl<F: StreamFloat> DecodeLane<F> {
+    pub(super) fn new(reports: StreamerSender<F>) -> Self {
         Self {
             reports,
             jobs: None,
@@ -131,7 +133,7 @@ impl DecodeLane {
     /// where it would have waited for good.
     pub(super) fn submit(
         &mut self,
-        shared: &Handles,
+        shared: &Handles<F>,
         id: StreamId,
         path: PathBuf,
     ) -> Result<(), OpenError> {
@@ -151,7 +153,7 @@ impl DecodeLane {
         sent.map_err(|_| OpenError::Io(io::ErrorKind::BrokenPipe))
     }
 
-    fn start(&self, shared: &Handles) -> Result<Sender<Job>, OpenError> {
+    fn start(&self, shared: &Handles<F>) -> Result<Sender<Job>, OpenError> {
         let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
         let reports = self.reports.clone();
         let (cache, metrics) = (Arc::clone(&shared.cache), Arc::clone(&shared.metrics));
@@ -203,12 +205,12 @@ impl DecodeLane {
 /// With no codec feature enabled there is no decoder to call, so the miss arm is
 /// gated out and a miss is simply `None`. The cache *lookup* stays live in both
 /// builds: entries reach it from elsewhere, and a hit needs no decoder.
-fn load_wave(
-    cache: &LruCache,
+fn load_wave<F: StreamFloat>(
+    cache: &LruCache<F>,
     metrics: &Metrics,
     meter: &mut ReadMeter,
     file_path: &Path,
-) -> Option<Arc<Wave>> {
+) -> Option<Arc<Wave<F>>> {
     if let Some(cached) = cache.get(file_path) {
         return Some(cached);
     }
@@ -218,10 +220,9 @@ fn load_wave(
     // `--no-default-features` build.
     #[cfg(codec)]
     {
-        if let Ok(w) = tutti_codec::read_wave::<f32>(file_path) {
+        if let Ok(w) = tutti_codec::read_wave::<F>(file_path) {
             let arc_wave = Arc::new(w);
-            let bytes = arc_wave.len().get() as u64 * arc_wave.channels() as u64 * 4;
-            meter.record_read(bytes, metrics);
+            meter.record_read(wave_bytes(&arc_wave), metrics);
             cache.insert(file_path.to_path_buf(), arc_wave.clone());
             return Some(arc_wave);
         }

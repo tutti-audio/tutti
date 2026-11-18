@@ -25,12 +25,12 @@
 //! `streamer_loop` is written in terms of `StreamerCycle::step`, so a
 //! divergence between what tests drive and what ships is not representable.
 
-use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
 use super::handlers::{Handles, Local, handle_command};
 use super::io::refill::{FILL_THRESHOLD, refill_all, refill_all_parallel};
 use super::record::{Record, Streams};
+use super::{StreamFloat, StreamerSender};
 
 /// What the loop should do after one streamer cycle.
 ///
@@ -74,15 +74,15 @@ pub enum StepOutcome {
 /// borrows nothing. Both the thread's loop and a test driver build one
 /// and call [`step`](Self::step) repeatedly; the only difference between them is
 /// what happens *between* the calls.
-pub(crate) struct StreamerCycle {
-    local: Local,
+pub(crate) struct StreamerCycle<F: StreamFloat = f32> {
+    local: Local<F>,
     config: BufferConfig,
 }
 
-impl StreamerCycle {
+impl<F: StreamFloat> StreamerCycle<F> {
     /// The stream table (tests).
     #[cfg(test)]
-    pub(crate) fn streams(&self) -> &Streams {
+    pub(crate) fn streams(&self) -> &Streams<F> {
         &self.local.streams
     }
 
@@ -90,7 +90,7 @@ impl StreamerCycle {
     ///
     /// `reports` is the streamer's own queue, which its decode thread answers
     /// on.
-    pub(crate) fn new(config: BufferConfig, reports: StreamerSender) -> Self {
+    pub(crate) fn new(config: BufferConfig, reports: StreamerSender<F>) -> Self {
         Self {
             local: Local::new(config.chunk_size, reports),
             config,
@@ -107,8 +107,8 @@ impl StreamerCycle {
     /// non-blockingly, so a step never waits for one to arrive.
     pub(crate) fn step(
         &mut self,
-        shared: &Handles,
-        mut drain: impl FnMut() -> Option<StreamerCommand>,
+        shared: &Handles<F>,
+        mut drain: impl FnMut() -> Option<StreamerCommand<F>>,
     ) -> StepOutcome {
         while let Some(cmd) = drain() {
             handle_command(cmd, shared, &self.config, &mut self.local);
@@ -166,7 +166,7 @@ impl StreamerCycle {
 /// about the cycle as a whole: did *any* refill land? A per-stream comparison
 /// would report a stall for a stream at EOF even while its neighbours were
 /// still filling, and the loop must keep running for those.
-fn total_buffered(streams: &Streams) -> usize {
+fn total_buffered<F: StreamFloat>(streams: &Streams<F>) -> usize {
     streams
         .records()
         .iter()
@@ -177,7 +177,7 @@ fn total_buffered(streams: &Streams) -> usize {
 
 /// True when no stream needs a refill: the loop can safely sleep until rung
 /// instead of spinning.
-fn buffers_healthy(streams: &Streams) -> bool {
+fn buffers_healthy<F: StreamFloat>(streams: &Streams<F>) -> bool {
     // Every live stream must be at or above its refill threshold.
     streams
         .records()

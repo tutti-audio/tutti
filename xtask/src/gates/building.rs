@@ -483,6 +483,18 @@ pub(super) const ALLOW: &[Allow] = &[
         "starting the streamer thread: the failure is the OS's, not a value's",
     ),
     ty(
+        "crates/tutti-sampler/",
+        "DiskStreamer::start",
+        CTOR,
+        "starting the streamer thread for a chosen format: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-sampler/",
+        "DiskStreamer::by_hand",
+        CTOR,
+        "building the hand-stepped streamer for a chosen format: the failure is the OS's, not a value's",
+    ),
+    ty(
         "crates/tutti-plugin-types/",
         "WindowHandle::from_window",
         CTOR,

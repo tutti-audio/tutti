@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tutti_types::{AtomicSampleRate, SampleRate, Samples, SrcRatio};
 
-use super::StreamerSender;
 use super::bell::Bell;
 use super::cache::LruCache;
 use super::cells::Cells;
@@ -26,6 +25,7 @@ use super::open::{OpenError, Opened};
 use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Effect, Record, Streams, step};
 use super::status::StatusCell;
+use super::{StreamFloat, StreamerSender};
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
@@ -36,8 +36,8 @@ use tutti_types::ChannelLayout;
 /// Arc'd handles shared between the control side and the streamer loop.
 /// `Clone` is cheap — every field is an `Arc`.
 #[derive(Clone)]
-pub(super) struct Handles {
-    pub cache: Arc<LruCache>,
+pub(super) struct Handles<F: StreamFloat = f32> {
+    pub cache: Arc<LruCache<F>>,
     pub metrics: Arc<Metrics>,
     /// What wakes the streamer: every stream's reader rings it.
     pub bell: Arc<Bell>,
@@ -81,31 +81,31 @@ impl SessionRate {
 }
 
 /// Streamer-thread-local state. Never shared. Plain data.
-pub(super) struct Local {
+pub(super) struct Local<F: StreamFloat = f32> {
     /// Every open stream, one record each.
-    pub streams: Streams,
+    pub streams: Streams<F>,
     /// Flat interleaved refill scratch. Streamer-thread-local, so it may grow.
-    pub interleave_buffer: Vec<f32>,
+    pub interleave_buffer: Vec<F>,
     /// The thread whole-file decodes run on, started on first use.
-    pub lane: DecodeLane,
+    pub lane: DecodeLane<F>,
     /// Opens waiting on the lane, until their `Decoded` arrives.
-    pub pending: Vec<Pending>,
+    pub pending: Vec<Pending<F>>,
 }
 
 /// An open of a file that cannot seek, waiting for the decode lane.
-pub(super) struct Pending {
+pub(super) struct Pending<F: StreamFloat = f32> {
     id: StreamId,
     file_path: PathBuf,
     start: u64,
     width: Option<ChannelLayout>,
-    reply: Reply,
+    reply: Reply<F>,
 }
 
-impl Local {
+impl<F: StreamFloat> Local<F> {
     /// Thread-local state with no streams, a scratch buffer pre-sized for one
     /// `base_chunk_size` refill. `reports` is the queue the decode lane
     /// answers on.
-    pub(super) fn new(base_chunk_size: usize, reports: StreamerSender) -> Self {
+    pub(super) fn new(base_chunk_size: usize, reports: StreamerSender<F>) -> Self {
         Self {
             streams: Streams::new(),
             interleave_buffer: Vec::with_capacity(base_chunk_size),
@@ -121,11 +121,11 @@ impl Local {
 /// [`step`] over the table, and silently no-ops for a stream the streamer no
 /// longer holds: commands race the streams they name, and there is no caller
 /// left to report to by the time the streamer sees one.
-pub(super) fn handle_command(
-    cmd: StreamerCommand,
-    shared: &Handles,
+pub(super) fn handle_command<F: StreamFloat>(
+    cmd: StreamerCommand<F>,
+    shared: &Handles<F>,
     config: &BufferConfig,
-    local: &mut Local,
+    local: &mut Local<F>,
 ) {
     match cmd {
         StreamerCommand::Open {
@@ -183,9 +183,9 @@ pub(super) fn handle_command(
 /// is asked in exactly one place. Re-deriving it here is how the two would drift
 /// the next time the conditions changed.
 #[cfg(codec)]
-fn open_stream(
+fn open_stream<F: StreamFloat>(
     file_path: &std::path::Path,
-) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn)> {
+) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn<F>)> {
     if !crate::probe(file_path).ok()?.streamable {
         return None;
     }
@@ -193,29 +193,29 @@ fn open_stream(
     // and are handled rather than unwrapped: the probe read the header a moment
     // ago, and a file can be replaced between the two reads.
     let meta = tutti_codec::read_wave_metadata(file_path).ok()?;
-    let decoder = tutti_codec::FileIn::<f32>::open(file_path).ok()?;
+    let decoder = tutti_codec::FileIn::<F>::open(file_path).ok()?;
     Some((meta, decoder))
 }
 
 /// The incremental decoder a seekable stream reads through; none without a
 /// codec.
 #[cfg(codec)]
-type Decoder = tutti_codec::FileIn;
+type Decoder<F> = tutti_codec::FileIn<F>;
 #[cfg(not(codec))]
-type Decoder = std::convert::Infallible;
+type Decoder<F> = (std::convert::Infallible, std::marker::PhantomData<F>);
 
 /// What a stream's ring is fed from: a decoder that seeks in the file, or the
 /// file decoded whole.
-enum Source {
+enum Source<F: StreamFloat> {
     #[cfg(codec)]
-    Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn>),
-    Whole(Arc<tutti_buffers::Wave>),
+    Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn<F>>),
+    Whole(Arc<tutti_buffers::Wave<F>>),
 }
 
 /// Where an open stands after its probe.
-enum Begun {
+enum Begun<F: StreamFloat> {
     /// Its source is in hand.
-    Ready(Source),
+    Ready(Source<F>),
     /// The file is being decoded whole on the decode lane; the open waits for
     /// its `Decoded`.
     #[cfg_attr(
@@ -228,12 +228,12 @@ enum Begun {
 /// Probes `file_path` for how to feed stream `id`: a seeking decoder, a wave
 /// the cache already holds, or else a whole-file decode on the decode lane.
 /// The streamer's thread reads a header here and nothing more.
-fn begin(
+fn begin<F: StreamFloat>(
     id: StreamId,
     file_path: &Path,
-    shared: &Handles,
-    lane: &mut DecodeLane,
-) -> Result<Begun, OpenError> {
+    shared: &Handles<F>,
+    lane: &mut DecodeLane<F>,
+) -> Result<Begun<F>, OpenError> {
     // Probe metadata (frame count / sample rate) for ring sizing + src_ratio
     // WITHOUT decoding the whole file. Prefer real incremental streaming; fall
     // back to the whole-file path when the format isn't seekable (no frame
@@ -273,7 +273,12 @@ fn begin(
 ///
 /// The probe and the build run under `catch_unwind`: a decoder that panics on
 /// a file fails that open (`OpenError::Format`), not the streamer.
-fn handle_open(open: Pending, shared: &Handles, config: &BufferConfig, local: &mut Local) {
+fn handle_open<F: StreamFloat>(
+    open: Pending<F>,
+    shared: &Handles<F>,
+    config: &BufferConfig,
+    local: &mut Local<F>,
+) {
     let begun = catch_unwind(AssertUnwindSafe(|| {
         begin(open.id, &open.file_path, shared, &mut local.lane)
     }));
@@ -294,12 +299,12 @@ fn handle_open(open: Pending, shared: &Handles, config: &BufferConfig, local: &m
 
 /// Answers `open` from `source`: builds its stream, puts the record in the
 /// table and replies with the reader's parts, or replies with the failure.
-fn complete(
-    open: Pending,
-    source: Result<Source, OpenError>,
-    shared: &Handles,
+fn complete<F: StreamFloat>(
+    open: Pending<F>,
+    source: Result<Source<F>, OpenError>,
+    shared: &Handles<F>,
     config: &BufferConfig,
-    local: &mut Local,
+    local: &mut Local<F>,
 ) {
     let Pending {
         id,
@@ -343,16 +348,16 @@ fn complete(
 /// Builds the region ring at the file's own width and pins the wave in the
 /// cache for the stream's lifetime. The placement into `width` (the file's own
 /// when `None`) is built, and so refused, before anything is built.
-fn build_stream(
+fn build_stream<F: StreamFloat>(
     id: StreamId,
     file_path: PathBuf,
     start: u64,
     width: Option<ChannelLayout>,
-    source: Source,
-    shared: &Handles,
+    source: Source<F>,
+    shared: &Handles<F>,
     config: &BufferConfig,
-) -> Result<(Record, Opened), OpenError> {
-    let (file_length, file_sr, file_topology, decoder, resident): (_, _, _, Option<Decoder>, _) =
+) -> Result<(Record<F>, Opened<F>), OpenError> {
+    let (file_length, file_sr, file_topology, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
         match source {
             // Decoder metadata carries the header's integer rate.
             #[cfg(codec)]
@@ -476,7 +481,12 @@ fn build_stream(
 /// loop change never decodes the whole file. A lead-in that cannot be read
 /// plays the loop hard, is logged, and is what the ring's published control
 /// says is applied (so a fork plays it hard too).
-fn handle_loop(stream: StreamId, ask: Option<Loop>, config: &BufferConfig, local: &mut Local) {
+fn handle_loop<F: StreamFloat>(
+    stream: StreamId,
+    ask: Option<Loop>,
+    config: &BufferConfig,
+    local: &mut Local<F>,
+) {
     let Some(&Effect::Loop(id, ask)) = step(&mut local.streams, Cmd::Loop(stream, ask)).first()
     else {
         return;
@@ -491,9 +501,9 @@ fn handle_loop(stream: StreamId, ask: Option<Loop>, config: &BufferConfig, local
 
 /// Captures `ask` into `record`'s ring and records it as applied: the file
 /// work of [`handle_loop`].
-fn capture_loop(record: &mut Record, ask: Option<Loop>, config: &BufferConfig) {
+fn capture_loop<F: StreamFloat>(record: &mut Record<F>, ask: Option<Loop>, config: &BufferConfig) {
     let len = record.file_frames.get();
-    let rate = record.cells.read_rate().get();
+    let rate = record.cells.read_rate();
     let writer = &mut record.out;
 
     let channels = writer.channels();
@@ -530,11 +540,11 @@ fn capture_loop(record: &mut Record, ask: Option<Loop>, config: &BufferConfig) {
 /// [`apply_mapping`]'s: a switch the reader crossfades across just past the
 /// block it is in. The direction is the published map's own, so the one
 /// publish carries it to the voice and to a fork.
-fn handle_direction(
+fn handle_direction<F: StreamFloat>(
     stream: StreamId,
     direction: Direction,
     config: &BufferConfig,
-    local: &mut Local,
+    local: &mut Local<F>,
 ) {
     let Some(&Effect::Direction(id, direction)) =
         step(&mut local.streams, Cmd::Direction(stream, direction)).first()
@@ -547,7 +557,7 @@ fn handle_direction(
     let fade = config.seek_crossfade_frames;
     let _ = record.contained(|record| {
         let reverse = direction.is_reverse();
-        let rate = record.cells.read_rate().get();
+        let rate = record.cells.read_rate();
         let writer = &mut record.out;
         if writer.content().current.reverse == reverse {
             return;

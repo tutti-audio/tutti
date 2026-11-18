@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
+
+use super::StreamFloat;
 use tutti_types::ChannelLayout;
 
 use super::open::Opened;
@@ -23,12 +25,12 @@ tutti_types::id! {
 
 /// Where the streamer answers an open: one cell, written once by the streamer
 /// and read once by [`Opening::poll`](crate::Opening::poll).
-pub(crate) type Reply = Sender<Result<Opened, OpenError>>;
+pub(crate) type Reply<F = f32> = Sender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
-pub(crate) struct Decoded(pub(crate) Result<Arc<Wave>, OpenError>);
+pub(crate) struct Decoded<F: StreamFloat = f32>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
 
-impl std::fmt::Debug for Decoded {
+impl<F: StreamFloat> std::fmt::Debug for Decoded<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             Ok(wave) => write!(f, "Decoded({} frames)", wave.len()),
@@ -39,7 +41,7 @@ impl std::fmt::Debug for Decoded {
 
 /// Command sent to the Streamer thread.
 #[derive(Debug)]
-pub(crate) enum StreamerCommand {
+pub(crate) enum StreamerCommand<F: StreamFloat = f32> {
     /// Open `file_path` as stream `id`, its window starting at frame `start`,
     /// and answer on `reply`.
     Open {
@@ -48,7 +50,7 @@ pub(crate) enum StreamerCommand {
         start: u64,
         /// The voice's width, or the file's own when `None`.
         width: Option<ChannelLayout>,
-        reply: Reply,
+        reply: Reply<F>,
     },
     /// The decode thread finished the whole-file decode an open of a file that
     /// cannot seek waits on: the streamer builds the stream's ring from it and
@@ -58,7 +60,7 @@ pub(crate) enum StreamerCommand {
         not(codec),
         allow(dead_code, reason = "sent only by the codec-gated decode lane")
     )]
-    Decoded { id: StreamId, wave: Decoded },
+    Decoded { id: StreamId, wave: Decoded<F> },
     /// End a stream: its record, and with it its ring and region, goes in the
     /// step that handles this. Sent by `Drop for Stream`. A stream the
     /// streamer no longer holds ignores it.

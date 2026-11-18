@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use tutti_buffers::Wave;
+use tutti_buffers::{Float, Wave};
 use tutti_rt::LockExt;
 
 /// Bounded LRU cache with entry count and byte limits.
@@ -27,14 +27,14 @@ use tutti_rt::LockExt;
 /// the lock is released. The control side never reads it (a stream's file is
 /// its own [`StreamFile`](super::control::StreamFile)), so a plain map behind
 /// one lock is all it takes.
-pub struct LruCache {
-    inner: Mutex<Inner>,
+pub struct LruCache<F: Float = f32> {
+    inner: Mutex<Inner<F>>,
     max_entries: usize,
     max_bytes: u64,
 }
 
-struct Inner {
-    entries: HashMap<PathBuf, CacheEntry>,
+struct Inner<F: Float> {
+    entries: HashMap<PathBuf, CacheEntry<F>>,
     current_bytes: u64,
     /// Monotonic access counter — the source of every `last_access` stamp.
     ///
@@ -47,7 +47,7 @@ struct Inner {
     access_tick: u64,
 }
 
-impl Inner {
+impl<F: Float> Inner<F> {
     /// The next access stamp, consuming a tick.
     fn next_tick(&mut self) -> u64 {
         let tick = self.access_tick;
@@ -56,8 +56,8 @@ impl Inner {
     }
 }
 
-struct CacheEntry {
-    wave: Arc<Wave>,
+struct CacheEntry<F: Float> {
+    wave: Arc<Wave<F>>,
     /// The value of [`Inner::access_tick`] at this entry's last touch.
     /// Ordering-only — the number has no meaning beyond comparing against
     /// another entry's.
@@ -87,7 +87,13 @@ impl Drop for StreamPin {
     }
 }
 
-impl LruCache {
+/// The bytes a resident `wave` holds: what the cache's budget and the read
+/// meter count.
+pub(super) fn wave_bytes<F: Float>(wave: &Wave<F>) -> u64 {
+    (wave.len().get() * wave.channels() * std::mem::size_of::<F>()) as u64
+}
+
+impl<F: Float> LruCache<F> {
     /// An empty cache bounded by `max_entries` resident waves and `max_bytes`
     /// total.
     ///
@@ -108,7 +114,7 @@ impl LruCache {
 
     /// The map, locked. Poisoning is ignored: nothing runs under the lock that
     /// can leave the map half-changed.
-    fn lock(&self) -> MutexGuard<'_, Inner> {
+    fn lock(&self) -> MutexGuard<'_, Inner<F>> {
         self.inner.lock_recover()
     }
 
@@ -116,7 +122,7 @@ impl LruCache {
     ///
     /// `None` is a plain miss — every caller treats it as "skip this region",
     /// never as an error.
-    pub fn get(&self, path: &Path) -> Option<Arc<Wave>> {
+    pub fn get(&self, path: &Path) -> Option<Arc<Wave<F>>> {
         let mut inner = self.lock();
         let tick = inner.next_tick();
         inner.entries.get_mut(path).map(|entry| {
@@ -138,8 +144,8 @@ impl LruCache {
     /// nothing: admitting it would empty the cache for one file and still
     /// leave it over budget. Its holder keeps it (a stream that cannot seek
     /// holds its file on its writer, `RegionOut::set_resident`).
-    pub fn insert(&self, path: PathBuf, wave: Arc<Wave>) {
-        let size = wave.len().get() as u64 * wave.channels() as u64 * 4;
+    pub fn insert(&self, path: PathBuf, wave: Arc<Wave<F>>) {
+        let size = wave_bytes(&wave);
         if size > self.max_bytes {
             return;
         }
@@ -194,13 +200,13 @@ impl LruCache {
     /// Whether inserting `incoming` bytes would exceed the entry-count or
     /// byte budget (byte check ignores an empty cache so a single oversized
     /// wave can still be admitted).
-    fn over_budget(&self, inner: &Inner, incoming: u64) -> bool {
+    fn over_budget(&self, inner: &Inner<F>, incoming: u64) -> bool {
         inner.entries.len() >= self.max_entries
             || (inner.current_bytes + incoming > self.max_bytes && !inner.entries.is_empty())
     }
 
     /// Removes the least recently used unpinned entry and hands it back.
-    fn evict_lru(inner: &mut Inner) -> Option<CacheEntry> {
+    fn evict_lru(inner: &mut Inner<F>) -> Option<CacheEntry<F>> {
         // Only unpinned entries are eviction candidates; a pinned entry backs an
         // active stream and must stay resident. If every remaining entry is
         // pinned this returns `None`, `insert`'s loop breaks, and the wave is

@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::StreamFloat;
 use super::StreamerSender;
 use super::cells::Cells;
 use super::command::{StreamId, StreamerCommand};
@@ -26,25 +27,25 @@ use tutti_rt::Publisher;
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone, Debug)]
-pub(crate) struct StreamerPort {
-    tx: StreamerSender,
+pub(crate) struct StreamerPort<F: StreamFloat = f32> {
+    tx: StreamerSender<F>,
 }
 
-impl StreamerPort {
-    pub(crate) fn new(tx: impl Into<StreamerSender>) -> Self {
+impl<F: StreamFloat> StreamerPort<F> {
+    pub(crate) fn new(tx: impl Into<StreamerSender<F>>) -> Self {
         Self { tx: tx.into() }
     }
 
     /// Queues `cmd` for the streamer. `Ok` means it was *queued*: the streamer
     /// applies it on its own thread, and that outcome is not available
     /// synchronously.
-    pub(crate) fn send(&self, cmd: StreamerCommand) -> Result<(), StreamerGone> {
+    pub(crate) fn send(&self, cmd: StreamerCommand<F>) -> Result<(), StreamerGone> {
         self.tx.send(cmd).map_err(|_| StreamerGone)
     }
 }
 
 /// The streamer's command for a loop `setting` on `stream`.
-fn loop_command(stream: StreamId, setting: Option<Loop>) -> StreamerCommand {
+fn loop_command<F: StreamFloat>(stream: StreamId, setting: Option<Loop>) -> StreamerCommand<F> {
     match setting {
         Some(looped) => StreamerCommand::SetStreamLoop { stream, looped },
         None => StreamerCommand::ClearStreamLoop { stream },
@@ -81,9 +82,9 @@ fn loop_command(stream: StreamId, setting: Option<Loop>) -> StreamerCommand {
 /// let _again = &stream;
 /// # }
 /// ```
-pub struct Stream {
+pub struct Stream<F: StreamFloat = f32> {
     id: StreamId,
-    port: StreamerPort,
+    port: StreamerPort<F>,
     /// What the streamer publishes of the stream ([`status`](Self::status)).
     status: Arc<StatusCell>,
     /// The cells the voice counts its underruns in; this handle is the one
@@ -92,10 +93,10 @@ pub struct Stream {
     /// Underruns read out of `cells` so far.
     underruns: AtomicU64,
     /// What the stream plays, immutable ([`file`](Self::file)).
-    file: Arc<StreamFile>,
+    file: Arc<StreamFile<F>>,
     /// The ring's published control: the loop as applied is read from it
     /// ([`StreamStatus::loop_`]).
-    control: Publisher<RingControl>,
+    control: Publisher<RingControl<F>>,
     /// The loop as last set through this handle, whose send succeeded: the
     /// loop a caller asked for, which a voice's own record of its loop is
     /// kept equal to.
@@ -104,20 +105,20 @@ pub struct Stream {
     direction: Direction,
 }
 
-impl std::fmt::Debug for Stream {
+impl<F: StreamFloat> std::fmt::Debug for Stream<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Stream").field("id", &self.id).finish()
     }
 }
 
-impl Stream {
+impl<F: StreamFloat> Stream<F> {
     pub(crate) fn new(
         id: StreamId,
-        port: StreamerPort,
+        port: StreamerPort<F>,
         status: Arc<StatusCell>,
         cells: Arc<Cells>,
-        file: Arc<StreamFile>,
-        control: Publisher<RingControl>,
+        file: Arc<StreamFile<F>>,
+        control: Publisher<RingControl<F>>,
     ) -> Self {
         Self {
             id,
@@ -164,7 +165,7 @@ impl Stream {
     /// The file the stream plays: its path and rate, and the wave when the
     /// streamer holds it whole. What a fork of the stream's voice reads.
     #[must_use]
-    pub fn file(&self) -> &StreamFile {
+    pub fn file(&self) -> &StreamFile<F> {
         &self.file
     }
 
@@ -213,7 +214,7 @@ impl Stream {
     /// retry.
     #[must_use = "a discarded loop is a loop that never plays"]
     pub fn set_loop(&mut self, setting: Option<Loop>) -> Result<(), StreamerGone> {
-        self.port.send(loop_command(self.id, setting))?;
+        self.port.send(loop_command::<F>(self.id, setting))?;
         // Recorded only once the streamer has the command: a failed send leaves
         // the stream as it was.
         self.loop_ = setting;
@@ -249,16 +250,16 @@ impl Stream {
 
 /// A dropped `Stream` ends its stream. A streamer that is already gone has
 /// nothing left to end.
-impl Drop for Stream {
+impl<F: StreamFloat> Drop for Stream<F> {
     fn drop(&mut self) {
         let _ = self.port.send(StreamerCommand::Close { stream: self.id });
     }
 }
 
 #[cfg(test)]
-impl Stream {
+impl<F: StreamFloat> Stream<F> {
     /// A handle on no streamer's stream: only its sends are in question (tests).
-    pub(crate) fn detached(id: StreamId, port: StreamerPort) -> Stream {
+    pub(crate) fn detached(id: StreamId, port: StreamerPort<F>) -> Self {
         Stream::new(
             id,
             port,
@@ -300,7 +301,7 @@ mod tests {
     /// indefinitely and do nothing, indistinguishable from working playback.
     #[test]
     fn a_stream_on_a_gone_streamer_reports_it() {
-        let (tx, queue) = crossbeam_channel::bounded(8);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(8);
         let mut stream = Stream::detached(StreamId::of(1), StreamerPort::new(tx));
         drop(queue);
         assert_eq!(stream.set_loop(None), Err(StreamerGone));
@@ -313,7 +314,7 @@ mod tests {
     /// their drop sends.
     #[test]
     fn a_stream_names_itself_in_every_command() {
-        let (tx, queue) = crossbeam_channel::bounded(16);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(16);
         let port = StreamerPort::new(tx);
         let (mut a, mut b) = (
             Stream::detached(StreamId::of(1), port.clone()),
@@ -353,7 +354,7 @@ mod tests {
     /// setting nobody received.
     #[test]
     fn a_failed_send_leaves_the_stream_as_it_was() {
-        let (tx, queue) = crossbeam_channel::bounded(8);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(8);
         let mut stream = Stream::detached(StreamId::of(3), StreamerPort::new(tx));
         assert_eq!(stream.loop_(), None);
         assert_eq!(stream.direction(), Direction::Forward);
