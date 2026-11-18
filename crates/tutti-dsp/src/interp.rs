@@ -50,7 +50,7 @@ pub struct ParabolicPeak<F> {
 #[inline]
 #[must_use]
 pub fn parabolic_peak<F: Float>(below: F, mid: F, above: F) -> ParabolicPeak<F> {
-    let half = F::from_f32(0.5);
+    let half = F::lit(0.5);
     let curvature = below - (mid + mid) + above;
     if curvature.is_nan() || curvature >= F::ZERO {
         return ParabolicPeak {
@@ -62,7 +62,7 @@ pub fn parabolic_peak<F: Float>(below: F, mid: F, above: F) -> ParabolicPeak<F> 
     let offset = (half * slope / curvature).clamp(-half, half);
     ParabolicPeak {
         offset,
-        value: mid - F::from_f32(0.25) * slope * offset,
+        value: mid - F::lit(0.25) * slope * offset,
     }
 }
 
@@ -85,12 +85,8 @@ pub fn parabolic_peak<F: Float>(below: F, mid: F, above: F) -> ParabolicPeak<F> 
 /// ```
 #[inline]
 pub fn cubic_hermite<F: Float>(y0: F, y1: F, y2: F, y3: F, t: F) -> F {
-    let (half, two, two_and_half, one_and_half) = (
-        F::from_f64(0.5),
-        F::from_f64(2.0),
-        F::from_f64(2.5),
-        F::from_f64(1.5),
-    );
+    let (half, two, two_and_half, one_and_half) =
+        (F::lit(0.5), F::lit(2.0), F::lit(2.5), F::lit(1.5));
     let c0 = y1;
     let c1 = half * (y2 - y0);
     let c2 = y0 - two_and_half * y1 + two * y2 - half * y3;

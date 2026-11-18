@@ -29,7 +29,7 @@ const _: () = assert_send_clone::<TransportHandle>();
 #[test]
 fn a_handle_on_another_thread_rolls_the_session_transport() {
     let s = offline();
-    s.set_tempo(Bpm::of(60.0)).expect("not following");
+    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
     let handle = s.transport_handle();
     std::thread::spawn(move || handle.play().unwrap())
         .join()

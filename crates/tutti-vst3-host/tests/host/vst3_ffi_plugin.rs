@@ -11,9 +11,9 @@ use tutti_fixtures::main_thread;
 
 use tutti_vst3_ffi::{
     AudioSide, BusBuffers, EventList, MIN_POINT_ROOM, Module, ParameterChangesImpl, Plugin,
-    ProcessIo, SampleWidth, Vst3Error, zeroed,
+    ProcessIo, SampleWidth, Vst3Error,
 };
-use vst3::Steinberg::Vst::ProcessSetup;
+use vst3::Steinberg::Vst::{ProcessContext, ProcessSetup};
 
 const BLOCK: usize = 64;
 
@@ -136,7 +136,7 @@ fn the_audio_half_answers_not_initialized_after_the_plugin_drops() {
         let mut outs_data: Vec<Vec<f32>> = vec![vec![0.0; BLOCK]; out_width];
         let ins: Vec<&[f32]> = (0..in_width).map(|_| ins_data.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = outs_data.iter_mut().map(Vec::as_mut_slice).collect();
-        let mut context = zeroed();
+        let mut context: ProcessContext = tutti_fixtures::sdk_zeroed();
         let setup = setup();
         side.process(ProcessIo {
             mode: tutti_vst3_ffi::ProcessMode::Realtime,

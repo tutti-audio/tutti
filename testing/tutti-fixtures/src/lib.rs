@@ -70,6 +70,8 @@ pub mod tpt;
 mod unique;
 #[cfg(feature = "vst3-cpp")]
 mod vst3_cpp;
+#[cfg(feature = "vst3-sdk")]
+mod vst3_sdk;
 mod wait;
 
 pub use alloc_count::{ThreadCounting, allocations};
@@ -95,6 +97,8 @@ pub use round_trip::check_round_trip;
 pub use unique::unique_name;
 #[cfg(feature = "vst3-cpp")]
 pub use vst3_cpp::{bundle_of, vst3_cpp_module};
+#[cfg(feature = "vst3-sdk")]
+pub use vst3_sdk::{SdkRecord, sdk_zeroed};
 pub use wait::wait_until;
 
 use std::path::{Path, PathBuf};

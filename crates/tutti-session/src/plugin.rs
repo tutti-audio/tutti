@@ -1560,7 +1560,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ) -> (Key<PluginNode>, tutti_plugin::catalog::PluginRebinder) {
         let handle = plugin.handle().clone();
         let loaded_ref = plugin.plugin().clone();
-        let meter = self.click_settings.project_meter();
+        let meter = self.transport.settings().project_meter().clone();
         let (key, rebinder) = match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
@@ -1836,7 +1836,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             self.finish_gave_up(gave_up, out);
             return;
         }
-        let meter = self.click_settings.project_meter();
+        let meter = self.transport.settings().project_meter().clone();
         client.controls().set_meter(meter);
         // The node's edges stay as they are, so a replacement with other
         // ports would leave the topology invalid and refuse every later
@@ -2763,7 +2763,7 @@ mod tests {
         let mut rig = rig(None);
         let (controls, _) =
             PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
-        let project = rig.session.click_settings().project_meter();
+        let project = rig.session.transport.settings().project_meter().clone();
         controls.set_meter(project);
         let meter = controls.meter();
         rig.session

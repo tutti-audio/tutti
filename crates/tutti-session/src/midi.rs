@@ -722,6 +722,9 @@ pub(crate) struct MidiState {
     mpe: MpeMode,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
+    /// Whether a live tempo owns the map, as `follow` and `clock` left it:
+    /// the tempo target's refusal reads it ([`is_following`](Self::is_following)).
+    following: Arc<std::sync::atomic::AtomicBool>,
     /// The MIDI clock the session follows, if it does ([`Midi::follow_clock`]).
     clock: Option<ClockFollow>,
     /// The Machine Control the session follows, if it does
@@ -889,6 +892,18 @@ impl MidiState {
     /// Whether the session follows a live tempo now.
     pub(crate) fn is_following(&self) -> bool {
         self.follow.is_some() || self.clock.as_ref().is_some_and(ClockFollow::owns_tempo)
+    }
+
+    /// The flag the tempo target reads, shared with this state.
+    pub(crate) fn following_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.following)
+    }
+
+    /// Publishes [`is_following`](Self::is_following) to the tempo target,
+    /// after a follower is set or dropped.
+    fn sync_following(&self) {
+        self.following
+            .store(self.is_following(), std::sync::atomic::Ordering::Release);
     }
 
     /// `Phase::Poll`, for the MIDI clock the session follows: reads its tap,
@@ -1763,8 +1778,8 @@ impl<F: Float> Midi<'_, F> {
     /// following (a ramp a step lands in is cut at its beat). The session has no
     /// project tempo apart from the published map, so **the map it finds now is
     /// the one [`unfollow_tempo`](Self::unfollow_tempo) restores**. While
-    /// following, `Session::set_tempo` and `set_tempo_map` refuse with
-    /// [`TempoError::Following`](crate::TempoError::Following), so nothing else
+    /// following, a write to the tempo target refuses with
+    /// [`SetRefusal::Following`](crate::SetRefusal::Following), so nothing else
     /// publishes in between.
     ///
     /// A change takes effect at the start of the next block (a meter at the next
@@ -1802,6 +1817,7 @@ impl<F: Float> Midi<'_, F> {
             Some(first) => first.replaced_by(core, tap),
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
         });
+        self.state.sync_following();
         Ok(())
     }
 
@@ -1816,6 +1832,7 @@ impl<F: Float> Midi<'_, F> {
     /// [`MidiError::NotFollowing`] when nothing is followed.
     pub fn unfollow_tempo(&mut self) -> Result<()> {
         let follow = self.state.follow.take().ok_or(MidiError::NotFollowing)?;
+        self.state.sync_following();
         let (tempo, meter) = follow.restore();
         if let Some(tempo) = tempo {
             self.settings.set_tempo_map(tempo);
@@ -1900,6 +1917,7 @@ impl<F: Float> Midi<'_, F> {
             self.settings.tempo_map(),
             self.meter.current(),
         ));
+        self.state.sync_following();
         Ok(())
     }
 
@@ -1928,6 +1946,7 @@ impl<F: Float> Midi<'_, F> {
             .clock
             .take()
             .ok_or(MidiError::NotFollowingClock)?;
+        self.state.sync_following();
         self.restore_maps(clock.restore());
         self.state.follow_events.push(MidiReport::ClockUnfollowed);
         Ok(())

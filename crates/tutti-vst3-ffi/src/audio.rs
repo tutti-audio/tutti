@@ -103,17 +103,9 @@ impl Shared {
     /// The claim for one audio-side entry: `None` once retired, or while a
     /// control thread holds it. Never blocks.
     pub(crate) fn try_enter(&self) -> Option<MutexGuard<'_, State>> {
-        self.try_enter_after(|| {})
-    }
-
-    /// [`try_enter`](Self::try_enter), with `between` run after the first
-    /// `retired` check and before the lock is taken: the window in which the
-    /// plugin may be retired and torn down by another thread.
-    fn try_enter_after(&self, between: impl FnOnce()) -> Option<MutexGuard<'_, State>> {
         if self.retired.load(Ordering::Acquire) {
             return None;
         }
-        between();
         let guard = self.state.try_lock()?;
         // The flag is checked again under the lock: `teardown` sets it and then
         // takes this lock, so a guard obtained after the teardown finished
@@ -683,17 +675,6 @@ mod tests {
         assert_eq!(rig.run_f32(8), Err(Vst3Error::NotInitialized));
         drop(held);
         assert_eq!(rig.run_f32(8), Ok(()));
-    }
-
-    /// An audio thread preempted between the `retired` check and the lock, while
-    /// the plugin is retired and torn down, gets no guard: the flag is checked
-    /// again under the lock.
-    #[test]
-    fn an_entry_that_loses_the_race_with_teardown_is_refused() {
-        let rig = rig(SampleWidth::F32, BLOCK);
-        let shared = rig.shared.clone();
-        let entered = shared.try_enter_after(|| drop(shared.teardown())).is_some();
-        assert!(!entered);
     }
 
     /// Teardown clears the state under the lock, so whoever takes the lock

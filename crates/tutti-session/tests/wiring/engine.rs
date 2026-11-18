@@ -71,9 +71,11 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
 /// The click has no inputs: it reads its block's `Env`.
 fn render_click(frames: usize) -> Vec<f32> {
     let mut s = offline();
-    let settings = Arc::clone(s.click_settings());
-    settings.mode().set(MetronomeMode::Always);
-    settings.set_volume(Amplitude::new(1.0)).unwrap();
+    s.set((
+        s.click().mode().to(MetronomeMode::Always),
+        s.click().volume().to(Amplitude::new(1.0)),
+    ))
+    .unwrap();
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()

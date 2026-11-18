@@ -14,10 +14,6 @@
 //! and a message may span blocks; one past [`SYSEX_MESSAGE_CAPACITY`] is
 //! dropped whole and counted ([`EventList::sysex_dropped`]).
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering::Relaxed},
-};
 use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::{
     Vst::{IEventList, IEventListTrait},
@@ -25,6 +21,7 @@ use vst3::Steinberg::{
 };
 use vst3::{Class, ComWrapper};
 
+use super::Lost;
 use crate::types::{
     Data, Event, EventHeader, EventKind, K_DATA_TYPE_MIDI_SYSEX, Payload, TextArena, TextRef,
 };
@@ -72,25 +69,39 @@ struct Inner {
     /// The bytes of SysEx messages the plugin `addEvent`ed to an output list
     /// (its pointer is valid only for the call), reserved there only.
     sysex_out: Vec<u8>,
-    counts: Arc<Counts>,
+    counts: Counts,
+    /// What of the arena's and the assembler's drops `counts` already holds
+    /// ([`Inner::sync`]).
+    text_synced: u64,
+    sysex_synced: u64,
 }
 
 /// What the list has lost, outside the cell: a reader never takes the borrow,
 /// so it cannot panic while a plugin thread holds the list, and a count made
 /// while the list is busy is not lost.
-#[derive(Default)]
+#[derive(Clone)]
 struct Counts {
     /// Events dropped ([`EventList::dropped`]).
-    events: AtomicU64,
-    /// Texts refused ([`EventList::text_dropped`]), mirrored from the arena
+    events: Lost,
+    /// Texts refused ([`EventList::text_dropped`]), added from the arena
     /// when a borrow that may have changed it ends ([`Inner::sync`]).
-    text: AtomicU64,
-    /// SysEx messages dropped ([`EventList::sysex_dropped`]), mirrored as `text` is.
-    sysex: AtomicU64,
+    text: Lost,
+    /// SysEx messages dropped ([`EventList::sysex_dropped`]), added as `text` is.
+    sysex: Lost,
+}
+
+impl Counts {
+    fn new() -> Self {
+        Self {
+            events: Lost::new(),
+            text: Lost::new(),
+            sysex: Lost::new(),
+        }
+    }
 }
 
 impl Inner {
-    fn new(sysex: SysexAssembler<Box<[u8]>>, sysex_out_room: usize, counts: Arc<Counts>) -> Self {
+    fn new(sysex: SysexAssembler<Box<[u8]>>, sysex_out_room: usize, counts: Counts) -> Self {
         Self {
             events: Vec::with_capacity(EVENT_CAPACITY),
             text_arena: TextArena::new(),
@@ -98,16 +109,20 @@ impl Inner {
             sysex,
             sysex_out: Vec::with_capacity(sysex_out_room),
             counts,
+            text_synced: 0,
+            sysex_synced: 0,
         }
     }
 
-    /// Publishes the arena's and the assembler's counts; called at the end of
-    /// every borrow that can change them.
-    fn sync(&self) {
-        self.counts
-            .text
-            .store(self.text_arena.dropped() as u64, Relaxed);
-        self.counts.sysex.store(self.sysex.dropped(), Relaxed);
+    /// Adds what the arena and the assembler dropped since the last call to
+    /// the counts; called at the end of every borrow that can change them.
+    fn sync(&mut self) {
+        let text = self.text_arena.dropped() as u64;
+        self.counts.text.add(text - self.text_synced);
+        self.text_synced = text;
+        let sysex = self.sysex.dropped();
+        self.counts.sysex.add(sysex - self.sysex_synced);
+        self.sysex_synced = sysex;
     }
 
     /// Clears the per-block storage in lockstep, keeping capacity.
@@ -132,7 +147,7 @@ impl Inner {
         size: usize,
     ) -> bool {
         if self.sysex_out.len() + size > self.sysex_out.capacity() {
-            self.counts.events.fetch_add(1, Relaxed);
+            self.counts.events.add(1);
             return false;
         }
         let start = self.sysex_out.len();
@@ -171,7 +186,7 @@ impl Inner {
             self.events.push(event);
             return true;
         }
-        self.counts.events.fetch_add(1, Relaxed);
+        self.counts.events.add(1);
         if !matches!(event.payload, Payload::NoteOff(_)) {
             return false;
         }
@@ -204,8 +219,8 @@ pub struct EventList {
     inner: AudioThreadCell<Inner>,
     /// Calls the audio thread skipped because a plugin thread held the list
     /// ([`busy`](Self::busy)).
-    busy: AtomicU64,
-    counts: Arc<Counts>,
+    busy: Lost,
+    counts: Counts,
 }
 
 impl Class for EventList {
@@ -227,10 +242,10 @@ impl EventList {
     }
 
     fn with_sysex(sysex: SysexAssembler<Box<[u8]>>, sysex_out_room: usize) -> ComWrapper<Self> {
-        let counts = Arc::<Counts>::default();
+        let counts = Counts::new();
         ComWrapper::new(Self {
-            inner: AudioThreadCell::new(Inner::new(sysex, sysex_out_room, Arc::clone(&counts))),
-            busy: AtomicU64::new(0),
+            inner: AudioThreadCell::new(Inner::new(sysex, sysex_out_room, counts.clone())),
+            busy: Lost::new(),
             counts,
         })
     }
@@ -241,7 +256,7 @@ impl EventList {
     /// the audio thread skips the block rather than wait or panic.
     pub fn try_begin(&self) -> Option<Staging<'_>> {
         let Some(mut inner) = self.inner.try_borrow_mut().map(Synced) else {
-            self.busy.fetch_add(1, Relaxed);
+            self.busy.add(1);
             return None;
         };
         inner.clear();
@@ -255,6 +270,7 @@ impl EventList {
     ///
     /// If a plugin thread is inside a call on the list.
     #[cfg(any(test, feature = "conformance"))]
+    #[doc(hidden)]
     pub fn begin(&self) -> Staging<'_> {
         self.try_begin().expect("the list is not in use")
     }
@@ -269,7 +285,7 @@ impl EventList {
             inner.clear();
             true
         } else {
-            self.busy.fetch_add(1, Relaxed);
+            self.busy.add(1);
             false
         }
     }
@@ -278,7 +294,7 @@ impl EventList {
     /// `None` (counted in [`busy`](Self::busy)) while the plugin is writing.
     pub fn try_with_events<R>(&self, read: impl FnOnce(&Staged<'_>) -> R) -> Option<R> {
         let Some(inner) = self.inner.try_borrow() else {
-            self.busy.fetch_add(1, Relaxed);
+            self.busy.add(1);
             return None;
         };
         Some(read(&Staged {
@@ -296,6 +312,7 @@ impl EventList {
     ///
     /// If a plugin thread is inside a call on the list.
     #[cfg(any(test, feature = "conformance"))]
+    #[doc(hidden)]
     pub fn with_events<R>(&self, read: impl FnOnce(&Staged<'_>) -> R) -> R {
         self.try_with_events(read).expect("the list is not in use")
     }
@@ -303,24 +320,26 @@ impl EventList {
     /// A hold on the list as a plugin thread inside `getEvent` has one, for a
     /// conformance test of what the host does while the plugin holds it.
     #[cfg(any(test, feature = "conformance"))]
+    #[doc(hidden)]
     pub fn hold_as_plugin(&self) -> impl Sized + '_ {
         self.inner.borrow()
     }
 
     /// How many calls the host skipped because a plugin thread held the list.
     pub fn busy(&self) -> u64 {
-        self.busy.load(Relaxed)
+        self.busy.get()
     }
 
     /// Counts `n` more events dropped ([`dropped`](Self::dropped)).
     /// Counted whether or not a plugin thread holds the list.
     pub fn add_dropped(&self, n: u64) {
-        self.counts.events.fetch_add(n, Relaxed);
+        self.counts.events.add(n);
     }
 
     /// The SysEx messages staged for the plugin, each as the bytes `getEvent`
     /// would hand it. Allocates: for tests and diagnostics.
     #[cfg(any(test, feature = "conformance"))]
+    #[doc(hidden)]
     #[must_use]
     pub fn staged_sysex(&self) -> Vec<Vec<u8>> {
         self.with_events(|staged| {
@@ -339,7 +358,7 @@ impl EventList {
     /// room was spent for the block. The event itself was still staged.
     /// Read without the list's borrow: never panics, whoever holds the list.
     pub fn text_dropped(&self) -> usize {
-        usize::try_from(self.counts.text.load(Relaxed)).unwrap_or(usize::MAX)
+        usize::try_from(self.counts.text.get()).unwrap_or(usize::MAX)
     }
 
     /// Events dropped for want of room since the list was made: past
@@ -348,7 +367,7 @@ impl EventList {
     /// [`add_dropped`](Self::add_dropped)).
     /// Read without the list's borrow, as [`text_dropped`](Self::text_dropped).
     pub fn dropped(&self) -> u64 {
-        self.counts.events.load(Relaxed)
+        self.counts.events.get()
     }
 
     /// SysEx messages dropped whole since the list was made: longer than
@@ -358,7 +377,7 @@ impl EventList {
     /// [`reset_sysex`](Self::reset_sysex). See [`SysexAssembler`].
     /// Read without the list's borrow, as [`text_dropped`](Self::text_dropped).
     pub fn sysex_dropped(&self) -> u64 {
-        self.counts.sysex.load(Relaxed)
+        self.counts.sysex.get()
     }
 
     /// The MIDI just staged lost its tail upstream: drops the open SysEx,
@@ -369,7 +388,7 @@ impl EventList {
             inner.sysex.lost_tail();
             inner.sync();
         } else {
-            self.busy.fetch_add(1, Relaxed);
+            self.busy.add(1);
         }
     }
 
@@ -380,7 +399,7 @@ impl EventList {
             inner.sysex.reset();
             inner.sync();
         } else {
-            self.busy.fetch_add(1, Relaxed);
+            self.busy.add(1);
         }
     }
 
@@ -446,7 +465,7 @@ impl Staging<'_> {
 
     /// Counts `n` events dropped by the host's own policy.
     pub fn count_dropped(&mut self, n: u64) {
-        self.0.counts.events.fetch_add(n, Relaxed);
+        self.0.counts.events.add(n);
     }
 
     /// Copies `text` into the block's arena, or refuses with an empty ref when
@@ -525,7 +544,7 @@ impl IEventListTrait for EventList {
             // Checked before the conversion interns the event's text, so a full
             // list refuses a non-note-off without spending the arena.
             if inner.room() == 0 && kind != Some(EventKind::NoteOff) {
-                inner.counts.events.fetch_add(1, Relaxed);
+                inner.counts.events.add(1);
                 return kResultFalse;
             }
             if kind == Some(EventKind::Data) {

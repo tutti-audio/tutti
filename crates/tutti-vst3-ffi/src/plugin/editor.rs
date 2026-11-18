@@ -233,6 +233,7 @@ impl Parts {
 
     /// What the run loop has registered and fired.
     #[cfg(feature = "conformance")]
+    #[doc(hidden)]
     #[must_use]
     pub fn run_loop_activity(&self) -> crate::RunLoopActivity {
         self.module.run_loop().activity()
@@ -241,6 +242,7 @@ impl Parts {
     /// The reference count of the host application, as a plugin holding it
     /// would see it.
     #[cfg(feature = "conformance")]
+    #[doc(hidden)]
     #[must_use]
     pub fn host_context_refcount(&self) -> usize {
         use vst3::com_scrape_types::Unknown;
@@ -259,6 +261,7 @@ impl Parts {
 
     /// Calls `IComponentHandler::performEdit` as a plugin's editor would.
     #[cfg(feature = "conformance")]
+    #[doc(hidden)]
     pub fn simulate_perform_edit(&self, id: u32, value: f64) {
         use vst3::Steinberg::Vst::IComponentHandlerTrait;
         if let Some(handler) = self.handler.as_com_ref::<IComponentHandler>() {
@@ -269,6 +272,7 @@ impl Parts {
 
     /// Calls `IComponentHandler::restartComponent` as a plugin would.
     #[cfg(feature = "conformance")]
+    #[doc(hidden)]
     pub fn simulate_restart_component(&self, flags: i32) {
         use vst3::Steinberg::Vst::IComponentHandlerTrait;
         if let Some(handler) = self.handler.as_com_ref::<IComponentHandler>() {

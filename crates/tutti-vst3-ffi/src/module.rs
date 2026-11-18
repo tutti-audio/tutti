@@ -3,7 +3,7 @@
 
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
@@ -29,16 +29,69 @@ type GetPluginFactoryFn = unsafe extern "system" fn() -> *mut IPluginFactory;
 
 /// Host name reported to plugins through `IHostApplication::getName`, both at
 /// factory level (`setHostContext`) and per instance.
-pub const HOST_NAME: &str = "vst3-host";
+const HOST_NAME: &str = "tutti";
 
-/// Why a module could not be opened.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{stage}: {reason}")]
-pub struct LoadError {
-    /// Which loading step failed.
-    pub stage: LoadStage,
-    /// Human-readable cause, for logs rather than matching.
-    pub reason: String,
+/// Why a module could not be opened: the step that failed
+/// ([`stage`](Self::stage)), the module's [`path`](Self::path), and what went
+/// wrong at it.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum LoadError {
+    /// The library could not be opened.
+    #[error("failed to open {}", path.display())]
+    Library {
+        /// The module's path.
+        path: PathBuf,
+        /// The OS loader's error.
+        #[source]
+        source: libloading::Error,
+    },
+    /// The module's entry point (`ModuleEntry`, `bundleEntry` or `InitDll`)
+    /// answered `false`.
+    #[error("{entry} refused in {}", path.display())]
+    EntryRefused {
+        /// The module's path.
+        path: PathBuf,
+        /// The entry point's name, as the SDK spells it.
+        entry: &'static str,
+    },
+    /// The library exports no `GetPluginFactory`.
+    #[error("no GetPluginFactory symbol in {}", path.display())]
+    NoFactorySymbol {
+        /// The module's path.
+        path: PathBuf,
+        /// The OS loader's error.
+        #[source]
+        source: libloading::Error,
+    },
+    /// `GetPluginFactory` returned null.
+    #[error("GetPluginFactory returned null in {}", path.display())]
+    NoFactory {
+        /// The module's path.
+        path: PathBuf,
+    },
+}
+
+impl LoadError {
+    /// The step that failed.
+    #[must_use]
+    pub fn stage(&self) -> LoadStage {
+        match self {
+            Self::Library { .. } | Self::EntryRefused { .. } => LoadStage::Opening,
+            Self::NoFactorySymbol { .. } | Self::NoFactory { .. } => LoadStage::Factory,
+        }
+    }
+
+    /// The module the load was opening.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Library { path, .. }
+            | Self::EntryRefused { path, .. }
+            | Self::NoFactorySymbol { path, .. }
+            | Self::NoFactory { path } => path,
+        }
+    }
 }
 
 /// Why a plugin could not be created from a class.
@@ -177,9 +230,9 @@ impl Module {
         // SAFETY: loading a plugin runs its static initializers, which is what
         // the caller asked for by naming a plugin module; `Library::new`'s
         // contract is that the path is a library the process may run.
-        let library = unsafe { Library::new(lib_path) }.map_err(|e| LoadError {
-            stage: LoadStage::Opening,
-            reason: e.to_string(),
+        let library = unsafe { Library::new(lib_path) }.map_err(|source| LoadError::Library {
+            path: lib_path.to_path_buf(),
+            source,
         })?;
 
         // The module entry point must run BEFORE `GetPluginFactory`: it is where
@@ -193,21 +246,23 @@ impl Module {
         // SAFETY: the symbol is the VST3 module's `GetPluginFactory`, whose C
         // signature is `GetPluginFactoryFn`; the symbol borrows `library`, which
         // outlives this block.
-        let get_factory: libloading::Symbol<GetPluginFactoryFn> =
-            unsafe { library.get(b"GetPluginFactory\0") }.map_err(|e| LoadError {
-                stage: LoadStage::Factory,
-                reason: format!("Missing GetPluginFactory symbol: {}", e),
-            })?;
+        let get_factory: libloading::Symbol<GetPluginFactoryFn> = unsafe {
+            library.get(b"GetPluginFactory\0")
+        }
+        .map_err(|source| LoadError::NoFactorySymbol {
+            path: lib_path.to_path_buf(),
+            source,
+        })?;
 
         // SAFETY: `GetPluginFactory` takes no arguments and returns a +1
         // reference to the module's factory, or null.
         let factory_ptr = unsafe { get_factory() };
         // SAFETY: a non-null result is that +1 reference, which `ComPtr` adopts
         // and releases on drop.
-        let factory = unsafe { ComPtr::from_raw(factory_ptr) }.ok_or_else(|| LoadError {
-            stage: LoadStage::Factory,
-            reason: "GetPluginFactory returned null".to_string(),
-        })?;
+        let factory =
+            unsafe { ComPtr::from_raw(factory_ptr) }.ok_or_else(|| LoadError::NoFactory {
+                path: lib_path.to_path_buf(),
+            })?;
 
         // `IPluginFactory3::setHostContext` — the only way a plugin can reach
         // `IHostApplication` *before* any instance exists. Plugins use it for
@@ -298,7 +353,6 @@ impl Module {
         check(unsafe { self.parts.factory.getClassInfo(index, &mut info) })?;
         Ok(ClassInfo {
             cid: info.cid,
-            cid_bytes: info.cid.map(|b| b as u8),
             category: read_c_chars(&info.category),
             name: read_c_chars(&info.name),
             // `PClassInfo` (the v1 struct) carries no vendor, version or
@@ -325,7 +379,6 @@ impl Module {
         check(unsafe { f3.getClassInfoUnicode(index, &mut info) }).ok()?;
         Some(ClassInfo {
             cid: info.cid,
-            cid_bytes: info.cid.map(|b| b as u8),
             category: read_c_chars(&info.category),
             name: read_utf16_str(&info.name),
             // `ipluginbase.h:357` documents the vendor field as "overwrite
@@ -515,8 +568,6 @@ pub struct ClassInfo {
     /// Steinberg-signed class id used to pass back to
     /// `IPluginFactory::createInstance`.
     pub cid: TUID,
-    /// Human-readable byte-order independent representation for formatting.
-    pub cid_bytes: [u8; 16],
     /// Category string, e.g. `"Audio Module Class"`, `"Controller Class"`.
     ///
     /// This names what *kind of COM class* this is, not what the plugin does —

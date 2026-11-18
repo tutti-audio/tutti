@@ -1,4 +1,5 @@
 use super::*;
+use crate::Float;
 use crate::{BufferError, InterleavedMut};
 use Speaker::*;
 use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering, LayoutError};

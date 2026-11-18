@@ -322,7 +322,7 @@ impl<F: Float> Row<F> {
 ///   samples copied bit for bit.
 /// - **A speaker in both:** it goes straight across at gain 1.0.
 /// - **A speaker the destination lacks** folds into the nearest ones the
-///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by a fixed table:
+///   destination has, at −3 dB ([`MINUS_3_DB`](Float::MINUS_3_DB)), by a fixed table:
 ///   the centre into front left and right; a side or rear speaker into its
 ///   counterpart (side for rear and back) or else the front speaker on
 ///   its side; a top-back speaker into the back, else the side surround, else
@@ -386,6 +386,7 @@ impl<F: Float> Row<F> {
 /// ```
 /// use tutti_buffers::{Float, Fold};
 /// use tutti_types::Bed;
+/// use tutti_units::Real;
 ///
 /// let five_one = Bed::Surround51.topology();
 /// let stereo = Bed::Stereo.topology();
@@ -814,7 +815,7 @@ impl<F: Float> Fold<F> {
             ([_, _], Some(l), Some(r)) => Row::Mix {
                 a: Expr::Copy(narrow(l)),
                 b: Expr::Copy(narrow(r)),
-                scale: F::from_f32(0.5),
+                scale: F::lit(0.5),
             },
             _ => {
                 let pair = [FrontLeft, FrontRight];
@@ -1043,6 +1044,7 @@ impl<F: Float> Fold<F> {
     /// ```
     /// use tutti_buffers::{Float, Fold};
     /// use tutti_types::Bed;
+    /// use tutti_units::Real;
     ///
     /// let five_one = Bed::Surround51.topology();
     /// let stereo = Bed::Stereo.topology();

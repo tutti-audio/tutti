@@ -1,7 +1,8 @@
 use super::*;
 use crate::filter::ladder::kernel::{LadderCoefficients, ladder_step};
 use crate::{Complex32, RealFft, Ring};
-use tutti_buffers::{Float, Mono};
+use tutti_buffers::Mono;
+use tutti_units::Real;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -76,7 +77,7 @@ fn the_small_signal_response_is_the_models() {
             let mut s = [0.0f64; 4];
             let ir: Vec<f32> = (0..N)
                 .map(|n| {
-                    (ladder_step(&c, ty, &mut s, if n == 0 { amp } else { 0.0 }, Float::tanh) / amp)
+                    (ladder_step(&c, ty, &mut s, if n == 0 { amp } else { 0.0 }, Real::tanh) / amp)
                         as f32
                 })
                 .collect();
@@ -115,7 +116,7 @@ fn the_model_is_the_small_signal_system_and_loud_signals_leave_it() {
                     LadderType::LP24,
                     &mut s,
                     if n == 0 { amp } else { 0.0 },
-                    Float::tanh,
+                    Real::tanh,
                 ) / amp
             })
             .collect::<Vec<f64>>()
@@ -143,7 +144,7 @@ fn the_radius_and_the_tail_are_what_the_linearised_filter_rings() {
                 LadderType::LP24,
                 &mut s,
                 if n == 0 { amp } else { 0.0 },
-                Float::tanh,
+                Real::tanh,
             ) / amp
         })
         .collect();

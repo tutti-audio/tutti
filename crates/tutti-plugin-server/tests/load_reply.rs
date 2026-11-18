@@ -132,7 +132,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
                 "the library was refused before a format read it: {message}"
             );
             assert!(
-                message.starts_with("Opening:") || message.contains("ailed"),
+                message.contains("no GetPluginFactory symbol"),
                 "the reply names the format's reason: {message}"
             );
         }

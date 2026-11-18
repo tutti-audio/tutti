@@ -7,18 +7,17 @@ use std::time::Instant;
 
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
-use tutti_music::LoopRange;
-use tutti_nodes::ClickSettings;
+use tutti_music::{LoopRange, MeterMap};
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
 use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_units::{At, Beat, Bpm, SampleRate, Samples};
+use tutti_units::{At, Beat, SampleRate, Samples};
 
 use crate::RootDeclaration;
 use crate::format::Sealed;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime, SessionFloat};
-use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, TempoError};
+use crate::{HeardOpen, HeardTapError, Playhead, RemoveError};
 
 /// One step of [`Session::update`]. [`PHASES`] is their order.
 ///
@@ -588,7 +587,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// Whether `output_policy` was set and not yet applied.
     pub(crate) output_policy_staged: bool,
     pub(crate) click: Option<NodeKey>,
-    pub(crate) click_settings: Arc<ClickSettings>,
     /// The per-channel pre-roll of the plan sent last, for sources outside
     /// the graph (a disk stream), republished with every plan.
     pub(crate) compensation: Arc<PrerollTable>,
@@ -833,7 +831,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             root_request,
             root_refusal,
             click,
-            click_settings,
             compensation,
             latency,
             resumed,
@@ -900,7 +897,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 root_request,
                 root_refusal,
                 click,
-                click_settings,
                 compensation,
                 latency,
                 resumed,
@@ -948,6 +944,48 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             },
             old_running,
         )
+    }
+}
+
+impl<K: AppKey, C: Clock> Session<K, C> {
+    /// Registers the session's own values (its tempo, meter and click) in
+    /// `table`, once, as the session is built. Each is a cell the session
+    /// and the audio thread already share; the table only names it for the
+    /// verbs.
+    pub(crate) fn provide_values(
+        &self,
+        table: &crate::value::ValueTable,
+        click: Arc<tutti_nodes::ClickSettings>,
+    ) {
+        use crate::value::{ClickVolumeSlot, MeterSlot, SettingSlot, SlotId, TempoSlot};
+        #[cfg(feature = "midi")]
+        let following = self.midi_state.following_flag();
+        #[cfg(not(feature = "midi"))]
+        let following = Arc::default();
+        table.provide(
+            SlotId::Tempo,
+            Arc::new(TempoSlot {
+                settings: self.transport.settings().clone(),
+                following,
+            }) as crate::value::SlotCell<Arc<TempoMap>>,
+        );
+        table.provide(
+            SlotId::Meter,
+            Arc::new(MeterSlot(self.transport.settings().project_meter().clone()))
+                as crate::value::SlotCell<Arc<MeterMap>>,
+        );
+        table.provide(
+            SlotId::ClickVolume,
+            Arc::new(ClickVolumeSlot(Arc::clone(&click)))
+                as crate::value::SlotCell<tutti_units::Amplitude>,
+        );
+        table.provide(
+            SlotId::ClickMode,
+            Arc::new(SettingSlot {
+                owner: click,
+                project: tutti_nodes::ClickSettings::mode,
+            }) as crate::value::SlotCell<tutti_nodes::MetronomeMode>,
+        );
     }
 }
 
@@ -1294,7 +1332,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 {
                     let follow = crate::midi_follow::FollowCx {
                         settings: self.transport.settings(),
-                        meter: &self.click_settings.project_meter(),
+                        meter: self.transport.settings().project_meter(),
                         playhead: self.playhead(),
                     };
                     let tempo_edited = self.midi_state.follow_phase(&follow, &mut self.graph, out);
@@ -1397,7 +1435,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// offline engine's output folds.
     pub(crate) fn reclaim(&self) -> usize {
         let mut pinned = self.graph.reclaim();
-        pinned += self.click_settings.project_meter().reclaim();
+        pinned += self.transport.settings().project_meter().reclaim();
         pinned += self.transport.settings().reclaim_tempo();
         // The engine's output folds are swept by the graph (`Graph::reclaim`),
         // offline or on a device, through the `OutputControl` it kept.
@@ -1727,45 +1765,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .schedule(At::NextBlock, LoopEdit::armed(false))
     }
 
-    /// Sets a constant project tempo (the project's [`TempoMap`], one step).
-    /// The engine takes it at the next block. A tempo that is not finite and
-    /// positive leaves the map as it was.
-    ///
-    /// # Errors
-    ///
-    /// [`TempoError::Following`] while the session follows a live tempo:
-    /// nothing is published.
-    pub fn set_tempo(&self, bpm: Bpm) -> std::result::Result<(), TempoError> {
-        self.tempo_is_ours()?;
-        self.transport.settings().set_tempo(bpm);
-        Ok(())
-    }
-
-    /// Publishes `map` as the project's tempo (steps and ramps): the engine
-    /// takes it at the next block. A map by value works: `map.into()`.
-    ///
-    /// # Errors
-    ///
-    /// [`TempoError::Following`] while the session follows a live tempo:
-    /// nothing is published.
-    pub fn set_tempo_map(
-        &self,
-        map: impl Into<Arc<TempoMap>>,
-    ) -> std::result::Result<(), TempoError> {
-        self.tempo_is_ours()?;
-        self.transport.settings().set_tempo_map(map);
-        Ok(())
-    }
-
-    /// Refuses a tempo the app sets while a live tempo owns the map.
-    fn tempo_is_ours(&self) -> std::result::Result<(), TempoError> {
-        #[cfg(feature = "midi")]
-        if self.midi_state.is_following() {
-            return Err(TempoError::Following);
-        }
-        Ok(())
-    }
-
     /// The per-channel compensation of the plan sent last, by output channel:
     /// what the compiler delays each output by, for a host that displays it.
     /// Republished with every plan; empty until the first. A node in the graph
@@ -1789,9 +1788,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.click
     }
 
-    /// The metronome's settings.
-    pub fn click_settings(&self) -> &Arc<ClickSettings> {
-        &self.click_settings
+    /// The metronome's targets: its level and when it sounds, written with
+    /// [`set`](Self::set) and read with [`get`](Self::get).
+    #[must_use]
+    pub const fn click(&self) -> crate::ClickTargets {
+        crate::ClickTargets::new()
     }
 
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -1924,10 +1925,63 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             nodes: self.midi.as_ref(),
             jobs: &mut self.jobs,
             settings: self.transport.settings(),
-            meter: self.click_settings.project_meter(),
+            meter: self.transport.settings().project_meter().clone(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi_io.as_mut(),
         };
         (midi, &mut self.resource_ids)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
+    use tutti_transport::MeterSlot;
+    use tutti_types::ChannelLayout;
+    use tutti_units::{Beat, SampleRate};
+
+    use crate::Session;
+
+    /// **The update's `Reclaim` phase frees what a block held across a
+    /// replacement**, in a cell nothing publishes to again: the meter a
+    /// following plugin slot (a `MeterSlot`, as a plugin node holds) read when
+    /// the project meter changed. A held `Loan` stands in for a block in
+    /// progress across the publish.
+    ///
+    /// The nodes' cells are the graph's table, pinned by
+    /// `the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph`; the
+    /// modulation lanes by `tests/modulation/modulation.rs`, the hardware ports by
+    /// `tests/midi/midi.rs` (`midi-hardware`), a plugin's meter by `plugin.rs`.
+    #[test]
+    fn an_update_frees_what_a_block_held_across_a_replacement() {
+        let mut s = Session::builder()
+            .outputs_floor(ChannelLayout::MONO)
+            .build_detached(SampleRate::SR_48K)
+            .expect("builds");
+        let _ = s.update();
+
+        let slot = MeterSlot::following_meter(Some(s.transport.settings().project_meter().clone()));
+        let meter = s.transport_handle().meter();
+        let old = Arc::new(MeterMap::new([MeterChange::new(
+            Beat(0.0),
+            TimeSignature::of(3, 4),
+        )]));
+        let gone = Arc::downgrade(&old);
+        s.set(meter.to(old)).unwrap();
+
+        let mut node = slot.reader();
+        {
+            // A block in progress across the publish.
+            let _held = node.lend();
+            s.set(meter.to(MeterMap::default())).unwrap();
+            // Still held: this update's own reclaim leaves it.
+            let _ = s.update();
+        }
+        assert!(gone.upgrade().is_some(), "the meter is retired");
+
+        let _ = s.update();
+        assert!(gone.upgrade().is_none(), "the meter is freed");
     }
 }

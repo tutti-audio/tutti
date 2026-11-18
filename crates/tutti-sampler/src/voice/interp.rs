@@ -1180,7 +1180,7 @@ mod tests {
 
     /// Narrowing goes through the engine's ITU-R BS.775 matrix, not a front-pair
     /// truncation: a centre-only 5.1 source must reach both stereo outputs at
-    /// −3 dB ([`MINUS_3_DB`](tutti_buffers::Float::MINUS_3_DB)), the ITU figure.
+    /// −3 dB ([`MINUS_3_DB`](Float::MINUS_3_DB)), the ITU figure.
     #[test]
     fn six_channel_wave_on_a_stereo_frame_folds_through_the_itu_matrix() {
         // 5.1 order: L R C LFE Ls Rs — centre only.
@@ -1195,7 +1195,7 @@ mod tests {
 
         assert_eq!(
             out,
-            [<f32 as tutti_buffers::Float>::MINUS_3_DB; 2],
+            [<f32 as Float>::MINUS_3_DB; 2],
             "the ITU centre figure"
         );
         assert!(
@@ -1337,7 +1337,7 @@ mod tests {
         let mut out = [9.0f32; 8];
         super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
         assert!(
-            (out[0] - <f32 as tutti_buffers::Float>::MINUS_3_DB).abs() < 1e-6,
+            (out[0] - <f32 as Float>::MINUS_3_DB).abs() < 1e-6,
             "{out:?}"
         );
         assert!(out[1..].iter().all(|&s| s.abs() < 1e-6), "{out:?}");
@@ -1355,7 +1355,7 @@ mod tests {
             SamplePosition(4.0),
             &mut out,
         );
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        let m = <f32 as Float>::MINUS_3_DB;
         assert!((out[0] - (1.0 + m * 4.0)).abs() < 1e-5 && (out[1] - (2.0 + m * 8.0)).abs() < 1e-5);
     }
 

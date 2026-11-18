@@ -116,7 +116,7 @@ fn a_timed_transport_program_needs_only_the_root() {
 }
 
 /// A tempo map is built from `tutti::tempo` alone and published to the
-/// transport's settings (what `Session::set_tempo_map` forwards to): 120 BPM, then a time ramp to 180 over four
+/// transport's settings (what the session's tempo target writes): 120 BPM, then a time ramp to 180 over four
 /// beats, lasts 1.6 s, so beat 4 is frame 76 800 at 48 kHz.
 #[test]
 fn a_tempo_map_is_built_and_published_through_the_facade() {

@@ -42,7 +42,7 @@ impl<F: Float> Node<F> for Half {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let (ins, mut outs) = io.split();
         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
-            *o = *i * F::from_f64(0.5);
+            *o = *i * F::lit(0.5);
         }
         Status::Modified
     }

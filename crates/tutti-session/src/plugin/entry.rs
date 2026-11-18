@@ -819,7 +819,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return Swap::Done;
         };
         let (fade, law) = (tutti_graph::DECLICK, tutti_graph::FadeLaw::default());
-        let meter = self.click_settings.project_meter();
+        let meter = self.transport.settings().project_meter().clone();
         // The graph is not re-preparing (checked above), so it never hands the
         // plugin back as busy.
         let swapped = match plugin.into_client() {

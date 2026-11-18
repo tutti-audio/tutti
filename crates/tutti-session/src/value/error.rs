@@ -56,4 +56,8 @@ pub enum SetRefusal {
     /// what an `f32` cell stores.
     #[error("the value does not fit the param's cell")]
     OutOfRange,
+    /// The session follows a live tempo, which owns the tempo map: an app's
+    /// write would be overwritten at the next message.
+    #[error("a live tempo is followed")]
+    Following,
 }

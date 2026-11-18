@@ -188,8 +188,9 @@ pub use tutti_session::{
 pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
-    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+    AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
+    IntoRead, Knobs, MeterTarget, Modify, Moved, ParamTarget, ScalarTarget, SetRefusal,
+    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -247,24 +248,24 @@ pub mod nodes {
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
         BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
-        ChannelTimes, ChannelTimesError, ClickConfig, ClickSettings, ClickState,
-        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
-        DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls,
-        DynamicEqNode, DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls,
-        EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode,
-        FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
-        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
-        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
-        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
+        ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings,
+        ClickState, CompressorControls, CompressorNode, ConvolverError, ConvolverNode,
+        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
+        CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls,
+        DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
+        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
+        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
+        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
+        LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
+        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
         NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
         PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
         TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
-        TransientShaperNode, VbapError, VbapPannerNode, VolumeOutOfRange,
+        TransientShaperNode, VbapError, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -323,12 +324,12 @@ pub mod types {
         SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
         UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Phase, Resyncs};
+    pub use tutti_units::{Phase, Real, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
 /// made from, and the `TempoView` a reader walks it with. What
-/// `Session::set_tempo_map` takes.
+/// the tempo target takes.
 pub mod tempo {
     pub use tutti_tempo::{Cell, CellGrid, CellGridError, TempoError};
     pub use tutti_tempo::{TempoMap, TempoMapBuilder, TempoPoint, TempoView, Transition};

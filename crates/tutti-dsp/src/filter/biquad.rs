@@ -1,7 +1,6 @@
 //! The second-order section both the crossover and the SVF's equivalent forms
 //! share: its coefficients, its response and its poles.
 
-use tutti_buffers::{Float, Mono, MonoMut};
 use tutti_units::{Db, SampleRate, Seconds};
 
 use crate::{Complex64, Ring};
@@ -50,51 +49,6 @@ impl Biquad {
     pub fn spectral_radius(&self) -> f64 {
         let [p, q] = self.poles();
         p.norm().max(q.norm())
-    }
-}
-
-/// A [`Biquad`]'s direct form I history: the last two inputs and outputs, in
-/// `f64`. The history is the filter's whole state and is independent of the
-/// coefficients, so a caller may change them between blocks (the SoundFont voice
-/// does, every chunk) or hold the history while it bypasses the section
-/// ([`hold`](Self::hold)).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct DirectForm1 {
-    x: [f64; 2],
-    y: [f64; 2],
-}
-
-impl DirectForm1 {
-    /// Filter `block` in place through `c`.
-    ///
-    /// The arithmetic runs in `f64` whatever the block's format `F`, so a block of `f32` is
-    /// widened exactly and rounded back once per sample.
-    pub fn process<F: Float>(&mut self, c: &Biquad, mut block: MonoMut<'_, F>) {
-        for sample in block.samples_mut() {
-            let x = sample.to_f64();
-            let y = c.b0 * x + c.b1 * self.x[0] + c.b2 * self.x[1]
-                - c.a1 * self.y[0]
-                - c.a2 * self.y[1];
-            self.x = [x, self.x[0]];
-            self.y = [y, self.y[0]];
-            *sample = F::from_f64(y);
-        }
-    }
-
-    /// Pass `block` through untouched, leaving the history as the filter's would
-    /// be had its output been its input, so the section can take over without a
-    /// step. A block shorter than two frames keeps what the history held.
-    pub fn hold<F: Float>(&mut self, block: Mono<'_, F>) {
-        for &sample in block.samples().iter().rev().take(2).rev() {
-            let x = sample.to_f64();
-            self.x = [x, self.x[0]];
-            self.y = [x, self.y[0]];
-        }
-    }
-
-    /// Clear the history.
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 

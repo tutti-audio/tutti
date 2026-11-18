@@ -82,7 +82,7 @@ tutti-clap-host = { path = "../tutti-clap-host" }
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 # The block views and the sample width (`Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
-tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "vst3-cpp"] }
+tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "vst3-cpp", "vst3-sdk"] }
 tutti-shared-plugin = { path = "../../testing/tutti-shared-plugin" }
 # The crate docs' editor example takes any `raw-window-handle` window.
 raw-window-handle = "0.6"

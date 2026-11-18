@@ -15,6 +15,7 @@
 )]
 
 use common::spec_of;
+use tutti_buffers::Float;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -22,7 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
-use tutti_buffers::{Float, FoldError};
+use tutti_buffers::FoldError;
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
     Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,

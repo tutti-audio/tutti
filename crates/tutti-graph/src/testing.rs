@@ -404,7 +404,7 @@ impl<F: Float> Node<F> for TestNode<F> {
             Kind::Smooth => {
                 let prev = &mut self.prev;
                 io.channel(0).map(|now| {
-                    let y = F::from_f32(0.5) * (now + *prev);
+                    let y = F::lit(0.5) * (now + *prev);
                     *prev = now;
                     y
                 });

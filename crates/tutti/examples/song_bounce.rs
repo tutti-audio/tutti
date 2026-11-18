@@ -58,7 +58,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples(512)))
         .build()?;
-    s.set_tempo(Bpm::of(120.0)).expect("not following");
+    s.set(
+        s.transport_handle()
+            .tempo()
+            .to(tutti::tempo::TempoMap::constant(Bpm::of(120.0)).expect("120 BPM is a map")),
+    )
+    .expect("not following");
 
     // The sampler: the same mono wave on beats 0 and 4, each a node as it
     // stands, placed at stereo to join the stereo chain.

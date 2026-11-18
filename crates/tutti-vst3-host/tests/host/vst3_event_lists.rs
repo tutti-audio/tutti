@@ -38,8 +38,7 @@ fn count(list: &EventList) -> usize {
 
 /// A `kDataEvent` of `data_type` as a plugin hands it to `addEvent`.
 fn data_event(data_type: u32, sample_offset: i32, bytes: &[u8]) -> Event {
-    // SAFETY: all-zero bytes is a valid value of this plain-data SDK struct.
-    let mut e: Event = unsafe { std::mem::zeroed() };
+    let mut e: Event = tutti_fixtures::sdk_zeroed();
     e.r#type = EventKind::Data as u16;
     e.sampleOffset = sample_offset;
     e.__field0.data = vst3::Steinberg::Vst::DataEvent {
@@ -272,8 +271,7 @@ fn a_full_text_arena_refuses_rather_than_moving_its_pointers() {
     assert_eq!(count as usize, fits + over, "every event is staged");
     let mut fetched: Vec<Event> = Vec::with_capacity(count as usize);
     for i in 0..count {
-        // SAFETY: all-zero bytes is a valid value of this plain-data SDK struct.
-        let mut out: Event = unsafe { std::mem::zeroed() };
+        let mut out: Event = tutti_fixtures::sdk_zeroed();
         // SAFETY: the test calls a COM method on a live object it owns, with arguments valid
         // for the call.
         assert_eq!(unsafe { ptr.getEvent(i, &mut out) }, kResultOk);
@@ -303,10 +301,11 @@ fn a_full_text_arena_refuses_rather_than_moving_its_pointers() {
 /// handed.
 fn sysex_read_by_plugin(list: &EventList) -> Vec<(i32, Vec<u8>)> {
     let mut out = Vec::new();
-    // SAFETY: all-zero bytes is a valid value of this plain-data SDK struct.
+    // SAFETY: the test calls a COM method on a live list it owns, with arguments valid
+    // for the call.
     unsafe {
         for i in 0..list.getEventCount() {
-            let mut e: Event = std::mem::zeroed();
+            let mut e: Event = tutti_fixtures::sdk_zeroed();
             assert_eq!(list.getEvent(i, &mut e), kResultOk);
             if e.r#type != EventKind::Data as u16 {
                 continue;

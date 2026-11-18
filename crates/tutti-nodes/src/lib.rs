@@ -264,7 +264,7 @@ pub use tutti_units::{
 
 mod click;
 pub use click::{
-    ClickConfig, ClickNode, ClickSettings, ClickState, MetronomeMode, VolumeOutOfRange,
+    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickSettings, ClickState, MetronomeMode,
 };
 
 mod lfo;

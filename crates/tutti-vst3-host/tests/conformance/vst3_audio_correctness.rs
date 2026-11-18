@@ -494,7 +494,7 @@ fn an_io_change_reactivates_the_plugin_rather_than_re_reading_it_live() {
         .loaded_mut()
         .poll_plugin_notifications(main_thread(), |_| {});
     assert!(
-        restart.io_changed,
+        restart.contains(tutti_vst3_ffi::RestartFlags::IO_CHANGED),
         "the probe requested restartComponent(kIoChanged) but it did not reach \
          the host — the rest of this test would be vacuous"
     );
@@ -1297,8 +1297,9 @@ fn context_requirements_are_read_after_the_component_initializes() {
 /// `conformance` seam playing the plugin's part (the probe never edits).
 #[test]
 fn an_overflowing_plugin_is_reported_once_by_the_next_poll() {
+    use tutti_vst3_ffi::RestartFlags;
+    use tutti_vst3_ffi::{NOTIFICATION_CAPACITY, PluginNotification};
     use tutti_vst3_host::host::conformance::plugin_perform_edit;
-    use tutti_vst3_host::{NOTIFICATION_CAPACITY, PluginNotification};
 
     let _guard = plugin_guard();
     let mut inst = load_probe(512);
@@ -1320,7 +1321,7 @@ fn an_overflowing_plugin_is_reported_once_by_the_next_poll() {
             }
         });
     assert!(
-        outcome.notifications_overflowed,
+        outcome.contains(RestartFlags::PARAM_VALUES_CHANGED),
         "a dropped edit must be reported so the host re-reads parameters"
     );
     assert_eq!(edits, NOTIFICATION_CAPACITY, "the oldest are delivered");
@@ -1329,10 +1330,7 @@ fn an_overflowing_plugin_is_reported_once_by_the_next_poll() {
     let outcome = inst
         .loaded_mut()
         .poll_plugin_notifications(main_thread(), |_| {});
-    assert!(
-        !outcome.notifications_overflowed,
-        "reported once, not on every later poll"
-    );
+    assert!(outcome.is_empty(), "reported once, not on every later poll");
 }
 
 /// **A SysEx open across a stop is not completed past it.** The plugin

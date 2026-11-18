@@ -12,19 +12,18 @@
 //! - **Restart requests** are cumulative — the host only ever acts on the union
 //!   of the flags since its last look — so they live in one `AtomicI32`,
 //!   `fetch_or`'d by the plugin and swapped to zero by
-//!   [`ComponentHandler::take_restart_bits`]. No queue, no capacity, nothing to
-//!   lose.
+//!   [`ComponentHandler::take_restart`], which returns them as
+//!   [`RestartFlags`]. No queue, no capacity, nothing to lose.
 //! - **The same flags are also raised as [`Request`]s** on a [`RequestWord`]
 //!   ([`ComponentHandler::requests`]), the form the shared core takes:
 //!   [`RestartFlags::raise_into`] says which flag is which request. A host that
 //!   drives a [`Lifecycle`](tutti_plugin_types::Lifecycle) reads that word; the
-//!   coalesced `restart_bits` stay for a plugin held without one.
+//!   coalesced flags stay for a plugin held without one.
 //! - **Everything else** (edits, progress, unit news) goes on one bounded
 //!   [`ArrayQueue`] of [`PluginNotification`], preallocated at construction.
 //!   A push past [`NOTIFICATION_CAPACITY`] is dropped and counted
 //!   ([`ComponentHandler::dropped_notifications`]), never logged and never
-//!   grown, and it raises a sticky flag
-//!   ([`ComponentHandler::take_overflowed`]) so the host knows to re-read.
+//!   grown; a host that sees the count move re-reads every parameter value.
 //!
 //! A restart therefore carries no position relative to the queued events. No
 //! consumer relied on one: the only reader always folded every restart into a
@@ -34,8 +33,9 @@
 //! truncated at [`PROGRESS_DESCRIPTION_CAPACITY`] bytes), so no callback
 //! allocates, and dropping a queued notification frees nothing.
 
+use super::Lost;
 use crate::guard::Out;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use tutti_plugin_types::ffi_guard;
 
 use tutti_plugin_types::{Request, RescanScope};
@@ -43,7 +43,9 @@ use tutti_rt::RequestWord;
 use tutti_units::Normalized;
 
 use arrayvec::ArrayString;
+use bitflags::bitflags;
 use crossbeam_queue::ArrayQueue;
+use vst3::Steinberg::Vst::RestartFlags_;
 use vst3::Steinberg::{
     FIDString, IPlugView, TBool,
     Vst::{
@@ -203,49 +205,47 @@ pub enum UnitEvent {
     UnitByBusChanged,
 }
 
-use vst3::Steinberg::Vst::RestartFlags_;
-
-/// Decoded view of the `RestartFlags` bitmask the plugin passes to
-/// `IComponentHandler::restartComponent`.
-///
-/// VST3 packs every "the host must re-sync X" signal into one `i32`. This
-/// splits it into named booleans so consumers can branch without re-deriving
-/// the bit math, and so the decode is unit-testable in isolation.
-///
-/// Spec reference: `Steinberg::Vst::RestartFlags`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct RestartFlags {
-    /// `kReloadComponent` — the plugin must be fully reloaded (deactivate +
-    /// reactivate). The heaviest signal; usually emitted after an in-plugin
-    /// preset load that changes the component structure.
-    pub reload_component: bool,
-    /// `kIoChanged` — input/output bus configuration changed; re-run bus
-    /// enumeration and (eventually) arrangement negotiation.
-    pub io_changed: bool,
-    /// `kParamValuesChanged` — one or more parameter *values* changed (e.g. an
-    /// in-plugin preset load); re-read parameter values into host state.
-    pub param_values_changed: bool,
-    /// `kLatencyChanged` — processing latency changed; re-read
-    /// `getLatencySamples` and surface to PDC.
-    pub latency_changed: bool,
-    /// `kParamTitlesChanged` — parameter titles/units/flags changed; re-read
-    /// parameter info.
-    pub param_titles_changed: bool,
-    /// `kMidiCCAssignmentChanged` — the `IMidiMapping` CC→param table changed;
-    /// re-query it.
-    pub midi_cc_assignment_changed: bool,
-    /// `kNoteExpressionChanged` — note-expression support changed.
-    pub note_expression_changed: bool,
-    /// `kIoTitlesChanged` — bus titles changed (cosmetic).
-    pub io_titles_changed: bool,
-    /// `kPrefetchableSupportChanged` — offline prefetch support changed.
-    pub prefetchable_support_changed: bool,
-    /// `kRoutingInfoChanged` — channel routing info changed.
-    pub routing_info_changed: bool,
-    /// `kKeyswitchChanged` — keyswitch info changed.
-    pub keyswitch_changed: bool,
-    /// `kParamIDMappingChanged` — param-ID mapping changed.
-    pub param_id_mapping_changed: bool,
+bitflags! {
+    /// The `RestartFlags` bitmask a plugin passes to
+    /// `IComponentHandler::restartComponent`: each bit is one "the host must
+    /// re-sync X" signal. The handler holds the union of every mask since the
+    /// host's last look ([`ComponentHandler::take_restart`]).
+    ///
+    /// Spec reference: `Steinberg::Vst::RestartFlags`.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+    pub struct RestartFlags: i32 {
+        /// `kReloadComponent`: the plugin must be fully reloaded (deactivate and
+        /// reactivate). The heaviest signal; usually emitted after an in-plugin
+        /// preset load that changes the component structure.
+        const RELOAD_COMPONENT = RestartFlags_::kReloadComponent;
+        /// `kIoChanged`: input/output bus configuration changed; re-run bus
+        /// enumeration and arrangement negotiation.
+        const IO_CHANGED = RestartFlags_::kIoChanged;
+        /// `kParamValuesChanged`: one or more parameter values changed (an
+        /// in-plugin preset load); re-read parameter values into host state.
+        const PARAM_VALUES_CHANGED = RestartFlags_::kParamValuesChanged;
+        /// `kLatencyChanged`: processing latency changed; re-read
+        /// `getLatencySamples`.
+        const LATENCY_CHANGED = RestartFlags_::kLatencyChanged;
+        /// `kParamTitlesChanged`: parameter titles, units or flags changed;
+        /// re-read parameter info.
+        const PARAM_TITLES_CHANGED = RestartFlags_::kParamTitlesChanged;
+        /// `kMidiCCAssignmentChanged`: the `IMidiMapping` CC to parameter table
+        /// changed; re-query it.
+        const MIDI_CC_ASSIGNMENT_CHANGED = RestartFlags_::kMidiCCAssignmentChanged;
+        /// `kNoteExpressionChanged`: note-expression support changed.
+        const NOTE_EXPRESSION_CHANGED = RestartFlags_::kNoteExpressionChanged;
+        /// `kIoTitlesChanged`: bus titles changed (cosmetic).
+        const IO_TITLES_CHANGED = RestartFlags_::kIoTitlesChanged;
+        /// `kPrefetchableSupportChanged`: offline prefetch support changed.
+        const PREFETCHABLE_SUPPORT_CHANGED = RestartFlags_::kPrefetchableSupportChanged;
+        /// `kRoutingInfoChanged`: channel routing info changed.
+        const ROUTING_INFO_CHANGED = RestartFlags_::kRoutingInfoChanged;
+        /// `kKeyswitchChanged`: keyswitch info changed.
+        const KEYSWITCH_CHANGED = RestartFlags_::kKeyswitchChanged;
+        /// `kParamIDMappingChanged`: the parameter id mapping changed.
+        const PARAM_ID_MAPPING_CHANGED = RestartFlags_::kParamIDMappingChanged;
+    }
 }
 
 impl RestartFlags {
@@ -255,52 +255,41 @@ impl RestartFlags {
     /// remap is a rescan of the parameter info, as a title change is;
     /// `kPrefetchableSupportChanged` asks for the deactivate and activate the
     /// header names, which is a restart. The three that nothing acts on (bus
-    /// titles, routing, keyswitches) raise nothing: they stay in the
-    /// coalesced flags of `ComponentHandler::take_restart_bits`.
+    /// titles, routing, keyswitches) raise nothing: they stay in the flags of
+    /// [`ComponentHandler::take_restart`].
     pub fn raise_into(self, word: &RequestWord) {
         let requests = [
-            (self.reload_component, Request::Reload),
-            (self.io_changed, Request::IoChanged),
-            (self.latency_changed, Request::LatencyChanged),
+            (self.contains(Self::RELOAD_COMPONENT), Request::Reload),
+            (self.contains(Self::IO_CHANGED), Request::IoChanged),
             (
-                self.param_values_changed,
+                self.contains(Self::LATENCY_CHANGED),
+                Request::LatencyChanged,
+            ),
+            (
+                self.contains(Self::PARAM_VALUES_CHANGED),
                 Request::RescanParams(RescanScope::Values),
             ),
             (
-                self.param_titles_changed || self.param_id_mapping_changed,
+                self.intersects(Self::PARAM_TITLES_CHANGED | Self::PARAM_ID_MAPPING_CHANGED),
                 Request::RescanParams(RescanScope::Info),
             ),
             (
-                self.midi_cc_assignment_changed,
+                self.contains(Self::MIDI_CC_ASSIGNMENT_CHANGED),
                 Request::MidiCcAssignmentChanged,
             ),
-            (self.note_expression_changed, Request::NoteExpressionChanged),
-            (self.prefetchable_support_changed, Request::Restart),
+            (
+                self.contains(Self::NOTE_EXPRESSION_CHANGED),
+                Request::NoteExpressionChanged,
+            ),
+            (
+                self.contains(Self::PREFETCHABLE_SUPPORT_CHANGED),
+                Request::Restart,
+            ),
         ];
         for (raised, request) in requests {
             if raised {
                 let _ = request.raise(word);
             }
-        }
-    }
-
-    /// Decodes the raw `i32` bitmask passed to `restartComponent`.
-    #[must_use]
-    pub fn from_bits(flags: i32) -> Self {
-        let has = |bit: i32| (flags & bit) != 0;
-        Self {
-            reload_component: has(RestartFlags_::kReloadComponent),
-            io_changed: has(RestartFlags_::kIoChanged),
-            param_values_changed: has(RestartFlags_::kParamValuesChanged),
-            latency_changed: has(RestartFlags_::kLatencyChanged),
-            param_titles_changed: has(RestartFlags_::kParamTitlesChanged),
-            midi_cc_assignment_changed: has(RestartFlags_::kMidiCCAssignmentChanged),
-            note_expression_changed: has(RestartFlags_::kNoteExpressionChanged),
-            io_titles_changed: has(RestartFlags_::kIoTitlesChanged),
-            prefetchable_support_changed: has(RestartFlags_::kPrefetchableSupportChanged),
-            routing_info_changed: has(RestartFlags_::kRoutingInfoChanged),
-            keyswitch_changed: has(RestartFlags_::kKeyswitchChanged),
-            param_id_mapping_changed: has(RestartFlags_::kParamIDMappingChanged),
         }
     }
 }
@@ -310,8 +299,8 @@ impl RestartFlags {
 /// the host's notification poll.
 ///
 /// `restartComponent` is not among them: restart requests are cumulative, so
-/// they are coalesced into the the host's restart outcome that
-/// poll returns rather than queued one per call.
+/// they are coalesced into the [`RestartFlags`] that
+/// [`ComponentHandler::take_restart`] returns rather than queued one per call.
 ///
 /// Typical usage: a user drags a knob in the plugin UI → the plugin calls
 /// `beginEdit` / `performEdit` / `endEdit` → the host receives the matching
@@ -374,11 +363,9 @@ pub enum PluginNotification {
 ///
 /// **Overflow drops the newest notification**, and counts it. Keeping the
 /// oldest means a gesture can lose its last `PerformEdit` and its `EndEdit`,
-/// so the host's view of a parameter may be stale. Each drop also raises a
-/// sticky flag, reported once by the next poll as
-/// the host's restart outcome (`notifications_overflowed`):
-/// a host seeing it re-reads every parameter value, as for
-/// `kParamValuesChanged`. (Dropping the oldest instead would lose the
+/// so the host's view of a parameter may be stale. A host that sees
+/// [`ComponentHandler::dropped_notifications`] move re-reads every parameter
+/// value, as for `kParamValuesChanged`. (Dropping the oldest instead would lose the
 /// `BeginEdit` and break a gesture just the same; there is no order-safe drop.)
 pub const NOTIFICATION_CAPACITY: usize = 512;
 
@@ -388,11 +375,10 @@ pub struct ComponentHandler {
     /// Edits, progress and unit news, in arrival order.
     notifications: ArrayQueue<PluginNotification>,
     /// Pushes refused because `notifications` was full.
-    dropped: AtomicU64,
-    /// Set by every refused push, cleared by `take_overflowed`.
-    overflowed: AtomicBool,
-    /// The union of every `restartComponent` flag word since the last take.
-    restart_bits: AtomicI32,
+    dropped: Lost,
+    /// The union of every `restartComponent` flag word since the last take:
+    /// [`RestartFlags`] bits.
+    restart: AtomicI32,
     /// The same flags as the core's requests, for a host that drives a
     /// `Lifecycle`.
     requests: RequestWord,
@@ -416,9 +402,8 @@ impl ComponentHandler {
     pub fn new() -> ComWrapper<Self> {
         ComWrapper::new(Self {
             notifications: ArrayQueue::new(NOTIFICATION_CAPACITY),
-            dropped: AtomicU64::new(0),
-            overflowed: AtomicBool::new(false),
-            restart_bits: AtomicI32::new(0),
+            dropped: Lost::new(),
+            restart: AtomicI32::new(0),
             requests: RequestWord::new(),
             next_progress_id: AtomicU64::new(1),
         })
@@ -432,13 +417,13 @@ impl ComponentHandler {
     }
 
     /// Takes the union of every `restartComponent` flag word received since
-    /// the last take, leaving zero behind. Wait-free and allocation-free, so
+    /// the last take, leaving none behind. Wait-free and allocation-free, so
     /// it may run on an audio thread.
-    pub fn take_restart_bits(&self) -> i32 {
+    pub fn take_restart(&self) -> RestartFlags {
         // Acquire pairs with the plugin's Release `fetch_or`: whatever the
         // plugin wrote before asking for the restart (a new latency, a new bus
         // layout) is visible to the host once it sees the bit.
-        self.restart_bits.swap(0, Ordering::Acquire)
+        RestartFlags::from_bits_truncate(self.restart.swap(0, Ordering::Acquire))
     }
 
     /// The oldest queued notification, if any. Lock-free and allocation-free,
@@ -452,25 +437,18 @@ impl ComponentHandler {
         self.notifications.len()
     }
 
-    /// Whether any notification was dropped since the last take, clearing the
-    /// flag. See [`NOTIFICATION_CAPACITY`] for what a caller does about it.
-    pub fn take_overflowed(&self) -> bool {
-        self.overflowed.swap(false, Ordering::Relaxed)
-    }
-
     /// Notifications refused because the queue held
     /// [`NOTIFICATION_CAPACITY`] unread ones. Cumulative over the handler's
     /// life; a host polls it to learn that it read too rarely.
     pub fn dropped_notifications(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed)
+        self.dropped.get()
     }
 
     /// Queues `n`, or counts it if the queue is full. Never allocates and
     /// never blocks: the plugin may be calling from its process thread.
     fn push(&self, n: PluginNotification) {
         if self.notifications.push(n).is_err() {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-            self.overflowed.store(true, Ordering::Relaxed);
+            self.dropped.add(1);
         }
     }
 
@@ -507,9 +485,10 @@ impl IComponentHandlerTrait for ComponentHandler {
 
     unsafe fn restartComponent(&self, flags: i32) -> tresult {
         ffi_guard(vst3::Steinberg::kInternalError, || {
-            // Release pairs with `take_restart_bits`' Acquire; see there.
-            self.restart_bits.fetch_or(flags, Ordering::Release);
-            RestartFlags::from_bits(flags).raise_into(&self.requests);
+            // Release pairs with `take_restart`' Acquire; see there.
+            let flags = RestartFlags::from_bits_truncate(flags);
+            self.restart.fetch_or(flags.bits(), Ordering::Release);
+            flags.raise_into(&self.requests);
             kResultOk
         })
     }

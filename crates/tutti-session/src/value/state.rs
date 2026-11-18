@@ -16,6 +16,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
 use super::error::{ValueError, ValueErrorKind};
+use super::slot::{self, SlotCell, SlotId};
 use super::target::AnyTarget;
 use crate::AppKey;
 
@@ -34,6 +35,9 @@ struct NodeParams {
 #[derive(Default, Debug)]
 pub struct Params {
     nodes: BTreeMap<NodeKey, NodeParams>,
+    /// The session's own values, by what they are: each a
+    /// [`SlotCell`] of its value type.
+    pub(super) slots: BTreeMap<SlotId, slot::Erased>,
 }
 
 impl Params {
@@ -123,6 +127,15 @@ impl ValueTable {
             .nodes
             .insert(node, NodeParams { owner, set, seeds });
         drop(old);
+    }
+
+    /// Registers the session's own value `id`, held in `slot`. Once, as the
+    /// session is built.
+    pub(crate) fn provide<V: 'static>(&self, id: SlotId, slot: SlotCell<V>) {
+        self.params
+            .lock_recover()
+            .slots
+            .insert(id, slot::erase(slot));
     }
 
     /// Forgets `node`'s params: its targets are gone.

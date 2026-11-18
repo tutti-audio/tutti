@@ -117,7 +117,10 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     let refused = s.set(cutoff.to(Hz(5.0))).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert_eq!(refused.at, 0);
-    assert_eq!(refused.target.expect("it names the key").node(), lp.erase());
+    assert_eq!(
+        refused.target.expect("it names the key").node(),
+        Some(lp.erase())
+    );
 }
 
 /// A host's node with one param, a `Hz` cutoff.

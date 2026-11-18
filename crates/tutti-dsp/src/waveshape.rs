@@ -106,11 +106,11 @@ impl ShapeKind {
     /// tests depend on it bit for bit.
     #[inline(always)]
     fn curve<F: Float>(self, hardness: F, x: F) -> F {
-        let (half, one) = (F::from_f32(0.5), F::ONE);
+        let (half, one) = (F::lit(0.5), F::ONE);
         match self {
             Self::Tanh => (x * hardness).tanh(),
             // Rescaled to saturate at ±1 while keeping unit slope at the origin.
-            Self::Atan => (x * (hardness * F::PI * half)).atan() * (F::from_f32(2.0) / F::PI),
+            Self::Atan => (x * (hardness * F::PI * half)).atan() * (F::lit(2.0) / F::PI),
             Self::Softsign => {
                 let y = x * hardness;
                 y / (one + y.abs())
