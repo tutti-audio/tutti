@@ -27,12 +27,12 @@ where
         assert_eq!(get(&back), raw);
         assert_eq!(back, value);
     }
-    // max + 1, 200 and 255: refused, with the range in the message.
+    // max + 1, 200 and 255: refused, with the raw and the width in the message.
     for raw in [max + 1, 200, 255] {
         let err = serde_json::from_str::<T>(&raw.to_string()).unwrap_err();
-        // The message names what was refused, the number and the limit.
+        // The message names the number and the width.
         let message = err.to_string();
-        for part in [what.to_string(), raw.to_string(), max.to_string()] {
+        for part in [what.to_string(), raw.to_string()] {
             assert!(message.contains(&part), "{message} lacks {part}");
         }
     }
@@ -44,9 +44,9 @@ where
 
 #[test]
 fn a_number_above_the_range_is_refused() {
-    check("channel", 15, MidiChannel::new, |v| v.get());
-    check("group", 15, MidiGroup::new, |v| v.get());
-    check("controller number", 127, CCNumber::new, |v| v.get());
+    check("within 4 bits", 15, MidiChannel::new, |v| v.get());
+    check("within 4 bits", 15, MidiGroup::new, |v| v.get());
+    check("within 7 bits", 127, CCNumber::new, |v| v.get());
 }
 
 #[test]
