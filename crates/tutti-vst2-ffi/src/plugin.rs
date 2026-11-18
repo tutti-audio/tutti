@@ -12,6 +12,7 @@ use crate::{
     channels::ChannelInfo,
     editor::Editor,
     host::{self, Host},
+    speaker::SpeakerArrangement,
 };
 
 primitive_enum! {
@@ -175,6 +176,7 @@ primitive_enum! {
         ProcessVarIo,
         /// [value]: input `*mut VstSpeakerArrangement`.
         /// [ptr]: output `*mut VstSpeakerArrangement`.
+        /// [return]: 1 when the plugin takes both.
         SetSpeakerArrangement,
 
         /// Deprecated.
@@ -259,8 +261,15 @@ primitive_enum! {
         /// Called after a preset is loaded.
         EndSetPreset,
 
-        /// [value]: inputs `*mut VstSpeakerArrangement`
-        /// [ptr]: Outputs `*mut VstSpeakerArrangement`
+        /// [value]: input `*mut *mut VstSpeakerArrangement`, which the plugin points at its own
+        /// input arrangement.
+        /// [ptr]: output `*mut *mut VstSpeakerArrangement`, likewise.
+        /// [return]: 1 when both are written.
+        ///
+        /// `aeffectx.h` words this opcode's comment as a copy of `effSetSpeakerArrangement`'s;
+        /// the pointer-to-pointer form is the SDK's own practice: its AudioEffectX class
+        /// takes two `VstSpeakerArrangement**` in getSpeakerArrangement, and its dispatcher
+        /// forwards `value` and `ptr` to them unchanged.
         GetSpeakerArrangement,
         /// [ptr]: buffer for plugin name, limited to `consts::MAX_PRODUCT_STR_LEN`.
         /// [return]: next plugin's uniqueID.
@@ -519,6 +528,26 @@ pub trait Plugin: Send {
     /// relying on soft bypass rather than muting the plugin itself.
     fn set_bypass(&mut self, bypass: bool) -> bool {
         false
+    }
+
+    /// Takes the host's proposed speaker arrangements, answering `effSetSpeakerArrangement`
+    /// (42). Return `true` to accept both.
+    ///
+    /// The default is `false`: declining, as an unimplemented opcode does.
+    ///
+    /// This method is only called while the plugin is in the *suspended* state.
+    fn set_speaker_arrangement(
+        &mut self,
+        input: &SpeakerArrangement,
+        output: &SpeakerArrangement,
+    ) -> bool {
+        false
+    }
+
+    /// The input and output arrangements the plugin holds, answering
+    /// `effGetSpeakerArrangement` (69). `None` answers 0, "no arrangement to report".
+    fn speaker_arrangement(&self) -> Option<(SpeakerArrangement, SpeakerArrangement)> {
+        None
     }
 
     /// The plugin's own name, answering `effGetEffectName` (45).
