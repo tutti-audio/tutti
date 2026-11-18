@@ -1,4 +1,5 @@
 use super::*;
+use tutti_units::Real;
 
 fn correlate(a: &[f32], b: &[f32], size: usize) -> Vec<f32> {
     let mut out = vec![0.0; size];

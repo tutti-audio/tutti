@@ -39,7 +39,7 @@ use tutti_tempo::TempoMap;
 use tutti_transport::FrozenClock;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::{Bed, ChannelLayout};
-use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
+use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, Real, SampleRate};
 use tutti_units::{Db, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -420,7 +420,7 @@ fn a_surround_mix_folds_to_every_width() {
         let n = width.count() as usize;
         // The ITU quad fold, written out: `Lo = FL + f32::MINUS_3_DB·BL`, `Ro = FR + f32::MINUS_3_DB·BR`,
         // and the mono file is `(Lo + Ro)·f32::MINUS_3_DB`.
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        let m = <f32 as Real>::MINUS_3_DB;
         let mut folded = vec![Vec::with_capacity(FRAMES); n];
         let [fl, fr, bl, br] = [0, 1, 2, 3].map(|c| &quad[c]);
         for (((&fl, &fr), &bl), &br) in fl.iter().zip(fr).zip(bl).zip(br) {

@@ -1,6 +1,6 @@
 use super::*;
 use tutti_fixtures::signal::{impulse, impulse_at, peak};
-use tutti_units::Samples;
+use tutti_units::{Real, Samples};
 
 /// Direct (naive) convolution — the definition, used as ground truth.
 ///

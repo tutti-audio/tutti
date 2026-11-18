@@ -5,14 +5,14 @@
 //! Every figure is analytic: constants of exactly representable values, so
 //! `0.5 L + 0.5 R` is exact in `f32`.
 
-use tutti_buffers::{Float, FoldError, InterleavedMut};
+use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
     Committed, ConnectError, Edge, EdgeGainError, InPort, OutPort, Root, Session, SessionEvent,
 };
 use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
-use tutti_units::Amplitude;
+use tutti_units::{Amplitude, Real};
 
 const BLOCK: usize = 64;
 

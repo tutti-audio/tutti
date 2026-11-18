@@ -31,7 +31,7 @@ use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{LoopEdit, Transport};
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{Amplitude, Real, SampleRate};
 
 /// A stereo source that reads the transport per frame from its `Env`, so
 /// the gated loop below exercises `transport_at` and the executor's change
@@ -716,7 +716,7 @@ fn a_714_root_block_is_allocation_free() {
     // side), the LFE omitted, and tutti's table for the heights (-3 dB into the
     // front on their side).
     let v = |c: usize| (c + 1) as f32 / 16.0;
-    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let m = <f32 as Real>::MINUS_3_DB;
     let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
     let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
     for frame in stereo.as_chunks::<2>().0 {
@@ -856,7 +856,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     // Settled: output 3 is silent, output 4 is the stereo fold's left channel
     // at the dim, the rest are silent.
     let v = |c: usize| (c + 1) as f32 / 16.0;
-    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let m = <f32 as Real>::MINUS_3_DB;
     let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
     for frame in out.as_chunks::<12>().0 {
         assert!(
@@ -1020,7 +1020,7 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
         }
     });
     let v = |c: usize| (c + 1) as f32 / 16.0;
-    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let m = <f32 as Real>::MINUS_3_DB;
     let (left, right) = (v(0) + m * (v(2) + v(4)), v(1) + m * (v(2) + v(5)));
     for frame in out.as_chunks::<2>().0 {
         assert!(

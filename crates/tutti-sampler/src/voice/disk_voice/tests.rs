@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tutti_graph::RenderMode;
 use tutti_graph::contract::Direct;
 use tutti_types::MaxBlock;
-use tutti_units::{Beat, BeatDuration, Bpm, Samples};
+use tutti_units::{Beat, BeatDuration, Bpm, Real, Samples};
 
 /// The rate the tests' blocks run at.
 const SR: f64 = 44_100.0;
@@ -880,7 +880,7 @@ fn named_ten() -> tutti_types::ChannelTopology {
 /// into the centre at -3 dB; the back centre into both backs at -3 dB; the
 /// right side has no source, so it is silent.
 fn ten_into_seven_one(v: impl Fn(usize) -> f32) -> [f32; 8] {
-    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let m = <f32 as Real>::MINUS_3_DB;
     [
         v(0),
         v(1),

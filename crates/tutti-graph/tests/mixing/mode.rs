@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
-use tutti_buffers::{Float, FoldError};
+use tutti_buffers::FoldError;
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
     Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
@@ -31,7 +31,7 @@ use tutti_graph::{
 };
 use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_ump::Ump;
-use tutti_units::{Latency, Samples, Tail};
+use tutti_units::{Latency, Real, Samples, Tail};
 
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.

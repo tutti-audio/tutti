@@ -2,6 +2,7 @@ use super::*;
 use crate::{BufferError, InterleavedMut};
 use Speaker::*;
 use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering, LayoutError};
+use tutti_units::Real;
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))

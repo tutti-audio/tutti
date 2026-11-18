@@ -30,7 +30,7 @@ use tutti_sampler::{
     StreamReader,
 };
 use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_units::{Beat, Bpm, SampleRate};
+use tutti_units::{Beat, Bpm, Real, SampleRate};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -292,7 +292,7 @@ struct Fixture {
 
 fn fixtures() -> [Fixture; 3] {
     use tutti_types::Speaker::*;
-    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let m = <f32 as Real>::MINUS_3_DB;
     let v = value;
     [
         // The rears before the sides.
