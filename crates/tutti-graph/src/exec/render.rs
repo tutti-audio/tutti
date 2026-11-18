@@ -282,18 +282,20 @@ impl<F: Float> Executor<F> {
                 inject,
                 has_inject,
                 has_due,
+                cut_in,
                 overlay,
                 par,
             } = state;
             // Slices, not `&mut Vec`s: a slice's pointer and length are locals
             // the op loop can keep in registers across the opaque node calls,
             // where a `Vec` behind a reference is reloaded after every one.
-            let (flags, events, inject, has_inject, has_due) = (
+            let (flags, events, inject, has_inject, has_due, cut_in) = (
                 &mut flags[..],
                 &mut events[..],
                 &mut inject[..],
                 &mut has_inject[..],
                 &mut has_due[..],
+                &cut_in[..],
             );
             let plan: &Plan = plan;
             let cap = *event_cap;
@@ -363,6 +365,7 @@ impl<F: Float> Executor<F> {
                         inject,
                         has_inject,
                         has_due,
+                        cut_in,
                         due,
                         logs: &mut logs.lanes[..],
                         log_claims: &mut logs.claims,
@@ -381,6 +384,7 @@ impl<F: Float> Executor<F> {
                     inject,
                     has_inject,
                     has_due,
+                    cut_in,
                     at: 0,
                     overlay,
                     due,
@@ -450,6 +454,9 @@ impl<F: Float> Executor<F> {
                                 &mut *st.events,
                             );
                             st.dropped.charge_merge(bound, lost);
+                            if let Some(b) = bound {
+                                crate::loss::add_cut(&st.cut_in[b.unit as usize], lost);
+                            }
                         }
                         Op::Node { unit, .. } => {
                             // One record per node op, lowered at compile time and

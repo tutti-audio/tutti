@@ -1306,7 +1306,9 @@ impl<'a> Plugin<'a> {
     /// ([`Losses`](crate::Losses)):
     ///
     /// - [`lost`](crate::Losses::lost): MIDI events on the node's event input
-    ///   that never reached the plugin (past the capacity of a block, in a
+    ///   that never reached the plugin (past the node's declared event-input
+    ///   bound, which the graph cuts before the node runs; past the capacity of
+    ///   a block, in a
     ///   block the plugin did not run, or the rest of a SysEx message that
     ///   lost a packet); parameter points of a sent grid that a full queue
     ///   dropped; and parameter edits the plugin made that the host did not

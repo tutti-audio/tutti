@@ -295,6 +295,7 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) inject: &'b mut [Inject],
     pub(crate) has_inject: &'b mut [bool],
     pub(crate) has_due: &'b mut [bool],
+    pub(crate) cut_in: &'b [std::sync::atomic::AtomicU32],
     pub(crate) due: Deliveries<'b>,
     /// Where the block's lost events are added up.
     pub(crate) dropped: &'b mut Dropped,
@@ -333,6 +334,7 @@ struct Shared<'s, 'o, F: Float = f32> {
     inject_spans: &'s [Span],
     has_inject: SplitMut<'s, bool>,
     has_due: SplitMut<'s, bool>,
+    cut_in: &'s [std::sync::atomic::AtomicU32],
     outputs: SplitMut<'s, &'o mut [F]>,
     workers: SplitMut<'s, Worker>,
     /// Each participant's log slots and ring, claimed by its index for the
@@ -413,6 +415,7 @@ pub(crate) fn run_block<F: Float>(
             inject_spans,
             has_inject: SplitMut::new(b.has_inject, has_inject),
             has_due: SplitMut::new(b.has_due, has_due),
+            cut_in: b.cut_in,
             outputs: SplitMut::new(b.outputs, outputs),
             workers: SplitMut::new(workers, worker_claims),
             logs: SplitMut::new(b.logs, b.log_claims),
@@ -557,6 +560,9 @@ impl<F: Float> Shared<'_, '_, F> {
                 };
                 let lost = event_merge_op(&self.plan.event_list[srcs.range()], dst, bound, &mut e);
                 dropped.charge_merge(bound, lost);
+                if let Some(b) = bound {
+                    crate::loss::add_cut(&self.cut_in[b.unit as usize], lost);
+                }
             }
             Op::Node { unit, .. } => {
                 let rec = &self.plan.nodes.recs[unit as usize];
@@ -590,6 +596,7 @@ impl<F: Float> Shared<'_, '_, F> {
                     inject: &mut inject,
                     has_inject: std::slice::from_mut(&mut *has_inject),
                     has_due: std::slice::from_mut(&mut *has_due),
+                    cut_in: self.cut_in,
                     at: 0,
                     overlay,
                     due: self.due,

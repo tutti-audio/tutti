@@ -256,6 +256,8 @@ fn the_parallel_losses_are_the_serial_ones() {
 struct Recorder {
     bound: Option<u32>,
     blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+    /// The sum of what `Io::event_input_cut` read.
+    cut: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Node for Recorder {
@@ -270,6 +272,8 @@ impl Node for Recorder {
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let frames = io.events(0).iter().map(|e| e.offset.index() as u32);
         self.blocks.lock().unwrap().push(frames.collect());
+        self.cut
+            .fetch_add(io.event_input_cut(), std::sync::atomic::Ordering::Relaxed);
         Status::Silent
     }
     fn reset(&mut self) {}
@@ -282,6 +286,7 @@ struct Bounded {
     ed: Editor,
     exec: Executor,
     blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+    cut: Arc<std::sync::atomic::AtomicU64>,
     writers: u64,
 }
 
@@ -293,18 +298,21 @@ impl Bounded {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = Arc::default();
+        let cut = Arc::<std::sync::atomic::AtomicU64>::default();
         ed.insert(
             NodeKey(100),
             "recorder",
             tutti_graph::Unforkable(Recorder {
                 bound,
                 blocks: Arc::clone(&blocks),
+                cut: Arc::clone(&cut),
             }),
         );
         let mut rig = Self {
             ed,
             exec,
             blocks,
+            cut,
             writers: 0,
         };
         for &n in ons {
@@ -369,6 +377,12 @@ fn a_declared_input_bound_keeps_the_earliest_and_counts_the_rest() {
         assert_eq!(got, vec![vec![0, 0, 1, 1, 2, 2, 3, 3]; 2], "{workers}");
         assert_eq!(rig.exec.dropped_event_count(), 6, "{workers}");
         assert_eq!(rig.exec.lost_event_count(), 6, "{workers}");
+        // The node reads the same 3 a block that were charged to it.
+        assert_eq!(
+            rig.cut.load(std::sync::atomic::Ordering::Relaxed),
+            6,
+            "{workers}"
+        );
         // Every cut is the node's: charged to it, at no port.
         let losses: Vec<EventLoss> = rig.ed.take_event_losses().collect();
         let each = EventLoss {
@@ -529,6 +543,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             NodeKey(100),
             "recorder",
             tutti_graph::Unforkable(Recorder {
+                cut: Arc::default(),
                 bound: Some(4),
                 blocks: Arc::clone(&blocks),
             }),
@@ -605,6 +620,7 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             NodeKey(100),
             "recorder",
             tutti_graph::Unforkable(Recorder {
+                cut: Arc::default(),
                 bound: Some(bound),
                 blocks: Arc::default(),
             }),
@@ -654,6 +670,7 @@ fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
             .replace_or_swap(
                 NodeKey(100),
                 tutti_graph::Unforkable(Recorder {
+                    cut: Arc::default(),
                     bound: Some(3),
                     blocks: Arc::clone(&rig.blocks),
                 }),

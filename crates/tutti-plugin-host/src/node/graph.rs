@@ -149,6 +149,13 @@ where
         if this.owed_lost > 0 {
             io.count_lost(std::mem::take(&mut this.owed_lost));
         }
+        // What the graph cut from the node's declared input bound: already
+        // charged to the node there (not `count_lost` again), and counted in
+        // the plugin's own tally.
+        let cut = io.event_input_cut();
+        if cut > 0 {
+            this.params.count_midi_dropped(cut);
+        }
         if this.rate_refused {
             // The plugin was not told this node's rate (`set_rate`): silence,
             // not audio at another rate.

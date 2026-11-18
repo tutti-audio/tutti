@@ -377,6 +377,9 @@ impl Stager {
             inject,
             has_inject: vec![false; plan.units.len()],
             has_due: vec![false; plan.units.len()],
+            cut_in: (0..plan.units.len())
+                .map(|_| std::sync::atomic::AtomicU32::new(0))
+                .collect(),
             overlay: Vec::with_capacity(overlay),
             par,
         };
