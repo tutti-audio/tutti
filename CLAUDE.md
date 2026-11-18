@@ -281,19 +281,19 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 
 0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-ump`, `tutti-types`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-rt`, `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`,
-   `tutti-buffers`
-2. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
+1. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
+2. `tutti-rt`
+3. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
-3. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
-4. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
+4. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
+5. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
-5. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
+6. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
    `tutti-midi-hardware`, `tutti-clap-host`, `tutti-vst3-host`, `tutti-au-host`,
    `tutti-vst2-host`, `tutti-plugin-host`
-6. `tutti-plugin`, `tutti-plugin-probe`
-7. `tutti-plugin-server`, `tutti-session`
-8. `tutti`
+7. `tutti-plugin`, `tutti-plugin-probe`
+8. `tutti-plugin-server`, `tutti-session`
+9. `tutti`
 
 - Nothing under `crates/` has a normal or build dependency on `testing/`.
 - Only `tutti` depends on `tutti-session`, and nothing depends on `tutti`.
