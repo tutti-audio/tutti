@@ -193,8 +193,7 @@ impl Portamento {
             };
 
             // A fractional glide length feeding a reciprocal, not a frame
-            // count: multiply in f64 and narrow once. Narrowing the rate first
-            // computes the step at f32 precision and drifts over a long glide.
+            // count: it multiplies in f64 and narrows once to the `f32` progress.
             let glide_samples = (glide_time * self.sample_rate.get()) as f32;
             let rate = if glide_samples > 0.0 {
                 1.0 / glide_samples

@@ -48,7 +48,7 @@ fn one_import_renders_a_block() {
 fn the_measurement_vocabulary_arrives_and_converts() {
     assert!((Db(-6.0).to_amplitude().get() - 0.501).abs() < 0.01);
     assert_eq!(Seconds(1.0).to_samples(SampleRate::SR_48K).get(), 48_000);
-    assert!((Cents(1200.0).to_semitones().get() - 12.0).abs() < 1e-6);
+    assert_eq!(Cents(1200.0).to_semitones().get(), 12.0);
     assert_eq!(ChannelLayout::STEREO.count(), 2);
 }
 

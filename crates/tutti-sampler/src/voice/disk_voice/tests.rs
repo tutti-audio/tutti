@@ -499,7 +499,7 @@ fn clip_reader_silent_outside_window_audible_inside() {
 #[test]
 fn a_non_finite_gain_is_silence_on_a_disk_voice() {
     let samples: Vec<_> = (1..64).map(|i| (i as f32, i as f32)).collect();
-    for gain in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for gain in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
         let mut reader = make_clip_reader_at(
             &samples,

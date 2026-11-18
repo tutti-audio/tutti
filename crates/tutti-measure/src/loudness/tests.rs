@@ -59,7 +59,7 @@ fn silent_render_yields_a_finite_normalization_gain() {
 }
 
 /// Interleaved stereo sine at `amp`, `secs` long.
-fn sine(rate: f64, secs: f64, freq: f64, amp: f32) -> Vec<f32> {
+fn sine(rate: f64, secs: f64, freq: f64, amp: f64) -> Vec<f32> {
     let n = (rate * secs) as usize;
     tutti_fixtures::signal::sine(
         tutti_units::Hz(freq),
@@ -247,7 +247,7 @@ fn gain_to_never_amplifies_to_reach_the_ceiling() {
 /// is not a whole number of cycles adds at most
 /// `10 log10(1 + 1/(4 pi f T))` = 0.001 dB for the 400 ms window, so the
 /// published figure is the whole budget.
-const WINDOW_TOL: f32 = 0.1;
+const WINDOW_TOL: f64 = 0.1;
 
 /// Stereo (identical channels) 997 Hz sine, amplitude `amp(t)` at `t`
 /// seconds, with a continuous phase.
@@ -266,8 +266,8 @@ fn windowed_sine(rate: f64, secs: f64, amp: impl Fn(f64) -> f64) -> Vec<f32> {
 /// `-0.691 + 10 log10(sum_ch G * a^2 / 2)`, and the K-weighting's gain at
 /// 997 Hz is the `+0.691` dB that offset cancels, so two channels read
 /// `10 log10(a^2) = 20 log10(a)`.
-fn stereo_lufs(a: f64) -> f32 {
-    Db::from_amplitude(Amplitude::new(a as f32)).get()
+fn stereo_lufs(a: f64) -> f64 {
+    Db::from_amplitude(Amplitude::new(a)).get()
 }
 
 fn windowed_cfg(rate: f64) -> Rated<WindowedLoudnessConfig> {
@@ -353,19 +353,18 @@ fn a_ten_db_step_settles_after_each_window() {
     assert!((at(0.0).momentary.get() - low).abs() < WINDOW_TOL);
     assert!((at(0.0).short_term.get() - low).abs() < WINDOW_TOL);
 
-    let ramp =
-        |t: f64, window: f64| f64::from(low) + 10.0 * (1.0 + 9.0 * (t / window).min(1.0)).log10();
+    let ramp = |t: f64, window: f64| low + 10.0 * (1.0 + 9.0 * (t / window).min(1.0)).log10();
     for t in [0.1, 0.2, 0.3, 0.4, 0.5, 1.0] {
         let got = at(t).momentary.get();
         assert!(
-            (got - ramp(t, 0.4) as f32).abs() < WINDOW_TOL,
+            (got - ramp(t, 0.4)).abs() < WINDOW_TOL,
             "momentary +{t}s: {got}"
         );
     }
     for t in [0.5, 1.0, 2.0, 3.0, 3.5, 4.0] {
         let got = at(t).short_term.get();
         assert!(
-            (got - ramp(t, 3.0) as f32).abs() < WINDOW_TOL,
+            (got - ramp(t, 3.0)).abs() < WINDOW_TOL,
             "short-term +{t}s: {got}"
         );
     }
@@ -535,7 +534,7 @@ fn bad_settings_and_input_are_errors() {
 // cancels against a reference channel of weight 1.0 at the same tone.
 
 const TONE_HZ: f64 = 1_000.0;
-const TONE_AMP: f32 = 0.1;
+const TONE_AMP: f64 = 0.1;
 
 /// Integrated loudness of `bed` with a tone of `TONE_AMP` on the `index`th
 /// channel alone, two seconds at 48 kHz.
@@ -558,9 +557,9 @@ fn tone_on(bed: Bed, index: usize) -> Loudness {
 
 /// Table 5, per system: the weight of each speaker (1.00 or 1.41) in the
 /// bed's channel order, `None` for the LFE.
-fn table_5(bed: Bed) -> Vec<Option<f32>> {
-    const W: Option<f32> = Some(1.41);
-    const U: Option<f32> = Some(1.0);
+fn table_5(bed: Bed) -> Vec<Option<f64>> {
+    const W: Option<f64> = Some(1.41);
+    const U: Option<f64> = Some(1.0);
     match bed {
         // System A, 0+2+0: M+030 M-030.
         Bed::Stereo => vec![U, U],
@@ -597,7 +596,7 @@ fn a_speaker_weighs_what_table_5_lists_for_its_system() {
             let read = tone_on(bed, index);
             match weight {
                 Some(g) => {
-                    let want = reference.lufs.get() + 10.0 * g.log10();
+                    let want = reference.lufs.get() + Db::from_power(g).get();
                     assert!(
                         (read.lufs.get() - want).abs() < 0.01,
                         "{bed:?} channel {index}: {:?} vs {want}",
@@ -628,7 +627,7 @@ fn a_speaker_weighs_what_table_5_lists_for_its_system() {
 fn one_tone_reads_the_annex_1_figure_at_weight_one_and_one_point_four_one() {
     let unit = tone_on(Bed::Surround51, 0).lufs.get();
     let side = tone_on(Bed::Surround51, 4).lufs.get();
-    let analytic = 10.0 * (f64::from(TONE_AMP).powi(2) / 2.0).log10() as f32;
+    let analytic = Db::from_power(TONE_AMP.powi(2) / 2.0).get();
     assert!((unit - analytic).abs() < 0.05, "{unit} vs {analytic}");
     assert!((side - (analytic + 1.4922)).abs() < 0.05, "{side}");
 }
@@ -683,7 +682,7 @@ fn the_weight_follows_the_speaker_in_a_reordered_topology() {
         .get()
     };
     let (side, front, lfe) = (read(0), read(1), read(2));
-    assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
+    assert!((side - front - Db::from_power(1.41).get()).abs() < 0.01);
     assert_eq!(lfe, -70.0);
 }
 
@@ -744,7 +743,7 @@ fn the_windowed_meter_weighs_by_placement() {
         .get()
     };
     let (front, side, lfe) = (momentary(0), momentary(4), momentary(3));
-    assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
+    assert!((side - front - Db::from_power(1.41).get()).abs() < 0.01);
     assert_eq!(lfe, WindowedReading::LOUDNESS_FLOOR.get());
 }
 
@@ -814,10 +813,13 @@ fn the_true_peak_meter_reads_the_inter_sample_peak() {
         )
         .unwrap();
     let peak = state.finish().get();
-    let analytic = 20.0 * 0.5f32.log10();
+    let analytic = Db::from_amplitude(Amplitude(0.5)).get();
     // The 4x oversampling filter reads 0.1 dB high at this phase.
     assert!((peak - analytic).abs() < 0.15, "{peak} vs {analytic}");
-    assert!(peak > 20.0 * sample_peak.log10() + 2.9, "{peak}");
+    assert!(
+        peak > Db::from_amplitude(Amplitude(f64::from(sample_peak))).get() + 2.9,
+        "{peak}"
+    );
 }
 
 /// Silence reads the floor, and a chunk of another width is refused.
@@ -883,7 +885,10 @@ fn the_true_peak_meter_reads_the_same_figure_at_i16() {
     )
     .unwrap()
     .get();
-    assert!((peak - 20.0 * 0.5f32.log10()).abs() < 0.15, "{peak}");
+    assert!(
+        (peak - Db::from_amplitude(Amplitude(0.5)).get()).abs() < 0.15,
+        "{peak}"
+    );
 }
 
 /// The trait fold over uneven chunks (1, 7, 64 frames and the rest) is
@@ -935,7 +940,7 @@ fn the_true_peak_trait_fold_over_uneven_chunks_equals_measure_true_peak() {
     assert_eq!(peak, batch);
     // The samples reach 0.5 / sqrt 2 (-9.03 dB); the sine between them 0.5.
     assert!(
-        (peak.get() - 20.0 * 0.5f32.log10()).abs() < 0.15,
+        (peak.get() - Db::from_amplitude(Amplitude(0.5)).get()).abs() < 0.15,
         "{peak:?}"
     );
 }
@@ -993,7 +998,7 @@ fn a_wide_layout_keeps_every_sample_on_its_channel() {
     };
     let (left, surround, lfe) = (tone(0), tone(4), tone(3));
     assert!(
-        (surround - left - 10.0 * 1.41f32.log10()).abs() < 0.05,
+        (surround - left - Db::from_power(1.41).get()).abs() < 0.05,
         "{left} {surround}"
     );
     assert_eq!(lfe, -70.0, "the LFE adds no loudness");
@@ -1020,5 +1025,8 @@ fn the_true_peak_of_a_channel_does_not_depend_on_the_layout_width() {
         let peak = measure_true_peak(Interleaved::new(&buf, layout).unwrap(), rate).unwrap();
         assert_eq!(peak, mono, "{width} channels");
     }
-    assert!((mono.get() - 20.0 * 0.4f32.log10()).abs() < 0.3, "{mono:?}");
+    assert!(
+        (mono.get() - Db::from_amplitude(Amplitude(0.4)).get()).abs() < 0.3,
+        "{mono:?}"
+    );
 }

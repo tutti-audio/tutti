@@ -44,9 +44,9 @@ fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
     let all = say(&mut core, Addressee::All, FINE(0));
     let r = retunes(&all);
     assert_eq!(r.len(), 16, "every channel");
-    assert!(r.iter().all(|&(_, b)| (b + 1.0).abs() < 1e-6), "-100 cents");
+    assert!(r.iter().all(|&(_, b)| b == -1.0), "-100 cents");
     let r = retunes(&say(&mut core, Addressee::All, FINE(0x3FFF)));
-    assert!((r[0].1 - 8191.0 / 8192.0).abs() < 1e-6);
+    assert_eq!(r[0].1, 8191.0 / 8192.0);
     let r = retunes(&say(&mut core, Addressee::All, FINE(0x2000)));
     assert!(r.iter().all(|&(_, b)| b == 0.0), "A440");
 }
@@ -100,7 +100,7 @@ fn the_percussion_channel_is_not_retuned() {
     assert!((retunes(&bend)[0].1 - 2.0).abs() < 1e-3, "the wheel alone");
 }
 
-fn gain(core: &Voicing) -> (f32, f32) {
+fn gain(core: &Voicing) -> (f64, f64) {
     let g = core.master_gain();
     (g.left.0, g.right.0)
 }
@@ -114,8 +114,8 @@ fn master_volume_is_the_square_of_the_value() {
     let volume = |v| Universal::MasterVolume(U14::of(v));
     assert!(say(&mut core, Addressee::All, volume(0x2000)).is_empty());
     let (l, r) = gain(&core);
-    let expected = (8192.0_f32 / 16383.0).powi(2);
-    assert!((l - expected).abs() < 1e-6 && (r - expected).abs() < 1e-6);
+    let expected = (8192.0_f64 / 16383.0).powi(2);
+    assert!((l - expected).abs() < 1e-15 && (r - expected).abs() < 1e-15);
     say(&mut core, Addressee::All, volume(0));
     assert_eq!(gain(&core), (0.0, 0.0));
 }
@@ -128,11 +128,11 @@ fn the_own_and_all_call_volumes_are_kept_apart_and_multiply() {
     let volume = |v| Universal::MasterVolume(U14::of(v));
     say(&mut core, Addressee::Own, volume(0x2000));
     say(&mut core, Addressee::All, volume(0x2000));
-    let quarter = (8192.0_f32 / 16383.0).powi(2);
-    assert!((gain(&core).0 - quarter * quarter).abs() < 1e-6);
+    let quarter = (8192.0_f64 / 16383.0).powi(2);
+    assert!((gain(&core).0 - quarter * quarter).abs() < 1e-15);
     // Bringing the all-call back up leaves the own level where it was.
     say(&mut core, Addressee::All, volume(0x3FFF));
-    assert!((gain(&core).0 - quarter).abs() < 1e-6);
+    assert!((gain(&core).0 - quarter).abs() < 1e-15);
 }
 
 /// M1 p.57: balance `00 00` is hard left, `7F 7F` hard right, and the centre
@@ -265,8 +265,8 @@ fn general_midi_resets_the_master_but_not_the_own_knob() {
         Universal::GeneralMidi(GeneralMidi::On),
     );
     assert!(retunes(&on).iter().all(|&(_, b)| b == 0.0), "A440 again");
-    let quarter = (8192.0_f32 / 16383.0).powi(2);
-    assert!((gain(&core).0 - quarter).abs() < 1e-6);
+    let quarter = (8192.0_f64 / 16383.0).powi(2);
+    assert!((gain(&core).0 - quarter).abs() < 1e-15);
 }
 
 /// The Device Inquiry's messages are for whoever owns the wire: the note logic

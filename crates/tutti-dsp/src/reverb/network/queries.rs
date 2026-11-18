@@ -42,17 +42,12 @@ impl Fdn {
             Matrix::Reflection(v) => {
                 // `A Aᵀ - I = 4 (|v|² - 1) v vᵀ`.
                 let s = energy(v);
-                let peak = v
-                    .iter()
-                    .map(|&x| f64::from(x.magnitude().get()))
-                    .fold(0.0, f64::max);
+                let peak = v.iter().map(|&x| x.magnitude().get()).fold(0.0, f64::max);
                 4.0 * (s - 1.0).abs() * peak * peak
             }
             Matrix::Circulant(c) => (0..n)
                 .map(|k| {
-                    let r: f64 = (0..n)
-                        .map(|j| f64::from(c[j].get()) * f64::from(c[(j + k) % n].get()))
-                        .sum();
+                    let r: f64 = (0..n).map(|j| c[j].get() * c[(j + k) % n].get()).sum();
                     (r - delta(k, 0)).abs()
                 })
                 .fold(0.0, f64::max),
@@ -60,7 +55,7 @@ impl Fdn {
                 .flat_map(|i| (0..n).map(move |j| (i, j)))
                 .map(|(i, j)| {
                     let dot: f64 = (0..n)
-                        .map(|k| f64::from(a[i * n + k].get()) * f64::from(a[j * n + k].get()))
+                        .map(|k| a[i * n + k].get() * a[j * n + k].get())
                         .sum();
                     (dot - delta(i, j)).abs()
                 })
@@ -113,7 +108,7 @@ impl Fdn {
         let mut max = 0.0f64;
         for line in self.lines.iter() {
             for band in Band::ALL {
-                let g = f64::from(line.absorption.gain(band).get());
+                let g = line.absorption.gain(band).get();
                 if g.is_nan() || g < 0.0 {
                     return f64::INFINITY;
                 }
@@ -149,11 +144,11 @@ impl Fdn {
         let lines = self.lines.iter().map(|l| {
             (
                 l.effective_frames(),
-                Db::from_amplitude_f64(f64::from(l.absorption.gain(band).get())),
+                Db::from_amplitude(l.absorption.gain(band)),
             )
         });
         let seconds = if self.mixing() {
-            let (m, l) = lines.fold((0.0, 0.0), |(m, l), (dm, dl)| (m + dm, l + dl));
+            let (m, l) = lines.fold((0.0, Db::UNITY), |(m, l), (dm, dl)| (m + dm, l + dl));
             if self.lines.is_empty() {
                 0.0
             } else {
@@ -180,11 +175,11 @@ impl Fdn {
         let mut longest = 0.0f64;
         for l in self.lines.iter() {
             let peak = l.diffuser.map_or(0.0, |d| {
-                let g = f64::from(d.gain.magnitude().get());
+                let g = d.gain.magnitude().get();
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
             let m = l.length.get() + peak + l.absorption.peak_delay().get();
-            let db_g = Db::from_amplitude_f64(f64::from(l.absorption.gain(band).get()));
+            let db_g = Db::from_amplitude(l.absorption.gain(band)).get();
             if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;
             }
@@ -193,7 +188,7 @@ impl Fdn {
         }
         Some((
             db_rho,
-            Db::from_amplitude_f64(self.norm_bound().max(1.0)),
+            Db::from_amplitude(Amplitude(self.norm_bound().max(1.0))).get(),
             longest,
         ))
     }
@@ -266,9 +261,9 @@ impl Fdn {
             && self.lines_hold()
             && self.orthogonal()
             && self.lines.iter().all(|l| {
-                Band::ALL.iter().all(|&b| {
-                    (f64::from(l.absorption.gain(b).get()) - 1.0).abs() <= LOSSLESS_TOLERANCE
-                })
+                Band::ALL
+                    .iter()
+                    .all(|&b| (l.absorption.gain(b).get() - 1.0).abs() <= LOSSLESS_TOLERANCE)
             })
     }
 
@@ -302,7 +297,7 @@ impl Fdn {
 /// Frames an all-pass keeps ringing: its delay times the trips its geometric
 /// train takes to fall to `amplitude` (infinity when `|g| >= 1`).
 fn all_pass_ring(a: &AllPass, amplitude: f64) -> f64 {
-    let g = f64::from(a.gain.magnitude().get());
+    let g = a.gain.magnitude().get();
     if g >= 1.0 {
         return f64::INFINITY;
     }
@@ -468,8 +463,8 @@ impl System for Network {
             return Ring::Unbounded;
         }
         let floor = Db::new(floor.get().min(0.0));
-        let depth = f64::from(-floor.get());
-        let amplitude = f64::from(floor.to_amplitude().get());
+        let depth = -floor.get();
+        let amplitude = floor.to_amplitude().get();
         let mut decay = 0.0f64;
         let mut frames = self.pre_delay.get() as f64;
         for stage in self.stages.iter() {

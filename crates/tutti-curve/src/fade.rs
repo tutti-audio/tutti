@@ -1,4 +1,4 @@
-use tutti_units::{SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::Law;
 
@@ -53,14 +53,15 @@ impl FadeLaw {
     /// In debug builds, if `k >= n`.
     #[inline]
     #[must_use]
-    pub fn gains(self, k: usize, n: usize) -> (f32, f32) {
+    pub fn gains(self, k: usize, n: usize) -> (Amplitude, Amplitude) {
         debug_assert!(k < n, "frame {k} of a {n}-frame fade");
-        let s = Law::Smootherstep.eval((k + 1) as f32 / (n + 1) as f32);
+        // `Law` is still `f32`; the curve PR makes it `f64`.
+        let s = f64::from(Law::Smootherstep.eval((k + 1) as f32 / (n + 1) as f32));
         match self {
-            Self::EqualAmplitude => (1.0 - s, s),
+            Self::EqualAmplitude => (Amplitude(1.0 - s), Amplitude(s)),
             Self::EqualPower => {
-                let a = s * core::f32::consts::FRAC_PI_2;
-                (libm::cosf(a), libm::sinf(a))
+                let a = s * core::f64::consts::FRAC_PI_2;
+                (Amplitude(libm::cos(a)), Amplitude(libm::sin(a)))
             }
         }
     }
@@ -69,12 +70,12 @@ impl FadeLaw {
     /// `from * out + to * in`, and exactly `to` from frame `n` on.
     #[inline]
     #[must_use]
-    pub fn between(self, from: f32, to: f32, k: usize, n: usize) -> f32 {
+    pub fn between(self, from: Amplitude, to: Amplitude, k: usize, n: usize) -> Amplitude {
         if k >= n {
             return to;
         }
         let (out, inn) = self.gains(k, n);
-        from * out + to * inn
+        Amplitude(from.get() * out.get() + to.get() * inn.get())
     }
 }
 

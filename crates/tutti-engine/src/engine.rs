@@ -129,7 +129,7 @@ use tutti_transport::{
 };
 use tutti_types::ChannelLayout;
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{At, Frame};
+use tutti_units::{Amplitude, At, Frame};
 use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The block capacity an engine sizes its fold scratch for unless given
@@ -348,10 +348,9 @@ impl<F: Float> Mixing<'_, F> {
             let (old, new) = if first + i < length {
                 law.gains(first + i, length)
             } else {
-                (0.0, 1.0)
+                (Amplitude::SILENT, Amplitude::UNITY)
             };
-            // A fade law's gains are `f32` levels.
-            (*go, *gn) = (F::from_f32(old), F::from_f32(new));
+            (*go, *gn) = (F::from_f64(old.get()), F::from_f64(new.get()));
         }
         let new_planes = Planes::new(new.1)?;
         let old_planes = old.map(|(_, planes)| Planes::new(planes)).transpose()?;
@@ -1202,7 +1201,7 @@ impl GainPlan {
 /// with the gain at zero there, and the new audio fades in.
 #[derive(Clone, Copy, Debug)]
 struct Fader {
-    gain: f32,
+    gain: Amplitude,
     aim: Option<Frame>,
     /// Frames a fade spans, at the rate of the block being shaped.
     fade: usize,
@@ -1214,7 +1213,7 @@ struct Fader {
 /// ends on `aim`) or to unity, `k` of them done.
 #[derive(Clone, Copy, Debug)]
 struct Run {
-    from: f32,
+    from: Amplitude,
     k: usize,
     n: usize,
     /// The frame a fade-out ends on; `None`: a fade-in.
@@ -1224,8 +1223,12 @@ struct Run {
 impl Run {
     /// The gain of the fade's next frame, and the run moved past it; `None`
     /// once it has reached its end.
-    fn step(self) -> (f32, Option<Self>) {
-        let to = if self.aim.is_some() { 0.0 } else { 1.0 };
+    fn step(self) -> (Amplitude, Option<Self>) {
+        let to = if self.aim.is_some() {
+            Amplitude::SILENT
+        } else {
+            Amplitude::UNITY
+        };
         let gain = FadeLaw::EqualAmplitude.between(self.from, to, self.k, self.n);
         // A fade-in lasts one frame past its last law step, which is the
         // gain's exact end; a fade-out ends on its aim, which is zero.
@@ -1240,7 +1243,7 @@ impl Run {
 impl Fader {
     fn new(fade: usize) -> Self {
         Self {
-            gain: 1.0,
+            gain: Amplitude::UNITY,
             aim: None,
             fade,
             run: None,
@@ -1250,7 +1253,7 @@ impl Fader {
     /// A fade-in from silence, starting on the next frame.
     fn rise(fade: usize) -> Option<Run> {
         Some(Run {
-            from: 0.0,
+            from: Amplitude::SILENT,
             k: 0,
             n: fade,
             aim: None,
@@ -1274,7 +1277,7 @@ impl Fader {
         // Nothing to do on a block with no event, full gain, and no fade-out
         // starting inside it: the common case.
         let quiet = self.aim.is_none_or(|to| to.get() > end + fade as u64);
-        if plan.len == 0 && self.gain == 1.0 && self.run.is_none() && quiet {
+        if plan.len == 0 && self.gain == Amplitude::UNITY && self.run.is_none() && quiet {
             return;
         }
         let mut next = 0;
@@ -1294,14 +1297,14 @@ impl Fader {
             }
             let x = frame0.get() + i as u64;
             if jump {
-                self.gain = 0.0;
+                self.gain = Amplitude::SILENT;
                 self.run = Self::rise(fade);
             } else {
                 match self.aim {
                     Some(to) if x >= to.get() => {
                         // On the target: zero, and the fade-in starts from
                         // here (whether or not the command was applied).
-                        self.gain = 0.0;
+                        self.gain = Amplitude::SILENT;
                         self.aim = None;
                         self.run = Self::rise(fade);
                     }
@@ -1322,7 +1325,7 @@ impl Fader {
                     _ => {
                         let run = match self.run {
                             Some(r) if r.aim.is_none() => Some(r),
-                            _ if self.gain < 1.0 => Some(Run {
+                            _ if self.gain < Amplitude::UNITY => Some(Run {
                                 from: self.gain,
                                 k: 0,
                                 n: fade,
@@ -1337,11 +1340,11 @@ impl Fader {
                     }
                 }
             }
-            if self.gain != 1.0 {
+            if self.gain != Amplitude::UNITY {
                 let at = (base + i) * channels;
+                let gain = F::from_f64(self.gain.get());
                 for s in &mut output[at..at + channels] {
-                    // The master gain is an `f32` level (an `Amplitude`).
-                    *s *= F::from_f32(self.gain);
+                    *s *= gain;
                 }
             }
         }
@@ -2681,12 +2684,13 @@ mod tests {
         let mut out = vec![0.0f32; frames * 2];
         engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         for k in 0..frames {
+            // The ramp is `f64`; the `f32` samples take its gain narrowed.
             let gain = if k + 1 >= n {
                 0.5
             } else {
-                1.0 + (0.5 - 1.0) * ((k + 1) as f32 / n as f32)
+                1.0 + (0.5 - 1.0) * ((k + 1) as f64 / n as f64)
             };
-            assert_eq!(out[2 * k], 21.0 * gain, "left, frame {k}");
+            assert_eq!(out[2 * k], 21.0 * gain as f32, "left, frame {k}");
             assert_eq!(out[2 * k + 1], 22.0, "right is untouched, frame {k}");
         }
         // Muted, it ramps down from where it stands, and the dim scales the rest.
@@ -2953,8 +2957,9 @@ mod tests {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
-                (0.0, 1.0)
+                (Amplitude::SILENT, Amplitude::UNITY)
             };
+            let (go, gn) = (go.get() as f32, gn.get() as f32);
             assert_eq!(
                 *frame,
                 [21.0 * go, 22.0 * go, 21.0 * gn, 22.0 * gn],
@@ -3002,8 +3007,9 @@ mod tests {
             let (out, new) = if k < 20 {
                 FadeLaw::EqualAmplitude.gains(k, 20)
             } else {
-                (0.0, 1.0)
+                (Amplitude::SILENT, Amplitude::UNITY)
             };
+            let (out, new) = (out.get() as f32, new.get() as f32);
             // Heard left goes to output 1 and heard right to output 0, from
             // the block after the change.
             let want = if k < 8 { [out, new] } else { [new, out] };
@@ -3105,8 +3111,9 @@ mod tests {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
-                (0.0, 1.0)
+                (Amplitude::SILENT, Amplitude::UNITY)
             };
+            let (go, gn) = (go.get() as f32, gn.get() as f32);
             assert_eq!(
                 *frame,
                 [21.0 * go, 22.0 * go, 21.0 * gn, 22.0 * gn],
@@ -3143,8 +3150,9 @@ mod tests {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
-                (0.0, 1.0)
+                (Amplitude::SILENT, Amplitude::UNITY)
             };
+            let (go, gn) = (go.get() as f32, gn.get() as f32);
             assert_eq!(
                 *frame,
                 [21.0 * go + 22.0 * gn, 22.0 * go + 21.0 * gn],

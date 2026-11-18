@@ -190,7 +190,7 @@ fn the_figure_is_the_same_at_every_configuration() {
 /// `NeverSettles`, not `TailLonger`**, and nothing else is judged.
 #[test]
 fn a_plugin_that_makes_its_own_sound_never_settles() {
-    let bias = Db(-60.0).to_amplitude().get();
+    let bias = Db(-60.0).to_amplitude().get() as f32;
     let m = measure_at(
         &mut Fake::new(0, 8191).with_bias(bias),
         effect(finite(8191), 0),
@@ -215,8 +215,8 @@ fn a_plugin_that_makes_its_own_sound_never_settles() {
 /// over it is sound.
 #[test]
 fn the_floor_is_the_boundary_of_sound() {
-    let under = Db(-101.0).to_amplitude().get();
-    let over = Db(-99.0).to_amplitude().get();
+    let under = Db(-101.0).to_amplitude().get() as f32;
+    let over = Db(-99.0).to_amplitude().get() as f32;
     let quiet = measure_at(
         &mut Fake::new(0, 100).with_bias(under),
         effect(finite(100), 0),

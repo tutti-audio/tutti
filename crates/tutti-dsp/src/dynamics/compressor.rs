@@ -25,7 +25,7 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
+use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
 use crate::finite::finite_or;
 use crate::follower::Follower;
 use crate::{Glide, Lanes, Lerp, Steps};
@@ -80,7 +80,7 @@ impl Default for CompressorControls {
 
 /// The most makeup, in dB, a compressor applies: 10^(400/20) is 1e20, so the gain of a
 /// makeup and a reduction stays finite whatever either is.
-const MAX_MAKEUP_DB: f32 = 400.0;
+const MAX_MAKEUP: Db = Db(400.0);
 
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,13 +103,12 @@ impl CompressorMember {
         let d = CompressorControls::DEFAULT;
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
+            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             attack: c.attack,
             release: c.release,
-            makeup: Db(
-                finite_or(c.makeup.get(), d.makeup.get()).clamp(-MAX_MAKEUP_DB, MAX_MAKEUP_DB)
-            ),
+            makeup: Db(finite_or(c.makeup.get(), d.makeup.get())
+                .clamp(-MAX_MAKEUP.get(), MAX_MAKEUP.get())),
             key_cutoff: Hz(finite_or(c.key_cutoff.get(), d.key_cutoff.get())),
             key_q: Q(finite_or(c.key_q.get(), d.key_q.get())),
             rate,
@@ -154,12 +153,12 @@ impl<F: Float> Detector<F> {
     /// `-reduction + makeup`.
     #[inline]
     fn frame(&self, reduction: &mut F, level: F, threshold: F, makeup: F) -> F {
-        // The knee and ratio widen to `F` here, exactly.
+        // The knee narrows to `F` and the ratio (an `f32` unit) widens, here.
         let target = gain_reduction(
             level_db(level),
             threshold,
             F::from_f32(self.ratio.get()),
-            F::from_f32(self.knee.get()),
+            F::from_f64(self.knee.get()),
         );
         *reduction = self.ballistics.follow_raw(*reduction, target);
         db_gain(makeup - *reduction)
@@ -258,18 +257,15 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
         if let Some(key) = &mut self.key {
             key.aim(member.key_cutoff, member.key_q);
         }
-        self.makeup.aim_by(
-            <F as Float>::from_f32(member.makeup.get()),
-            Steps::Fixed(self.steps),
-        );
+        self.makeup
+            .aim_by(F::from_f64(member.makeup.get()), Steps::Fixed(self.steps));
     }
 
     /// The deepest smoothed reduction any frame reached since the last call (or since
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        // `Db` is `f32`: the reading narrows once, when it is taken.
-        Db(core::mem::replace(&mut self.deepest, F::ZERO).to_f32())
+        Db(core::mem::replace(&mut self.deepest, F::ZERO).to_f64())
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
@@ -295,7 +291,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.detector;
-        let aimed = <F as Float>::from_f32(d.threshold.get());
+        let aimed = F::from_f64(d.threshold.get());
         let blended = self.makeup.blended(frames);
         let taken = self.makeup.taken();
         let mut gains = [F::ZERO; CHUNK];

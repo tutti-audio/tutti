@@ -16,7 +16,7 @@ const L: usize = 240;
 /// The longest block `run` hands the bank.
 const CHUNK: usize = 256;
 
-fn controls(threshold: f32, ceiling: f32, release: f64) -> LimiterControls {
+fn controls(threshold: f64, ceiling: f64, release: f64) -> LimiterControls {
     LimiterControls {
         threshold: Db(threshold),
         ceiling: Db(ceiling),
@@ -59,7 +59,7 @@ fn hostile() -> Vec<LimiterControls> {
             ..base
         },
     ];
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(LimiterControls {
             threshold: Db(bad),
             ..base
@@ -69,7 +69,7 @@ fn hostile() -> Vec<LimiterControls> {
             ..base
         });
         all.push(LimiterControls {
-            release: Seconds(f64::from(bad)),
+            release: Seconds(bad),
             ..base
         });
     }
@@ -176,8 +176,8 @@ fn the_bank_holds_the_figures_of_its_definition() {
     let d = LimiterControls::DEFAULT;
     let m = Design::<f32>::of(
         &LimiterControls {
-            threshold: Db(f32::NAN),
-            ceiling: Db(f32::NAN),
+            threshold: Db(f64::NAN),
+            ceiling: Db(f64::NAN),
             release: Seconds(f64::INFINITY),
         },
         RATE,
@@ -190,7 +190,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
             d.release.one_pole_coeff(RATE) as f32
         )
     );
-    for inf in [f32::INFINITY, f32::NEG_INFINITY] {
+    for inf in [f64::INFINITY, f64::NEG_INFINITY] {
         let m = Design::<f32>::of(
             &LimiterControls {
                 ceiling: Db(inf),
@@ -218,8 +218,8 @@ fn the_bank_holds_the_figures_of_its_definition() {
 fn oracle(x: &[Vec<f32>], c: &LimiterControls, rate: f64) -> Vec<Vec<f64>> {
     let n = x[0].len();
     let (drive, threshold) = (
-        amplitude(f64::from(c.ceiling.get()) - f64::from(c.threshold.get())),
-        amplitude(f64::from(c.threshold.get())),
+        amplitude(c.ceiling.get() - c.threshold.get()),
+        amplitude(c.threshold.get()),
     );
     let coeff = 1.0 - (-1.0 / (c.release.get() * rate)).exp();
     let mut envelope = f64::INFINITY;
@@ -299,7 +299,7 @@ fn the_output_is_the_delayed_input_scaled_by_the_window_minimum_of_the_envelope(
         );
         // The figure was not vacuous: the curve engaged, some sample leaving well under
         // its input moved by the drive (the gain of a signal under the threshold).
-        let drive = amplitude(f64::from(c.ceiling.get()) - f64::from(c.threshold.get()));
+        let drive = amplitude(c.ceiling.get() - c.threshold.get());
         let reduced = want[0]
             .iter()
             .skip(L)
@@ -319,7 +319,7 @@ fn the_output_stays_within_the_ceiling_bound() {
     {
         let bound = bound_of(ceiling);
         for block in [1, 7, 64, 256] {
-            let mut k = runner(&controls(threshold as f32, ceiling as f32, release));
+            let mut k = runner(&controls(threshold, ceiling, release));
             let out = run_in(&mut k, &[&x[0], &x[1]], [None, None], block);
             let peak = out
                 .iter()
@@ -349,18 +349,18 @@ fn the_output_stays_within_the_ceiling_bound() {
 fn a_signal_under_the_threshold_is_moved_by_the_drive_and_delayed() {
     let n = 48_000;
     for (threshold, ceiling, level) in [
-        (-6.0f32, -6.0f32, 0.1f32),
+        (-6.0f64, -6.0f64, 0.1f32),
         (-20.0, -6.0, 0.03),
         (-6.0, -12.0, 0.2),
     ] {
         let x = noise(7, n, level);
         assert!(
-            f64::from(level) < amplitude(f64::from(threshold)),
+            f64::from(level) < amplitude(threshold),
             "the signal is under the threshold"
         );
         let mut k = runner(&controls(threshold, ceiling, 0.01));
         let out = run_mono(&mut k, &x);
-        let drive = amplitude(f64::from(ceiling - threshold));
+        let drive = amplitude(ceiling - threshold);
         for i in L..n {
             let want = f64::from(x[i - L]) * drive;
             assert!(
@@ -377,7 +377,7 @@ fn a_signal_under_the_threshold_is_moved_by_the_drive_and_delayed() {
 /// reset puts it back: the same step after a reset leaves at the ceiling again.
 #[test]
 fn the_first_audio_after_a_reset_is_limited_from_its_first_sample() {
-    let ceiling = Db(-6.0).to_amplitude().get();
+    let ceiling = Db(-6.0).to_amplitude().get() as f32;
     let x = vec![1.0f32; 4 * L];
     let mut k = runner(&controls(-6.0, -6.0, 0.1));
     for pass in 0..2 {
@@ -690,7 +690,7 @@ fn a_square_an_impulse_train_and_a_burst_stay_under_the_ceiling() {
         let bound = bound_of(ceiling);
         for (name, x) in [("square", &square), ("train", &train), ("burst", &burst)] {
             for block in [1, 33, 256] {
-                let mut k = runner(&controls(-12.0, ceiling as f32, 0.05));
+                let mut k = runner(&controls(-12.0, ceiling, 0.05));
                 let out = run_in(&mut k, &[x, x], [None, None], block);
                 let peak = out
                     .iter()
@@ -777,7 +777,7 @@ fn a_clone_continues_identically_and_shares_nothing() {
 fn every_reachable_limiter_stays_within_its_ceiling_bound() {
     let x = [noise(31, 3_000, 2.0), noise(32, 3_000, 1.2)];
     for c in reachable() {
-        let bound = bound_of(f64::from(c.ceiling.get()));
+        let bound = bound_of(c.ceiling.get());
         let mut k = runner(&c);
         let out = run(&mut k, &[&x[0], &x[1]]);
         let peak = out
@@ -837,11 +837,10 @@ fn a_hostile_lane_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
     }
 }
 
-/// A cell threshold of `-inf` or far under -758 dB leaves the output under the ceiling: the
+/// A cell threshold of `-inf` or far under -6165 dB leaves the output under the ceiling: the
 /// boost under the threshold is held to the ceiling over the (clamped) threshold amplitude,
-/// not the 1.175 a clamped gap would give, and a ceiling of `-inf` mutes. Silence, tiny
-/// samples at the clamp (1e-38 to 1.2e-38, where `over / peak` would overflow at a boosted
-/// ceiling) and a loud signal, at ceilings 0, 12 and 20 dB and `-inf`.
+/// not the gain a clamped gap would give, and a ceiling of `-inf` mutes. Silence, tiny
+/// samples and a loud signal, at ceilings 0, 12 and 20 dB and `-inf`.
 #[test]
 fn a_threshold_past_the_clamp_does_not_overshoot_the_ceiling() {
     let n = 3_000;
@@ -849,15 +848,17 @@ fn a_threshold_past_the_clamp_does_not_overshoot_the_ceiling() {
     x[100] = 1.0e-38;
     x[101] = 1.1e-38;
     x[102] = 1.2e-38;
-    for threshold in [f32::NEG_INFINITY, -800.0, -758.0, -2000.0] {
-        for ceiling in [0.0f32, f32::NEG_INFINITY, 12.0, 20.0] {
+    // The thresholds straddle the `f64` amplitude limit (`10^(-6165/20)` is near `f64::MIN_POSITIVE`),
+    // a `Db` being `f64`; the `f32` clamp (`MAX_GAP`) sits well inside them.
+    for threshold in [f64::NEG_INFINITY, -7000.0, -6165.0, -2000.0] {
+        for ceiling in [0.0f64, f64::NEG_INFINITY, 12.0, 20.0] {
             let mut k = runner(&controls(threshold, ceiling, 0.05));
             for scale in [1.0f32, 1.0e-30, 1.0e-38] {
                 let scaled: Vec<f32> = x.iter().map(|v| v * scale).collect();
                 let out = run_mono(&mut k, &scaled);
                 let peak = out.iter().map(|&s| f64::from(s).abs()).fold(0.0, f64::max);
                 let bound = if ceiling.is_finite() {
-                    bound_of(f64::from(ceiling))
+                    bound_of(ceiling)
                 } else {
                     0.0
                 };
@@ -894,7 +895,7 @@ fn an_infinite_sample_is_finite_on_its_own_frame_and_does_not_latch_the_envelope
         peak <= bound_of(-6.0) && peak > 0.2,
         "the tail: peak {peak}"
     );
-    let mut k = runner(&controls(-12.0, f32::NEG_INFINITY, 0.01));
+    let mut k = runner(&controls(-12.0, f64::NEG_INFINITY, 0.01));
     let out = run_mono(&mut k, &x);
     assert!(out.iter().all(|&s| s == 0.0), "a ceiling of -inf mutes it");
 }
@@ -907,7 +908,7 @@ fn a_hostile_aimed_ceiling_read_with_a_lane_is_clamped_too() {
     let n = 4_000;
     let x = [noise(45, n, 1.5), noise(46, n, 1.0)];
     let thr = vec![-20.0f32; n];
-    for ceiling in [f32::INFINITY, 1.0e30] {
+    for ceiling in [f64::INFINITY, 1.0e30] {
         let mut k = runner(&controls(-12.0, ceiling, 0.05));
         let mut silent_then_loud = vec![0.0f32; 500];
         silent_then_loud.extend_from_slice(&x[0][..n - 500]);
@@ -964,21 +965,21 @@ fn the_aimed_extremes_keep_their_meaning_on_the_lane_path() {
     let thr = vec![-20.0f32; n];
     let ceil = vec![-6.0f32; n];
 
-    let mut k = runner(&controls(-12.0, f32::NEG_INFINITY, 0.05));
+    let mut k = runner(&controls(-12.0, f64::NEG_INFINITY, 0.05));
     let out = run_in(&mut k, &[&x[0], &x[1]], [Some(&thr), None], 64);
     assert!(
         out.iter().flatten().all(|&s| s == 0.0),
         "a -inf ceiling mutes exactly"
     );
 
-    let mut k = runner(&controls(f32::INFINITY, -6.0, 0.05));
+    let mut k = runner(&controls(f64::INFINITY, -6.0, 0.05));
     let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&ceil)], 64);
     assert!(
         out.iter().flatten().all(|&s| s == 0.0),
         "a +inf threshold is a gain of 0"
     );
 
-    let mut k = runner(&controls(f32::NEG_INFINITY, -6.0, 0.05));
+    let mut k = runner(&controls(f64::NEG_INFINITY, -6.0, 0.05));
     let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&ceil)], 64);
     let peak = out
         .iter()
@@ -1020,26 +1021,21 @@ fn an_f64_limiter_under_its_threshold_delays_by_exactly_the_lookahead() {
 }
 
 /// A constant signal over the threshold comes out at the ceiling the control holds, to 1e-15:
-/// the oracle is the closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it
-/// (`Db` stores `f32`), and widened; the gain is divided in `f64`.
+/// the oracle is the closed form `10^(-20 / 20)`; the gain is divided in `f64`.
 #[test]
 fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = vec![wide_signal(1)[0]; 3 * L];
     let y = run_f64(&controls(-30.0, -20.0, 0.1), &x);
-    assert_close_f64(
-        &y[L..],
-        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); 2 * L],
-        1e-15,
-    );
+    // The ceiling is the `f64` converter's value: the control is no longer rounded to `f32`.
+    assert_close_f64(&y[L..], &vec![Db(-20.0).to_amplitude().get(); 2 * L], 1e-15);
 }
 
 /// After a loud stretch the gain rises toward the quiet gain `10^((ceiling - threshold) / 20)`
 /// along the one-pole `e[k] = e[k-1] + c (target - e[k-1])`, `c = 1 - exp(-1 / (release
 /// rate))`, from the limited gain `ceiling / peak`; the output is the delayed quiet signal
 /// times that envelope (a rising envelope's window minimum is its oldest value): the closed
-/// form in `f64`, to 1e-12, from the ceiling and quiet gains' closed forms rounded to `f32`, as the control stores them
-/// (`Db` stores `f32`), and widened.
+/// form in `f64`, to 1e-12, from the ceiling and quiet gains' closed forms.
 #[test]
 fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -1051,14 +1047,15 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
         .map(|n| if n < switch { loud } else { quiet })
         .collect();
     let coeff = 1.0 - (-1.0 / (release * RATE.get())).exp();
-    let below = f64::from(10f64.powf((ceiling - threshold) / 20.0) as f32);
-    let mut envelope = f64::from(10f64.powf(ceiling / 20.0) as f32) / loud;
+    let below = Db(ceiling - threshold).to_amplitude().get();
+    let mut envelope = Db(ceiling).to_amplitude().get() / loud;
     let mut gains = vec![envelope; switch];
     for _ in switch..len {
         envelope += coeff * (below - envelope);
         gains.push(envelope);
     }
     let want: Vec<f64> = (switch + L..len).map(|n| quiet * gains[n - L]).collect();
-    let y = run_f64(&controls(threshold as f32, ceiling as f32, release), &x);
+    let y = run_f64(&controls(threshold, ceiling, release), &x);
+    // The closed form is `f64` throughout, so the tolerance is rounding, not `f32`'s.
     assert_close_f64(&y[switch + L..], &want, 1e-12);
 }

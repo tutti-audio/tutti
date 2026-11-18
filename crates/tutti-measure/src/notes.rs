@@ -444,7 +444,7 @@ pub fn transcribe<S: Sample>(
         });
     }
     let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    if peak < SILENCE_FLOOR.to_amplitude().get() {
+    if f64::from(peak) < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
     check_frame_count(cfg.framing().frames_for(Samples(samples.len())), MAX_FRAMES)?;

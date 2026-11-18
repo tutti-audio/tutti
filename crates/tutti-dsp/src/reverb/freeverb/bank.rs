@@ -136,13 +136,12 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             rate,
             into: 0,
         };
-        // `Feedback` and `Gain` are `f32` units: the figure narrows through them.
         bank.set_combs(
             F::from_f32(START.feedback().get()),
             F::from_f64(START.damping()),
         );
         for apf in bank.all_passes.iter_mut().flatten() {
-            apf.feedback = F::from_f32(ALLPASS_FEEDBACK.get());
+            apf.feedback = F::from_f64(ALLPASS_FEEDBACK.get());
         }
         bank
     }
@@ -219,13 +218,10 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             .max()
             .unwrap_or(0);
         let comb = ring_seconds(longest, trips(f64::from(loop_gain), TAIL_FLOOR), self.rate);
-        let chain = self.all_passes[1].iter().map(|a| a.buffer.len()).map(|d| {
-            ring_seconds(
-                d,
-                trips(f64::from(ALLPASS_FEEDBACK.get()), TAIL_FLOOR),
-                self.rate,
-            )
-        });
+        let chain = self.all_passes[1]
+            .iter()
+            .map(|a| a.buffer.len())
+            .map(|d| ring_seconds(d, trips(ALLPASS_FEEDBACK.get(), TAIL_FLOOR), self.rate));
         let total = chain.fold(comb, |sum, s| Seconds(sum.get() + s.get()));
         Tail::Finite(total.to_samples_ceil(self.rate))
     }
@@ -285,7 +281,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each channel's combs and
     /// all-passes into `left` and `right`, which are overwritten.
     fn run(&mut self, input: &[F], left: &mut [F], right: &mut [F]) {
-        let gain = F::from_f32(Self::FIXED_GAIN.get());
+        let gain = F::from_f64(Self::FIXED_GAIN.get());
         for (out, (combs, all_passes)) in [left, right]
             .into_iter()
             .zip(self.combs.iter_mut().zip(self.all_passes.iter_mut()))

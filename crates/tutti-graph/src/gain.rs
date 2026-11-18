@@ -205,9 +205,8 @@ impl Hash for EdgeGain {
 /// into and the executor snapshots once per block, and the range a driven
 /// value is clamped to.
 ///
-/// An [`Amplitude`] is a plain `f32` newtype, so the cell holds the raw `f32`
-/// (an `AtomicF32`, which is what a control lane's knob is) and converts at its
-/// edge: nothing outside it sees a bare float. **The base is the lane's
+/// The cell holds the base as an `f32` (an `AtomicF32`, which is what a control
+/// lane's knob is) and converts at its edge: nothing outside it sees a bare float. **The base is the lane's
 /// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] and a
 /// route's `ModState::set_knob` store into the same cell, so a routed
 /// modulation moves around the base and the base is what the gain returns to. The
@@ -229,7 +228,8 @@ impl GainCell {
         let ranges = ParamRanges::new(ParamPorts::of(&[EdgeGain::ADDR]));
         ranges.store(EdgeGain::ADDR, range);
         Self {
-            base: Arc::new(AtomicF32::new(base.get())),
+            // The cell is an `f32` param word: the base narrows once into it.
+            base: Arc::new(AtomicF32::new(base.get() as f32)),
             range: ranges,
             fade: Arc::new(AtomicU8::new(EdgeFade::None.bits())),
         }
@@ -248,7 +248,8 @@ impl GainCell {
 
     /// Store `base`. Wait-free.
     pub(crate) fn store(&self, base: Amplitude) {
-        self.base.store(base.get(), Ordering::Release);
+        // The cell is an `f32` param word: the base narrows once into it.
+        self.base.store(base.get() as f32, Ordering::Release);
     }
 
     /// Store `range`. Wait-free.
@@ -259,7 +260,7 @@ impl GainCell {
     /// The base now. Wait-free.
     #[inline]
     pub(crate) fn load(&self) -> Amplitude {
-        Amplitude::new(self.base.load(Ordering::Acquire))
+        Amplitude::new(f64::from(self.base.load(Ordering::Acquire)))
     }
 
     /// The base as a width-erased cell: the very cell the executor reads and
@@ -690,7 +691,7 @@ mod tests {
     use super::*;
 
     fn amp(v: f32) -> Amplitude {
-        Amplitude::new(v)
+        Amplitude::new(f64::from(v))
     }
 
     fn lane(base: f32) -> (GainCell, SumLane<f32>) {

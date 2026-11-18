@@ -34,7 +34,7 @@ fn set_mode<C>(solo: &mut Solo<C>, mode: NodeMode) {
 /// denormal beyond the declick, which a copy keeps and arithmetic would not.
 fn input() -> Vec<f32> {
     let mut x: Vec<f32> = (0..FRAMES)
-        .map(|i| (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
+        .map(|i| ((std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin()) as f32)
         .collect();
     x[declick_frames(RATE).get() + 10] = -0.0;
     x[declick_frames(RATE).get() + 11] = f32::from_bits(1);
@@ -81,7 +81,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
 
     set_mode(&mut s, NodeMode::Active);
     let back = s.render_input(Planes::new(&[&x, &x]).unwrap());
-    let fader = Amplitude(0.75).get();
+    let fader = Amplitude(0.75).get() as f32;
     for (c, y) in back.iter().enumerate() {
         let want: Vec<u32> = x[from..].iter().map(|v| (v * fader).to_bits()).collect();
         assert_eq!(bits(&y[from..]), want, "channel {c} is the fader again");

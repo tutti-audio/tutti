@@ -24,14 +24,14 @@ fn fraction(value: ControlValue) -> f64 {
 #[must_use]
 pub fn volume_gain(value: ControlValue) -> Db {
     // `log10(0)` is `-inf`, which `Db` carries as silence.
-    Db::new((40.0 * fraction(value).log10()) as f32)
+    Db::new(40.0 * fraction(value).log10())
 }
 
 /// The send level a reverb send value sets: linear in amplitude, `1.0`
 /// (100%) at `0xFFFFFFFF` (M2-125 §5.2 for CC#91 and §6.1.8 for RPNC#91).
 #[must_use]
 pub fn send_level(value: ControlValue) -> Amplitude {
-    Amplitude::new(fraction(value) as f32)
+    Amplitude::new(fraction(value))
 }
 
 #[cfg(test)]

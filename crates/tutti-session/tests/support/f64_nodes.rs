@@ -41,7 +41,7 @@ impl<F: Float> Node<F> for Gain {
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         // The param cell is an `f32` word, widened once per block.
-        let cell = F::from_f32(self.0.load().get());
+        let cell = F::from_f64(self.0.load().get());
         let (ins, mut outs) = io.split();
         for (n, (o, i)) in outs
             .get(0)

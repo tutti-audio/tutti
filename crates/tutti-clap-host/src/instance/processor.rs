@@ -27,7 +27,7 @@ pub(crate) struct ProcessorParts {
     pub input_ports: Vec<u32>,
     pub output_ports: Vec<u32>,
     pub max_frames: u32,
-    pub scratch: AudioScratch,
+    pub scratch: Box<AudioScratch>,
     pub ranges: Reader<RangeTable>,
     pub drain: EditDrain,
     pub reports: EditSink,
@@ -48,7 +48,8 @@ pub(crate) struct ProcessorParts {
 /// destroyed once, by the main thread, last) is argued rule by rule in the
 /// `tutti_clap_ffi::Plugin` module docs; this crate holds no `unsafe` of its own.
 pub struct ClapProcessor {
-    pub(crate) scratch: AudioScratch,
+    /// Boxed (several KiB): a Processor moves by value through activation.
+    pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
     pub(crate) drain: EditDrain,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
@@ -373,3 +374,9 @@ impl Processor for ClapProcessor {
         ClapProcessor::reset(self);
     }
 }
+
+// A Processor moves by value through activation (`Lifecycle`, the server's
+// `Served`), and every debug frame on that path holds a copy. Its scratch is
+// boxed, so it stays small; a new inline array that tips this bound fails the
+// build.
+const _: () = assert!(size_of::<ClapProcessor>() <= 4096);

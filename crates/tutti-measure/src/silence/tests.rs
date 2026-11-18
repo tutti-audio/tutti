@@ -48,18 +48,24 @@ fn a_gap_splits_only_at_the_minimum_length() {
     assert_eq!(strip(&c, &build(50)), vec![r(0, 100), r(150, 250)]);
 }
 
-/// A sample exactly at the threshold is loud; the next float below is not.
+/// The least `f32` sample not under the threshold is loud; the float below it is not.
 #[test]
 fn the_threshold_edge_is_inclusive() {
     let c = cfg(Db(-20.0), 10.0);
     let floor = Db(-20.0).to_amplitude().get();
-    let below = f32::from_bits(floor.to_bits() - 1);
+    let nearest = floor as f32;
+    let at = if f64::from(nearest) >= floor {
+        nearest
+    } else {
+        nearest.next_up()
+    };
+    let below = at.next_down();
     let mut x = vec![0.0f32; 100];
-    x[10] = floor;
+    x[10] = at;
     x[60] = below;
     assert_eq!(strip(&c, &x), vec![r(10, 11)]);
     // Sign does not matter.
-    x[10] = -floor;
+    x[10] = -at;
     assert_eq!(strip(&c, &x), vec![r(10, 11)]);
 }
 

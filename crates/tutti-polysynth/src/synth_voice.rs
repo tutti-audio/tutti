@@ -81,7 +81,7 @@ pub(crate) struct SynthVoice {
     cc_resonance_value: f32,
     filter_mod: FilterModConfig,
     lfo_phase: Phase,
-    envelope_level: f32,
+    envelope_level: Amplitude,
     active: bool,
     mpe: MpeVoiceState,
     base_note_freq: Hz,
@@ -128,18 +128,19 @@ fn channel_pan(channel: &ChannelState) -> (Amplitude, Amplitude) {
 
 /// [`channel_pan`] of a pan position.
 fn unity_centre_pan(pan: Pan) -> (Amplitude, Amplitude) {
-    let p = pan.get();
+    // `Pan` is an `f32` unit; the law runs in `f64`.
+    let p = f64::from(pan.get());
     let p = if p.is_nan() { 0.0 } else { p.clamp(-1.0, 1.0) };
     if p <= -1.0 {
-        return (Amplitude(std::f32::consts::SQRT_2), Amplitude::SILENT);
+        return (Amplitude(std::f64::consts::SQRT_2), Amplitude::SILENT);
     }
     if p >= 1.0 {
-        return (Amplitude::SILENT, Amplitude(std::f32::consts::SQRT_2));
+        return (Amplitude::SILENT, Amplitude(std::f64::consts::SQRT_2));
     }
     // `sqrt(2) cos(Pi/4 + d)` is `cos d - sin d` and `sqrt(2) sin(Pi/4 + d)` is
     // `cos d + sin d`, with `d` the angle off the centre: written so, the centre
-    // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp short in `f32`.
-    let (sin, cos) = (std::f32::consts::FRAC_PI_4 * p).sin_cos();
+    // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp off.
+    let (sin, cos) = (std::f64::consts::FRAC_PI_4 * p).sin_cos();
     (Amplitude(cos - sin), Amplitude(cos + sin))
 }
 
@@ -176,8 +177,8 @@ impl SynthVoice {
         bank: &VoiceBank,
         index: usize,
         channel: &ChannelState,
-    ) -> f32 {
-        bank.envelope(bank.lane(index, 0)).get() * self.voice_gain(channel)
+    ) -> Amplitude {
+        Amplitude(bank.envelope(bank.lane(index, 0)).get() * self.voice_gain(channel).get())
     }
 
     /// Whether this voice is silent, so a note-on would start it fresh.
@@ -191,7 +192,7 @@ impl SynthVoice {
             *slot = p.phase_offset;
         }
     }
-    pub(crate) fn set_envelope_level(&mut self, level: f32) {
+    pub(crate) fn set_envelope_level(&mut self, level: Amplitude) {
         self.envelope_level = level;
     }
     pub(crate) fn deactivate(&mut self) {
@@ -238,7 +239,7 @@ impl SynthVoice {
             cc_resonance_value: 0.0,
             filter_mod: config.filter_mod,
             lfo_phase: Phase::START,
-            envelope_level: 0.0,
+            envelope_level: Amplitude::SILENT,
             active: false,
             mpe: MpeVoiceState::new(),
             base_note_freq: A4_FREQ,
@@ -294,7 +295,7 @@ impl SynthVoice {
         self.note = NoteNumber::default();
         self.channel = MidiChannel::FIRST;
         self.velocity = 0.0;
-        self.envelope_level = 0.0;
+        self.envelope_level = Amplitude::SILENT;
         self.active = false;
         self.gate = false;
         self.edge = GateEdge::None;
@@ -436,7 +437,7 @@ impl SynthVoice {
             // Constant-power pan law, then the unison voice's own gain and the
             // voice's. Evaluated per control step, not per sample.
             let (left, right) = pan_gains(pan, PanLaw::SquareRoot);
-            let g = amplitude.get() * gain;
+            let g = amplitude.get() * gain.get();
             bank.set_gains(
                 lane,
                 Amplitude(left.get() * g * pan_left.get()),
@@ -456,9 +457,12 @@ impl SynthVoice {
 
     /// Velocity, pressure (the note's and the channel's), per-note gain and the
     /// channel's Volume and Expression, combined.
-    fn voice_gain(&self, channel: &ChannelState) -> f32 {
+    fn voice_gain(&self, channel: &ChannelState) -> Amplitude {
         let (pressure_gain, note_gain) = self.mpe.gain_factors(channel.pressure());
-        self.velocity * pressure_gain * note_gain * channel_level(channel)
+        // The factors are `f32` figures: their product widens once.
+        Amplitude(f64::from(
+            self.velocity * pressure_gain * note_gain * channel_level(channel),
+        ))
     }
 
     /// The cutoff every modulation source leaves, advancing the filter LFO by

@@ -394,7 +394,7 @@ impl<F: Float> Editor<F> {
                     from: Edge::Direct(source),
                 };
                 let weight = gain.map_or(Amplitude::UNITY, |g| g.base);
-                if weight.get().to_bits() != 1.0f32.to_bits() {
+                if weight != Amplitude::UNITY {
                     now.spec.gains.insert(id, EdgeGain::new(weight));
                 }
                 now.lanes.insert(id, weight);

@@ -105,6 +105,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
+use crate::lane::{control_in, fade_gains};
 use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
@@ -264,22 +265,22 @@ pub struct Reference<F: Float = f32> {
     reset_time: bool,
     frame: Frame,
     params: BTreeMap<ParamIn, RefParam<F>>,
-    /// The param-port state of each node's mix lane, which is `f32` as the
+    /// The param-port state of each node's mix lane, in `F` as the
     /// executor's mix lane is.
-    mix_ports: BTreeMap<NodeKey, RefParam<f32>>,
+    mix_ports: BTreeMap<NodeKey, RefParam<F>>,
     /// Ranges moved by [`set_param_range`](Self::set_param_range) since the
     /// last graph: they override the graph's.
     ranges: BTreeMap<ParamIn, ParamRange>,
     /// The weight each edge gain's lane was given by the last block it ran
     /// (the `w_prev` of doc 013, "Edge gain"), kept while the graph keeps the
     /// edge's entry. The reference's own bookkeeping: none of the executor's.
-    lane_prev: BTreeMap<EdgeId, Amplitude>,
+    lane_prev: BTreeMap<EdgeId, F>,
     /// Edge gains moved by [`set_edge_gain`](Self::set_edge_gain) since the
     /// last graph: they override the graph's.
     gain_moves: BTreeMap<EdgeId, Amplitude>,
     /// The param-port state of each driven edge gain's lane, as
     /// `Reference::params` keeps a node's: one rule (`ref_port`).
-    gain_ports: BTreeMap<EdgeId, RefParam<f32>>,
+    gain_ports: BTreeMap<EdgeId, RefParam<F>>,
     /// Edge gain ranges moved by [`set_edge_gain_range`](Self::set_edge_gain_range)
     /// since the last graph.
     gain_ranges: BTreeMap<EdgeId, ParamRange>,
@@ -763,7 +764,7 @@ impl<F: Float> Reference<F> {
                     key,
                     RefMode::new(
                         spec_mode(key),
-                        spec_mix(key).get(),
+                        control_in::<F>(spec_mix(key).get()),
                         &shape,
                         t.nodes[&key].latency.get(),
                         declick_frames(self.prepare.sample_rate()).get(),
@@ -1489,7 +1490,9 @@ impl<F: Float> Reference<F> {
         if let Some(m) = &mut mode {
             let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
             // The mix as the block starts: the previous block's is its start.
-            m.take_mix(self.wanted_mix.get(&key).map_or(1.0, |m| m.get()));
+            m.take_mix(control_in::<F>(
+                self.wanted_mix.get(&key).map_or(1.0, |m| m.get()),
+            ));
             // Its lane, when a source drives it: the param port's rule over
             // the source's events, the base being the mix just taken. A unit
             // that has run is on a running port (a source connected now
@@ -1653,9 +1656,9 @@ impl<F: Float> Reference<F> {
                 if k >= f.len {
                     break;
                 }
-                let (g_out, g_in) = f.law.gains(k, f.len);
+                let (g_out, g_in) = fade_gains::<F>(f.law, k, f.len);
                 for (o, x) in outs.iter_mut().zip(&old) {
-                    o[i] = o[i] * F::from_f32(g_in) + x[i] * F::from_f32(g_out);
+                    o[i] = o[i] * g_in + x[i] * g_out;
                 }
             }
             f.done = (f.done + frames).min(f.len);
@@ -1671,11 +1674,10 @@ impl<F: Float> Reference<F> {
                             RefFrame::Fade { wy, wx, y_on, x_on } => {
                                 match (y_on, x_on && x.is_some()) {
                                     (true, true) => {
-                                        *y * F::from_f32(wy)
-                                            + x.unwrap_or(F::ZERO) * F::from_f32(wx)
+                                        *y * wy + x.unwrap_or(F::ZERO) * wx
                                     }
-                                    (true, false) => *y * F::from_f32(wy),
-                                    (false, true) => x.unwrap_or(F::ZERO) * F::from_f32(wx),
+                                    (true, false) => *y * wy,
+                                    (false, true) => x.unwrap_or(F::ZERO) * wx,
                                     (false, false) => F::ZERO,
                                 }
                             }
@@ -1684,11 +1686,11 @@ impl<F: Float> Reference<F> {
                                 // input (while the mix holds still); otherwise
                                 // the blend (a channel with no input has one
                                 // term).
-                                NodeMode::Active if !moving && mix == 1.0 => *y,
-                                NodeMode::Active if !moving && mix == 0.0 => x.unwrap_or(F::ZERO),
+                                NodeMode::Active if !moving && mix == F::ONE => *y,
+                                NodeMode::Active if !moving && mix == F::ZERO => x.unwrap_or(F::ZERO),
                                 NodeMode::Active => match x {
-                                    Some(x) => *y * F::from_f32(mix) + x * F::from_f32(1.0 - mix),
-                                    None => *y * F::from_f32(mix),
+                                    Some(x) => *y * mix + x * (F::ONE - mix),
+                                    None => *y * mix,
                                 },
                                 NodeMode::Muted => F::ZERO,
                                 NodeMode::Bypassed => x.unwrap_or(F::ZERO),
@@ -1734,9 +1736,10 @@ impl<F: Float> Reference<F> {
         targets: &BTreeMap<EdgeId, Amplitude>,
         frames: usize,
         events: &BTreeMap<EventOut, Vec<Event>>,
-    ) -> Option<RefWeight> {
+    ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
-        let to = targets[&id];
+        // The control narrows once per block into the lane's float.
+        let to = F::from_f64(targets[&id].get());
         let ran = self.lane_prev.contains_key(&id);
         let evs: Vec<Event> = match gain.source {
             Some(from) => {
@@ -1758,7 +1761,7 @@ impl<F: Float> Reference<F> {
                 !ran,
                 RefPortIn {
                     param: crate::EdgeGain::ADDR,
-                    b1: to.get(),
+                    b1: to,
                     range,
                     source: gain.source,
                     events: &evs,
@@ -1767,7 +1770,7 @@ impl<F: Float> Reference<F> {
                 },
             ) {
                 let (vals, _) = vals;
-                self.lane_prev.insert(id, Amplitude::new(vals[frames - 1]));
+                self.lane_prev.insert(id, vals[frames - 1]);
                 return Some(RefWeight::Frames(vals));
             }
         }
@@ -1788,9 +1791,9 @@ impl<F: Float> Reference<F> {
         graph: &ValidGraph,
         frames: usize,
         events: &BTreeMap<EventOut, Vec<Event>>,
-        base: f32,
+        base: F,
         fresh: bool,
-    ) -> Option<Vec<f32>> {
+    ) -> Option<Vec<F>> {
         let at = ParamIn {
             node: key,
             param: NodeMix::ADDR,
@@ -2083,9 +2086,8 @@ fn ref_port<F: Float>(
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
-            // The fade law's gains are `f32`.
-            let (out, inn) = FadeLaw::EqualAmplitude.gains(j, decl);
-            *v = st.hold * F::from_f32(out) + *v * F::from_f32(inn);
+            let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, j, decl);
+            *v = st.hold * out + *v * inn;
         }
     }
     st.fading = st.fading.saturating_sub(frames);
@@ -2116,13 +2118,13 @@ fn r_started_arrives<F: Float>(r: &RefRamp<F>) -> Option<u64> {
 /// it was parked. Written from the doc, sharing nothing with `ModeState`.
 struct RefMode<F: Float> {
     heading: NodeMode,
-    y: f32,
-    x: f32,
+    y: F,
+    x: F,
     /// The mix the previous block was given, and this block's.
-    mix_from: f32,
-    mix_to: f32,
+    mix_from: F,
+    mix_to: F,
     /// `(y, x)` at the start of the fade, and the fade's frames done.
-    fade: Option<((f32, f32), usize)>,
+    fade: Option<((F, F), usize)>,
     /// The fade's length in frames.
     declick: usize,
     warm: usize,
@@ -2139,25 +2141,25 @@ struct RefMode<F: Float> {
     owed: BTreeMap<u16, RefHeld>,
     /// The mix lane's value at each frame of this block, when a source drives
     /// it and delivers.
-    lane: Option<Vec<f32>>,
+    lane: Option<Vec<F>>,
     /// Whether the node has run a block.
     ran: bool,
 }
 
 /// What one frame of a node op does.
 #[derive(Clone, Copy)]
-enum RefFrame {
+enum RefFrame<F: Float> {
     /// The aligned input alone, the node's output discarded.
     Warm,
     /// `y * wy + x * wx`, a term left out where its weight is zero at both ends.
     Fade {
-        wy: f32,
-        wx: f32,
+        wy: F,
+        wx: F,
         y_on: bool,
         x_on: bool,
     },
     /// The mode's steady frame, at this frame's mix.
-    Steady { mix: f32, moving: bool },
+    Steady { mix: F, moving: bool },
 }
 
 /// The mode the executor acts on for a cell holding `mode`: a node whose shape
@@ -2171,18 +2173,18 @@ fn read_mode(shape: &crate::node::Shape, mode: NodeMode) -> NodeMode {
     }
 }
 
-fn weights_of(mode: NodeMode, mix: f32) -> (f32, f32) {
+fn weights_of<F: Float>(mode: NodeMode, mix: F) -> (F, F) {
     match mode {
-        NodeMode::Active => (mix, 1.0 - mix),
-        NodeMode::Bypassed => (0.0, 1.0),
-        NodeMode::Muted => (0.0, 0.0),
+        NodeMode::Active => (mix, F::ONE - mix),
+        NodeMode::Bypassed => (F::ZERO, F::ONE),
+        NodeMode::Muted => (F::ZERO, F::ZERO),
     }
 }
 
 impl<F: Float> RefMode<F> {
     fn new(
         mode: NodeMode,
-        mix: f32,
+        mix: F,
         shape: &crate::node::Shape,
         latency: usize,
         declick: usize,
@@ -2234,14 +2236,14 @@ impl<F: Float> RefMode<F> {
 
     /// This block's mix: the one the previous block was given is where the
     /// ramp starts.
-    fn take_mix(&mut self, to: f32) {
+    fn take_mix(&mut self, to: F) {
         self.mix_from = self.mix_to;
         self.mix_to = to;
     }
 
     /// This block's lane: its values replace the ramp, and the next block
     /// ramps from the last of them.
-    fn drive(&mut self, lane: Option<Vec<f32>>) {
+    fn drive(&mut self, lane: Option<Vec<F>>) {
         self.ran = true;
         if let Some(v) = &lane {
             self.mix_to = v[v.len() - 1];
@@ -2269,7 +2271,7 @@ impl<F: Float> RefMode<F> {
     /// ramps from the previous block's to this one's across the frames
     /// (`from + (to - from) * ((i + 1) / frames)`), or is its value when it
     /// does not move.
-    fn frames(&mut self, frames: usize) -> Vec<RefFrame> {
+    fn frames(&mut self, frames: usize) -> Vec<RefFrame<F>> {
         let (from, to) = (self.mix_from, self.mix_to);
         let lane = self.lane.take();
         let mix_at = |i: usize| {
@@ -2281,7 +2283,7 @@ impl<F: Float> RefMode<F> {
                 if i + 1 == frames {
                     to
                 } else {
-                    from + (to - from) * ((i + 1) as f32 / frames as f32)
+                    from + (to - from) * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
                 }
             }
         };
@@ -2300,7 +2302,7 @@ impl<F: Float> RefMode<F> {
                         moving: lane.is_some() || from != to,
                     };
                 };
-                let g = FadeLaw::EqualAmplitude.gains(k, self.declick).1;
+                let g = fade_gains::<F>(FadeLaw::EqualAmplitude, k, self.declick).1;
                 let wy = begin.0 + (target.0 - begin.0) * g;
                 let wx = begin.1 + (target.1 - begin.1) * g;
                 (self.y, self.x) = (wy, wx);
@@ -2313,8 +2315,8 @@ impl<F: Float> RefMode<F> {
                 RefFrame::Fade {
                     wy,
                     wx,
-                    y_on: begin.0 != 0.0 || target.0 != 0.0,
-                    x_on: begin.1 != 0.0 || target.1 != 0.0,
+                    y_on: begin.0 != F::ZERO || target.0 != F::ZERO,
+                    x_on: begin.1 != F::ZERO || target.1 != F::ZERO,
                 }
             })
             .collect()
@@ -2883,21 +2885,21 @@ fn sorted<T: Copy + Ord>(set: &[T]) -> Vec<T> {
 /// weights of its lane when its edge has a gain entry.
 struct RefAddend<F: Float> {
     buf: Vec<F>,
-    weight: Option<RefWeight>,
+    weight: Option<RefWeight<F>>,
 }
 
 /// A weighted lane's weights for one block.
-enum RefWeight {
+enum RefWeight<F: Float> {
     /// Ramping across the block from the weight the previous block was given
     /// to this block's.
-    Ramp { from: Amplitude, to: Amplitude },
+    Ramp { from: F, to: F },
     /// A driven lane: the weight at every frame.
-    Frames(Vec<f32>),
+    Frames(Vec<F>),
 }
 
 /// The value a sink holds: none is silence, one plain addend is itself (an
 /// alias, so a `-0.0` stays), anything else is the left fold
-/// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `f32`, one rounding per add
+/// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `F`, one rounding per add
 /// and per multiply, each lane weighted by
 /// `w[i] = from + (to - from) * ((i + 1) / frames)` (doc 013, "Audio fan-in sums", points 1 and 2, and "Edge
 /// gain"). Skips nothing, silent addends and a weight of `1.0` or `0.0`
@@ -2914,15 +2916,16 @@ fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F
                     *x = match &a.weight {
                         None => *x + *y,
                         Some(RefWeight::Ramp { from, to }) => {
-                            let (from, to) = (from.get(), to.get());
                             let w = if i + 1 == frames {
-                                to
+                                *to
                             } else {
-                                from + (to - from) * ((i + 1) as f32 / frames as f32)
+                                *from
+                                    + (*to - *from)
+                                        * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
                             };
-                            *x + F::from_f32(w) * *y
+                            *x + w * *y
                         }
-                        Some(RefWeight::Frames(w)) => *x + F::from_f32(w[i]) * *y,
+                        Some(RefWeight::Frames(w)) => *x + w[i] * *y,
                     };
                 }
             }

@@ -1290,11 +1290,13 @@ mod tests {
     #[test]
     fn a_linear_ramp_renders_the_unshaped_bits() {
         for len in [1usize, 2, 3, 7, 10, 64, 97, 1000] {
-            for (from, target) in [(0.0f32, 1.0f32), (0.3, -7.9), (440.0, 1234.5)] {
+            for (from, target) in [(0.0f64, 1.0f64), (0.3, -7.9), (440.0, 1234.5)] {
+                // The port renders in `f32`: the oracle narrows the span once.
+                let (from32, target32) = (from as f32, target as f32);
                 let frames = len + 4;
                 let events = [Event::ramp(
                     Offset::of(Samples(1), Samples(frames)),
-                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
+                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
                 )];
                 let mut r = Ramp::default();
                 let mut out = vec![0.0f32; frames];
@@ -1303,15 +1305,15 @@ mod tests {
                     &events,
                     UnitParam::Cutoff.into(),
                     &mut out,
-                    |_| from,
+                    |_| from32,
                     &mut Corners::new(&mut vec![0; frames]),
                 );
                 for (j, &v) in out[1..].iter().enumerate() {
                     let done = j + 1;
                     let want = if done >= len {
-                        target
+                        target32
                     } else {
-                        from + (target - from) * (done as f32 / len as f32)
+                        from32 + (target32 - from32) * (done as f32 / len as f32)
                     };
                     assert_eq!(v.to_bits(), want.to_bits(), "len {len}, frame {j}");
                 }

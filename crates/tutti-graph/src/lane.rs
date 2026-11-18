@@ -71,12 +71,12 @@ pub(crate) fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usi
 }
 
 /// `(out, in)`: the gains of frame `j` of a `len`-frame fade, in `F`. The law
-/// is the curve crate's and its gains are `f32`; they widen here, where the
-/// fade is rendered into a lane.
+/// is the curve crate's and its gains are `Amplitude`s; they narrow once here,
+/// where the fade is rendered into a lane.
 #[inline]
 pub(crate) fn fade_gains<F: Float>(law: FadeLaw, j: usize, len: usize) -> (F, F) {
     let (out, inn) = law.gains(j, len);
-    (F::from_f32(out), F::from_f32(inn))
+    (F::from_f64(out.get()), F::from_f64(inn.get()))
 }
 
 /// `start` moved to `goal` at frame `j` of a `len`-frame fade of `law`, and
@@ -91,8 +91,9 @@ pub(crate) fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: 
 }
 
 /// A control value (a param cell's, an edge weight's, a mix's) as the lane's
-/// float: the one place a node-side control is read into a lane.
+/// float: the one place a node-side control is read into a lane. It widens
+/// exactly and narrows once.
 #[inline]
-pub(crate) fn control_in<F: Float>(value: f32) -> F {
-    F::from_f32(value)
+pub(crate) fn control_in<F: Float>(value: impl Into<f64>) -> F {
+    F::from_f64(value.into())
 }

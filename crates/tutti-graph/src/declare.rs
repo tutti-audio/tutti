@@ -485,7 +485,7 @@ pub fn input<'a, F: Float>(
 ///         let level = self
 ///             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 ///             .last_frame()
-///             .unwrap_or_else(|| self.level.load().get());
+///             .unwrap_or_else(|| self.level.load().get() as f32);
 ///         io.output(0).fill(level);
 ///         Status::Modified
 ///     }

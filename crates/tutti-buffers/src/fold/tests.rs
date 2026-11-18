@@ -1652,9 +1652,10 @@ fn the_default_levels_are_bs775_minus_3_db() {
     use tutti_units::Amplitude;
     let m = f32::MINUS_3_DB;
     let levels = FoldLevels::default();
+    let minus_3_db = Amplitude(f64::MINUS_3_DB);
     assert_eq!(
         (levels.centre, levels.surround, levels.height, levels.lfe),
-        (Amplitude(m), Amplitude(m), Amplitude(m), None)
+        (minus_3_db, minus_3_db, minus_3_db, None)
     );
     let f = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
     assert_eq!(f.contributions(0), [(0, 1.0), (2, m), (4, m)]);
@@ -1668,7 +1669,7 @@ fn a_level_that_is_not_a_gain_is_refused() {
     use tutti_types::Bed;
     use tutti_units::Amplitude;
     let (five_one, stereo) = (Bed::Surround51.topology(), Bed::Stereo.topology());
-    for bad in [f32::NAN, f32::INFINITY, -0.5] {
+    for bad in [f64::NAN, f64::INFINITY, -0.5] {
         let spec = |levels| Fold::<f32>::spec(&five_one, &stereo).levels(levels).build();
         let base = FoldLevels::default();
         assert_eq!(

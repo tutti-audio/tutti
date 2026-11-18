@@ -258,7 +258,7 @@ pub struct ConvolverNode {
     /// Last finite gain. It does not feed recursive state here, but the block's
     /// end is the next block's ramp start, so a NaN would carry into the block
     /// after it (see [`LastGood`]).
-    good: LastGood,
+    good: LastGood<f32>,
 }
 
 impl std::fmt::Debug for ConvolverNode {
@@ -593,9 +593,10 @@ impl ConvolverNode {
     #[inline]
     fn apply_gain(out: &mut [f32], glide: &Glide<f32>, held: Option<Amplitude>) {
         if let Some(gain) = held {
-            // Nothing moved: a constant in the loop.
+            // Nothing moved: a constant in the loop. The block is `f32`: the gain narrows once.
+            let gain = gain.get() as f32;
             for o in out {
-                *o *= gain.get();
+                *o *= gain;
             }
             return;
         }
@@ -608,7 +609,7 @@ impl ConvolverNode {
     /// frame, floored at 0 like the setter. A non-finite value reads as the
     /// last finite one (see [`LastGood`]).
     #[inline]
-    fn apply_driven_gain(out: &mut [f32], lane: &[f32], good: &mut LastGood) {
+    fn apply_driven_gain(out: &mut [f32], lane: &[f32], good: &mut LastGood<f32>) {
         for (o, &g) in out.iter_mut().zip(lane) {
             *o *= good.read(g).max(0.0);
         }
@@ -619,11 +620,13 @@ impl ConvolverNode {
     /// between blocks glides across the next one and lands exactly on the new
     /// value (a block of one takes it at once).
     fn begin_block(&mut self, size: usize) -> (Glide<f32>, Option<Amplitude>) {
-        let gain = Amplitude(self.good.read(self.gain.load().get()));
+        // The block is `f32`: the cell's gain narrows once, before the last-good read.
+        let gain = Amplitude(f64::from(self.good.read(self.gain.load().get() as f32)));
         let from = self.last.unwrap_or(gain);
         self.last = Some(gain);
-        let mut glide = Glide::landed(from.get());
-        glide.aim_in(gain.get(), u32::try_from(size).unwrap_or(u32::MAX));
+        // The ramp runs over the `f32` block: its ends narrow once per block.
+        let mut glide = Glide::landed(from.get() as f32);
+        glide.aim_in(gain.get() as f32, u32::try_from(size).unwrap_or(u32::MAX));
         let held = (from.get() == gain.get()).then_some(gain);
         (glide, held)
     }
@@ -1050,7 +1053,8 @@ mod tests {
                 .unwrap();
         assert_eq!(node.param_set().params().count(), 1);
         assert!(node.param_set().set(UnitParam::Volume, 0.7));
-        assert_eq!(node.gain().load(), Amplitude(0.7));
+        // The param word is `f32`.
+        assert_eq!(node.gain().load(), Amplitude(f64::from(0.7_f32)));
         node.set_gain(Amplitude::new(0.3));
         let fork = node.fork_fresh();
         node.set_gain(Amplitude::new(2.0));
@@ -1328,7 +1332,7 @@ mod direct_sum {
             ),
         ];
         for (name, node, outputs) in cases {
-            node.set_gain(Amplitude::new(gain as f32));
+            node.set_gain(Amplitude::new(gain));
             let lat = node.latency_samples().0;
             let x = signal(usize::from(node.inputs().count()), FRAMES);
             let mut mono = vec![0.0f32; FRAMES];

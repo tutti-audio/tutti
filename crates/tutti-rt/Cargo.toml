@@ -23,9 +23,6 @@ thread-priority = "3.1"
 # reaches the audio thread through. A general-purpose crate that names no tutti
 # crate; it comes from crates.io.
 arc-lend = "0.2.1"
-# The fixed inline storage behind `RtVec` (`vec.rs`): a run of `N` slots that
-# cannot grow, so the cap is the type's, not a check beside it.
-arrayvec = "0.7"
 # The byte views behind `SeqWriter<T>` and `PackedAtomic<T>`: a `NoUninit +
 # AnyBitPattern` value to and from its bytes with no `unsafe`.
 bytemuck = "1.16"

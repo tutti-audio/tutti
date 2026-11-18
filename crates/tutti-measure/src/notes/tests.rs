@@ -509,7 +509,7 @@ fn velocity_follows_amplitude() {
     for (n, &a) in notes.iter().zip(&amps) {
         let want = 20.0 * (a / 2f64.sqrt()).log10();
         assert!(
-            (f64::from(n.velocity.get()) - want).abs() < 0.1,
+            (n.velocity.get() - want).abs() < 0.1,
             "{} vs {want}",
             n.velocity
         );
@@ -539,9 +539,9 @@ fn the_velocity_map_is_linear_and_clamped() {
     assert_eq!(r.midi(Db(-40.0)), 64);
     assert_eq!(r.midi(Db(-100.0)), 1);
     assert_eq!(r.midi(Db(0.0)), 127);
-    assert_eq!(r.midi(Db(f32::NEG_INFINITY)), 1);
-    assert_eq!(r.midi(Db(f32::NAN)), 1);
-    let level = |v: f32| FiniteLevel::of(Db(v));
+    assert_eq!(r.midi(Db(f64::NEG_INFINITY)), 1);
+    assert_eq!(r.midi(Db(f64::NAN)), 1);
+    let level = |v: f64| FiniteLevel::of(Db(v));
     assert!(VelocityRange::new(level(-20.0), level(-20.0)).is_none());
     assert_eq!(
         VelocityRange::try_from(level(-20.0)..=level(-30.0)),
@@ -551,8 +551,8 @@ fn the_velocity_map_is_linear_and_clamped() {
         })
     );
     // A NaN or infinite bound is not a `FiniteLevel`.
-    assert!(FiniteLevel::new(Db(f32::NAN)).is_none());
-    assert!(FiniteLevel::new(Db(f32::INFINITY)).is_none());
+    assert!(FiniteLevel::new(Db(f64::NAN)).is_none());
+    assert!(FiniteLevel::new(Db(f64::INFINITY)).is_none());
 }
 
 /// Scaling the input by a power of two (exact in floating point) changes
@@ -777,7 +777,7 @@ fn settings_and_inputs_are_validated() {
         notes_from_track(&c, &t, &neg, &[]),
         Err(Error::NegativeInput)
     );
-    neg[3] = Amplitude(f32::NAN);
+    neg[3] = Amplitude(f64::NAN);
     assert_eq!(
         notes_from_track(&c, &t, &neg, &[]),
         Err(Error::NonFiniteInput)

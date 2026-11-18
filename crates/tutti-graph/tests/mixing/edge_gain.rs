@@ -53,7 +53,7 @@ fn dc(value: f32) -> Kind {
 }
 
 fn amp(v: f32) -> Amplitude {
-    Amplitude::new(v)
+    Amplitude::new(f64::from(v))
 }
 
 /// Edge `node → (sink, 0)` of a pass-through sink.

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tutti_buffers::{Float, InterleavedMut, PlanesMut};
 
 use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition};
+use tutti_units::Amplitude;
 
 use super::{Graph, render};
 
@@ -264,10 +265,9 @@ impl<F: Float> AudioSide<F> {
                         let (go, gn) = if f.done.get() + i < f.fade.duration.get() {
                             f.fade.law.gains(f.done.get() + i, f.fade.duration.get())
                         } else {
-                            (0.0, 1.0)
+                            (Amplitude::SILENT, Amplitude::UNITY)
                         };
-                        // A fade law's gains are `f32` levels.
-                        *x = was * F::from_f32(go) + *x * F::from_f32(gn);
+                        *x = was * F::from_f64(go.get()) + *x * F::from_f64(gn.get());
                     }
                 }
             }

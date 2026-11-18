@@ -204,7 +204,8 @@ pub fn measure_at<P: Processor>(
     subject: Subject,
     config: ProbeConfig,
 ) -> Result<Measured, PluginError> {
-    let floor = config.floor.to_amplitude().get();
+    // The render is `f32`: the floor narrows once.
+    let floor = config.floor.to_amplitude().get() as f32;
     let frames = |t: Seconds| t.to_samples_ceil(config.rate).get();
     let mut run = Render::new(processor, subject, config.block);
     let block = run.block;
@@ -216,7 +217,7 @@ pub fn measure_at<P: Processor>(
         held = held.min(run.peak());
     }
     if held > floor {
-        let level = Amplitude(held).to_db();
+        let level = Amplitude(f64::from(held)).to_db();
         run.processor.stop();
         return Ok(unsettled(config, level));
     }
@@ -246,7 +247,8 @@ pub fn measure_at<P: Processor>(
             }
         } else if at == 0 {
             for ch in &mut run.ins {
-                ch[0] = IMPULSE.get();
+                // The probe renders in `f32`: the impulse narrows once.
+                ch[0] = IMPULSE.get() as f32;
             }
         }
         run.run(&events)?;

@@ -1513,7 +1513,7 @@ impl Voicing {
         let Steal::By(order) = self.rules.steal else {
             return None;
         };
-        let mut best: Option<(&Note, f32)> = None;
+        let mut best: Option<(&Note, f64)> = None;
         for n in &self.notes {
             let level = levels(n.id).map_or(0.0, Amplitude::get);
             if n.strike == self.strike {
@@ -2746,13 +2746,13 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.send(1, relative(0, 3 << 25), &One);
         let up = s.send(1, bend(u32::MAX), &One);
-        assert!((retunes(&up)[0].1 - 5.0).abs() < 1e-5, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 5.0, "{up:?}");
         s.send(1, relative(0, -(1 << 25)), &One);
         let up = s.send(1, bend(u32::MAX), &One);
-        assert!((retunes(&up)[0].1 - 4.0).abs() < 1e-5, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 4.0, "{up:?}");
         // Another channel holds its own.
         let other = s.send(2, bend(u32::MAX), &One);
-        assert!((retunes(&other)[0].1 - 2.0).abs() < 1e-5);
+        assert_eq!(retunes(&other)[0].1, 2.0);
     }
 
     /// The spec is silent at the ends of the range; this core saturates: a
@@ -2803,9 +2803,9 @@ mod tests {
         let up = s.send(3, bend(u32::MAX), &One);
         assert_eq!(retunes(&up).len(), 1);
         assert_eq!(retunes(&up)[0].0, 3);
-        assert!((retunes(&up)[0].1 - 2.0).abs() < 1e-4, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 2.0, "{up:?}");
         let down = s.send(3, bend(0), &One);
-        assert!((retunes(&down)[0].1 + 2.0).abs() < 1e-6);
+        assert_eq!(retunes(&down)[0].1, -2.0);
         assert_eq!(retunes(&s.send(3, bend(1 << 31), &One)), [(3, 0.0)]);
     }
 
@@ -2814,12 +2814,9 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.send(0, bend(u32::MAX), &One);
         let c = s.send(0, rpn0(12.0), &One);
-        assert!((retunes(&c)[0].1 - 12.0).abs() < 1e-3, "{c:?}");
+        assert_eq!(retunes(&c)[0].1, 12.0, "{c:?}");
         let other = s.send(1, bend(u32::MAX), &One);
-        assert!(
-            (retunes(&other)[0].1 - 2.0).abs() < 1e-4,
-            "channel 1 keeps its range"
-        );
+        assert_eq!(retunes(&other)[0].1, 2.0, "channel 1 keeps its range");
     }
 
     /// Reset All Controllers centres the wheel and leaves the sensitivity
@@ -2831,7 +2828,7 @@ mod tests {
         s.send(0, bend(u32::MAX), &One);
         assert_eq!(retunes(&s.cc(0, 121, 0)), [(0, 0.0)]);
         let again = s.send(0, bend(u32::MAX), &One);
-        assert!((retunes(&again)[0].1 - 12.0).abs() < 1e-3);
+        assert_eq!(retunes(&again)[0].1, 12.0);
     }
 
     /// A channel's wheel and sensitivity are its own: whatever the instrument
@@ -2856,7 +2853,7 @@ mod tests {
         s.send(0, bend(u32::MAX), &One);
         s.core.reset();
         let c = s.send(0, bend(u32::MAX), &One);
-        assert!((retunes(&c)[0].1 - 2.0).abs() < 1e-4);
+        assert_eq!(retunes(&c)[0].1, 2.0);
     }
 
     // ---- a pedal or a panic is its channel's ----------------------------------
@@ -3251,7 +3248,7 @@ mod tests {
         assert_eq!(glide.from, NoteNumber::of(60));
         // 400 cents at CC 5 = 0, the fastest rate of GM2 section 3.3.3's
         // figure (1,000 cent/msec): 0.4 ms.
-        assert!((glide.time.get() - 0.0004).abs() < 1e-6, "{glide:?}");
+        assert_eq!(glide.time, Seconds(0.0004), "{glide:?}");
         assert_eq!(glide_of(&s.on(0, 65)), None);
         // Another channel's note is not the one it is for.
         s.cc(0, 84, 60);
@@ -3314,7 +3311,7 @@ mod tests {
         s.cc(0, 5, 0);
         let g = glide_of(&s.on(0, 75)).expect("on");
         assert_eq!(g.from, NoteNumber::of(63));
-        assert!((g.time.get() - 0.0012).abs() < 1e-6, "{g:?}");
+        assert_eq!(g.time, Seconds(0.0012), "{g:?}");
     }
 
     /// RP-022: RPN 01 is Channel Fine Tuning and RPN 02 Channel Coarse Tuning;
@@ -3331,10 +3328,10 @@ mod tests {
         );
         // Fine: 0x3000 is half way between 0x2000 and 0x4000, 50 cents up.
         let r = retunes(&s.send(2, registered(1, 0x3000 << 18), &One));
-        assert!((r[0].1 - 1.5).abs() < 1e-4, "{r:?}");
+        assert_eq!(r[0].1, 1.5, "{r:?}");
         // Full bend up at range 2 adds 2.
         let r = retunes(&s.send(2, bend(u32::MAX), &One));
-        assert!((r[0].1 - 3.5).abs() < 1e-4, "{r:?}");
+        assert_eq!(r[0].1, 3.5, "{r:?}");
         // Another channel is untouched.
         assert!(s.core.channel_pitch(MidiChannel::of(3)).0 == 0.0);
     }
@@ -3456,9 +3453,9 @@ mod tests {
         s.cc(0, 1, 127);
         s.cc(0, 33, 127);
         let depth = |s: &Sim| s.core.channel(MidiChannel::of(0)).modulation_depth().get();
-        assert!((depth(&s) - 50.0).abs() < 1e-3);
+        assert_eq!(depth(&s), 50.0);
         s.send(0, registered(5, 1 << 25), &One);
-        assert!((depth(&s) - 100.0).abs() < 1e-3);
+        assert_eq!(depth(&s), 100.0);
     }
 
     /// M1 Channel Pressure is per channel: the value is the channel's own.

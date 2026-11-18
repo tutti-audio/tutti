@@ -11,7 +11,7 @@ fn a_full_scale_sine_reads_one_over_root_two() {
         .collect();
     let got = rms(Mono::new(&sine)).get();
     assert!(
-        (f64::from(got) - core::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6,
+        (got - core::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6,
         "{got}"
     );
 }

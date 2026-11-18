@@ -69,10 +69,11 @@ impl From<LevelSpan> for Level {
         let rms = if span.frames == 0 {
             0.0
         } else {
-            (span.sum_sq / span.frames as f64).sqrt() as f32
+            (span.sum_sq / span.frames as f64).sqrt()
         };
         Self {
-            peak: Amplitude(span.peak),
+            // The level cell is an `f32` lane: its peak widens.
+            peak: Amplitude(f64::from(span.peak)),
             rms: Amplitude(rms),
             frames: Samples(usize::try_from(span.frames).unwrap_or(usize::MAX)),
         }

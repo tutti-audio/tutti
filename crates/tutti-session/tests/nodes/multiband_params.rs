@@ -64,11 +64,9 @@ fn rig() -> (
         .build()
         .expect("builds");
     let g = s.graph();
-    let (low, _) = g.add(ForkByClone(
-        Osc::sine(Hz(LOW)).with_amplitude(Amplitude(A as f32)),
-    ));
+    let (low, _) = g.add(ForkByClone(Osc::sine(Hz(LOW)).with_amplitude(Amplitude(A))));
     let (high, _) = g.add(ForkByClone(
-        Osc::sine(Hz(HIGH)).with_amplitude(Amplitude(A as f32)),
+        Osc::sine(Hz(HIGH)).with_amplitude(Amplitude(A)),
     ));
     let (mb, controls) =
         g.add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap());

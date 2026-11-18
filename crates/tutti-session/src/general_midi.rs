@@ -81,7 +81,8 @@ impl GeneralMidi {
     /// Sets the gain of the whole mix, a linear amplitude: the dry pair and
     /// both effects. A store into the strip's cell, read once per block.
     pub fn set_gain(&self, gain: Amplitude) {
-        self.strip_params.set(UnitParam::Volume, gain.get());
+        // The param cell is an `f32` word: the gain narrows once.
+        self.strip_params.set(UnitParam::Volume, gain.get() as f32);
     }
 
     /// Takes the whole setup out of the graph: the unit with its queue and

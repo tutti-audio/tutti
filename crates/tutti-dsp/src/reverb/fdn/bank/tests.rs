@@ -319,13 +319,13 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
     let f = fdn_of(&net);
     let expected: f64 = (0..f.lines.len())
         .map(|j| {
-            let b = f64::from(f.input[j].get());
-            let c = f64::from(f.output.rows[0][j].get());
-            let g = f64::from(f.lines[j].absorption.gain(Band::Low).get());
+            let b = f.input[j].get();
+            let c = f.output.rows[0][j].get();
+            let g = f.lines[j].absorption.gain(Band::Low).get();
             b * c / (1.0 - g)
         })
         .sum::<f64>()
-        * f64::from(net.wet.to_amplitude().get());
+        * net.wet.to_amplitude().get();
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     let [left, _] = run(&mut bank, &mut glides, &impulse(10 * 48_000), 64);
     let sum: f64 = left.iter().map(|&v| f64::from(v)).sum();
@@ -378,7 +378,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
         lw == rw && (lw - 0.5 * unit).abs() < 1e-6,
         "mono: {lw} {rw}"
     );
-    let (silent, _) = echo(Db(f32::NEG_INFINITY), 1.0);
+    let (silent, _) = echo(Db(f64::NEG_INFINITY), 1.0);
     assert_eq!(silent, 0.0);
 }
 

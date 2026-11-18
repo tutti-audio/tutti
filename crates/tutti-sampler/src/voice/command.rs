@@ -565,7 +565,9 @@ impl<F: RingFloat> VoiceNodeHandle<F> {
     /// is silence. A write to a
     /// shared cell: never lost, never queued.
     pub fn set_gain(&self, gain: Amplitude) {
-        self.params.set(tutti_units::UnitParam::Volume, gain.get());
+        // The param cell is an `f32` word: the gain narrows once.
+        self.params
+            .set(tutti_units::UnitParam::Volume, gain.get() as f32);
     }
 
     /// The voice's gain, as last set.

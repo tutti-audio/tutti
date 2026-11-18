@@ -92,6 +92,14 @@ impl FileRow {
         self.probe_result().map(|(format, _)| format)
     }
 
+    /// Whether this row is a blacklist and its file has not changed since, by
+    /// `facts`: the rule [`PluginDb::is_blacklisted_and_unchanged`] applies to
+    /// the row of a path.
+    #[must_use]
+    pub fn is_blacklisted_and_unchanged(&self, facts: &FileFacts) -> bool {
+        facts::is_blacklisted_and_unchanged(self, facts)
+    }
+
     /// Why the file is blacklisted, or `None` if it is not.
     #[must_use]
     pub fn blacklist_reason(&self) -> Option<&str> {
@@ -290,7 +298,7 @@ impl PluginDb {
     #[must_use]
     pub fn is_blacklisted_and_unchanged(&self, path: &Path, facts: &FileFacts) -> bool {
         self.row(path)
-            .is_some_and(|row| facts::is_blacklisted_and_unchanged(row, facts))
+            .is_some_and(|row| row.is_blacklisted_and_unchanged(facts))
     }
 
     /// Blacklists `path` with a reason, stamped with the file's time in `facts`.

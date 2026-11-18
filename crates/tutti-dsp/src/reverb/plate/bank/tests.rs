@@ -184,7 +184,7 @@ fn the_first_sound_is_the_pre_delay_plus_the_earliest_tap() {
 /// bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
 #[test]
 fn the_tail_covers_the_response_falling_under_the_floor() {
-    let floor = 10f64.powf(f64::from(crate::TAIL_FLOOR.get()) / 20.0);
+    let floor = 10f64.powf(crate::TAIL_FLOOR.get() / 20.0);
     for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
         // (decay, damping, bandwidth, diffusion, pre-delay)
         for (decay, damping, bandwidth, diffusion, pre) in [
@@ -240,7 +240,8 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
     };
     let decay1 = tank.lines[0].diffuser.unwrap();
     for (what, design, direct) in [("input 1", input[0], -0.75), ("decay 1", decay1, 0.70)] {
-        let (d, g) = (design.delay.get() as usize, design.gain.get());
+        // The lattice under test runs in `f32`: the coefficient narrows once.
+        let (d, g) = (design.delay.get() as usize, design.gain.get() as f32);
         let mut ring = line(Samples(d));
         let y: Vec<f32> = (0..80 * d)
             .map(|n| {

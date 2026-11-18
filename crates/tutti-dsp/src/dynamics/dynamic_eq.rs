@@ -41,7 +41,7 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
 use super::key_filter::KeyStage;
-use super::shared::{MAX_KNEE_DB, floored};
+use super::shared::{MAX_KNEE, floored};
 use crate::finite::finite_or;
 use crate::follower::Follower;
 use crate::{
@@ -98,7 +98,7 @@ pub struct DynamicEqControls {
     /// How fast the gain change falls back toward flat. Read as `attack` is.
     pub release: Seconds,
     /// The most the band's gain moves from flat, in dB and not below 0: the cut of a
-    /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN_DB`.
+    /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN`.
     pub range: Db,
 }
 
@@ -159,10 +159,11 @@ impl<F: Float> Design<F> {
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get()))
                 .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
+            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB)),
+            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
+            // `Q` is an `f32` unit.
             key_scale: F::ONE / <F as Float>::from_f32(q.get()),
             mean: F::from_f64(tau.one_pole_coeff(rate)),
         }
@@ -242,9 +243,9 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         self.signed()
     }
 
-    /// The gain change as a `Db`, which stores `f32`: the state narrows once, here.
+    /// The gain change as a `Db`: the state widens once, here.
     fn signed(&self) -> Db {
-        let moved = Db(self.moved.to_f32());
+        let moved = Db(self.moved.to_f64());
         match self.mode {
             DynamicMode::Downward => -moved,
             DynamicMode::Upward => moved,
@@ -312,15 +313,15 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         self.mean_square += d.mean * (x * x - self.mean_square);
         let db = level_db((<F as Float>::from_f32(2.0) * self.mean_square).sqrt());
         let (threshold, ratio, knee) = (
-            <F as Float>::from_f32(d.threshold.get()),
+            F::from_f64(d.threshold.get()),
             <F as Float>::from_f32(d.ratio.get()),
-            <F as Float>::from_f32(d.knee.get()),
+            F::from_f64(d.knee.get()),
         );
         let curve = match self.mode {
             DynamicMode::Downward => gain_reduction(db, threshold, ratio, knee),
             DynamicMode::Upward => upward_gain_lift(db, threshold, ratio, knee),
         };
-        let range = <F as Float>::from_f32(d.range.get());
+        let range = F::from_f64(d.range.get());
         self.moved = d.ballistics.follow_raw(self.moved, curve.min(range));
     }
 

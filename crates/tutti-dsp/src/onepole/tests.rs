@@ -4,8 +4,8 @@ use super::*;
 /// per halving puts 2^-10 at -20 log10(1024) dB.
 #[test]
 fn ring_frames_of_a_half_pole_to_two_to_the_minus_ten_is_ten() {
-    let floor = Db(Db::from_amplitude_f64(1.0 / 1024.0) as f32);
-    assert!((ring_frames(0.5, floor) - 10.0).abs() < 1e-4);
+    let floor = Db::from_amplitude(tutti_units::Amplitude(1.0 / 1024.0));
+    assert!((ring_frames(0.5, floor) - 10.0).abs() < 1e-12);
 }
 
 #[test]

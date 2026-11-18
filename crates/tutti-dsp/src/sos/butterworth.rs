@@ -72,19 +72,18 @@ pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<f64, SosError
     }
 }
 
-/// `gain` as a linear amplitude exponent in dB when it is within [`MAX_GAIN_MAGNITUDE`].
-pub(super) fn check_gain(gain: Db) -> Result<f64, SosError> {
-    let db = f64::from(gain.get());
-    if db.abs() <= f64::from(MAX_GAIN_MAGNITUDE.get()) {
-        Ok(db)
+/// `gain` when it is within [`MAX_GAIN_MAGNITUDE`].
+pub(super) fn check_gain(gain: Db) -> Result<Db, SosError> {
+    if gain.get().abs() <= MAX_GAIN_MAGNITUDE.get() {
+        Ok(gain)
     } else {
         Err(SosError::GainOutOfRange { gain })
     }
 }
 
 /// The root of the amplitude gain of `db` decibels, `10^(db / 40)`: the `A` of a bell and a tilt.
-pub(super) fn gain_root(db: f64) -> f64 {
-    Db::to_amplitude_f64(db / 2.0)
+pub(super) fn gain_root(db: Db) -> f64 {
+    Db(db.get() / 2.0).to_amplitude().get()
 }
 
 /// A Butterworth filter, described without a sample rate: maximally flat in the passband,

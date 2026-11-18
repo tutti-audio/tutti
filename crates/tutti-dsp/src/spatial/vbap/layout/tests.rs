@@ -5,7 +5,7 @@
 
 use super::*;
 use tutti_types::{Bed, Speaker};
-use tutti_units::{Azimuth, Direction, Elevation, Spread};
+use tutti_units::{Azimuth, Direction, Elevation, Gain, Spread};
 
 type Position = (f64, f64);
 
@@ -189,13 +189,12 @@ fn the_sum_of_squared_gains_is_one() {
 /// 24 bearings across the seam, and heights from straight down to straight up,
 /// which reaches the regions the raw solve answers with silence (under the
 /// Atmos bed, the poles of a horizontal ring) and the rear of a front-only
-/// pair. The bound is `f32` accumulation over at most 12 gains, each narrowed
-/// from `f64`; the failures it is here for (a missing or doubled
-/// normalisation, a clamped-away arc) are order 1.
+/// pair. The failures it is here for (a missing or doubled normalisation, a clamped-away
+/// arc) are order 1.
 #[test]
 fn the_corrected_gains_are_unit_power_everywhere() {
     for (name, layout, _) in presets() {
-        let mut gains = vec![0.0; layout.speaker_count()];
+        let mut gains = vec![Gain::SILENT; layout.speaker_count()];
         for spread in [0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0] {
             for az in (0..360).step_by(15) {
                 for el in (-90..=90).step_by(30) {
@@ -205,9 +204,9 @@ fn the_corrected_gains_are_unit_power_everywhere() {
                         Spread::new_clamped(spread),
                         &mut gains,
                     );
-                    let sum: f32 = gains.iter().map(|g| g * g).sum();
+                    let sum: f64 = gains.iter().map(|g| g.get() * g.get()).sum();
                     assert!(
-                        (sum - 1.0).abs() < 1e-3,
+                        (sum - 1.0).abs() < 1e-6,
                         "{name} at ({az}, {el}), spread {spread}: power {sum}, gains {gains:?}"
                     );
                 }
@@ -225,7 +224,7 @@ fn the_corrected_gains_are_unit_power_everywhere() {
 #[test]
 fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
     let layout = SpeakerLayout::from_bed(Bed::Stereo).unwrap();
-    let centre = core::f32::consts::FRAC_1_SQRT_2;
+    let centre = core::f64::consts::FRAC_1_SQRT_2;
     // (azimuth, left, right)
     for (az, left, right) in [
         (0.0f64, centre, centre),
@@ -242,10 +241,10 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
         (315.0, 0.0, 1.0),
         (345.0, 0.343_724, 0.939_071),
     ] {
-        let mut got = [0.0f32; 2];
+        let mut got = [Gain::SILENT; 2];
         layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut got);
         assert!(
-            (got[0] - left).abs() < 1e-3 && (got[1] - right).abs() < 1e-3,
+            (got[0].get() - left).abs() < 1e-6 && (got[1].get() - right).abs() < 1e-6,
             "stereo at {az}: {got:?}, want [{left}, {right}]"
         );
     }
@@ -258,9 +257,9 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
 fn a_surrounding_layout_does_not_fold_its_rear_arc() {
     let layout = SpeakerLayout::from_bed(Bed::Quad).unwrap();
     let at = |az: f64| {
-        let mut g = [0.0f32; 4];
+        let mut g = [Gain::SILENT; 4];
         layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut g);
-        g
+        g.map(Gain::get)
     };
     let front = at(0.0);
     assert!(
@@ -287,9 +286,9 @@ fn gains_are_not_negative() {
                 for g in raw(&layout, a, e) {
                     assert!(g >= 0.0, "{name} at ({a}, {e}): {g}");
                 }
-                let mut all = vec![0.0; layout.speaker_count()];
+                let mut all = vec![Gain::SILENT; layout.speaker_count()];
                 layout.gains_into(Azimuth(a), Elevation(e), Spread::POINT, &mut all);
-                assert!(all.iter().all(|g| *g >= 0.0), "{name} at ({a}, {e})");
+                assert!(all.iter().all(|g| g.get() >= 0.0), "{name} at ({a}, {e})");
             }
         }
     }
@@ -317,12 +316,12 @@ fn a_source_uses_at_most_a_tuple() {
 fn a_source_at_a_speaker_puts_all_its_gain_there() {
     for (name, layout, positions) in presets() {
         for (s, &(a, e)) in positions.iter().enumerate() {
-            let mut gains = vec![0.0; layout.speaker_count()];
+            let mut gains = vec![Gain::SILENT; layout.speaker_count()];
             layout.gains_into(Azimuth(a), Elevation(e), Spread::POINT, &mut gains);
             for (other, g) in gains.iter().enumerate() {
-                let want = if other == s { 1.0 } else { 0.0 };
+                let (g, want) = (g.get(), if other == s { 1.0 } else { 0.0 });
                 assert!(
-                    (g - want).abs() < 1e-6,
+                    (g - want).abs() < 1e-12,
                     "{name}: source at speaker {s}, gain {other} is {g}"
                 );
             }
@@ -508,12 +507,12 @@ fn a_bed_pans_to_each_of_its_speakers_at_unity() {
         assert_eq!(layout.speaker_count(), placed.len(), "{bed:?}");
         for (i, &speaker) in placed.iter().enumerate() {
             let at = bed.direction(speaker).unwrap();
-            let mut gains = vec![0.0f32; placed.len()];
+            let mut gains = vec![Gain::SILENT; placed.len()];
             layout.gains_into(at.azimuth, at.elevation, Spread::POINT, &mut gains);
-            for (j, &g) in gains.iter().enumerate() {
-                let want = if i == j { 1.0 } else { 0.0 };
+            for (j, g) in gains.iter().enumerate() {
+                let (g, want) = (g.get(), if i == j { 1.0 } else { 0.0 });
                 assert!(
-                    (g - want).abs() < 1e-3,
+                    (g - want).abs() < 1e-12,
                     "{bed:?} source at {speaker:?}: gain {j} is {g}"
                 );
             }
@@ -535,14 +534,17 @@ fn a_non_finite_direction_gives_silence_without_panicking() {
     for (_, layout, _) in presets() {
         for (az, el) in [(f64::NAN, 0.0), (0.0, f64::NAN), (f64::NAN, f64::NAN)] {
             for spread in [0.0, 0.5] {
-                let mut gains = vec![1.0f32; layout.speaker_count()];
+                let mut gains = vec![Gain::UNITY; layout.speaker_count()];
                 layout.gains_into(
                     Azimuth(az),
                     Elevation(el),
                     Spread::new_clamped(spread),
                     &mut gains,
                 );
-                assert!(gains.iter().all(|&g| g == 0.0), "({az}, {el}): {gains:?}");
+                assert!(
+                    gains.iter().all(|&g| g == Gain::SILENT),
+                    "({az}, {el}): {gains:?}"
+                );
             }
         }
     }

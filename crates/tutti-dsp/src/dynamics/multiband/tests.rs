@@ -30,12 +30,12 @@ fn hz(freqs: &[f64]) -> CrossoverControls {
 }
 
 fn band(
-    threshold: f32,
-    knee: f32,
+    threshold: f64,
+    knee: f64,
     ratio: f32,
     attack: f64,
     release: f64,
-    makeup: f32,
+    makeup: f64,
 ) -> BandSettings {
     BandSettings {
         compressor: CompressorControls {
@@ -295,18 +295,13 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             run(&mut k, &[&x[..SETTLE]]);
             k.take_reading();
             let mut set = unity(&splits);
-            set.bands[b] = band(threshold as f32, knee, ratio, 0.0, f64::INFINITY, makeup);
+            set.bands[b] = band(threshold, knee, ratio, 0.0, f64::INFINITY, makeup);
             k.aim(&set);
             let out = run(&mut k, &[&x[SETTLE..]]).remove(0);
             let reading = k.take_reading();
 
-            let want = curve(
-                level,
-                f64::from(threshold as f32),
-                f64::from(ratio),
-                f64::from(knee),
-            );
-            let got = f64::from(reading.band(b).unwrap().get());
+            let want = curve(level, f64::from(threshold as f32), f64::from(ratio), knee);
+            let got = reading.band(b).unwrap().get();
             assert!(
                 (got - want).abs() < 2e-3,
                 "band {b}, knee {knee}: metered {got} dB, the curve says {want}"
@@ -318,7 +313,7 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
                     "band {b} leaves band {other} alone"
                 );
             }
-            let gain = linear(f64::from(makeup) - want);
+            let gain = linear(makeup - want);
             let weighted: f64 = (0..4)
                 .map(|j| band_magnitude(j, &splits, f) * if j == b { gain } else { 1.0 })
                 .sum();
@@ -359,7 +354,7 @@ fn a_loud_band_follows_the_static_curve_and_a_quiet_band_is_left_alone() {
     let amp = amplitude_at(&out[0][SETTLE..], 5_000.0, RATE.get());
     assert!((amp - 0.01).abs() < 2e-5, "the quiet band is {amp}");
     let reading = k.take_reading();
-    let deepest = f64::from(reading.band(0).unwrap().get());
+    let deepest = reading.band(0).unwrap().get();
     assert!(
         (deepest - reduction).abs() < 1e-3,
         "{deepest} vs {reduction}"
@@ -543,7 +538,7 @@ fn a_bands_follower_closes_one_minus_one_over_e_in_one_attack() {
         [Some(&low), None, None, None],
         256,
     );
-    let reached = f64::from(k.take_reading().band(0).unwrap().get());
+    let reached = k.take_reading().band(0).unwrap().get();
     let curve = hard(db(0.5), -30.0, 8.0);
     let want = curve * (1.0 - 1.0 / core::f64::consts::E);
     assert!((reached - want).abs() < 2e-3 * curve, "{reached} vs {want}");
@@ -562,7 +557,7 @@ fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
     run(&mut k, &[&vec![0.5f32; 4_800]]);
     run(&mut k, &[&vec![0.0f32; 4_800]]);
     let curve = hard(db(0.5), -30.0, 8.0);
-    let both = f64::from(k.take_reading().band(0).unwrap().get());
+    let both = k.take_reading().band(0).unwrap().get();
     assert!((both - curve).abs() < 1e-3, "{both} vs {curve}");
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The follower released during the silence: nothing is held over from before the read.
@@ -589,7 +584,7 @@ fn a_band_reads_its_own_threshold_lane() {
     run_in(&mut k, &[&x], [Some(&low), None, None, None], 256);
     let want = hard(db(0.5), -30.0, 4.0);
     let reading = k.take_reading();
-    let d0 = f64::from(reading.band(0).unwrap().get());
+    let d0 = reading.band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "{d0} vs {want}");
     assert!(reading.band(1).unwrap().get() < 1e-3 && reading.band(2).unwrap().get() < 1e-3);
     // A lane that is NaN reads as the aimed threshold (0 dB): nothing to reduce.
@@ -612,7 +607,7 @@ fn a_band_reads_its_own_threshold_lane() {
         Planes::new(&planes).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
-    let d0 = f64::from(k.take_reading().band(0).unwrap().get());
+    let d0 = k.take_reading().band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "f64: {d0} vs {want}");
 }
 
@@ -696,7 +691,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
     k.aim(&loud);
     run(&mut k, &[&vec![0.9f32; 5_000]]);
     k.reset();
-    assert_eq!(k.take_reading().iter().map(Db::get).sum::<f32>(), 0.0);
+    assert_eq!(k.take_reading().iter().map(Db::get).sum::<f64>(), 0.0);
     k.aim(&set);
     let got = run(&mut k, &[&x]);
     assert!(
@@ -794,12 +789,12 @@ fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
     }
 }
 
-/// A knee past 400 dB is held there, on a band too: a knee of 1e20 or 3e38 renders finite with
+/// A knee past 400 dB is held there, on a band too: a knee of 1e20 or 1e200 renders finite with
 /// the band's level inside it, and once the level has moved (a settled DC of 0.5, then of 0.1)
 /// the band's reduction is back on the static curve of the 400 dB knee.
 #[test]
 fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
-    for knee in [1.0e20f32, 3.0e38] {
+    for knee in [1.0e20f64, 1.0e200] {
         let mut set = unity(&[200.0, 3_000.0]);
         set.bands[0] = band(-20.0, knee, 4.0, 0.001, 0.001, 0.0);
         let mut k = bank(1, 3);

@@ -19,7 +19,7 @@
 use serde::{Deserialize, Serialize};
 use tutti_ump::{CCNumber, ControlValue, NoteNumber, RegisteredPerNoteController, Voice2};
 
-use tutti_units::Normalized;
+use tutti_units::{Normalized, Semitones};
 
 /// A per-note expression dimension.
 ///
@@ -157,8 +157,8 @@ fn per_note_controller_of_expression(expression: NoteExpressionType) -> Option<C
 /// that is not finite or lands outside what 7.25 holds (`0..128` notes): the
 /// caller counts it lost.
 #[must_use]
-pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
-    let pitch = f64::from(note.get()) + semitones;
+pub fn per_note_tuning(note: NoteNumber, semitones: Semitones) -> Option<Voice2> {
+    let pitch = f64::from(note.get()) + semitones.get();
     if !pitch.is_finite() || !(0.0..128.0).contains(&pitch) {
         return None;
     }
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn a_tuning_is_an_absolute_pitch_in_q7_25() {
         let note = NoteNumber::of(60);
-        let bits = |semitones| match per_note_tuning(note, semitones) {
+        let bits = |semitones: Semitones| match per_note_tuning(note, semitones) {
             Some(Voice2::RegisteredPerNote {
                 controller: RegisteredPerNoteController::Pitch,
                 value,
@@ -249,16 +249,24 @@ mod tests {
             }) => value.get(),
             other => panic!("not Registered Pitch 7.25: {other:?}"),
         };
-        assert_eq!(bits(0.0), 60 << 25);
-        assert_eq!(bits(12.0), 72 << 25);
-        assert_eq!(bits(-0.25), (59 << 25) | (3 << 23));
-        assert_eq!(bits(-60.0), 0);
+        assert_eq!(bits(Semitones::UNISON), 60 << 25);
+        assert_eq!(bits(Semitones::OCTAVE), 72 << 25);
+        assert_eq!(bits(Semitones::new(-0.25)), (59 << 25) | (3 << 23));
+        assert_eq!(bits(Semitones::new(-60.0)), 0);
         // Just under 128 rounds to 2^32 in Q7.25 and saturates at the top word.
-        assert_eq!(bits(128.0 - 60.0 - 1e-9), u32::MAX);
-        assert_eq!(per_note_tuning(note, 68.0), None, "128 is past the range");
-        assert_eq!(per_note_tuning(note, -61.0), None, "below note 0");
-        assert_eq!(per_note_tuning(note, f64::NAN), None);
-        assert_eq!(per_note_tuning(note, f64::INFINITY), None);
+        assert_eq!(bits(Semitones::new(128.0 - 60.0 - 1e-9)), u32::MAX);
+        assert_eq!(
+            per_note_tuning(note, Semitones::new(68.0)),
+            None,
+            "128 is past the range"
+        );
+        assert_eq!(
+            per_note_tuning(note, Semitones::new(-61.0)),
+            None,
+            "below note 0"
+        );
+        assert_eq!(per_note_tuning(note, Semitones::new(f64::NAN)), None);
+        assert_eq!(per_note_tuning(note, Semitones::new(f64::INFINITY)), None);
     }
 
     /// Pressure is Polyphonic Pressure, the table's expressions are the

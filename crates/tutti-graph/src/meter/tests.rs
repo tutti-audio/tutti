@@ -22,7 +22,7 @@ fn read(samples: &[f32]) -> Level {
 }
 
 /// An amplitude-`a` sine, 64 frames per period.
-fn sine(a: f32, frames: usize) -> Vec<f32> {
+fn sine(a: f64, frames: usize) -> Vec<f32> {
     use tutti_units::{Amplitude, Hz, SampleRate, Samples};
     // One cycle per 64 frames: 1 Hz at a 64 Hz rate.
     tutti_fixtures::signal::sine(Hz(1.0), Amplitude(a), SampleRate::of(64.0), Samples(frames))
@@ -76,7 +76,7 @@ fn blocks_between_reads_fold() {
     assert_eq!(l.peak.get(), 1.0);
     assert_eq!(l.frames, Samples(256));
     // sqrt((64 * 1 + 192 * 0.25) / 256)
-    assert_eq!(l.rms.get(), (112.0f64 / 256.0).sqrt() as f32);
+    assert_eq!(l.rms.get(), (112.0f64 / 256.0).sqrt());
 }
 
 /// A read with no frames has no peak and no energy: a block lands whole or
@@ -130,7 +130,7 @@ fn a_known_sine_reads_its_peak_and_rms() {
     let l = read(&sine(0.5, 256));
     assert!((l.peak.get() - 0.5).abs() < 1e-5, "peak {}", l.peak.get());
     assert!(
-        (l.rms.get() - 0.5 / 2f32.sqrt()).abs() < 1e-5,
+        (l.rms.get() - 0.5 / 2f64.sqrt()).abs() < 1e-5,
         "rms {}",
         l.rms.get()
     );
@@ -179,7 +179,7 @@ fn an_empty_block_changes_nothing() {
 }
 
 /// A long unread span reads exactly: an hour of 48 kHz in 512-frame blocks,
-/// taken once, has the analytic RMS (an `f32` energy sum stalls past 2^24).
+/// taken once, has the analytic RMS (the energy sums in `f64`).
 #[test]
 fn an_hour_unread_reads_the_analytic_rms() {
     let (mut w, mut r) = level_cell();
@@ -192,7 +192,7 @@ fn an_hour_unread_reads_the_analytic_rms() {
         w.fold(stats.peak, f64::from(stats.sum_sq), 512);
     }
     let l = take(&mut r);
-    let want = (f64::from(stats.sum_sq) / 512.0).sqrt() as f32;
+    let want = (f64::from(stats.sum_sq) / 512.0).sqrt();
     assert_eq!(l.rms.get(), want);
     assert_eq!(l.frames, Samples(337_500 * 512));
 }
@@ -231,11 +231,11 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     meter_op::<f64, _, _>(&mut writer, &arena, &[0u8][..], &[0], FRAMES);
     let level = reader.read()[0];
     let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
-    let rms = (sum_sq / FRAMES as f64).sqrt() as f32;
+    let rms = (sum_sq / FRAMES as f64).sqrt();
     assert_eq!(level.frames, Samples(FRAMES));
     assert_eq!(level.peak, Amplitude(0.75));
     assert!(
-        (level.rms.0 - rms).abs() <= rms * f32::EPSILON,
+        (level.rms.0 - rms).abs() <= rms * f64::from(f32::EPSILON),
         "{} against {rms}",
         level.rms.0
     );

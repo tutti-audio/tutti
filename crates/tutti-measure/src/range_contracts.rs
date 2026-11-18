@@ -60,7 +60,7 @@ const NAN: f32 = f32::NAN;
 const INF: f32 = f32::INFINITY;
 const NEG_INF: f32 = f32::NEG_INFINITY;
 
-fn db(raws: &[f32]) -> Vec<Db> {
+fn db(raws: &[f64]) -> Vec<Db> {
     raws.iter().map(|&r| Db(r)).collect()
 }
 
@@ -68,7 +68,7 @@ fn cents(raws: &[f64]) -> Vec<Cents> {
     raws.iter().map(|&r| Cents(r)).collect()
 }
 
-fn amplitudes(raws: &[f32]) -> Vec<Amplitude> {
+fn amplitudes(raws: &[f64]) -> Vec<Amplitude> {
     raws.iter().map(|&r| Amplitude(r)).collect()
 }
 
@@ -108,7 +108,7 @@ fn peak_floor_keeps_the_range_checked_shape() {
         get: PeakFloor::get,
         of: Some(PeakFloor::of),
         valid: &db(&[-120.0, -40.0, 0.0]),
-        invalid: &db(&[1.0, -121.0, NAN, INF, NEG_INF]),
+        invalid: &db(&[1.0, -121.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 
@@ -168,7 +168,7 @@ fn spectrum_floor_keeps_the_range_checked_shape() {
         get: SpectrumFloor::get,
         of: Some(SpectrumFloor::of),
         valid: &db(&[-300.0, -96.0, 0.0]),
-        invalid: &db(&[1.0, -301.0, NAN, INF, NEG_INF]),
+        invalid: &db(&[1.0, -301.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 
@@ -180,7 +180,7 @@ fn peak_decay_keeps_the_range_checked_shape() {
         get: PeakDecay::get,
         of: Some(PeakDecay::of),
         valid: &db(&[0.0, 20.0, 10_000.0]),
-        invalid: &db(&[-1.0, 10_001.0, NAN, INF, NEG_INF]),
+        invalid: &db(&[-1.0, 10_001.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 
@@ -270,8 +270,8 @@ fn onset_threshold_keeps_the_range_checked_shape() {
         new: OnsetThreshold::new,
         get: OnsetThreshold::get,
         of: Some(OnsetThreshold::of),
-        valid: &amplitudes(&[0.0, 0.3, 1.0, f32::MAX]),
-        invalid: &amplitudes(&[-0.1, NAN, INF, NEG_INF]),
+        valid: &amplitudes(&[0.0, 0.3, 1.0, f64::from(f32::MAX)]),
+        invalid: &amplitudes(&[-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 
@@ -282,8 +282,8 @@ fn onset_sensitivity_keeps_the_range_checked_shape() {
         new: OnsetSensitivity::new,
         get: OnsetSensitivity::get,
         of: Some(OnsetSensitivity::of),
-        valid: &amplitudes(&[f32::MIN_POSITIVE, 1.0, 3.0, f32::MAX]),
-        invalid: &amplitudes(&[0.0, -1.0, NAN, INF]),
+        valid: &amplitudes(&[f64::from(f32::MIN_POSITIVE), 1.0, 3.0, f64::from(f32::MAX)]),
+        invalid: &amplitudes(&[0.0, -1.0, f64::NAN, f64::INFINITY]),
     });
 }
 
@@ -306,8 +306,8 @@ fn gate_level_keeps_the_range_checked_shape() {
         new: FiniteLevel::new,
         get: FiniteLevel::get,
         of: Some(FiniteLevel::of),
-        valid: &db(&[-300.0, -60.0, 0.0, 12.0, f32::MAX, f32::MIN]),
-        invalid: &db(&[NAN, INF, NEG_INF]),
+        valid: &db(&[-300.0, -60.0, 0.0, 12.0, f64::MAX, f64::MIN]),
+        invalid: &db(&[f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
 

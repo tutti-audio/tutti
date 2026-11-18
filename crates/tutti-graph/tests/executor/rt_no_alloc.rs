@@ -1410,7 +1410,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
             for block in 0..40u64 {
                 for k in 1..=n {
                     let w = ((block + k) % 7) as f32 * 0.25 - 0.5;
-                    ed.set_edge_gain(edge_of(k), Amplitude::new(w))
+                    ed.set_edge_gain(edge_of(k), Amplitude::new(f64::from(w)))
                         .expect("an edge with an entry");
                 }
                 assert_no_alloc::assert_no_alloc(|| {
@@ -1903,7 +1903,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         if block % 3 == 0 {
             for k in 1..=8u64 {
                 let w = 0.25 * ((block + k as usize) % 5) as f32;
-                ed.set_edge_gain(edge(k), tutti_units::Amplitude::new(w))
+                ed.set_edge_gain(edge(k), tutti_units::Amplitude::new(f64::from(w)))
                     .expect("edge");
             }
         }
