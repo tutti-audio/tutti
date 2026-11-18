@@ -11,7 +11,7 @@ fn io_cause(error: &MidiHardwareError) -> Option<&std::io::Error> {
 #[test]
 fn a_spawn_failure_keeps_the_os_refusal_as_its_source() {
     let error = MidiHardwareError::Spawn {
-        thread: Thread::MidiIn,
+        thread: MidiThread::MidiIn,
         source: std::io::Error::from(std::io::ErrorKind::OutOfMemory),
     };
     assert_eq!(

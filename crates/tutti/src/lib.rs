@@ -697,7 +697,7 @@ pub mod midi {
         WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::{NotFound, SeedError, Thread as MidiThread};
+    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{

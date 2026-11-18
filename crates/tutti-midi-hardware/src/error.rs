@@ -24,7 +24,7 @@ pub enum NotFound {
 /// A thread this crate starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Thread {
+pub enum MidiThread {
     /// The device watch: a backend's, or the fake's.
     DeviceWatch,
     /// An input's pump.
@@ -35,7 +35,7 @@ pub enum Thread {
     Sensing,
 }
 
-impl Thread {
+impl MidiThread {
     /// The name the thread runs under.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -56,7 +56,7 @@ pub enum MidiHardwareError {
     #[error("cannot start the {} thread", .thread.name())]
     Spawn {
         /// The thread.
-        thread: Thread,
+        thread: MidiThread,
         /// The OS's refusal.
         #[source]
         source: std::io::Error,
@@ -80,7 +80,7 @@ pub enum MidiHardwareError {
     #[error("the {} thread ended before it was ready", .thread.name())]
     ThreadEnded {
         /// The thread.
-        thread: Thread,
+        thread: MidiThread,
     },
 
     /// What was asked for is not there: a stale or foreign id.
