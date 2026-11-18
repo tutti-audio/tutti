@@ -175,7 +175,10 @@ impl<S: Sample> FileIn<S> {
 
     /// Frames held in `leftover`, consumed or not.
     fn leftover_frames(&self) -> usize {
-        Samples::from_interleaved_len(self.leftover.len(), self.topology.width()).get()
+        self.topology
+            .width()
+            .from_interleaved_len(self.leftover.len())
+            .get()
     }
 
     /// Returns whether [`seek`](Self::seek) can serve arbitrary positions:
@@ -295,7 +298,7 @@ impl<S: Sample> FileIn<S> {
             self.leftover.clear();
             self.leftover_pos = 0;
             self.leftover
-                .resize(Samples(frames).interleaved_len(layout), S::SILENCE);
+                .resize(layout.interleaved_len(Samples(frames)), S::SILENCE);
             let planes = Planes::from_vecs(planes).expect("every plane holds the packet's frames");
             let out = InterleavedMut::new(&mut self.leftover, layout)
                 .expect("the buffer holds whole frames");

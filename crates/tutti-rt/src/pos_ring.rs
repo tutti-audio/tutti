@@ -319,7 +319,7 @@ impl<S: RingSample> PosRing<S> {
             frames,
             recip: recip(frames as u64),
             keep_behind,
-            slots: (0..Samples(frames).interleaved_len(layout))
+            slots: (0..layout.interleaved_len(Samples(frames)))
                 .map(|_| S::atom(S::SILENCE))
                 .collect(),
             window: AtomicU64::new(0),
@@ -592,7 +592,9 @@ impl<S: RingSample> PosWriter<S> {
         }
         let landing = Samples((end - to) as usize);
         for (i, frame) in view.slice(Samples(0)..landing).iter().enumerate() {
-            let at = Samples(ring.slot(to + i as u64)).interleaved_len(ring.layout);
+            let at = ring
+                .layout
+                .interleaved_len(Samples(ring.slot(to + i as u64)));
             for (word, &s) in ring.slots[at..at + frame.len()].iter().zip(frame) {
                 S::store(word, s);
             }
@@ -714,8 +716,8 @@ impl<'a, S: RingSample> PosClaim<'a, S> {
         let slot = self.ring.slot(s);
         let layout = self.ring.layout;
         let (from, to) = (
-            Samples(slot).interleaved_len(layout),
-            Samples(slot + 1).interleaved_len(layout),
+            layout.interleaved_len(Samples(slot)),
+            layout.interleaved_len(Samples(slot + 1)),
         );
         PosFrame(&self.ring.slots[from..to])
     }

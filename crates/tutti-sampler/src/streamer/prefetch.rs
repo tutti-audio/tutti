@@ -404,7 +404,7 @@ impl RegionOut {
     /// (`PosRing::push`). A trailing partial frame is ignored.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
         let layout = self.writer.layout();
-        let whole = Samples::from_interleaved_len(samples.len(), layout).interleaved_len(layout);
+        let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
         let frames = Interleaved::new(&samples[..whole], layout)
             .expect("a whole number of frames of the ring's width");
         self.writer.push(frames).expect("the ring's width")
