@@ -248,10 +248,10 @@ pub struct Written {
     /// is an error instead).
     pub dropped_events: u64,
     /// Values the conversion to an integer format clipped (after any gain,
-    /// resample and dither): those at or past `+1.0` or below `-1.0`, held at
-    /// the integer's `MAX` or `MIN` by the rule in
-    /// [`Sample`](tutti_buffers::Sample). A NaN is written as 0 and is not
-    /// counted. `0` for a format that does not quantize (`Pcm::Float32`,
+    /// resample and dither): those whose rounded value lies past the integer
+    /// format's `MAX` or `MIN`, held there by the rule in
+    /// [`Sample`](tutti_buffers::Sample); an infinity is counted. A NaN is
+    /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float32`,
     /// `Pcm::Float64`, and Ogg Vorbis, whose encoder takes the float stream). A
     /// normalizing export keeps its target and ceiling one LSB plus the dither
     /// amplitude below full scale for an integer format, so this stays `0`

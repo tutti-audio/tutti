@@ -579,7 +579,7 @@ fn feed_planes(
 }
 
 /// A file output whose frames are all written: its chain, to be finalized.
-pub(crate) struct PendingFile<F: Float = f32> {
+pub(crate) struct PendingFile<F: Float> {
     /// The output's index in the list the render was given.
     pub(crate) index: usize,
     pub(crate) path: PathBuf,
