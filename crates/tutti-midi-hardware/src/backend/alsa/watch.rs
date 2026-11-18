@@ -54,7 +54,7 @@ use super::{address_of, handle_of};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{MidiHardwareError, Result};
+use crate::error::{MidiHardwareError, Result, Thread};
 use tutti_alsa_ffi::{
     Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
@@ -63,9 +63,6 @@ use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Looks a settle takes before it reports the last one.
 const MAX_SETTLE: usize = 8;
-/// Linux truncates a thread name to 15 bytes.
-const THREAD_NAME: &str = "tutti-devwatch";
-
 /// A subscription to the announce port, and the descriptors to wait on.
 struct Announce {
     /// The client, and the read end of the stop pair: the owner drops the write
@@ -598,7 +595,7 @@ pub(super) fn start(
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
     tracker.seed(|| announce.drain(), || snapshot(announce.seq.client()))?;
-    let thread = spawn_named(THREAD_NAME, None, move |_| {
+    let thread = spawn_named(Thread::DeviceWatch.name(), None, move |_| {
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             loop {
                 match announce.wait(tracker.retry_after()) {
@@ -625,7 +622,7 @@ pub(super) fn start(
         }
     })
     .map_err(|source| MidiHardwareError::Spawn {
-        thread: THREAD_NAME,
+        thread: Thread::DeviceWatch,
         source,
     })?;
     Ok(Box::new(AlsaWatch {

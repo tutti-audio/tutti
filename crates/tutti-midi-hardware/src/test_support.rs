@@ -30,7 +30,7 @@ use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result, Thread};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
 use tutti_rt::PushError;
@@ -474,7 +474,7 @@ impl MidiEndpoints for FakeBackend {
         self.watchers.fetch_add(1, Ordering::SeqCst);
         let running = Running(Arc::clone(&self.watchers));
         let thread = std::thread::Builder::new()
-            .name("tutti-fake-watch".to_string())
+            .name(Thread::DeviceWatch.name().to_string())
             .spawn(move || {
                 let _running = running;
                 for (report, done) in incoming {
@@ -491,7 +491,7 @@ impl MidiEndpoints for FakeBackend {
                 }
             })
             .map_err(|source| MidiHardwareError::Spawn {
-                thread: "tutti-fake-watch",
+                thread: Thread::DeviceWatch,
                 source,
             })?;
         Ok(Box::new(FakeWatch {

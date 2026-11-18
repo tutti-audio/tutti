@@ -29,9 +29,9 @@ impl InputConnection for WinMmInput {
 ///
 /// # Errors
 ///
-/// [`MidiHardwareError::Os`] from the port's opening, such as
-/// [`MmResult::Allocated`](tutti_winmm_ffi::MmResult::Allocated) when another
-/// application holds it.
+/// [`MidiHardwareError::Os`] from the port's opening. The endpoint's `open_input`
+/// turns `MmResult::Allocated`, another application holding the port, into
+/// [`MidiHardwareError::InUse`].
 pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {
     let died = Arc::new(FaultLatch::new());
     let guard = Guard::new(Arc::clone(&died));

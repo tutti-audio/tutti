@@ -35,7 +35,7 @@ use coremidi::{Client, Notification};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
-use crate::error::{MidiHardwareError, Result};
+use crate::error::{MidiHardwareError, Result, Thread};
 use tutti_coremidi_ffi::{Operation, OsStatus};
 use tutti_midi_device::OsDevice;
 use tutti_rt::spawn_named;
@@ -160,7 +160,7 @@ fn start_hub() -> Result<&'static Hub> {
         }));
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
-        spawn_named("tutti-devwatch", None, move |_| {
+        spawn_named(Thread::DeviceWatch.name(), None, move |_| {
             let client = tutti_coremidi_ffi::create_client(|| {
                 Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
                     if matches!(
@@ -195,7 +195,7 @@ fn start_hub() -> Result<&'static Hub> {
             }
         })
         .map_err(|source| MidiHardwareError::Spawn {
-            thread: "tutti-devwatch",
+            thread: Thread::DeviceWatch,
             source,
         })?
         .detach();
@@ -205,7 +205,7 @@ fn start_hub() -> Result<&'static Hub> {
                 Err(tutti_coremidi_ffi::Error::call(Operation::CreateClient, status).into())
             }
             Err(_) => Err(MidiHardwareError::ThreadEnded {
-                thread: "tutti-devwatch",
+                thread: Thread::DeviceWatch,
             }),
         }
     }

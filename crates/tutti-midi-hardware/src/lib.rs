@@ -273,7 +273,7 @@ pub use devices::{
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-pub use error::{MidiHardwareError, NotFound, Result};
+pub use error::{MidiHardwareError, NotFound, Result, Thread};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{

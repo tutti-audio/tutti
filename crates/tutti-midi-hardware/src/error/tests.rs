@@ -11,7 +11,7 @@ fn io_cause(error: &MidiHardwareError) -> Option<&std::io::Error> {
 #[test]
 fn a_spawn_failure_keeps_the_os_refusal_as_its_source() {
     let error = MidiHardwareError::Spawn {
-        thread: "tutti-midi-in",
+        thread: Thread::MidiIn,
         source: std::io::Error::from(std::io::ErrorKind::OutOfMemory),
     };
     assert_eq!(
@@ -49,8 +49,9 @@ fn a_name_that_matched_nothing_lists_its_candidates() {
         name: "keystpe".into(),
         searched: vec!["Keystep Pro".into(), "IAC Bus 1".into()],
     };
-    assert_eq!(
-        error.to_string(),
-        "no MIDI device named like 'keystpe' (searched: Keystep Pro, IAC Bus 1)"
-    );
+    let MidiHardwareError::NoDeviceNamed { name, searched } = error else {
+        panic!("not NoDeviceNamed");
+    };
+    assert_eq!(name, "keystpe");
+    assert_eq!(searched, ["Keystep Pro", "IAC Bus 1"]);
 }

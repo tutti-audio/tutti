@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{MidiHardwareError, Result};
+use crate::error::{MidiHardwareError, Result, Thread};
 use tutti_midi_device::OsDevice;
 use tutti_rt::{ThreadHandle, spawn_named};
 
@@ -59,7 +59,7 @@ pub(in crate::backend) fn start(
     let failures = sink.clone();
     let mut reporter = Reporter::new(sink);
     reporter.seed(snapshot())?;
-    let thread = spawn_named("tutti-devwatch", None, move |stop| {
+    let thread = spawn_named(Thread::DeviceWatch.name(), None, move |stop| {
         while !stop.wait(interval) {
             let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 reporter.report(snapshot(), |_| false);
@@ -71,7 +71,7 @@ pub(in crate::backend) fn start(
         }
     })
     .map_err(|source| MidiHardwareError::Spawn {
-        thread: "tutti-devwatch",
+        thread: Thread::DeviceWatch,
         source,
     })?;
     Ok(PollWatch {

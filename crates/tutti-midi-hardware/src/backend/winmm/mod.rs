@@ -41,7 +41,7 @@ use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
 use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
 
 use super::legacy_port::poll;
@@ -133,6 +133,19 @@ fn resolve_output(id: EndpointId) -> Result<OutputPort> {
     Ok(locate(slot, identified::<Output>()).ok_or(NotFound::Endpoint(id))?)
 }
 
+/// `error` as the open of `id` reports it: winmm's `MMSYSERR_ALLOCATED` (another
+/// application holds the port) is [`MidiHardwareError::InUse`], and any other
+/// failure stays the OS's own.
+fn in_use_if_allocated(id: EndpointId, error: MidiHardwareError) -> MidiHardwareError {
+    match error {
+        MidiHardwareError::Os(tutti_winmm_ffi::Error::Call {
+            source: tutti_winmm_ffi::MmResult::Allocated,
+            ..
+        }) => MidiHardwareError::InUse(id),
+        other => other,
+    }
+}
+
 impl MidiEndpoints for WinMmEndpoints {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         Ok(Box::new(poll::start(sink, devices, poll::INTERVAL)?))
@@ -152,11 +165,46 @@ impl MidiEndpoints for WinMmEndpoints {
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         let port = resolve_input(id)?;
-        Ok(Box::new(input::open(&port, producer)?))
+        Ok(Box::new(
+            input::open(&port, producer).map_err(|e| in_use_if_allocated(id, e))?,
+        ))
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let port = resolve_output(id)?;
-        Ok(Box::new(output::open(&port)?))
+        Ok(Box::new(
+            output::open(&port).map_err(|e| in_use_if_allocated(id, e))?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_winmm_ffi::{Error, MmOperation, MmResult};
+
+    fn open_failed(result: MmResult) -> MidiHardwareError {
+        MidiHardwareError::Os(Error::Call {
+            operation: MmOperation::MidiInOpen,
+            source: result,
+        })
+    }
+
+    /// **A port another application holds is `InUse`**, and any other winmm
+    /// failure stays the OS's own.
+    #[test]
+    fn mmsyserr_allocated_is_in_use_and_other_results_are_not() {
+        let id = EndpointId::from_raw(7);
+        assert!(matches!(
+            in_use_if_allocated(id, open_failed(MmResult::Allocated)),
+            MidiHardwareError::InUse(held) if held == id
+        ));
+        assert!(matches!(
+            in_use_if_allocated(id, open_failed(MmResult::BadDeviceId)),
+            MidiHardwareError::Os(Error::Call {
+                source: MmResult::BadDeviceId,
+                ..
+            })
+        ));
     }
 }

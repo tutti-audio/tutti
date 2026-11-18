@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};
 use crate::endpoints::DeviceOut;
-use crate::error::{MidiHardwareError, Result};
+use crate::error::{MidiHardwareError, Result, Thread};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_rt::{CounterWriter, ThreadHandle, spawn_named};
@@ -133,14 +133,14 @@ pub(super) fn open(port: &OutputPort) -> Result<WinMmOutput> {
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared { mailbox, wake });
-    let thread = spawn_named("tutti-midi-out", None, {
+    let thread = spawn_named(Thread::MidiOut.name(), None, {
         let shared = Arc::clone(&shared);
         move |_| {
             thread(port, wait, losses, &shared);
         }
     })
     .map_err(|source| MidiHardwareError::Spawn {
-        thread: "tutti-midi-out",
+        thread: Thread::MidiOut,
         source,
     })?;
     Ok(WinMmOutput {

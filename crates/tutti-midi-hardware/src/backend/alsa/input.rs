@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use super::poll::ErrorRun;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
-use crate::error::{MidiHardwareError, Result};
+use crate::error::{MidiHardwareError, Result, Thread};
 use crate::guard::Guard;
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
@@ -162,13 +162,13 @@ pub(super) fn start(
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
     let died = Arc::new(FaultLatch::new());
     let flag = Arc::clone(&died);
-    let thread = spawn_named("tutti-midi-in", None, move |_| {
+    let thread = spawn_named(Thread::MidiIn.name(), None, move |_| {
         // A panic in the pump ends it with the input held, so it is caught
         // and raises the latch, as an error does.
         Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, &flag, producer));
     })
     .map_err(|source| MidiHardwareError::Spawn {
-        thread: "tutti-midi-in",
+        thread: Thread::MidiIn,
         source,
     })?;
 

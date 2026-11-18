@@ -21,15 +21,42 @@ pub enum NotFound {
     Endpoint(tutti_midi_device::EndpointId),
 }
 
+/// A thread this crate starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Thread {
+    /// The device watch: a backend's, or the fake's.
+    DeviceWatch,
+    /// An input's pump.
+    MidiIn,
+    /// An output's sender.
+    MidiOut,
+    /// An output's Active Sensing heartbeat.
+    Sensing,
+}
+
+impl Thread {
+    /// The name the thread runs under.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::DeviceWatch => "tutti-devwatch",
+            Self::MidiIn => "tutti-midi-in",
+            Self::MidiOut => "tutti-midi-out",
+            Self::Sensing => "tutti-midi-sense",
+        }
+    }
+}
+
 /// What can go wrong opening or driving an OS MIDI endpoint.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiHardwareError {
     /// A thread could not start: the OS refused it.
-    #[error("cannot start the {thread} thread")]
+    #[error("cannot start the {} thread", .thread.name())]
     Spawn {
-        /// The thread's name.
-        thread: &'static str,
+        /// The thread.
+        thread: Thread,
         /// The OS's refusal.
         #[source]
         source: std::io::Error,
@@ -50,10 +77,10 @@ pub enum MidiHardwareError {
     DescriptorBroken,
 
     /// A thread ended before it reported that it was ready.
-    #[error("the {thread} thread ended before it was ready")]
+    #[error("the {} thread ended before it was ready", .thread.name())]
     ThreadEnded {
-        /// The thread's name.
-        thread: &'static str,
+        /// The thread.
+        thread: Thread,
     },
 
     /// What was asked for is not there: a stale or foreign id.
@@ -82,7 +109,8 @@ pub enum MidiHardwareError {
         searched: Vec<String>,
     },
 
-    /// The endpoint is already open: the OS lets one connection hold it.
+    /// Another connection or application holds the endpoint, and the OS lets
+    /// only one.
     #[error("MIDI endpoint {} is in use", .0.raw())]
     InUse(tutti_midi_device::EndpointId),
 

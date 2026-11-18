@@ -124,10 +124,10 @@ fn a_watch_that_fails_says_so_and_the_list_freezes() {
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     assert!(events.failure().is_none());
     fake.fail_watch();
-    assert_eq!(
-        events.failure().map(|f| f.to_string()),
-        Some("the sequencer descriptor failed".into())
-    );
+    assert!(matches!(
+        events.failure(),
+        Some(WatchFailure::Failed(e)) if matches!(*e, MidiHardwareError::DescriptorBroken)
+    ));
     // The thread has ended: a later plug is not reported.
     fake.plug(endpoint(2, "Pads"), PortDirection::Input);
     assert_eq!(devices.list().len(), 1);
