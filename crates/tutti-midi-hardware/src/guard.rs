@@ -40,7 +40,7 @@ impl Guard {
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => Some(result),
             Err(_) => {
-                self.died.raise();
+                self.died.raise(());
                 None
             }
         }

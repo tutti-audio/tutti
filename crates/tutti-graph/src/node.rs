@@ -104,6 +104,14 @@ pub struct Shape {
     /// told `Full` at the push, can still choose what matters (a note-off
     /// before a controller move) for the room it has left.
     pub event_capacity: Option<NonZeroU32>,
+    /// Whether this node writes param events ([`ParamEvent`](crate::ParamEvent):
+    /// ramps and segments) to its event output ports, beside the events. The
+    /// compiler reserves a param buffer, as large as the port's event
+    /// capacity, on each slot an output of such a node can reach; an output of
+    /// a node that does not declare it refuses every
+    /// [`push_param`](crate::EventWriter::push_param). Set it with
+    /// [`with_param_events`](Self::with_param_events).
+    pub param_events: bool,
     /// The most events per block this node accepts on its event inputs,
     /// **all of them together**: the size a host may allocate for what it is
     /// sent. `None` is unbounded: each input is sized from the edges into it.
@@ -331,6 +339,7 @@ impl Shape {
             event_in: 0,
             event_out: 0,
             event_capacity: None,
+            param_events: false,
             event_input_capacity: None,
             latency: Latency::ZERO,
             tail: Tail::None,
@@ -560,6 +569,20 @@ impl Shape {
     #[must_use]
     pub const fn with_event_capacity(mut self, per_block: NonZeroU32) -> Self {
         self.event_capacity = Some(per_block);
+        self
+    }
+
+    /// This shape, writing param events to its event output ports (see
+    /// [`param_events`](Self::param_events)).
+    ///
+    /// ```
+    /// use tutti_graph::Shape;
+    /// let lane = Shape::EMPTY.with_events(0, 1).with_param_events();
+    /// assert!(lane.param_events);
+    /// ```
+    #[must_use]
+    pub const fn with_param_events(mut self) -> Self {
+        self.param_events = true;
         self
     }
 

@@ -185,32 +185,6 @@ fn reset_and_fresh_equal_a_new_matrix() {
     }
 }
 
-/// The views' sample format is the caller's: `f64` views render what `f32` ones do.
-#[test]
-fn f64_views_render_the_f32_result() {
-    let irs: Vec<Vec<f32>> = (0..4).map(|p| noise(5 + p, 200)).collect();
-    let x: Vec<Vec<f32>> = (0..2).map(|c| noise(2 + c, 400)).collect();
-    let mut m32 =
-        MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
-    let want = render(&mut m32, &x, &[400]);
-    let x64: Vec<Vec<f64>> = x
-        .iter()
-        .map(|c| c.iter().map(|&v| f64::from(v)).collect())
-        .collect();
-    let mut out = vec![vec![0.0f64; 400]; 2];
-    let mut m64 =
-        MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
-    m64.process(
-        Planes::from_vecs(&x64).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
-    for (o, w) in out.iter().zip(&want) {
-        for (&a, &b) in o.iter().zip(w) {
-            assert!((a - f64::from(b)).abs() < 1e-6);
-        }
-    }
-}
-
 /// A shape with no channel, or the wrong number of responses, is refused by name.
 #[test]
 fn a_bad_shape_is_refused_by_name() {

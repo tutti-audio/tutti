@@ -10,8 +10,8 @@
 
 use tutti_graph::testing as common;
 use tutti_graph::{
-    CommitError, Cx, Editor, Event, EventOut, Executor, FadeLaw, GraphInvalid, Io, Law, Node,
-    NodeKey, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
+    CommitError, Cx, Editor, EventOut, Executor, FadeLaw, GraphInvalid, Io, Law, Node, NodeKey,
+    ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
@@ -63,6 +63,7 @@ impl Node for Sender {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -71,7 +72,7 @@ impl Node for Sender {
         for &(at, seg) in &self.0 {
             if at >= start && at < start + io.frames() as u64 {
                 let o = io.offset((at - start) as usize).expect("inside");
-                let _ = io.event_out(0).push(Event::segment(o, seg));
+                let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
             }
         }
         Status::Silent
@@ -131,7 +132,7 @@ fn render(ed: &mut Editor, exec: &mut Executor, frames: usize) -> [Vec<f32>; 2] 
 }
 
 /// One sender of the same segment to both params (their raw values), at frame 0.
-fn both(from: f32, to: f32, len: usize, shape: Law) -> Vec<(u64, ParamSegment)> {
+fn both(from: f64, to: f64, len: usize, shape: Law) -> Vec<(u64, ParamSegment)> {
     [UnitParam::Azimuth, UnitParam::Elevation]
         .into_iter()
         .map(|p| (0, ParamSegment::unit(p, from, to, Samples(len), shape)))
@@ -148,9 +149,11 @@ fn an_azimuth_segment_from_170_to_minus_170_turns_through_180_not_0() {
     for (j, &v) in az.iter().enumerate().take(99) {
         // `position` 1: frame j is `(1 + j) / 100` of the way.
         let t = (1 + j) as f64 / 100.0;
+        // The port renders in `f64` and crosses to `f32` once: within half an
+        // `f32` ulp of the closed form at 180.
         let want = Azimuth(170.0 + 20.0 * t).wrap().get();
         assert!(
-            (f64::from(v) - want).abs() < 1e-3,
+            (f64::from(v) - want).abs() < 1e-5,
             "frame {j}: {v} against {want}"
         );
         assert!(v.abs() >= 169.0, "frame {j}: {v} went the long way");
@@ -172,7 +175,7 @@ fn an_azimuth_segment_applies_its_shape_to_the_arc() {
         // The short arc from -160 to 160 is -40.
         let want = Azimuth(-160.0 - 40.0 * g).wrap().get();
         assert!(
-            (f64::from(v) - want).abs() < 1e-3,
+            (f64::from(v) - want).abs() < 1e-5,
             "frame {j}: {v} against {want}"
         );
     }
@@ -187,17 +190,17 @@ fn an_elevation_segment_between_the_same_ends_passes_through_0() {
     for (j, &v) in el.iter().enumerate().take(99) {
         let want = 170.0 - 340.0 * ((1 + j) as f64 / 100.0);
         assert!(
-            (f64::from(v) - want).abs() < 1e-3,
+            (f64::from(v) - want).abs() < 1e-5,
             "frame {j}: {v} against {want}"
         );
     }
-    assert!(el[49].abs() < 1e-3, "the midpoint is 0, got {}", el[49]);
+    assert!(el[49].abs() < 1e-5, "the midpoint is 0, got {}", el[49]);
 }
 
 /// The port wraps a bearing past 180 onto the circle, where a line clamps it.
 #[test]
 fn the_port_wraps_a_bearing_rather_than_clamping_it() {
-    let both_step = |v: f32| {
+    let both_step = |v: f64| {
         [UnitParam::Azimuth, UnitParam::Elevation]
             .into_iter()
             .map(|p| (0, ParamSegment::unit(p, v, v, Samples(0), Law::Linear)))
@@ -315,7 +318,8 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     for k in 0..WIDTH {
         ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
     }
-    let step = ParamSegment::unit(UnitParam::Azimuth, target, target, Samples(0), Law::Linear);
+    let (from, to) = (f64::from(target), f64::from(target));
+    let step = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples(0), Law::Linear);
     ed.insert(
         NodeKey(SENDER),
         "sender",
@@ -381,12 +385,17 @@ fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
             pooled.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
             "{base} to {target}: the pool differs from the serial render"
         );
+        let (base, target) = (f64::from(base), f64::from(target));
         let arc = UnitParam::Azimuth.arc(base, target);
         assert_eq!(arc.abs(), 20.0);
         for (j, &v) in serial.iter().enumerate().take(d) {
             let (_, inn) = FadeLaw::EqualAmplitude.gains(Samples(j), Samples(d));
-            let want = UnitParam::Azimuth.wrap(base + arc * inn.get() as f32);
-            assert!((v - want).abs() < 1e-3, "frame {j}: {v} against {want}");
+            // The fade is a lane in the graph's `f32`.
+            let want = UnitParam::Azimuth.wrap(base + arc * inn.get());
+            assert!(
+                (f64::from(v) - want).abs() < 1e-3,
+                "frame {j}: {v} against {want}"
+            );
             assert!(v.abs() > 169.0, "frame {j}: {v} went through the middle");
         }
         let fade = &serial[..d];
@@ -394,6 +403,6 @@ fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
             fade.iter().any(|&v| v > 179.0) && fade.iter().any(|&v| v < -179.0),
             "{base} to {target}: the fade crossed the seam"
         );
-        assert_eq!(serial[d], target, "and lands on the source");
+        assert_eq!(f64::from(serial[d]), target, "and lands on the source");
     }
 }

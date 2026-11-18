@@ -8,13 +8,12 @@
 //! input order. A 2 by 2 matrix is true stereo, an N by M matrix is an ambisonic response
 //! set, and a diagonal one is the per-channel convolution.
 
-use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
+use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 use super::Convolver;
 use crate::FftFloat;
-use crate::convert::convert_equal;
 
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
 const CHUNK: usize = 64;
@@ -167,7 +166,7 @@ impl<F: FftFloat> MatrixConvolver<F> {
     /// reads as silence, and an output channel the matrix is narrower than is not touched.
     /// The frames rendered are the fewer of the two views'. The render is the same bits
     /// for any split of the stream into calls. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let (rows, cols) = (
             usize::from(self.inputs.count()),
@@ -178,7 +177,7 @@ impl<F: FftFloat> MatrixConvolver<F> {
             let n = CHUNK.min(frames - at);
             for (i, row) in self.heard.iter_mut().enumerate() {
                 match input.get_plane(i) {
-                    Some(src) => convert_equal(&src.samples()[at..at + n], &mut row[..n]),
+                    Some(src) => row[..n].copy_from_slice(&src.samples()[at..at + n]),
                     None => row[..n].fill(F::ZERO),
                 }
             }
@@ -194,7 +193,7 @@ impl<F: FftFloat> MatrixConvolver<F> {
                     }
                 }
                 if let Some(mut plane) = output.get_plane_mut(o) {
-                    convert_equal(&self.sum[..n], &mut plane.samples_mut()[at..at + n]);
+                    plane.samples_mut()[at..at + n].copy_from_slice(&self.sum[..n]);
                 }
             }
             at += n;

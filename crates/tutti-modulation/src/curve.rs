@@ -19,7 +19,7 @@ pub enum CurveSegment {
     /// before a curve's first point, after its last, a single point.
     Hold {
         /// The value held.
-        value: f32,
+        value: f64,
         /// Where the curve next moves, if it does.
         until: Option<Beat>,
     },
@@ -33,9 +33,9 @@ pub enum CurveSegment {
         /// Where it ends (the next piece starts there).
         end: Beat,
         /// The value at `start`.
-        from: f32,
+        from: f64,
         /// The value at `end`.
-        to: f32,
+        to: f64,
         /// How it gets there.
         shape: Law,
     },
@@ -57,7 +57,7 @@ pub enum CurveSegment {
 pub trait Curve: Send + Sync {
     /// Evaluates the curve at `beat`, or returns `None` if it has no value
     /// there.
-    fn value_at(&self, beat: Beat) -> Option<f32>;
+    fn value_at(&self, beat: Beat) -> Option<f64>;
 
     /// Returns a copy of this curve that no later write reaches, for a
     /// render that runs beside the live graph (a graph fork: an offline
@@ -89,16 +89,11 @@ pub trait Curve: Send + Sync {
     }
 }
 
-/// A unit's value as the lane's `f32`.
-fn lane<U: Unit<Raw = f64>>(value: U) -> f32 {
-    value.to_raw() as f32
-}
-
-/// A trajectory of any unit reads at its raw value, narrowed to the lane's
-/// `f32`: the lane that consumes a `Curve` knows its target's unit.
+/// A trajectory of any unit reads at its raw value: the lane that consumes a
+/// `Curve` knows its target's unit.
 impl<U: Unit<Raw = f64> + Send + Sync> Curve for Trajectory<U> {
-    fn value_at(&self, beat: Beat) -> Option<f32> {
-        Trajectory::value_at(self, beat).map(lane)
+    fn value_at(&self, beat: Beat) -> Option<f64> {
+        Trajectory::value_at(self, beat).map(|u| u.to_raw())
     }
 
     /// The trajectory's breakpoints, each breakpoint's `curve` the law of the piece it

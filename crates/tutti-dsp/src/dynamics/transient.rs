@@ -40,7 +40,7 @@ use tutti_units::{Db, SampleRate, Seconds};
 use super::curves::db_gain;
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::finite::finite_or;
-use crate::follower::Follower;
+use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lerp};
 
 /// The controls of a [`TransientBank`]: the dB the two branches of the gain reach.
@@ -119,15 +119,15 @@ fn gain_db<F: Float>(fast: F, slow: F, attack: F, sustain: F) -> F {
 /// A transient shaper of any width: one gain from the loudest channel's fast and slow
 /// envelopes, applied to every channel.
 ///
-/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
-/// another sample format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state and the views are `F`, the graph's float.
+/// Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct TransientBank<F: Float + Lerp> {
     fast: Follower<F>,
     slow: Follower<F>,
     /// The fast and the slow envelope, both at 0 until a level is heard: per-sample levels in
-    /// `F`; they become `Amplitude` once that unit stores `f64`.
-    envelopes: (F, F),
+    /// `F`.
+    envelopes: (Smoothed<F>, Smoothed<F>),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
     amounts: Glide<Amounts>,
     steps: u32,
@@ -143,7 +143,7 @@ impl<F: Float + Lerp> TransientBank<F> {
         Self {
             fast: follower(fast),
             slow: follower(slow),
-            envelopes: (F::ZERO, F::ZERO),
+            envelopes: (Smoothed::ZERO, Smoothed::ZERO),
             amounts: Glide::landed(TransientControls::DEFAULT.designed()),
             steps,
         }
@@ -151,7 +151,7 @@ impl<F: Float + Lerp> TransientBank<F> {
 
     /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
     pub fn reset(&mut self) {
-        self.envelopes = (F::ZERO, F::ZERO);
+        self.envelopes = (Smoothed::ZERO, Smoothed::ZERO);
         self.amounts.settle();
     }
 
@@ -175,7 +175,7 @@ impl<F: Float + Lerp> TransientBank<F> {
     /// sample reads as quiet and an infinite one as the largest finite level. Frame `i` reads
     /// the amounts at the glide's step `taken + 1 + i`, then the block's steps are taken. No
     /// allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
         let blended = self.amounts.blended(frames);
@@ -195,23 +195,21 @@ impl<F: Float + Lerp> TransientBank<F> {
                 } else {
                     self.amounts.target()
                 };
-                let fast = self.fast.follow_raw(self.envelopes.0, *g);
-                let slow = self.slow.follow_raw(self.envelopes.1, *g);
-                self.envelopes = (fast, slow);
-                // The amounts widen to `F` here, exactly.
+                let fast = self.fast.follow_raw(&mut self.envelopes.0, *g);
+                let slow = self.slow.follow_raw(&mut self.envelopes.1, *g);
                 *g = db_gain(gain_db(
                     fast,
                     slow,
-                    F::from_f64(a.attack.get()),
-                    F::from_f64(a.sustain.get()),
+                    F::from_unit(a.attack),
+                    F::from_unit(a.sustain),
                 ));
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
-                for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
+                for ((y, &x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
+                    *y = x * g;
                 }
             }
             start = end;

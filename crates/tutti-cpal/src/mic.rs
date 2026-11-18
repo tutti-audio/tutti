@@ -499,7 +499,7 @@ impl<F: Float> Source for MicIn<F> {
         }) {
             Drained::Item(n) => Pull::Frames(n),
             Drained::Empty => Pull::Starved,
-            Drained::Failed => Pull::Failed,
+            Drained::Failed(()) => Pull::Failed,
         }
     }
 

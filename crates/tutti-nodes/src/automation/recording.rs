@@ -289,9 +289,8 @@ impl<U: Unit<Raw = f64>> Recorder<U> {
 /// [`Curve`] requires: between takes the recorder contributes *nothing* and the
 /// saved trajectory shows through, rather than pinning the param to `0.0`.
 impl<U: tutti_graph::Scalar> Curve for Recorder<U> {
-    fn value_at(&self, beat: Beat) -> Option<f32> {
-        // A curve's value is a lane's `f32`: a wider unit narrows once here.
-        let lane = |u: U| u.to_raw() as f32;
+    fn value_at(&self, beat: Beat) -> Option<f64> {
+        let lane = |u: U| u.to_raw();
         match self.take {
             Some(Take::Held { value }) => Some(lane(value)),
             Some(Take::Capturing { .. }) => self.trajectory.value_at(beat).map(lane),

@@ -153,19 +153,20 @@ impl core::fmt::Display for LfoShape {
 /// magnitude; `Unipolar` remaps `[-1, 1] → [0, 1]` (the source only pushes one
 /// direction from base) then curves. `depth` scales the result.
 ///
-/// The curve is `curve.eval_in(u)` on the normalized `u`, computed in `f32`, so
-/// every [`Law`] shapes exactly as the editor draws it. Every law runs from 0
+/// The curve is `curve.eval_in(u)` on the normalized `u`, computed in the
+/// signal's own float `R`, so every [`Law`] shapes exactly as the editor draws
+/// it. Every law runs from 0
 /// at no input to 1 at full input, and none leaves `[0, 1]` on the way, so the
 /// offset never exceeds `depth`. `Hold` is 0 until the input is exactly full.
 ///
-/// The return is a bare `f32`, not a [`Depth`]: it is an offset in the
+/// The return is a bare `R`, not a [`Depth`]: it is an offset in the
 /// *target's* units — Hz for a cutoff, linear gain for a fader — which the
 /// caller has already scaled by the target's range. Only the input amount is a
 /// `Depth`.
 #[inline]
-pub fn shape(x: f32, depth: Depth, polarity: Polarity, curve: Law) -> f32 {
-    // The depth crosses into the `f32` lane once per call.
-    let depth = f32::from_unit(depth);
+pub fn shape<R: Real>(x: R, depth: Depth, polarity: Polarity, curve: Law) -> R {
+    // The depth crosses into the signal's lane once per call.
+    let depth = R::from_unit(depth);
     match polarity {
         // Bipolar: preserve sign, curve the magnitude, restore sign.
         Polarity::Bipolar => {
@@ -174,7 +175,7 @@ pub fn shape(x: f32, depth: Depth, polarity: Polarity, curve: Law) -> f32 {
         }
         // Unipolar: remap [-1, 1] → [0, 1], then curve.
         Polarity::Unipolar => {
-            let u = (x.clamp(-1.0, 1.0) + 1.0) * 0.5;
+            let u = (x.clamp(-R::ONE, R::ONE) + R::ONE) * R::lit(0.5);
             depth * curve.eval_in(u)
         }
     }

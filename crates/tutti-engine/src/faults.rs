@@ -325,7 +325,7 @@ impl StreamFaults {
     }
 
     /// Reads the disconnect, **then** runs `pop` over the capture ring, and
-    /// answers `Drained::Failed` only if the pop found nothing
+    /// answers `Drained::Failed(())` only if the pop found nothing
     /// ([`FaultLatch::drain`]). The order is the point: a pop first and a flag
     /// after could report a drained ring with frames the callback pushed in
     /// between.
@@ -530,7 +530,7 @@ impl StreamFaults {
             kind,
             StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
         ) {
-            self.disconnected.raise();
+            self.disconnected.raise(());
         }
         self.count.fetch_add(1, Ordering::Release);
     }

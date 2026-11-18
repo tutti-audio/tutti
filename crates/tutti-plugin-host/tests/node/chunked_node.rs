@@ -19,8 +19,8 @@ use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_fixtures::main_thread;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Env, Event, Harmony, LogFilter, Node, Offset, ParamRamp, PlayClock, RtLevel, RtTarget,
-    TransportChanges, TransportPosition,
+    Env, Event, Harmony, LogFilter, Node, Offset, ParamEvent, ParamRamp, PlayClock, RtLevel,
+    RtTarget, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
@@ -656,9 +656,9 @@ fn the_loss_a_chunked_processor_reports_is_counted() {
     let (mut unit, controls) = node(&rig, 100, tempo(None));
     rig.lose.store(3, Ordering::Relaxed);
     rig.unsent.store(true, Ordering::Relaxed);
-    unit.events(
+    unit.param_events(
         0,
-        &[Event::ramp(
+        &[ParamEvent::ramp(
             at(0, 100),
             ParamRamp::foreign(PARAM, 0.5, Samples(0)),
         )],
@@ -1036,12 +1036,13 @@ fn the_chunked_audio_path_does_not_allocate() {
     let (mut unit, _) = node(&rig, 100, tempo(Some(4.0 + 79.5 * BEATS_PER_FRAME)));
     let mut frame = 0;
     let mut one = |unit: &mut Direct<PluginNode<Rec>>| {
-        unit.events(
+        unit.events(0, &[note_on(5, 100)]);
+        unit.param_events(
             0,
-            &[
-                note_on(5, 100),
-                Event::ramp(at(50, 100), ParamRamp::foreign(PARAM, 0.25, Samples(10))),
-            ],
+            &[ParamEvent::ramp(
+                at(50, 100),
+                ParamRamp::foreign(PARAM, 0.25, Samples(10)),
+            )],
         );
         run_block(unit, frame, 100);
         frame += 100;

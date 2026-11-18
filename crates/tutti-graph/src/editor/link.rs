@@ -134,7 +134,7 @@ impl<F: Float> Link<F> {
         let acked = self.acked;
         self.ending_taps.retain(|(at, end)| match at {
             Some(sent) if *sent <= acked => {
-                end.raise();
+                end.raise(());
                 false
             }
             _ => true,
