@@ -429,6 +429,54 @@ fn a_lost_plugin_ends_the_server_abnormally() {
     );
 }
 
+/// **An audio connection that breaks the protocol ends the session, typed.** A
+/// frame that does not decode kills the render thread's connection while the
+/// control connection goes on; the loop reports it as `AudioConnection` (it
+/// used to end audio silently).
+#[test]
+fn an_undecodable_audio_frame_ends_the_session() {
+    use std::io::Write as _;
+    let (mut fixture, _slab) = session("garbage");
+    let host = fixture.host();
+    let main = main_thread();
+    let render = RenderThread::spawn(
+        fixture.side.take().expect("run once"),
+        Some(Box::new(fixture.audio.take().expect("run once"))),
+    )
+    .expect("the render thread");
+    // Silent until the loop ends itself: the garbage is sent once the loop
+    // first waits, and the script then waits for the loop to act on it.
+    let mut script = Script::new([
+        Step::Call(Box::new(move || {
+            let mut stream = &host.stream;
+            let body = [0xff_u8; 8];
+            stream
+                .write_all(&(body.len() as u32).to_be_bytes())
+                .and_then(|()| stream.write_all(&body))
+                .expect("the host writes");
+        })),
+        Until::step(|_| false),
+    ]);
+    let result = serve_every(
+        &mut fixture.session,
+        &mut script,
+        &mut Native::default(),
+        main,
+        &render,
+        TICK,
+    );
+    fixture.session.drop_plugin(main);
+    drop(render.stop());
+    assert!(
+        matches!(
+            result,
+            Err(BridgeError::AudioConnection { ref cause })
+                if matches!(**cause, BridgeError::Serialization(_))
+        ),
+        "{result:?}"
+    );
+}
+
 /// **With nothing loaded, an editor request is answered, never dropped**: the
 /// host blocks on the open and the resize.
 #[test]

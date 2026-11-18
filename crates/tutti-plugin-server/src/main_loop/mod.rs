@@ -162,6 +162,18 @@ fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
     Ok(())
 }
 
+/// Whether a connection's end is the peer leaving: a clean end of stream, or
+/// the socket reset or broken under it. Every other error is the peer
+/// breaking the protocol.
+fn host_left(error: &BridgeError) -> bool {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionReset, UnexpectedEof};
+    match error {
+        BridgeError::ProcessCrashed => true,
+        BridgeError::Io(e) => matches!(e.kind(), UnexpectedEof | BrokenPipe | ConnectionReset),
+        _ => false,
+    }
+}
+
 /// [`serve`] with a tick every `period`.
 pub(crate) fn serve_every(
     session: &mut Session,
@@ -180,14 +192,15 @@ pub(crate) fn serve_every(
     let mut ready: Vec<Ready> = Vec::new();
     loop {
         ensure_not_lost(session)?;
-        // An audio connection that ends is the host leaving, which the control
-        // connection says too; one that was misused is a peer to stop serving.
+        // An audio connection that ends cleanly is the host leaving, which the
+        // control connection says too. Any other end is a peer that broke the
+        // protocol (a frame that does not decode, an oversize or version-skewed
+        // one) while the control connection goes on: logged here, off the
+        // render thread, and the session ends with it.
         if let Some(error) = render.ended()
-            && matches!(
-                **error,
-                BridgeError::ProtocolError(_) | BridgeError::UnexpectedMessage { .. }
-            )
+            && !host_left(error)
         {
+            tracing::error!("plugin-server: the audio connection failed: {error}; ending");
             return Err(BridgeError::AudioConnection {
                 cause: Arc::clone(error),
             });
