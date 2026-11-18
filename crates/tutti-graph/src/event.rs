@@ -18,10 +18,11 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 
-use tutti_buffers::Float;
 use tutti_curve::{Curvature, Exponent, Law, Piece};
 use tutti_ump::Ump;
-use tutti_units::{ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam};
+use tutti_units::{
+    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam,
+};
 
 use crate::declare::Scalar;
 use crate::time::Offset;
@@ -176,16 +177,22 @@ pub(crate) enum ShapeTag {
     Smootherstep,
 }
 
+/// An exponent as the event's `f32` parameter word, saturated onto the finite
+/// positive `f32`s so the word is always a valid exponent again.
+fn exponent_word(p: Exponent) -> f32 {
+    (p.get() as f32).clamp(f32::MIN_POSITIVE, f32::MAX)
+}
+
 impl ShapeTag {
     /// The law as its tag and parameter: how a segment and a ramp store it.
     fn pack(law: Law) -> (Self, f32) {
         match law {
             Law::Linear => (Self::Linear, 0.0),
             Law::Hold => (Self::Hold, 0.0),
-            Law::PowerIn(p) => (Self::PowerIn, p.get()),
-            Law::PowerOut(p) => (Self::PowerOut, p.get()),
-            Law::PowerInOut(p) => (Self::PowerInOut, p.get()),
-            Law::Exp(k) => (Self::Exp, k.get()),
+            Law::PowerIn(p) => (Self::PowerIn, exponent_word(p)),
+            Law::PowerOut(p) => (Self::PowerOut, exponent_word(p)),
+            Law::PowerInOut(p) => (Self::PowerInOut, exponent_word(p)),
+            Law::Exp(k) => (Self::Exp, k.get() as f32),
             Law::Smootherstep => (Self::Smootherstep, 0.0),
         }
     }
@@ -195,8 +202,8 @@ impl ShapeTag {
     /// fallbacks below are never taken: they are the neutral parameter, not a
     /// repair of a caller's value.
     fn unpack(self, param: f32) -> Law {
-        let exponent = Exponent::new(param).unwrap_or(Exponent::ONE);
-        let curvature = Curvature::new(param).unwrap_or(Curvature::ZERO);
+        let exponent = Exponent::new(f64::from(param)).unwrap_or(Exponent::ONE);
+        let curvature = Curvature::new(f64::from(param)).unwrap_or(Curvature::ZERO);
         match self {
             Self::Linear => Law::Linear,
             Self::Hold => Law::Hold,
@@ -436,7 +443,7 @@ impl ParamSegment {
     /// within `u32::MAX` frames. For a node that takes point values and
     /// must land the end value on its frame.
     pub fn arrives_after(&self) -> Option<Samples> {
-        arrival::<f32>(self.position, self.length).map(|j| Samples(j as usize))
+        arrival(self.position, self.length).map(|j| Samples(j as usize))
     }
 
     /// The pure part of the segment: its endpoints and its law, as a
@@ -479,57 +486,51 @@ pub(crate) fn segment_value(
     length: f32,
     j: u32,
 ) -> f32 {
-    match segment_progress::<f32>(position, length, j) {
+    match segment_progress(position, length, j) {
         Some(t) => piece.value(param, t),
         None => piece.to,
     }
 }
 
 /// How many frames after its event a segment of `position` and `length`
-/// arrives, progress read in `F`: the first `j` at which
-/// [`segment_progress`] is `None` (0 for a step). `None` when it never arrives
-/// within `u32::MAX` frames. The one count the port's corners, the reference
-/// interpreter's and [`ParamSegment::arrives_after`] share.
-pub(crate) fn arrival<F: Float>(position: f32, length: f32) -> Option<u32> {
-    let (p, l) = (F::from_f32(position), F::from_f32(length));
-    if segment_progress::<F>(position, length, 0).is_none() {
+/// arrives: the first `j` at which [`segment_progress`] is `None` (0 for a
+/// step). `None` when it never arrives within `u32::MAX` frames. The one
+/// count the port's corners, the reference interpreter's and
+/// [`ParamSegment::arrives_after`] share.
+pub(crate) fn arrival(position: f32, length: f32) -> Option<u32> {
+    let (p, l) = (position, length);
+    if segment_progress(p, l, 0).is_none() {
         return Some(0);
     }
     // Finite here. The guess is within a frame or two of the predicate's
     // answer, which decides.
-    let guess = (l - p).ceil().max(F::ZERO);
-    if guess >= frames_in::<F>(u32::MAX) {
+    let guess = (l - p).ceil().max(0.0);
+    if guess >= u32::MAX as f32 {
         return None;
     }
-    let mut j = guess.to_f64() as u32;
-    while j > 0 && segment_progress::<F>(position, length, j - 1).is_none() {
+    let mut j = guess as u32;
+    while j > 0 && segment_progress(p, l, j - 1).is_none() {
         j -= 1;
     }
-    while segment_progress::<F>(position, length, j).is_some() {
+    while segment_progress(p, l, j).is_some() {
         j = j.checked_add(1)?;
     }
     Some(j)
 }
 
-/// A frame count as `F`: the integer rounded to nearest, as an `as` cast
-/// rounds it.
-#[inline]
-pub(crate) fn frames_in<F: Float>(n: u32) -> F {
-    F::from_f64(f64::from(n))
-}
-
-/// A segment's progress `j` frames after its event, in `F`, `None` once it
-/// has arrived: at 1 or past, NaN (a NaN position), or a length that is not
+/// A segment's progress `j` frames after its event, `None` once it has
+/// arrived: at 1 or past, NaN (a NaN position), or a length that is not
 /// finite and above zero (a step). A negative progress (a delayed start) is
-/// returned as is; the shape clamps it to 0.
+/// pinned to 0.
 #[inline]
-pub(crate) fn segment_progress<F: Float>(position: f32, length: f32, j: u32) -> Option<F> {
-    let (p, l) = (F::from_f32(position), F::from_f32(length));
-    if !(l > F::ZERO && l.is_finite()) {
+pub(crate) fn segment_progress(position: f32, length: f32, j: u32) -> Option<Normalized> {
+    if !(length > 0.0 && length.is_finite()) {
         return None;
     }
-    let t = (p + frames_in::<F>(j)) / l;
-    (t < F::ONE).then_some(t)
+    // `position` and `length` are the event's `f32` words, so the quotient is
+    // too; it widens once into the law's `f64` progress.
+    let t = (position + j as f32) / length;
+    (t < 1.0).then(|| Normalized::clamped(f64::from(t)))
 }
 
 /// What an [`Event`] says.

@@ -3,7 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Law};
-use tutti_units::{Azimuth, Samples, UnitParam};
+use tutti_units::{Azimuth, Normalized, Samples, UnitParam};
 
 /// `value` as `param` holds it: wrapped onto the circle for a circular param
 /// ([`UnitParam::wrap`]), in the unit's `f64` and narrowed once to `F`.
@@ -30,27 +30,22 @@ pub(crate) fn arc_in<F: Float>(param: UnitParam, from: F, to: F) -> F {
     }
 }
 
-/// A law's value at progress `t`, in `F`. A line is exact in `F`; a shaped
-/// law is evaluated at its own `f32` width (its exponent and curvature words
-/// are `f32`).
+/// A law's value at progress `t`: evaluated in `f64` and narrowed once to `F`.
 #[inline]
-pub(crate) fn law_in<F: Float>(law: Law, t: F) -> F {
-    match law {
-        Law::Linear => {
-            if t >= F::ZERO {
-                t.min(F::ONE)
-            } else {
-                F::ZERO
-            }
-        }
-        shaped => F::from_f32(shaped.eval(t.to_f32())),
-    }
+pub(crate) fn law_in<F: Float>(law: Law, t: Normalized) -> F {
+    F::from_f64(law.eval(t).get())
 }
 
 /// `Piece::value` read in `F`: `from + (to - from) * g(t)`, a circular
 /// param along the short arc.
 #[inline]
-pub(crate) fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: Law, t: F) -> F {
+pub(crate) fn piece_in<F: Float>(
+    param: Option<UnitParam>,
+    from: F,
+    to: F,
+    law: Law,
+    t: Normalized,
+) -> F {
     let g = law_in(law, t);
     match param {
         Some(p) if p.is_circular() => wrap_in(p, from + arc_in(p, from, to) * g),
@@ -68,8 +63,13 @@ pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: Samples, n
     if k + 1 >= n {
         to
     } else {
-        let count = |i: usize| F::from_f64(i as f64);
-        piece_in(param, from, to, Law::Linear, count(k + 1) / count(n))
+        piece_in(
+            param,
+            from,
+            to,
+            Law::Linear,
+            Normalized::progress(Samples(k + 1), Samples(n)),
+        )
     }
 }
 
@@ -80,7 +80,7 @@ pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: Samples, n
 /// The graph's quantity to lane crossing (a fade law rendered in `F`).
 #[inline]
 pub fn fade_gains<F: Float>(law: FadeLaw, j: Samples, len: Samples) -> (F, F) {
-    let (out, inn) = law.gains(j.get(), len.get());
+    let (out, inn) = law.gains(j, len);
     (F::from_f64(out.get()), F::from_f64(inn.get()))
 }
 

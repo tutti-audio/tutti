@@ -4,7 +4,7 @@
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
 use tutti_types::MAX_CHANNELS;
-use tutti_units::Amplitude;
+use tutti_units::{Amplitude, Normalized, Samples};
 
 /// One output's ramp: from the gain it left off at to the target, `done` of
 /// `frames` frames along.
@@ -82,8 +82,10 @@ impl OutputStage {
                 ramp.now = if ramp.done + 1 >= ramp.frames {
                     ramp.to
                 } else {
-                    ramp.from
-                        .lerp(ramp.to, (ramp.done + 1) as f64 / ramp.frames as f64)
+                    ramp.from.lerp(
+                        ramp.to,
+                        Normalized::progress(Samples(ramp.done + 1), Samples(ramp.frames)),
+                    )
                 };
                 if ramp.done < ramp.frames {
                     ramp.done += 1;

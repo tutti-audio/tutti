@@ -1,6 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_units::{Beat, Unit};
+use tutti_units::{Beat, Normalized, Unit};
 
 use crate::{CurveRaw, Law};
 
@@ -125,12 +125,12 @@ impl<U: Unit<Raw: CurveRaw>> Trajectory<U> {
         // first breakpoint after `time`; a breakpoint exactly at `time` starts its own.
         let next = self.breakpoints.partition_point(|p| p.time.get() <= time);
         let (p, q) = (self.breakpoints[next - 1], self.breakpoints[next]);
-        let t = (time - p.time.get()) / (q.time.get() - p.time.get());
+        let t = Normalized::clamped((beat - p.time) / (q.time - p.time));
         Some(self.clamped(Self::piece(p, q.value, t)))
     }
 
     /// Drops every breakpoint whose value its neighbours' piece already gives to
-    /// within `tolerance`, a distance in the unit's raw value; the first and last stay.
+    /// within `tolerance`, a distance in the unit's raw value (`Unit` has no difference, so a generic distance is its raw); the first and last stay.
     pub fn simplify(&mut self, tolerance: U::Raw) -> &mut Self {
         if self.breakpoints.len() <= 2 {
             return self;
@@ -144,8 +144,7 @@ impl<U: Unit<Raw: CurveRaw>> Trajectory<U> {
                 self.breakpoints[i],
                 self.breakpoints[i + 1],
             );
-            let span = next.time.get() - prev.time.get();
-            let t = (curr.time.get() - prev.time.get()) / span;
+            let t = Normalized::clamped((curr.time - prev.time) / (next.time - prev.time));
             if (curr.value.to_raw().widen() - Self::piece(prev, next.value, t)).abs() > tolerance {
                 kept.push(curr);
             }
@@ -157,11 +156,9 @@ impl<U: Unit<Raw: CurveRaw>> Trajectory<U> {
 
     /// The value `t` of the way from `from`'s value to `to` along `from`'s law,
     /// in `f64`.
-    fn piece(from: Breakpoint<U>, to: U, t: f64) -> f64 {
+    fn piece(from: Breakpoint<U>, to: U, t: Normalized) -> f64 {
         let (a, b) = (from.value.to_raw().widen(), to.to_raw().widen());
-        // The law's progress is the shared `f32` shape; the interpolation
-        // between the endpoints is in `f64`.
-        a + (b - a) * f64::from(from.law.eval(t as f32))
+        a + (b - a) * from.law.eval(t).get()
     }
 
     fn clamped(&self, value: f64) -> U {

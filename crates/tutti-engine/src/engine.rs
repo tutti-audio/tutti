@@ -346,7 +346,7 @@ impl<F: Float> Mixing<'_, F> {
             .enumerate()
         {
             let (old, new) = if first + i < length {
-                law.gains(first + i, length)
+                law.gains(Samples(first + i), Samples(length))
             } else {
                 (Amplitude::SILENT, Amplitude::UNITY)
             };
@@ -1229,7 +1229,7 @@ impl Run {
         } else {
             Amplitude::UNITY
         };
-        let gain = FadeLaw::EqualAmplitude.between(self.from, to, self.k, self.n);
+        let gain = FadeLaw::EqualAmplitude.between(self.from, to, Samples(self.k), Samples(self.n));
         // A fade-in lasts one frame past its last law step, which is the
         // gain's exact end; a fade-out ends on its aim, which is zero.
         let next = Self {
@@ -2955,7 +2955,7 @@ mod tests {
         let out = render_four(&engine, n + 70);
         for (k, frame) in frames_of(&out, 4).enumerate() {
             let (go, gn) = if k < n {
-                FadeLaw::EqualAmplitude.gains(k, n)
+                FadeLaw::EqualAmplitude.gains(Samples(k), Samples(n))
             } else {
                 (Amplitude::SILENT, Amplitude::UNITY)
             };
@@ -3005,7 +3005,7 @@ mod tests {
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
-                FadeLaw::EqualAmplitude.gains(k, 20)
+                FadeLaw::EqualAmplitude.gains(Samples(k), Samples(20))
             } else {
                 (Amplitude::SILENT, Amplitude::UNITY)
             };
@@ -3109,7 +3109,7 @@ mod tests {
         out.extend(render_four(&engine, n + 70 - 100));
         for (k, frame) in frames_of(&out, 4).enumerate() {
             let (go, gn) = if k < n {
-                FadeLaw::EqualAmplitude.gains(k, n)
+                FadeLaw::EqualAmplitude.gains(Samples(k), Samples(n))
             } else {
                 (Amplitude::SILENT, Amplitude::UNITY)
             };
@@ -3148,7 +3148,7 @@ mod tests {
         engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         for (k, frame) in frames_of(&out, 2).enumerate() {
             let (go, gn) = if k < n {
-                FadeLaw::EqualAmplitude.gains(k, n)
+                FadeLaw::EqualAmplitude.gains(Samples(k), Samples(n))
             } else {
                 (Amplitude::SILENT, Amplitude::UNITY)
             };

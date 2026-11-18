@@ -139,7 +139,7 @@ fn host_mix(block: &Block) -> Vec<(f32, f32, f32)> {
         .map(|i| {
             let (go, gn) = match block.fade {
                 Some(f) if f.done.get() + i < f.fade.duration.get() => {
-                    f.fade.law.gains(f.done.get() + i, f.fade.duration.get())
+                    f.fade.law.gains(f.done + Samples(i), f.fade.duration)
                 }
                 _ => (Amplitude::SILENT, Amplitude::UNITY),
             };

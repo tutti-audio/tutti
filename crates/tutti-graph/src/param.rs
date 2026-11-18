@@ -43,9 +43,9 @@ use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_buffers::Float;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, ParamAddr, Samples, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, Samples, UnitAddr, UnitParam};
 
-use crate::event::{Event, EventKind, frames_in, segment_progress};
+use crate::event::{Event, EventKind, segment_progress};
 use crate::lane::{arc_in, fade_gains, piece_in, ramp_in, wrap_in};
 use crate::spec::EventOut;
 use tutti_curve::{FadeLaw, Law, Piece};
@@ -609,7 +609,7 @@ impl<F: Float> Ramp<F> {
         {
             return false;
         }
-        let arrive = crate::event::arrival::<F>(curve.position, curve.length);
+        let arrive = crate::event::arrival(curve.position, curve.length);
         if self.active {
             self.arrive.map(|a| a.checked_sub(self.done)) == arrive.map(Some)
         } else {
@@ -644,13 +644,13 @@ impl<F: Float> Ramp<F> {
         self.active = true;
         self.curve = Some(curve);
         self.started = true;
-        self.arrive = crate::event::arrival::<F>(curve.position, curve.length);
+        self.arrive = crate::event::arrival(curve.position, curve.length);
     }
 
     /// The move's value at progress `t`: along the short arc for a circular
     /// param.
     #[inline]
-    fn at(&self, t: F) -> F {
+    fn at(&self, t: Normalized) -> F {
         piece_in(self.param, self.from, self.target, self.shape, t)
     }
 
@@ -664,7 +664,7 @@ impl<F: Float> Ramp<F> {
             if let Some(c) = self.curve {
                 // `segment_value`'s arithmetic, stepped: arrived, it holds
                 // the target as a finished ramp does.
-                match segment_progress::<F>(c.position, c.length, self.done) {
+                match segment_progress(c.position, c.length, self.done) {
                     Some(t) => {
                         self.value = self.at(t);
                     }
@@ -682,7 +682,10 @@ impl<F: Float> Ramp<F> {
                 } else {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
-                    let t = frames_in::<F>(self.done) / frames_in::<F>(self.len);
+                    let t = Normalized::progress(
+                        Samples(self.done as usize),
+                        Samples(self.len as usize),
+                    );
                     self.at(t)
                 };
             }

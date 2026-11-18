@@ -1284,7 +1284,8 @@ fn crossfade_wraps<F: Float, H: AsMut<[F]>>(
         let end = run.end.min(run.start + wrap.left());
         for at in run.start..end {
             let i = at - base;
-            let (g_out, g_in) = FadeLaw::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
+            let (g_out, g_in) =
+                FadeLaw::EqualPower.gains(Samples(wrap.ago + at - run.start), Samples(wrap.len));
             let (g_out, g_in) = (F::from_f64(g_out.get()), F::from_f64(g_in.get()));
             let g_in = if own_start { F::ONE } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.

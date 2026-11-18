@@ -3745,7 +3745,7 @@ fn render<F: Float>(
     // With no device there is no fold: the root's channels are the output's
     // by index, and a root change crossfades channel by channel, the old
     // root's channels after the new root's.
-    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
+    let gains = fade.map(|f| f.fade.law.gains(f.done, f.fade.duration));
     for (c, o) in output.iter_mut().enumerate() {
         let new = scratch
             .get(c)

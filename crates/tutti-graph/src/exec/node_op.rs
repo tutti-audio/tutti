@@ -5,7 +5,7 @@ use std::cell::Cell;
 use tutti_buffers::Float;
 
 use tutti_types::MaxBlock;
-use tutti_units::Tail;
+use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
 use super::tail_elapsed;
@@ -22,7 +22,6 @@ use crate::param::ParamInput;
 use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
 use crate::slots::{AudioSlots, EventSlots, SlotFlags};
-use tutti_units::Samples;
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a

@@ -110,7 +110,7 @@ use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
-use tutti_units::{Amplitude, At, Frame, Latency, Mix, Samples};
+use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
 
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
@@ -2016,7 +2016,7 @@ fn ref_port<F: Float>(
                         base(i)
                     };
                     let arrives =
-                        crate::event::arrival::<F>(position, length).map(|j| now + u64::from(j));
+                        crate::event::arrival(position, length).map(|j| now + u64::from(j));
                     // The piece in flight, sent again: the same values and
                     // law, bit for bit, arriving on the same frame, or both
                     // already at rest on their end. No corner.
@@ -2064,7 +2064,7 @@ fn ref_port<F: Float>(
         } else if let Some((position, length)) = r.curve {
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
-            match crate::event::segment_progress::<F>(position, length, j) {
+            match crate::event::segment_progress(position, length, j) {
                 Some(t) => ref_line(r.from, r.target, r.shape, t),
                 None => r.target,
             }
@@ -2073,7 +2073,10 @@ fn ref_port<F: Float>(
             if into >= r.len {
                 r.target
             } else {
-                let t = F::from_f64(into as f64) / F::from_f64(r.len as f64);
+                let t = Normalized::progress(
+                    Samples(usize::try_from(into).unwrap_or(usize::MAX)),
+                    Samples(usize::try_from(r.len).unwrap_or(usize::MAX)),
+                );
                 ref_line(r.from, r.target, r.shape, t)
             }
         };
@@ -2098,14 +2101,10 @@ fn ref_port<F: Float>(
     Some((vals, corners))
 }
 
-/// `from + (to - from) * law(t)` in `F`: a line is exact in `F`, a shaped law
-/// is read at its own `f32` width.
-fn ref_line<F: Float>(from: F, to: F, law: tutti_curve::Law, t: F) -> F {
-    let g = match law {
-        tutti_curve::Law::Linear => t.clamp(F::ZERO, F::ONE),
-        shaped => F::from_f32(shaped.eval(t.to_f32())),
-    };
-    from + (to - from) * g
+/// `from + (to - from) * law(t)` in `F`: the law is read in `f64` and narrows
+/// once.
+fn ref_line<F: Float>(from: F, to: F, law: tutti_curve::Law, t: Normalized) -> F {
+    from + (to - from) * F::from_f64(law.eval(t).get())
 }
 
 /// The frame a started move arrives on.

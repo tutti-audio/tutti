@@ -1,4 +1,4 @@
-use tutti_units::UnitParam;
+use tutti_units::{Normalized, Samples, UnitParam};
 
 use crate::Law;
 
@@ -31,12 +31,12 @@ impl Piece {
     /// a piece the graph, the lanes and the editor share.
     #[inline]
     #[must_use]
-    pub fn value(self, param: Option<UnitParam>, t: f32) -> f32 {
+    pub fn value(self, param: Option<UnitParam>, t: Normalized) -> f32 {
+        // The law's `f64` result narrows once to the `f32` endpoint words.
+        let g = self.law.eval(t).get() as f32;
         match param {
-            Some(p) if p.is_circular() => {
-                p.wrap(self.from + p.arc(self.from, self.to) * self.law.eval(t))
-            }
-            _ => self.from + (self.to - self.from) * self.law.eval(t),
+            Some(p) if p.is_circular() => p.wrap(self.from + p.arc(self.from, self.to) * g),
+            _ => self.from + (self.to - self.from) * g,
         }
     }
 
@@ -48,11 +48,13 @@ impl Piece {
     /// one-off move between two states is a [`FadeLaw`](crate::FadeLaw).
     #[inline]
     #[must_use]
-    pub fn ramp_at(param: Option<UnitParam>, from: f32, to: f32, k: usize, n: usize) -> f32 {
+    pub fn ramp_at(param: Option<UnitParam>, from: f32, to: f32, k: Samples, n: Samples) -> f32 {
+        let (k, n) = (k.get(), n.get());
         if k + 1 >= n {
             to
         } else {
-            Self::new(from, to, Law::Linear).value(param, (k + 1) as f32 / n as f32)
+            Self::new(from, to, Law::Linear)
+                .value(param, Normalized::progress(Samples(k + 1), Samples(n)))
         }
     }
 }
