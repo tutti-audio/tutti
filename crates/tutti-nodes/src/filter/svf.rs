@@ -553,11 +553,7 @@ mod tests {
             Some(1000.0),
             "cutoff's base is its control"
         );
-        assert_eq!(
-            f.param_base(1),
-            Some(f64::from(0.7f32)),
-            "Q's base is its control"
-        );
+        assert_eq!(f.param_base(1), Some(0.7), "Q's base is its control");
         assert_eq!(f.param_base(2), Some(0.0), "gain's base is its control");
         assert_eq!(shape.tail, Tail::Unknown, "a resonant filter rings on");
     }
