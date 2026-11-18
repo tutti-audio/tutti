@@ -665,9 +665,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 state: None,
                 cx: Context {
                     rate: self.graph.prepared().sample_rate(),
-                    work: self.work.clone(),
+                    work: self.plugins.work.clone(),
                     ids: self.pool.resource_ids.clone(),
-                    recovery: self.recovery.is_some(),
+                    recovery: self.plugins.recovery.is_some(),
                 },
             },
         }
@@ -782,12 +782,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     pub(crate) fn swap_pooled_plugins(&mut self) {
         // A landing with no node over the key (a first load) is not a swap:
         // `swap_pooled` finds no link and does nothing.
-        self.pooled_swaps.extend(self.pool.entries.landed_keys());
-        for key in std::mem::take(&mut self.pooled_swaps) {
+        self.plugins
+            .pooled_swaps
+            .extend(self.pool.entries.landed_keys());
+        for key in std::mem::take(&mut self.plugins.pooled_swaps) {
             match self.swap_pooled(&key) {
                 Swap::Done => {}
                 Swap::Waiting => {
-                    self.pooled_swaps.insert(key);
+                    self.plugins.pooled_swaps.insert(key);
                 }
                 Swap::Refused(generation, error) => {
                     self.pool.entries.refuse_landed(&key, generation, error);

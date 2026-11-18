@@ -63,7 +63,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     fn main_deferral(&self) -> Option<Defer> {
         #[cfg(feature = "plugin")]
         {
-            let work = self.work.clone();
+            let work = self.plugins.work.clone();
             Some(std::sync::Arc::new(move |discard| work.defer(discard)))
         }
         #[cfg(not(feature = "plugin"))]

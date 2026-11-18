@@ -281,6 +281,12 @@ impl<F: SessionFloat> std::fmt::Debug for Inputs<F> {
 }
 
 impl<F: SessionFloat> Inputs<F> {
+    /// The inputs of a session built with `options`: on its host, opened by
+    /// the builder's opener if it set one.
+    pub(crate) fn from_options(options: &mut crate::builder::Options) -> Self {
+        Self::new(options.host, options.input_opener.take())
+    }
+
     pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn Openers>>) -> Self {
         Self {
             host,

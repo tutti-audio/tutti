@@ -97,7 +97,7 @@ impl Default for BlockConfig {
 
 /// What every build shares, whichever state the builder is in.
 #[derive(Debug)]
-struct Options {
+pub(crate) struct Options {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     root: Option<ChannelTopology>,
@@ -107,11 +107,11 @@ struct Options {
     render_workers: Workers,
     /// The platform host the output and every input the session opens use.
     #[cfg(feature = "device")]
-    host: tutti_cpal::AudioHost,
+    pub(crate) host: tutti_cpal::AudioHost,
     /// Where the session's inputs open, if not the sound card
     /// ([`input_opener`](Self::input_opener)).
     #[cfg(feature = "capture")]
-    input_opener: Option<Box<dyn crate::input::Openers>>,
+    pub(crate) input_opener: Option<Box<dyn crate::input::Openers>>,
     render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
@@ -121,16 +121,16 @@ struct Options {
     #[cfg(feature = "midi-hardware")]
     midi_backend: Option<MidiBackend>,
     #[cfg(feature = "midi")]
-    mpe_mode: tutti_midi_protocol::MpeMode,
+    pub(crate) mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
     unresolved_warning: std::time::Duration,
     #[cfg(feature = "plugin")]
-    snapshot_interval: std::time::Duration,
+    pub(crate) snapshot_interval: std::time::Duration,
     #[cfg(feature = "plugin")]
-    recovery: Option<crate::RecoveryPolicy>,
+    pub(crate) recovery: Option<crate::RecoveryPolicy>,
     #[cfg(feature = "plugin")]
-    hang: crate::HangPolicy,
+    pub(crate) hang: crate::HangPolicy,
     spawner: crate::jobs::Spawner,
     pool: crate::PoolConfig,
 }
@@ -240,18 +240,18 @@ impl Default for Workers {
 
 /// What every build path shares: the graph, the transport, the click, the
 /// MIDI nodes, and what the engine's callback state holds.
-struct Parts<F: Float> {
+pub(crate) struct Parts<F: Float> {
     graph: Graph<F>,
     transport: Transport,
     click: Option<NodeKey>,
     click_settings: Arc<ClickSettings>,
     compensation: Arc<PrerollTable>,
     #[cfg(feature = "midi")]
-    midi: Option<crate::MidiNodes>,
+    pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
-    midi_io: Option<tutti_midi_hardware::MidiSession>,
+    pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
     #[cfg(feature = "midi-hardware")]
-    device_events: Option<tutti_midi_hardware::DeviceEvents>,
+    pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
 
 impl<F: SessionFloat> Default for SessionBuilder<Offline<F>> {
@@ -525,7 +525,8 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]
         session
-            .midi_state
+            .midi
+            .state
             .set_output_clock(crate::midi::OutputClockSource::new(clock.clone(), latency));
         #[cfg(not(feature = "midi"))]
         let _ = latency;
@@ -619,7 +620,8 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         // stream's latency, read on every drain.
         #[cfg(feature = "midi")]
         session
-            .midi_state
+            .midi
+            .state
             .set_output_clock(crate::midi::OutputClockSource::new(
                 clock.clone(),
                 audio_engine.latency(),
@@ -983,89 +985,41 @@ impl<C: Clock> SessionBuilder<C> {
     /// (`sampler`) a disk streamer when `streamer`.
     fn session<N: Clock<Float = C::Float>>(
         &mut self,
-        parts: Parts<N::Float>,
+        mut parts: Parts<N::Float>,
         running: N::Running,
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
-        #[cfg(feature = "sampler")]
-        let disk_streamer = if streamer {
-            Some(tutti_sampler::DiskStreamer::start(
-                parts.graph.prepared().sample_rate(),
-                tutti_sampler::DiskStreamerConfig::default(),
-            )?)
-        } else {
-            None
-        };
-        #[cfg(not(feature = "sampler"))]
-        let _ = streamer;
-        #[cfg(feature = "plugin")]
-        let (main_work, work) = tutti_plugin_types::MainWork::new();
-        #[cfg(feature = "plugin")]
-        let main_work = crate::session::SharedWork::new(main_work);
+        let sampler = crate::session::parts::SamplerPart::new(
+            streamer,
+            parts.graph.prepared().sample_rate(),
+        )?;
+        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
-        #[cfg(feature = "midi-hardware")]
-        let midi_attached = parts.midi_io.is_some();
         let session = Session {
             values: crate::value::ValueState::new(Arc::clone(&table)),
-            #[cfg(feature = "plugin")]
-            _early_work: crate::session::EarlyWork(main_work.clone()),
+            _early_work,
             running,
-            graph: parts.graph,
             pool: crate::session::parts::PoolPart::new(self.opts.pool),
-            #[cfg(feature = "plugin")]
-            pooled_swaps: std::collections::BTreeSet::new(),
             transport: crate::session::parts::TransportPart::new(
-                parts.transport,
+                parts.transport.clone(),
                 parts.click,
-                parts.compensation,
+                Arc::clone(&parts.compensation),
             ),
             output: crate::session::parts::OutputPart::new(
                 self.opts.root.clone(),
                 crate::policy::output_cell(table.output_facts()),
             ),
             reports: Default::default(),
-            #[cfg(feature = "midi")]
-            midi: parts.midi,
-            #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
-            midi_state: crate::midi::MidiState::default().with_mpe(self.opts.mpe_mode),
-            #[cfg(feature = "midi-hardware")]
-            midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
-                .with_mpe(self.opts.mpe_mode),
+            midi: crate::session::parts::MidiPart::new(&mut parts, &self.opts),
+            graph: parts.graph,
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
-            #[cfg(feature = "midi-hardware")]
-            midi_io: parts.midi_io,
-            #[cfg(feature = "midi-hardware")]
-            midi_policy: crate::midi_hardware::policy_cell(midi_attached),
-            #[cfg(feature = "sampler")]
-            disk_streamer,
-            #[cfg(feature = "sampler")]
-            sampler_opens: tutti_types::Mint::new(),
-            #[cfg(feature = "sampler")]
-            sampler_streams: Default::default(),
-            #[cfg(feature = "device")]
-            output_listing: None,
-            #[cfg(feature = "device")]
-            outputs_listed: false,
-            #[cfg(feature = "capture")]
-            inputs: crate::input::Inputs::new(self.opts.host, self.opts.input_opener.take()),
-            #[cfg(feature = "plugin")]
-            snapshot_interval: self.opts.snapshot_interval,
-            #[cfg(feature = "plugin")]
-            recovery: self.opts.recovery,
-            #[cfg(feature = "plugin")]
-            hang: self.opts.hang,
-            #[cfg(feature = "plugin")]
-            plugins_now: std::time::Instant::now(),
-            #[cfg(feature = "plugin")]
-            render_mode: Default::default(),
-            #[cfg(feature = "export")]
+            sampler,
+            devices: Default::default(),
+            inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
             jobs: crate::jobs::Jobs::new(self.opts.spawner.clone()),
-            #[cfg(feature = "plugin")]
-            work,
-            #[cfg(feature = "plugin")]
-            main_work,
+            plugins,
         };
         session.provide_values(&table, click_settings);
         Ok(session)
