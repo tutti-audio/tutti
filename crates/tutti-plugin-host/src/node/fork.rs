@@ -13,7 +13,7 @@
 //!
 //! # What a fork is
 //!
-//! [`InProcNode::fork_instance`], which the fork source calls, on the
+//! [`HostedNode::fork_instance`], which the fork source calls, on the
 //! **main thread** (see "Threads" below):
 //!
 //! 1. **Read what the live node has delivered** per parameter (its parameter
@@ -103,7 +103,7 @@ use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, Origin, RenderMode, StateUse};
 
-use super::client::{InProcNode, RateDelivery, TransportFeed};
+use super::client::{HostedNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
 use crate::DeliveryCounters;
@@ -148,7 +148,7 @@ where
 {
     /// The source for `bound`, or `None` for a plugin with no origin to load
     /// again.
-    pub(super) fn of(bound: &InProcNode<F>) -> Option<Self> {
+    pub(super) fn of(bound: &HostedNode<F>) -> Option<Self> {
         let client = &bound.client;
         let reload = client.reload.as_ref()?;
         Some(Self {
@@ -169,7 +169,7 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<InProcNode<F>, PluginForkError> {
+    ) -> Result<HostedNode<F>, PluginForkError> {
         // First, so a plugin that cannot save costs no second instance. The
         // `Arc` is dropped straight after: the fork holds no strong reference.
         let live = self.live.upgrade().ok_or(PluginForkError::LiveGone)?;
@@ -285,7 +285,7 @@ where
     }
 }
 
-impl<F: InProcess + 'static> InProcNode<F>
+impl<F: InProcess + 'static> HostedNode<F>
 where
     F::Processor: 'static,
 {
@@ -315,7 +315,9 @@ where
     ///
     /// # Errors
     ///
-    /// A [`PluginForkError`] naming the step that failed: the live instance is
+    /// A [`PluginForkError`] naming the step that failed: the node has no
+    /// origin to load again ([`PluginForkError::NoOrigin`], as a node built
+    /// by [`client_over`](crate::client_over) has), the live instance is
     /// gone or would not save its state, the second instance did not load (a
     /// plugin that cannot be instantiated twice), it is a different plugin,
     /// or it refused the preset or the state. A second instance that was
@@ -324,7 +326,7 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<InProcNode<F>, PluginForkError> {
+    ) -> Result<HostedNode<F>, PluginForkError> {
         Fork::of(self)
             .ok_or(PluginForkError::NoOrigin)?
             .instance(main, mode)

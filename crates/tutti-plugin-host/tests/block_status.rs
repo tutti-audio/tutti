@@ -19,7 +19,7 @@ use tutti_graph::{
     NodeKey, OutPort, PlayClock, Prepare as GraphPrepare, Source, Status, TransportChanges,
     TransportPosition, Unforkable,
 };
-use tutti_plugin_host::{InProcNode, client_over};
+use tutti_plugin_host::{HostedNode, client_over};
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
 use tutti_plugin_types::{
     ChannelLayout, Control, Loaded, MAX_BLOCK_CHANNELS, PluginBus, PluginTooWide, Prepare,
@@ -34,7 +34,7 @@ const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
 /// The fake's node: a voice of `ring` frames declaring `tail` as its ceiling.
-fn node(ring: usize, tail: usize) -> (InProcNode<FakeLoaded>, FakePlugin) {
+fn node(ring: usize, tail: usize) -> (HostedNode<FakeLoaded>, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     fake.ring_out(ring);
     fake.set_tail(Samples(tail));

@@ -79,7 +79,7 @@ use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
-use crate::plugin::{Gate, HostedPlugin, Notices, queue};
+use crate::plugin::{Gate, HostedPlugin, Signals, queue};
 
 /// The lane knobs of a plugin's driven parameters: where a set of one goes,
 /// whether the host made it or the plugin reported it. The modulation apply
@@ -523,7 +523,7 @@ pub struct ParamGesture {
     gate: Gate,
     driven: Driven,
     handle: PluginHandle,
-    notices: Notices,
+    notices: Signals,
     reporter: ParamReporter,
 }
 

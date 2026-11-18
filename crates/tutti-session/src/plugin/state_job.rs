@@ -190,7 +190,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     pub(super) fn state_parts<P>(
         &self,
         key: &P,
-    ) -> Result<(PluginHandle, PluginRef, super::Notices, Hosted), NodeLookup<P>>
+    ) -> Result<(PluginHandle, PluginRef, super::Signals, Hosted), NodeLookup<P>>
     where
         P: crate::AppKey,
     {

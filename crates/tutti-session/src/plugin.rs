@@ -585,16 +585,16 @@ pub(crate) fn event(node: NodeKey, change: PluginChange) -> SessionEvent {
 }
 
 /// What a plugin reported, waiting for the next `Phase::Plugins`.
-pub(crate) type Notices = Arc<Mutex<Vec<PluginSignal>>>;
+pub(crate) type Signals = Arc<Mutex<Vec<PluginSignal>>>;
 
 /// Queues `notice` as if the plugin had reported it.
-pub(crate) fn queue(notices: &Notices, notice: PluginSignal) {
+pub(crate) fn queue(notices: &Signals, notice: PluginSignal) {
     notices.lock_recover().push(notice);
 }
 
 /// A queue for what `handle` reports and the subscription that fills it.
-fn hear(handle: &PluginHandle) -> (Notices, Subscription) {
-    let notices = Notices::default();
+fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
+    let notices = Signals::default();
     let queue = Arc::clone(&notices);
     let hearing = handle.subscribe(move |notice| queue.lock_recover().push(notice));
     (notices, hearing)
@@ -796,7 +796,7 @@ pub(crate) struct HostedPlugin {
     snapshot_at: Option<Instant>,
     /// What the plugin reported since the last `Phase::Plugins`, heard on
     /// whichever thread the plugin reports from.
-    pub(crate) notices: Notices,
+    pub(crate) notices: Signals,
     /// The handle's subscription that fills `notices`; replaced with the handle.
     hearing: Subscription,
     /// What the plugin declares and the value of each parameter
@@ -1256,7 +1256,7 @@ impl HostedPlugin {
 /// of process, is a `Key<PluginNode>`. It names the *kind* of node, as
 /// [`Key::erase`] names none; the view of the plugin is [`Plugin`].
 /// It is the session's name for a hosted plugin's node; the node itself is
-/// `tutti_plugin_host::InProcNode`, below the session.
+/// `tutti_plugin_host::HostedNode`, below the session.
 /// `key.param(id)` is a plugin parameter's
 /// `ParamRef` (see `Key::param`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

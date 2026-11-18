@@ -161,18 +161,19 @@ impl PluginStatus {
 /// [`status`](Self::status) and [`is_crashed`](Self::is_crashed) read an atomic.
 /// Call these per frame.
 ///
-/// **Fire-and-forget.** [`AnyThread::set_parameter_value`] and
-/// [`set_automation_mode`](Self::set_automation_mode) queue the write and
-/// return without waiting (a served plugin's goes onto its command queue, an
-/// in-process plugin's runs at once on the main thread or is posted to it).
-/// A knob turn must never stall a UI, so these deliberately have no reply to
-/// wait for — and therefore no way to report that the plugin refused.
+/// **Fire-and-forget.** [`AnyThread::set_parameter_value`] queues the write
+/// and returns without waiting (a served plugin's goes onto its command queue,
+/// an in-process plugin's runs at once on the main thread or is posted to it).
+/// A knob turn must never stall a UI, so it deliberately has no reply to wait
+/// for, and therefore no way to report that the plugin refused.
+/// [`set_automation_mode`](Self::set_automation_mode) does not wait either; it
+/// answers at once whether the push was accepted.
 ///
 /// **Blocking round-trips.** [`AnyThread::save_state`],
 /// [`load_state`](Self::load_state), [`AnyThread::parameter_descriptors`],
 /// [`AnyThread::parameter_value`], [`presets`](Self::presets),
-/// [`load_preset`](Self::load_preset) and [`current_preset`](Self::current_preset)
-/// wait for the reply. A served plugin's answer is bounded by five seconds
+/// [`load_preset`](Self::load_preset), [`current_preset`](Self::current_preset)
+/// and [`AnyThread::set_render_mode`] wait for the reply. A served plugin's answer is bounded by five seconds
 /// for the parameter and preset calls and ten for state, a wedged plugin
 /// spending the whole timeout before returning `None`. An in-process plugin
 /// answers at once on the main thread; off it the call waits up to two
@@ -856,7 +857,7 @@ impl PluginHandle {
         lent(control, |c| c.set_track_info(main, info)).unwrap_or(Delivered::PluginDead)
     }
 
-    // ---- Notices (plugin -> host) -------------------------------------------
+    // ---- Signals (plugin -> host) -------------------------------------------
 
     /// Calls `f` with everything the plugin reports (a [`PluginSignal`]) until the
     /// returned [`Subscription`] drops. Any number of subscribers may hear one

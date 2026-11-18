@@ -67,7 +67,7 @@ use tutti_units::ParamId;
 /// A graph holding this node forks (`Editor::fork`, which an offline export
 /// takes) **by state transfer**: a second instance of the plugin, from the same
 /// library, restored from this one's saved state. See
-/// [`InProcNode::fork_instance`]. The client becomes a graph node by
+/// [`HostedNode::fork_instance`]. The client becomes a graph node by
 /// [`bind`](Self::bind)ing it to the project's tempo map.
 pub struct InProcClient<F: Loaded> {
     /// The plugin's control side. Control threads only: the audio thread
@@ -434,25 +434,25 @@ impl TransportFeed {
 /// [`Node`](tutti_graph::Node) and an [`IntoNode`](tutti_graph::IntoNode);
 /// the loaded client is neither. It derefs to the client for its control
 /// surface (`controls`, `set_meter`, ...).
-pub struct InProcNode<F: Loaded> {
+pub struct HostedNode<F: Loaded> {
     pub(super) client: InProcClient<F>,
     pub(super) tempo: TempoReader,
 }
 
-impl<F: Loaded> std::fmt::Debug for InProcNode<F> {
+impl<F: Loaded> std::fmt::Debug for HostedNode<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcNode").finish_non_exhaustive()
+        f.debug_struct("HostedNode").finish_non_exhaustive()
     }
 }
 
-impl<F: Loaded> std::ops::Deref for InProcNode<F> {
+impl<F: Loaded> std::ops::Deref for HostedNode<F> {
     type Target = InProcClient<F>;
     fn deref(&self) -> &InProcClient<F> {
         &self.client
     }
 }
 
-impl<F: Loaded> std::ops::DerefMut for InProcNode<F> {
+impl<F: Loaded> std::ops::DerefMut for HostedNode<F> {
     fn deref_mut(&mut self) -> &mut InProcClient<F> {
         &mut self.client
     }
@@ -607,8 +607,8 @@ impl<F: Loaded> InProcClient<F> {
     /// reader of its own; a host with no session builds one over a fixed map
     /// ([`TempoReader::fixed`]). A fork clones the reader. Control thread.
     #[must_use]
-    pub fn bind(self, tempo: TempoReader) -> InProcNode<F> {
-        InProcNode {
+    pub fn bind(self, tempo: TempoReader) -> HostedNode<F> {
+        HostedNode {
             client: self,
             tempo,
         }

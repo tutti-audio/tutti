@@ -182,7 +182,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     // Sixteenths, a different one for every parameter, frame and block.
     let value = |b: u32, k: u32, id: u32| ((b * 2 + k + id) % 16) as f32 / 16.0;
     let mut events: Vec<Event> = Vec::with_capacity(2 * PARAMS as usize);
-    let mut block = |unit: &mut Direct<tutti_plugin_host::InProcNode<Vst2Loaded>>, b: u32| {
+    let mut block = |unit: &mut Direct<tutti_plugin_host::HostedNode<Vst2Loaded>>, b: u32| {
         events.clear();
         for (k, frame) in [(0u32, 0usize), (1, 32)] {
             let at = Offset::of(Samples(frame), Samples(64));

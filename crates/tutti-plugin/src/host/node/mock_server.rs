@@ -298,7 +298,7 @@ pub(super) fn tempo(beat: f64) -> TempoReader {
 pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
-) -> (Direct<tutti_plugin_host::InProcNode<Ipc>>, Record, Threads) {
+) -> (Direct<tutti_plugin_host::HostedNode<Ipc>>, Record, Threads) {
     let guard = Arc::new(ProcessGuard::for_test(BridgeConfig::at(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
     )));
