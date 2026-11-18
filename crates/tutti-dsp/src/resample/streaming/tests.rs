@@ -628,38 +628,49 @@ fn rates_of_one_whole_hz_are_no_conversion() {
     );
 }
 
-/// A channel count a `ChannelLayout` cannot hold is refused with the buffer
-/// error when a chunk runs, not a panic: a narrower view (the rest silent) of one chunk
-/// is pushed into a resampler wider than the layout allows.
+/// A channel count a `ChannelLayout` cannot hold is refused by `new`, with the layout error.
 #[test]
-fn a_width_over_the_layout_limit_is_refused_when_a_chunk_runs() {
+fn new_refuses_a_width_over_the_layout_limit() {
     let channels = usize::from(u16::MAX) + 1;
-    let mut r = StreamingResampler::<f32>::new(
+    let made = StreamingResampler::<f32>::new(
         channels,
         SampleRate::from_hz(44_100).unwrap(),
         SampleRate::from_hz(48_000).unwrap(),
         ChunkSize::MIN,
-    )
-    .unwrap();
-    let planes = vec![vec![0.0f32; ChunkSize::MIN.chunk().get()]];
-    let mut out = vec![Vec::new(); channels];
-    assert!(matches!(
-        r.push(Planes::from_vecs(&planes).unwrap(), &mut out),
-        Err(ResampleError::Buffer(tutti_buffers::BufferError::Layout(_)))
-    ));
+    );
+    assert!(matches!(made, Err(ResampleError::Layout(_))));
 }
 
-/// A view narrower than the resampler is silent in the channels it lacks.
+/// A view narrower or wider than the resampler is refused with both widths and consumes
+/// nothing: the next matching push gives what a fresh resampler gives.
 #[test]
-fn a_narrower_view_leaves_the_other_channels_silent() {
-    let mut r =
-        StreamingResampler::<f32>::new(2, SampleRate::SR_48K, SampleRate::SR_48K, ChunkSize::N512)
-            .unwrap();
-    let planes = vec![vec![0.5f32; 4096]];
-    let mut out = vec![Vec::new(); 2];
-    r.push(Planes::from_vecs(&planes).unwrap(), &mut out)
+fn a_view_of_another_width_is_refused_and_leaves_the_resampler_unchanged() {
+    let make = || {
+        StreamingResampler::<f32>::new(2, SampleRate::SR_44K1, SampleRate::SR_48K, ChunkSize::N512)
+            .unwrap()
+    };
+    let signal: Vec<Vec<f32>> = (0..2).map(|c| vec![0.1 * (c + 1) as f32; 3000]).collect();
+    let mut fresh = make();
+    let mut want = vec![Vec::new(); 2];
+    fresh
+        .push(Planes::from_vecs(&signal).unwrap(), &mut want)
         .unwrap();
-    assert!(!out[0].is_empty());
-    assert!(out[0].iter().any(|&x| x != 0.0));
-    assert!(out[1].iter().all(|&x| x == 0.0));
+    fresh.finish(&mut want).unwrap();
+
+    let mut r = make();
+    let mut got = vec![Vec::new(); 2];
+    for width in [1usize, 3] {
+        let other = vec![vec![0.9f32; 3000]; width];
+        assert_eq!(
+            r.push(Planes::from_vecs(&other).unwrap(), &mut got),
+            Err(ResampleError::WidthMismatch {
+                expected: 2,
+                got: width
+            })
+        );
+    }
+    r.push(Planes::from_vecs(&signal).unwrap(), &mut got)
+        .unwrap();
+    r.finish(&mut got).unwrap();
+    assert_eq!(got, want);
 }

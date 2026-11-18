@@ -18,7 +18,7 @@
 use super::{FftResampler, ResampleError};
 use rustfft::FftNum;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{SampleRate, Samples};
+use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 /// Input frames per FFT chunk, and how finely each chunk is subdivided.
 ///
@@ -216,6 +216,8 @@ impl<F: Float + FftNum> StreamingResampler<F> {
         target_rate: SampleRate,
         chunk: ChunkSize,
     ) -> Result<Self, ResampleError> {
+        // Every scratch view is then buildable, so `drain_chunks` cannot fail on one.
+        ChannelLayout::try_from(channels)?;
         let (source_hz, target_hz) = (source_rate.get(), target_rate.get());
         let (source_int, target_int) = (whole_hz(source_hz)?, whole_hz(target_hz)?);
         let inner = FftResampler::new(
@@ -240,20 +242,22 @@ impl<F: Float + FftNum> StreamingResampler<F> {
         })
     }
 
-    /// Feed one block of planar input; append whatever output it completes. A channel
-    /// the view lacks reads as silence, and one past the resampler's width is ignored.
+    /// Feed one block of planar input; append whatever output it completes.
     ///
     /// # Errors
-    /// [`ResampleError`] if the converter refuses a chunk or the carry stops
-    /// shrinking.
+    /// [`ResampleError::WidthMismatch`] if the view is not as wide as the resampler (nothing is
+    /// consumed then), else [`ResampleError`] if the converter refuses a chunk or the carry
+    /// stops shrinking.
     pub fn push(&mut self, planes: Planes<'_, F>, out: &mut [Vec<F>]) -> Result<(), ResampleError> {
         let n = planes.frames().get();
-        // A channel the view lacks reads as silence; one past the resampler's width is dropped.
-        for (c, carry) in self.carry.iter_mut().enumerate() {
-            match planes.get_plane(c) {
-                Some(p) => carry.extend_from_slice(p.samples()),
-                None => carry.resize(carry.len() + n, F::ZERO),
-            }
+        if planes.channels() != self.carry.len() {
+            return Err(ResampleError::WidthMismatch {
+                expected: self.carry.len(),
+                got: planes.channels(),
+            });
+        }
+        for (carry, p) in self.carry.iter_mut().zip(planes) {
+            carry.extend_from_slice(p.samples());
         }
         self.fed += n;
         self.drain(out, false)
@@ -367,11 +371,12 @@ impl<F: Float + FftNum> StreamingResampler<F> {
                 scratch.clear();
                 scratch.extend_from_slice(&self.carry[c][chunk.clone()]);
             }
-            // Each scratch plane is `need` frames in, `output_frames_max()` out; a
-            // channel count a `ChannelLayout` cannot hold is the only refusal.
+            // Each scratch plane is `need` frames in and `output_frames_max()` out, and `new`
+            // checked the width against `ChannelLayout`, so both views build.
             let produced_len = self.inner.process_into_buffer(
-                Planes::from_vecs(&self.in_scratch)?,
-                PlanesMut::from_vecs(&mut self.out_scratch)?,
+                Planes::from_vecs(&self.in_scratch).expect("BUG: equal planes of a checked width"),
+                PlanesMut::from_vecs(&mut self.out_scratch)
+                    .expect("BUG: equal planes of a checked width"),
             )?;
             let produced = &self.out_scratch;
             self.head += need;
