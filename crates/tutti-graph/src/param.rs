@@ -247,8 +247,10 @@ pub struct ParamIn {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CellValue(pub(crate) f64);
 
-/// The `f32` word a param segment or range bound carries until they widen;
-/// removed with them.
+/// The boundary to the `f32` word a param segment or range bound carries: a
+/// control value narrows here, saturating. Not API: B2 and B3 widen those
+/// words and delete it.
+#[doc(hidden)]
 #[must_use]
 pub fn control_word(v: f64) -> f32 {
     f32::from_unit(CellValue(v))
