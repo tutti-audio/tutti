@@ -247,7 +247,7 @@ param_session_node!(
 
 /// An audio inlet as a graph node: no controls (the writer is the producer's),
 /// no params. Its fork is refused ([`Graph::open_inlet`](crate::Graph::open_inlet)).
-impl SessionNode for tutti_graph::InletNode {
+impl<F: Float> SessionNode<F> for tutti_graph::InletNode<F> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }

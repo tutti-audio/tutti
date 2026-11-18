@@ -799,7 +799,7 @@ fn from_decl_builds_its_own_kind() {
     };
     let node = EnvelopeFollowerNode::from_decl(&f, ChannelLayout::STEREO).expect("a follower");
     assert_eq!(node.source(), SourceId(9));
-    assert_eq!(node.shape().audio_in(), ChannelLayout::STEREO);
+    assert_eq!(Node::<f32>::shape(&node).audio_in(), ChannelLayout::STEREO);
     assert!(EnvelopeFollowerNode::from_decl(&n, ChannelLayout::MONO).is_none());
     assert_eq!(
         NoteEnvelopeNode::from_decl(&n).map(|n| n.source()),

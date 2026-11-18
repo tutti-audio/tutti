@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
@@ -613,7 +614,12 @@ fn same_target(a: &TargetDecl, b: &TargetDecl) -> bool {
 
 impl Memo {
     /// Whether an apply of `decl` now would see what the kept one saw.
-    fn holds(&self, decl: &Declarations<'_>, editor: &Editor, host: &dyn ModHost) -> bool {
+    fn holds<F: Float>(
+        &self,
+        decl: &Declarations<'_>,
+        editor: &Editor<F>,
+        host: &dyn ModHost,
+    ) -> bool {
         self.revision == editor.revision()
             && self.epoch == editor.play_reading().epoch
             && self.sources.as_slice() == decl.sources
@@ -697,10 +703,10 @@ impl Modulation {
         clippy::missing_panics_doc,
         reason = "the expects run after validation: every key they look up was listed by this call, and a declaration that compiled builds its node"
     )]
-    pub fn apply(
+    pub fn apply<F: Float>(
         &mut self,
         decl: &Declarations<'_>,
-        editor: &mut Editor,
+        editor: &mut Editor<F>,
         host: &dyn ModHost,
     ) -> Result<Applied, ReconcileError> {
         if self
@@ -1136,7 +1142,7 @@ impl Modulation {
     /// owed ([`resyncs_owed`](Self::resyncs_owed) is then not 0: call
     /// `send_resyncs` again on a later frame), one refused for good is
     /// dropped and counted ([`resyncs_dropped`](Self::resyncs_dropped)).
-    pub fn commit(&mut self, editor: &mut Editor) -> Result<(), CommitError> {
+    pub fn commit<F: Float>(&mut self, editor: &mut Editor<F>) -> Result<(), CommitError> {
         editor.commit()?;
         // Not an error of the commit: kept owed or counted, as documented.
         let _ = self.send_resyncs(editor);
@@ -1155,7 +1161,7 @@ impl Modulation {
     /// before any commit) stays owed for the next call; one refused for good
     /// (no such port, a resolution too coarse, a poisoned executor) is
     /// dropped and counted in [`resyncs_dropped`](Self::resyncs_dropped).
-    pub fn send_resyncs(&mut self, editor: &mut Editor) -> Result<(), ScheduleError> {
+    pub fn send_resyncs<F: Float>(&mut self, editor: &mut Editor<F>) -> Result<(), ScheduleError> {
         let owed = std::mem::take(&mut self.resync);
         let mut first = Ok(());
         for s in owed {
@@ -1181,13 +1187,13 @@ impl Modulation {
     }
 
     /// `target`, as the host resolved it (`to`), checked against `editor`.
-    fn resolve_target(
+    fn resolve_target<F: Float>(
         &self,
         target: TargetKey,
         to: Option<Target>,
         own: &BTreeSet<(ParamIn, NodeKey)>,
         own_edges: &BTreeSet<(EdgeId, NodeKey)>,
-        editor: &Editor,
+        editor: &Editor<F>,
     ) -> Result<Option<Bind>, ReconcileError> {
         let Some(resolved) = to else {
             return Ok(None);
@@ -1326,13 +1332,13 @@ impl Modulation {
     /// `source`'s node, fed by what the host resolved (`feed`), checked
     /// against `editor`: its key (kept, or fresh), its feed and a
     /// follower's width.
-    fn resolve_source(
+    fn resolve_source<F: Float>(
         &self,
         source: SourceKey,
         decl: SignalSource,
         kept: bool,
         feed: Option<Feed>,
-        editor: &Editor,
+        editor: &Editor<F>,
     ) -> Result<Option<SourcePlan>, ReconcileError> {
         // A feed naming a node not in the graph (removed since) is no feed.
         let feed = feed.filter(|f| {
@@ -1377,10 +1383,10 @@ impl Modulation {
     /// as it stands without this reconciler's own lanes and source wiring,
     /// plus what this apply would wire: each source's feed, and each edge as
     /// source → target node.
-    fn check_cycles(
+    fn check_cycles<F: Float>(
         &self,
         decl: &Declarations<'_>,
-        editor: &Editor,
+        editor: &Editor<F>,
         binds: &BTreeMap<TargetKey, Bind>,
         plans: &BTreeMap<SourceKey, SourcePlan>,
         edges: &BTreeSet<(SourceKey, TargetKey)>,
@@ -1508,7 +1514,13 @@ fn owe_resyncs(
 
 /// Stores a range edit: the port's cell for a native lane (a store, no
 /// commit), the lane's own for a plugin lane.
-fn store_range(editor: &mut Editor, bind: &Bind, controls: &LaneControls, min: f32, max: f32) {
+fn store_range<F: Float>(
+    editor: &mut Editor<F>,
+    bind: &Bind,
+    controls: &LaneControls,
+    min: f32,
+    max: f32,
+) {
     match bind {
         Bind::Native { at, .. } | Bind::Mix { at, .. } => {
             editor
@@ -1527,7 +1539,7 @@ fn store_range(editor: &mut Editor, bind: &Bind, controls: &LaneControls, min: f
 }
 
 /// Wires `feed` into source node `key`'s input.
-fn wire_feed(editor: &mut Editor, key: NodeKey, feed: Option<Feed>) {
+fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>) {
     match feed {
         Some(Feed::Audio(from)) => {
             let width = editor
@@ -1552,7 +1564,12 @@ fn wire_feed(editor: &mut Editor, key: NodeKey, feed: Option<Feed>) {
 }
 
 /// Undoes [`wire_feed`].
-fn unwire_feed(editor: &mut Editor, key: NodeKey, feed: Option<Feed>, width: ChannelLayout) {
+fn unwire_feed<F: Float>(
+    editor: &mut Editor<F>,
+    key: NodeKey,
+    feed: Option<Feed>,
+    width: ChannelLayout,
+) {
     match feed {
         Some(Feed::Audio(from)) => {
             // Only the edges it wired: a host that took the key may have
@@ -1577,7 +1594,7 @@ fn unwire_feed(editor: &mut Editor, key: NodeKey, feed: Option<Feed>, width: Cha
 /// editor already holds. A host that writes its own keys (a literal, an
 /// entity's bits) may have taken one the counter has not reached yet;
 /// inserting there would replace the host's node.
-fn unused_key(editor: &Editor) -> NodeKey {
+fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
     loop {
         let key = NodeKey::fresh();
         if !editor.spec().topology.nodes.contains_key(&key) {
@@ -1588,7 +1605,7 @@ fn unused_key(editor: &Editor) -> NodeKey {
 
 /// Whether the node the reconciler built at `key` (generation `generation` at its
 /// insert) is gone from it: removed, or replaced by a host's insert.
-fn taken(editor: &Editor, key: NodeKey, generation: u32) -> bool {
+fn taken<F: Float>(editor: &Editor<F>, key: NodeKey, generation: u32) -> bool {
     let spec = editor.spec();
     !spec.topology.nodes.contains_key(&key) || spec.generation(key) != generation
 }
@@ -1597,7 +1614,7 @@ fn taken(editor: &Editor, key: NodeKey, generation: u32) -> bool {
 /// no other edge between them (a host's feedback edge from a node it put
 /// at a taken key stays). An identical direct edge the host wired itself
 /// cannot be told apart, and goes too.
-fn remove_event_edge(editor: &mut Editor, at: EventIn, from: EventOut) {
+fn remove_event_edge<F: Float>(editor: &mut Editor<F>, at: EventIn, from: EventOut) {
     let events = &mut editor.spec_mut().events;
     if let Some(sources) = events.get_mut(&at) {
         sources.retain(|e| *e != EventEdge::Direct(from));
