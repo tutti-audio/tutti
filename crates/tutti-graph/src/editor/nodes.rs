@@ -163,6 +163,7 @@ impl<F: Float> Editor<F> {
             // a replace waiting behind a running fade runs the old unit under
             // the new plan: both must fit the same buffers.
             && shape.event_capacity == running.event_capacity
+            && shape.event_input_capacity == running.event_input_capacity
             // The key's param state (per declared param) runs on across a
             // fade, so both units must declare the same params.
             && shape.params == running.params;
@@ -245,6 +246,7 @@ impl<F: Float> Editor<F> {
                 && shape.in_place == r.in_place
                 && shape.event_resolution == r.event_resolution
                 && shape.event_capacity == r.event_capacity
+                && shape.event_input_capacity == r.event_input_capacity
                 && shape.params == r.params
         });
         let unwired = self.place(key, kind, unit, wake, shape, fork);

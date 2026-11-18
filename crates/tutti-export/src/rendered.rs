@@ -225,7 +225,7 @@ impl Rendered {
         if self.planes.is_empty() {
             return;
         }
-        out.resize(self.frames().interleaved_len(self.layout()), 0.0);
+        out.resize(self.layout().interleaved_len(self.frames()), 0.0);
         // At least one plane of one length, and `out` is whole frames of them:
         // the views always build and agree.
         let written = tutti_buffers::Planes::from_vecs(&self.planes).and_then(|planes| {

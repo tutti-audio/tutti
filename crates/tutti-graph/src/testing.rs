@@ -18,6 +18,7 @@
 )]
 
 use std::collections::{BTreeMap, VecDeque};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::Float;
@@ -118,6 +119,9 @@ pub enum Kind {
     /// Folds incoming events into a running value: `s = 0.5 s + (w0 % 97)`.
     /// Order-sensitive, so a merge that reorders ties is caught.
     Consumer { inputs: u16 },
+    /// [`Kind::Consumer`] declaring that its event inputs together accept at
+    /// most `cap` events per block (`Shape::event_input_capacity`).
+    BoundedConsumer { inputs: u16, cap: u32 },
     /// Re-emits its input events `latency` frames later.
     EventLag { latency: usize },
     /// Reads the environment: frame, arrival latency, tempo.
@@ -270,10 +274,14 @@ impl<F: Float> TestNode<F> {
                 .with_tail(Tail::None),
             Kind::Burst { cap, .. } => Shape::source_unassigned(ch(1))
                 .with_events(0, 1)
-                .with_event_capacity(cap),
+                .with_event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)
                 .with_tail(Tail::Unbounded),
+            Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
+                .with_events(inputs, 0)
+                .with_tail(Tail::Unbounded)
+                .with_event_input_capacity(cap_of(cap)),
             Kind::EventLag { latency } => Shape::EMPTY
                 .with_events(1, 1)
                 .with_latency(lat(latency))
@@ -305,6 +313,16 @@ impl<F: Float> TestNode<F> {
     }
 }
 
+/// An event capacity of `n` (non-zero; a literal zero fails at compile time in
+/// a `const`, and at the call otherwise).
+#[allow(dead_code)]
+pub const fn cap_of(n: u32) -> NonZeroU32 {
+    match NonZeroU32::new(n) {
+        Some(n) => n,
+        None => panic!("a test event capacity of zero"),
+    }
+}
+
 /// `shape`'s figures over these buses, its ports kept.
 #[allow(dead_code)]
 pub fn rebused(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) -> Shape {
@@ -313,6 +331,7 @@ pub fn rebused(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) ->
     bused.event_in = shape.event_in;
     bused.event_out = shape.event_out;
     bused.event_capacity = shape.event_capacity;
+    bused.event_input_capacity = shape.event_input_capacity;
     bused.latency = shape.latency;
     bused.tail = shape.tail;
     bused.in_place = shape.in_place;
@@ -466,7 +485,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 io.output(0).fill(F::from_f32(self.count));
                 Status::Modified
             }
-            Kind::Consumer { inputs } => {
+            Kind::Consumer { inputs } | Kind::BoundedConsumer { inputs, .. } => {
                 // A merge of this node's own ports, in port order, so several
                 // event inputs are consumed deterministically too.
                 let mut heads = [0usize; 8];

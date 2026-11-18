@@ -3,6 +3,7 @@
 //! Construction needs a measured HRIR sphere, so [`HrtfBinauralNode::new`]
 //! takes the dataset bytes.
 
+use tutti_buffers::{MonoMut, StereoPlanes};
 use tutti_dsp::{HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::Latency;
@@ -213,12 +214,21 @@ impl Node for HrtfBinauralNode {
         // The shape declares two outputs, so both are always present.
         if let (Some(out_left), Some(out_right)) = (outs.next(), outs.next()) {
             let aim = &mut self.aim;
-            self.panner.process(
-                blend,
-                (left, right),
-                (&mut out_left[..size], &mut out_right[..size]),
-                || aim.step(target),
-            );
+            if let Ok(input) = StereoPlanes::new(left, right) {
+                self.panner.process(
+                    blend,
+                    input,
+                    (
+                        MonoMut::new(&mut out_left[..size]),
+                        MonoMut::new(&mut out_right[..size]),
+                    ),
+                    || aim.step(target),
+                );
+            } else {
+                // The two inputs are one length, so this is unreachable; silence, never stale.
+                out_left[..size].fill(0.0);
+                out_right[..size].fill(0.0);
+            }
         }
         Status::Modified
     }

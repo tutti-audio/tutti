@@ -278,6 +278,79 @@ fn parallel_process_is_allocation_free_in_steady_state() {
     process_is_allocation_free_in_steady_state_on(4);
 }
 
+/// A node's declared event-input bound is held without allocating: three
+/// emitters fan into a consumer accepting 5 events a block, so its merge cuts
+/// every block, and a third emitter wired in by a later commit is held to the
+/// bound too.
+fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    use_pool(&mut exec, workers);
+    for (key, period) in [(1u64, 5u64), (2, 7), (3, 3)] {
+        ed.insert(
+            NodeKey(key),
+            "emit",
+            Unforkable(TestNode::new(Kind::Emitter { period, phase: 0 })),
+        );
+    }
+    ed.insert(
+        NodeKey(4),
+        "consume",
+        Unforkable(TestNode::new(Kind::BoundedConsumer { inputs: 1, cap: 5 })),
+    );
+    let wire = |ed: &mut Editor, from: u64| {
+        ed.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(4),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut {
+                node: NodeKey(from),
+                port: 0,
+            }),
+        );
+    };
+    wire(&mut ed, 1);
+    wire(&mut ed, 2);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(4),
+            port: 0,
+        })]);
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    let transport = TransportPosition::default();
+    let mut out = vec![0.0f32; 256];
+    exec.process(256, &transport, &[], &mut [&mut out[..]]);
+    // Frames 0..256 hold 52 multiples of 5 and 37 of 7.
+    assert_eq!(exec.dropped_event_count(), 52 + 37 - 5);
+    let before = exec.dropped_event_count();
+    wire(&mut ed, 3);
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..200 {
+            exec.process(256, &transport, &[], &mut [&mut out[..]]);
+        }
+    });
+    assert!(
+        exec.dropped_event_count() >= before + 200 * (85 + 51 + 36 - 5),
+        "every block lost what the bound cut"
+    );
+}
+
+#[test]
+fn a_bounded_event_merge_is_allocation_free() {
+    a_bounded_event_merge_is_allocation_free_on(1);
+}
+
+#[test]
+fn a_bounded_event_merge_is_allocation_free_in_parallel() {
+    a_bounded_event_merge_is_allocation_free_on(4);
+}
+
 /// Crossfades never allocate on the audio thread: both units running, the
 /// blend, a fade's end (the crossfade and its outgoing unit onto the
 /// fade-return ring) and the start of the fade waiting behind it —
@@ -524,7 +597,9 @@ struct Spray {
 
 impl Node for Spray {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(self.cap)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -750,7 +825,9 @@ struct RampEvery;
 
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -947,7 +1024,9 @@ struct SeamEvery;
 
 impl Node for SeamEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2099,7 +2178,7 @@ impl Node for Holder {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(self.per_block.max(1) as u32)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

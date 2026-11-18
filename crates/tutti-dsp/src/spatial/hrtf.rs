@@ -28,13 +28,14 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::{Fold, Mono, MonoMut, Planes};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Fold, Mono, MonoMut, Planes, StereoPlanes};
 use tutti_types::{ChannelLayout, ChannelTopology, Direction, Mix, Radians, SampleRate};
 
 mod hull;
 mod sphere;
 
-use crate::Complex32;
+use crate::Complex;
 pub use sphere::{HrirMeasurement, HrirSphere};
 use sphere::{HrtfSet, Weights};
 
@@ -197,37 +198,37 @@ fn rate_key(sample_rate: SampleRate) -> u32 {
 /// The streaming convolver for one source.
 ///
 /// A clone is [`fresh`](Self::fresh): it takes the direction to aim at.
-pub struct HrtfBinaural {
+pub struct HrtfBinaural<F: Float + FftNum = f32> {
     sphere: Arc<HrirSphere>,
-    set: Arc<HrtfSet>,
+    set: Arc<HrtfSet<F>>,
     /// The input history, `fft_len` frames: the last `fft_len - HRTF_STEP` frames
     /// already rendered, then the step being filled.
-    history: Vec<f32>,
+    history: Vec<F>,
     /// Frames of the current step filled so far, `0..HRTF_STEP`.
     fill: usize,
     /// The last rendered step, drained while the next one fills: the wet
     /// pair and the mono input it was rendered from (the dry path, equally
     /// late).
-    wet_left: Vec<f32>,
-    wet_right: Vec<f32>,
-    dry: Vec<f32>,
+    wet_left: Vec<F>,
+    wet_right: Vec<F>,
+    dry: Vec<F>,
     /// The input history's spectrum, `fft_len / 2 + 1` bins.
-    spectrum: Vec<Complex32>,
+    spectrum: Vec<Complex<F>>,
     /// The product with one ear's filter, inverse-transformed in place.
-    product: Vec<Complex32>,
+    product: Vec<Complex<F>>,
     /// One ear's `fft_len` output frame, and the previous filter's while a
     /// direction change crossfades.
-    frame: Vec<f32>,
-    frame_prev: Vec<f32>,
-    scratch: Vec<Complex32>,
+    frame: Vec<F>,
+    frame_prev: Vec<F>,
+    scratch: Vec<Complex<F>>,
     /// The blend the last step ended on.
     current: Weights,
     face_hint: usize,
     /// The input pair folded to the mono the renderer convolves.
-    fold: Fold,
+    fold: Fold<F>,
 }
 
-impl std::fmt::Debug for HrtfBinaural {
+impl<F: Float + FftNum> std::fmt::Debug for HrtfBinaural<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HrtfBinaural")
             .field("fill", &self.fill)
@@ -236,7 +237,7 @@ impl std::fmt::Debug for HrtfBinaural {
     }
 }
 
-impl HrtfBinaural {
+impl<F: Float + FftNum> HrtfBinaural<F> {
     /// Parses `hrir_bytes` and prepares the sphere at `sample_rate`, aimed at
     /// `aim`. Control thread.
     ///
@@ -255,22 +256,22 @@ impl HrtfBinaural {
 
     /// A renderer over a prepared set, with cleared streaming state, aimed
     /// at `aim`.
-    fn over(sphere: Arc<HrirSphere>, set: Arc<HrtfSet>, aim: Direction) -> Self {
+    fn over(sphere: Arc<HrirSphere>, set: Arc<HrtfSet<F>>, aim: Direction) -> Self {
         let n = set.fft_len;
         let bins = set.fft.bins();
-        let zero = Complex32::new(0.0, 0.0);
+        let zero = Complex::new(F::ZERO, F::ZERO);
         let mut face_hint = 0;
         let current = set.weights(unit_vector(aim), &mut face_hint);
         Self {
-            history: vec![0.0; n],
+            history: vec![F::ZERO; n],
             fill: 0,
-            wet_left: vec![0.0; HRTF_STEP],
-            wet_right: vec![0.0; HRTF_STEP],
-            dry: vec![0.0; HRTF_STEP],
+            wet_left: vec![F::ZERO; HRTF_STEP],
+            wet_right: vec![F::ZERO; HRTF_STEP],
+            dry: vec![F::ZERO; HRTF_STEP],
             spectrum: vec![zero; bins],
             product: vec![zero; bins],
-            frame: vec![0.0; n],
-            frame_prev: vec![0.0; n],
+            frame: vec![F::ZERO; n],
+            frame_prev: vec![F::ZERO; n],
             scratch: set.fft.new_scratch(),
             current,
             face_hint,
@@ -310,11 +311,11 @@ impl HrtfBinaural {
     /// Zero the streaming buffers and aim at `aim`, so the next step renders
     /// there with no crossfade in from elsewhere.
     pub fn reset_state(&mut self, aim: Direction) {
-        self.history.fill(0.0);
+        self.history.fill(F::ZERO);
         self.fill = 0;
-        self.wet_left.fill(0.0);
-        self.wet_right.fill(0.0);
-        self.dry.fill(0.0);
+        self.wet_left.fill(F::ZERO);
+        self.wet_right.fill(F::ZERO);
+        self.dry.fill(F::ZERO);
         self.current = self.set.weights(unit_vector(aim), &mut self.face_hint);
     }
 
@@ -333,10 +334,14 @@ impl HrtfBinaural {
     pub fn process(
         &mut self,
         blend: Mix,
-        input: (&[f32], &[f32]),
-        output: (&mut [f32], &mut [f32]),
+        input: StereoPlanes<'_, F>,
+        output: (MonoMut<'_, F>, MonoMut<'_, F>),
         mut aim: impl FnMut() -> Direction,
     ) {
+        let input = (input.left(), input.right());
+        let (output, output_right) = output;
+        let output = (output.into_samples_mut(), output_right.into_samples_mut());
+        let mix = <F as Float>::from_f32(blend.get());
         let frames = output.0.len();
         let start = self.history.len() - HRTF_STEP;
         let mut done = 0;
@@ -354,8 +359,8 @@ impl HrtfBinaural {
                 .zip(dry)
                 .zip(wet.0.iter().zip(wet.1))
             {
-                *l = blend.blend(d, wl);
-                *r = blend.blend(d, wr);
+                *l = crate::lerp(d, wl, mix);
+                *r = crate::lerp(d, wr, mix);
             }
             let fresh = &mut self.history[start + at..start + at + n];
             let pair = [ins.0, ins.1];
@@ -366,7 +371,7 @@ impl HrtfBinaural {
             debug_assert!(folded.is_ok(), "a step's planes are one length: {folded:?}");
             if folded.is_err() {
                 // Not folded: silent, never the history's previous contents.
-                fresh.fill(0.0);
+                fresh.fill(F::ZERO);
             }
             self.fill += n;
             done += n;
@@ -391,7 +396,7 @@ impl HrtfBinaural {
         );
 
         let crossfade = next != self.current;
-        let step = 1.0 / HRTF_STEP as f32;
+        let step = <F as Float>::from_f32(1.0 / HRTF_STEP as f32);
         let wet = [&mut self.wet_left, &mut self.wet_right];
         for (ear, wet) in wet.into_iter().enumerate() {
             blend_into(
@@ -418,7 +423,7 @@ impl HrtfBinaural {
                 for (i, ((w, &y), &z)) in wet.iter_mut().zip(new).zip(old).enumerate() {
                     // Reaches the new filter on the step's last frame, so the
                     // next step continues from it.
-                    let t = (i + 1) as f32 * step;
+                    let t = <F as Float>::from_f32((i + 1) as f32) * step;
                     *w = crate::lerp(z, y, t);
                 }
             } else {
@@ -433,20 +438,20 @@ impl HrtfBinaural {
 /// One ear's `fft_len` output frame for `input`'s spectrum through the
 /// filter `weights` blend: the weighted sum of the three vertices' spectra,
 /// multiplied in and inverse-transformed. `product` is clobbered.
-fn blend_into(
-    set: &HrtfSet,
+fn blend_into<F: Float + FftNum>(
+    set: &HrtfSet<F>,
     weights: &Weights,
     ear: usize,
-    input: &[Complex32],
-    product: &mut [Complex32],
-    frame: &mut [f32],
-    scratch: &mut [Complex32],
+    input: &[Complex<F>],
+    product: &mut [Complex<F>],
+    frame: &mut [F],
+    scratch: &mut [Complex<F>],
 ) {
     let [a, b, c] = weights.verts.map(|v| {
         let (left, right) = set.spectrum(v);
         if ear == 0 { left } else { right }
     });
-    let [wa, wb, wc] = weights.w;
+    let [wa, wb, wc] = weights.w.map(<F as Float>::from_f32);
     let filters = a.iter().zip(b).zip(c);
     for ((p, &x), ((&a, &b), &c)) in product.iter_mut().zip(input).zip(filters) {
         *p = x * (a * wa + b * wb + c * wc);

@@ -1,5 +1,27 @@
 use super::*;
+use tutti_buffers::{Mono, MonoMut};
 use tutti_types::{ChannelLayout, ChannelTopology};
+
+/// `VbapGains::render_channel` over plain slices.
+fn render<F: Float>(
+    glide: &Glide<VbapGains>,
+    first: u32,
+    speaker: Option<usize>,
+    fold: &Fold<F>,
+    left: &[F],
+    right: &[F],
+    out: &mut [F],
+) {
+    VbapGains::render_channel(
+        glide,
+        first,
+        speaker,
+        fold,
+        Mono::new(left),
+        Mono::new(right),
+        MonoMut::new(out),
+    );
+}
 
 use crate::Glide;
 
@@ -14,7 +36,7 @@ fn gains(mono: bool, a0: f32, b0: f32) -> VbapGains {
     g
 }
 
-fn stereo_to_mono() -> Fold {
+fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
         &ChannelTopology::assumed(ChannelLayout::STEREO),
         &ChannelTopology::assumed(ChannelLayout::MONO),
@@ -31,14 +53,35 @@ fn a_held_gain_is_the_fold_times_g_or_the_pair_weighed() {
     let mut out = [0.0f32; 2];
     let mono = [(l[0] + r[0]) * 0.5, (l[1] + r[1]) * 0.5];
     let held = Glide::landed(gains(true, 0.3, 0.0)).by(16);
-    VbapGains::render_channel(&held, 1, Some(0), &fold, &l, &r, &mut out);
+    render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
         assert_eq!(out[i], mono[i] * 0.3);
     }
     let held = Glide::landed(gains(false, 0.3, 0.7)).by(16);
-    VbapGains::render_channel(&held, 1, Some(0), &fold, &l, &r, &mut out);
+    render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
         assert_eq!(out[i], l[i] * 0.3 + r[i] * 0.7);
+    }
+}
+
+/// In `f64` a held gain is `l * a + r * b` and a glide reads `k / 16` at step `k`, with the
+/// `f32` gains widened exactly.
+#[test]
+fn an_f64_render_weighs_the_pair_by_the_widened_gains() {
+    let fold = stereo_to_mono::<f64>();
+    let (l, r) = ([0.5f64, -0.25], [0.125f64, 1.0]);
+    let mut out = [0.0f64; 2];
+    let held = Glide::landed(gains(false, 0.3, 0.7)).by(16);
+    render(&held, 1, Some(0), &fold, &l, &r, &mut out);
+    for i in 0..2 {
+        assert_eq!(out[i], l[i] * f64::from(0.3f32) + r[i] * f64::from(0.7f32));
+    }
+    let mut glide = Glide::landed(gains(true, 0.0, 0.0)).by(16);
+    glide.aim(gains(true, 1.0, 0.0));
+    let (ones, mut ramp) = ([1.0f64; 16], [0.0f64; 16]);
+    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut ramp);
+    for (i, &g) in ramp.iter().enumerate() {
+        assert_eq!(g, (i + 1) as f64 / 16.0, "frame {i}");
     }
 }
 
@@ -52,7 +95,7 @@ fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
     glide.aim(gains(true, 1.0, 0.0));
     let ones = [1.0f32; 16];
     let mut whole = [0.0f32; 16];
-    VbapGains::render_channel(&glide, 1, Some(0), &fold, &ones, &ones, &mut whole);
+    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut whole);
     for (i, &g) in whole.iter().enumerate() {
         assert_eq!(g, (i + 1) as f32 / 16.0, "frame {i}");
     }
@@ -61,7 +104,7 @@ fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
     for len in [3usize, 1, 7, 5] {
         let end = first as usize - 1 + len;
         let at = first as usize - 1;
-        VbapGains::render_channel(
+        render(
             &glide,
             first,
             Some(0),
@@ -74,7 +117,7 @@ fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
     }
     assert_eq!(whole.map(f32::to_bits), cut.map(f32::to_bits));
     let mut none = [1.0f32; 4];
-    VbapGains::render_channel(&glide, 1, None, &fold, &ones[..4], &ones[..4], &mut none);
+    render(&glide, 1, None, &fold, &ones[..4], &ones[..4], &mut none);
     assert_eq!(none, [0.0; 4], "no speaker is silence");
 }
 
@@ -88,7 +131,7 @@ fn a_glide_between_the_branches_blends_their_pairs() {
     glide.aim(gains(false, 0.0, 1.0));
     let (l, r) = ([1.0f32; 16], [0.0f32; 16]);
     let mut out = [0.0f32; 16];
-    VbapGains::render_channel(&glide, 1, Some(0), &fold, &l, &r, &mut out);
+    render(&glide, 1, Some(0), &fold, &l, &r, &mut out);
     // The left weight goes from 0.5 (half of 1.0) to 0.0.
     assert_eq!(out[7], 0.25);
     assert_eq!(out[15], 0.0);
@@ -186,7 +229,7 @@ fn a_signed_zero_gain_change_is_a_glide_that_lands_on_the_target_bits() {
     glide.aim(gains(true, -0.0, 0.0));
     let ones = [1.0f32; 16];
     let mut out = [1.0f32; 16];
-    VbapGains::render_channel(&glide, 1, Some(0), &fold, &ones, &ones, &mut out);
+    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut out);
     assert!(out[..15].iter().all(|o| o.to_bits() == 0.0f32.to_bits()));
     assert_eq!(out[15].to_bits(), (-0.0f32).to_bits());
 }

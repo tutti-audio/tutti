@@ -11,7 +11,8 @@
 use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::ChannelLayout;
 
-use super::{Convolver, convert_mono};
+use super::Convolver;
+use crate::convert::convert_equal;
 
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
 const CHUNK: usize = 64;
@@ -175,7 +176,7 @@ impl MatrixConvolver {
             let n = CHUNK.min(frames - at);
             for (i, row) in self.heard.iter_mut().enumerate() {
                 match input.get_plane(i) {
-                    Some(src) => convert_mono(&src.samples()[at..at + n], &mut row[..n]),
+                    Some(src) => convert_equal(&src.samples()[at..at + n], &mut row[..n]),
                     None => row[..n].fill(0.0),
                 }
             }
@@ -191,7 +192,7 @@ impl MatrixConvolver {
                     }
                 }
                 if let Some(mut plane) = output.get_plane_mut(o) {
-                    convert_mono(&self.sum[..n], &mut plane.samples_mut()[at..at + n]);
+                    convert_equal(&self.sum[..n], &mut plane.samples_mut()[at..at + n]);
                 }
             }
             at += n;

@@ -38,10 +38,7 @@ use super::*;
 fn omitted_operators_are_documented() {}
 
 #[test]
-fn mix_blends_and_refuses_to_scale() {
-    assert_eq!(Mix::DRY.blend(1.0, 9.0), 1.0);
-    assert_eq!(Mix::WET.blend(1.0, 9.0), 9.0);
-    assert_eq!(Mix(0.5).blend(0.0, 1.0), 0.5);
+fn mix_clamps_into_range_and_refuses_to_scale() {
     assert_eq!(Mix::new_clamped(1.5), Mix::WET);
     assert_eq!(Mix::new_clamped(-0.5), Mix::DRY);
     // `Mix * f32` and `Mix + Mix` are deliberately absent — see the

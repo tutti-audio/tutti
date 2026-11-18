@@ -1,7 +1,6 @@
 //! Reading MIDI 1.0 from a winmm input.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use super::super::legacy_port::anchor::Anchor;
@@ -10,18 +9,19 @@ use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
+use tutti_rt::FaultLatch;
 use tutti_winmm_ffi::{Event, InputPort, MidiIn};
 
 /// An open winmm input. Dropping it stops the port and returns its buffers.
 pub struct WinMmInput {
-    /// Set when the driver closes the port or the callback panics.
-    died: Arc<AtomicBool>,
+    /// Raised when the driver closes the port or the callback panics.
+    died: Arc<FaultLatch>,
     port: MidiIn,
 }
 
 impl InputConnection for WinMmInput {
     fn is_alive(&self) -> bool {
-        !self.died.load(Ordering::Acquire) && self.port.is_alive()
+        !self.died.is_raised() && self.port.is_alive()
     }
 }
 
@@ -33,7 +33,7 @@ impl InputConnection for WinMmInput {
 /// [`MmResult::Allocated`](tutti_winmm_ffi::MmResult::Allocated) when another
 /// application holds it.
 pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {
-    let died = Arc::new(AtomicBool::new(false));
+    let died = Arc::new(FaultLatch::new());
     let guard = Guard::new(Arc::clone(&died));
     let closed = Arc::clone(&died);
     let mut bytes = ByteIn::new();
@@ -61,7 +61,7 @@ pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Resul
                         push(ump, at);
                     }
                 }
-                Event::Closed => closed.store(true, Ordering::Release),
+                Event::Closed => closed.raise(),
             }
         });
     })?;

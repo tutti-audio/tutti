@@ -90,7 +90,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{At, Latency};
 
-use crate::event::{Event, EventKind, merge_into};
+use crate::event::{Event, EventKind, merge_into, merge_walk};
+use crate::node::MAX_PORTS;
 use crate::node::{Env, Resolution};
 use crate::plan::Plan;
 use crate::spec::EventIn;
@@ -585,6 +586,57 @@ impl Deliveries<'_> {
             i = run;
         }
         (n, dropped)
+    }
+}
+
+impl Deliveries<'_> {
+    /// A node's whole event input for the block under a declared bound of
+    /// `bound` events, all ports together: every port's `base(port)` with its
+    /// scheduled deliveries after it, cut to the earliest `bound` by
+    /// `(offset, port)` with note-offs first (`merge_walk`). Returns `None`
+    /// when everything fits. Otherwise every port's events are written to
+    /// `buf` and its `(port, range)` recorded in `views`, and the result is
+    /// how many views and how many events were cut. Never grows `buf`.
+    pub(crate) fn overlay_bounded<'e>(
+        &self,
+        unit: u32,
+        ports: usize,
+        bound: usize,
+        base: impl Fn(u16) -> &'e [Event],
+        buf: &mut Vec<Event>,
+        views: &mut [(u16, u32, u32)],
+    ) -> Option<(usize, u32)> {
+        let start = self.due.partition_point(|d| d.unit < unit);
+        let end = self.due.partition_point(|d| d.unit <= unit);
+        let mine = &self.due[start..end];
+        let mut sources: [&[Event]; 2 * MAX_PORTS] = [&[]; 2 * MAX_PORTS];
+        let mut total = 0;
+        for p in 0..ports {
+            let port = p as u16;
+            let from = start + mine.partition_point(|d| d.port < port);
+            let to = start + mine.partition_point(|d| d.port <= port);
+            sources[2 * p] = base(port);
+            sources[2 * p + 1] = &self.events[from..to];
+            total += sources[2 * p].len() + sources[2 * p + 1].len();
+        }
+        if total <= bound {
+            return None;
+        }
+        let sources = &sources[..2 * ports];
+        buf.clear();
+        let room = bound.min(buf.capacity());
+        let mut dropped = 0;
+        // The walk is the same for every port: each pass keeps its own.
+        for (p, view) in views.iter_mut().enumerate().take(ports) {
+            let from = buf.len() as u32;
+            dropped = merge_walk(sources, room, |i, e| {
+                if i / 2 == p {
+                    buf.push(e);
+                }
+            });
+            *view = (p as u16, from, buf.len() as u32);
+        }
+        Some((ports, dropped))
     }
 }
 
