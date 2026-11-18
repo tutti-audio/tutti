@@ -51,7 +51,7 @@ fn build_engine_with_chain() -> Engine {
     ed.insert(
         limiter,
         "limiter",
-        LimiterNode::stereo(LimiterControls {
+        LimiterNode::<f32>::stereo(LimiterControls {
             threshold: Db(-1.0),
             ceiling: Db(-0.3),
             ..LimiterControls::DEFAULT

@@ -189,7 +189,7 @@ pub struct MultibandBank {
     model: CrossoverModel,
     /// The coefficients in flight over one grid period.
     coefficients: Glide<CrossoverCoefficients>,
-    compressors: [CompressorBank; MAX_BANDS],
+    compressors: [CompressorBank<f32>; MAX_BANDS],
     /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`].
     bypass: [Glide<f32>; MAX_BANDS],
     /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`].

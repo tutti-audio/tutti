@@ -92,7 +92,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "compressor",
-            Box::new(CompressorNode::mono(CompressorControls::DEFAULT)),
+            Box::new(CompressorNode::<f32>::mono(CompressorControls::DEFAULT)),
         ),
         (
             // A hold of 91 frames captures the poisoned frame (273 is 3 x 91) and holds it
@@ -157,18 +157,25 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                     .sustain(Db(-6.0)),
             )),
         ),
-        ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
+        (
+            "gate",
+            Box::new(GateNode::<f32>::mono(GateControls::DEFAULT)),
+        ),
         (
             "limiter",
-            Box::new(LimiterNode::mono(LimiterControls::DEFAULT)),
+            Box::new(LimiterNode::<f32>::mono(LimiterControls::DEFAULT)),
         ),
         (
             "true-peak limiter",
             Box::new(
-                LimiterNode::mono(LimiterControls::DEFAULT).detection(PeakDetection::TruePeak),
+                LimiterNode::<f32>::mono(LimiterControls::DEFAULT)
+                    .detection(PeakDetection::TruePeak),
             ),
         ),
-        ("brickwall", Box::new(BrickwallLimiterNode::new(Db(-1.0)))),
+        (
+            "brickwall",
+            Box::new(BrickwallLimiterNode::<f32>::new(Db(-1.0))),
+        ),
         (
             "chorus",
             Box::new(ModDelayNode::<f32>::chorus(BusTopology::MONO)),
@@ -415,7 +422,7 @@ mod logged {
     #[test]
     fn a_finite_input_logs_nothing() {
         assert!(records(dc_blocker(), 0.0, None, 8).is_empty());
-        let compressor = CompressorNode::stereo(CompressorControls::DEFAULT);
+        let compressor = CompressorNode::<f32>::stereo(CompressorControls::DEFAULT);
         assert!(records(compressor, 0.0, None, 8).is_empty());
     }
 

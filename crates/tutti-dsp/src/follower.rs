@@ -35,13 +35,19 @@ impl<F: Float> Follower<F> {
     /// above `state` and at the release's otherwise.
     #[inline]
     pub(crate) fn follow<U: Unit<Raw = F>>(&self, state: U, target: U) -> U {
-        let (state, target) = (state.to_raw(), target.to_raw());
+        U::from_raw(self.follow_raw(state.to_raw(), target.to_raw()))
+    }
+
+    /// [`follow`](Self::follow) over the bare float, for a quantity no unit of raw `F` covers
+    /// yet; it goes when `Db` and `Amplitude` store `f64`.
+    #[inline]
+    pub(crate) fn follow_raw(&self, state: F, target: F) -> F {
         let coeff = if target > state {
             self.attack
         } else {
             self.release
         };
-        U::from_raw(Smoother::toward(state, target, coeff))
+        Smoother::toward(state, target, coeff)
     }
 }
 

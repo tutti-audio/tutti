@@ -6,6 +6,9 @@ use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
 
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 /// 5 ms at 48 kHz: 240 frames.
 const LOOKAHEAD: Lookahead = Lookahead::of(Seconds(0.005));
@@ -74,21 +77,21 @@ fn hostile() -> Vec<LimiterControls> {
 }
 
 /// A stereo bank at `rate` aimed at `c`.
-fn runner_at(c: &LimiterControls, rate: SampleRate) -> LimiterBank {
-    let mut bank = LimiterBank::new(ChannelLayout::STEREO, LOOKAHEAD, rate);
+fn runner_at(c: &LimiterControls, rate: SampleRate) -> LimiterBank<f32> {
+    let mut bank = LimiterBank::<f32>::new(ChannelLayout::STEREO, LOOKAHEAD, rate);
     bank.aim(c);
     bank
 }
 
 /// A stereo bank at 48 kHz aimed at `c`.
-fn runner(c: &LimiterControls) -> LimiterBank {
+fn runner(c: &LimiterControls) -> LimiterBank<f32> {
     runner_at(c, RATE)
 }
 
 /// `audio` (one slice per channel) through `bank` in blocks of `block`, with the threshold
 /// and ceiling lanes when given.
 fn run_in(
-    bank: &mut LimiterBank,
+    bank: &mut LimiterBank<f32>,
     audio: &[&[f32]],
     lanes: [Option<&[f32]>; 2],
     block: usize,
@@ -114,12 +117,12 @@ fn run_in(
     out
 }
 
-fn run(bank: &mut LimiterBank, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+fn run(bank: &mut LimiterBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
     run_in(bank, audio, [None, None], CHUNK)
 }
 
 /// The same signal on both channels, run with no lane.
-fn run_mono(bank: &mut LimiterBank, audio: &[f32]) -> Vec<f32> {
+fn run_mono(bank: &mut LimiterBank<f32>, audio: &[f32]) -> Vec<f32> {
     run(bank, &[audio, audio]).remove(0)
 }
 
@@ -159,10 +162,10 @@ fn the_bank_holds_the_figures_of_its_definition() {
         assert_eq!(bank.latency().get(), frames, "at {rate}");
     }
     // A lookahead under one frame is one frame: the window rounds up.
-    let bank = LimiterBank::new(ChannelLayout::MONO, Lookahead::of(Seconds(1e-9)), RATE);
+    let bank = LimiterBank::<f32>::new(ChannelLayout::MONO, Lookahead::of(Seconds(1e-9)), RATE);
     assert_eq!(bank.latency().get(), 1);
 
-    let m = Design::of(&controls(-12.0, -3.0, 0.0002), RATE);
+    let m = Design::<f32>::of(&controls(-12.0, -3.0, 0.0002), RATE);
     assert_eq!(
         m.release,
         Seconds(0.001).one_pole_coeff(RATE) as f32,
@@ -171,7 +174,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
     assert_eq!((m.threshold, m.ceiling), (Db(-12.0), Db(-3.0)));
 
     let d = LimiterControls::DEFAULT;
-    let m = Design::of(
+    let m = Design::<f32>::of(
         &LimiterControls {
             threshold: Db(f32::NAN),
             ceiling: Db(f32::NAN),
@@ -188,7 +191,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
         )
     );
     for inf in [f32::INFINITY, f32::NEG_INFINITY] {
-        let m = Design::of(
+        let m = Design::<f32>::of(
             &LimiterControls {
                 ceiling: Db(inf),
                 ..d
@@ -196,7 +199,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
             RATE,
         );
         assert_eq!(m.ceiling, Db(inf), "`+-inf` are ceilings");
-        let m = Design::of(
+        let m = Design::<f32>::of(
             &LimiterControls {
                 threshold: Db(inf),
                 ..d
@@ -989,3 +992,73 @@ fn the_aimed_extremes_keep_their_meaning_on_the_lane_path() {
 }
 
 mod true_peak;
+
+/// `x` through a mono `f64` bank at 48 kHz aimed at `c`, in one block.
+fn run_f64(c: &LimiterControls, x: &[f64]) -> Vec<f64> {
+    let mut bank = LimiterBank::<f64>::new(ChannelLayout::MONO, LOOKAHEAD, RATE);
+    bank.aim(c);
+    let mut out = vec![0.0f64; x.len()];
+    bank.process(
+        LimiterLanes::default(),
+        Planes::new(&[x]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    out
+}
+
+/// Under a threshold at the ceiling the gain is `10^0 = 1`: an `f64` signal of more than 24
+/// bits comes out exactly `L` frames late (the lookahead is the delay) and silent before.
+#[test]
+fn an_f64_limiter_under_its_threshold_delays_by_exactly_the_lookahead() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let len = 3 * L;
+    let x = wide_signal(len);
+    let want: Vec<f64> = (0..len)
+        .map(|n| n.checked_sub(L).map_or(0.0, |k| x[k]))
+        .collect();
+    assert_close_f64(&run_f64(&controls(0.0, 0.0, 0.1), &x), &want, 0.0);
+}
+
+/// A constant signal over the threshold comes out at the ceiling the control holds, to 1e-15:
+/// the oracle is the closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it
+/// (`Db` stores `f32`), and widened; the gain is divided in `f64`.
+#[test]
+fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = vec![wide_signal(1)[0]; 3 * L];
+    let y = run_f64(&controls(-30.0, -20.0, 0.1), &x);
+    assert_close_f64(
+        &y[L..],
+        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); 2 * L],
+        1e-15,
+    );
+}
+
+/// After a loud stretch the gain rises toward the quiet gain `10^((ceiling - threshold) / 20)`
+/// along the one-pole `e[k] = e[k-1] + c (target - e[k-1])`, `c = 1 - exp(-1 / (release
+/// rate))`, from the limited gain `ceiling / peak`; the output is the delayed quiet signal
+/// times that envelope (a rising envelope's window minimum is its oldest value): the closed
+/// form in `f64`, to 1e-12, from the ceiling and quiet gains' closed forms rounded to `f32`, as the control stores them
+/// (`Db` stores `f32`), and widened.
+#[test]
+fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (threshold, ceiling, release) = (-6.0f64, -3.0f64, 0.01);
+    let (len, switch) = (2_000, 600);
+    let quiet = wide_signal(1)[0];
+    let loud = 4.0 * quiet;
+    let x: Vec<f64> = (0..len)
+        .map(|n| if n < switch { loud } else { quiet })
+        .collect();
+    let coeff = 1.0 - (-1.0 / (release * RATE.get())).exp();
+    let below = f64::from(10f64.powf((ceiling - threshold) / 20.0) as f32);
+    let mut envelope = f64::from(10f64.powf(ceiling / 20.0) as f32) / loud;
+    let mut gains = vec![envelope; switch];
+    for _ in switch..len {
+        envelope += coeff * (below - envelope);
+        gains.push(envelope);
+    }
+    let want: Vec<f64> = (switch + L..len).map(|n| quiet * gains[n - L]).collect();
+    let y = run_f64(&controls(threshold as f32, ceiling as f32, release), &x);
+    assert_close_f64(&y[switch + L..], &want, 1e-12);
+}

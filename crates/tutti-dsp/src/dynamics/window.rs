@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use tutti_buffers::Float;
+
 /// Sliding-window minimum via a monotonic deque. O(1) amortized per push.
 ///
 /// Used by the lookahead limiter to track the smallest gain (greatest
@@ -12,12 +14,12 @@ use std::collections::VecDeque;
 /// and never grows past the allocation [`new`](Self::new) makes: each
 /// [`push`](Self::push) evicts the entry leaving the window *before* adding
 /// the new one. A clone keeps that allocation.
-pub(crate) struct MonotonicMinDeque {
-    entries: VecDeque<(u64, f32)>,
+pub(crate) struct MonotonicMinDeque<F> {
+    entries: VecDeque<(u64, F)>,
     window: usize,
 }
 
-impl std::fmt::Debug for MonotonicMinDeque {
+impl<F> std::fmt::Debug for MonotonicMinDeque<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MonotonicMinDeque")
             .field("len", &self.entries.len())
@@ -26,7 +28,7 @@ impl std::fmt::Debug for MonotonicMinDeque {
     }
 }
 
-impl MonotonicMinDeque {
+impl<F: Float> MonotonicMinDeque<F> {
     /// Builds an empty deque over a window of `window` entries (clamped to
     /// at least 1), preallocating them.
     ///
@@ -64,7 +66,7 @@ impl MonotonicMinDeque {
     /// the deque at `window` entries, so it never allocates and is safe on
     /// the audio thread.
     #[inline]
-    pub(crate) fn push(&mut self, index: u64, value: f32) {
+    pub(crate) fn push(&mut self, index: u64, value: F) {
         let oldest = index.saturating_sub(self.window as u64 - 1);
         while let Some(&(idx, _)) = self.entries.front() {
             if idx < oldest {
@@ -85,7 +87,7 @@ impl MonotonicMinDeque {
 
     /// Current window minimum. Returns `None` when the deque is empty.
     #[inline]
-    pub(crate) fn min(&self) -> Option<f32> {
+    pub(crate) fn min(&self) -> Option<F> {
         self.entries.front().map(|&(_, v)| v)
     }
 }
@@ -93,7 +95,7 @@ impl MonotonicMinDeque {
 /// A clone holds the same entries over the same window, in an allocation
 /// of the full window: a derived clone would size the copy to the entries
 /// it holds, and the next release would grow it on the audio thread.
-impl Clone for MonotonicMinDeque {
+impl<F: Copy> Clone for MonotonicMinDeque<F> {
     fn clone(&self) -> Self {
         let mut entries = VecDeque::with_capacity(self.window);
         entries.extend(self.entries.iter().copied());

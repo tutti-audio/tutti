@@ -13,25 +13,25 @@ fn ceiling_db() -> f32 {
 
 /// A bank limiting to `CEILING` with no drive (threshold at the ceiling: the gain is
 /// `min(1, ceiling / peak)`), at 48 kHz and a 5 ms lookahead.
-fn bank(detection: PeakDetection) -> LimiterBank {
+fn bank(detection: PeakDetection) -> LimiterBank<f32> {
     bank_at(detection, LOOKAHEAD, RATE)
 }
 
-fn bank_at(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank {
-    let mut bank = LimiterBank::detecting(ChannelLayout::MONO, lookahead, rate, detection)
+fn bank_at(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank<f32> {
+    let mut bank = LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, rate, detection)
         .expect("the lookahead is long enough");
     bank.aim(&controls(ceiling_db(), ceiling_db(), 0.1));
     bank
 }
 
-fn render(bank: &mut LimiterBank, x: &[f32]) -> Vec<f32> {
+fn render(bank: &mut LimiterBank<f32>, x: &[f32]) -> Vec<f32> {
     run(bank, &[x]).remove(0)
 }
 
 /// The shortest lookahead a true-peak bank takes at the test rate, as the refusal names it.
 fn shortest() -> Lookahead {
     let short = Lookahead::of(Seconds(0.0002));
-    match LimiterBank::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak) {
+    match LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak) {
         Err(TruePeakError::Lookahead { shortest, .. }) => shortest,
         other => panic!("{other:?}"),
     }
@@ -104,7 +104,7 @@ fn db(ratio: f64) -> f64 {
 
 /// The bound a true-peak bank keeps: the ceiling and its margin, in amplitude.
 fn bound() -> f64 {
-    CEILING * 10f64.powf(f64::from(LimiterBank::TRUE_PEAK_MARGIN.get()) / 20.0)
+    CEILING * 10f64.powf(f64::from(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get()) / 20.0)
 }
 
 /// The bound of a tone of `cycles` of the rate: its own band limit in place of the passband's,
@@ -179,7 +179,7 @@ fn a_sample_peak_limiter_leaves_an_fs_4_sine_3_db_over_its_ceiling_between_sampl
         (over - analytic).abs() < 0.01,
         "{over} dB over, analytic {analytic} dB"
     );
-    assert!(over > f64::from(LimiterBank::TRUE_PEAK_MARGIN.get()) + 2.0);
+    assert!(over > f64::from(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get()) + 2.0);
 }
 
 /// The same signal through a true-peak limiter reaches the ceiling between its samples, to
@@ -266,8 +266,9 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
 #[test]
 fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
     let short = Lookahead::of(Seconds(0.0002));
-    let refused = LimiterBank::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak)
-        .expect_err("ten frames");
+    let refused =
+        LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak)
+            .expect_err("ten frames");
     let TruePeakError::Lookahead {
         lookahead,
         needed,
@@ -281,12 +282,13 @@ fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
         .plan(RATE)
         .unwrap();
     assert_eq!(needed, Samples(1 + plan.upsample_delay() / 4));
-    let ok = LimiterBank::detecting(ChannelLayout::MONO, shortest, RATE, PeakDetection::TruePeak)
-        .expect("the shortest lines up");
+    let ok =
+        LimiterBank::<f32>::detecting(ChannelLayout::MONO, shortest, RATE, PeakDetection::TruePeak)
+            .expect("the shortest lines up");
     assert!(ok.latency() >= needed);
     let one_under = Lookahead::of(Seconds((needed.get() - 1) as f64 / 48_000.0));
     assert!(
-        LimiterBank::detecting(
+        LimiterBank::<f32>::detecting(
             ChannelLayout::MONO,
             one_under,
             RATE,
@@ -295,7 +297,8 @@ fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
         .is_err()
     );
     assert!(
-        LimiterBank::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::Sample).is_ok()
+        LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::Sample)
+            .is_ok()
     );
 }
 
