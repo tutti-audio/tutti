@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::{MonoMut, StereoPlanes};
 use tutti_types::{Azimuth, Elevation};
 
 /// A tetrahedron with delta responses: the smallest sphere that parses.
@@ -33,7 +34,7 @@ fn tetrahedron(rate: u32) -> Vec<u8> {
 fn a_clone_shares_the_sphere_and_its_spectra() {
     let rate = SampleRate::SR_48K;
     let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
-    let mut a = HrtfBinaural::new(&tetrahedron(48_000), rate, front).expect("parses");
+    let mut a = HrtfBinaural::<f32>::new(&tetrahedron(48_000), rate, front).expect("parses");
     let b = a.fresh(front);
     assert!(Arc::ptr_eq(&a.sphere, &b.sphere));
     assert!(Arc::ptr_eq(&a.set, &b.set));
@@ -51,7 +52,7 @@ fn a_clone_shares_the_sphere_and_its_spectra() {
 #[test]
 fn a_prepare_above_the_ceiling_keeps_one_set() {
     let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
-    let mut a = HrtfBinaural::new(&tetrahedron(48_000), SampleRate::of(1_536_000.0), front)
+    let mut a = HrtfBinaural::<f32>::new(&tetrahedron(48_000), SampleRate::of(1_536_000.0), front)
         .expect("parses");
     let set = a.set.clone();
     a.set_sample_rate(SampleRate::of(1_024_000.0), || front);
@@ -69,7 +70,7 @@ fn a_prepare_above_the_ceiling_keeps_one_set() {
 #[test]
 fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
     let rate = SampleRate::SR_48K;
-    let mut p = HrtfBinaural::new(
+    let mut p = HrtfBinaural::<f32>::new(
         &tetrahedron(48_000),
         rate,
         Direction::new(Azimuth::FRONT, Elevation::LEVEL),
@@ -94,12 +95,40 @@ fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
     ] {
         let mut peak = 0.0f32;
         for _ in 0..20 {
-            p.process(Mix::WET, (&input, &input), (&mut left, &mut right), || {
-                target
-            });
+            p.process(
+                Mix::WET,
+                StereoPlanes::new(&input, &input).unwrap(),
+                (MonoMut::new(&mut left), MonoMut::new(&mut right)),
+                || target,
+            );
             assert!(left.iter().chain(&right).all(|s| s.is_finite()));
             peak = left.iter().chain(&right).fold(peak, |m, s| m.max(s.abs()));
         }
         assert!(peak > 0.1, "{target:?} rendered silence (peak {peak})");
+    }
+}
+
+/// In `f64`, a sphere of delta responses (left 1, right 0.5) renders the mono input delayed by
+/// one step, scaled by each ear's gain: every blend of the vertices' deltas is that delta.
+#[test]
+fn an_f64_render_is_the_input_delayed_one_step_and_scaled_per_ear() {
+    let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
+    let mut p =
+        HrtfBinaural::<f64>::new(&tetrahedron(48_000), SampleRate::SR_48K, front).expect("parses");
+    let input: Vec<f64> = (0..2 * HRTF_STEP).map(|n| 0.01 * n as f64 - 0.7).collect();
+    let (mut left, mut right) = (vec![0.0f64; input.len()], vec![0.0f64; input.len()]);
+    p.process(
+        Mix::WET,
+        StereoPlanes::new(&input, &input).unwrap(),
+        (MonoMut::new(&mut left), MonoMut::new(&mut right)),
+        || front,
+    );
+    for n in 0..HRTF_STEP {
+        let want = input[n];
+        assert!((left[HRTF_LATENCY + n] - want).abs() < 1e-12, "left {n}");
+        assert!(
+            (right[HRTF_LATENCY + n] - 0.5 * want).abs() < 1e-12,
+            "right {n}"
+        );
     }
 }

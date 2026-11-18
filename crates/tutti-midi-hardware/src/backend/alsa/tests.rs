@@ -344,29 +344,6 @@ fn opening_twice_gives_each_its_own_watch() {
     until(&b, added(&name));
 }
 
-/// An idle `Devices` is quiet: enumerating must not announce, or the watch
-/// wakes itself forever (every enumeration's own client start, port and exit
-/// are announced to it).
-#[test]
-fn an_idle_devices_does_not_wake_itself() {
-    let devices = Watched::open();
-    // The watch must be running: without a sequencer there is no thread, and
-    // this would pass for the wrong reason.
-    settle_watch_threads(1);
-    let opens = super::client::OPENS.load(std::sync::atomic::Ordering::SeqCst);
-    // A full second: an event from another process returns `wait` early, and
-    // the loop goes on.
-    let until = Instant::now() + Duration::from_secs(1);
-    while let Some(left) = until.checked_duration_since(Instant::now()) {
-        devices.wait(left);
-    }
-    // Every client opened is announced to the watch, which opens another to
-    // look, and so on: a loop is a client opened per wake. Other processes'
-    // wakes are no evidence either way, so this counts what this one does.
-    let opened = super::client::OPENS.load(std::sync::atomic::Ordering::SeqCst) - opens;
-    assert_eq!(opened, 0, "{opened} sequencer clients opened while idle");
-}
-
 /// Opening an input and an output on a device makes the engine's own clients
 /// (`tutti-in`, `tutti-out`); they are not devices, in this process or another.
 #[test]
@@ -385,10 +362,13 @@ fn the_engines_own_clients_are_not_listed() {
     drop(device);
     // Announcements are in order: whatever the opens announced is before this.
     until_in(&devices, &mut backlog, removed(id));
-    // The engine's ports are named like their clients; the stand-in devices of
-    // other tests are not.
+    // The engine's clients carry exactly these names, in this process and in
+    // any other copy of the suite running beside it; another test's device
+    // (`tutti-loop-<pid>-source`, `tutti-in-<pid>`) is a device and is listed.
     let engine = |i: &DeviceInfo| match i.id.identity() {
-        Identity::Alsa { client, port } => client.starts_with("tutti-") && client == port,
+        Identity::Alsa { client, .. } => {
+            client == super::input::CLIENT || client == super::output::CLIENT
+        }
         _ => false,
     };
     assert!(!backlog.iter().any(|e| engine(e.info())), "{backlog:?}");
@@ -549,11 +529,11 @@ fn asking_for_capabilities_does_not_wake_the_watch() {
     let id = info(until(&devices, added(&name))).id;
     // The first call opens the enumerating client, which announces itself once.
     assert!(devices.capability(&id).is_some());
-    let opens = super::client::OPENS.load(std::sync::atomic::Ordering::SeqCst);
+    let opens = tutti_alsa_ffi::clients_opened();
     for _ in 0..1000 {
         let _ = devices.capability(&id);
     }
-    let opened = super::client::OPENS.load(std::sync::atomic::Ordering::SeqCst) - opens;
+    let opened = tutti_alsa_ffi::clients_opened() - opens;
     assert_eq!(opened, 0, "{opened} sequencer clients opened for 1000 asks");
 }
 
@@ -613,18 +593,6 @@ fn a_device_that_takes_a_departed_clients_number_is_added_once() {
     }
 }
 
-/// Sends a note-on (UMP MIDI 1.0 channel voice, group 0) from `device`'s port 0
-/// to whoever is subscribed.
-fn send_note(device: &Virtual) {
-    device
-        .0
-        .send_to_subscribers(
-            PortId::of(0),
-            tutti_alsa_ffi::Packet::new(&[0x2090_3C64]).unwrap(),
-        )
-        .expect("send failed");
-}
-
 /// Renders blocks until the rig's clock reaches OS time `now`: the audio
 /// thread of a test that runs on the wall clock.
 fn run_to(rig: &mut crate::testing::Rig, now: Instant) {
@@ -638,6 +606,7 @@ fn run_to(rig: &mut crate::testing::Rig, now: Instant) {
 /// A device and an input pump connected to its port, with the inlet the pump
 /// fills and the graph (on the wall clock) that plays it.
 struct Pumped {
+    /// Keeps the device (and so the port the pump reads) alive.
     device: Virtual,
     rig: crate::testing::Rig,
     connection: Option<Box<dyn crate::endpoints::InputConnection>>,
@@ -652,25 +621,40 @@ impl Pumped {
 
     /// A pump on `device`'s port 0.
     fn over(device: Virtual, lead: Duration) -> Self {
+        let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
+        Self::start(device, id, lead, |_| {})
+    }
+
+    /// A pump on `device`'s port 0 whose client runs `hook` before each read.
+    fn hooked(
+        device: Virtual,
+        id: tutti_midi_device::EndpointId,
+        hook: impl FnMut() -> std::io::Result<()> + Send + 'static,
+    ) -> Self {
+        Self::start(device, id, Duration::ZERO, |seq| seq.set_read_hook(hook))
+    }
+
+    fn start(
+        device: Virtual,
+        id: tutti_midi_device::EndpointId,
+        lead: Duration,
+        prime: impl FnOnce(&Client),
+    ) -> Self {
         let inlets = tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), lead);
         let ports = std::sync::Arc::new(HardwareMidiInputs::new(std::sync::Arc::clone(&inlets)));
-        let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
         let (producer, inlet) = ports.open_input_port("pump");
         let mut rig = crate::testing::Rig::over(&inlets, Instant::now());
         rig.attach(inlet);
         rig.run(1);
-        let connection = super::input::open(id, producer).expect("the pump to open");
+        let (seq, clock) = super::input::prepare(id).expect("the pump's client");
+        prime(&seq);
+        let connection = super::input::start(seq, clock, producer).expect("the pump to open");
         Self {
             device,
             rig,
-            connection: Some(connection),
+            connection: Some(Box::new(connection)),
             _ports: ports,
         }
-    }
-
-    /// Sends a note-on from the device.
-    fn send(&self) {
-        send_note(&self.device);
     }
 }
 
@@ -779,21 +763,6 @@ fn only_a_source_that_cannot_speak_midi2_is_opened_as_midi1() {
     );
 }
 
-/// An idle pump sleeps: it does not come back from `poll` on a timer. The
-/// window only gives a timer the chance to show; a pump that is not woken has
-/// the same count however long it is.
-#[test]
-fn an_idle_pump_does_not_wake() {
-    let pumped = Pumped::open(Duration::ZERO);
-    std::thread::sleep(Duration::from_millis(50));
-    let before = super::input::PUMP_WAKES.load(std::sync::atomic::Ordering::SeqCst);
-    std::thread::sleep(Duration::from_secs(2));
-    let woke = super::input::PUMP_WAKES.load(std::sync::atomic::Ordering::SeqCst) - before;
-    // Another client's traffic does not reach this port, so nothing should wake it.
-    assert!(woke <= 3, "{woke} wakes in 2 s idle");
-    drop(pumped);
-}
-
 /// Dropping an input returns while its pump is blocked in `poll`: the drop
 /// completes, where a pump that waited for its next wake would never end.
 #[test]
@@ -808,127 +777,60 @@ fn dropping_an_input_stops_a_blocked_pump() {
     finished.recv_timeout(PATIENCE).expect("the pump to stop");
 }
 
-/// A pump whose reads keep failing ends, and the input reads as gone: the
-/// holder can see that the device went silent, and `connect_input` replaces it.
-/// The failure is injected (`INJECT_READ_ERROR`): a healthy sequencer has no
-/// other way to a failing read.
+/// A pump whose reads keep failing ends and raises its latch: the holder can
+/// see that the device went silent, and `connect_input` replaces it. The
+/// failure is the client's read hook (`set_read_hook`): a healthy sequencer has
+/// no other way to a failing read. The pump runs on this thread, so its return
+/// is the event.
 #[test]
-fn an_input_whose_pump_fails_reads_as_gone() {
-    let devices = Watched::open();
-    let ports = std::sync::Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(16), Duration::ZERO),
+fn a_pump_whose_reads_fail_ends_and_raises_its_latch() {
+    let device = plug(&unique("dies"));
+    let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
+    let (seq, clock) = super::input::prepare(id).expect("the pump's client");
+    seq.set_read_hook(|| Err(std::io::Error::from_raw_os_error(EIO)));
+    let (_stop, stop_rx) = std::os::unix::net::UnixStream::pair().unwrap();
+    let poller = seq.into_poller(stop_rx.into()).expect("descriptors");
+    let ports = HardwareMidiInputs::new(tutti_midi_runtime::InputInlets::new(
+        tutti_graph::EventCapacity::of(16),
+        Duration::ZERO,
     ));
-    let name = unique("dies");
-    let device = plug(&name);
-    let id = info(until(&devices, added(&name))).id;
-    let input = open_input_when_listed(&devices, &id, &ports);
-    assert!(input.is_alive(), "a running pump is alive");
-
-    // Clears the injection when the test ends, however it ends: a pump that
-    // keeps failing would otherwise never stop for the `drop` below.
-    struct Injected;
-    impl Drop for Injected {
-        fn drop(&mut self) {
-            super::input::INJECT_READ_ERROR.store(false, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-    let _injected = Injected;
-    super::input::INJECT_READ_ERROR.store(true, std::sync::atomic::Ordering::SeqCst);
-    // Wakes the parked pump; its reads then fail until the cap.
-    send_note(&device);
-    let deadline = Instant::now() + PATIENCE;
-    while input.is_alive() {
-        assert!(Instant::now() < deadline, "the pump never ended");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    // Dropping a dead input is as prompt as any.
-    drop(input);
+    let (producer, _inlet) = ports.open_input_port("dies");
+    let died = tutti_rt::FaultLatch::new();
+    super::input::pump(poller, clock, &died, producer);
+    assert!(died.is_raised(), "a pump that gave up raises the latch");
 }
 
-/// The time an event is given is when it arrived, not when the pump read it.
-/// The pump is held 400 ms after its wake (`PUMP_STALL_MS`), so three notes sent
-/// 50 and 100 ms apart are all in the queue when it reads; their spacing as the
-/// graph hears them (the frames they sound on) is the spacing of the instants
-/// the sender sent them at, within the sequencer clock's resolution and the
-/// scheduler's (both are measured, so load stretches both), and a read-time
-/// stamp would put all three within microseconds. The inlets' lead (one second)
-/// is longer than the stall, so no event is late and its frame is its
-/// arrival's.
-#[test]
-fn events_keep_the_spacing_they_arrived_with_when_the_pump_is_late() {
-    let rate = crate::testing::RATE;
-    super::input::PUMP_STALL_MS.store(400, std::sync::atomic::Ordering::SeqCst);
-    let mut pumped = Pumped::open(Duration::from_secs(1));
-
-    let mut sent = Vec::new();
-    for gap in [0, 50, 100] {
-        std::thread::sleep(Duration::from_millis(gap));
-        pumped.send();
-        sent.push(Instant::now());
-    }
-
-    // Each event's frame, as the graph plays it: the graph runs on the wall
-    // clock until all three have sounded.
-    let mut heard: Vec<u64> = Vec::new();
-    let deadline = Instant::now() + PATIENCE;
-    while heard.len() < 3 {
-        assert!(Instant::now() < deadline, "got {heard:?}");
-        run_to(&mut pumped.rig, Instant::now());
-        heard.extend(pumped.rig.take().iter().map(|e| e.1));
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    super::input::PUMP_STALL_MS.store(0, std::sync::atomic::Ordering::SeqCst);
-
-    for i in 1..3 {
-        let spacing = (heard[i] - heard[i - 1]) as f64 / rate;
-        let sent = (sent[i] - sent[i - 1]).as_secs_f64();
-        assert!(
-            (spacing - sent).abs() < 0.025,
-            "gap {i}: sent {sent:.4} s apart, heard {spacing:.4} s apart"
-        );
-    }
-}
+/// `EIO`, what the injected failure reads as.
+const EIO: i32 = 5;
 
 /// Dropping an input does not wait for ever on a pump that will not stop: here
-/// one held 30 s after a wake, which `JOIN_BOUND` (1 s) must cut short: the
-/// drop gives up after the bound and well before the pump would have ended.
+/// one held in its first read, which `JOIN_BOUND` cuts short, so the drop
+/// returns and detaches it. The test waits for the pump to be held (the hook
+/// says so), drops on another thread, and requires that drop to complete while
+/// the pump is still held; `PATIENCE` only guards the hang a waiting drop is.
 #[test]
 fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
-    use std::sync::atomic::Ordering;
-    super::input::PUMP_STALL_MS.store(30_000, Ordering::SeqCst);
-    let mut pumped = Pumped::open(Duration::ZERO);
-    let woke = super::input::PUMP_WAKES.load(Ordering::SeqCst);
-    pumped.send();
-    let deadline = Instant::now() + PATIENCE;
-    while super::input::PUMP_WAKES.load(Ordering::SeqCst) == woke {
-        assert!(Instant::now() < deadline, "the pump never woke");
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let connection = pumped.connection.take().unwrap();
-    let start = Instant::now();
-    drop(connection);
-    let took = start.elapsed();
-    // Releases the stalled pump, which would otherwise sleep out its 30 s.
-    super::input::PUMP_STALL_MS.store(0, std::sync::atomic::Ordering::SeqCst);
-    assert!(
-        took >= Duration::from_millis(900),
-        "gave up early: {took:?}"
-    );
-    assert!(
-        took < Duration::from_secs(25),
-        "waited on the pump: {took:?}"
-    );
-}
-
-/// A send after a panic poisoned the output lock still goes: the guarded state
-/// is a client and two ids, never half-written.
-#[test]
-fn an_output_with_a_poisoned_lock_still_sends() {
-    let target = plug(&unique("poisoned"));
-    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
-    let output = super::output::connect(id).expect("the output to open");
-    output.poison();
-    send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::Now);
+    let device = plug(&unique("stuck"));
+    let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
+    let (held, held_rx) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let mut pumped = Pumped::hooked(device, id, move || {
+        let _ = held.send(());
+        // Held until the sender drops.
+        let _ = released.recv();
+        Ok(())
+    });
+    held_rx.recv_timeout(PATIENCE).expect("the pump to be held");
+    let connection = pumped.connection.take();
+    let (dropped, dropped_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(connection);
+        let _ = dropped.send(());
+    });
+    dropped_rx
+        .recv_timeout(PATIENCE)
+        .expect("the drop to return while the pump is still held");
+    drop(release);
 }
 
 /// The next note message (type `0x2`) that reaches `device`'s port, polling

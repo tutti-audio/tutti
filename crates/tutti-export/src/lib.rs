@@ -235,7 +235,7 @@ pub struct Written {
     pub bytes: u64,
     /// Frames the file holds, at the file's rate: what the encoder was given,
     /// after the latency trim, the length and any resample (the stated length
-    /// of the resample, `StreamingResampler::output_frames`).
+    /// of the resample, `tutti_dsp::resampled_frames`).
     pub frames: Samples,
     /// Events the graph lost during the render that produced the file;
     /// nonzero only under [`EventLossPolicy::Allow`] (under `Fail` the render

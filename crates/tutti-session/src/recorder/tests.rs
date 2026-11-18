@@ -293,7 +293,7 @@ impl Source for Ramp {
 
     fn pull(&mut self, mut out: InterleavedMut<'_>) -> Pull {
         let out = out.samples_mut();
-        let fits = Samples::from_interleaved_len(out.len(), ChannelLayout::STEREO).get();
+        let fits = ChannelLayout::STEREO.from_interleaved_len(out.len()).get();
         let n = (self.frames - self.pos).min(fits);
         if n == 0 {
             return Pull::Ended;
@@ -680,7 +680,7 @@ fn pump_drains_a_finite_source_exactly() {
     let mut total = Samples::ZERO;
     while let Ok(Pull::Frames(n)) = pump(&mut src, &mut dst, &mut buf) {
         assert!(
-            n <= Samples::from_interleaved_len(buf.len(), ChannelLayout::STEREO),
+            n <= ChannelLayout::STEREO.from_interleaved_len(buf.len()),
             "pump reported more FRAMES than the buffer holds"
         );
         total += n;
