@@ -225,7 +225,7 @@ impl ClapLoaded {
             input_ports,
             output_ports,
             max_frames: max_block.get_u32(),
-            scratch,
+            scratch: Box::new(scratch),
             ranges: ranges.reader(),
             drain,
             reports,
