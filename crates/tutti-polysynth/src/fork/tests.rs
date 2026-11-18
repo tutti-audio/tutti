@@ -73,7 +73,7 @@ fn a_fork_takes_the_authored_volume_at_the_fork() {
         let set = source.params().clone();
         set.set(UnitParam::Volume, before);
         // A modulation driver's composite in the live cell: not authored.
-        live.set_volume(tutti_units::Amplitude(before * 3.0));
+        live.set_volume(tutti_units::Amplitude(f64::from(before) * 3.0));
         let fork = source.fork_node();
         set.set(UnitParam::Volume, after);
         peak(fork, 4_096)

@@ -119,14 +119,14 @@ impl FirDesign {
         let nyquist_hz = rate.nyquist();
         let nyquist = nyquist_hz.get();
         let transition = self.transition.get();
-        let attenuation = f64::from(self.attenuation.get());
+        let attenuation = self.attenuation.get();
         if !(transition.is_finite() && transition > 0.0) {
             return Err(FirError::NonPositiveTransition(self.transition));
         }
         if !(attenuation.is_finite() && attenuation > 0.0) {
             return Err(FirError::NonPositiveAttenuation(self.attenuation));
         }
-        if attenuation > f64::from(MAX_ATTENUATION.get()) {
+        if attenuation > MAX_ATTENUATION.get() {
             return Err(FirError::AttenuationTooHigh {
                 attenuation: self.attenuation,
                 max: MAX_ATTENUATION,
@@ -370,7 +370,7 @@ pub enum FirError {
 /// 50 dB, and 0 below 21 dB.
 #[must_use]
 pub fn kaiser_beta(attenuation: Db) -> f64 {
-    let a = f64::from(attenuation.get());
+    let a = attenuation.get();
     if a > 50.0 {
         0.1102 * (a - 8.7)
     } else if a >= 21.0 {

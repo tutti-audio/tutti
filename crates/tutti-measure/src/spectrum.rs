@@ -373,10 +373,9 @@ impl SpectrumPlan {
 
     /// Whole frames a peak is held for: the hold rounded up to the hop.
     ///
-    /// Worked in `f64` from the frame interval, since an `f32` one would turn an
-    /// exact multiple into one frame too many. The hold itself is an `f32` with
-    /// a relative error of at most 2^-24 (6e-8), so a millionth of slack keeps
-    /// 0.1 s at a hop of 480 samples and 48 kHz at 10 frames.
+    /// The quotient of an exact multiple can land a rounding above the integer
+    /// and turn into one frame too many, so a millionth of slack keeps 0.1 s at a
+    /// hop of 480 samples and 48 kHz at 10 frames.
     #[must_use]
     pub(crate) fn peak_hold_frames(&self) -> FrameCount {
         let frames = self.peak_hold.get().get() / self.geometry.frame_interval().get();
@@ -496,7 +495,7 @@ pub struct SpectrumMeter<S: Sample = f32> {
     levels: Vec<Db>,
     peaks: Vec<Db>,
     /// The level each peak last rose to, and the frames since.
-    anchor: Vec<f32>,
+    anchor: Vec<Db>,
     age: Vec<u32>,
     spectrogram: Vec<Db>,
     /// The next column to write, and how many hold a frame.
@@ -547,7 +546,7 @@ impl<S: Sample> SpectrumMeter<S> {
             power: vec![0.0; outputs],
             levels: vec![cfg.floor.get(); outputs],
             peaks: vec![cfg.floor.get(); outputs],
-            anchor: vec![cfg.floor.get().get(); outputs],
+            anchor: vec![cfg.floor.get(); outputs],
             age: vec![0; outputs],
             spectrogram: vec![cfg.floor.get(); cfg.columns * outputs],
             head: 0,
@@ -570,7 +569,7 @@ impl<S: Sample> SpectrumMeter<S> {
         self.power.fill(0.0);
         self.levels.fill(floor);
         self.peaks.fill(floor);
-        self.anchor.fill(floor.get());
+        self.anchor.fill(floor);
         self.age.fill(0);
         self.spectrogram.fill(floor);
         self.head = 0;
@@ -637,8 +636,8 @@ impl<S: Sample> SpectrumMeter<S> {
         let first = self.frames == 0;
         // Validated to fit when the state was built.
         let hold = cfg.peak_hold_frames().get() as u32;
-        // One product per call: exact, then rounded once to the `f32` the loop runs in.
-        let decay = (f64::from(cfg.peak_decay.get().get()) * dt.get()) as f32;
+        // The decay of one frame: one product per call.
+        let decay = cfg.peak_decay.get().get() * dt.get();
         let floor = cfg.floor.get();
 
         for i in 0..self.power.len() {
@@ -672,13 +671,13 @@ impl<S: Sample> SpectrumMeter<S> {
             self.levels[i] = level;
 
             self.age[i] = self.age[i].saturating_add(1);
-            let held = self.anchor[i] - decay * self.age[i].saturating_sub(hold) as f32;
-            if level.get() >= held {
-                self.anchor[i] = level.get();
+            let held = self.anchor[i] - Db(decay * f64::from(self.age[i].saturating_sub(hold)));
+            if level >= held {
+                self.anchor[i] = level;
                 self.age[i] = 0;
                 self.peaks[i] = level;
             } else {
-                self.peaks[i] = Db(held.max(floor.get()));
+                self.peaks[i] = held.max(floor);
             }
         }
 
@@ -704,11 +703,12 @@ fn clamp_power(p: f32) -> f32 {
     }
 }
 
-/// [`Db::from_power`], at least `floor`; zero power reads the floor.
+/// [`Db::from_power`], at least `floor`; zero power reads the floor. The power is an `f32`
+/// transform figure.
 #[inline]
 fn to_db(power: f32, floor: Db) -> Db {
     if power > 0.0 {
-        Db::from_power(power).max(floor)
+        Db::from_power(f64::from(power)).max(floor)
     } else {
         floor
     }

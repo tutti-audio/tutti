@@ -453,7 +453,7 @@ mod tests {
             })
             .collect();
         let peak = h.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let eps = f64::from(TAIL_FLOOR.to_amplitude().get());
+        let eps = TAIL_FLOOR.to_amplitude().get();
         h.iter().rposition(|v| v.abs() >= eps * peak).unwrap() + 1
     }
 

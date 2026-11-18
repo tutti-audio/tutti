@@ -45,7 +45,7 @@ fn render(bank: &mut VoiceBank, lanes: &[usize], frames: usize, step: usize) -> 
 }
 
 /// The envelope level after each of `frames` single-frame steps.
-fn envelope_trace(bank: &mut VoiceBank, lane: usize, frames: usize) -> Vec<f32> {
+fn envelope_trace(bank: &mut VoiceBank, lane: usize, frames: usize) -> Vec<f64> {
     (0..frames)
         .map(|_| {
             bank.mark_live(lane);
@@ -314,7 +314,7 @@ fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
     assert!(
         after.iter().all(|&e| e >= before),
         "retrigger dropped the level from {before} to {:?}",
-        after.iter().cloned().fold(f32::INFINITY, f32::min)
+        after.iter().cloned().fold(f64::INFINITY, f64::min)
     );
     assert!(
         before <= 1.0,

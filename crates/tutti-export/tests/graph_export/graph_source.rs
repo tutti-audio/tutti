@@ -352,7 +352,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
             Ok(r)
         },
     );
-    let target = Db(-1.0).to_amplitude().get();
+    let target = Db(-1.0).to_amplitude().get() as f32;
     let peak = tutti_fixtures::signal::peak(&float_samples(&bytes));
     assert!(
         peak <= target + 1e-6 && peak > target * 0.99,

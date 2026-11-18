@@ -82,7 +82,7 @@ impl<F: Float> BrickwallBank<F> {
 
     /// Aims at `controls`: a NaN ceiling is the default's, 0 dB.
     pub fn aim(&mut self, controls: &BrickwallControls) {
-        self.ceiling = Amplitude(amplitude::<f32>(controls.ceiling.get()).unwrap_or(1.0));
+        self.ceiling = Amplitude(amplitude::<f64>(controls.ceiling.get()).unwrap_or(1.0));
     }
 
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
@@ -98,7 +98,7 @@ impl<F: Float> BrickwallBank<F> {
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        let base = F::from_f32(self.ceiling.get());
+        let base = F::from_f64(self.ceiling.get());
         match lanes.ceiling {
             // Each frame's ceiling is converted once, for every channel.
             Some(lane) => {

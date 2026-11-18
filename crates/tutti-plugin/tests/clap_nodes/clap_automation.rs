@@ -50,7 +50,7 @@ impl Curve for Constant {
 /// normalized `v` sets.
 fn gained(v: f64) -> f32 {
     let db = GAIN_DB.0 + v * (GAIN_DB.1 - GAIN_DB.0);
-    tutti_units::Db::new(db as f32).to_amplitude().get()
+    tutti_units::Db::new(db).to_amplitude().get() as f32
 }
 
 /// **Automation reaches the plugin.** The probe renders its tag (1.0 on

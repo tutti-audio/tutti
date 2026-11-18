@@ -120,7 +120,7 @@ fn sweep(name: &str, node: ConvolverNode, gains: &[Option<f32>], driven: bool) {
     }
     for &gain in gains {
         if let Some(g) = gain {
-            cell.store(Amplitude(g));
+            cell.store(Amplitude(f64::from(g)));
         }
         // Past the first partitions, so the blocks take the hot path.
         for _ in 0..12 {

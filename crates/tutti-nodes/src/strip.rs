@@ -113,7 +113,7 @@ pub struct BusStripNode {
     /// The last finite volume read: a cell a host wrote a NaN or an infinity
     /// into reads as unchanged (see [`LastGood`]). Balance needs none: a NaN
     /// balance already reads as unity on both sides ([`Balance::gains`]).
-    good: LastGood,
+    good: LastGood<f64>,
 }
 
 /// Which side of the balance a channel is on.
@@ -329,8 +329,11 @@ impl BusStripNode {
             // has a SIMD conversion; it rounds as `usize` would.
             debug_assert!(i32::try_from(size).is_ok());
             let n = size as i32 as f32;
-            let ramp = |i: usize| lerp(start, end, (i + 1) as i32 as f32 / n).get();
-            let steady = end.get();
+            // The samples are `f32`: the endpoints narrow once per block, and the ramp runs in
+            // the sample width.
+            let (start, end) = (start.get() as f32, end.get() as f32);
+            let ramp = |i: usize| lerp(start, end, (i + 1) as i32 as f32 / n);
+            let steady = end;
             match (ramping, volume.is_some() || balance.is_some()) {
                 (false, false) => scale(x, y, |_| steady),
                 (true, false) => scale(x, y, ramp),
@@ -373,13 +376,15 @@ impl BusStripNode {
     /// is already a signal, and the graph that feeds it owns its continuity.
     #[inline(always)]
     fn fed_gain(volume: Option<&[f32]>, balance: Option<&[f32]>, i: usize, side: Side) -> f32 {
-        let fader = volume.map_or(Amplitude::UNITY, |v| Amplitude(v[i]));
+        // A fed value changes every frame, so its gain is computed per frame as `f64` units and
+        // narrows once, into the sample width.
+        let fader = volume.map_or(Amplitude::UNITY, |v| Amplitude(f64::from(v[i])));
         if side == Side::Mid {
-            return fader.get();
+            return fader.get() as f32;
         }
         let balance = balance.map_or(Balance::CENTER, |b| Balance(b[i]));
         let (l, r) = balance.gains();
-        ((if side == Side::Right { r } else { l }) * fader.get()).get()
+        ((if side == Side::Right { r } else { l }) * fader.get()).get() as f32
     }
 }
 
@@ -387,13 +392,11 @@ impl BusStripNode {
 ///
 /// Written as `from·(1−t) + to·t` rather than `from + (to−from)·t` for that
 /// endpoint: the second form rounds, so a ramp to silence could end a few
-/// ulps above zero and a strip faded to nothing would leak. Not an `Amplitude` operator
-/// because `Amplitude` deliberately has no `Add` (cascading gains multiply);
-/// an interpolation between two gains is a different operation, and this is
-/// its one home.
+/// ulps above zero and a strip faded to nothing would leak. Over the sample width's bare
+/// gains, narrowed once per block: a per-frame `f64` ramp would not vectorise with the product.
 #[inline(always)]
-fn lerp(from: Amplitude, to: Amplitude, t: f32) -> Amplitude {
-    Amplitude(tutti_dsp::lerp(from.get(), to.get(), t))
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    tutti_dsp::lerp(from, to, t)
 }
 
 /// `y = x · gain(frame)`, over one channel's block.
@@ -926,7 +929,7 @@ mod tests {
 
     /// One frame of ones through a strip on `topology` at `balance` and
     /// `volume`, read back by the speaker each channel feeds.
-    fn gain_by_speaker(topology: BusTopology, balance: f32, volume: f32) -> Vec<(Speaker, f32)> {
+    fn gain_by_speaker(topology: BusTopology, balance: f32, volume: f64) -> Vec<(Speaker, f32)> {
         let mut s = BusStripNode::new(topology);
         s.set_volume(Amplitude(volume));
         set_balance(&s, balance);
@@ -956,13 +959,14 @@ mod tests {
     fn a_stereo_strip_is_input_times_balance_law_times_volume() {
         for balance in [-1.0f32, -0.5, 0.0, 0.5, 1.0] {
             let (gl, gr) = Balance(balance).gains();
-            let volume = 0.5f32;
+            let volume = 0.5f64;
             let mut s = BusStripNode::stereo();
             s.set_volume(Amplitude(volume));
             set_balance(&s, balance);
             let (l, r) = tick2(&mut s, 0.75, -0.25);
-            assert_eq!(l, 0.75 * (gl.get() * volume), "left at {balance}");
-            assert_eq!(r, -0.25 * (gr.get() * volume), "right at {balance}");
+            // The samples are `f32`: each gain narrows into the product.
+            assert_eq!(l, 0.75 * (gl.get() * volume) as f32, "left at {balance}");
+            assert_eq!(r, -0.25 * (gr.get() * volume) as f32, "right at {balance}");
         }
     }
 

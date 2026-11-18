@@ -362,7 +362,7 @@ impl Reading {
         match self {
             // An integrated loudness is always above the gate when it was
             // measured, so the gate itself is the "passed nothing" sentinel.
-            Self::Lufs { loudness, .. } if loudness.lufs.get() <= ABSOLUTE_GATE_LUFS => {
+            Self::Lufs { loudness, .. } if loudness.lufs <= ABSOLUTE_GATE_LUFS => {
                 Err(Unmeasured::BelowGate)
             }
             Self::Peak { measured, .. } if measured.true_peak() <= Db::FLOOR => {
@@ -590,7 +590,7 @@ impl Measurer {
 
 /// EBU R128's absolute gate, in LUFS: what the meter's integrated loudness
 /// reads when no block passed it.
-const ABSOLUTE_GATE_LUFS: f32 = -70.0;
+const ABSOLUTE_GATE_LUFS: Db = Db(-70.0);
 
 #[cfg(test)]
 mod tests;

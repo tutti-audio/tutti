@@ -33,7 +33,7 @@ use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn band(gain: f32) -> EqBandNode<f32> {
+fn band(gain: f64) -> EqBandNode<f32> {
     EqBandNode::<f32>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(gain))
 }
 

@@ -27,7 +27,7 @@
 //!   that panics unwinds out of the switch and drops the session.
 //! - **Captures end** when the session leaves the sound card: each input the
 //!   session held closes and is reported as
-//!   [`DeviceEvent::InputClosed`](crate::DeviceEvent) (feature `audio-io`).
+//!   [`DeviceEvent::InputClosed`](crate::DeviceEvent) (feature `capture`).
 //! - **A rate that differs** is [`SessionEvent::RateChanged`].
 //! - **A failure gives the session back, running on its old clock,** with one
 //!   exception. Everything that can be known is refused before the old stream
@@ -115,8 +115,8 @@ fn note_rate_change(events: &mut Vec<SessionEvent>, from: SampleRate, to: Sample
 }
 
 /// The input latency cell the card's session reads, with the output's cell
-/// handed to the inputs (feature `audio-io`).
-#[cfg(feature = "audio-io")]
+/// handed to the inputs (feature `capture`).
+#[cfg(feature = "capture")]
 fn bind_inputs<K: crate::AppKey, F: crate::SessionFloat>(
     live: &mut LiveSession<K, F>,
     driver: &TuttiDriver<F>,
@@ -125,7 +125,7 @@ fn bind_inputs<K: crate::AppKey, F: crate::SessionFloat>(
     live.inputs.latency()
 }
 
-#[cfg(not(feature = "audio-io"))]
+#[cfg(not(feature = "capture"))]
 fn bind_inputs<K: crate::AppKey, F: crate::SessionFloat>(
     _: &mut LiveSession<K, F>,
     _: &TuttiDriver<F>,
@@ -339,7 +339,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     /// keeps the rate it ran at and takes the graph's block as the timer's,
     /// and the session has no audio in or out. The captures the session held
     /// end ([`DeviceEvent::InputClosed`](crate::DeviceEvent), feature
-    /// `audio-io`); the device watch ends with the device.
+    /// `capture`); the device watch ends with the device.
     ///
     /// **A failure gives the session back running on the card**: before the
     /// stream stops when the graph cannot re-prepare or a run waits
@@ -432,7 +432,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
             self.carried_events.append(&mut events);
             return Err(ClockError::new(self, after_stop(switch, undone)));
         }
-        #[cfg(feature = "audio-io")]
+        #[cfg(feature = "capture")]
         events.extend(self.inputs.close_all().into_iter().map(|input| {
             SessionEvent::Device(crate::DeviceEvent::InputClosed {
                 input: input.node().erase(),

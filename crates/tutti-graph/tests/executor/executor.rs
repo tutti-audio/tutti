@@ -414,7 +414,8 @@ impl Node for GainNode {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         // Read once per block, as the RT rules ask.
-        let g = self.0.load().0;
+        // The block is `f32`: the gain narrows once.
+        let g = self.0.load().0 as f32;
         io.channel(0).map(|x| x * g);
         Status::Modified
     }
@@ -956,7 +957,7 @@ impl Node for OutOfBand {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let level = self.level.load().get();
+        let level = self.level.load().get() as f32;
         let (ins, mut outs) = io.split();
         let mut silent = 0u64;
         for c in 0..usize::from(self.outputs) {

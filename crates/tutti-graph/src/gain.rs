@@ -204,9 +204,8 @@ impl Hash for EdgeGain {
 /// into and the executor snapshots once per block, and the range a driven
 /// value is clamped to.
 ///
-/// An [`Amplitude`] is a plain `f32` newtype, so the cell holds the raw `f32`
-/// (an `AtomicF32`, which is what a control lane's knob is) and converts at its
-/// edge: nothing outside it sees a bare float. **The base is the lane's
+/// The cell holds the base as an `f32` (an `AtomicF32`, which is what a control
+/// lane's knob is) and converts at its edge: nothing outside it sees a bare float. **The base is the lane's
 /// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] and a
 /// route's `ModState::set_knob` store into the same cell, so a routed
 /// modulation moves around the base and the base is what the gain returns to. The
@@ -228,7 +227,8 @@ impl GainCell {
         let ranges = ParamRanges::new(ParamPorts::of(&[EdgeGain::ADDR]));
         ranges.store(EdgeGain::ADDR, range);
         Self {
-            base: Arc::new(AtomicF32::new(base.get())),
+            // The cell is an `f32` param word: the base narrows once into it.
+            base: Arc::new(AtomicF32::new(base.get() as f32)),
             range: ranges,
             fade: Arc::new(AtomicU8::new(EdgeFade::None.bits())),
         }
@@ -247,7 +247,8 @@ impl GainCell {
 
     /// Store `base`. Wait-free.
     pub(crate) fn store(&self, base: Amplitude) {
-        self.base.store(base.get(), Ordering::Release);
+        // The cell is an `f32` param word: the base narrows once into it.
+        self.base.store(base.get() as f32, Ordering::Release);
     }
 
     /// Store `range`. Wait-free.
@@ -258,7 +259,7 @@ impl GainCell {
     /// The base now. Wait-free.
     #[inline]
     pub(crate) fn load(&self) -> Amplitude {
-        Amplitude::new(self.base.load(Ordering::Acquire))
+        Amplitude::new(f64::from(self.base.load(Ordering::Acquire)))
     }
 
     /// The base as a width-erased cell: the very cell the executor reads and
@@ -475,9 +476,10 @@ impl SumLane {
         };
         if let Some(drive) = &mut self.drive {
             drive.begin();
-            drive.port(0, EdgeGain::ADDR, frames, source, Some(to.get()));
+            // The param port is an `f32` lane: the goal narrows once per block.
+            drive.port(0, EdgeGain::ADDR, frames, source, Some(to.get() as f32));
             if let Some(f) = drive.frames(0, frames) {
-                self.prev = f.last().map(|&last| Amplitude::new(last));
+                self.prev = f.last().map(|&last| Amplitude::new(f64::from(last)));
                 // The port's frames are not scaled by a fade: it is over.
                 self.fade.start = None;
                 if want != self.fade.seen {
@@ -519,12 +521,7 @@ impl SumLane {
                 self.prev = Some(to);
             } else {
                 self.fade.k = k + frames;
-                self.prev = Some(Amplitude::new(fade_at(
-                    start.get(),
-                    to.get(),
-                    k + frames - 1,
-                    len,
-                )));
+                self.prev = Some(fade_at(start, to, k + frames - 1, len));
             }
             return w;
         }
@@ -554,7 +551,7 @@ pub(crate) struct Carried {
 /// `w` at fade frame `j` of a fade of `len` frames: `start` moved to `goal` along
 /// [`FadeLaw::EqualAmplitude`], and exactly `goal` from `len` on.
 #[inline(always)]
-pub(crate) fn fade_at(start: f32, goal: f32, j: usize, len: usize) -> f32 {
+pub(crate) fn fade_at(start: Amplitude, goal: Amplitude, j: usize, len: usize) -> Amplitude {
     FadeLaw::EqualAmplitude.between(start, goal, j, len)
 }
 
@@ -577,25 +574,27 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
             }
         }
         (Some(a), Weight::Static(w)) => {
-            let w = F::from_f32(w.get());
+            let w = F::from_f64(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
                 *o = F::ZERO + w * x;
             }
         }
         (None, Weight::Static(w)) => {
-            let w = F::from_f32(w.get());
+            let w = F::from_f64(w.get());
             for o in out.iter_mut() {
                 *o = F::ZERO + w * *o;
             }
         }
         (Some(a), Weight::Ramp { from, to }) => {
-            let (from, to) = (from.get(), to.get());
+            // The ramp is an `f32` piece: its ends narrow once per block.
+            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
                 *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
-            let (from, to) = (from.get(), to.get());
+            // The ramp is an `f32` piece: its ends narrow once per block.
+            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, o) in out.iter_mut().enumerate() {
                 *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * *o;
             }
@@ -609,9 +608,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
                 len,
             },
         ) => {
-            let (start, goal) = (start.get(), goal.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO + F::from_f32(fade_at(start, goal, k + i, len)) * x;
+                *o = F::ZERO + F::from_f64(fade_at(start, goal, k + i, len).get()) * x;
             }
         }
         (
@@ -623,9 +621,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
                 len,
             },
         ) => {
-            let (start, goal) = (start.get(), goal.get());
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO + F::from_f32(fade_at(start, goal, k + i, len)) * *o;
+                *o = F::ZERO + F::from_f64(fade_at(start, goal, k + i, len).get()) * *o;
             }
         }
         (Some(a), Weight::Frames(w)) => {
@@ -653,13 +650,14 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             }
         }
         Weight::Static(w) => {
-            let w = F::from_f32(w.get());
+            let w = F::from_f64(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
                 *o += w * x;
             }
         }
         Weight::Ramp { from, to } => {
-            let (from, to) = (from.get(), to.get());
+            // The ramp is an `f32` piece: its ends narrow once per block.
+            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
                 *o += F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
             }
@@ -670,9 +668,8 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             k,
             len,
         } => {
-            let (start, goal) = (start.get(), goal.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += F::from_f32(fade_at(start, goal, k + i, len)) * x;
+                *o += F::from_f64(fade_at(start, goal, k + i, len).get()) * x;
             }
         }
         Weight::Frames(w) => {
@@ -688,7 +685,7 @@ mod tests {
     use super::*;
 
     fn amp(v: f32) -> Amplitude {
-        Amplitude::new(v)
+        Amplitude::new(f64::from(v))
     }
 
     fn lane(base: f32) -> (GainCell, SumLane) {

@@ -25,12 +25,12 @@ fn session() -> DetachedSession {
 }
 
 /// The largest absolute sample the blocks hold.
-fn peak_of(blocks: &PeakBlocks) -> f32 {
+fn peak_of(blocks: &PeakBlocks) -> f64 {
     blocks
         .as_flat()
         .iter()
         .map(|block| block.peak().get())
-        .fold(0.0, f32::max)
+        .fold(0.0, f64::max)
 }
 
 fn write(path: &Path, rate: SampleRate, channels: u16, interleaved: &[f32]) {
@@ -92,7 +92,7 @@ fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
     write(&path, RATE, 1, &samples);
     let job = s.analyze(path, peak_blocks(1000));
     let blocks = land(&mut s, &job).unwrap();
-    let found: Vec<(usize, f32)> = blocks
+    let found: Vec<(usize, f64)> = blocks
         .channel(0)
         .unwrap()
         .iter()
@@ -122,7 +122,7 @@ fn a_stereo_file_keeps_each_channels_peak() {
             .unwrap()
             .iter()
             .map(|block| block.peak().get())
-            .fold(0.0, f32::max)
+            .fold(0.0, f64::max)
     };
     assert_eq!((peak(0), peak(1)), (0.5, 0.125));
 }

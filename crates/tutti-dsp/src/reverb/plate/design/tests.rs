@@ -65,7 +65,7 @@ fn the_decay_coefficient_gives_the_designed_rt60_by_the_closed_form() {
                 panic!("the decay gain")
             };
             let t = loop_frames(rate) / rate.get();
-            let rt60 = -3.0 * t / f64::from(g.get()).powi(4).log10();
+            let rt60 = -3.0 * t / g.get().powi(4).log10();
             assert!((rt60 - secs).abs() < 1e-4 * secs, "{rate:?} {secs}: {rt60}");
         }
     }
@@ -74,7 +74,7 @@ fn the_decay_coefficient_gives_the_designed_rt60_by_the_closed_form() {
 /// The paper's table 2 as it prints it: node, offset at 29761 Hz, sign; left output then right.
 /// `node24_30`, `31_33` and `33_39` are the left half's first delay, second lattice and second
 /// delay; `48_54`, `55_59` and `59_63` the right half's.
-const PAPER_TAPS: [[(&str, u32, f32); 7]; 2] = [
+const PAPER_TAPS: [[(&str, u32, f64); 7]; 2] = [
     [
         ("48_54", 266, 1.0),
         ("48_54", 2974, 1.0),
@@ -166,7 +166,7 @@ fn diffusion_scales_every_lattice_coefficient_and_zero_makes_them_delays() {
         };
         c.design_into(SampleRate::SR_48K, &mut n);
         let f = fdn_of(&n);
-        let mut all: Vec<f32> = n
+        let mut all: Vec<f64> = n
             .stages
             .iter()
             .filter_map(|s| match s {

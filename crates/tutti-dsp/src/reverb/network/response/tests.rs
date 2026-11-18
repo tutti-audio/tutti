@@ -6,33 +6,33 @@ use crate::reverb::network::{Gains, Inline, LineModulation, OutputMap, Tap, Taps
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// `v` as signed gains.
-fn gain_vec(v: &[f32]) -> Vec<Gain> {
+fn gain_vec(v: &[f64]) -> Vec<Gain> {
     v.iter().map(|&x| Gain::new(x)).collect()
 }
 
-fn gains(v: &[f32]) -> Gains {
+fn gains(v: &[f64]) -> Gains {
     Gains::from_slice(&gain_vec(v)).unwrap()
 }
 
-fn dense(v: &[f32]) -> Matrix {
+fn dense(v: &[f64]) -> Matrix {
     Matrix::Dense(Inline::from_slice(&gain_vec(v)).unwrap())
 }
 
-fn line(length: f32, absorption: Absorption) -> Line {
+fn line(length: f64, absorption: Absorption) -> Line {
     Line {
-        length: SampleSpan::of(f64::from(length)),
+        length: SampleSpan::of(length),
         modulation: LineModulation::NONE,
         absorption,
         diffuser: None,
     }
 }
 
-fn gain(g: f32) -> Absorption {
+fn gain(g: f64) -> Absorption {
     Absorption::Gain(Amplitude(g))
 }
 
 /// An FDN over `lines`, fed `input` and read through one row `output`.
-fn fdn(lines: &[Line], matrix: Matrix, input: &[f32], output: &[f32]) -> Fdn {
+fn fdn(lines: &[Line], matrix: Matrix, input: &[f64], output: &[f64]) -> Fdn {
     let mut rows = Inline::new();
     rows.push(gains(output)).unwrap();
     Fdn {
@@ -119,7 +119,6 @@ fn an_all_pass_has_the_l1_norm_of_its_impulse_response() {
         let d = 4usize;
         let len = 80 * d;
         let (mut h, mut buf) = (vec![0.0f64; len], vec![0.0f64; len]);
-        let g = f64::from(g);
         for t in 0..len {
             let x = if t == 0 { 1.0 } else { 0.0 };
             let back = |v: &[f64]| if t >= d { v[t - d] } else { 0.0 };
@@ -149,7 +148,7 @@ fn an_all_pass_has_the_l1_norm_of_its_impulse_response() {
 /// read on line 2 is `b c g z^-(m0 + m2) / (1 - g^3 z^-(m0 + m1 + m2))`.
 #[test]
 fn a_circulant_feeds_the_next_line_round_the_cycle() {
-    let (m, g) = ([30.0f32, 41.0, 53.0], 0.6f32);
+    let (m, g) = ([30.0f64, 41.0, 53.0], 0.6f64);
     let lines = m.map(|m| line(m, gain(g)));
     let f = fdn(
         &lines,
@@ -159,9 +158,8 @@ fn a_circulant_feeds_the_next_line_round_the_cycle() {
     );
     let n = network(vec![Stage::Fdn(f)]);
     for w in [0.0, 0.1, 0.77, 2.0, 3.1] {
-        let z = |d: f32| delay(w, f64::from(d));
-        let want =
-            z(m[0] + m[2]) * f64::from(g) / (ONE - z(m[0] + m[1] + m[2]) * f64::from(g).powi(3));
+        let z = |d: f64| delay(w, d);
+        let want = z(m[0] + m[2]) * g / (ONE - z(m[0] + m[1] + m[2]) * g.powi(3));
         assert!(
             close(at(&n, w), want),
             "w {w}: {:?} against {want:?}",
@@ -175,17 +173,17 @@ fn a_circulant_feeds_the_next_line_round_the_cycle() {
 /// as a dense one (the literal below is `H_4 / 2`).
 #[test]
 fn a_hadamard_is_the_sylvester_matrix() {
-    let m = [31.0f32, 37.0, 43.0, 47.0];
+    let m = [31.0f64, 37.0, 43.0, 47.0];
     let lines = m.map(|m| line(m, gain(0.7)));
     let (b, c) = ([1.0, 0.5, 0.25, 0.125], [0.3, 0.1, 0.2, 0.4]);
     let hadamard = network(vec![Stage::Fdn(fdn(&lines, Matrix::Hadamard, &b, &c))]);
     let h = [
-        [1.0f32, 1.0, 1.0, 1.0],
+        [1.0f64, 1.0, 1.0, 1.0],
         [1.0, -1.0, 1.0, -1.0],
         [1.0, 1.0, -1.0, -1.0],
         [1.0, -1.0, -1.0, 1.0],
     ];
-    let flat: Vec<f32> = h.iter().flatten().map(|x| x / 2.0).collect();
+    let flat: Vec<f64> = h.iter().flatten().map(|x| x / 2.0).collect();
     let dense = network(vec![Stage::Fdn(fdn(&lines, dense(&flat), &b, &c))]);
     for w in [0.0, 0.2, 1.1, 3.0] {
         assert!(close(at(&hadamard, w), at(&dense, w)), "w {w}");
@@ -196,7 +194,7 @@ fn a_hadamard_is_the_sylvester_matrix() {
 /// elimination over the same matrix written as a dense one.
 #[test]
 fn the_rank_one_solve_equals_elimination() {
-    let m = [101.0f32, 113.0, 127.0, 139.0, 149.0];
+    let m = [101.0f64, 113.0, 127.0, 139.0, 149.0];
     let lines = m.map(|m| {
         line(
             m,
@@ -208,16 +206,16 @@ fn the_rank_one_solve_equals_elimination() {
     });
     let (b, c) = ([1.0, 0.5, 0.25, 0.125, 0.0625], [0.3, -0.1, 0.2, 0.4, -0.2]);
     let n = 5usize;
-    let v = [0.5f32, 0.5, 0.5, 0.5, 0.0];
-    let norm = libm::sqrt(f64::from(v.iter().map(|x| x * x).sum::<f32>()));
-    let v: Vec<f32> = v.iter().map(|x| (f64::from(*x) / norm) as f32).collect();
+    let v = [0.5f64, 0.5, 0.5, 0.5, 0.0];
+    let norm = libm::sqrt(v.iter().map(|x| x * x).sum::<f64>());
+    let v: Vec<f64> = v.iter().map(|x| x / norm).collect();
     let dense_of = |entry: &dyn Fn(usize, usize) -> f64| {
-        let all: Vec<f32> = (0..n * n).map(|k| entry(k / n, k % n) as f32).collect();
+        let all: Vec<f64> = (0..n * n).map(|k| entry(k / n, k % n)).collect();
         dense(&all)
     };
     let id = |i: usize, j: usize| f64::from(u8::from(i == j));
     let householder = dense_of(&|i, j| id(i, j) - 2.0 / n as f64);
-    let reflection = dense_of(&|i, j| id(i, j) - 2.0 * f64::from(v[i]) * f64::from(v[j]));
+    let reflection = dense_of(&|i, j| id(i, j) - 2.0 * v[i] * v[j]);
     for (fast, slow) in [
         (Matrix::Householder, householder),
         (Matrix::Reflection(gains(&v)), reflection),
@@ -242,10 +240,10 @@ fn the_rank_one_solve_equals_elimination() {
 /// the larger and the elimination swaps.
 #[test]
 fn elimination_is_cramers_rule_on_two_lines() {
-    let m = [20.0f32, 33.0];
+    let m = [20.0f64, 33.0];
     let lines = m.map(|m| line(m, gain(3.0)));
-    let a = [[0.0f32, 1.0], [1.0, 0.0]];
-    let flat: Vec<f32> = a.iter().flatten().copied().collect();
+    let a = [[0.0f64, 1.0], [1.0, 0.0]];
+    let flat: Vec<f64> = a.iter().flatten().copied().collect();
     let n = network(vec![Stage::Fdn(fdn(
         &lines,
         dense(&flat),
@@ -267,7 +265,7 @@ fn elimination_is_cramers_rule_on_two_lines() {
 /// an all-pass `|g|^(1/D)`; of a loop the analysis cannot accept, infinity.
 #[test]
 fn the_spectral_radius_is_the_slowest_decay_per_frame() {
-    let (m, g) = ([1000.0f32, 2000.0], [0.9f32, 0.99]);
+    let (m, g) = ([1000.0f64, 2000.0], [0.9f64, 0.99]);
     let f = fdn(
         &[line(m[0], gain(g[0])), line(m[1], gain(g[1]))],
         Matrix::Diagonal,
@@ -275,7 +273,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
         &[1.0, 1.0],
     );
     let want = (0..2)
-        .map(|i| libm::pow(f64::from(g[i]), 1.0 / f64::from(m[i])))
+        .map(|i| libm::pow(g[i], 1.0 / m[i]))
         .fold(0.0, f64::max);
     let n = network(vec![Stage::Fdn(f)]);
     assert!(
@@ -367,7 +365,7 @@ fn the_l1_norm_is_exact_for_a_comb_and_a_bound_for_a_mixing_loop() {
     // Three Householder-mixed lines of gain 0.6, run in `f64`.
     let (m, g) = ([5usize, 7, 11], 0.6f64);
     let n = network(vec![Stage::Fdn(fdn(
-        &m.map(|m| line(m as f32, gain(g as f32))),
+        &m.map(|m| line(m as f64, gain(g))),
         Matrix::Householder,
         &[1.0, 0.5, 0.25],
         &[0.2, 0.4, 0.8],
@@ -457,7 +455,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     n.width = StereoWidth(0.0);
     n.wet = Db(-6.0);
     let (a, b) = both(&n);
-    let (mid, wet) = ((l + r) * 0.5, f64::from(Db(-6.0).to_amplitude().get()));
+    let (mid, wet) = ((l + r) * 0.5, Db(-6.0).to_amplitude().get());
     assert!(close(a, mid * wet) && close(b, mid * wet));
     // A width above 1 raises the l1 gain by the width.
     n.width = StereoWidth(2.0);

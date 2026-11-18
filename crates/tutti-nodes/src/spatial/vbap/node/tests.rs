@@ -2,7 +2,7 @@ use super::*;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
-use tutti_units::UnitParam;
+use tutti_units::{Gain, UnitParam};
 
 use tutti_dsp::SpeakerLayout;
 
@@ -559,9 +559,9 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
 
 /// The gains of a source at `azimuth` on the horizon: one per placed speaker,
 /// by the layout's own solve.
-fn solve(bed: Bed, azimuth: Azimuth) -> Vec<f32> {
+fn solve(bed: Bed, azimuth: Azimuth) -> Vec<Gain> {
     let layout = SpeakerLayout::from_bed(bed).unwrap();
-    let mut gains = vec![0.0f32; speaker_of_channel(bed).iter().flatten().count()];
+    let mut gains = vec![Gain::SILENT; speaker_of_channel(bed).iter().flatten().count()];
     layout.gains_into(azimuth, Elevation::LEVEL, Spread::POINT, &mut gains);
     gains
 }
@@ -603,7 +603,7 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
             solve(Bed::Quad, Azimuth(170.0)),
             solve(Bed::Quad, Azimuth(-170.0)),
         );
-        let mut worst_chord_gap = 0.0f32;
+        let mut worst_chord_gap = 0.0f64;
         for j in 1..=n + 2 {
             let out = drive(&mut node, rate, Planes::new(&[&ones, &ones]).unwrap(), &[]);
             for front in [0, 1] {
@@ -612,14 +612,15 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
             let bearing = Azimuth(170.0 + 20.0 * j.min(n) as f64 / n as f64).wrap();
             let want = solve(Bed::Quad, bearing);
             for c in 0..4 {
+                let want = want[c].get() as f32;
                 assert!(
-                    (out[c][GRID - 1] - want[c]).abs() < 1e-4,
-                    "{rate:?} point {j}, channel {c}: {} against {}",
+                    (out[c][GRID - 1] - want).abs() < 1e-4,
+                    "{rate:?} point {j}, channel {c}: {} against {want}",
                     out[c][GRID - 1],
-                    want[c]
                 );
             }
-            worst_chord_gap = worst_chord_gap.max((0.5 * (a[2] + b[2]) - want[2]).abs());
+            worst_chord_gap =
+                worst_chord_gap.max((0.5 * (a[2].get() + b[2].get()) - want[2].get()).abs());
         }
         assert!(worst_chord_gap > 0.01, "the chord of the ends is the arc");
     }
@@ -654,14 +655,17 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
             "channel {c} moved before the next grid point"
         );
         let Some(s) = *speaker else { continue };
-        let want = old[s] + (one_step[s] - old[s]) / GRID as f32;
+        let want = (old[s].get() + (one_step[s].get() - old[s].get()) / GRID as f64) as f32;
         assert!(
             (tail[c][8] - want).abs() < 1e-5,
             "channel {c}: first frame {} against {want}",
             tail[c][8]
         );
     }
-    assert!(one_step[0] > 0.0, "the step must move the left speaker");
+    assert!(
+        one_step[0] > Gain::SILENT,
+        "the step must move the left speaker"
+    );
 }
 
 /// A lane is followed, not smoothed: at each grid point the direction solved is
@@ -689,11 +693,11 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
         );
         let want = solve(Bed::Quad, Azimuth(f64::from(lane[0])));
         for c in 0..4 {
+            let want = want[c].get() as f32;
             assert!(
-                (out[c][GRID - 1] - want[c]).abs() < 1e-4,
-                "point {j}, channel {c}: {} against {}",
+                (out[c][GRID - 1] - want).abs() < 1e-4,
+                "point {j}, channel {c}: {} against {want}",
                 out[c][GRID - 1],
-                want[c]
             );
         }
     }

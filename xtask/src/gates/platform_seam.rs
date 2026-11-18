@@ -86,7 +86,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         PLUGINS,
     ),
     ("crates/tutti-plugin-types/src/probe_wire.rs", 1, PLUGINS),
-    ("crates/tutti-plugin/src/format/gui/mod.rs", 4, PLUGINS),
     ("crates/tutti-plugin/src/host/catalog.rs", 1, PLUGINS),
     ("crates/tutti-plugin/src/host/loadable.rs", 1, PLUGINS),
     (

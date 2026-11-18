@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_units::{Ballistics, Seconds};
+use tutti_units::{Ballistics, Db, Seconds};
 
 /// The frames a pass over a block takes at a time: the levels of a stretch become its gains
 /// in a stack array.
@@ -30,8 +30,7 @@ pub(super) fn level<F: Float>(x: F) -> F {
 }
 
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
-/// (as long as `frames`). Per-sample levels in `F`, which become `Amplitude` once that unit
-/// stores `f64`.
+/// (as long as `frames`): per-sample levels in `F`.
 #[inline]
 pub(crate) fn key_levels<S: Float, F: Float>(
     key: &Planes<'_, S>,
@@ -48,7 +47,7 @@ pub(crate) fn key_levels<S: Float, F: Float>(
 
 /// The widest knee, in dB, a detector's curve runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
 /// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
-pub(super) const MAX_KNEE_DB: f32 = 400.0;
+pub(super) const MAX_KNEE: Db = Db(400.0);
 
 /// The attack and release a control pair names, as a valid [`Ballistics`]: a time under 0 or
 /// NaN reads as 0 (instant) and an infinite one holds (coefficient 0), as

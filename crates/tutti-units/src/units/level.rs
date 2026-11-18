@@ -4,7 +4,7 @@ use super::*;
 
 unit! {
     /// Amplitude in decibels. Used for thresholds, gains, makeup, ceilings.
-    pub struct Db(pub f32): Unit, Ordered, Bounded, Additive, Signed;
+    pub struct Db(pub f64): Unit, Ordered, Bounded, Additive, Signed;
 }
 // dB is logarithmic, so cascaded gain stages ADD — unlike `Beat + Beat`, this
 // is meaningful. `Neg` inverts a gain (cut <-> boost).
@@ -27,7 +27,7 @@ impl Db {
     #[inline]
     #[must_use]
     pub fn to_amplitude(self) -> Amplitude {
-        Amplitude(libm::powf(10.0, self.0 / 20.0))
+        Amplitude(libm::pow(10.0, self.0 / 20.0))
     }
 
     /// Amplitude as decibels (`20·log10`). **Silence is `-inf`, not
@@ -47,27 +47,7 @@ impl Db {
     #[inline]
     #[must_use]
     pub fn from_amplitude(amp: Amplitude) -> Db {
-        Db(20.0 * libm::log10f(amp.0))
-    }
-
-    /// The amplitude ratio of `db` decibels in `f64`, `10^(db / 20)`: the working-precision
-    /// path for analysis and design, which widens a [`Db`] once at entry
-    /// (`f64::from(db.get())`) and narrows once at the end. The `f32` converters
-    /// ([`to_amplitude`](Self::to_amplitude)) stay the API. Through `libm`, so the result is
-    /// the same on every target.
-    #[inline]
-    #[must_use]
-    pub fn to_amplitude_f64(db: f64) -> f64 {
-        libm::pow(10.0, db / 20.0)
-    }
-
-    /// Decibels of an amplitude ratio in `f64`, `20 log10 ratio`: `-inf` for 0, NaN for a
-    /// negative ratio, as [`from_amplitude`](Self::from_amplitude) and under the same
-    /// working-precision rule as [`to_amplitude_f64`](Self::to_amplitude_f64).
-    #[inline]
-    #[must_use]
-    pub fn from_amplitude_f64(ratio: f64) -> f64 {
-        20.0 * libm::log10(ratio)
+        Db(20.0 * libm::log10(amp.0))
     }
 
     /// A power ratio as decibels (`10·log10`). `power` is a dimensionless
@@ -79,8 +59,8 @@ impl Db {
     /// at its own boundary, and a negative power is NaN.
     #[inline]
     #[must_use]
-    pub fn from_power(power: f32) -> Db {
-        Db(10.0 * libm::log10f(power))
+    pub fn from_power(power: f64) -> Db {
+        Db(10.0 * libm::log10(power))
     }
 }
 
@@ -90,7 +70,7 @@ unit! {
     /// **Not** a 0..1 quantity: a +6 dB peak is `Amplitude(2.0)`, and the
     /// dynamics detectors routinely see values above unity. The only floor is
     /// zero — [`SILENT`](Self::SILENT).
-    pub struct Amplitude(pub f32): Unit, Ordered, Bounded, Scalable;
+    pub struct Amplitude(pub f64): Unit, Ordered, Bounded, Scalable;
 }
 // NOT `Additive`: cascading two gain stages MULTIPLIES them. Summing
 // amplitudes is what mixing two signals does, and that is the signals' job,
@@ -128,6 +108,16 @@ impl From<Db> for Amplitude {
     }
 }
 
+impl Amplitude {
+    /// The straight line from `self` to `to` at `t`, with `t` in `0..=1`:
+    /// `self` at 0, `to` at 1. A gain ramp is linear in amplitude.
+    #[inline]
+    #[must_use]
+    pub fn lerp(self, to: Amplitude, t: f64) -> Amplitude {
+        Amplitude(self.0 + (to.0 - self.0) * t)
+    }
+}
+
 unit! {
     /// A signed linear gain: the multiplier on a signal, which may invert it.
     ///
@@ -143,9 +133,9 @@ unit! {
     ///
     /// The signed multiplier: an all-pass coefficient, a polarity, a routing
     /// weight. A delay's bounded feedback amount is [`Feedback`], not a `Gain`.
-    pub struct Gain(pub f32): Unit, Ordered, Bounded, Additive, Signed;
+    pub struct Gain(pub f64): Unit, Ordered, Bounded, Additive, Signed;
 }
-// NOT `Scalable`: `Amplitude * f32` scales the amplitude, so a `Gain * f32`
+// NOT `Scalable`: `Amplitude * f64` scales the amplitude, so a `Gain * f64`
 // that applied it to a sample would read differently for the same `x * 0.5`.
 // Apply with `apply`; compose gains with `Gain * Gain`.
 // NOT `Div` / `Ratio`: a quotient of gains divides by a zero gain. `recip` is
@@ -184,7 +174,7 @@ impl Gain {
     /// This gain applied to a sample.
     #[inline]
     #[must_use]
-    pub fn apply(self, sample: f32) -> f32 {
+    pub fn apply(self, sample: f64) -> f64 {
         self.0 * sample
     }
 

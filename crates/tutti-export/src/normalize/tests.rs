@@ -1,7 +1,7 @@
 use super::*;
 use tutti_measure::Loudness;
 
-fn reading(lufs: f32, true_peak: f32) -> Loudness {
+fn reading(lufs: f64, true_peak: f64) -> Loudness {
     Loudness {
         lufs: Db(lufs),
         true_peak: Db(true_peak),
@@ -65,8 +65,8 @@ mod headroom {
     }
 
     /// dBFS of `1 - lsbs / 2^(bits - 1)`: `lsbs` LSBs below full scale.
-    fn below_full_scale(bits: u32, lsbs: f64) -> f32 {
-        (20.0 * (1.0 - lsbs / f64::from(1u32 << (bits - 1))).log10()) as f32
+    fn below_full_scale(bits: u32, lsbs: f64) -> f64 {
+        Db::from_amplitude(Amplitude(1.0 - lsbs / f64::from(1u32 << (bits - 1)))).get()
     }
 
     /// An integer format keeps one LSB plus the dither's amplitude below full
@@ -83,7 +83,7 @@ mod headroom {
                 let got = headroom_ceiling(&config(pcm, dither)).expect("quantizes");
                 let want = below_full_scale(bits, lsbs);
                 assert!(
-                    (got.get() - want).abs() < 1e-7,
+                    (got.get() - want).abs() < 1e-12,
                     "{pcm:?} {dither:?}: {got:?} vs {want}"
                 );
             }
@@ -97,7 +97,7 @@ mod headroom {
     fn a_target_above_the_limit_is_pulled_to_it() {
         let int16 = config(Pcm::Int16, Some(DitherShape::Triangular));
         let limit = Db(below_full_scale(16, 2.0));
-        let near = |a: Db, b: Db| (a.get() - b.get()).abs() < 1e-7;
+        let near = |a: Db, b: Db| (a.get() - b.get()).abs() < 1e-12;
 
         let Normalize::Peak { target } = Normalize::peak(Db(0.0)).within(&int16) else {
             unreachable!()
@@ -144,8 +144,8 @@ mod measurer {
     /// A 1 kHz sine of `secs` seconds, as planes: amplitude `amp` on the left
     /// and half of it on the right, so a measurement that put a sample on the
     /// wrong channel reads something else.
-    fn sine(secs: usize, amp: f32) -> Rendered {
-        let plane = |amp: f32| -> Vec<f32> {
+    fn sine(secs: usize, amp: f64) -> Rendered {
+        let plane = |amp: f64| -> Vec<f32> {
             tutti_fixtures::signal::sine(Hz(1_000.0), Amplitude(amp), RATE, Samples(secs * 48_000))
         };
         Rendered::new(vec![plane(amp), plane(amp / 2.0)], RATE, 0).expect("equal planes")
@@ -206,7 +206,7 @@ mod measurer {
             .into_finished()
             .expect("not cancelled");
 
-        let analytic_lufs = 20.0 * 0.1f32.log10() + 10.0 * 0.625f32.log10();
+        let analytic_lufs = Db::from_amplitude(Amplitude(0.1)).get() + Db::from_power(0.625).get();
         assert!(
             (chunked.lufs.get() - analytic_lufs).abs() < 0.1,
             "{:?} vs {analytic_lufs}",

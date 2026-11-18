@@ -105,7 +105,7 @@ fn dc_wave(len: usize) -> Arc<Wave> {
 }
 
 /// A placed voice in a pool at `play_gain`, plus the clock driving it.
-fn pool_at_gain(play_gain: f32) -> (VoicePool, Arc<Clock>) {
+fn pool_at_gain(play_gain: f64) -> (VoicePool, Arc<Clock>) {
     let clock = Clock::new();
     let source = MemorySource::with_config(
         dc_wave(SR as usize),
@@ -152,17 +152,17 @@ fn settled_mean(out: &[f32]) -> f64 {
 /// unity alone would prove nothing; 0.5 squared is 0.25, a 6 dB error.
 #[test]
 fn voice_gain_scales_the_output_by_exactly_its_value() {
-    for g in [1.0f32, 0.5, 0.25, 0.75, 0.1] {
+    for g in [1.0f64, 0.5, 0.25, 0.75, 0.1] {
         let (mut pool, clock) = pool_at_gain(g);
         let out = render_placed(&mut pool, &clock, 8);
         let got = settled_mean(&out);
-        let want = (LEVEL * g) as f64;
+        let want = f64::from(LEVEL) * g;
 
         assert!(
             (got - want).abs() < 1e-4,
             "gain {g}: output is {got:.6}, expected {want:.6} \
              (a squared gain would give {:.6})",
-            (LEVEL * g * g) as f64
+            f64::from(LEVEL) * g * g
         );
     }
 }
@@ -253,11 +253,11 @@ fn zero_gain_is_exactly_silent() {
 /// cap every boosted clip.
 #[test]
 fn gain_above_unity_amplifies() {
-    for g in [1.5f32, 2.0, 4.0] {
+    for g in [1.5f64, 2.0, 4.0] {
         let (mut pool, clock) = pool_at_gain(g);
         let out = render_placed(&mut pool, &clock, 8);
         let got = settled_mean(&out);
-        let want = (LEVEL * g) as f64;
+        let want = f64::from(LEVEL) * g;
 
         assert!(
             (got - want).abs() < 1e-4,
@@ -321,7 +321,7 @@ fn gain_scales_every_channel_equally() {
 /// than a claim about a field nobody reads.
 #[test]
 fn a_bare_memory_source_applies_its_own_gain() {
-    for g in [1.0f32, 0.5, 0.25] {
+    for g in [1.0f64, 0.5, 0.25] {
         let mut source = MemorySource::with_config(
             dc_wave(SR as usize),
             MemorySourceConfig {
@@ -336,7 +336,7 @@ fn a_bare_memory_source_applies_its_own_gain() {
 
         let b = Clock::new().block(&mut source);
         let got = b[0][10] as f64;
-        let want = (LEVEL * g) as f64;
+        let want = f64::from(LEVEL) * g;
         assert!(
             (got - want).abs() < 1e-4,
             "bare source at gain {g}: got {got:.6}, expected {want:.6}"

@@ -81,7 +81,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
 
     set_mode(&mut s, NodeMode::Active);
     let back = s.render_input(Planes::new(&[&x, &x]).unwrap());
-    let fader = Amplitude(0.75).get();
+    let fader = Amplitude(0.75).get() as f32;
     for (c, y) in back.iter().enumerate() {
         let want: Vec<u32> = x[from..].iter().map(|v| (v * fader).to_bits()).collect();
         assert_eq!(bits(&y[from..]), want, "channel {c} is the fader again");

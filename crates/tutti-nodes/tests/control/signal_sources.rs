@@ -478,7 +478,7 @@ fn adsr(a: f32, d: f32, s: f32, r: f32) -> Adsr {
     Adsr {
         attack: Seconds::from_f32(a),
         decay: Seconds::from_f32(d),
-        sustain: Amplitude(s),
+        sustain: Amplitude(f64::from(s)),
         release: Seconds::from_f32(r),
     }
 }

@@ -42,7 +42,7 @@ struct Bands {
 }
 
 impl Bands {
-    fn new(t0: f32, t1: f32) -> Self {
+    fn new(t0: f64, t1: f64) -> Self {
         Self {
             thr: [Param::new(Db(t0)), Param::new(Db(t1))],
         }
@@ -59,7 +59,7 @@ impl Node for Bands {
             match io.param(k) {
                 ParamInput::Base => {
                     let base = thr.load().0;
-                    io.output(k).fill(base);
+                    io.output(k).fill(base as f32);
                 }
                 ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
             }
@@ -68,7 +68,7 @@ impl Node for Bands {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f32> {
-        self.thr.get(port).map(|p| p.load().0)
+        self.thr.get(port).map(|p| p.load().0 as f32)
     }
 }
 

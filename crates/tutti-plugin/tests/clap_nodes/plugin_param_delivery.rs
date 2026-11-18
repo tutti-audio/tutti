@@ -215,7 +215,7 @@ fn gain_at(db: f64) -> f32 {
 
 /// The probe's tag (1.0 on channel 0) at `db`.
 fn amplitude(db: f64) -> f32 {
-    tutti_units::Db::new(db as f32).to_amplitude().get()
+    tutti_units::Db::new(db).to_amplitude().get() as f32
 }
 
 /// **An export renders an edit made in the plugin's own editor, as live

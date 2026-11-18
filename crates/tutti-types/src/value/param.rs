@@ -382,10 +382,10 @@ where
 /// An `f32` unit is not a `Param64`:
 ///
 /// ```compile_fail
-/// use tutti_units::Db;
+/// use tutti_units::Mix;
 /// use tutti_types::Param64;
 /// struct Filter {
-///     threshold: Param64<Db>, // `Param<Db>`
+///     wet: Param64<Mix>, // `Param<Mix>`
 /// }
 /// ```
 pub struct Param64<U: Unit<Raw = f64>> {

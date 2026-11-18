@@ -81,7 +81,7 @@ mod general_midi;
 mod graph;
 #[cfg(feature = "plugin")]
 mod hang;
-#[cfg(all(feature = "device", feature = "audio-io"))]
+#[cfg(feature = "capture")]
 mod input;
 #[cfg(feature = "midi")]
 mod instrument;
@@ -133,7 +133,7 @@ mod sampler;
 mod session;
 #[cfg(feature = "device")]
 mod switch;
-#[cfg(all(feature = "device", feature = "audio-io"))]
+#[cfg(feature = "capture")]
 mod take;
 mod transport_handle;
 mod value;
@@ -178,7 +178,7 @@ pub use graph::{
     Committed, Crossfade, CrossfadeId, CrossfadeRefused, Feeder, Graph, LIVE_MAX_BLOCK, Meters,
     NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
-#[cfg(all(feature = "device", feature = "audio-io"))]
+#[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
@@ -270,7 +270,7 @@ pub use session::ModInput;
 pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
 #[cfg(feature = "device")]
 pub use switch::ClockError;
-#[cfg(all(feature = "device", feature = "audio-io"))]
+#[cfg(feature = "capture")]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
     TakeError, TakeEvent, TakeId, TakeTarget, Terms, Window,

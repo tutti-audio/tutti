@@ -3,12 +3,13 @@
 
 use super::*;
 use crate::{Oversampling, OversamplingFactor};
+use tutti_units::Amplitude;
 
 /// The ceiling the cases limit to: 0.5, -6.02 dB.
 const CEILING: f64 = 0.5;
 
-fn ceiling_db() -> f32 {
-    (20.0 * CEILING.log10()) as f32
+fn ceiling_db() -> f64 {
+    Db::from_amplitude(Amplitude(CEILING)).get()
 }
 
 /// A bank limiting to `CEILING` with no drive (threshold at the ceiling: the gain is
@@ -104,7 +105,7 @@ fn db(ratio: f64) -> f64 {
 
 /// The bound a true-peak bank keeps: the ceiling and its margin, in amplitude.
 fn bound() -> f64 {
-    CEILING * 10f64.powf(f64::from(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get()) / 20.0)
+    CEILING * 10f64.powf(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get() / 20.0)
 }
 
 /// The bound of a tone of `cycles` of the rate: its own band limit in place of the passband's,
@@ -179,7 +180,7 @@ fn a_sample_peak_limiter_leaves_an_fs_4_sine_3_db_over_its_ceiling_between_sampl
         (over - analytic).abs() < 0.01,
         "{over} dB over, analytic {analytic} dB"
     );
-    assert!(over > f64::from(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get()) + 2.0);
+    assert!(over > LimiterBank::<f32>::TRUE_PEAK_MARGIN.get() + 2.0);
 }
 
 /// The same signal through a true-peak limiter reaches the ceiling between its samples, to

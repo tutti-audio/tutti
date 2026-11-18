@@ -53,7 +53,7 @@ fn block_values_are_exact_for_a_ramp() {
         let lo = (i * 100) as f32;
         assert_eq!(block.min, lo);
         assert_eq!(block.max, lo + 99.0);
-        assert_eq!(block.peak(), Amplitude(lo + 99.0));
+        assert_eq!(block.peak(), Amplitude(f64::from(lo + 99.0)));
     }
 }
 
@@ -419,7 +419,7 @@ fn merge_unions_the_range_and_takes_the_quadratic_mean() {
     assert_eq!(m.min, -1.0, "the lower of the two mins");
     assert_eq!(m.max, 2.0, "the upper of the two maxes");
     // sqrt((0² + 1²) / 2), not (0 + 1) / 2.
-    assert!((m.rms.0 - 0.5f32.sqrt()).abs() < 1e-6, "got {}", m.rms.0);
+    assert!((m.rms.0 - 0.5f64.sqrt()).abs() < 1e-6, "got {}", m.rms.0);
 }
 
 /// The trait fold over uneven chunks (1, 7, 64 frames and the rest) yields
@@ -478,7 +478,7 @@ fn an_odd_and_a_wide_layout_keep_every_sample_on_its_channel() {
             assert!(
                 ch(&blocks, c)
                     .iter()
-                    .all(|b| b.min == want && b.max == want && b.rms.0 == want),
+                    .all(|b| b.min == want && b.max == want && b.rms.0 == f64::from(want)),
                 "channel {c} of {channels}"
             );
         }

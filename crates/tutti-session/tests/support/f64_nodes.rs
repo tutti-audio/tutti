@@ -49,9 +49,9 @@ impl<F: Float> Node<F> for Gain {
             .enumerate()
             .take(size)
         {
-            let gain = driven.map_or(cell, |lane| lane[n]);
-            // The param cell and a lane's frames are `f32` words; the product is in `F`.
-            *o = *i * F::from_f64(f64::from(gain));
+            // A lane's frames are `f32` words; the product is in `F`.
+            let gain = driven.map_or(cell, |lane| f64::from(lane[n]));
+            *o = *i * F::from_f64(gain);
         }
         Status::Modified
     }

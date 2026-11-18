@@ -561,7 +561,8 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         "they measured nothing"
     );
 
-    let scale = gain.to_amplitude().get();
+    // The decoded files are `f32`: the scale narrows once.
+    let scale = gain.to_amplitude().get() as f32;
     let (m, da, db) = (decode(&files[0]), decode(&files[1]), decode(&files[2]));
     for c in 0..2 {
         let want_a = [0.2, 0.1][c] * scale;
@@ -887,7 +888,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
     assert_eq!(written.measured, None);
     let gain = written.gain.expect("normalized").get();
     assert!(
-        (gain - (-12.0 - 20.0 * 0.5f32.log10())).abs() < 0.1,
+        (gain - (-12.0 - Db::from_amplitude(Amplitude(0.5)).get())).abs() < 0.1,
         "{gain}"
     );
     let peak = decode(&path)
@@ -923,6 +924,6 @@ fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     .unwrap();
     assert_eq!(written.placement, tutti_types::Placement::Assumed);
     let lufs = written.measured.expect("a placed loudness").lufs.get();
-    let analytic = 10.0 * (0.5f32.powi(2) / 2.0 * 5.82).log10();
+    let analytic = Db::from_power(0.5f64.powi(2) / 2.0 * 5.82).get();
     assert!((lufs - analytic).abs() < 0.1, "{lufs} vs {analytic}");
 }

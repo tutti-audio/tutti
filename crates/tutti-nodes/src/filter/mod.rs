@@ -106,7 +106,7 @@ pub(super) mod test_utils {
                 y
             })
             .collect();
-        let eps = f64::from(tutti_dsp::TAIL_FLOOR.to_amplitude().get());
+        let eps = tutti_dsp::TAIL_FLOOR.to_amplitude().get();
         let mut sum = 0.0;
         for n in (0..h.len()).rev() {
             sum += h[n].abs();

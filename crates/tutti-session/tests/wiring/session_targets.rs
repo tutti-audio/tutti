@@ -119,8 +119,8 @@ fn a_click_volume_outside_the_unit_range_is_refused_and_lands_nothing() {
     for (bad, refusal) in [
         (1.01, SetRefusal::OutOfRange),
         (-0.01, SetRefusal::OutOfRange),
-        (f32::NAN, SetRefusal::NotFinite),
-        (f32::INFINITY, SetRefusal::NotFinite),
+        (f64::NAN, SetRefusal::NotFinite),
+        (f64::INFINITY, SetRefusal::NotFinite),
     ] {
         let refused = s.set(volume.to(Amplitude::new(bad))).unwrap_err();
         assert_eq!(refused.kind, ValueErrorKind::Refused(refusal), "{bad}");
@@ -143,7 +143,7 @@ fn a_batch_with_a_refused_click_volume_lands_nothing() {
     let refused = s
         .set((
             tempo.to(ramped()),
-            s.click().volume().to(Amplitude::new(f32::NAN)),
+            s.click().volume().to(Amplitude::new(f64::NAN)),
         ))
         .unwrap_err();
     assert_eq!(refused.at, 1);

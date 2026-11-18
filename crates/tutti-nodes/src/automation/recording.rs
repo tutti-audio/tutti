@@ -501,7 +501,7 @@ mod tests {
         // A dead-straight ramp: every interior point is redundant.
         r.config.min_point_interval = BeatDuration(0.0);
         for i in 0..=10 {
-            r.record(Beat(i as f64), Db(i as f32 / 10.0));
+            r.record(Beat(i as f64), Db(f64::from(i) / 10.0));
         }
         let dense = r.trajectory.len();
         let env = r.finish();

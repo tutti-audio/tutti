@@ -306,7 +306,7 @@ pub enum SessionEvent {
     Device(crate::DeviceEvent),
     /// A take of the session's: its first frame arrived, it ended, or it
     /// failed ([`TakeEvent`](crate::TakeEvent)).
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     Take(crate::TakeEvent),
     /// A modulation problem (design 015 §4.7), the one type
     /// [`ModState::problems`](crate::ModState::problems) lists. Reported
@@ -417,7 +417,7 @@ impl std::fmt::Debug for SessionEvent {
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
             Self::Device(event) => f.debug_tuple("Device").field(event).finish(),
-            #[cfg(all(feature = "device", feature = "audio-io"))]
+            #[cfg(feature = "capture")]
             Self::Take(event) => f.debug_tuple("Take").field(event).finish(),
             Self::Modulation(problem) => f.debug_tuple("Modulation").field(problem).finish(),
             #[cfg(feature = "midi")]
@@ -628,7 +628,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     #[cfg(feature = "device")]
     pub(crate) outputs_listed: bool,
     /// The capture inputs added ([`Session::add_input`]) and the host they open on.
-    #[cfg(all(feature = "device", feature = "audio-io"))]
+    #[cfg(feature = "capture")]
     pub(crate) inputs: crate::input::Inputs<C::Float>,
     /// How often a healthy plugin's state is captured.
     #[cfg(feature = "plugin")]
@@ -855,7 +855,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             output_listing,
             #[cfg(feature = "device")]
             outputs_listed,
-            #[cfg(all(feature = "device", feature = "audio-io"))]
+            #[cfg(feature = "capture")]
             inputs,
             #[cfg(feature = "plugin")]
             snapshot_interval,
@@ -921,7 +921,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 output_listing,
                 #[cfg(feature = "device")]
                 outputs_listed,
-                #[cfg(all(feature = "device", feature = "audio-io"))]
+                #[cfg(feature = "capture")]
                 inputs,
                 #[cfg(feature = "plugin")]
                 snapshot_interval,
@@ -1550,7 +1550,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             // (it is in the graph unless the caller removed it first).
             let _ = self.graph.remove(pair);
         }
-        #[cfg(all(feature = "device", feature = "audio-io"))]
+        #[cfg(feature = "capture")]
         self.inputs.forget(node);
     }
 

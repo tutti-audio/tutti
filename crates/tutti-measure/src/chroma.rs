@@ -353,11 +353,12 @@ impl ChromaPlan {
         };
         let top = magnitudes[lo..=hi].iter().copied().fold(0.0f32, f32::max);
         // A sine of amplitude `a` reads `a * magnitude_gain / 2`.
-        let amplitude = 2.0 * top / self.geometry.magnitude_gain();
+        let amplitude = 2.0 * f64::from(top) / f64::from(self.geometry.magnitude_gain());
         if amplitude.is_nan() || amplitude < SILENCE_FLOOR.to_amplitude().get() {
             return false;
         }
-        let floor = top * self.peak_floor.get().to_amplitude().get();
+        // The magnitudes are `f32`: the floor's ratio narrows once.
+        let floor = top * self.peak_floor.get().to_amplitude().get() as f32;
         // A floor that compares false with a peak (a NaN) keeps none.
         for i in local_maxima(magnitudes, lo..hi + 1).filter(|&i| magnitudes[i] >= floor) {
             let m = magnitudes[i];

@@ -7,7 +7,7 @@ use tutti_units::{Beat, Bipolar, Db};
 use super::{Breakpoint, Trajectory};
 use crate::Law;
 
-fn point(beat: f64, value: f32) -> Breakpoint<Db> {
+fn point(beat: f64, value: f64) -> Breakpoint<Db> {
     Breakpoint::new(Beat(beat), Db(value))
 }
 
@@ -124,7 +124,7 @@ fn simplify_drops_the_redundant_and_keeps_the_corner() {
         e.add_breakpoint(point(b, v));
     }
     e.simplify(0.01);
-    let kept: Vec<(f64, f32)> = e
+    let kept: Vec<(f64, f64)> = e
         .breakpoints()
         .iter()
         .map(|p| (p.time.get(), p.value.get()))
@@ -171,8 +171,8 @@ fn an_f64_unit_is_read_at_its_own_width() {
 #[test]
 fn an_f32_unit_narrows_the_f64_evaluation_once() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(point(0.0, 0.1))
-        .add_breakpoint(point(2.0, 0.3));
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), Bipolar::of(0.1)))
+        .add_breakpoint(Breakpoint::new(Beat(2.0), Bipolar::of(0.3)));
     let got = e.value_at(Beat(1.0)).unwrap().get();
     assert!(
         (got.to_bits() as i64 - 0.2f32.to_bits() as i64).abs() <= 1,

@@ -441,12 +441,12 @@ impl<F: Float> LimiterBank<F> {
         };
         let threshold = lane_or(
             lanes.threshold,
-            F::from_f32(self.design.threshold.get()),
+            F::from_f64(self.design.threshold.get()),
             |t, _| t,
         );
         let ceiling = lane_or(
             lanes.ceiling,
-            F::from_f32(self.design.ceiling.get()),
+            F::from_f64(self.design.ceiling.get()),
             F::min,
         );
         limiter_gain(level_db(peak), threshold, ceiling)

@@ -308,6 +308,12 @@ impl ProbeEnv {
         self
     }
 
+    /// Makes the plugin answer `clap.preset-load`.
+    pub fn preset_load(mut self) -> Self {
+        self.set("TUTTI_CLAP_PROBE_PRESET_LOAD", "1".to_string());
+        self
+    }
+
     /// What the plugin returns from `process` (`tutti_clap_test_plugin::StatusMode`
     /// as a number).
     pub fn status_mode(mut self, mode: u32) -> Self {
