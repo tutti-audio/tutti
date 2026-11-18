@@ -4,6 +4,7 @@
 //! goes through.
 
 use std::collections::BTreeSet;
+use tutti_buffers::InterleavedMut;
 
 use tutti_graph::testing as common;
 
@@ -494,7 +495,12 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let mut out0 = vec![0.0f32; 64];
     exec.process(64, &TransportPosition::default(), &[], &mut [&mut out0[..]]);
     let mut buf = vec![f32::NAN; 2 * 64];
-    assert_eq!(tap.pop_into(&mut buf).get(), 64);
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
+            .get(),
+        64
+    );
     assert!(buf.chunks(2).all(|f| f[0] == 0.5 && f[1] == 0.0));
 }
 

@@ -69,7 +69,12 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     // The root is as fed, every frame the tap holds.
     let mut frame = [0.0f32; 6];
     let mut seen = 0;
-    while tap.pop_into(&mut frame).get() == 1 {
+    while tap
+        .pop_into(InterleavedMut::new(&mut frame, tap.layout()).unwrap())
+        .unwrap()
+        .get()
+        == 1
+    {
         assert_eq!(frame, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "frame {seen}");
         seen += 1;
     }

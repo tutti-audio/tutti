@@ -56,7 +56,7 @@ const DETECTOR_MAX: Seconds = Seconds(0.025);
 
 /// The largest threshold, in dB either way, a band runs: the upward curve mirrors a level about
 /// it (`2 t - x`), which stays finite for `|t|` this size and a level at or over -144 dB.
-const MAX_THRESHOLD_DB: f32 = 1.0e30;
+const MAX_THRESHOLD: Db = Db(1.0e30);
 
 /// The loudest key sample the detector squares: 1e15 (300 dB), whose square is finite.
 const MAX_KEY: f32 = 1.0e15;
@@ -108,11 +108,11 @@ impl DynamicEqControls {
     pub const DEFAULT: Self = Self {
         center: Hz(1_000.0),
         q: Q::BUTTERWORTH,
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
-        attack: Seconds(0.0),
-        release: Seconds(0.0),
+        attack: Seconds::ZERO,
+        release: Seconds::ZERO,
         range: Db(12.0),
     };
 }
@@ -129,7 +129,7 @@ struct Design {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
-    range: f32,
+    range: Db,
     ballistics: Follower,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
     key_scale: f32,
@@ -139,10 +139,10 @@ struct Design {
 
 impl Design {
     const NEUTRAL: Self = Self {
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
-        range: 0.0,
+        range: Db::UNITY,
         ballistics: Follower::NEUTRAL,
         key_scale: 1.0,
         mean: 1.0,
@@ -151,22 +151,25 @@ impl Design {
     /// The design of `c` at `rate`, with `center` and `q` as the filters are given them.
     fn of(c: &DynamicEqControls, center: Hz, q: Q, rate: SampleRate) -> Self {
         let d = DynamicEqControls::DEFAULT;
-        let tau = (DETECTOR_PERIODS / f64::from(center.get())).min(DETECTOR_MAX.get());
+        // A centre is held in the SVF's range, so it has a period; none reads as the longest time.
+        let tau = center.period().map_or(DETECTOR_MAX, |period| {
+            (period * DETECTOR_PERIODS).min(DETECTOR_MAX)
+        });
         Self {
-            threshold: Db(finite_or(c.threshold.get(), d.threshold.get())
-                .clamp(-MAX_THRESHOLD_DB, MAX_THRESHOLD_DB)),
+            threshold: Db(finite_or(c.threshold.get(), d.threshold.get()))
+                .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
             knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            range: finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB),
+            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB)),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: 1.0 / q.get(),
-            mean: Seconds(tau).one_pole_coeff(rate),
+            mean: tau.one_pole_coeff(rate),
         }
     }
 }
 
 /// The frames of the key a period reads at a time: the bell's design period.
-const PERIOD: usize = COEFF_INTERVAL;
+const PERIOD: Samples = Samples(COEFF_INTERVAL);
 
 /// One EQ band of any width whose bell gain follows the level of its key in the band.
 ///
@@ -186,14 +189,14 @@ pub struct DynamicEqBank {
     /// The mean square of the key, in the detector's one-pole.
     mean_square: f32,
     /// The smoothed gain change's size in dB, not below 0; its sign is the mode's.
-    moved: f32,
+    moved: Db,
     bell: SvfBank<f64>,
     coefficients: Glide<SvfCoefficients<f64>>,
     /// The gain change the coefficients were last designed at, in dB, `None` after the band
     /// moved.
-    designed: Option<f32>,
+    designed: Option<Db>,
     /// The frames into the current design period.
-    phase: usize,
+    phase: Samples,
 }
 
 impl DynamicEqBank {
@@ -210,22 +213,22 @@ impl DynamicEqBank {
             rate,
             key: KeyStage::new(SvfType::BandPass, width, rate),
             mean_square: 0.0,
-            moved: 0.0,
+            moved: Db::UNITY,
             bell: SvfBank::new(width),
-            coefficients: Glide::landed(Self::bell(d.center, d.q, 0.0, rate))
+            coefficients: Glide::landed(Self::bell(d.center, d.q, Db::UNITY, rate))
                 .by(COEFF_INTERVAL as u32),
             designed: None,
-            phase: 0,
+            phase: Samples::ZERO,
         }
     }
 
     /// The bell at `center` and `q` with `gain` dB.
-    fn bell(center: Hz, q: Q, gain: f32, rate: SampleRate) -> SvfCoefficients<f64> {
+    fn bell(center: Hz, q: Q, gain: Db, rate: SampleRate) -> SvfCoefficients<f64> {
         let controls = SvfControls {
             ty: SvfType::Bell,
             freq: center,
             q,
-            gain: Db(gain),
+            gain,
         };
         SvfCoefficients::from(&SvfModel::new(controls, rate))
     }
@@ -234,10 +237,10 @@ impl DynamicEqBank {
     /// flat. A **measurement**, for a meter. No allocation.
     #[must_use]
     pub fn gain(&self) -> Db {
-        Db(self.signed())
+        self.signed()
     }
 
-    fn signed(&self) -> f32 {
+    fn signed(&self) -> Db {
         match self.mode {
             DynamicMode::Downward => -self.moved,
             DynamicMode::Upward => self.moved,
@@ -247,8 +250,8 @@ impl DynamicEqBank {
     /// Back to silence: flat, nothing measured, the filters' state cleared. No allocation.
     pub fn reset(&mut self) {
         self.mean_square = 0.0;
-        self.moved = 0.0;
-        self.phase = 0;
+        self.moved = Db::UNITY;
+        self.phase = Samples::ZERO;
         self.bell.reset();
         self.key.reset();
         self.settle();
@@ -273,7 +276,7 @@ impl DynamicEqBank {
                 ty: SvfType::Bell,
                 freq: Hz(finite_or(controls.center.get(), d.center.get())),
                 q: Q(finite_or(controls.q.get(), d.q.get())),
-                gain: Db(0.0),
+                gain: Db::UNITY,
             },
             self.rate,
         )
@@ -310,7 +313,7 @@ impl DynamicEqBank {
             }
             DynamicMode::Upward => compute_upward_gain_lift(level_db, d.threshold, d.ratio, d.knee),
         };
-        self.moved = d.ballistics.follow(self.moved, curve.get().min(d.range));
+        self.moved = d.ballistics.follow(self.moved, curve.min(d.range));
     }
 
     /// Runs `input` into `output`, its band moved by the gain the loudest channel of `key`
@@ -334,12 +337,12 @@ impl DynamicEqBank {
             .get()
             .min(output.frames().get())
             .min(key.frames().get());
-        let mut levels = [0.0f32; PERIOD];
+        let mut levels = [0.0f32; PERIOD.get()];
         let mut start = 0;
         while start < frames {
-            let n = (frames - start).min(PERIOD - self.phase);
+            let n = (frames - start).min(PERIOD.get() - self.phase.get());
             let end = start + n;
-            if self.phase == 0 {
+            if self.phase == Samples::ZERO {
                 self.design_bell();
             }
             let levels = &mut levels[..n];
@@ -353,7 +356,7 @@ impl DynamicEqBank {
                 input.slice(span.clone()),
                 output.slice_mut(span),
             );
-            self.phase = (self.phase + n) % PERIOD;
+            self.phase = (self.phase + Samples(n)) % PERIOD;
             start = end;
         }
     }

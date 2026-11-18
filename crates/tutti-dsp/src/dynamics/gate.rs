@@ -63,10 +63,10 @@ impl GateControls {
     /// What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
         threshold: Db(-40.0),
-        attack: Seconds(0.0),
-        hold: Seconds(0.0),
-        release: Seconds(0.0),
-        range: Db(0.0),
+        attack: Seconds::ZERO,
+        hold: Seconds::ZERO,
+        release: Seconds::ZERO,
+        range: Db::UNITY,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
