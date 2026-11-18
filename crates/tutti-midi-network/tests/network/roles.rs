@@ -6,9 +6,9 @@ use std::num::NonZeroUsize;
 use std::time::Instant;
 
 use tutti_midi_network::{
-    Admission, AuthMethods, Bye, ByeReason, Client, Command, Credentials, DatagramBuilder, Event,
-    Host, HostConfig, Invitation, NetworkEndpoint, PingId, SessionConfig, SessionState, Username,
-    identity_from_txt, parse, txt_properties,
+    Admission, AuthMethods, Bye, ByeReason, Client, Command, Credentials, DatagramBuilder, Digest,
+    Event, Host, HostConfig, Invitation, NetworkEndpoint, PingId, SessionConfig, SessionState,
+    Username, identity_from_txt, parse, txt_properties,
 };
 
 use crate::sim::{host_addr, identity};
@@ -241,3 +241,44 @@ fn a_device_in_both_roles_presents_one_identity_in_the_txt_record_and_every_comm
         assert_eq!(who, device, "{what} carries the device's identity");
     }
 }
+
+/// A Host that is asked again by a peer it already holds answers with its own
+/// identity: a repeated Invitation, a repeated Invitation with Authentication
+/// in a Session, and a repeated Invitation while the user is deciding.
+/// Spec: m2-124/9#2
+#[test]
+fn a_repeated_invitation_is_answered_with_the_hosts_own_identity() {
+    let now = Instant::now();
+    let device = identity("Workbench", "DEV-1");
+    let invite = datagram(&Command::Invitation(Invitation {
+        methods: AuthMethods::NONE,
+        identity: identity("Other", "OTHER-1"),
+    }));
+    let answer = |host: &mut Host, bytes: &[u8]| {
+        host.on_message(PEER, bytes, now);
+        let mut last = Vec::new();
+        while let Some(t) = host.poll_transmit() {
+            last = commands(&t.payload);
+        }
+        last
+    };
+
+    let mut open = Host::new(HostConfig::new(device));
+    open.on_message(PEER, &invite, now);
+    while open.poll_transmit().is_some() {}
+    assert_eq!(answer(&mut open, &invite), [Command::Accepted(device)]);
+    let auth = datagram(&Command::InvitationWithAuth(Digest::new([0; 32])));
+    assert_eq!(answer(&mut open, &auth), [Command::Accepted(device)]);
+
+    let mut config = HostConfig::new(device);
+    config.admission = Admission::Confirm;
+    let mut confirming = Host::new(config);
+    confirming.on_message(PEER, &invite, now);
+    while confirming.poll_transmit().is_some() {}
+    assert_eq!(answer(&mut confirming, &invite), [Command::Pending(device)]);
+}
+
+const PEER: SocketAddr = SocketAddr::new(
+    std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 5)),
+    5000,
+);
