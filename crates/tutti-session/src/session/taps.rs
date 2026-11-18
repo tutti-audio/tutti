@@ -58,7 +58,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// audio thread has not taken the last installs it is not an error: the
     /// call returns [`HeardOpen::Retry`] and opens nothing.
     pub fn open_heard_tap(&self, capacity: Samples) -> Result<HeardOpen<C::Float>, HeardTapError> {
-        let (taps, layout) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
+        let (taps, layout) = self.output.heard.as_ref().ok_or(HeardTapError::Detached)?;
         Ok(taps.open(*layout, capacity)?)
     }
 
@@ -72,7 +72,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`HeardTapError::Tap`]`(NotOpen)` when no heard tap is open (never opened, or
     /// closed already); nothing changes.
     pub fn close_heard_tap(&self) -> Result<(), HeardTapError> {
-        let (taps, _) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
+        let (taps, _) = self.output.heard.as_ref().ok_or(HeardTapError::Detached)?;
         Ok(taps.close()?)
     }
 
@@ -119,14 +119,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`render`](Self::render)) renders; `None` on a detached session,
     /// which has no engine.
     pub fn load_meter(&self) -> Option<&LoadMeter> {
-        self.load.as_ref()
+        self.output.load.as_ref()
     }
 
     /// The same meter, mutably: [`take`](LoadMeter::take)
     /// reads the peak since the last take, so it is the one reader's (the
     /// session holds it; there is no second).
     pub fn load_meter_mut(&mut self) -> Option<&mut LoadMeter> {
-        self.load.as_mut()
+        self.output.load.as_mut()
     }
 
     /// The engine's MIDI nodes, when the builder inserted them.
@@ -161,6 +161,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             #[cfg(feature = "midi-hardware")]
             io: self.midi_io.as_mut(),
         };
-        (midi, &mut self.resource_ids)
+        (midi, &mut self.pool.resource_ids)
     }
 }

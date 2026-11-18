@@ -164,7 +164,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
 
     /// Applies a staged policy to the engine, in [`Phase::Commit`](crate::Phase::Commit).
     pub(crate) fn apply_output_policy(&mut self) {
-        let Some(policy) = self.output_policy.take_staged() else {
+        let Some(policy) = self.output.policy.take_staged() else {
             return;
         };
         if let Some(control) = self.graph.output_control() {

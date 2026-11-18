@@ -40,7 +40,7 @@ impl<'a, S: Float> OpenCx<'a, S> {
         #[cfg(feature = "midi")]
         let (midi, ids) = session.midi_and_ids();
         #[cfg(not(feature = "midi"))]
-        let ids = &mut session.resource_ids;
+        let ids = &mut session.pool.resource_ids;
         Self {
             rate,
             ids,
