@@ -121,8 +121,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::node_losses::{Count, LossCounts};
-use tutti_plugin_types::{Normalized, ParameterChanges, ParameterQueue};
+use tutti_plugin_types::{ParameterChanges, ParameterQueue};
 use tutti_rt::Tally;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// A slot with no queue in the chunk being filled.

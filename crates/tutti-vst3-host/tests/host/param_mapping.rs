@@ -3,8 +3,9 @@
 //! `20000 * 1000^(-n)`), through `Vst3Loaded::mapping`.
 
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{Normalized, ParamMapping, contract};
+use tutti_plugin_types::{ParamMapping, contract};
 use tutti_shared_plugin::core::{LEVEL, TONE, tone_plain};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_host::{LoadOptions, Vst3Loaded};
 

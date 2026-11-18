@@ -30,9 +30,9 @@ use tutti_buffers::{Float, InputOutput};
 
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamWriteError, ParameterInfo, PluginAudio,
-    PluginDescriptor, PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext,
-    ProcessOutput, ProcessWake, SampleRate, Samples, WindowHandle,
+    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -40,6 +40,7 @@ use crate::{
     StateUse, TimerId, TrackInfo, Wakeups,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of

@@ -10,9 +10,10 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, KeyEvent, KeyUse, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit,
-    PluginError, PluginResult, WindowHandle,
+    InProcess, KeyEvent, KeyUse, Load, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError,
+    PluginResult, WindowHandle,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use super::loaded::Vst3Loaded;

@@ -7,10 +7,11 @@
 //! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
-    AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Normalized, OwnBypass,
-    ParameterInfo, PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason,
-    bypass_value, is_bypassed,
+    AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
+    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, bypass_value,
+    is_bypassed,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// What a loaded plugin answers from any thread, without a main-thread token.

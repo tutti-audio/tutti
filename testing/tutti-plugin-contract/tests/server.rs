@@ -20,9 +20,10 @@ use tutti_plugin_contract::{
 };
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, Normalized,
-    ParamEdit, SampleFormat, SampleRate,
+    BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, ParamEdit,
+    SampleFormat, SampleRate,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 fn through_server<F: Format>(path: PathBuf) {

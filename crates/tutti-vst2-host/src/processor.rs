@@ -18,9 +18,10 @@ use vst::host::RenderHandle;
 
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    Normalized, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext,
+    ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext,
     ProcessOutput, Processor, SampleFormat, SampleRate,
 };
+use tutti_units::Normalized;
 
 use crate::host::HostState;
 use crate::loaded::{AudioSide, LossesTold};

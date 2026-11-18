@@ -30,10 +30,9 @@ use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use crate::events::{InputEvents, Stager, sample_offset};
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
-use tutti_plugin_types::{
-    MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource, Normalized,
-};
+use tutti_plugin_types::{MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource};
 use tutti_rt::{Reader, RtVec};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_ffi::{EventList, Plugin};
 

@@ -33,9 +33,10 @@ use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
 use tutti::session::{Peer as _, PoolEvent};
 use tutti::{
-    Beat, Bounce, Catalog, Format, MaxBlock, Normalized, ParamId, Pcm, PluginEvent, PluginRef,
-    Range, Root, SampleRate, Samples, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, MaxBlock, ParamId, Pcm, PluginEvent, PluginRef, Range, Root,
+    SampleRate, Samples, Session, SessionEvent, StateUse,
 };
+use tutti_units::Normalized;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

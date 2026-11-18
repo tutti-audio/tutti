@@ -21,7 +21,8 @@ use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 use tutti_rt::LockExt;
 
-use tutti_plugin_types::{Control, Normalized, ParamFlags, ParamSteps};
+use tutti_plugin_types::{Control, ParamFlags, ParamSteps};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 #[path = "support/active.rs"]

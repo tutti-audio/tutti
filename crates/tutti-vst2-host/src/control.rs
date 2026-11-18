@@ -5,10 +5,11 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamAccess, ParamEdit, ParamWriteError,
+    KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
     PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::error::Vst2Error;

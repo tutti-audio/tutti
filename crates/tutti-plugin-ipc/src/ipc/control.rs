@@ -10,12 +10,13 @@ use dpi::Size;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
-    LoadedPlugin, MainThreadMarker, Normalized, OwnBypass, ParameterInfo, PluginDescriptor,
-    PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode,
-    RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo,
-    WindowHandle, bypass_value,
+    LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
+    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
+    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
+    bypass_value,
 };
 use tutti_rt::LockExt;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use super::{Ipc, IpcController};

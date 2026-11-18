@@ -62,7 +62,7 @@ pub mod midi {
     }
 }
 
-/// A [`Normalized`](tutti_plugin_types::Normalized) carried as the `f64` it is,
+/// A [`Normalized`](tutti_units::Normalized) carried as the `f64` it is,
 /// as `#[serde(with = "wire::normalized")]`.
 ///
 /// `Normalized` is an `f64` and every parameter value on this wire keeps its
@@ -74,7 +74,7 @@ pub mod midi {
 /// is broken, and the frame fails rather than carrying a value made up for it.
 pub mod normalized {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use tutti_plugin_types::Normalized;
+    use tutti_units::Normalized;
 
     use super::checked;
 
@@ -89,12 +89,12 @@ pub mod normalized {
     }
 }
 
-/// An optional [`Normalized`](tutti_plugin_types::Normalized) carried as an
+/// An optional [`Normalized`](tutti_units::Normalized) carried as an
 /// optional `f64`, as `#[serde(with = "wire::normalized_opt")]`; see
 /// [`normalized`].
 pub mod normalized_opt {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use tutti_plugin_types::Normalized;
+    use tutti_units::Normalized;
 
     use super::checked;
 
@@ -109,10 +109,10 @@ pub mod normalized_opt {
     }
 }
 
-/// `raw` as a [`Normalized`](tutti_plugin_types::Normalized), or the decode
+/// `raw` as a [`Normalized`](tutti_units::Normalized), or the decode
 /// error naming it when `Normalized::new` refuses it.
-fn checked<E: serde::de::Error>(raw: f64) -> Result<tutti_plugin_types::Normalized, E> {
-    tutti_plugin_types::Normalized::new(raw).ok_or_else(|| {
+fn checked<E: serde::de::Error>(raw: f64) -> Result<tutti_units::Normalized, E> {
+    tutti_units::Normalized::new(raw).ok_or_else(|| {
         E::invalid_value(
             serde::de::Unexpected::Float(raw),
             &"a normalized value in 0..=1",
@@ -310,7 +310,8 @@ mod tests {
     /// desync between two binaries built apart.
     #[test]
     fn typed_parameter_and_rate_fields_keep_their_wire_widths() {
-        use crate::protocol::{BridgeMessage, HostMessage, Normalized, ParamEdit, ParamId};
+        use crate::protocol::{BridgeMessage, HostMessage, ParamEdit, ParamId};
+        use tutti_units::Normalized;
         use tutti_units::SampleRate;
 
         let set = HostMessage::SetParameter {
@@ -542,7 +543,8 @@ mod tests {
 
     #[test]
     fn a_normalized_outside_the_unit_range_is_refused() {
-        use crate::protocol::{BridgeMessage, HostMessage, Normalized, ParamId};
+        use crate::protocol::{BridgeMessage, HostMessage, ParamId};
+        use tutti_units::Normalized;
         let set_message = |raw: f64| {
             // variant 3, id 1 (one varint byte each), then the f64.
             let mut bytes = vec![3, 1];

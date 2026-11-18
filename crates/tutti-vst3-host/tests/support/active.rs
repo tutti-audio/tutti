@@ -13,9 +13,10 @@ use tutti_buffers::InputOutput;
 use tutti_fixtures::{Activation, main_thread};
 
 use tutti_plugin_types::{
-    Control, MainThreadMarker, MaxBlock, Normalized, PluginError, Prepare, RenderMode,
-    SampleFormat, SampleRate, Samples,
+    Control, MainThreadMarker, MaxBlock, PluginError, Prepare, RenderMode, SampleFormat,
+    SampleRate, Samples,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_host::{
     InputEvents, Library, LoadOptions, ParameterChanges, ProcessFailed, ProcessMode,

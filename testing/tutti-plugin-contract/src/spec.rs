@@ -4,9 +4,10 @@
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
 use tutti_plugin_types::{
-    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, Normalized, ParamSteps, Samples,
+    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps, Samples,
 };
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// A parameter.
@@ -289,7 +290,8 @@ impl Edit {
     /// The host's edit this stands for.
     #[must_use]
     pub fn expected(self) -> tutti_plugin_types::ParamEdit {
-        use tutti_plugin_types::{Normalized, ParamEdit};
+        use tutti_plugin_types::ParamEdit;
+        use tutti_units::Normalized;
         match self {
             Self::Begin(p) => ParamEdit::Begin(p.id()),
             Self::Change(p, v) => ParamEdit::change(p.id(), Normalized::of(v)),

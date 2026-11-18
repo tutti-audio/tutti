@@ -10,9 +10,10 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamMapping,
-    PluginError, PluginResult, Request, RescanScope, WindowHandle,
+    InProcess, Load, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError,
+    PluginResult, Request, RescanScope, WindowHandle,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use super::ClapLoaded;

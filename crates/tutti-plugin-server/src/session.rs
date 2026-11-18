@@ -997,7 +997,8 @@ mod tests {
     #[cfg(feature = "clap")]
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
-    use tutti_plugin_types::{MidiEventVec, Normalized, NoteExpressionChanges, ParameterChanges};
+    use tutti_plugin_types::{MidiEventVec, NoteExpressionChanges, ParameterChanges};
+    use tutti_units::Normalized;
     use tutti_units::ParamId;
 
     fn assert_none(r: Reaction) {

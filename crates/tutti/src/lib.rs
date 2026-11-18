@@ -150,8 +150,8 @@ pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 pub use tutti_units::{
-    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, ParamId, Q,
-    SampleRate, Samples, Seconds, Semitones,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
+    Q, SampleRate, Samples, Seconds, Semitones,
 };
 
 // The device handle and a device's identity.
@@ -171,8 +171,6 @@ pub use tutti_codec::{Format, Pcm};
 // The session, its wiring and its requests.
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
-#[cfg(feature = "plugin")]
-pub use tutti_plugin::Normalized;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
@@ -319,10 +317,10 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, Pan, ParamAddr,
-        ParamKey, PhaseIncrement, PlayReading, PlaybackRate, Radians, ReadRate, Resonance,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio,
-        StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
+        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, NormalizedOutOfRange,
+        Pan, ParamAddr, ParamKey, PhaseIncrement, PlayReading, PlaybackRate, Radians, ReadRate,
+        Resonance, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread,
+        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
         UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Resyncs};
@@ -627,11 +625,11 @@ pub mod plugin {
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
-        InvalidContentScale, InvalidNormalized, KeyEvent, KeyUse, LatencyVerdict, Load, Locator,
-        Measured, NotChecked, ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo,
-        PlainUnit, PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion,
-        ProbeConfig, SampleFormat, StateError, StateHash, TailVerdict, UnknownExtension, Verdict,
-        VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
+        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Load, Locator, Measured, NotChecked,
+        ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
+        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, SampleFormat,
+        StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
+        Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{
