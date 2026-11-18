@@ -91,8 +91,8 @@ use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
 use crate::event::{Event, EventKind, merge_into, merge_walk};
+use crate::node::Env;
 use crate::node::MAX_PORTS;
-use crate::node::{Env, Resolution};
 use crate::plan::Plan;
 use crate::spec::EventIn;
 use crate::time::{Due, Offset, Playhead};
@@ -140,18 +140,6 @@ pub enum ScheduleError {
     /// some have landed.
     #[error("{} commands outstanding", COMMAND_CAPACITY)]
     Backpressure,
-    /// A parameter ramp was addressed to a node that does not honour event
-    /// offsets sample-accurately: automation would land at the wrong time,
-    /// silently. The same rule as
-    /// [`CompileError::ResolutionTooCoarse`](crate::CompileError::ResolutionTooCoarse)
-    /// for a marked edge.
-    #[error("a ramp into node {} port {}, which honours events only at {sink:?}", .to.node.0, .to.port)]
-    ResolutionTooCoarse {
-        /// The port asked for.
-        to: EventIn,
-        /// What its node declares.
-        sink: Resolution,
-    },
     /// The editor is poisoned (see
     /// [`CommitError::Poisoned`](crate::CommitError::Poisoned)).
     #[error("the editor is poisoned; build a new pair")]
@@ -172,10 +160,7 @@ impl ScheduleError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::NoPlan | Self::Backpressure => true,
-            Self::NoSuchPort { .. }
-            | Self::ResolutionTooCoarse { .. }
-            | Self::Poisoned
-            | Self::UnknownCommand { .. } => false,
+            Self::NoSuchPort { .. } | Self::Poisoned | Self::UnknownCommand { .. } => false,
         }
     }
 }
@@ -677,13 +662,6 @@ mod tests {
         assert!(ScheduleError::NoPlan.is_transient());
         assert!(ScheduleError::Backpressure.is_transient());
         assert!(!ScheduleError::NoSuchPort { to }.is_transient());
-        assert!(
-            !ScheduleError::ResolutionTooCoarse {
-                to,
-                sink: Resolution::Frames(64)
-            }
-            .is_transient()
-        );
         assert!(!ScheduleError::Poisoned.is_transient());
     }
 

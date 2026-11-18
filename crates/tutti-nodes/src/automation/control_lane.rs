@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node,
-    NodeParts, Offset, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment, PlayReading,
-    Prepare, Shape, Status, TransportPosition, control_word,
+    Cost, Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node, NodeParts, Offset,
+    ParamEvent, ParamKind, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment, PlayReading,
+    Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
@@ -345,7 +345,7 @@ pub struct ControlLaneNode {
     native: bool,
     walk: Walk,
     seen: Seen,
-    scratch: Vec<Event>,
+    scratch: Vec<ParamEvent>,
 }
 
 impl std::fmt::Debug for ControlLaneNode {
@@ -428,15 +428,7 @@ impl ControlLaneNode {
             knob,
             range.map_or(RangeSource::None, RangeSource::Port),
             Some(param.param),
-            Arc::new(move |from, to, shape| {
-                ParamSegment::unit(
-                    param,
-                    control_word(from),
-                    control_word(to),
-                    Samples(0),
-                    shape,
-                )
-            }),
+            Arc::new(move |from, to, shape| ParamSegment::unit(param, from, to, Samples(0), shape)),
             true,
         )
     }
@@ -456,9 +448,7 @@ impl ControlLaneNode {
             knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
             RangeSource::Own(Publisher::new(ParamRange::new(range.0, range.1))),
             None,
-            Arc::new(move |from, to, shape| {
-                ParamSegment::foreign(id, control_word(from), control_word(to), Samples(0), shape)
-            }),
+            Arc::new(move |from, to, shape| ParamSegment::foreign(id, from, to, Samples(0), shape)),
             false,
         )
     }
@@ -513,11 +503,21 @@ fn continues(expected: &TransportPosition, got: &TransportPosition) -> bool {
         && (a - b).abs() <= 1e-9 * a.abs().max(1.0)
 }
 
+/// A curve piece's `(since, span)` for a point on a frame: the piece started
+/// `since` frames before it and is `since + until` long, both fractional, so a
+/// segment evaluates its law at each frame's exact place on the piece. `None`
+/// when the piece is longer than a segment can count (`u32::MAX` frames): a
+/// producer sends it as shorter pieces.
+fn exact_span(since: f64, until: f64) -> Option<(SamplePosition, SamplePosition)> {
+    let span = since + until;
+    (span <= f64::from(u32::MAX)).then_some((SamplePosition(since), SamplePosition(span)))
+}
+
 /// A segment's value `j` frames (fractional) after its event, `to` once it
-/// has arrived: the port's arithmetic in `f64`, for a time between frames.
-fn value_along(seg: &ParamSegment, from: f32, to: f32, j: f64) -> f32 {
-    let (p, l) = (seg.position().get(), seg.length().get());
-    if !(l > 0.0 && l.is_finite()) {
+/// has arrived: the port's arithmetic, for a time between frames.
+fn value_along(seg: &ParamSegment, from: f64, to: f64, j: f64) -> f64 {
+    let (p, l) = (seg.position().get() as f64, seg.length().get() as f64);
+    if l <= 0.0 {
         return to;
     }
     let t = (p + j) / l;
@@ -531,7 +531,7 @@ fn value_along(seg: &ParamSegment, from: f32, to: f32, j: f64) -> f32 {
 impl Input {
     /// The input's raw value at `at` frames after the block start of `base`
     /// (fractional): the port's own arithmetic on a frame, `f64` between.
-    fn value(&self, at: f64, base: Frame) -> f32 {
+    fn value(&self, at: f64, base: Frame) -> f64 {
         let since = base.get() as f64 + at - self.recv.get() as f64;
         let id = ParamId::new(self.source);
         let (from, to) = (
@@ -549,7 +549,7 @@ impl Input {
     /// it has.
     fn arrives_in(&self, at: f64, base: Frame) -> Option<f64> {
         let since = base.get() as f64 + at - self.recv.get() as f64;
-        let arrive = self.seg.arrives_after()?.get() as f64;
+        let arrive = self.seg.arrives_after().get() as f64;
         (arrive > since).then_some(arrive - since)
     }
 }
@@ -587,7 +587,7 @@ impl Block<'_> {
 
     /// The inputs' raw values at `at` frames into the block, in the
     /// program's input order.
-    fn inputs_at(&self, walk: &Walk, at: f64) -> [Option<f32>; MAX_LANE_INPUTS] {
+    fn inputs_at(&self, walk: &Walk, at: f64) -> [Option<f64>; MAX_LANE_INPUTS] {
         let mut out = [None; MAX_LANE_INPUTS];
         for (k, l) in self.program.inputs().iter().enumerate() {
             out[k] = walk
@@ -601,13 +601,13 @@ impl Block<'_> {
     }
 
     /// The program's value at `time`, for the lane's param.
-    fn value_at(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f64> {
+    fn value_at(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
             .value_at(self.unit, self.knob, time, self.span, ins)
     }
 
     /// The program's left limit at `time`, for the lane's param.
-    fn value_before(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f64> {
+    fn value_before(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
             .value_before(self.unit, self.knob, time, self.span, ins)
     }
@@ -628,12 +628,12 @@ impl Block<'_> {
     }
 
     /// Sends `seg` at frame `p`.
-    fn send(&self, out: &mut Vec<Event>, p: usize, seg: ParamSegment) -> Result<(), Overflow> {
+    fn send(&self, out: &mut Vec<ParamEvent>, p: usize, seg: ParamSegment) -> Result<(), Overflow> {
         if out.len() >= SOURCE_EVENT_CAPACITY.get() as usize {
             return Err(Overflow::Full);
         }
         if let Some(at) = Offset::new(Samples(p), self.cx.env.block_len) {
-            out.push(Event::segment(at, seg));
+            out.push(ParamEvent::segment(at, seg));
         }
         Ok(())
     }
@@ -643,7 +643,7 @@ impl Block<'_> {
     fn point(
         &self,
         walk: &mut Walk,
-        out: &mut Vec<Event>,
+        out: &mut Vec<ParamEvent>,
         p: usize,
         glide: bool,
     ) -> Result<(), Overflow> {
@@ -707,14 +707,19 @@ impl Block<'_> {
                         shape,
                     }) if from.is_finite() && to.is_finite() && end.get() > beat => {
                         let (s, e) = (start.get(), end.get());
-                        let seg = make(f64::from(from), f64::from(to), shape)
-                            .resumed(SamplePosition((beat - s) * f), SamplePosition((e - s) * f));
-                        Some((seg, f64::from(from), f64::from(to), Some((e - beat) * f)))
+                        // The piece on whole frames: its start and end round to
+                        // the nearest frame, so a piece sent in any block is
+                        // the same piece. One past what a segment can count is
+                        // not exact: the grid takes it.
+                        exact_span((beat - s) * f, (e - beat) * f).map(|(since, span)| {
+                            let seg = make(from, to, shape).resumed_exactly(since, span);
+                            (seg, from, to, Some((e - beat) * f))
+                        })
                     }
                     Some(CurveSegment::Hold { value, until }) if value.is_finite() => Some((
-                        make(f64::from(value), f64::from(value), Law::Linear),
-                        f64::from(value),
-                        f64::from(value),
+                        make(value, value, Law::Linear),
+                        value,
+                        value,
                         until.map(|u| (u.get() - beat) * f).filter(|d| *d > 0.0),
                     )),
                     None if curve.value_at(t.beat()).is_none() => {
@@ -742,9 +747,9 @@ impl Block<'_> {
         let n_in = self.program.inputs().len();
         let in_flight = walk.flight.and_then(|f| f.seg.map(|s| (s, f.sent)));
         let v0 = match (glide, in_flight) {
-            (true, Some((seg, sent))) => Some(f64::from(
-                seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))),
-            )),
+            (true, Some((seg, sent))) => {
+                Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))))
+            }
             _ => self.value_at(&time, &ins[..n_in]),
         };
         // What moves with time: a constant layer (a macro) does not.
@@ -795,6 +800,12 @@ impl Block<'_> {
             // Gliding into a steady value: one grid step.
             d = f64::from(CONTROL_GRID.stride());
         }
+        // A corner on a frame computes a hair off it (a beat in frames): it
+        // is that frame's, not the next one's.
+        let nearest = d.round();
+        if nearest >= 1.0 && (d - nearest).abs() < 1e-6 {
+            d = nearest;
+        }
         let end = ProgramTime {
             beat: Beat(fpb.map_or(beat, |f| beat + d / f)),
             play: SamplePosition(time.play.get() + d),
@@ -810,19 +821,14 @@ impl Block<'_> {
                 .into_iter()
                 .filter(|x| x.is_finite())
                 .filter(|&x| (a - x) * (b - x) < 0.0)
-                .map(|x| ((x - a) / (b - a), x))
-                .min_by(|p, q| p.0.total_cmp(&q.0));
-            if let Some((x, bound)) = cross {
-                // The first frame at or past the crossing. The port renders the
-                // piece in `f32` (B3), so a crossing on a frame can compute a
-                // hair past it: a frame whose line value is the bound to `f32`
-                // precision is the crossing's own.
-                let line = |k: f64| a + (b - a) * k / d;
-                let mut k = (x * d).ceil();
-                let tol = bound.abs().max(1.0) * f64::from(f32::EPSILON);
-                if k > 1.0 && (line(k - 1.0) - bound).abs() <= tol {
-                    k -= 1.0;
-                }
+                .map(|x| (x - a) / (b - a))
+                .min_by(f64::total_cmp);
+            if let Some(x) = cross {
+                // The first frame at or past the crossing. A crossing on a frame
+                // can compute a hair past it (the piece's end is a left limit,
+                // a nanobeat early): a position within a thousandth of a frame
+                // of a whole one is that frame's own.
+                let k = (x * d - 1e-3).ceil();
                 if k >= 1.0 && k < d {
                     v1 = a + (b - a) * k / d;
                     d = k;
@@ -830,7 +836,17 @@ impl Block<'_> {
             }
         }
         let (v0, v1) = (self.clamp(v0), self.clamp(v1));
-        let seg = make(v0, v1, Law::Linear).resumed(SamplePosition(0.0), SamplePosition(d));
+        // The piece runs to the next point, which is on a whole frame: a
+        // segment counts whole frames, so a corner between two frames ends
+        // the line on the frame after it, extended along the same line. Each
+        // frame before the corner is on the line it was, and the next point
+        // replaces the piece on the frame that ends it.
+        let len = SamplePosition(d).to_samples_ceil();
+        let v1 = match len.get() as f64 {
+            l if l > d && d > 0.0 => self.clamp(v0 + (v1 - v0) * (l / d)),
+            _ => v1,
+        };
+        let seg = make(v0, v1, Law::Linear).resumed(Samples(0), len);
         if unchanged(None, v1, Some(d), &seg) {
             return Ok(());
         }
@@ -853,8 +869,8 @@ impl Block<'_> {
     fn run(
         &self,
         walk: &mut Walk,
-        out: &mut Vec<Event>,
-        events: &[Event],
+        out: &mut Vec<ParamEvent>,
+        events: &[ParamEvent],
         at_zero: Option<bool>,
     ) -> Result<(), Overflow> {
         let env = self.cx.env;
@@ -923,8 +939,8 @@ impl Block<'_> {
     /// The segment `e` carries for a source the program reads, if any: the
     /// only events that are inputs (anything else is ignored, and is no
     /// point).
-    fn input_of(&self, e: &Event) -> Option<(u32, ParamSegment)> {
-        let EventKind::Segment(seg) = e.kind else {
+    fn input_of(&self, e: &ParamEvent) -> Option<(u32, ParamSegment)> {
+        let ParamKind::Segment(seg) = e.kind else {
             return None;
         };
         let ParamAddr::Id(id) = seg.addr() else {
@@ -985,6 +1001,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
+            .with_param_events()
             .with_event_capacity(SOURCE_EVENT_CAPACITY)
             .with_cost(Cost::Moderate)
             .with_tail(Tail::None)
@@ -1053,7 +1070,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             .is_none_or(|f| f.next.is_some_and(|n| n <= env.frame));
         let at_zero = (due || changed || moved || resync).then_some(changed && !moved && !resync);
 
-        let events = io.events(0).as_slice();
+        let events = io.events(0).params();
         let mut block = Block {
             cx,
             program,
@@ -1098,7 +1115,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
         let out = io.event_out(0);
         for e in &self.scratch {
             // Within the declared capacity: never refused.
-            let _ = out.push(*e);
+            let _ = out.push_param(*e);
         }
         let last = Offset::new(Samples(len - 1), env.block_len).unwrap_or(Offset::ZERO);
         self.seen = Seen {
@@ -1164,6 +1181,31 @@ mod tests {
 
     fn program() -> Arc<ControlProgram> {
         Arc::new(ControlProgram::default())
+    }
+
+    /// A piece keeps its fractional start and length: any point within it
+    /// names the same two ends.
+    #[test]
+    fn a_piece_keeps_its_fractional_span() {
+        assert_eq!(
+            exact_span(0.6, 10.4),
+            Some((SamplePosition(0.6), SamplePosition(11.0)))
+        );
+        assert_eq!(
+            exact_span(7.6, 3.4),
+            Some((SamplePosition(7.6), SamplePosition(11.0)))
+        );
+    }
+
+    /// A piece longer than a segment can count (`u32::MAX` frames) has no
+    /// span: the lane sends the grid's shorter pieces instead.
+    #[test]
+    fn a_piece_past_u32_max_frames_is_not_exact() {
+        let max = f64::from(u32::MAX);
+        assert!(exact_span(0.0, max - 10.0).is_some());
+        assert_eq!(exact_span(0.0, max + 10.0), None);
+        // Counted from where it started, not from the point.
+        assert_eq!(exact_span(max / 2.0 + 10.0, max / 2.0 + 10.0), None);
     }
 
     /// **A program a block still held when the lane was republished is freed

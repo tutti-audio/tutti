@@ -45,6 +45,7 @@ use crate::meter::MeterWriter;
 use crate::par::Par;
 use crate::param::ParamState;
 use crate::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
+use crate::slots::EventSlot;
 use crate::spec::{EventIn, EventOut};
 use crate::tap::TapWriter;
 
@@ -233,6 +234,10 @@ pub(crate) struct Stager {
     feedback: BTreeMap<FeedbackKey, usize>,
     /// The event delays whose FIFO holds a table for owed closes.
     owing: BTreeSet<DelayKey>,
+    /// The event delays whose FIFO has room for param events, and the same
+    /// for event feedback.
+    param_fifos: BTreeSet<DelayKey>,
+    param_feedback: BTreeSet<FeedbackKey>,
     /// The injection buffers of the last commit, with the commit that made
     /// them, once it was seen applied, and the block count then.
     shells: Vec<Shell>,
@@ -275,6 +280,8 @@ impl Stager {
             fifos: BTreeMap::new(),
             feedback: BTreeMap::new(),
             owing: BTreeSet::new(),
+            param_fifos: BTreeSet::new(),
+            param_feedback: BTreeSet::new(),
             shells: Vec::new(),
             shells_seq: 0,
             shells_seen: None,
@@ -338,8 +345,8 @@ impl Stager {
                 _ => None,
             })
             .collect();
-        let (rings, ring_fifo, ring_caps, owing) = self.delays(&cx, &to_close);
-        let (audio_fb, audio_fb_from, efb, efb_fifo, efb_caps) = self.feedback(&cx);
+        let (rings, ring_fifo, ring_caps, owing, ring_params) = self.delays(&cx, &to_close);
+        let (audio_fb, audio_fb_from, efb, efb_fifo, efb_caps, efb_params) = self.feedback(&cx);
         let outlets = outlets(c, &cx);
         let (lanes, lanes_from) = lanes(c, &cx);
         let drives = drives(c, &cx, input.mix_lane);
@@ -347,6 +354,7 @@ impl Stager {
         let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
         let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
+        let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store_len.max(c.delta.store_len as usize);
         let participants = self.pool.load(Ordering::Acquire);
@@ -365,7 +373,10 @@ impl Stager {
                 v
             },
             events: (0..plan.event_slot_capacity.len())
-                .map(|i| Vec::with_capacity(slot_capacity(i)))
+                .map(|i| {
+                    let params = if param_slots[i] { slot_capacity(i) } else { 0 };
+                    EventSlot::with_capacity(slot_capacity(i), params)
+                })
                 .collect(),
             rings,
             audio_fb,
@@ -434,6 +445,8 @@ impl Stager {
         // The bounds the next commit builds from.
         self.fifos = ring_caps;
         self.owing = owing;
+        self.param_fifos = ring_params;
+        self.param_feedback = efb_params;
         self.feedback = efb_caps;
         self.shells = shells;
         self.shells_seq = c.seq;
@@ -469,6 +482,7 @@ impl Stager {
         FifoPlan,
         BTreeMap<DelayKey, usize>,
         BTreeSet<DelayKey>,
+        BTreeSet<DelayKey>,
     ) {
         let plan = cx.plan;
         let old_delays: BTreeMap<DelayKey, usize> = cx
@@ -484,6 +498,7 @@ impl Stager {
         let old_by_source = ring_by_source(cx.old.map(|p| p.delays.as_slice()).unwrap_or_default());
         let mut caps = BTreeMap::new();
         let mut owing = BTreeSet::new();
+        let mut with_params = BTreeSet::new();
         let mut rings = Vec::with_capacity(plan.delays.len());
         let mut from = Vec::with_capacity(plan.delays.len());
         let mut extra = vec![0; plan.delays.len()];
@@ -503,12 +518,26 @@ impl Stager {
                         how = RingFrom::Move { from: j };
                         cap = cap.max(want);
                     }
+                    // A FIFO for a source that writes param events has room
+                    // for them: one kept from before the source did is built
+                    // afresh and takes the queue over.
+                    let params = plan.event_tap_params(src);
+                    let had_params = carried.is_some() && self.param_fifos.contains(&d.key);
+                    if let (RingFrom::Keep { from: j, .. }, true, false) = (how, params, had_params)
+                    {
+                        how = RingFrom::Move { from: j };
+                        cap = cap.max(want);
+                    }
                     rings.push((!matches!(how, RingFrom::Keep { .. })).then(|| {
                         let f = EventFifo::sized_for(d.len, rate, cx.max_block, cap);
+                        let f = if params { f.with_params() } else { f };
                         Ring::Event(if table { f.with_owed() } else { f })
                     }));
                     if table {
                         owing.insert(d.key);
+                    }
+                    if params {
+                        with_params.insert(d.key);
                     }
                     from.push(how);
                     extra[i] = over;
@@ -543,7 +572,7 @@ impl Stager {
                 },
             }
         }
-        (rings, FifoPlan { from, extra }, caps, owing)
+        (rings, FifoPlan { from, extra }, caps, owing, with_params)
     }
 
     /// The capacity the executor's FIFO for `key` has, as of the last commit.
@@ -567,6 +596,7 @@ impl Stager {
         Vec<Option<EventFifo>>,
         FifoPlan,
         BTreeMap<FeedbackKey, usize>,
+        BTreeSet<FeedbackKey>,
     ) {
         let plan = cx.plan;
         let keyed = |kind: &[crate::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
@@ -585,6 +615,7 @@ impl Stager {
             })
             .collect();
         let mut caps = BTreeMap::new();
+        let mut with_params = BTreeSet::new();
         let mut from = Vec::with_capacity(plan.event_feedback.len());
         let mut extra = vec![0; plan.event_feedback.len()];
         let event = plan
@@ -602,15 +633,35 @@ impl Stager {
                     debug_assert!(have.is_some(), "a carried FIFO was in the last plan");
                     (j as u32, have.unwrap_or(0))
                 });
-                let (how, cap, over) = fit_fifo(carried, want, rate);
+                let (mut how, mut cap, over) = fit_fifo(carried, want, rate);
+                // As a delay's FIFO: one kept from before its source wrote
+                // param events is built afresh.
+                let params = plan.event_tap_params(EventTapSource::Out(src));
+                let had_params = carried.is_some() && self.param_feedback.contains(&f.key);
+                if let (RingFrom::Keep { from: j, .. }, true, false) = (how, params, had_params) {
+                    how = RingFrom::Move { from: j };
+                    cap = cap.max(want);
+                }
                 from.push(how);
                 extra[i] = over;
                 caps.insert(f.key, cap);
-                (!matches!(how, RingFrom::Keep { .. }))
-                    .then(|| EventFifo::sized(f.key.delay(), rate, cx.max_block))
+                if params {
+                    with_params.insert(f.key);
+                }
+                (!matches!(how, RingFrom::Keep { .. })).then(|| {
+                    let fifo = EventFifo::sized_for(f.key.delay(), rate, cx.max_block, cap);
+                    if params { fifo.with_params() } else { fifo }
+                })
             })
             .collect();
-        (audio, audio_from, event, FifoPlan { from, extra }, caps)
+        (
+            audio,
+            audio_from,
+            event,
+            FifoPlan { from, extra },
+            caps,
+            with_params,
+        )
     }
 
     /// What disappears flushes to sinks that survive, and held keys of an
@@ -1073,6 +1124,44 @@ fn drives<F: Float>(
                 .flatten()
         })
         .collect()
+}
+
+/// Per event slot, whether it can hold param events: a slot a param-writing
+/// node's output is placed in ([`Shape::param_events`](crate::Shape::param_events)),
+/// a feedback slot of one, or a delay's or a merge's output with such a slot
+/// among its inputs. Only these slots reserve room for them. A slot the
+/// colouring shares among values takes the union over the plan.
+fn param_slots(plan: &Plan) -> Vec<bool> {
+    let mut has = vec![false; plan.event_slot_capacity.len()];
+    for spec in &plan.event_feedback {
+        if let FeedbackKey::Event { from, .. } = spec.key {
+            has[spec.slot as usize] |= plan.event_port_params(from);
+        }
+    }
+    // Ops run in topological order, so a merge comes after what feeds it.
+    for op in &plan.ops {
+        match *op {
+            Op::Node { unit, .. } if plan.units[unit as usize].shape.param_events => {
+                let rec = &plan.nodes.recs[unit as usize];
+                let [_, _, _, eout] = rec.ports(&plan.nodes.slots);
+                for &s in eout {
+                    has[s as usize] = true;
+                }
+            }
+            Op::EventDelay { src, dst, .. } => {
+                let from = has[src as usize];
+                has[dst as usize] |= from;
+            }
+            Op::EventMerge { srcs, dst, .. } => {
+                let any = plan.event_list[srcs.range()]
+                    .iter()
+                    .any(|&s| s != crate::plan::EMPTY_SLOT && has[s as usize]);
+                has[dst as usize] |= any;
+            }
+            _ => {}
+        }
+    }
+    has
 }
 
 /// A FIFO carried across a commit that lowered its bound can hold more than

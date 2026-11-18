@@ -38,24 +38,21 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
 /// that is NaN or negative (not a loop gain), never settle: infinity.
 #[must_use]
 pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> Seconds {
-    Seconds(decay_seconds(
-        delay.get(),
-        Db::from_amplitude(gain),
-        rate.get(),
-    ))
+    decay_seconds(delay.get(), Db::from_amplitude(gain), rate)
 }
 
-/// RT60 in seconds of a loop set (`delay_sum` frames in all, `db_sum` the sum of
-/// the loop gains' decibels per trip): `-60 Σm / (fs Σ dB)`.
-pub(crate) fn decay_seconds(delay_sum: f64, db_sum: Db, rate: f64) -> f64 {
+/// RT60 of a loop set (`delay_sum` frames in all, `db_sum` the sum of the loop gains' decibels
+/// per trip): `-60 Σm / (fs Σ dB)`. The frames are a bare count because an unbounded line is
+/// infinite, which a [`SampleSpan`] cannot hold.
+pub(crate) fn decay_seconds(delay_sum: f64, db_sum: Db, rate: SampleRate) -> Seconds {
     let db_sum = db_sum.get();
-    if db_sum.is_nan() || db_sum >= 0.0 {
+    Seconds(if db_sum.is_nan() || db_sum >= 0.0 {
         f64::INFINITY
     } else if db_sum == f64::NEG_INFINITY {
         0.0
     } else {
-        -60.0 * delay_sum / (rate * db_sum)
-    }
+        -60.0 * delay_sum / (rate.get() * db_sum)
+    })
 }
 
 #[cfg(test)]

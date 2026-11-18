@@ -78,14 +78,14 @@ fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
     .expect("parses");
     let mut hint = 0;
     for dir in [
-        [f32::NAN; 3],
-        [f32::INFINITY, 0.0, 0.0],
+        [f64::NAN; 3],
+        [f64::INFINITY, 0.0, 0.0],
         [0.0, 0.0, 0.0],
-        [f32::NAN, 1.0, 0.0],
+        [f64::NAN, 1.0, 0.0],
     ] {
         let w = p.set.weights(dir, &mut hint);
         assert!(w.verts.iter().all(|&v| (v as usize) < 4), "{dir:?}: {w:?}");
-        assert!(w.w.iter().all(|x| x.is_finite()) && (w.w.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!(w.w.iter().all(|x| x.is_finite()) && (w.w.iter().sum::<f64>() - 1.0).abs() < 1e-12);
     }
     let input = [0.5f32; 64];
     let (mut left, mut right) = ([0.0f32; 64], [0.0f32; 64]);

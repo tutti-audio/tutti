@@ -1244,6 +1244,26 @@ impl Plan {
             .and_then(|u| u.shape.event_input_capacity)
     }
 
+    /// Whether event output port `port` writes param events
+    /// ([`Shape::param_events`]).
+    pub(crate) fn event_port_params(&self, port: EventOut) -> bool {
+        self.unit(port.node)
+            .is_some_and(|u| port.port < u.shape.event_out && u.shape.param_events)
+    }
+
+    /// Whether what an event tap's source carries includes param events: the
+    /// port itself writes them, or, for an input, a port with an edge into it
+    /// does.
+    pub(crate) fn event_tap_params(&self, source: crate::EventTapSource) -> bool {
+        match source {
+            crate::EventTapSource::Out(port) => self.event_port_params(port),
+            crate::EventTapSource::In(at) => self
+                .event_edges
+                .iter()
+                .any(|&(from, to)| to == at && self.event_port_params(from)),
+        }
+    }
+
     /// The declared capacity of each output port that writes what an event
     /// tap's source carries: the port itself, or, for an input, every port
     /// with an edge into it (what the node can receive there, summed).
