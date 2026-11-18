@@ -1,7 +1,7 @@
 //! A child process that cannot outlive its owner.
 
 use std::ops::{Deref, DerefMut};
-use std::process::Child;
+use std::process::{Child, ExitStatus};
 
 /// A child process that is killed and reaped when it drops.
 ///
@@ -11,17 +11,68 @@ use std::process::Child;
 /// plugin-server, the probe) is held as one of these from the moment it is
 /// spawned, so no path out of the code that holds it leaves one behind.
 ///
-/// It derefs to the [`Child`], so `id`, `try_wait`, `kill` and `wait` are
-/// std's own. A child that already exited (or was reaped through the deref)
-/// is dropped harmlessly: `kill` answers `Ok` and `wait` its status at once.
+/// It derefs to the [`Child`], so `id`, `kill` and `wait` are std's own. A
+/// child that already exited (or was reaped through the deref) is dropped
+/// harmlessly: `kill` answers `Ok` and `wait` its status at once. Reap through
+/// [`try_reap`](Self::try_reap), not the deref's `try_wait`, when the child
+/// leads a [group](Self::leading_group).
 #[derive(Debug)]
-pub struct Reaped(Child);
+pub struct Reaped {
+    child: Child,
+    /// The child leads a process group of its own, which its end takes with it.
+    group: bool,
+}
 
 impl Reaped {
     /// Own `child` from now on.
     #[must_use]
     pub fn new(child: Child) -> Self {
-        Self(child)
+        Self {
+            child,
+            group: false,
+        }
+    }
+
+    /// Own `child`, which leads a process group of its own
+    /// ([`own_group`](tutti_plugin_ipc_ffi::own_group)): its end, by the kill
+    /// of a drop or by its reaping, ends the group's other processes too (the
+    /// helpers a plugin spawned).
+    #[must_use]
+    pub fn leading_group(child: Child) -> Self {
+        Self { child, group: true }
+    }
+
+    /// The child's status if it has ended, reaping it, and ending its group
+    /// with it: the id of a leader reaped and then left would name another
+    /// process later, so the group goes at the reaping.
+    ///
+    /// # Errors
+    ///
+    /// The OS error of `try_wait`.
+    pub fn try_reap(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        let status = self.child.try_wait()?;
+        if status.is_some() {
+            self.end_group();
+        }
+        Ok(status)
+    }
+
+    /// Kills the child and its group, without waiting for it.
+    ///
+    /// # Errors
+    ///
+    /// The OS error of `kill`.
+    pub fn kill_all(&mut self) -> std::io::Result<()> {
+        self.end_group();
+        self.child.kill()
+    }
+
+    /// Ends the group while its leader's id is still the leader's: before the
+    /// reaping, or at it. A `false` `group` has nothing to end.
+    fn end_group(&mut self) {
+        if std::mem::take(&mut self.group) {
+            tutti_plugin_ipc_ffi::kill_group(self.child.id());
+        }
     }
 }
 
@@ -29,13 +80,13 @@ impl Deref for Reaped {
     type Target = Child;
 
     fn deref(&self) -> &Child {
-        &self.0
+        &self.child
     }
 }
 
 impl DerefMut for Reaped {
     fn deref_mut(&mut self) -> &mut Child {
-        &mut self.0
+        &mut self.child
     }
 }
 
@@ -43,8 +94,8 @@ impl Drop for Reaped {
     fn drop(&mut self) {
         // No `wait` when the kill failed: a process this one cannot signal
         // could block the reap forever, and a leaked process is the lesser harm.
-        if self.0.kill().is_ok() {
-            let _ = self.0.wait();
+        if self.kill_all().is_ok() {
+            let _ = self.child.wait();
         }
     }
 }

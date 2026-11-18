@@ -134,6 +134,10 @@ pub struct AudioConfig {
 
     /// How long each wait on a subprocess runs before erroring.
     pub timeouts: Timeouts,
+
+    /// Whether the host clears its dumpable flag before it spawns its first
+    /// plugin server ([`BridgeConfig::protect_host_memory`]). Off by default.
+    pub protect_host_memory: bool,
 }
 
 impl Default for AudioConfig {
@@ -142,6 +146,7 @@ impl Default for AudioConfig {
             format: FloatWidth::F32,
             buffer_size: 8192,
             timeouts: Timeouts::default(),
+            protect_host_memory: false,
         }
     }
 }
@@ -177,6 +182,14 @@ impl AudioConfig {
         self
     }
 
+    /// Sets whether the host protects its memory from the plugins it spawns
+    /// ([`BridgeConfig::protect_host_memory`]).
+    #[must_use]
+    pub fn protect_host_memory(mut self, protect: bool) -> Self {
+        self.protect_host_memory = protect;
+        self
+    }
+
     // --- internal resolution ---
 
     /// The bridge configuration a plugin loaded under this catalog config gets.
@@ -190,6 +203,7 @@ impl AudioConfig {
             preferred_format: self.format,
             max_buffer_size: self.buffer_size,
             timeouts: self.timeouts,
+            protect_host_memory: self.protect_host_memory,
             ..BridgeConfig::at(crate::unique_socket_path()?)
         })
     }

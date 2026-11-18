@@ -139,6 +139,14 @@ pub struct BridgeConfig {
     /// Sample format to request; the subprocess replies with what it negotiated.
     #[serde(default = "crate::protocol::default_format")]
     pub preferred_format: FloatWidth,
+    /// Clear the host's dumpable flag (Linux: PR_SET_DUMPABLE 0) before the
+    /// first server is spawned, so a plugin, which runs as the same user, cannot
+    /// `ptrace` the host or write its memory. Off by default: the flag also
+    /// stops the host dumping core and an unprivileged debugger or crash
+    /// handler attaching to it, which is the app's to choose. Nothing elsewhere
+    /// (macOS's hardened runtime is the app's signing).
+    #[serde(default)]
+    pub protect_host_memory: bool,
 }
 
 impl BridgeConfig {
@@ -157,6 +165,7 @@ impl BridgeConfig {
             max_buffer_size: 8192,
             timeouts: Timeouts::default(),
             preferred_format: FloatWidth::F32,
+            protect_host_memory: false,
         }
     }
 }

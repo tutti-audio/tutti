@@ -5,7 +5,7 @@
 //! which the render thread serves (`ProcessAudio` and `Reset`, nothing else),
 //! and the control connection, which the main thread's event loop serves.
 
-use crate::render::{RenderSide, RenderThread};
+use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{Transport, TransportListener};
 use std::path::PathBuf;
@@ -41,6 +41,20 @@ pub(crate) fn request_audio_priority(what: &str) {
         tracing::info!("plugin-server: {what}: {outcome}; expect more dropped blocks under load");
     }
 }
+
+/// How a served session ended, when it did not fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[must_use]
+pub enum Ended {
+    /// The session ended and every plugin it loaded was destroyed.
+    Clean,
+    /// A plugin was leaked: its render thread never returned the processor, and
+    /// destroying the plugin would have freed what that thread still reads.
+    PluginLeaked,
+}
+
+/// The exit status of a server whose session ended with [`Ended::PluginLeaked`].
+pub const EXIT_PLUGIN_LEAKED: u8 = 3;
 
 /// The subprocess-side server: one hosted plugin, one host connection.
 ///
@@ -106,7 +120,8 @@ impl PluginServer {
         })
     }
 
-    /// Serves one host, then returns. Blocks for the lifetime of the session.
+    /// Serves one host, then returns how the session ended ([`Ended`]). Blocks
+    /// for the lifetime of the session.
     ///
     /// # The connection dance
     ///
@@ -136,12 +151,21 @@ impl PluginServer {
     /// connection fails. The handshake connection closing is the host's way of
     /// ending that phase, not an error. However it ends, the plugin is
     /// released first.
-    pub fn run(mut self) -> BridgeResult<()> {
+    pub fn run(mut self) -> BridgeResult<Ended> {
         let served = self.serve();
         // Idempotent: the paths that never reached the control phase.
         self.served.stop();
         self.release();
-        served
+        // The plugin and the session go with the server: what they leak, they
+        // leak here.
+        drop(self);
+        served.map(|()| {
+            if crate::leak::happened() {
+                Ended::PluginLeaked
+            } else {
+                Ended::Clean
+            }
+        })
     }
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
@@ -185,7 +209,7 @@ impl PluginServer {
         // is returned by that thread's poll, and the plugin is destroyed only
         // once it has it back.
         self.session.drop_plugin(self.main);
-        drop(render.stop());
+        self.take_home(render);
         self.session.report_final_losses();
         if served.is_ok() {
             tracing::info!(
@@ -193,6 +217,26 @@ impl PluginServer {
             );
         }
         served
+    }
+
+    /// Stops the render thread within [`RENDER_STOP_PATIENCE`]. A thread that
+    /// panicked is reported (the main loop has seen it end the connection); one
+    /// stuck inside the plugin ends the process outright, as an orphan's
+    /// watchdog does: nothing can free a plugin that never returns from a call.
+    fn take_home(&self, render: RenderThread) {
+        match render.stop_within(RENDER_STOP_PATIENCE) {
+            Ok(_side) => {}
+            Err(NotHome::Panicked(panicked)) => {
+                tracing::error!("plugin-server: {panicked}");
+            }
+            Err(NotHome::Stuck) => {
+                tracing::error!(
+                    "plugin-server: the render thread is stuck in the plugin; ending the process"
+                );
+                let _ = std::fs::remove_file(&self.socket);
+                tutti_plugin_ipc_ffi::terminate_process()
+            }
+        }
     }
 
     /// Releases a plugin whose audio phase never began: the Processor was lent
@@ -208,7 +252,7 @@ impl PluginServer {
         match RenderThread::spawn(side, None) {
             Ok(thread) => {
                 self.session.drop_plugin(self.main);
-                drop(thread.stop());
+                self.take_home(thread);
                 self.session.report_final_losses();
             }
             Err(failed) => {
@@ -273,6 +317,10 @@ impl Drop for PluginServer {
         let _ = std::fs::remove_file(&self.socket);
     }
 }
+
+/// How long a stopped render thread is given to return: it ends at its next
+/// step, so this is a thread stuck inside the plugin or in a read.
+const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How long a server is given to shut down after its host ended, before it is
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.

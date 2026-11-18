@@ -1,0 +1,66 @@
+//! Unix: the server leads a process group of its own, so the group's end
+//! reaches the helper processes a plugin spawned.
+
+use rustix::process::{Pid, Signal};
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command};
+
+/// Makes `command` start its process as the leader of a new process group.
+pub fn own_group(command: &mut Command) {
+    command.process_group(0);
+}
+
+/// Nothing to do after the spawn: the group was made at it ([`own_group`]).
+///
+/// # Errors
+///
+/// Never on unix.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "the signature of the Windows module"
+)]
+pub fn bind_to_host(_child: &Child) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Ends every process of the group `leader` leads (`SIGKILL`). Call it while
+/// the leader is unreaped (or just reaped): a reaped leader's id may name an
+/// unrelated process later. A group that is already gone is not an error.
+pub fn kill_group(leader: u32) {
+    if let Some(pid) = i32::try_from(leader).ok().and_then(Pid::from_raw) {
+        let _ = rustix::process::kill_process_group(pid, Signal::KILL);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Stdio;
+
+    /// **A process that leads its group takes the group's other members with
+    /// it**: the shell's background `sleep` is in the shell's group, and ends
+    /// when the group is killed.
+    #[test]
+    fn killing_a_group_ends_the_helpers_its_leader_spawned() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 60 & echo $!; wait"])
+            .stdout(Stdio::piped());
+        own_group(&mut command);
+        let mut leader = command.spawn().expect("the shell spawns");
+        let mut line = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(leader.stdout.take().expect("piped")),
+            &mut line,
+        )
+        .expect("the shell prints its helper's pid");
+        let helper: u32 = line.trim().parse().expect("a pid");
+        let (ended, helper_ended) = std::sync::mpsc::channel();
+        crate::watch_host(helper, move || ended.send(()).expect("listening"))
+            .expect("the watch on the helper starts");
+
+        kill_group(leader.id());
+        leader.wait().expect("the leader ends");
+        helper_ended.recv().expect("the helper ends with its group");
+    }
+}

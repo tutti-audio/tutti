@@ -10,7 +10,7 @@ use crate::protocol::{BridgeMessage, HostMessage, LoadedPlugin, PluginDescriptor
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Command;
 use std::time::{Duration, Instant};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_CHUNK;
@@ -140,9 +140,8 @@ pub(super) fn launch_with_state(
     state_use: StateUse,
 ) -> BridgeResult<LaunchedServer> {
     config.timeouts.validate()?;
-    let server =
-        ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone())
-            .map_err(BridgeError::ExitUnwatched)?;
+    let server = ProcessGuard::launched(spawn_process(locator, config)?, config.clone())
+        .map_err(BridgeError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
@@ -203,20 +202,43 @@ pub(super) fn launch_with_state(
     }
 }
 
-fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child> {
+/// Starts the server as the leader of a process group of its own, in the
+/// host's kill-on-close job on Windows, so its helpers and the server itself
+/// end with it.
+fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reaped> {
     let server_path = locator
         .resolve(Helper::Server)
         .ok_or(BridgeError::ServerNotFound)?;
     tracing::debug!("spawning plugin-server: {}", server_path.display());
-    Command::new(server_path)
+    if config.protect_host_memory {
+        protect_host_memory_once();
+    }
+    let mut command = Command::new(server_path);
+    command
         .arg(&config.socket_path)
         .env(
             tutti_plugin_ipc_ffi::HOST_PID_ENV,
             std::process::id().to_string(),
         )
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(BridgeError::Io)
+        .stderr(std::process::Stdio::inherit());
+    tutti_plugin_ipc_ffi::own_group(&mut command);
+    let child = command.spawn().map_err(BridgeError::Io)?;
+    let child = Reaped::leading_group(child);
+    if let Err(e) = tutti_plugin_ipc_ffi::bind_to_host(&child) {
+        tracing::warn!("the server is not bound to the host's end: {e}");
+    }
+    Ok(child)
+}
+
+/// Clears the host's dumpable flag, once for the process, at the first server
+/// it spawns ([`BridgeConfig::protect_host_memory`]).
+fn protect_host_memory_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(e) = tutti_plugin_ipc_ffi::protect_host_memory() {
+            tracing::warn!("the host's memory is not protected from its plugins: {e}");
+        }
+    });
 }
 
 /// Connect as soon as the server is listening, rather than after a fixed wait.
@@ -281,7 +303,7 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
 }
 
 /// Which wait a `LoadPlugin` reply is under: the open (library, instance,
-/// init) has the bridge's call window; once the server says it has begun
+/// init) has the load window ([`Timeouts::load`]); once the server says it has begun
 /// restoring staged state the restore has a window of its own and answers for
 /// a failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,7 +316,7 @@ impl LoadPhase {
     /// How long the next reply may take in this phase.
     fn window(self, timeouts: &Timeouts) -> Duration {
         match self {
-            Self::Opening => timeouts.call,
+            Self::Opening => timeouts.load,
             Self::Restoring => timeouts.state_restore,
         }
     }
@@ -501,6 +523,7 @@ mod tests {
     use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
     use std::path::PathBuf;
+    use std::process::Child;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -781,15 +804,17 @@ mod tests {
         );
     }
 
-    /// The window of the wait a `LoadPlugin` reply is under: `call` while the
-    /// plugin opens, `state_restore` once the server says it is restoring, and
-    /// only a restore's failure is the state's.
+    /// The window of the wait a `LoadPlugin` reply is under: `load` while the
+    /// plugin opens (a sampler's initialisation is a healthy load, not a generic
+    /// call), `state_restore` once the server says it is restoring, and only a
+    /// restore's failure is the state's.
     #[test]
     fn a_restore_is_waited_on_for_its_own_window() {
         let mut t = Timeouts::default();
         t.call = Duration::from_secs(1);
+        t.load = Duration::from_secs(7);
         t.state_restore = Duration::from_secs(20);
-        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(1));
+        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(7));
         assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
 
         let timed_out = || BridgeError::Timeout {

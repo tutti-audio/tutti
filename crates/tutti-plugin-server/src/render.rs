@@ -906,6 +906,9 @@ impl RenderThread {
             let (ended, slot) = (Arc::clone(&ended), Arc::clone(&slot));
             move |stop: &StopToken| {
                 let side = slot.lock_recover().take().expect("the side is taken once");
+                // Declared before the first call into the plugin's code, so a
+                // panic anywhere below is an end the main loop sees.
+                let _unwinding = EndedByPanic(&ended);
                 crate::server::request_audio_priority("the render thread");
                 run(side, audio, stop, &ended)
             }
@@ -931,17 +934,50 @@ impl RenderThread {
         self.ended.get()
     }
 
-    /// Stops the thread and takes its state back.
+    /// Stops the thread and takes its state back, waiting at most `patience`
+    /// for it: a thread stuck inside the plugin is given up on (detached), and
+    /// the caller ends the process.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If the render thread panicked (a plugin that panics is caught at the
-    /// lifecycle; anything else here is a bug).
-    pub(crate) fn stop(mut self) -> RenderSide {
+    /// The thread panicked (its state went with it), or it did not end within
+    /// `patience`.
+    pub(crate) fn stop_within(mut self, patience: Duration) -> Result<RenderSide, NotHome> {
         let handle = self.handle.take().expect("stopped once");
         handle.token().stop();
         self.wake.ring();
-        handle.join().expect("the render thread does not panic")
+        match handle.stop_within(patience) {
+            Ok(Ok(side)) => Ok(side),
+            Ok(Err(panicked)) => Err(NotHome::Panicked(panicked)),
+            Err(stuck) => {
+                stuck.detach();
+                Err(NotHome::Stuck)
+            }
+        }
+    }
+}
+
+/// Why a stopped render thread did not hand its state back.
+#[derive(Debug)]
+pub(crate) enum NotHome {
+    /// The thread panicked.
+    Panicked(tutti_rt::Panicked),
+    /// The thread is still running (a plugin that does not return from a block).
+    Stuck,
+}
+
+/// Records, as the end of the audio connection, a thread that unwinds: the main
+/// loop reads that and ends the session, which a panic that only reached the
+/// join would leave running.
+struct EndedByPanic<'a>(&'a OnceLock<Arc<BridgeError>>);
+
+impl Drop for EndedByPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let _ = self.0.set(Arc::new(BridgeError::Other(
+                "the render thread panicked".into(),
+            )));
+        }
     }
 }
 
@@ -1027,6 +1063,73 @@ mod tests {
         assert_eq!(link.losses(), Losses::default());
     }
 
+    /// A host connection that says a frame has begun and then does what `recv`
+    /// is told to: a peer whose frame never completes, or a transport that
+    /// breaks.
+    struct Begun<F: FnMut() -> BridgeResult<HostMessage> + Send>(F);
+
+    impl<F: FnMut() -> BridgeResult<HostMessage> + Send> Transport for Begun<F> {
+        fn recv(&mut self) -> BridgeResult<HostMessage> {
+            (self.0)()
+        }
+
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+            Ok(true)
+        }
+
+        fn send(&mut self, _: &BridgeMessage) -> BridgeResult<()> {
+            Ok(())
+        }
+    }
+
+    /// **A render thread stuck in a read is given up on, not joined for ever**:
+    /// the stop returns `Stuck` within its patience, so the server ends the
+    /// process instead of leaving an orphan that nothing can stop. The read
+    /// returns only when the test lets it, after the stop has answered.
+    #[test]
+    fn a_render_thread_stuck_in_a_read_is_given_up_on() {
+        let (_link, side) = link().expect("bells");
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (inside, entered) = std::sync::mpsc::channel::<()>();
+        let stalled = Begun(move || {
+            let _ = inside.send(());
+            let _ = released.recv();
+            Err(BridgeError::ProcessCrashed)
+        });
+        let thread = RenderThread::spawn(side, Some(Box::new(stalled))).expect("the thread");
+
+        entered.recv().expect("the thread reads");
+        let stopped = thread.stop_within(Duration::from_millis(50)).err();
+
+        assert!(matches!(stopped, Some(NotHome::Stuck)), "{stopped:?}");
+        drop(release);
+    }
+
+    /// **A render thread that panics ends the audio connection as the main loop
+    /// sees it**, and its stop reports the panic: the main thread neither
+    /// carries on over a dead renderer nor panics itself on the join.
+    #[test]
+    fn a_render_thread_that_panics_is_seen_by_the_main_loop_and_reported_by_its_stop() {
+        let (_link, side) = link().expect("bells");
+        let broken = Begun(|| panic!("the transport broke"));
+        let thread = RenderThread::spawn(side, Some(Box::new(broken))).expect("the thread");
+
+        tutti_fixtures::wait_until("the panic to be seen", Duration::from_secs(60), || {
+            thread.ended().is_some()
+        });
+
+        let stopped = thread.stop_within(Duration::from_secs(60)).err();
+        match stopped {
+            Some(NotHome::Panicked(panicked)) => {
+                assert!(
+                    panicked.message.contains("the transport broke"),
+                    "{panicked}"
+                );
+            }
+            other => panic!("expected the panic, got {other:?}"),
+        }
+    }
+
     /// The tests that need a socket pair: a unix local socket is a descriptor.
     #[cfg(unix)]
     mod woken {
@@ -1044,7 +1147,8 @@ mod tests {
         fn a_command_wakes_a_render_thread_that_waits_on_a_quiet_connection() {
             let (mut link, side) = link().expect("bells");
             let (_host_end, server_end) = UnixStream::pair().expect("socket pair");
-            let audio = SocketTransport::audio(Stream::from(OwnedFd::from(server_end)));
+            let audio = SocketTransport::audio(Stream::from(OwnedFd::from(server_end)))
+                .expect("the audio transport");
             let thread = RenderThread::spawn(side, Some(Box::new(audio))).expect("the thread");
 
             let (_slab_host, slab) = slab("wake", 256);
@@ -1056,7 +1160,9 @@ mod tests {
                 Patience::new(Instant::now(), Duration::from_secs(600)),
             );
 
-            let side = thread.stop();
+            let side = thread
+                .stop_within(Duration::from_secs(600))
+                .expect("the thread hands its side back");
             assert!(side.has_slab(), "the command was taken while no block came");
         }
     }
