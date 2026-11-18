@@ -33,7 +33,7 @@ impl Glide<ReadPosition> {
                 let now = self.now().get();
                 let frames = to.get().abs_diff(now) as f64 / ReadPosition::COUNTS_PER_FRAME;
                 // `as` saturates at `u32::MAX`, so a rate of zero is the slowest glide.
-                (frames / f64::from(rate)).ceil() as u32
+                (frames / rate).ceil() as u32
             }
         };
         self.aim_in(to, n);

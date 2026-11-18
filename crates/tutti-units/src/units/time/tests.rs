@@ -374,6 +374,15 @@ fn a_frequency_narrows_to_the_f32_closed_form() {
     }
 }
 
+/// A sample rate crosses into data as its rate in hertz.
+#[test]
+fn a_sample_rate_is_a_quantity_of_its_hertz() {
+    assert_eq!(
+        <f64 as crate::Real>::from_unit(SampleRate::SR_48K),
+        48_000.0
+    );
+}
+
 /// **The leave of a one-pole is `exp(-1 / (τ rate))`, held to the exponential's digits**: a time
 /// constant of a twentieth of a frame leaves `exp(-20) = 2.06e-9` of the gap, and instant and
 /// holding times are 0 and 1.

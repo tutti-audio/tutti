@@ -2917,8 +2917,10 @@ dependencies = [
  "proptest",
  "sha2",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-midi-device",
  "tutti-ump",
+ "tutti-units",
 ]
 
 [[package]]

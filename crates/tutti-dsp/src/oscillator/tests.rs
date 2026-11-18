@@ -1,11 +1,16 @@
 use super::*;
-use core::f64::consts::PI;
+use core::f64::consts::{PI, TAU};
+use tutti_units::PhaseStep;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
+// The tests other than the `f64` ones render at `F = f32`: the wave is computed in `f32` from
+// the phase truncated to `2^-24` cycles, so their tolerances are `f32`'s.
+
 fn render(wave: OscillatorWave, hz: f64, len: usize) -> Vec<f32> {
     let mut osc = Oscillator::new(wave);
-    (0..len).map(|_| osc.step(Hz(hz), RATE)).collect()
+    let step = OscillatorStep::new(Hz(hz), RATE);
+    (0..len).map(|_| osc.step(step)).collect()
 }
 
 /// The amplitude of the `hz` component of `x` over a whole number of its
@@ -55,8 +60,12 @@ fn a_square_holds_plus_and_minus_one_between_its_edges() {
     for &y in &out[25..48] {
         assert!((y + 1.0).abs() < 1e-6, "{y}");
     }
-    // An edge on a sample is the midpoint of the jump.
-    assert!(out[0].abs() < 1e-6 && out[24].abs() < 1e-6);
+    // An edge on a sample is the midpoint of the jump. At `dt = 1/48` (1 kHz at 48 kHz) the
+    // `f32` phase is the running phase truncated to `2^-24` cycles, so the offset from the edge
+    // `x = d / dt` is off by up to `2^-24 * 48` samples, and the jump's correction (slope at
+    // most 1, scaled by 2) moves the sample by twice that.
+    let edge = 2.0 * 48.0 * 2f32.powi(-24);
+    assert!(out[0].abs() <= edge && out[24].abs() <= edge, "{out:?}");
 }
 
 #[test]
@@ -134,18 +143,18 @@ fn the_band_limited_saw_leaves_the_aliased_lines_quiet() {
 #[test]
 fn a_frequency_that_is_not_finite_holds_the_phase() {
     let mut osc = Oscillator::new(OscillatorWave::Saw);
-    osc.step::<f32>(Hz(1_000.0), RATE);
+    osc.step(OscillatorStep::<f32>::new(Hz(1_000.0), RATE));
     let held = osc;
-    osc.step::<f32>(Hz(f64::NAN), RATE);
+    osc.step(OscillatorStep::<f32>::new(Hz(f64::NAN), RATE));
     assert_eq!(osc, held);
-    osc.step::<f32>(Hz(-5.0), RATE);
+    osc.step(OscillatorStep::<f32>::new(Hz(-5.0), RATE));
     assert_eq!(osc, held);
 }
 
 #[test]
 fn reset_returns_the_phase_to_zero() {
     let mut osc = Oscillator::new(OscillatorWave::Sine);
-    osc.step::<f32>(Hz(1_000.0), RATE);
+    osc.step(OscillatorStep::<f32>::new(Hz(1_000.0), RATE));
     osc.reset();
     assert_eq!(osc, Oscillator::new(OscillatorWave::Sine));
 }
@@ -157,9 +166,97 @@ fn an_f64_sine_is_the_closed_form_to_f64_precision() {
     let mut osc = Oscillator::new(OscillatorWave::Sine);
     for n in 0..4_800 {
         let exact = libm::sin(TAU * 1_234.5 * f64::from(n) / RATE.get());
-        let y: f64 = osc.step(Hz(1_234.5), RATE);
+        let y: f64 = osc.step(OscillatorStep::new(Hz(1_234.5), RATE));
         // The phase is a 64-bit count of cycles, whose rounding of `1234.5 / 48000` is
         // 2^-64 a step: far under the bound.
         assert!((y - exact).abs() < 1e-12, "sample {n}: {y} vs {exact}");
+    }
+}
+
+/// At `f64` the naive part of each wave is its closed form away from the edges: the phase is
+/// the running phase to `2^-53` cycles, so a saw (`2p - 1`), a square (`+-1`) and a triangle
+/// (`1 - 4|p - 1/2|`) at 1 kHz and 48 kHz hold to 1e-12 at the frames more than a sample from
+/// an edge.
+#[test]
+fn an_f64_saw_square_and_triangle_are_their_closed_forms_away_from_the_edges() {
+    let waves: [(OscillatorWave, fn(f64) -> f64); 3] = [
+        (OscillatorWave::Saw, |p| 2.0 * p - 1.0),
+        (OscillatorWave::Square, |p| if p < 0.5 { 1.0 } else { -1.0 }),
+        (OscillatorWave::Triangle, |p| 1.0 - 4.0 * (p - 0.5).abs()),
+    ];
+    for (wave, closed) in waves {
+        let mut osc = Oscillator::new(wave);
+        for n in 0..48 {
+            let y: f64 = osc.step(OscillatorStep::new(Hz(1_000.0), RATE));
+            let near_edge = n <= 1 || n >= 47 || (23..=25).contains(&n);
+            if !near_edge {
+                let want = closed(f64::from(n) / 48.0);
+                assert!(
+                    (y - want).abs() < 1e-12,
+                    "{wave:?} frame {n}: {y} vs {want}"
+                );
+            }
+        }
+    }
+}
+
+/// The closed-form saw and square at a phase `count` (of `2^64` cycles) with the step `inc`: the
+/// naive wave less (saw) or plus (square) twice the PolyBLEP of the exact distance from the edge
+/// in steps, formed from the counts in `f64`.
+fn closed_form(wave: OscillatorWave, count: u64, inc: u64) -> f64 {
+    let blep = |x: f64| {
+        if x < 0.0 {
+            0.5 * (x + 1.0) * (x + 1.0)
+        } else {
+            -0.5 * (1.0 - x) * (1.0 - x)
+        }
+    };
+    let cycles = 2f64.powi(64);
+    let near = |edge: u64| {
+        let d = i128::from(count.wrapping_sub(edge) as i64);
+        (-i128::from(inc) <= d && d < i128::from(inc)).then(|| d as f64 / inc as f64)
+    };
+    let p = count as f64 / cycles;
+    match wave {
+        OscillatorWave::Saw => 2.0 * p - 1.0 - near(0).map_or(0.0, |x| 2.0 * blep(x)),
+        _ => {
+            let naive = if p < 0.5 { 1.0 } else { -1.0 };
+            naive + near(0).map_or(0.0, |x| 2.0 * blep(x))
+                - near(1 << 63).map_or(0.0, |x| 2.0 * blep(x))
+        }
+    }
+}
+
+/// At 0.01 Hz and 48 kHz (a step of `2.1e-7` cycles, six `f32` ulps of the phase) the edge
+/// correction of an `f32` saw and square is the closed form's: the distance from the edge is
+/// taken from the exact count, so it is exact whatever the float. The remaining error is the
+/// naive wave's, the phase truncated to `2^-24` cycles (`2 * 2^-24` in a saw's `2p - 1`, none in
+/// a square's) and the rounding of the product with the correction (`2^-24` each of the two
+/// terms, `blep <= 1/2`): `5 * 2^-24`. A distance taken from the `f32` phase would be off by up
+/// to `2^-24 / 2.1e-7 = 0.08` steps, a correction error of 0.08.
+#[test]
+fn an_f32_saw_and_square_at_0_01_hz_hold_the_edge_correction_of_the_closed_form() {
+    let step = OscillatorStep::<f32>::new(Hz(0.01), RATE);
+    let inc = PhaseStep::from(PhaseIncrement(0.01 / RATE.get())).get();
+    let bound = 5.0 * 2f64.powi(-24);
+    for wave in [OscillatorWave::Saw, OscillatorWave::Square] {
+        // Start 3.3 steps before the edges at the wrap and at the half.
+        for edge in [0u64, 1 << 63] {
+            if wave == OscillatorWave::Saw && edge != 0 {
+                continue;
+            }
+            let start = edge.wrapping_sub(inc * 10 / 3);
+            let mut osc = Oscillator::new(wave);
+            osc.phase = RunningPhase::START.advance(PhaseStep::from_count(start));
+            for n in 0..8 {
+                let count = start.wrapping_add(inc * n);
+                let y: f32 = osc.step(step);
+                let want = closed_form(wave, count, inc);
+                assert!(
+                    (f64::from(y) - want).abs() <= bound,
+                    "{wave:?} edge {edge} frame {n}: {y} against {want}"
+                );
+            }
+        }
     }
 }

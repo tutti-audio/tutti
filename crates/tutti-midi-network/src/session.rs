@@ -35,7 +35,7 @@ struct Repeat {
 
 impl Repeat {
     fn deadline(&self, cfg: &SessionConfig) -> Instant {
-        self.next.min(self.started + cfg.command_timeout)
+        self.next.min(self.started + cfg.command_timeout.get())
     }
 }
 
@@ -183,7 +183,7 @@ impl Session {
         Repeat {
             command,
             started: now,
-            next: now + self.cfg.repeat_interval,
+            next: now + self.cfg.repeat_interval.get(),
         }
     }
 
@@ -469,7 +469,7 @@ impl Session {
             (Role::Client(_), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
                 self.remote = Some(identity);
                 self.phase = Phase::AwaitingAcceptance {
-                    until: now + self.cfg.pending_timeout,
+                    until: now + self.cfg.pending_timeout.get(),
                 };
             }
             (Role::Client(_), Phase::Established | Phase::Resetting(_)) => {}
@@ -718,13 +718,13 @@ impl Session {
                 Some(r.deadline(cfg))
             }
             Phase::AwaitingAcceptance { until } => Some(*until),
-            Phase::Confirming { since } => Some(*since + cfg.pending_timeout),
+            Phase::Confirming { since } => Some(*since + cfg.pending_timeout.get()),
             Phase::Challenged(c) => earliest(&[
-                Some(c.since + cfg.pending_timeout),
+                Some(c.since + cfg.pending_timeout.get()),
                 c.delayed.as_ref().map(|(at, _)| *at),
             ]),
             Phase::Established => earliest(&[
-                Some(self.last_heard + cfg.liveness_timeout),
+                Some(self.last_heard + cfg.liveness_timeout.get()),
                 Some(self.next_ping()),
                 self.link.idle_deadline(),
                 self.link.rx_deadline(),
@@ -733,9 +733,9 @@ impl Session {
     }
 
     fn next_ping(&self) -> Instant {
-        let quiet_until = self.last_heard + self.cfg.ping_interval;
+        let quiet_until = self.last_heard + self.cfg.ping_interval.get();
         match self.last_ping {
-            Some(sent) => quiet_until.max(sent + self.cfg.ping_interval),
+            Some(sent) => quiet_until.max(sent + self.cfg.ping_interval.get()),
             None => quiet_until,
         }
     }
@@ -745,30 +745,30 @@ impl Session {
         match &mut self.phase {
             Phase::Idle => {}
             Phase::Inviting(r) => {
-                if now >= r.started + cfg.command_timeout {
+                if now >= r.started + cfg.command_timeout.get() {
                     return self.close(now, ByeReason::InvitationCanceled);
                 }
                 if now >= r.next {
-                    r.next = now + cfg.repeat_interval;
+                    r.next = now + cfg.repeat_interval.get();
                     self.out.push(r.command.clone());
                 }
             }
             Phase::Resetting(r) => {
-                if now >= r.started + cfg.command_timeout {
+                if now >= r.started + cfg.command_timeout.get() {
                     return self.close(now, ByeReason::Timeout);
                 }
                 if now >= r.next {
-                    r.next = now + cfg.repeat_interval;
+                    r.next = now + cfg.repeat_interval.get();
                     self.out.push(r.command.clone());
                 }
             }
             Phase::Closing { repeat, reason } => {
                 let reason = *reason;
-                if now >= repeat.started + cfg.command_timeout {
+                if now >= repeat.started + cfg.command_timeout.get() {
                     return self.finish(EndedBy::Local, reason);
                 }
                 if now >= repeat.next {
-                    repeat.next = now + cfg.repeat_interval;
+                    repeat.next = now + cfg.repeat_interval.get();
                     self.out.push(repeat.command.clone());
                 }
             }
@@ -778,7 +778,7 @@ impl Session {
                 }
             }
             Phase::Confirming { since } => {
-                if now >= *since + cfg.pending_timeout {
+                if now >= *since + cfg.pending_timeout.get() {
                     self.refuse(now, ByeReason::UserDeclined);
                 }
             }
@@ -789,7 +789,7 @@ impl Session {
                 {
                     self.out.push(command);
                 }
-                if now >= c.since + cfg.pending_timeout {
+                if now >= c.since + cfg.pending_timeout.get() {
                     self.phase = Phase::Idle;
                     self.remote = None;
                 }
@@ -800,7 +800,7 @@ impl Session {
 
     fn tick_established(&mut self, now: Instant) {
         let cfg = self.cfg;
-        if now >= self.last_heard + cfg.liveness_timeout {
+        if now >= self.last_heard + cfg.liveness_timeout.get() {
             return self.close(now, ByeReason::Timeout);
         }
         if now >= self.next_ping() {
