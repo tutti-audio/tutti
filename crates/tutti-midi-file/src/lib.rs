@@ -14,27 +14,31 @@
 //!
 //! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
 //!   the first Group; a Clip File's packet is as stored), a `SysEx` or `Escape` of any
-//!   length, or a `Meta` (text, sequence number, channel prefix, tempo, SMPTE
-//!   offset, time and key signature, sequencer-specific, the rest as bytes).
+//!   length, or a `Meta` (text, channel prefix, tempo, time and key signature,
+//!   sequencer-specific, the rest as bytes). The four metas that open a track
+//!   (Sequence Number, Track Name, SMPTE Offset, copyright notice) are the
+//!   fields of its [`Track`] ([`Lead`]).
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
 //! - **Lossless in its events.** A read, a write and a read give the same file:
-//!   SysEx and meta included. Running status and a Delta Clockstamp's spelling
+//!   SysEx and meta included, but for what a read normalizes (below). Running status and a Delta Clockstamp's spelling
 //!   may differ. A Clip File read leaves out what is no event: its Null messages
 //!   (a write puts them back where a long gap needs them), JR Clock and JR
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
-//! - **A writer keeps SMF 1.0's placement rules, a reader keeps the file.**
-//!   [`MidiFile::smf`] refuses a SysEx message that does not end in `F7`, a
-//!   Sequence Number, SMPTE Offset or Track Name after the start of its track,
-//!   a copyright notice that is not the first event of the first track (or a
-//!   second one), and a format 1 file whose tempo map, SMPTE Offset or Sequence
-//!   Number is not in its first track ([`TracksError`]); a read keeps such a
-//!   file, its Sequence Number, SMPTE Offset and Track Name counting only at
-//!   the start. tutti's writer also refuses what the specification only
-//!   recommends: the format 1 tempo map outside the first track, and the
-//!   copyright placement. [`Track::numbered`],
-//!   [`Track::smpte_start`] and [`Track::copyright`] place their event where the
-//!   specification puts it, and [`MidiFile::with_default_tempo_and_meter`] adds the
-//!   tempo and time signature a file without them is read with.
+//! - **A track's opening metas are its fields, a reader normalizes.** A [`Track`]
+//!   holds its Sequence Number, Track Name, SMPTE Offset and copyright notice
+//!   ([`Track::numbered`], [`Track::named`], [`Track::smpte_start`],
+//!   [`Track::copyright`]) and the writer puts them first at tick 0, so a
+//!   late one is unwritable; a whole SysEx message is [`SysEx::Complete`], whose
+//!   `F7` the writer adds. [`MidiFile::smf`] refuses what no type prevents
+//!   ([`TracksError`]): a divided SysEx message left open or interrupted, a
+//!   Sequence Number, SMPTE Offset or tempo map outside the first track where
+//!   the format wants it there, a copyright notice outside the first track.
+//!   A read accepts a file that has such an event out of place, makes it
+//!   writable (a late or duplicate one dropped, one at tick 0 but not first
+//!   moved into the field, a SysEx message closed) and lists each change in
+//!   [`MidiFile::normalized`].
+//!   [`MidiFile::with_default_tempo_and_meter`] adds the tempo and time
+//!   signature a file without them is read with.
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: [`MidiFile::timebase`] gives it
 //!   [`MetricalSequences`] (or [`SmpteSequences`]), whose sequences each have
@@ -149,12 +153,13 @@ pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
 pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, MalformedMeta, Meta,
+    Altered, Converted, DropReason, Dropped, FileEvent, Lead, LyricChange, MalformedMeta, Meta,
     MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
-    MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind, OtherMetaKindOutOfRange,
-    OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat, SmpteFractionalFrames,
-    SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
-    TextKind, Tick, Timebase, Timeline, TimelineDrop, ToClipError, Track,
+    MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
+    OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Placement,
+    SmfFormat, SmfPart, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset,
+    SmpteSequence, SmpteSequences, SmpteView, SysEx, TextKind, Tick, Timebase, Timeline,
+    TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{

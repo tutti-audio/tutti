@@ -13,8 +13,8 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 
 use tutti_midi_file::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
-    ReadError, SmfDivision, SmfFormat, SmfParseError, SmpteFractionalFrames, SmpteOffset, TextKind,
-    Tick, Timebase, Track, TracksError,
+    ReadError, SmfDivision, SmfFormat, SmfParseError, SmpteFractionalFrames, SmpteOffset, SysEx,
+    TextKind, Tick, Timebase, Track, TracksError,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_types::{Beat, Bpm, Seconds};
@@ -134,33 +134,38 @@ fn every_event_kind_survives_a_read_and_a_write() {
 
         let events = &file.tracks()[0].events();
         let at = |i: usize| &events[i];
-        assert_eq!(at(0).1, FileEvent::Meta(Meta::sequence_number(5)));
-        assert_eq!(at(1).1, FileEvent::Meta(Meta::text(TextKind::Text, "text")));
-        assert_eq!(file.tracks()[0].name(), Some("Lead"));
-        assert_eq!(at(5).1, FileEvent::Meta(Meta::text(TextKind::Lyric, "la")));
+        // The four metas that open a track are its fields, and in this file
+        // they are where SMF 1.0 puts them, so the read changed nothing.
+        let first = &file.tracks()[0];
+        assert_eq!(first.sequence_number(), Some(5));
+        assert_eq!(first.copyright_bytes(), Some(&b"(c) nobody"[..]));
+        assert_eq!(first.name(), Some("Lead"));
         assert_eq!(
-            at(6).1,
+            file.smpte_offset(0),
+            Some(
+                SmpteOffset::new(
+                    SmpteTimecode::new(1, 30, 15, 10, SmpteFrameRate::Fps25).unwrap(),
+                    SmpteFractionalFrames::of(50),
+                )
+                .unwrap()
+            )
+        );
+        assert_eq!(file.normalized(), []);
+        assert_eq!(at(0).1, FileEvent::Meta(Meta::text(TextKind::Text, "text")));
+        assert_eq!(at(2).1, FileEvent::Meta(Meta::text(TextKind::Lyric, "la")));
+        assert_eq!(
+            at(3).1,
             FileEvent::Meta(Meta::text(TextKind::Marker, "Verse"))
         );
         assert_eq!(
-            at(12).1,
+            at(9).1,
             FileEvent::Meta(Meta::Tempo {
                 micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             })
         );
         assert_eq!(
-            at(13).1,
-            FileEvent::Meta(Meta::smpte_offset(
-                SmpteOffset::new(
-                    SmpteTimecode::new(1, 30, 15, 10, SmpteFrameRate::Fps25).unwrap(),
-                    SmpteFractionalFrames::of(50),
-                )
-                .unwrap()
-            ))
-        );
-        assert_eq!(
-            at(14).1,
+            at(10).1,
             FileEvent::Meta(Meta::TimeSignature {
                 numerator: 6,
                 denominator_power: 3,
@@ -170,18 +175,18 @@ fn every_event_kind_survives_a_read_and_a_write() {
             })
         );
         assert_eq!(
-            at(15).1,
+            at(11).1,
             FileEvent::Meta(Meta::KeySignature {
                 sharps: -3,
                 minor: true,
                 extra: Box::default(),
             })
         );
-        assert_eq!(at(18).1, on(0, 60, 100));
+        assert_eq!(at(14).1, on(0, 60, 100));
         // Running status read as the message it stands for.
-        assert_eq!(at(19).1, on(0, 62, 90));
+        assert_eq!(at(15).1, on(0, 62, 90));
         assert_eq!(
-            at(20),
+            at(16),
             &(
                 Tick(10),
                 voice(
@@ -194,19 +199,20 @@ fn every_event_kind_survives_a_read_and_a_write() {
             )
         );
         assert_eq!(
-            at(24).1,
+            at(20).1,
             voice(4, Voice1::PitchBend(U14::of(0x40 << 7 | 0x01)))
         );
         assert_eq!(
-            at(25).1,
-            FileEvent::SysEx(vec![0x7E, 0x7F, 0x09, 0x01, 0xF7].into())
+            at(21).1,
+            FileEvent::SysEx(SysEx::Complete(vec![0x7E, 0x7F, 0x09, 0x01].into()))
         );
-        let FileEvent::SysEx(long) = &at(26).1 else {
-            panic!("a SysEx");
+        // The `F7` ends it and the writer adds it, so the model holds 300 bytes.
+        let FileEvent::SysEx(SysEx::Complete(long)) = &at(22).1 else {
+            panic!("a whole SysEx message");
         };
-        assert_eq!(long.len(), 301);
-        assert_eq!(at(27).1, FileEvent::Escape(vec![1, 2, 3].into()));
-        assert_eq!(at(28).0, Tick(20 + u64::from(BEAT)));
+        assert_eq!(long.len(), 300);
+        assert_eq!(at(23).1, FileEvent::Escape(vec![1, 2, 3].into()));
+        assert_eq!(at(24).0, Tick(20 + u64::from(BEAT)));
 
         let written = file.to_bytes();
         // SMF 1.0 section 2.1: the header's format word, after the chunk type
@@ -951,13 +957,16 @@ fn what_an_smf_cannot_hold_is_refused() {
 /// Spec: smf/conventions#7
 #[test]
 fn an_event_longer_than_28_bits_is_too_large() {
+    // The wire's length counts the `F7` the writer adds.
     let sysex = |len: usize| {
-        let mut data = vec![0; len];
-        data[len - 1] = 0xF7;
+        let data = vec![0; len - 1];
         MidiFile::smf(
             SmfFormat::SingleTrack,
             SMF_DIVISION,
-            vec![track(vec![(0, FileEvent::SysEx(data.into()))])],
+            vec![track(vec![(
+                0,
+                FileEvent::SysEx(SysEx::Complete(data.into())),
+            )])],
         )
         .map(drop)
     };

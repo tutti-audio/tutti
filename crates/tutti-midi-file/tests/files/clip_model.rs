@@ -10,7 +10,7 @@ use tutti_midi_device::{
 };
 use tutti_midi_file::{
     ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfFormat,
-    Tick, Track, TracksError,
+    SysEx, Tick, Track, TracksError,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -398,7 +398,7 @@ fn no_prefix_of_a_valid_clip_is_accepted() {
 fn what_a_clip_cannot_hold_is_refused() {
     let one = |event| MidiFile::clip(DIVISION, track(vec![(0, event)]));
     assert!(matches!(
-        one(FileEvent::SysEx(vec![1].into())),
+        one(FileEvent::SysEx(SysEx::Complete(vec![1].into()))),
         Err(TracksError::Refused { .. })
     ));
     assert!(matches!(

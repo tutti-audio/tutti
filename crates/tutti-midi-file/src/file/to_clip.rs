@@ -16,7 +16,7 @@ use tutti_ump::{
 
 use unicode_normalization::UnicodeNormalization;
 
-use super::Container;
+use super::{Container, Lead, SysEx};
 use crate::{FileEvent, Meta, MetricalView, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
 
 use lyrics::Lyrics;
@@ -105,15 +105,26 @@ pub enum DropReason {
     EmptyText,
 }
 
-/// One event of the SMF that is not in the clip.
+/// What of an SMF track has no place in the clip: an event, or one of the meta
+/// events that open the track ([`Lead`]), which a track holds as fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SmfPart {
+    /// An event of the track.
+    Event(FileEvent),
+    /// A field of the track, at tick 0.
+    Lead(Lead),
+}
+
+/// One part of the SMF that is not in the clip.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dropped {
-    /// The track the event was in.
+    /// The track the part was in.
     pub track: usize,
     /// Where it was.
     pub tick: Tick,
-    /// The event.
-    pub event: FileEvent,
+    /// The part.
+    pub part: SmfPart,
     /// Why it has no place.
     pub reason: DropReason,
 }
@@ -341,21 +352,38 @@ fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>
     Ok(packets.map(event).collect())
 }
 
+/// What one of a track's [`Lead`]s becomes: its clip events, or the reason it
+/// has none.
+fn convert_lead(track: usize, lead: &Lead) -> std::result::Result<Vec<FileEvent>, DropReason> {
+    match lead {
+        // SMF 1.0 section 3.3: in a format 0 track, or the first track of a
+        // format 1 file, the name is the sequence's, otherwise the track's. The
+        // sequence is the Composition (Song) Name of Appendix B.
+        Lead::TrackName(name) if track == 0 => text(PlainTextKind::CompositionName, name),
+        Lead::TrackName(_) => Err(DropReason::TrackName),
+        Lead::Copyright(notice) => text(PlainTextKind::Copyright, notice),
+        Lead::SmpteOffset(_) => Err(DropReason::SuccessorUndefined),
+        Lead::SequenceNumber(_) => Err(DropReason::NoSuccessor),
+    }
+}
+
 /// What one SMF event becomes: its clip events (in order) and where among its
 /// tick's they go, or the reason it has none.
-fn convert(
-    track: usize,
-    ev: &FileEvent,
-) -> std::result::Result<(Rank, Vec<FileEvent>), DropReason> {
+fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropReason> {
     let other = |events| Ok((Rank::Other, events));
     match ev {
         // Already a UMP: a MIDI 1.0 channel message on the first Group.
         FileEvent::Message(_) | FileEvent::Unknown(_) => other(vec![ev.clone()]),
-        FileEvent::SysEx(body) => {
+        // A divided message's first packet is not one complete message.
+        FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotCompleteSevenBit),
+        FileEvent::SysEx(SysEx::Complete(body)) => {
             if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = **body {
                 return Err(DropReason::PropertyExchange);
             }
-            let whole: Vec<u8> = std::iter::once(0xF0).chain(body.iter().copied()).collect();
+            let whole: Vec<u8> = std::iter::once(0xF0)
+                .chain(body.iter().copied())
+                .chain([0xF7])
+                .collect();
             let message = SysexMessage::from_framed(&whole)
                 .map_err(|_| DropReason::SysexNotCompleteSevenBit)?;
             other(message.packets(MidiGroup::FIRST).map(event).collect())
@@ -397,13 +425,6 @@ fn convert(
             }
             Meta::Text { kind, bytes } => {
                 let kind = match kind {
-                    // SMF 1.0 section 3.3: in a format 0 track, or the first
-                    // track of a format 1 file, the name is the sequence's,
-                    // otherwise the track's. The sequence is the
-                    // Composition (Song) Name of Appendix B.
-                    TextKind::TrackName if track == 0 => PlainTextKind::CompositionName,
-                    TextKind::TrackName => return Err(DropReason::TrackName),
-                    TextKind::Copyright => PlainTextKind::Copyright,
                     // Any text is what the Unknown Metadata Text message is
                     // for (M2-104 Table 16, bank 1 status 0).
                     TextKind::Text => PlainTextKind::UnknownMetadata,
@@ -415,10 +436,7 @@ fn convert(
             }
             Meta::Malformed(_) => Err(DropReason::MalformedMeta),
             Meta::ChannelPrefix { .. } => Err(DropReason::ReplacedByAddressing),
-            Meta::SmpteOffset { .. } => Err(DropReason::SuccessorUndefined),
-            Meta::SequenceNumber { .. } | Meta::SequencerSpecific { .. } => {
-                Err(DropReason::NoSuccessor)
-            }
+            Meta::SequencerSpecific { .. } => Err(DropReason::NoSuccessor),
             Meta::Other { kind, .. } => Err(match kind.get() {
                 0x21 => DropReason::ReplacedByAddressing,
                 _ => DropReason::NoSuccessor,
@@ -648,6 +666,22 @@ impl MetricalView<'_> {
         let mut dropped = Vec::new();
         let mut moved = Vec::new();
         let mut altered = Vec::new();
+        // The fields that open each track are at tick 0, ahead of its events.
+        for (track, body) in file.tracks().iter().enumerate() {
+            for lead in body.leads() {
+                match convert_lead(track, &lead) {
+                    Ok(events) => {
+                        placed.extend(events.into_iter().map(|e| (Tick(0), Rank::Other, e)))
+                    }
+                    Err(reason) => dropped.push(Dropped {
+                        track,
+                        tick: Tick(0),
+                        part: SmfPart::Lead(lead),
+                        reason,
+                    }),
+                }
+            }
+        }
         for (
             Landing {
                 track,
@@ -664,7 +698,7 @@ impl MetricalView<'_> {
                 Err(DropReason::Superseded)
             } else {
                 match source {
-                    Source::Event => convert(track, event),
+                    Source::Event => convert(event),
                     Source::Lyric(events, made) => {
                         changes = made;
                         events.map(|events| (Rank::Other, events))
@@ -694,7 +728,7 @@ impl MetricalView<'_> {
                 Err(reason) => dropped.push(Dropped {
                     track,
                     tick: from,
-                    event: event.clone(),
+                    part: SmfPart::Event(event.clone()),
                     reason,
                 }),
             }

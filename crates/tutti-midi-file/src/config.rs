@@ -30,14 +30,16 @@ impl std::fmt::Display for TrackPart {
 /// broken. A `track` is an index into the list given.
 ///
 /// [`SysExNotEnded`](Self::SysExNotEnded) to
-/// [`CopyrightNotTogether`](Self::CopyrightNotTogether) are the rules of
-/// SMF 1.0 a writer keeps: [`MidiFile::smf`](crate::MidiFile::smf) refuses what
-/// breaks them, and a read keeps such a file as it is. tutti's writer also
+/// [`CopyrightNotInFirstTrack`](Self::CopyrightNotInFirstTrack) are the rules
+/// of SMF 1.0 a writer keeps that no type makes unwritable:
+/// [`MidiFile::smf`](crate::MidiFile::smf) refuses what breaks them. The rest
+/// of section 3.3's placement is a [`Track`](crate::Track)'s fields, written
+/// first at tick 0, and a read makes a file keep it
+/// ([`MidiFile::normalized`](crate::MidiFile::normalized)). tutti's writer also
 /// refuses what the specification only recommends: the format 1 tempo map
 /// outside the first track
-/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)), and the
-/// copyright placement ([`CopyrightNotFirst`](Self::CopyrightNotFirst),
-/// [`CopyrightNotTogether`](Self::CopyrightNotTogether)).
+/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)), and a
+/// copyright notice outside it.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {
@@ -89,14 +91,14 @@ pub enum TracksError {
         /// of the track if it is never ended.
         at: Tick,
     },
-    /// A System Exclusive message that does not end in `F7` (SMF 1.0 section
-    /// 3: it always ends with one, so the reader knows it has read all of it;
-    /// the last packet of a divided message ends with it).
-    #[error("track {track}: the SysEx message at tick {} does not end in F7", at.0)]
+    /// A divided System Exclusive message that is never ended by a packet ending
+    /// in `F7` (SMF 1.0 section 3: its last packet ends with it, so the reader
+    /// knows it has read all of it).
+    #[error("track {track}: the divided SysEx message at tick {} does not end in F7", at.0)]
     SysExNotEnded {
         /// The track.
         track: usize,
-        /// The tick of the last packet of the message.
+        /// The tick of its first packet.
         at: Tick,
     },
     /// A channel message or an `F0` event between the packets of a divided
@@ -104,23 +106,6 @@ pub enum TracksError {
     /// goes between them).
     #[error("track {track}: an event at tick {} interrupts a divided SysEx message", at.0)]
     SysExInterrupted {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A Sequence Number after the start of its track (SMF 1.0 section 3.3: at
-    /// time 0, before any nonzero delta-time and any transmittable MIDI event).
-    #[error("track {track}: the Sequence Number at tick {} is not at the start", at.0)]
-    SequenceNumberNotAtStart {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A Sequence/Track Name after time 0 (SMF 1.0 section 3.3).
-    #[error("track {track}: the Track Name at tick {} is not at time 0", at.0)]
-    TrackNameNotAtStart {
         /// The track.
         track: usize,
         /// The tick of the event.
@@ -152,33 +137,13 @@ pub enum TracksError {
         /// The tick of the event.
         at: Tick,
     },
-    /// An SMPTE Offset after the start of its track (SMF 1.0 section 3.3: at
-    /// the beginning, before any nonzero delta-time and any transmittable MIDI
-    /// event).
-    #[error("track {track}: the SMPTE Offset at tick {} is not at the start", at.0)]
-    SmpteOffsetNotAtStart {
+    /// A copyright notice in a track other than the first (SMF 1.0 section
+    /// 3.3: the first event of the first track chunk, all of a file's notices
+    /// together in one event).
+    #[error("track {track}: the copyright notice belongs in the first track")]
+    CopyrightNotInFirstTrack {
         /// The track.
         track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A copyright notice that is not the first event of the first track at
-    /// tick 0 (SMF 1.0 section 3.3).
-    #[error("track {track}: the copyright notice at tick {} is not the first event of the first track", at.0)]
-    CopyrightNotFirst {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A second copyright notice in a file (SMF 1.0 section 3.3: all of a
-    /// file's notices go together in one event).
-    #[error("track {track}: a second copyright notice at tick {}", at.0)]
-    CopyrightNotTogether {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
     },
     /// The container cannot hold an event.
     #[error("track {track} {part}: {refusal}")]
@@ -216,7 +181,9 @@ pub enum Refusal {
     /// An SMF holds MIDI 1.0 channel messages, not packets.
     #[error("an SMF holds MIDI 1.0 channel messages, not packets")]
     SmfPacket,
-    /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`).
+    /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`) or
+    /// the fields of an SMF track (its Sequence Number, name, SMPTE Offset and
+    /// copyright notice).
     #[error("a Clip File holds packets, not SMF events")]
     ClipSmfEvent,
     /// A Utility message is the Clip File's own structure.
