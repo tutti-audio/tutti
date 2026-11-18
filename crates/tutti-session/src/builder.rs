@@ -60,7 +60,7 @@ use tutti_engine::BlockDates;
 /// assert_eq!(session.graph_ref().outputs(), 6);
 /// ```
 pub struct SessionBuilder<C: Clock = Offline> {
-    opts: Options,
+    opts: Options<C::Float>,
     config: C::Config,
     dates: C::Dates,
 }
@@ -97,7 +97,7 @@ impl Default for BlockConfig {
 
 /// What every build shares, whichever state the builder is in.
 #[derive(Debug)]
-struct Options {
+struct Options<F: Float> {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     root: Option<ChannelTopology>,
@@ -111,7 +111,7 @@ struct Options {
     /// Where the session's inputs open, if not the sound card
     /// ([`input_opener`](Self::input_opener)).
     #[cfg(all(feature = "device", feature = "audio-io"))]
-    input_opener: Option<Box<dyn crate::InputOpener>>,
+    input_opener: Option<Box<dyn crate::InputOpener<F>>>,
     render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
@@ -133,6 +133,7 @@ struct Options {
     hang: crate::HangPolicy,
     spawner: crate::jobs::Spawner,
     pool: crate::PoolConfig,
+    float: std::marker::PhantomData<fn() -> F>,
 }
 
 /// A MIDI backend a host supplies, held until the session takes it.
@@ -146,7 +147,7 @@ impl std::fmt::Debug for MidiBackend {
     }
 }
 
-impl Default for Options {
+impl<F: Float> Default for Options<F> {
     fn default() -> Self {
         Self {
             inputs: ChannelLayout::EMPTY,
@@ -176,6 +177,7 @@ impl Default for Options {
             hang: crate::HangPolicy::default(),
             spawner: crate::jobs::Spawner::default(),
             pool: crate::PoolConfig::default(),
+            float: std::marker::PhantomData,
         }
     }
 }
@@ -707,7 +709,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// instead of the sound card: a test's own capture, with no device.
     #[cfg(all(feature = "device", feature = "audio-io", feature = "testing"))]
     #[must_use]
-    pub fn input_opener(mut self, opener: impl crate::InputOpener + 'static) -> Self {
+    pub fn input_opener(mut self, opener: impl crate::InputOpener<C::Float> + 'static) -> Self {
         self.opts.input_opener = Some(Box::new(opener));
         self
     }
@@ -948,7 +950,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// The session over `parts`, `engine` its offline engine if any, with
     /// (`sampler`) a disk streamer when `streamer`.
-    fn session<N: Clock>(
+    fn session<N: Clock<Float = C::Float>>(
         &mut self,
         parts: Parts<N::Float>,
         running: N::Running,

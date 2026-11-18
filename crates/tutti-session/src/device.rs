@@ -335,7 +335,8 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
                     .events
                     .push(SessionEvent::Device(DeviceEvent::Restarted(restarted)));
                 self.note_device(FollowEvent::Opened(name), now);
-                F::reopen_inputs(self);
+                #[cfg(feature = "audio-io")]
+                self.reopen_inputs();
                 Ok(restarted)
             }
             Err(e) => {
@@ -781,8 +782,8 @@ pub enum DeviceEvent {
     /// stays in the graph, silent, and is tried again at the next restart.
     #[cfg(feature = "audio-io")]
     InputReopenFailed {
-        /// The input.
-        input: crate::Input,
+        /// The input's inlet node ([`Input::node`](crate::Input::node), erased).
+        input: tutti_graph::NodeKey,
         /// Why not.
         error: Error,
     },
@@ -791,8 +792,8 @@ pub enum DeviceEvent {
     /// the graph, silent. One event for each input.
     #[cfg(feature = "audio-io")]
     InputClosed {
-        /// The input.
-        input: crate::Input,
+        /// The input's inlet node ([`Input::node`](crate::Input::node), erased).
+        input: tutti_graph::NodeKey,
     },
     /// The listing started with [`Session::list_outputs`] answered: the
     /// host's output devices, in enumeration order. Reported once.

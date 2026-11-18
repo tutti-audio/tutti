@@ -60,18 +60,18 @@ pub(crate) fn to_offset<F: Float, U: OffsetBinary>(x: F) -> U {
     U::from_signed(x.convert_to::<U::Native>())
 }
 
-/// The `f32` a native ([`Sample`]) device sample reads as.
+/// What a native ([`Sample`]) device sample reads as in the graph's float.
 #[cfg(feature = "capture")]
 #[inline]
-pub(crate) fn from_native<S: Sample>(sample: S) -> f32 {
-    sample.convert_to::<f32>()
+pub(crate) fn from_native<S: Sample, F: Float>(sample: S) -> F {
+    sample.convert_to::<F>()
 }
 
-/// The `f32` an offset-binary device sample reads as.
+/// What an offset-binary device sample reads as in the graph's float.
 #[cfg(feature = "capture")]
 #[inline]
-pub(crate) fn from_offset<U: OffsetBinary>(sample: U) -> f32 {
-    sample.to_signed().convert_to::<f32>()
+pub(crate) fn from_offset<U: OffsetBinary, F: Float>(sample: U) -> F {
+    sample.to_signed().convert_to::<F>()
 }
 
 /// How a stream's faults read cpal's `err`: `DeviceNotAvailable` is the device

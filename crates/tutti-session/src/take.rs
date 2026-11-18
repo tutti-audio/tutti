@@ -49,7 +49,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
-use tutti_buffers::{Interleaved, InterleavedMut, Sink, SinkFailed};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
@@ -179,16 +179,16 @@ pub struct Window {
 /// file's sink yourself ([`DitherSink`](crate::DitherSink)) and give it to
 /// [`sink`](Self::sink); such a take has no path, so no
 /// [`clip`](Recorded::clip).
-pub struct TakeTarget {
-    kind: TargetKind,
+pub struct TakeTarget<F: Float = f32> {
+    kind: TargetKind<F>,
 }
 
-enum TargetKind {
+enum TargetKind<F: Float> {
     File { path: PathBuf, format: Format },
-    Sink(Box<dyn DynSink>),
+    Sink(Box<dyn DynSink<F>>),
 }
 
-impl fmt::Debug for TakeTarget {
+impl<F: Float> fmt::Debug for TakeTarget<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             TargetKind::File { path, format } => f
@@ -201,7 +201,7 @@ impl fmt::Debug for TakeTarget {
     }
 }
 
-impl TakeTarget {
+impl<F: Float> TakeTarget<F> {
     /// A file at `path`, in `format`, as wide as the input and at the graph's
     /// rate.
     pub fn file(path: impl Into<PathBuf>, format: Format) -> Self {
@@ -213,7 +213,8 @@ impl TakeTarget {
         }
     }
 
-    /// A WAV file of 32-bit float at `path`.
+    /// A WAV file of 32-bit float at `path`. An `f64` session keeps its frames
+    /// whole in [`file`](Self::file) with `Pcm::Float64`.
     pub fn wav(path: impl Into<PathBuf>) -> Self {
         Self::file(path, Format::Wav(tutti_codec::Pcm::Float32))
     }
@@ -223,7 +224,7 @@ impl TakeTarget {
     /// [`TakeError::Width`].
     pub fn sink<S>(sink: S) -> Self
     where
-        S: Sink<Sample = f32> + Send + 'static,
+        S: Sink<Sample = F> + Send + 'static,
         S::Error: Send + Sync + 'static,
     {
         Self {
@@ -237,22 +238,22 @@ impl TakeTarget {
 type SinkClosed = Arc<dyn std::error::Error + Send + Sync>;
 
 /// A [`Sink`] that can be finalized through a box.
-trait DynSink: Send {
+trait DynSink<F: Float>: Send {
     fn layout(&self) -> ChannelLayout;
-    fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed>;
+    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed>;
     fn finalize(self: Box<Self>) -> Result<(), SinkClosed>;
 }
 
-impl<S> DynSink for S
+impl<F: Float, S> DynSink<F> for S
 where
-    S: Sink<Sample = f32> + Send,
+    S: Sink<Sample = F> + Send,
     S::Error: Send + Sync + 'static,
 {
     fn layout(&self) -> ChannelLayout {
         Sink::layout(self)
     }
 
-    fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
+    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
         Sink::write(self, frames)
     }
 
@@ -507,10 +508,10 @@ impl Recorded {
         self.lost
     }
 
-    /// The take as a clip that starts where it belongs
-    /// ([`Placement::start_beat`]): add it to the graph, in place of the input
-    /// if you like (`graph.replace(input.node(), done.clip()?)`), and a bounce
-    /// can fork it.
+    /// The take as a clip, in the session's float, that starts where it
+    /// belongs ([`Placement::start_beat`]): add it to the graph, in place of
+    /// the input if you like (`graph.replace(input.node(), done.clip()?)`), and
+    /// a bounce can fork it.
     ///
     /// # Errors
     ///
@@ -520,9 +521,9 @@ impl Recorded {
     /// [`Error::Place`](crate::Error::Place) for a wave the sampler cannot
     /// place.
     #[cfg(feature = "sampler")]
-    pub fn clip(&self) -> crate::Result<tutti_sampler::Clip> {
+    pub fn clip<F: tutti_rt::RingFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
         let path = self.path().ok_or(TakeError::NoFile)?;
-        let wave = tutti_codec::read_wave::<f32>(path)?;
+        let wave = tutti_codec::read_wave::<F>(path)?;
         Ok(tutti_sampler::Clip::new(wave)?.at(self.placement.start_beat))
     }
 }
@@ -751,8 +752,7 @@ impl<S: InFlight> Take<S> {
     }
 }
 
-/// `f32` because a take is read back as an `f32` clip (`Clip<f32>`).
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
     /// pump into `target` on the session's spawner. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
@@ -778,9 +778,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// left open on an error.
     pub fn record(
         &mut self,
-        input: &Input,
+        input: &Input<C::Float>,
         punch: Punch,
-        target: TakeTarget,
+        target: TakeTarget<C::Float>,
     ) -> Result<Take<Armed>, TakeError> {
         let node = input.node();
         let held = self
@@ -894,11 +894,11 @@ fn resolve(punch: &Punch, anchor: &Anchor, rolling: bool) -> Result<Window, Take
 
 /// The target as a sink at the input's width, and the file it writes if it is
 /// one.
-fn open_target(
-    target: TakeTarget,
+fn open_target<F: Float>(
+    target: TakeTarget<F>,
     layout: ChannelLayout,
     rate: SampleRate,
-) -> Result<(Box<dyn DynSink>, Option<PathBuf>), TakeError> {
+) -> Result<(Box<dyn DynSink<F>>, Option<PathBuf>), TakeError> {
     match target.kind {
         TargetKind::File { path, format } => {
             let file = FileOut::create(&Spec::of_width(format, layout, rate), &path)
@@ -919,9 +919,9 @@ fn open_target(
 
 /// The pump of one take: the tap's reader into the sink, between the
 /// punch-in and the punch-out, on the graph's frames.
-struct Pump {
-    reader: TapReader,
-    sink: Box<dyn DynSink>,
+struct Pump<F: Float> {
+    reader: TapReader<F>,
+    sink: Box<dyn DynSink<F>>,
     path: Option<PathBuf>,
     window: Window,
     /// The inlet's lead and the input's trim.
@@ -932,11 +932,11 @@ struct Pump {
     stop: Arc<AtomicBool>,
 }
 
-impl Pump {
+impl<F: Float> Pump<F> {
     fn run(mut self, landings: &Landings<Started>) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
-        let mut scratch = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
-        let silence = vec![0.0f32; layout.interleaved_len(Samples(PASS_FRAMES))];
+        let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples(PASS_FRAMES))];
+        let silence = vec![F::ZERO; layout.interleaved_len(Samples(PASS_FRAMES))];
         // A whole number of frames at the tap's width, so the view builds; a
         // zero-width tap has nothing to take.
         let Ok(silence) = Interleaved::new(&silence, layout) else {
@@ -1077,7 +1077,11 @@ impl Pump {
 
 /// Writes `frames` frames of silence, a pass at a time. `false`: the sink
 /// refused.
-fn write_silence(sink: &mut dyn DynSink, silence: Interleaved<'_, f32>, frames: usize) -> bool {
+fn write_silence<F: Float>(
+    sink: &mut dyn DynSink<F>,
+    silence: Interleaved<'_, F>,
+    frames: usize,
+) -> bool {
     let mut left = frames;
     while left > 0 {
         let now = left.min(silence.frames().get());
