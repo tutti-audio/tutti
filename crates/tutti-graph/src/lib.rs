@@ -671,6 +671,7 @@ pub use latency::{
     OutputDelay, PortFeed, delays, plan as latency_plan,
 };
 pub use loss::EventLoss;
+pub use meter::{Level, MeterReader, MeterWriter};
 pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
     Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS, MAX_TRANSPORT_CHANGES, Node,
@@ -691,6 +692,8 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+#[cfg(feature = "testing")]
+pub use reference::Reference;
 pub use render_mode::RenderMode;
 pub use root::{
     RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
@@ -698,16 +701,15 @@ pub use root::{
 pub use rtlog::{
     LogFilter, MAX_FIELDS, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue, TEXT_CAPACITY,
 };
-pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
-pub use wake::Wake;
-pub use meter::{Level, MeterReader, MeterWriter};
-#[cfg(feature = "testing")]
-pub use reference::Reference;
 pub use spec::{EventEdge, EventIn, EventOut, GraphInvalid, GraphSpec, ValidGraph};
+pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use tap::{TapReader, TapWriter};
 pub use time::{Continuity, Due, Offset, Playhead};
 pub use tutti_rt::BlockWaits;
+// The reading is a value type, `tutti-units`' (the modulation compiler
+// carries one without naming the graph); the clock that keeps it is here.
 pub use tutti_units::PlayReading;
+pub use wake::Wake;
 
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
