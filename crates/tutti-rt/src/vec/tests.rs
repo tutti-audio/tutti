@@ -173,3 +173,38 @@ fn boxed_builds_a_collection_larger_than_the_stack() {
         .expect("spawn the small-stack thread");
     assert_eq!(handle.join().expect("no stack overflow"), 8 * STACK / 64);
 }
+
+/// Drops into a shared counter, and panics on its drop when told to.
+struct Bomb<'a> {
+    drops: &'a core::cell::Cell<usize>,
+    panics: bool,
+}
+
+impl Drop for Bomb<'_> {
+    fn drop(&mut self) {
+        self.drops.set(self.drops.get() + 1);
+        assert!(!self.panics, "this item's drop panics");
+    }
+}
+
+#[test]
+fn a_panicking_item_drop_in_clear_still_drops_the_others_once_and_empties() {
+    let drops = core::cell::Cell::new(0);
+    let mut v: RtVec<Bomb<'_>, 4> = RtVec::new();
+    for i in 0..4 {
+        assert!(v.push(Bomb {
+            drops: &drops,
+            panics: i == 1,
+        }));
+    }
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| v.clear()));
+    assert!(unwound.is_err(), "the panic reaches the caller");
+    assert_eq!(drops.get(), 4, "each of the four items dropped once");
+    assert_eq!(v.len(), 0);
+    drop(v);
+    assert_eq!(
+        drops.get(),
+        4,
+        "dropping the emptied collection drops none twice"
+    );
+}

@@ -90,8 +90,8 @@ impl<T, const N: usize> RtVec<T, N> {
     #[inline]
     pub fn clear(&mut self) {
         let items: *mut [T] = self.as_mut_slice();
-        // The length goes to zero first: a panicking item drop leaks the rest,
-        // never drops one twice.
+        // The length goes to zero first, so a panicking item drop never leaves
+        // a slot that drops twice; `drop_in_place` still drops the others.
         self.len = 0;
         self.overflowed = false;
         // SAFETY: `items` covered exactly the initialised slots `..len`, and
