@@ -169,7 +169,7 @@ fn the_convolver_is_blended_by_the_graph() {
     let ir2 = room_ir(0.8, Seconds(0.08), RATE);
     check(
         "convolver (dual mono, 64-frame block)",
-        &|| ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], 64).unwrap(),
+        &|| ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], Samples(64)).unwrap(),
         2,
         64,
     );
@@ -181,7 +181,7 @@ fn the_convolver_is_blended_by_the_graph() {
                 Mono::new(&ir2),
                 Mono::new(&ir2),
                 Mono::new(&ir),
-                64,
+                Samples(64),
             )
         },
         2,
@@ -189,13 +189,13 @@ fn the_convolver_is_blended_by_the_graph() {
     );
     check(
         "convolver (shared IR, six channels)",
-        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), 128).unwrap(),
+        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), Samples(128)).unwrap(),
         6,
         128,
     );
     check(
         "convolver (folded, stereo)",
-        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], 32).unwrap(),
+        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], Samples(32)).unwrap(),
         2,
         32,
     );

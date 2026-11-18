@@ -199,7 +199,7 @@ fn a_true_stereo_node_parks_after_its_longest_path() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        64,
+        Samples(64),
     );
     assert_parks_at_the_tail(node, 64, 200);
 }
@@ -218,7 +218,8 @@ fn an_ambisonic_node_parks_after_its_longest_path() {
         })
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    let node = ConvolverNode::ambisonic(foa, ChannelTopology::from(foa), &views, 64).unwrap();
+    let node =
+        ConvolverNode::ambisonic(foa, ChannelTopology::from(foa), &views, Samples(64)).unwrap();
     assert_parks_at_the_tail(node, 64, 300);
 }
 
@@ -236,7 +237,8 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
     let node =
-        ConvolverNode::ambisonic(foa, ChannelTopology::from(Bed::Stereo), &views, 64).unwrap();
+        ConvolverNode::ambisonic(foa, ChannelTopology::from(Bed::Stereo), &views, Samples(64))
+            .unwrap();
     assert_parks_at_the_tail(node, 64, 250);
 }
 
@@ -253,7 +255,7 @@ fn the_node_says_silent_from_the_first_block_past_its_tail() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        64,
+        Samples(64),
     );
     let (recording, log) = Recording::new(node);
     let mut node = prepared(recording, SR, BLOCK);
@@ -286,7 +288,7 @@ fn a_node_that_never_says_silent_is_never_skipped() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        64,
+        Samples(64),
     );
     let (recording, log) = Recording::new(node);
     recording.hide_silence.store(true, Ordering::Relaxed);
@@ -421,20 +423,20 @@ fn kinds() -> Vec<(&'static str, Make)> {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            64,
+            Samples(64),
         )
     }
     fn dual_mono() -> ConvolverNode {
         ConvolverNode::per_channel(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
-            64,
+            Samples(64),
         )
         .unwrap()
     }
     fn folded() -> ConvolverNode {
         ConvolverNode::folded(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
-            64,
+            Samples(64),
         )
         .unwrap()
     }
@@ -599,7 +601,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
                 Mono::new(&irs[2][..]),
                 Mono::new(&irs[3][..]),
             ],
-            64,
+            Samples(64),
         );
         let mut out = vec![vec![0.0f32; input[0].len()]; 2];
         m.process(
@@ -614,7 +616,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            64,
+            Samples(64),
         )
     };
     for gap in [263usize, 264] {

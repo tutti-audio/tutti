@@ -347,7 +347,7 @@ impl FdnBank {
     /// is the caller's to land.
     #[must_use]
     pub fn glides(&self) -> FdnGlides {
-        FdnGlides::new(self.max_lines, ramp(self.rate.get()), &self.target)
+        FdnGlides::new(self.max_lines, ramp(self.rate), &self.target)
     }
 
     /// How long it rings at its worst: the layout's longest decay, or unbounded for a layout

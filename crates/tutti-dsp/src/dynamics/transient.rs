@@ -54,17 +54,17 @@ pub struct TransientControls {
 impl TransientControls {
     /// No change: both amounts 0 dB.
     pub const DEFAULT: Self = Self {
-        attack: Db(0.0),
-        sustain: Db(0.0),
+        attack: Db::UNITY,
+        sustain: Db::UNITY,
     };
 
     /// These controls within range, a non-finite amount as the default's.
     fn designed(self) -> Amounts {
         let amount = |db: Db| {
-            finite_or(db.get(), 0.0).clamp(
+            Db(finite_or(db.get(), Db::UNITY.get()).clamp(
                 -TransientBank::MAX_AMOUNT.get(),
                 TransientBank::MAX_AMOUNT.get(),
-            )
+            ))
         };
         Amounts {
             attack: amount(self.attack),
@@ -82,8 +82,8 @@ impl Default for TransientControls {
 /// The two amounts in dB, as a pair a glide blends.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Amounts {
-    attack: f32,
-    sustain: f32,
+    attack: Db,
+    sustain: Db,
 }
 
 impl Lerp for Amounts {
@@ -91,8 +91,8 @@ impl Lerp for Amounts {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         let t = k as f32 / n as f32;
         Self {
-            attack: crate::lerp(self.attack, to.attack, t),
-            sustain: crate::lerp(self.sustain, to.sustain, t),
+            attack: Db(crate::lerp(self.attack.get(), to.attack.get(), t)),
+            sustain: Db(crate::lerp(self.sustain.get(), to.sustain.get(), t)),
         }
     }
 }
@@ -100,13 +100,13 @@ impl Lerp for Amounts {
 /// The gain in dB at the envelopes `fast` and `slow` (both at least 0 and finite) for the
 /// amounts `attack` and `sustain`: the closed form of the [module](self).
 #[inline]
-fn gain_db(fast: f32, slow: f32, attack: f32, sustain: f32) -> f32 {
+fn gain_db(fast: f32, slow: f32, attack: Db, sustain: Db) -> Db {
     if fast > slow {
-        attack * (1.0 - slow / fast)
+        Db(attack.get() * (1.0 - slow / fast))
     } else if slow > fast {
-        sustain * (1.0 - fast / slow)
+        Db(sustain.get() * (1.0 - fast / slow))
     } else {
-        0.0
+        Db::UNITY
     }
 }
 
@@ -194,7 +194,7 @@ impl TransientBank {
                 let fast = self.fast.follow(self.envelopes.0, *g);
                 let slow = self.slow.follow(self.envelopes.1, *g);
                 self.envelopes = (fast, slow);
-                *g = Db::new(gain_db(fast, slow, a.attack, a.sustain))
+                *g = gain_db(fast, slow, a.attack, a.sustain)
                     .to_amplitude()
                     .get();
             }

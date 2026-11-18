@@ -30,6 +30,7 @@
 
 use tutti_types::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
 
+use crate::delay::finite_or;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_DENSE,
@@ -211,15 +212,10 @@ impl Default for PlateControls {
     }
 }
 
-/// `v` if finite, else `default`.
-fn finite(v: f32, default: f32) -> f32 {
-    if v.is_finite() { v } else { default }
-}
-
 impl PlateControls {
     /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.45 of the rate.
     pub(crate) fn bandwidth_at(&self, rate: SampleRate) -> Hz {
-        let hz = finite(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
+        let hz = finite_or(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
         Hz(hz.clamp(MIN_BANDWIDTH.get(), (0.45 * rate.get()) as f32))
     }
 
@@ -239,7 +235,7 @@ impl PlateControls {
             d.decay
         }
         .clamp(MIN_DECAY, MAX_PLATE_DECAY);
-        let damping = finite(self.damping.get(), d.damping.get()).clamp(0.0, MAX_DAMPING);
+        let damping = finite_or(self.damping.get(), d.damping.get()).clamp(0.0, MAX_DAMPING);
         let pre = if self.pre_delay.get().is_finite() {
             self.pre_delay
         } else {
@@ -247,7 +243,7 @@ impl PlateControls {
         }
         .clamp(Seconds(0.0), MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
-        let diffusion = finite(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
+        let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
 
         let total = SampleSpan::clamped(loop_frames(rate));
         let loop_gain = f64::from(loop_gain(total, rt60, rate).get());

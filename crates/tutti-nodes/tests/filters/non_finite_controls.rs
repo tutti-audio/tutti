@@ -321,7 +321,7 @@ fn the_convolver_holds_off_non_finite_controls() {
     let ir = decay_ir(128, Seconds::new(0.1), SampleRate::SR_48K);
     survives_node(
         "convolver",
-        || ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), 64).unwrap(),
+        || ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples(64)).unwrap(),
         |n| vec![("gain", n.gain().cell(), 2.0)],
     );
 }
