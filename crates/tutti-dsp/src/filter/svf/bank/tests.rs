@@ -11,7 +11,7 @@ use crate::{Lerp, SvfControls, SvfModel, SvfType};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn coefficients(ty: SvfType, fc: f64, q: f32, gain: f64) -> SvfCoefficients<f64> {
+fn coefficients(ty: SvfType, fc: f64, q: f64, gain: f64) -> SvfCoefficients<f64> {
     let controls = SvfControls {
         ty,
         freq: Hz::new(fc),
@@ -58,7 +58,7 @@ fn run(
 fn the_held_response_is_the_rbj_closed_form() {
     const N: usize = 1 << 15;
     for ty in TYPES {
-        for (fc, q, gain) in [(1_000.0f64, 0.707f32, 9.0f64), (250.0, 4.0, -12.0)] {
+        for (fc, q, gain) in [(1_000.0f64, 0.707f64, 9.0f64), (250.0, 4.0, -12.0)] {
             let mut bank = SvfBank::new(ChannelLayout::MONO);
             let mut glide = Glide::landed(coefficients(ty, fc, q, gain));
             let mut x = vec![0.0f32; N];
@@ -66,7 +66,7 @@ fn the_held_response_is_the_rbj_closed_form() {
             let y = run(&mut bank, &mut glide, &[x], &[N]).remove(0);
             let rounding =
                 y.iter().map(|&v| f64::from(v.abs())).sum::<f64>() * 2f64.powi(-24) + 1e-12;
-            let want = rbj(ty, fc, f64::from(q), gain, RATE.get());
+            let want = rbj(ty, fc, q, gain, RATE.get());
             for f in [50.0, fc, 3_000.0, 15_000.0] {
                 let w = 2.0 * PI * f / RATE.get();
                 let got: Complex64 = y
@@ -181,7 +181,7 @@ fn a_glides_midpoint_is_stable() {
     let mut designs = Vec::new();
     for ty in TYPES {
         for (fc, q, gain) in [
-            (20.0f64, 0.5f32, -24.0f64),
+            (20.0f64, 0.5f64, -24.0f64),
             (1_000.0, 0.707, 0.0),
             (12_000.0, 20.0, 24.0),
         ] {

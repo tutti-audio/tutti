@@ -758,7 +758,7 @@ mod tests {
         let mut f = prepared(SvfFilterNode::<f64>::new(
             SvfType::LowPass,
             Hz::new(800.0),
-            Q(f32::NAN),
+            Q(f64::NAN),
         ));
         let mut last = Vec::new();
         for block in x.chunks(1024) {

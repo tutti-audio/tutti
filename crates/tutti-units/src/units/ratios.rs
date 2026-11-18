@@ -21,7 +21,7 @@ unit! {
     /// `1.0` is no compression. Below 1.0 would be an *expander*, which this
     /// type deliberately does not represent — a compressor clamps
     /// up to 1.0 rather than silently inverting its own behaviour.
-    pub struct CompressionRatio(pub f32): Unit, Ordered, Bounded;
+    pub struct CompressionRatio(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: 4:1 plus 4:1 is not 8:1.
 // NOT `Scalable`: doubling a ratio is not doubling anything audible —
@@ -34,7 +34,7 @@ impl CompressionRatio {
     /// Constrain to a real compression ratio, at least 1. NaN stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> CompressionRatio {
+    pub fn new_clamped(v: f64) -> CompressionRatio {
         CompressionRatio(if v < 1.0 { 1.0 } else { v })
     }
 }
@@ -52,7 +52,7 @@ unit! {
     /// Not a [`CompressionRatio`] despite the matching range (a unitless
     /// input:output ratio of level changes), and not a `Samples` count: a count is whole and this
     /// moves continuously.
-    pub struct HoldFactor(pub f32): Unit, Ordered, Bounded;
+    pub struct HoldFactor(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: two holds do not sum into a third.
 // NOT `Scalable`: a scaled factor falls below 1 or between whole frames, and
@@ -65,7 +65,7 @@ impl HoldFactor {
     /// Constrain to at least 1. NaN stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> HoldFactor {
+    pub fn new_clamped(v: f64) -> HoldFactor {
         HoldFactor(if v < 1.0 { 1.0 } else { v })
     }
 }
@@ -76,21 +76,21 @@ unit! {
     /// `0.707` (1/sqrt2) is the maximally-flat Butterworth response; higher is
     /// a narrower, more peaked resonance. Must stay above zero: `Q` divides
     /// into the filter's damping term.
-    pub struct Q(pub f32): Unit, Ordered, Bounded, Scalable;
+    pub struct Q(pub f64): Unit, Ordered, Bounded, Scalable;
 }
 // NOT `Additive`: two Q values do not sum into a third.
 
 impl Q {
     /// Butterworth — the maximally flat response, `1/sqrt(2)`.
-    pub const BUTTERWORTH: Q = Q(core::f32::consts::FRAC_1_SQRT_2);
+    pub const BUTTERWORTH: Q = Q(core::f64::consts::FRAC_1_SQRT_2);
 
     /// Constrain above zero, since `Q` divides into the damping term. NaN
     /// stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Q {
-        Q(if v < f32::MIN_POSITIVE {
-            f32::MIN_POSITIVE
+    pub fn new_clamped(v: f64) -> Q {
+        Q(if v < f64::MIN_POSITIVE {
+            f64::MIN_POSITIVE
         } else {
             v
         })
@@ -105,7 +105,7 @@ unit! {
     /// ladder self-oscillates, whereas `Q(1.0)` is a mild bell. They are
     /// different parameterizations of different topologies, and swapping them
     /// is silent.
-    pub struct Resonance(pub f32): Unit, Ordered, Bounded;
+    pub struct Resonance(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: as with `Feedback`, scaling walks
 // the value toward self-oscillation with no check.
@@ -119,7 +119,7 @@ impl Resonance {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Resonance {
+    pub fn new_clamped(v: f64) -> Resonance {
         Resonance(v).clamp(Self::NONE, Self::SELF_OSCILLATION)
     }
 }

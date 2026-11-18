@@ -11,7 +11,7 @@ use super::*;
 /// - `CentsSpan * f64`, `-CentsSpan` — a negative factor leaves the range.
 ///   Scale the raw number and call `new` (or `clamped`, where saturating is
 ///   meant).
-/// - `HoldFactor + HoldFactor`, `HoldFactor * f32` — a hold is a count of frames
+/// - `HoldFactor + HoldFactor`, `HoldFactor * f64` — a hold is a count of frames
 ///   read after rounding; a sum or a scaled factor can fall below 1. Build the
 ///   new factor from the raw number with `HoldFactor::new_clamped`.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
@@ -62,6 +62,21 @@ fn a_pitch_ratio_round_trips_through_cents() {
     // here reaches a frequency table and silences a note with no error.
     assert_eq!(Cents::from_pitch_ratio(0.0), Cents(0.0));
     assert_eq!(Cents::from_pitch_ratio(-1.0), Cents(0.0));
+}
+
+/// The four ratios store `f64`: a figure past `f32` resolution survives construction, clamping
+/// and `get`, and `Q::BUTTERWORTH` is the `f64` figure `1/sqrt(2)`.
+#[test]
+fn the_ratios_hold_full_f64_figures() {
+    let fine = 1.0 + f64::EPSILON;
+    assert_eq!(CompressionRatio::new_clamped(fine).get(), fine);
+    assert_eq!(HoldFactor::new_clamped(fine).get(), fine);
+    assert_eq!(Q::new_clamped(fine).get(), fine);
+    assert_eq!(
+        Resonance::new_clamped(1.0 - f64::EPSILON).get(),
+        1.0 - f64::EPSILON
+    );
+    assert_eq!(Q::BUTTERWORTH.get(), core::f64::consts::FRAC_1_SQRT_2);
 }
 
 #[test]
@@ -138,8 +153,8 @@ fn a_hold_factor_is_at_least_one() {
     assert_eq!(HoldFactor::new_clamped(0.5), HoldFactor::NONE);
     assert_eq!(HoldFactor::new_clamped(-4.0), HoldFactor::NONE);
     assert_eq!(HoldFactor::new_clamped(2.6), HoldFactor::new(2.6));
-    assert_eq!(HoldFactor::new_clamped(f32::INFINITY).get(), f32::INFINITY);
-    assert!(HoldFactor::new_clamped(f32::NAN).get().is_nan());
+    assert_eq!(HoldFactor::new_clamped(f64::INFINITY).get(), f64::INFINITY);
+    assert!(HoldFactor::new_clamped(f64::NAN).get().is_nan());
     assert_eq!(HoldFactor::NONE.get(), 1.0);
 }
 

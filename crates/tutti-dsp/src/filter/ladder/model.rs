@@ -66,7 +66,7 @@ impl LadderControls {
     #[must_use]
     pub fn moved_from(&self, applied: &Self) -> bool {
         const FREQ_EPS: f64 = 0.01;
-        const RES_EPS: f32 = 0.0001;
+        const RES_EPS: f64 = 0.0001;
         self.ty != applied.ty
             || self.drive != applied.drive
             || (self.freq.get() - applied.freq.get()).abs() > FREQ_EPS
@@ -76,13 +76,17 @@ impl LadderControls {
     /// These controls with every non-finite figure replaced by the default's.
     /// A cutoff, resonance or drive out of range is the coefficients' to clamp.
     fn sanitized(self) -> Self {
-        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
-        let finite_hz = |v: f64, d: f64| if v.is_finite() { v } else { d };
+        let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
+        let drive = if self.drive.get().is_finite() {
+            self.drive.get()
+        } else {
+            Self::DEFAULT.drive.get()
+        };
         Self {
             ty: self.ty,
-            freq: Hz(finite_hz(self.freq.get(), Self::DEFAULT.freq.get())),
+            freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
             res: Resonance(finite(self.res.get(), Self::DEFAULT.res.get())),
-            drive: Drive(finite(self.drive.get(), Self::DEFAULT.drive.get()).max(0.0)),
+            drive: Drive(drive.max(0.0)),
         }
     }
 }

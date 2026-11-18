@@ -309,7 +309,7 @@ mod tests {
     // `f32`'s; each node has an `f64` kernel test below.
 
     /// The controls of a compressor the tests name four of, the others at the default's.
-    fn four(threshold: f64, ratio: f32, attack: f64, release: f64) -> CompressorControls {
+    fn four(threshold: f64, ratio: f64, attack: f64, release: f64) -> CompressorControls {
         CompressorControls {
             threshold: Db::new(threshold),
             ratio: CompressionRatio::new(ratio),
@@ -319,7 +319,7 @@ mod tests {
         }
     }
 
-    fn comp(threshold: f64, ratio: f32, attack: f64, release: f64) -> CompressorNode<f32> {
+    fn comp(threshold: f64, ratio: f64, attack: f64, release: f64) -> CompressorNode<f32> {
         CompressorNode::<f32>::new(
             BusTopology::MONO,
             KeySource::Sidechain,
@@ -364,7 +364,7 @@ mod tests {
     /// later finite ratio takes effect.
     #[test]
     fn a_nan_ratio_at_construction_is_finite_and_recovers() {
-        let mut node = prepared_at(comp(-20.0, f32::NAN, 0.0001, 0.1), RATE_44K);
+        let mut node = prepared_at(comp(-20.0, f64::NAN, 0.0001, 0.1), RATE_44K);
         let audio = vec![0.5f32; 256];
         let sc = vec![0.9f32; 256];
         for _ in 0..16 {
@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn an_f64_kernel_lands_a_wide_key_on_the_static_curve_in_f64() {
         use tutti_fixtures::signal::wide_signal;
-        let (threshold, ratio) = (-30.0f64, 5.0f32);
+        let (threshold, ratio) = (-30.0f64, 5.0f64);
         let key = vec![wide_signal(1)[0]; 128];
         let mut k = CompressorKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
         k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
@@ -775,7 +775,7 @@ mod tests {
             std::slice::from_ref(&key),
         );
         let level = 20.0 * key[0].log10();
-        let want = threshold + (level - threshold) / f64::from(ratio);
+        let want = threshold + (level - threshold) / ratio;
         let got = 20.0 * y[0][127].log10();
         assert!((got - want).abs() < 1e-12, "{got} dB against {want} dB");
     }
