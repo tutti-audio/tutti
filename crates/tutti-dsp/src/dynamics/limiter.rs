@@ -47,7 +47,7 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
-use super::curves::{LimiterCurve, level_db, limiter_gain};
+use super::curves::{LimiterCurve, WideCurve, level_db, limiter_gain};
 use super::lookahead::{LookaheadRing, fold_peak};
 use super::shared::{CHUNK, level};
 use crate::smoother::Smoother;
@@ -207,7 +207,7 @@ fn lookahead_frames(lookahead: Lookahead, rate: SampleRate) -> usize {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F: Float> {
     /// The transfer curve at the aimed threshold and ceiling, for a block no lane drives.
-    curve: LimiterCurve,
+    curve: WideCurve<F>,
     /// What a frame nobody drives (or a non-finite one) is: the aimed threshold.
     threshold: Db,
     /// And the aimed ceiling.
@@ -238,7 +238,7 @@ impl<F: Float> Design<F> {
             d.release
         };
         Self {
-            curve: LimiterCurve::new(threshold, ceiling),
+            curve: LimiterCurve::new(threshold, ceiling).widened(),
             threshold,
             ceiling,
             release: F::from_f64(
@@ -424,7 +424,7 @@ impl<F: Float> LimiterBank<F> {
     #[inline]
     fn target_gain<S: Float>(&self, lanes: &LimiterLanes<'_, S>, i: usize, peak: F) -> F {
         if lanes.threshold.is_none() && lanes.ceiling.is_none() {
-            return self.design.curve.gain_of(peak);
+            return self.design.curve.gain(peak);
         }
         // A lane's finite value, held within `LANE_DB_LIMIT` either way; else the aimed
         // value, held only where it can overflow or cancel: a ceiling at most

@@ -124,8 +124,8 @@ impl<F: Float> Design<F> {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens<F: Float>(level: F, threshold: Amplitude, silence_opens: bool) -> bool {
-    level >= F::from_f32(threshold.get()) || (level <= F::ZERO && silence_opens)
+fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
+    level >= threshold || (level <= F::ZERO && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -253,6 +253,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.design;
+        let threshold = <F as Float>::from_f32(d.threshold.get());
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
         let held = db_gain(self.range.target());
@@ -277,7 +278,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
                     .filter(|t| t.is_finite())
                 {
                     Some(t) => level_db(level) >= t,
-                    None => opens(level, d.threshold, d.silence_opens),
+                    None => opens(level, threshold, d.silence_opens),
                 };
                 if open {
                     self.hold_counter = d.hold_samples;

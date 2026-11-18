@@ -212,17 +212,36 @@ impl LimiterCurve {
     /// divisor is never zero.
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
-        Amplitude(self.gain_of(peak.get()))
+        Amplitude(self.widened::<f32>().gain(peak.get()))
     }
 
-    /// [`gain`](Self::gain) for a peak held in `F`: the curve's figures widen to `F` and the
-    /// divide runs there.
+    /// This curve's figures widened to `F`, once, for a per-sample [`WideCurve::gain`].
+    pub(crate) fn widened<F: Float>(&self) -> WideCurve<F> {
+        WideCurve {
+            threshold: F::from_f32(self.threshold.get()),
+            over: F::from_f32(self.over.get()),
+            below: F::from_f32(self.below.get()),
+        }
+    }
+}
+
+/// A [`LimiterCurve`] widened to `F`: the figures as bare amplitudes, so a per-sample gain
+/// widens nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WideCurve<F> {
+    threshold: F,
+    over: F,
+    below: F,
+}
+
+impl<F: Float> WideCurve<F> {
+    /// The gain for a linked peak held in `F`, as [`LimiterCurve::gain`].
     #[inline]
-    pub(crate) fn gain_of<F: Float>(&self, peak: F) -> F {
-        if peak > F::from_f32(self.threshold.get()) {
-            F::from_f32(self.over.get()) / peak
+    pub(crate) fn gain(&self, peak: F) -> F {
+        if peak > self.threshold {
+            self.over / peak
         } else {
-            F::from_f32(self.below.get())
+            self.below
         }
     }
 }

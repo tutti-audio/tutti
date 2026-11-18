@@ -378,8 +378,9 @@ mod tests {
         assert!((out[1] + 1.0).abs() < 1e-4);
     }
 
-    /// An `f64` kernel clamps at the ceiling its control holds, widened (`Db` stores `f32`): over
-    /// `-13 dB` a signal of more than 24 bits leaves at it, to 1e-15.
+    /// An `f64` kernel clamps at the ceiling its control holds: over `-20 dB` a signal of more
+    /// than 24 bits leaves at `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it (`Db`
+    /// stores `f32`), and widened, to 1e-15.
     #[test]
     fn an_f64_kernel_clamps_a_wide_signal_at_the_f64_ceiling() {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -387,12 +388,12 @@ mod tests {
         let mut k = BrickwallKernel::<f64>::new(BusTopology::MONO);
         k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
         let controls = BrickwallControls {
-            ceiling: Db::new(-13.0),
+            ceiling: Db::new(-20.0),
         };
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]);
         assert_close_f64(
             &y[0],
-            &vec![f64::from(Db::new(-13.0).to_amplitude().get()); 128],
+            &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); 128],
             1e-15,
         );
     }

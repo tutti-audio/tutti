@@ -250,8 +250,9 @@ fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
     }
 }
 
-/// An `f64` clipper clamps in `f64`: over `-13 dB` a signal of more than 24 bits leaves at the
-/// ceiling the control holds, widened (`Db` stores `f32`), to 1e-15, and under `0 dB` it comes
+/// An `f64` clipper clamps in `f64`: over `-20 dB` a signal of more than 24 bits leaves at the
+/// closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it (`Db` stores `f32`),
+/// and widened, to 1e-15, and under `0 dB` it comes
 /// out as it went in.
 #[test]
 fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
@@ -269,8 +270,8 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
         y
     };
     assert_close_f64(
-        &render(-13.0),
-        &vec![f64::from(Db(-13.0).to_amplitude().get()); x.len()],
+        &render(-20.0),
+        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); x.len()],
         1e-15,
     );
     assert_close_f64(&render(0.0), &x, 0.0);

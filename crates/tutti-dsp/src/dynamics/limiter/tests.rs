@@ -1020,16 +1020,16 @@ fn an_f64_limiter_under_its_threshold_delays_by_exactly_the_lookahead() {
 }
 
 /// A constant signal over the threshold comes out at the ceiling the control holds, to 1e-15:
-/// the oracle widens the control's own `Amplitude` (`Db` stores `f32`), and the gain is divided
-/// in `f64`.
+/// the oracle is the closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it
+/// (`Db` stores `f32`), and widened; the gain is divided in `f64`.
 #[test]
 fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = vec![wide_signal(1)[0]; 3 * L];
-    let y = run_f64(&controls(-20.0, -13.0, 0.1), &x);
+    let y = run_f64(&controls(-30.0, -20.0, 0.1), &x);
     assert_close_f64(
         &y[L..],
-        &vec![f64::from(Db(-13.0).to_amplitude().get()); 2 * L],
+        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); 2 * L],
         1e-15,
     );
 }
@@ -1038,8 +1038,8 @@ fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
 /// along the one-pole `e[k] = e[k-1] + c (target - e[k-1])`, `c = 1 - exp(-1 / (release
 /// rate))`, from the limited gain `ceiling / peak`; the output is the delayed quiet signal
 /// times that envelope (a rising envelope's window minimum is its oldest value): the closed
-/// form in `f64`, to 1e-12, from the ceiling and quiet gains the controls hold (`Db` stores
-/// `f32`), widened.
+/// form in `f64`, to 1e-12, from the ceiling and quiet gains' closed forms rounded to `f32`, as the control stores them
+/// (`Db` stores `f32`), and widened.
 #[test]
 fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -1051,8 +1051,8 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
         .map(|n| if n < switch { loud } else { quiet })
         .collect();
     let coeff = 1.0 - (-1.0 / (release * RATE.get())).exp();
-    let below = f64::from(Db((ceiling - threshold) as f32).to_amplitude().get());
-    let mut envelope = f64::from(Db(ceiling as f32).to_amplitude().get()) / loud;
+    let below = f64::from(10f64.powf((ceiling - threshold) / 20.0) as f32);
+    let mut envelope = f64::from(10f64.powf(ceiling / 20.0) as f32) / loud;
     let mut gains = vec![envelope; switch];
     for _ in switch..len {
         envelope += coeff * (below - envelope);
