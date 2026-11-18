@@ -23,7 +23,7 @@ use super::{Native, serve_every};
 mod fds;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11;
-use crate::render::{RenderSide, RenderThread, ToRender};
+use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
 use crate::transport::Transport;
 
@@ -260,7 +260,7 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let creator = AudioSlab::create(shm.clone(), layout.clone()).expect("slab");
     session
         .render
-        .send(ToRender::Slab(AudioSlab::open(shm, layout).expect("slab")));
+        .attach_slab(AudioSlab::open(shm, layout).expect("slab"));
     let (requests, host_requests) = mpsc::channel();
     let (replies, host_replies) = mpsc::channel();
     (

@@ -10,12 +10,26 @@
 //! anyone to serve.
 
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, read_frame, write_frame};
-use tutti_plugin_types::BridgeResult;
+use tutti_plugin_ipc::{
+    BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
+};
+use tutti_plugin_types::{BridgeResult, MIDI_STACK_CAPACITY};
 
 use crate::main_loop::{
     Listener as PlatformListener, Stream as PlatformStream, wait_for_connection,
 };
+
+/// The longest request the audio connection takes: whatever the protocol
+/// allows ([`MAX_FRAME_BYTES`]). A block's request carries automation at the
+/// host's point budget for the activated block and queue count, which is
+/// megabytes at a large block, so the buffer holds the protocol's whole bound
+/// rather than a guess. The memory is zeroed pages the OS maps on first touch:
+/// a connection that never carries a large block never makes them resident.
+const AUDIO_REQUEST_BYTES: usize = MAX_FRAME_BYTES;
+
+/// The longest reply the audio connection sends, in bytes: a block's reply
+/// with its MIDI at the cap, each event at the most its varints take.
+pub(crate) const AUDIO_REPLY_BYTES: usize = MIDI_STACK_CAPACITY * 32 + 256;
 
 /// One framed, blocking message channel to the host.
 ///
@@ -71,13 +85,30 @@ pub(crate) trait Transport: Send {
 /// Windows named pipe).
 pub(crate) struct SocketTransport {
     stream: PlatformStream,
+    /// The audio connection's frame buffers, of fixed capacity, so a block's
+    /// frames allocate nothing on the render thread; `None` for a connection
+    /// that is served off it.
+    frames: Option<FrameBuf>,
 }
 
 impl SocketTransport {
     /// Wrap an already-accepted stream. The stream must be in blocking mode;
     /// see [`TransportListener::accept`] for why that is not incidental.
     pub(crate) fn new(stream: PlatformStream) -> Self {
-        Self { stream }
+        Self {
+            stream,
+            frames: None,
+        }
+    }
+
+    /// Wraps the audio connection's stream, which the render thread reads and
+    /// writes through buffers built here: a frame is never read into, or
+    /// serialized into, memory that is sized on that thread.
+    pub(crate) fn audio(stream: PlatformStream) -> Self {
+        Self {
+            stream,
+            frames: Some(FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES)),
+        }
     }
 }
 
@@ -92,7 +123,10 @@ impl Transport for SocketTransport {
         // oversize length as `ProcessCrashed`; here the peer is the host,
         // which has not crashed, so the error names the frame and the session
         // ends on it either way.
-        read_frame(&mut self.stream)
+        match self.frames.as_mut() {
+            Some(frames) => frames.read(&mut self.stream),
+            None => read_frame(&mut self.stream),
+        }
     }
 
     /// Waits for the host's next frame on the platform's wait
@@ -108,7 +142,10 @@ impl Transport for SocketTransport {
     fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
         // Reachable with an oversize body through `StateData`, whose chunk is
         // whatever the plugin hands back from `get_state`.
-        write_frame(&mut self.stream, msg)
+        match self.frames.as_mut() {
+            Some(frames) => frames.write(&mut self.stream, msg),
+            None => write_frame(&mut self.stream, msg),
+        }
     }
 }
 
@@ -151,11 +188,20 @@ impl TransportListener {
     /// parked in the second accept with nothing to interrupt it. One orphaned
     /// process per loaded plugin, every time a DAW crashes or is force-quit.
     pub(crate) fn accept(&self) -> BridgeResult<SocketTransport> {
+        Ok(SocketTransport::new(self.accept_stream()?))
+    }
+
+    /// [`accept`](Self::accept) for the audio connection, whose transport reads
+    /// and writes through fixed buffers ([`SocketTransport::audio`]).
+    pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport> {
+        Ok(SocketTransport::audio(self.accept_stream()?))
+    }
+
+    fn accept_stream(&self) -> BridgeResult<PlatformStream> {
         // Held across the accept: where the wait cannot interrupt a blocked
         // accept, this is what notices a host that dies during it.
         let _watching = wait_for_connection(&self.listener)?;
-        let stream = self.listener.accept()?;
-        Ok(SocketTransport::new(stream))
+        Ok(self.listener.accept()?)
     }
 }
 
@@ -227,5 +273,59 @@ mod wait_tests {
         drop(host);
         assert!(transport.wait_readable(Duration::from_secs(10)).unwrap());
         assert!(transport.recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod audio_frame_tests {
+    use super::*;
+    use tutti_plugin_ipc::ProcessAudioData;
+    use tutti_plugin_types::{ParameterChanges, ParameterQueue, SampleRate};
+    use tutti_types::ParamId;
+
+    /// **The audio connection accepts the largest request the host may send.**
+    /// A block of 65536 frames with 256 queues each at the whole chunk room (the
+    /// most the host's point pool lets 256 queues carry) encodes to more than
+    /// 4 MiB, a size an earlier fixed cap refused, and it is read through the
+    /// buffer the audio connection is built with.
+    #[test]
+    fn the_largest_legal_block_request_is_accepted() {
+        const QUEUES: u32 = 256;
+        const FRAMES: usize = 65536;
+        let room = ParameterQueue::chunk_room(FRAMES);
+        let mut changes = ParameterChanges::reserved(QUEUES as usize, room);
+        for queue in 0..QUEUES {
+            for point in 0..room {
+                changes.add_change(
+                    ParamId::new(0xF000_0000 + queue),
+                    i32::try_from(point * 28).unwrap(),
+                    point as f64 / room as f64,
+                );
+            }
+        }
+        let block = HostMessage::ProcessAudio(ProcessAudioData {
+            seq: 1,
+            num_samples: FRAMES,
+            param_changes: changes,
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        });
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &block).unwrap();
+        assert!(
+            wire.len() > 4 * 1024 * 1024,
+            "the case is past the old cap, {} bytes",
+            wire.len()
+        );
+        let mut frames = FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES);
+        let HostMessage::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
+            panic!("a block");
+        };
+        let points: usize = back
+            .param_changes
+            .queues
+            .iter()
+            .map(ParameterQueue::len)
+            .sum();
+        assert_eq!(points, QUEUES as usize * room);
     }
 }
