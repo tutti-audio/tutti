@@ -306,5 +306,57 @@ impl Window for CosineWindow {
     }
 }
 
+/// The zeroth-order modified Bessel function of the first kind,
+/// `Σₖ ((x/2)ᵏ / k!)²`, summed until a term falls below `f64` precision.
+pub(crate) fn bessel_i0(x: f64) -> f64 {
+    let quarter = x * x / 4.0;
+    let (mut term, mut sum) = (1.0, 1.0);
+    let mut k = 1.0;
+    while term > sum * f64::EPSILON * 1e-2 {
+        term *= quarter / (k * k);
+        sum += term;
+        k += 1.0;
+    }
+    sum
+}
+
+/// The Kaiser window of shape `beta`: `w(t) = I0(β √(1 − (2t − 1)²)) / I0(β)`, peak 1 at the
+/// middle and `1 / I0(β)` at the ends; `beta = 0` is [`CosineWindow::RECTANGULAR`].
+///
+/// [`at`](Window::at) is the periodic form over `[0, 1)`, like every window here;
+/// [`centred`](Self::centred) is the symmetric one in `f64`, which a filter design takes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct KaiserWindow {
+    beta: f64,
+    /// `I0(beta)`.
+    norm: f64,
+}
+
+impl KaiserWindow {
+    /// The window of shape `beta`, at least 0.
+    pub(crate) fn new(beta: f64) -> Self {
+        Self {
+            beta,
+            norm: bessel_i0(beta),
+        }
+    }
+
+    /// The window centred on 0, in `f64`: `x` in `[−0.5, 0.5]`, peak 1 at `x = 0` and
+    /// `1 / I0(β)` at `x = ±0.5`; `x` outside the range is 0.
+    #[inline]
+    #[must_use]
+    pub(crate) fn centred(&self, x: f64) -> f64 {
+        let r = 2.0 * x;
+        bessel_i0(self.beta * libm::sqrt((1.0 - r * r).max(0.0))) / self.norm
+    }
+}
+
+impl Window for KaiserWindow {
+    #[inline]
+    fn at(&self, t: f32) -> f32 {
+        self.centred(f64::from(t) - 0.5) as f32
+    }
+}
+
 #[cfg(test)]
 mod tests;

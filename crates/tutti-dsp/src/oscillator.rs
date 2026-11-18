@@ -15,6 +15,8 @@
 use core::f64::consts::TAU;
 use tutti_types::{Hz, SampleRate};
 
+use crate::finite::finite_or;
+
 /// The shape an [`Oscillator`] reads its phase through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OscillatorWave {
@@ -122,13 +124,9 @@ impl Oscillator {
     /// of `frequency` at `rate`.
     #[inline]
     pub fn step(&mut self, frequency: Hz, rate: SampleRate) -> f32 {
-        let f = f64::from(frequency.get());
-        // `clamp` passes a NaN through, so a non-finite frequency is held out.
-        let dt = if f.is_finite() {
-            (f / rate.get()).clamp(0.0, 0.5)
-        } else {
-            0.0
-        };
+        // A non-finite frequency holds the phase.
+        let f = f64::from(finite_or(frequency.get(), 0.0));
+        let dt = (f / rate.get()).clamp(0.0, 0.5);
         let p = self.phase;
         let y = match self.wave {
             OscillatorWave::Sine => libm::sin(TAU * p),

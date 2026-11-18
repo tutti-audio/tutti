@@ -32,8 +32,9 @@ use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Samples, Seco
 
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
-use crate::delay::finite_or;
-use crate::dynamics::{Follower, floored, key_levels};
+use crate::dynamics::{floored, key_levels};
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{COEFF_INTERVAL, Glide, Lanes};
 
 /// The frames between designs: the grid period.

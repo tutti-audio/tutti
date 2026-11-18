@@ -1,20 +1,12 @@
-//! What the delay and the reverbs share: a control that is not finite, and the length of a
-//! ring-out.
+//! What the delay and the reverbs share: the length of a ring-out.
 
 use tutti_types::{Db, SampleRate, Seconds};
 
-/// `x` if it is finite, else `default`.
-pub(crate) fn finite_or(x: f32, default: f32) -> f32 {
-    if x.is_finite() { x } else { default }
-}
+use crate::onepole::ring_frames;
 
 /// The trips an echo makes before it is `floor` under the first one, at loop gain `q`.
 pub(crate) fn trips(q: f64, floor: Db) -> f64 {
-    if q <= 0.0 {
-        return 0.0;
-    }
-    let target = libm::log(Db::to_amplitude_f64(f64::from(floor.get())));
-    (target / libm::log(q)).ceil().max(0.0)
+    ring_frames(q, floor).ceil()
 }
 
 /// How long the echoes of a delay of `frames` frames ring: `1 + trips` periods of the

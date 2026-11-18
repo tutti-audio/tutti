@@ -42,8 +42,9 @@ use tutti_types::{
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction, compute_upward_gain_lift};
 use super::key_filter::KeyStage;
-use super::shared::{Follower, MAX_KNEE_DB, floored};
-use crate::delay::finite_or;
+use super::shared::{MAX_KNEE_DB, floored};
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{
     COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
 };

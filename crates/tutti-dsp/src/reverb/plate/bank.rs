@@ -27,8 +27,9 @@ use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{Gain, Hz, MAX_CHANNELS, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
+use crate::onepole::{cutoff_pole, ring_frames};
 use crate::reverb::network::{Absorption, Network, Stage};
-use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
+use crate::reverb::{CHUNK, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
@@ -525,11 +526,7 @@ impl PlateBank {
 /// long after it stops.
 fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
     let pole = cutoff_pole(cutoff, rate);
-    let floor = f64::from(TAIL_FLOOR.to_amplitude().get());
-    if pole <= 0.0 {
-        return Seconds::ZERO;
-    }
-    Seconds(libm::log(floor) / libm::log(pole) / rate.get())
+    Seconds(ring_frames(pole, TAIL_FLOOR) / rate.get())
 }
 
 /// The lengths and fixed coefficients of the design in `network`.
