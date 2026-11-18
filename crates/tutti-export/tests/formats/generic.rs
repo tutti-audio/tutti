@@ -166,9 +166,10 @@ fn an_f64_render_converts_to_integers_by_the_rule() {
 
 /// An f64 render resampled 48 kHz -> 96 kHz stays f64: a 1 kHz sine, far inside
 /// the resampler's flat passband, comes out as the analytic sine at the output
-/// rate to a relative 1e-9, a hundred times under what a trip through `f32`
-/// (relative epsilon 1.2e-7) could hold. The first and last 4096 output frames
-/// are left out: the converter's edge transient is not passband.
+/// rate. The 1e-9 bound is the windowed-sinc filter's passband ripple (the
+/// worst deviation measures 2.3e-10), not the float width. The first and last
+/// 4096 output frames are left out: the converter's edge transient is not
+/// passband.
 #[test]
 fn an_f64_resample_holds_f64_precision_against_the_analytic_sine() {
     const HZ: f64 = 1000.0;

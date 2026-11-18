@@ -266,6 +266,7 @@ impl<F: Float> AudioSide<F> {
                         } else {
                             (0.0, 1.0)
                         };
+                        // A fade law's gains are `f32` levels.
                         *x = was * F::from_f32(go) + *x * F::from_f32(gn);
                     }
                 }

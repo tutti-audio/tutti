@@ -40,6 +40,7 @@ fn render(workers: Workers, lanes: usize) -> Vec<f64> {
     }
     let _ = s.update();
     for (lane, gain) in gains.iter().enumerate() {
+        // An `Amplitude` is an `f32` level.
         let value = 0.125 * (lane + 1) as f32;
         s.set(gain.volume().to(Amplitude::new(value))).unwrap();
     }
@@ -53,6 +54,7 @@ fn render(workers: Workers, lanes: usize) -> Vec<f64> {
 /// away.
 #[test]
 fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
+    // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from(FINE as f32), FINE, "FINE is not an f32");
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let mut s = session(Workers::SERIAL);
