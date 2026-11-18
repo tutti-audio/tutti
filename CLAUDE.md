@@ -56,8 +56,9 @@ std only. A rule the compiler already enforces is not a gate.
   missing; it never skips.
 - **A test finds a repo file through `tutti_fixtures`** (`asset`, `repo_root`, `cdylib`,
   `plugin_server`, `plugin_probe`), never a relative `..` path. Absence is a failure.
-- **A feature-gated suite runs only where its feature is on.** Add a new one to CI's dark
-  features job and to `cargo xtask test-features`, or it never runs.
+- **A feature-gated suite runs only where its feature is on.** CI's dark features job runs
+  its listed crates with `--all-features`; a crate whose suite a feature gates joins that
+  `-p` list and `cargo xtask test-features`, or it never runs.
   `tutti-midi-hardware --features sequencer-tests` needs the kernel's `snd-seq`; CI only
   lints it, so run it locally before changing `backend/alsa`.
 - **A test pins an analytic figure, a spec value or an invariant**, never a digest of
