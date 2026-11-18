@@ -78,6 +78,10 @@ name = "event_path"
 harness = false
 
 [[bench]]
+name = "event_merge"
+harness = false
+
+[[bench]]
 name = "held_keys"
 harness = false
 
