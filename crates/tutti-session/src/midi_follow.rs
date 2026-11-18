@@ -88,9 +88,9 @@ use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, Followed,
     MachineControlEvent, MachineControlFollower, TempoFollower,
 };
+use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
-use tutti_types::MeterMap;
 use tutti_ump::MidiGroup;
 use tutti_units::{At, Beat, Bpm, Frame, Seconds};
 

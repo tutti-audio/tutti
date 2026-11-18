@@ -21,7 +21,7 @@ use tutti_units::{Beat, SampleRate};
 /// transport.motion().try_send(MotionEvent::Play)?; // a request; may be refused
 /// transport.settings().set_tempo(Bpm::of(140.0));      // a value; cannot fail
 /// // Loop beats 0 to 4 from the next block; the engine owns the region.
-/// let range = tutti_types::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0)).expect("ordered");
+/// let range = tutti_music::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0)).expect("ordered");
 /// transport.motion().schedule(At::NextBlock, LoopEdit::over(range))?;
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```

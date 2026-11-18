@@ -16,7 +16,7 @@
 //! decoder in `tutti-ump` refuses it) and is ignored here too.
 
 use tutti_midi_protocol::{flex_tempo, flex_time_signature};
-use tutti_types::TimeSignature;
+use tutti_music::TimeSignature;
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
 use tutti_units::Bpm;
 

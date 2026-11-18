@@ -29,7 +29,7 @@
 //! only while `Event::midi` takes no `impl Into<Offset>` parameter and there is
 //! no `impl From<Frame> for Offset`.
 
-use tutti_types::{FRAME_TOLERANCE, first_frame_at_or_after};
+use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after};
 use tutti_units::Bpm;
 use tutti_units::{At, Frame, Latency, SampleRate, Samples};
 
@@ -445,7 +445,7 @@ impl Env {
     /// there (or the block's own transport), with its beat advanced to
     /// `offset` at its tempo while it rolls, wrapping at its loop.
     ///
-    /// Walked with the host's own clock, [`FrameClock`](tutti_types::FrameClock), from the
+    /// Walked with the host's own clock, [`FrameClock`](tutti_music::FrameClock), from the
     /// transport's position ([`TransportPosition::clock`]): the same code tutti-transport's
     /// `TransportClock` and `OfflineTimeline` step by, so for a
     /// host that counts frames (its transport [counted](TransportPosition::counted))
@@ -592,7 +592,7 @@ impl Env {
         // routing through `BeatDuration::to_seconds` (now an exact `f64`
         // `Seconds`) would re-associate the arithmetic and round a frame
         // differently (see `BeatDuration::to_seconds`).
-        tutti_types::frames_per_beat(tempo, self.sample_rate)
+        tutti_music::frames_per_beat(tempo, self.sample_rate)
     }
 
     /// Where a scheduled command lands in the block of a sink whose inputs
@@ -678,7 +678,7 @@ impl Env {
 mod tests {
     use super::*;
     use crate::node::TransportPosition;
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     use tutti_units::{Beat, Bpm, Latency, SampleRate};
 
     /// `for_each_beat` hands every frame its beat: held while stopped,
@@ -768,7 +768,7 @@ mod tests {
 
     /// **A tempo too slow to count frames at does not move the transport**: the
     /// smallest `Bpm` has no frames per beat, rolling or not, as in
-    /// `tutti_types::frames_per_beat`.
+    /// `tutti_music::frames_per_beat`.
     #[test]
     fn the_slowest_tempo_has_no_frames_per_beat() {
         let slow = env(
@@ -1275,10 +1275,10 @@ mod tests {
             (133.3, None),
             (
                 97.0,
-                tutti_types::LoopRange::new(Beat::new(1_000.0), Beat::new(1_000.004)),
+                tutti_music::LoopRange::new(Beat::new(1_000.0), Beat::new(1_000.004)),
             ),
         ] {
-            let mut host = tutti_types::FrameClock::new(Beat(0.25), Bpm::of(tempo), rate);
+            let mut host = tutti_music::FrameClock::new(Beat(0.25), Bpm::of(tempo), rate);
             host.advance(Samples(987_654_321), None);
             if let Some(l) = looping {
                 host.seat(Beat(1_000.0));

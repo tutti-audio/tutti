@@ -267,7 +267,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
         }
     }
 
-    let bps = tutti_types::beats_per_sample(Bpm::of(120.0), RATE);
+    let bps = tutti_music::beats_per_sample(Bpm::of(120.0), RATE);
     let stood = (timeline.beat().get() / bps.get()).round() as usize;
     assert_eq!(
         stood, frames,

@@ -19,7 +19,9 @@
 
 use std::num::NonZeroU32;
 
-use tutti_types::{BusTopology, ChannelLayout, FrameClock, LoopRange, MaxBlock, SegmentOrigin};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+
+use tutti_music::{FrameClock, LoopRange, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, PortSpan};

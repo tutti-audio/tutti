@@ -69,7 +69,7 @@
 
 use std::sync::Arc;
 
-use rustfft::FftNum;
+use crate::FftFloat;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
 use tutti_units::Samples;
 
@@ -221,7 +221,7 @@ fn complex_multiply_accumulate<F: Float>(
 /// One level of an impulse response, transformed: `segments.len()` spectra of
 /// `part` frames each, and the two transforms of `2 × part` points that
 /// produced them and that every convolver over it runs.
-struct Level<F: Float + FftNum> {
+struct Level<F: FftFloat> {
     part: usize,
     /// Frames from the level's uniform output (latency `part`) to its due
     /// time (latency `B`): `start + B - part`. Zero for the head.
@@ -242,7 +242,7 @@ struct Level<F: Float + FftNum> {
 /// read-only after that. Nothing on the audio thread (or anywhere) writes it,
 /// so any number of convolvers (a node's channels, a clone, a fork) share one
 /// behind an `Arc`.
-pub struct IrSpectra<F: Float + FftNum = f32> {
+pub struct IrSpectra<F: FftFloat = f32> {
     block_size: Samples,
     ir_len: Samples,
     levels: Vec<Level<F>>,
@@ -253,7 +253,7 @@ pub struct IrSpectra<F: Float + FftNum = f32> {
     output_ring: usize,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for IrSpectra<F> {
+impl<F: FftFloat> std::fmt::Debug for IrSpectra<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IrSpectra")
             .field("block_size", &self.block_size)
@@ -264,7 +264,7 @@ impl<F: Float + FftNum> std::fmt::Debug for IrSpectra<F> {
     }
 }
 
-impl<F: Float + FftNum> IrSpectra<F> {
+impl<F: FftFloat> IrSpectra<F> {
     /// Partition and transform `ir` at `block_size`, which must be a power
     /// of two. Allocates; control thread.
     fn new(ir: &[F], block_size: Samples) -> Self {
@@ -380,7 +380,7 @@ impl<F: Float + FftNum> IrSpectra<F> {
 /// One convolver's running state for one [`Level`]: everything here is this
 /// convolver's own; the spectra are only read.
 #[derive(Clone)]
-struct LevelState<F: Float + FftNum> {
+struct LevelState<F: FftFloat> {
     /// The input's spectra, one per partition: a ring whose write slot is
     /// `current`; the block before is at `current + 1`.
     history: Vec<Vec<Complex<F>>>,
@@ -416,7 +416,7 @@ struct LevelState<F: Float + FftNum> {
     crossed: bool,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for LevelState<F> {
+impl<F: FftFloat> std::fmt::Debug for LevelState<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LevelState")
             .field("current", &self.current)
@@ -431,7 +431,7 @@ impl<F: Float + FftNum> std::fmt::Debug for LevelState<F> {
     }
 }
 
-impl<F: Float + FftNum> LevelState<F> {
+impl<F: FftFloat> LevelState<F> {
     /// A level's state in its freshly built state. Allocates.
     fn new(lv: &Level<F>) -> Self {
         let zero = Complex::new(F::ZERO, F::ZERO);
@@ -600,7 +600,7 @@ impl<F: Float + FftNum> LevelState<F> {
 /// state, all sized at construction. The hot path (`process_sample`,
 /// `process_block`) never allocates.
 #[derive(Clone)]
-pub struct Convolver<F: Float + FftNum = f32> {
+pub struct Convolver<F: FftFloat = f32> {
     spectra: Arc<IrSpectra<F>>,
     levels: Vec<LevelState<F>>,
     /// The newest input frames, a ring of `spectra.input_ring`.
@@ -612,7 +612,7 @@ pub struct Convolver<F: Float + FftNum = f32> {
     pushed: u64,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for Convolver<F> {
+impl<F: FftFloat> std::fmt::Debug for Convolver<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Convolver")
             .field("spectra", &self.spectra)
@@ -622,7 +622,7 @@ impl<F: Float + FftNum> std::fmt::Debug for Convolver<F> {
     }
 }
 
-impl<F: Float + FftNum> Convolver<F> {
+impl<F: FftFloat> Convolver<F> {
     /// Creates a new convolver from an impulse response in any sample format,
     /// converted to `F`.
     ///

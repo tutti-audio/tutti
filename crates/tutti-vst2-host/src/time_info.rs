@@ -207,8 +207,8 @@ pub(crate) fn advance_time_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_music::LoopRange;
     use tutti_plugin_types::LoopRegion;
-    use tutti_types::LoopRange;
     use tutti_units::{Beat, Bpm};
     use vst::api::TimeInfoFlags as F;
 

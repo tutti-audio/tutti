@@ -476,11 +476,11 @@ fn lane_blocks(total: usize) -> Vec<usize> {
 /// on; the four outputs appended to `out`.
 fn lane_block(
     exec: &mut tutti_graph::Executor,
-    clock: &mut tutti_types::FrameClock,
+    clock: &mut tutti_music::FrameClock,
     n: usize,
     bufs: &mut [Vec<f32>; 4],
 ) {
-    let looping = tutti_types::LoopRange::new(tutti_units::Beat(0.1), tutti_units::Beat(0.5));
+    let looping = tutti_music::LoopRange::new(tutti_units::Beat(0.1), tutti_units::Beat(0.5));
     let t = tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), looping);
     let [a, b, c, d] = bufs;
     exec.process(
@@ -529,7 +529,7 @@ fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
                 .expect("a worker pool");
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(113.0),
             SampleRate::SR_48K,
@@ -574,7 +574,7 @@ fn event_lanes_render_the_same_serial_and_parallel() {
                     .expect("a worker pool"),
             )));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(113.0),
             SampleRate::SR_48K,
@@ -817,20 +817,20 @@ fn lane_moves(
 
 /// The 120 BPM transport the 200-lane rigs roll, looping 0.5 to 1.7 beats
 /// (wraps inside blocks).
-fn lanes_transport(clock: &tutti_types::FrameClock) -> tutti_graph::TransportPosition {
+fn lanes_transport(clock: &tutti_music::FrameClock) -> tutti_graph::TransportPosition {
     tutti_graph::TransportPosition::counted(
         true,
         clock.tempo(),
         clock.origin(),
         Some(
-            tutti_types::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
+            tutti_music::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
                 .expect("a loop"),
         ),
     )
 }
 
-fn lanes_loop() -> Option<tutti_types::LoopRange> {
-    tutti_types::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
+fn lanes_loop() -> Option<tutti_music::LoopRange> {
+    tutti_music::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
 }
 
 /// 200 control lanes render bit for bit the same serial and
@@ -856,7 +856,7 @@ fn two_hundred_lanes_render_the_same_serial_and_parallel() {
                     .expect("a worker pool"),
             )));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
@@ -910,7 +910,7 @@ fn two_hundred_lanes_are_allocation_free_serial_and_on_a_pool() {
                 .expect("a worker pool");
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
@@ -1138,14 +1138,14 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
 /// frames; the clock moved on while rolling.
 fn signal_block(
     exec: &mut tutti_graph::Executor,
-    clock: &mut tutti_types::FrameClock,
+    clock: &mut tutti_music::FrameClock,
     b: usize,
     n: usize,
     refs: &mut [&mut [f32]],
 ) {
     use tutti_graph::{Offset, TransportChanges, TransportPosition};
     let rolling =
-        |c: &tutti_types::FrameClock| TransportPosition::counted(true, c.tempo(), c.origin(), None);
+        |c: &tutti_music::FrameClock| TransportPosition::counted(true, c.tempo(), c.origin(), None);
     let stopped = TransportPosition::new(false, clock.tempo(), tutti_units::Beat(0.0), None);
     let mut ch = TransportChanges::NONE;
     let t = match b {
@@ -1190,7 +1190,7 @@ fn signal_sources_render_the_same_serial_and_parallel() {
                     .expect("a worker pool"),
             )));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
@@ -1241,7 +1241,7 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
                 .expect("a worker pool");
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
-        let mut clock = tutti_types::FrameClock::new(
+        let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,

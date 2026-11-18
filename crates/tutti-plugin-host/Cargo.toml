@@ -25,6 +25,7 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
+tutti-music = { version = "0.0.1", path = "../tutti-music" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

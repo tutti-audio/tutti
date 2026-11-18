@@ -65,7 +65,7 @@ const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
 ///
 /// The frame is the source of truth: away from a jump, the transport at a
 /// frame is the last jump before it rolled forward in closed form with the
-/// host's clock ([`FrameClock`](tutti_types::FrameClock), the walk
+/// host's clock ([`FrameClock`](tutti_music::FrameClock), the walk
 /// [`Env::transport_at`] uses, loop wraps included). So the history keeps a
 /// **piece** (a frame, and the transport the host reported there) only where
 /// the transport is not the previous piece rolled forward:
@@ -84,7 +84,7 @@ const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
 /// frame in the block that held it: a piece is skipped only when the block's
 /// transport *equals* the roll, and the clock's closed form makes rolling
 /// `a` then `b` frames land on the bits rolling `a + b` does
-/// ([`TimelineSegment::beat_at`](tutti_types::TimelineSegment::beat_at) is
+/// ([`TimelineSegment::beat_at`](tutti_music::TimelineSegment::beat_at) is
 /// relative to its segment's origin, and a wrap lands on the unique frame
 /// that reaches the loop's end). Not a tolerance: the tests compare
 /// `TransportPosition`s with `==`.
@@ -362,7 +362,7 @@ impl Env {
 mod tests {
     use super::*;
     use crate::node::TransportChanges;
-    use tutti_types::{LoopRange, SegmentOrigin};
+    use tutti_music::{LoopRange, SegmentOrigin};
     use tutti_units::{Beat, Bpm};
 
     const SR: SampleRate = SampleRate::SR_48K;

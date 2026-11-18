@@ -553,7 +553,7 @@ mod tests {
         let blk = a.begin_block();
         assert_eq!(blk.beat(), beat, "no jump");
         let s = ((4.0 - 0.75 * beat.get()).sqrt() - 2.0) / (-3.0 / 8.0);
-        let m = tutti_types::first_frame_at_or_after(s * 96_000.0) as u64;
+        let m = tutti_music::first_frame_at_or_after(s * 96_000.0) as u64;
         let k = m / 128;
         let at = |frame: u64| b_of(frame as f64 / 96_000.0);
         let chord = |k: u64| (at((k + 1) * 128) - at(k * 128)) * 60.0 * 96_000.0 / 128.0;

@@ -55,7 +55,7 @@
 //!
 //! Where no chord is detected there is no span.
 
-use tutti_types::PitchClass;
+use tutti_music::PitchClass;
 use tutti_units::Samples;
 
 use tutti_units::ranged;

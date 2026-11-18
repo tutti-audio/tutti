@@ -467,7 +467,7 @@ impl Script {
             tutti_units::Bpm::of(self.tempo),
             tutti_units::Beat(self.beat),
             self.looping.map(|(start, end)| {
-                tutti_types::LoopRange::new(tutti_units::Beat(start), tutti_units::Beat(end))
+                tutti_music::LoopRange::new(tutti_units::Beat(start), tutti_units::Beat(end))
                     .expect("a loop")
             }),
         );
