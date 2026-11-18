@@ -79,10 +79,6 @@ pub(super) const EDGES: &[(&str, &str)] = &[
         "the lane renderer: a control ramp or segment rendered into an `F` lane",
     ),
     (
-        "crates/tutti-graph/src/bridged.rs",
-        "`Bridged`: the user-written data crossing between widths",
-    ),
-    (
         "crates/tutti-graph/src/meter.rs",
         "the meter folds: a per-block statistic crossing into a reading",
     ),
