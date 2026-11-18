@@ -92,6 +92,12 @@ pub trait Sample:
     /// The format as a run-time value.
     const FORMAT: SampleFormat;
 
+    /// The size of one least significant bit in nominal units, `2^-(n-1)`
+    /// for an `n`-bit integer format (the reciprocal of the scale the
+    /// float-to-integer rule multiplies by), and `None` for a float, which has
+    /// no step.
+    const STEP: Option<f64>;
+
     /// The value as a nominal-unit `f64`: an integer divided by `2^(n-1)`
     /// (exact), a float widened.
     #[must_use]
@@ -118,6 +124,32 @@ pub trait Sample:
 #[inline]
 const fn scale(bits: u32) -> f64 {
     (1u64 << (bits - 1)) as f64
+}
+
+/// One least significant bit of an `n`-bit integer format in nominal units:
+/// the reciprocal of [`scale`].
+const fn step(bits: u32) -> f64 {
+    1.0 / scale(bits)
+}
+
+/// Whether `x`, converted to the `bits`-bit integer format, lands outside its
+/// range and is clipped to it: the rounded scaled value past `MAX` or `MIN`.
+/// NaN reads as `0` and is not a clip.
+#[inline]
+fn clips_into_int(x: f64, bits: u32) -> bool {
+    if x.is_nan() {
+        return false;
+    }
+    let s = scale(bits);
+    let v = libm::rint(x * s);
+    v > s - 1.0 || v < -s
+}
+
+/// Whether converting `x` to `T` clips it: only an integer target clips, and
+/// the source's nominal value decides (exact for an integer source).
+#[inline]
+pub(crate) fn clips<A: Sample, T: Sample>(x: A) -> bool {
+    T::INT_BITS.is_some_and(|bits| clips_into_int(x.to_f64(), bits))
 }
 
 /// Float to an `n`-bit integer: scale, round half to even, clip. NaN is `0`.
@@ -173,6 +205,7 @@ macro_rules! int_sample {
             const BITS: u32 = $bits;
             const IS_FLOAT: bool = false;
             const FORMAT: SampleFormat = SampleFormat::$format;
+            const STEP: Option<f64> = Some(step($bits));
             #[inline]
             fn to_f64(self) -> f64 {
                 f64::from(i32::from(self)) / scale($bits)
@@ -206,6 +239,7 @@ impl Sample for I24 {
     const BITS: u32 = 24;
     const IS_FLOAT: bool = false;
     const FORMAT: SampleFormat = SampleFormat::I24;
+    const STEP: Option<f64> = Some(step(24));
     #[inline]
     fn to_f64(self) -> f64 {
         f64::from(self.get()) / scale(24)
@@ -233,6 +267,7 @@ impl Sample for f32 {
     const BITS: u32 = 32;
     const IS_FLOAT: bool = true;
     const FORMAT: SampleFormat = SampleFormat::F32;
+    const STEP: Option<f64> = None;
     #[inline]
     fn to_f64(self) -> f64 {
         f64::from(self)
@@ -260,6 +295,7 @@ impl Sample for f64 {
     const BITS: u32 = 64;
     const IS_FLOAT: bool = true;
     const FORMAT: SampleFormat = SampleFormat::F64;
+    const STEP: Option<f64> = None;
     #[inline]
     fn to_f64(self) -> f64 {
         self

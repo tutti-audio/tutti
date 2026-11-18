@@ -5,6 +5,7 @@
 //! widths must agree, then the frame counts. A source and a destination of
 //! different formats convert sample by sample by the rule in [`Sample`].
 
+use crate::sample::clips;
 use crate::{BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::{ChannelLayout, Samples};
 
@@ -32,13 +33,46 @@ use tutti_types::{ChannelLayout, Samples};
 /// written then.
 pub fn convert<A: Sample, B: Sample>(
     src: Interleaved<'_, A>,
-    mut dst: InterleavedMut<'_, B>,
+    dst: InterleavedMut<'_, B>,
 ) -> Result<(), BufferError> {
+    convert_counting_clips(src, dst).map(drop)
+}
+
+/// Converts as [`convert`] does and returns how many values clipped: a float
+/// or a wider integer whose rounded value fell outside the integer target's
+/// range and was held at its `MIN` or `MAX`. A NaN reads as `0` and is not a
+/// clip; into a float format nothing clips, so the count is `0`.
+///
+/// ```
+/// use tutti_buffers::{convert_counting_clips, Interleaved, InterleavedMut};
+/// use tutti_types::ChannelLayout;
+///
+/// let src = [1.0f32, 32767.0 / 32768.0, -1.0, f32::NAN];
+/// let mut dst = [0i16; 4];
+/// let clipped = convert_counting_clips(
+///     Interleaved::new(&src, ChannelLayout::STEREO)?,
+///     InterleavedMut::new(&mut dst, ChannelLayout::STEREO)?,
+/// )?;
+/// assert_eq!(clipped, 1); // only +1.0: -1.0 is `MIN` exactly
+/// assert_eq!(dst, [32767, 32767, -32768, 0]);
+/// # Ok::<(), tutti_buffers::BufferError>(())
+/// ```
+///
+/// # Errors
+///
+/// The same as [`convert`]: [`BufferError::WidthMismatch`], then
+/// [`BufferError::LengthMismatch`], with nothing written.
+pub fn convert_counting_clips<A: Sample, B: Sample>(
+    src: Interleaved<'_, A>,
+    mut dst: InterleavedMut<'_, B>,
+) -> Result<usize, BufferError> {
     same_shape(src.layout(), dst.layout(), src.frames(), dst.frames())?;
+    let mut clipped = 0;
     for (d, &s) in dst.samples_mut().iter_mut().zip(src.samples()) {
+        clipped += usize::from(clips::<A, B>(s));
         *d = s.convert_to();
     }
-    Ok(())
+    Ok(clipped)
 }
 
 /// Converts one channel of `src` into `dst`'s format by the rule in
