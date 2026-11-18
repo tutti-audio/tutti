@@ -81,7 +81,10 @@ pub use command::{
     RetransmitRefusal, RetransmitRequest, UmpData, UmpDataError, UserAuthChallenge, UserAuthState,
     UserAuthentication,
 };
-pub use config::{Fec, Requests, Retransmit, SessionConfig};
+pub use config::{
+    Fec, IdleInterval, IdleIntervalOutOfRange, RepeatInterval, RepeatIntervalOutOfRange, Requests,
+    Retransmit, SessionConfig, Timer, TimerOutOfRange,
+};
 pub use datagram::{
     Commands, DatagramBuilder, MAX_DATAGRAM_BYTES, Refused, SIGNATURE, SignatureError, parse,
 };
