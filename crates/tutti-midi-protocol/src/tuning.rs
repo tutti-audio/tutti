@@ -16,7 +16,6 @@
 //! reserved to mean no change rather than a frequency: it is
 //! [`TuningFrequency::NO_CHANGE`], a value of the same type, and has no pitch.
 
-#[cfg(feature = "serde")]
 use alloc::vec::Vec;
 use tutti_ump::{MidiChannel, NoteNumber, U7, U14};
 use tutti_units::{Cents, Semitones};
