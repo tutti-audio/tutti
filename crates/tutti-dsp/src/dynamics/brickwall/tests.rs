@@ -14,6 +14,12 @@ fn ceiling_of(db: f64) -> f32 {
     Db(db).to_amplitude().get() as f32
 }
 
+/// The ceiling a fed `f32` lane value runs at: `10^(db / 20)` computed in `f32`, as the per-frame
+/// read does.
+fn fed_ceiling_of(db: f32) -> f32 {
+    libm::powf(10.0, db / 20.0)
+}
+
 fn controls(db: f64) -> BrickwallControls {
     BrickwallControls { ceiling: Db(db) }
 }
@@ -184,7 +190,7 @@ fn a_fed_ceiling_is_read_per_frame() {
                 let want = if lane[i].is_nan() {
                     definition(x, held)
                 } else {
-                    definition(x, ceiling_of(f64::from(lane[i])))
+                    definition(x, fed_ceiling_of(lane[i]))
                 };
                 assert_eq!(y, want, "block {block}, frame {i}, lane {}", lane[i]);
             }

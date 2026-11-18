@@ -159,7 +159,9 @@ impl BrickwallSet {
 mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
-    use crate::test_support::{RATE_44K, prepared, prepared_at, sample_gain, tick, tick_fed};
+    use crate::test_support::{
+        RATE_44K, fed_sample_gain, prepared, prepared_at, sample_gain, tick, tick_fed,
+    };
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
@@ -275,7 +277,7 @@ mod tests {
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(f32::NAN)], &mut out);
         assert_eq!(out, [cell, -cell]);
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(-12.0)], &mut out);
-        let fed = sample_gain(Db::new(-12.0));
+        let fed = fed_sample_gain(-12.0);
         assert_eq!(out, [fed, -fed]);
     }
 
@@ -339,7 +341,7 @@ mod tests {
         let out = drive(&mut bw, RATE, Planes::new(&refs).unwrap(), &[Some(&fed)]);
         for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
             for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
-                let ceiling = sample_gain(Db(f64::from(fed[i])));
+                let ceiling = fed_sample_gain(fed[i]);
                 let want = if x.abs() > ceiling {
                     ceiling.copysign(x)
                 } else {

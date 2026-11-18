@@ -328,9 +328,12 @@ impl BusStripNode {
             // on the target rather than an ulp beside it. Through `i32`, which
             // has a SIMD conversion; it rounds as `usize` would.
             debug_assert!(i32::try_from(size).is_ok());
-            let n = size as i32 as f64;
-            let ramp = |i: usize| lerp(start, end, (i + 1) as i32 as f64 / n).get();
-            let steady = end.get();
+            let n = size as i32 as f32;
+            // The samples are `f32`: the endpoints narrow once per block, and the ramp runs in
+            // the sample width.
+            let (start, end) = (start.get() as f32, end.get() as f32);
+            let ramp = |i: usize| lerp(start, end, (i + 1) as i32 as f32 / n);
+            let steady = end;
             match (ramping, volume.is_some() || balance.is_some()) {
                 (false, false) => scale(x, y, |_| steady),
                 (true, false) => scale(x, y, ramp),
@@ -346,7 +349,7 @@ impl BusStripNode {
     fn scale_fed(
         x: &[f32],
         y: &mut [f32],
-        base: impl Fn(usize) -> f64,
+        base: impl Fn(usize) -> f32,
         volume: Option<&[f32]>,
         balance: Option<&[f32]>,
         side: Side,
@@ -372,14 +375,16 @@ impl BusStripNode {
     /// untyped float becomes a typed quantity again. Not ramped: a fed value
     /// is already a signal, and the graph that feeds it owns its continuity.
     #[inline(always)]
-    fn fed_gain(volume: Option<&[f32]>, balance: Option<&[f32]>, i: usize, side: Side) -> f64 {
+    fn fed_gain(volume: Option<&[f32]>, balance: Option<&[f32]>, i: usize, side: Side) -> f32 {
+        // A fed value changes every frame, so its gain is computed per frame as `f64` units and
+        // narrows once, into the sample width.
         let fader = volume.map_or(Amplitude::UNITY, |v| Amplitude(f64::from(v[i])));
         if side == Side::Mid {
-            return fader.get();
+            return fader.get() as f32;
         }
         let balance = balance.map_or(Balance::CENTER, |b| Balance(b[i]));
         let (l, r) = balance.gains();
-        ((if side == Side::Right { r } else { l }) * fader.get()).get()
+        ((if side == Side::Right { r } else { l }) * fader.get()).get() as f32
     }
 }
 
@@ -387,13 +392,11 @@ impl BusStripNode {
 ///
 /// Written as `from·(1−t) + to·t` rather than `from + (to−from)·t` for that
 /// endpoint: the second form rounds, so a ramp to silence could end a few
-/// ulps above zero and a strip faded to nothing would leak. Not an `Amplitude` operator
-/// because `Amplitude` deliberately has no `Add` (cascading gains multiply);
-/// an interpolation between two gains is a different operation, and this is
-/// its one home.
+/// ulps above zero and a strip faded to nothing would leak. Over the sample width's bare
+/// gains, narrowed once per block: a per-frame `f64` ramp would not vectorise with the product.
 #[inline(always)]
-fn lerp(from: Amplitude, to: Amplitude, t: f64) -> Amplitude {
-    Amplitude(tutti_dsp::lerp(from.get(), to.get(), t))
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    tutti_dsp::lerp(from, to, t)
 }
 
 /// `y = x · gain(frame)`, over one channel's block.
@@ -401,10 +404,9 @@ fn lerp(from: Amplitude, to: Amplitude, t: f64) -> Amplitude {
 /// `#[inline(always)]` so each caller's `gain` is compiled into the loop and
 /// the loop vectorises with it.
 #[inline(always)]
-fn scale(x: &[f32], y: &mut [f32], gain: impl Fn(usize) -> f64) {
+fn scale(x: &[f32], y: &mut [f32], gain: impl Fn(usize) -> f32) {
     for (i, (y, &x)) in y.iter_mut().zip(x).enumerate() {
-        // The samples are `f32`: the gain narrows into the product.
-        *y = x * gain(i) as f32;
+        *y = x * gain(i);
     }
 }
 

@@ -69,11 +69,12 @@ impl OutputStage {
             }
             if ramp.done >= ramp.frames {
                 if ramp.now != Amplitude::UNITY {
+                    let gain = F::from_f64(ramp.now.get());
                     block
                         .iter_mut()
                         .skip(c)
                         .step_by(out_ch)
-                        .for_each(|s| *s *= F::from_f64(ramp.now.get()));
+                        .for_each(|s| *s *= gain);
                 }
                 continue;
             }

@@ -511,7 +511,7 @@ impl ClickNode {
         click_accent: &[f32],
         click_pos: &mut usize,
         is_accent: bool,
-        volume: Amplitude,
+        volume: F,
     ) -> F {
         let buffer = if is_accent {
             click_accent
@@ -520,7 +520,7 @@ impl ClickNode {
         };
 
         if *click_pos < buffer.len() {
-            let sample = F::from_f64(f64::from(buffer[*click_pos]) * volume.get());
+            let sample = F::from_f32(buffer[*click_pos]) * volume;
             *click_pos += 1;
             sample
         } else {
@@ -539,7 +539,8 @@ impl ClickNode {
     fn render<F: Float>(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
         let mode = self.settings.mode().get();
         let in_preroll = self.preroll.load(Ordering::Acquire);
-        let volume = self.settings.volume();
+        // The volume narrows to the render's format once per block.
+        let volume = F::from_f64(self.settings.volume().get());
         self.forget_latch();
         for (start, piece) in env.segments() {
             if !Self::should_play(mode, &piece.transport, in_preroll) {

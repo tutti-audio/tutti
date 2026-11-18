@@ -848,6 +848,8 @@ fn a_threshold_past_the_clamp_does_not_overshoot_the_ceiling() {
     x[100] = 1.0e-38;
     x[101] = 1.1e-38;
     x[102] = 1.2e-38;
+    // The thresholds straddle the `f64` amplitude limit (`10^(-6165/20)` is near `f64::MIN_POSITIVE`),
+    // a `Db` being `f64`; the `f32` clamp (`MAX_GAP`) sits well inside them.
     for threshold in [f64::NEG_INFINITY, -7000.0, -6165.0, -2000.0] {
         for ceiling in [0.0f64, f64::NEG_INFINITY, 12.0, 20.0] {
             let mut k = runner(&controls(threshold, ceiling, 0.05));
@@ -1025,6 +1027,7 @@ fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = vec![wide_signal(1)[0]; 3 * L];
     let y = run_f64(&controls(-30.0, -20.0, 0.1), &x);
+    // The ceiling is the `f64` converter's value: the control is no longer rounded to `f32`.
     assert_close_f64(&y[L..], &vec![Db(-20.0).to_amplitude().get(); 2 * L], 1e-15);
 }
 
@@ -1053,5 +1056,6 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     }
     let want: Vec<f64> = (switch + L..len).map(|n| quiet * gains[n - L]).collect();
     let y = run_f64(&controls(threshold, ceiling, release), &x);
+    // The closed form is `f64` throughout, so the tolerance is rounding, not `f32`'s.
     assert_close_f64(&y[switch + L..], &want, 1e-12);
 }

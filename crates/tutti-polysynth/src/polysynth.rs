@@ -632,15 +632,18 @@ impl PolySynth {
             // ended to where the Universal messages have put it: at unity
             // throughout it is the identity.
             let (from, to) = (self.master_applied, self.allocator.master_gain());
-            let ramp = |from: Amplitude, to: Amplitude, i: usize| {
-                tutti_dsp::lerp(from.get(), to.get(), (i + 1) as f64 / n as f64)
-            };
+            // The output is `f32`: the volume and the ramp's ends narrow once per step and the
+            // ramp runs in `f32`.
+            let volume = volume.get() as f32;
+            let (from_left, to_left) = (from.left.get() as f32, to.left.get() as f32);
+            let (from_right, to_right) = (from.right.get() as f32, to.right.get() as f32);
+            let ramp =
+                |from: f32, to: f32, i: usize| tutti_dsp::lerp(from, to, (i + 1) as f32 / n as f32);
             for (i, (&l, &r)) in left.iter().zip(right).enumerate() {
-                // The output is `f32`: each frame's gain narrows into the product.
                 emit(
                     start + done + i,
-                    l * (volume.get() * ramp(from.left, to.left, i)) as f32,
-                    r * (volume.get() * ramp(from.right, to.right, i)) as f32,
+                    l * (volume * ramp(from_left, to_left, i)),
+                    r * (volume * ramp(from_right, to_right, i)),
                 );
             }
             self.master_applied = to;

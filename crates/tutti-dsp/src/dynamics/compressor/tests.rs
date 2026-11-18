@@ -188,6 +188,7 @@ fn the_member_reduction_is_the_static_curve() {
             let level = f64::from(step) * 1.5 - 20.0;
             let want = curve(level, t, w, r);
             let got = reduction_db(&m, Db(level)).get();
+            // `Db` is `f64` and the member and the oracle are one formula, so the gap is rounding.
             assert!(
                 (got - want).abs() < 1e-12,
                 "{c:?} at {level}: {got} vs {want}"
@@ -214,6 +215,7 @@ fn the_curve_has_its_three_regions() {
     // Under -25 dB: nothing. Over -15 dB: three quarters of the excess.
     assert_eq!(reduction_db(&m, Db(-40.0)), Db::UNITY);
     assert_eq!(reduction_db(&m, Db(-25.0)), Db::UNITY);
+    // `7.5` and `15` are exact in `f64`, which the `Db` stores; the quadratic is to rounding.
     assert_eq!(reduction_db(&m, Db(-10.0)), Db(7.5));
     assert_eq!(reduction_db(&m, Db::UNITY), Db(15.0));
     // At the threshold the quadratic has run a half of the knee: (3/4)(5)^2/(2*10).
@@ -727,7 +729,8 @@ fn the_deepest_reduction_is_read_once_and_cleared_by_a_reset() {
     assert_eq!(bank.take_deepest(), Db::UNITY);
 }
 
-/// A knee past 400 dB is held there: a knee of 1e20 or 1e200 (whose square overflows) renders finite with the key inside it, and once the key has left (silence,
+/// A knee past 400 dB is held there: a knee of 1e20 or 1e200 renders finite with the key inside
+/// it (1e200 is a `Db` `f64` holds and its square overflows), and once the key has left (silence,
 /// then a steady -30 dB) the gain is back on the static curve of the 400 dB knee.
 #[test]
 fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {

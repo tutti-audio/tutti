@@ -21,7 +21,7 @@
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_units::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{Feedback, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
@@ -124,6 +124,8 @@ pub struct DelayBank<F: Float> {
     taps: Box<[F]>,
     interpolation: InterpolationMode,
     routing: Routing,
+    /// The routing's weights at `F`, row-major by the line fed: widened once at build.
+    weights: Box<[F]>,
     linked: bool,
     rate: SampleRate,
     /// The line's capacity in frames: the delay is clamped into it.
@@ -150,6 +152,9 @@ impl<F: Float + Lerp> DelayBank<F> {
             taps: vec![F::ZERO; width].into_boxed_slice(),
             interpolation: layout.interpolation(),
             routing: *layout.routing(),
+            weights: (0..width * width)
+                .map(|k| F::from_f64(layout.routing().weight(k / width, k % width).get()))
+                .collect(),
             linked: layout.times().is_linked(),
             rate,
             cap: cap.get(),
@@ -341,10 +346,12 @@ impl<F: Float + Lerp> DelayBank<F> {
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
                 let mut acc = xs[c][i].convert_to::<F>() + self.taps[c] * fb;
-                for j in 0..width {
-                    let w = self.routing.weight(c, j);
-                    if w != Gain::SILENT {
-                        acc += F::from_f64(w.get()) * cf * self.taps[j];
+                for (&w, &tap) in self.weights[c * width..(c + 1) * width]
+                    .iter()
+                    .zip(&self.taps)
+                {
+                    if w != F::ZERO {
+                        acc += w * cf * tap;
                     }
                 }
                 line.push_sample(acc);

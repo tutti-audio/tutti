@@ -47,22 +47,22 @@ impl DitherNoise {
     /// target depth in the `[-1, 1]` float domain), to every sample of `audio` in place.
     ///
     /// One draw per sample, in frame order and channel order within a frame. A draw is an
-    /// `f32` (the 32-bit word's nearest `f32` over `2^32 - 1`) widened exactly, scaled by the
-    /// `lsb` in `f64` and narrowed to `F`, so a block of `f32` and one of `f64` get the same
-    /// noise.
+    /// `f32` (the 32-bit word's nearest `f32` over `2^32 - 1`) widened exactly into `F` and
+    /// scaled by the `lsb`, narrowed to `F` once per call, so a block of `f32` and one of `f64`
+    /// get the same noise.
     pub fn apply<F: Float>(
         &mut self,
         shape: DitherShape,
         lsb: Amplitude,
         mut audio: InterleavedMut<'_, F>,
     ) {
-        let lsb = lsb.get();
+        let lsb = F::from_f64(lsb.get());
         for s in audio.samples_mut() {
             let noise = match shape {
                 DitherShape::Rectangular => self.rectangular(),
                 DitherShape::Triangular => self.triangular(),
             };
-            *s += F::from_f64(f64::from(noise) * lsb);
+            *s += F::from_f32(noise) * lsb;
         }
     }
 

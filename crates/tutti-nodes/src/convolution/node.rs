@@ -258,7 +258,7 @@ pub struct ConvolverNode {
     /// Last finite gain. It does not feed recursive state here, but the block's
     /// end is the next block's ramp start, so a NaN would carry into the block
     /// after it (see [`LastGood`]).
-    good: LastGood<f64>,
+    good: LastGood<f32>,
 }
 
 impl std::fmt::Debug for ConvolverNode {
@@ -609,10 +609,9 @@ impl ConvolverNode {
     /// frame, floored at 0 like the setter. A non-finite value reads as the
     /// last finite one (see [`LastGood`]).
     #[inline]
-    fn apply_driven_gain(out: &mut [f32], lane: &[f32], good: &mut LastGood<f64>) {
+    fn apply_driven_gain(out: &mut [f32], lane: &[f32], good: &mut LastGood<f32>) {
         for (o, &g) in out.iter_mut().zip(lane) {
-            // The block is `f32`: the floored gain narrows into the product.
-            *o *= good.read(f64::from(g)).max(0.0) as f32;
+            *o *= good.read(g).max(0.0);
         }
     }
 
@@ -621,7 +620,8 @@ impl ConvolverNode {
     /// between blocks glides across the next one and lands exactly on the new
     /// value (a block of one takes it at once).
     fn begin_block(&mut self, size: usize) -> (Glide<f32>, Option<Amplitude>) {
-        let gain = Amplitude(self.good.read(self.gain.load().get()));
+        // The block is `f32`: the cell's gain narrows once, before the last-good read.
+        let gain = Amplitude(f64::from(self.good.read(self.gain.load().get() as f32)));
         let from = self.last.unwrap_or(gain);
         self.last = Some(gain);
         // The ramp runs over the `f32` block: its ends narrow once per block.

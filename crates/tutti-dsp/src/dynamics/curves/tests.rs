@@ -205,30 +205,55 @@ fn a_threshold_past_the_clamp_never_overshoots_the_ceiling() {
     }
 }
 
-/// The generic dB helpers at `f32` are the closed forms (`20 log10 x`, `10^(d / 20)`) in `f64`
-/// narrowed once, to two ulps, over a sweep that includes silence, the extremes and the infinities: `level_db` pins
-/// silence at `Db::FLOOR`.
+/// The generic dB helpers at `f64` are `Db`'s converters to the bit (silence at `Db::FLOOR`), and
+/// at `f32` the closed forms `20 log10 x` and `10^(d / 20)` computed in `f32` through `libm`, to
+/// the bit, over a sweep that includes silence, the extremes and the infinities.
 #[test]
-fn the_generic_db_helpers_narrow_to_the_f32_closed_forms() {
-    let ulps =
-        |got: f32, want: f32| (got - want).abs() <= 2.0 * f32::EPSILON * want.abs().max(1e-30);
-    for k in -300..=300 {
-        let x = 10f32.powf(k as f32 / 10.0);
-        let (got, want) = (level_db::<f32>(x), (20.0 * f64::from(x).log10()) as f32);
-        assert!(
-            ulps(got, want) || (got - want).abs() < 1e-5,
-            "level {x}: {got} vs {want}"
+fn the_generic_db_helpers_are_the_converters_at_f64_and_the_closed_forms_at_f32() {
+    let levels = (-300..=300)
+        .map(|k| 10f64.powf(f64::from(k) / 10.0))
+        .chain([
+            0.0,
+            1.0,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            0.5,
+            2.0,
+            -1.0,
+            -0.0,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+        ]);
+    for x in levels {
+        let want = if x <= 0.0 {
+            Db::FLOOR
+        } else {
+            Db::from_amplitude(Amplitude(x))
+        };
+        assert_eq!(level_db::<f64>(x), want.get(), "level {x}");
+        let narrow = x as f32;
+        let want32 = if narrow <= 0.0 {
+            Db::FLOOR.get() as f32
+        } else {
+            20.0f32 * libm::log10f(narrow)
+        };
+        assert_eq!(level_db::<f32>(narrow), want32, "f32 level {narrow}");
+    }
+    assert!(level_db::<f64>(f64::NAN).is_nan() && level_db::<f32>(f32::NAN).is_nan());
+    let dbs = (-4000..=4000).map(|k| f64::from(k) / 10.0).chain([
+        0.0,
+        Db::FLOOR.get(),
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+    ]);
+    for d in dbs {
+        assert_eq!(db_gain::<f64>(d), Db(d).to_amplitude().get(), "{d} dB");
+        let narrow = d as f32;
+        assert_eq!(
+            db_gain::<f32>(narrow),
+            libm::powf(10.0, narrow / 20.0),
+            "f32 {narrow} dB"
         );
     }
-    assert_eq!(level_db::<f32>(0.0), Db::FLOOR.get() as f32);
-    assert_eq!(level_db::<f32>(-1.0), Db::FLOOR.get() as f32);
-    assert_eq!(level_db::<f32>(f32::INFINITY), f32::INFINITY);
-    assert!(level_db::<f32>(f32::NAN).is_nan());
-    for k in -4000..=4000 {
-        let d = k as f32 / 10.0;
-        let (got, want) = (db_gain::<f32>(d), 10f64.powf(f64::from(d) / 20.0) as f32);
-        assert!(ulps(got, want), "{d} dB: {got} vs {want}");
-    }
-    assert_eq!(db_gain::<f32>(f32::NEG_INFINITY), 0.0);
-    assert_eq!(db_gain::<f32>(f32::INFINITY), f32::INFINITY);
+    assert!(db_gain::<f64>(f64::NAN).is_nan() && db_gain::<f32>(f32::NAN).is_nan());
 }

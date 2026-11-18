@@ -7,17 +7,23 @@ use tutti_buffers::Float;
 use tutti_units::{Amplitude, CompressionRatio, Db};
 
 /// The decibels of a level at the working precision `F`, floored at [`Db::FLOOR`]: a level of
-/// zero or below is the floor. The maths is [`amplitude_to_db`]'s, in `f64`, narrowed to `F`.
+/// zero or below is the floor. The maths is [`Db::from_amplitude`]'s, `20 log10`, in `F`: a unit
+/// is `f64`, not generic over `F`, so a per-sample level in `F` is computed here and
+/// [`amplitude_to_db`] at `f64` gives the same bits.
 #[inline]
 pub(crate) fn level_db<F: Float>(level: F) -> F {
-    F::from_f64(amplitude_to_db(Amplitude(level.to_f64())).get())
+    if level <= F::ZERO {
+        F::from_f64(Db::FLOOR.get())
+    } else {
+        F::from_f64(20.0) * level.log10()
+    }
 }
 
-/// The amplitude ratio of `db` decibels at the working precision `F`: [`Db::to_amplitude`] in
-/// `f64`, narrowed to `F`.
+/// The amplitude ratio of `db` decibels at the working precision `F`, `10^(db / 20)` in `F` as
+/// [`Db::to_amplitude`] has it at `f64`: `-inf` is 0 and `+inf` is `+inf`.
 #[inline]
 pub(crate) fn db_gain<F: Float>(db: F) -> F {
-    F::from_f64(Db(db.to_f64()).to_amplitude().get())
+    F::from_f64(10.0).powf(db / F::from_f64(20.0))
 }
 
 /// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
@@ -175,10 +181,13 @@ pub struct LimiterCurve {
 
 impl LimiterCurve {
     /// The largest `ceiling - threshold` gap used: `10^(760/20)` is 1e38, finite in `f32`
-    /// (the limit is about 770 dB).
+    /// (the limit is about 770 dB). The limits are `f32`-sized because the curve is narrowed
+    /// into a bank of `F`, and `f32` is the narrowest `F`: at that instantiation a larger gap
+    /// is an infinite gain (`a_threshold_past_the_clamp_never_overshoots_the_ceiling`).
     const MAX_GAP: Db = Db(760.0);
 
-    /// The largest ceiling amplitude used: a boost's output stays far from `f32::MAX`.
+    /// The largest ceiling amplitude used: a boost's output stays far from `f32::MAX`, the
+    /// same `f32` boundary as [`MAX_GAP`](Self::MAX_GAP).
     const MAX_OVER: Amplitude = Amplitude(1.0e37);
 
     /// The curve for `threshold` and `ceiling`, held across a block.

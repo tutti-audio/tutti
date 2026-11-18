@@ -90,7 +90,8 @@ fn the_fdn_aims_and_renders_without_allocating() {
     }
 }
 
-/// The FDN's `design_into` runs on a 160 KiB stack: a network is 111 KB, and building one on an
+/// The FDN's `design_into` runs on a 140 KiB stack: a network is 109 KiB (`MAX_STAGES` of the
+/// largest stage), with 31 KiB spare for the frames, and building one on an
 /// audio thread's callback must not copy it. An unoptimised build copies a network about
 /// three times, so building one needs well over that.
 #[test]
@@ -99,7 +100,7 @@ fn the_fdns_design_into_needs_no_network_sized_stack() {
     let rate = SampleRate::SR_44K1;
     let mut network = Box::new(tutti_dsp::Network::new(rate));
     let handle = std::thread::Builder::new()
-        .stack_size(160 * 1024)
+        .stack_size(140 * 1024)
         .spawn(move || {
             FdnLayout::default().design_into(&FdnControls::DEFAULT, rate, &mut network);
             network.stages.len()

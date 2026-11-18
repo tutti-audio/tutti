@@ -1342,8 +1342,9 @@ impl Fader {
             }
             if self.gain != Amplitude::UNITY {
                 let at = (base + i) * channels;
+                let gain = F::from_f64(self.gain.get());
                 for s in &mut output[at..at + channels] {
-                    *s *= F::from_f64(self.gain.get());
+                    *s *= gain;
                 }
             }
         }

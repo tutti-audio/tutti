@@ -18,6 +18,12 @@ pub(crate) fn sample_gain(db: Db) -> f32 {
     db.to_amplitude().get() as f32
 }
 
+/// The amplitude of a fed `f32` lane value in dB, as a per-frame read computes it: `10^(db / 20)`
+/// in `f32` through `libm`.
+pub(crate) fn fed_sample_gain(db: f32) -> f32 {
+    libm::powf(10.0, db / 20.0)
+}
+
 /// A node prepared at [`RATE`] for blocks of up to 1024 frames.
 pub(crate) fn prepared<N: Node>(node: N) -> N {
     tutti_graph::contract::prepared(node, RATE, 1024)

@@ -94,14 +94,15 @@ impl VbapGains {
         };
         let (from, to, n) = (&glide.from, &glide.to, glide.n);
         // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
-        // for one speaker's pair: `at` would blend all of the set for each frame. The
-        // gains enter the render's format here.
-        let blend = |from: Gain, to: Gain, k: u32| {
-            F::from_f64(if k >= n {
-                to.get()
+        // for one speaker's pair: `at` would blend all of the set for each frame. The ends
+        // enter the render's format once per call and the blend runs in `F`.
+        let n_f = F::from_f64(f64::from(n));
+        let blend = |from: F, to: F, k: u32| {
+            if k >= n {
+                to
             } else {
-                from.get().lerp(&to.get(), k, n)
-            })
+                crate::lerp(from, to, F::from_f64(f64::from(k)) / n_f)
+            }
         };
         let steps = first..;
         // A pair of ends that are the same bits is a held gain, which skips the
@@ -120,6 +121,7 @@ impl VbapGains {
                 }
                 return;
             }
+            let (g_from, g_to) = (F::from_f64(g_from.get()), F::from_f64(g_to.get()));
             for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
                 *o = mono(l, r) * blend(g_from, g_to, k);
             }
@@ -135,6 +137,9 @@ impl VbapGains {
                 }
                 return;
             }
+            let widen = |g: Gain| F::from_f64(g.get());
+            let (a_from, a_to) = (widen(a_from), widen(a_to));
+            let (b_from, b_to) = (widen(b_from), widen(b_to));
             for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
                 *o = l * blend(a_from, a_to, k) + r * blend(b_from, b_to, k);
             }
