@@ -20,6 +20,7 @@ use tutti_types::{
 use crate::controls::{ParamSet, Params};
 use crate::io::Io;
 use crate::param::{MAX_PARAM_PORTS, ParamInput, ParamPorts};
+use tutti_buffers::Float;
 
 mod sealed {
     pub trait Sealed {}
@@ -283,9 +284,9 @@ pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f32> {
 /// (a row after a `;`, or an `Option` cell that is `None`) reads
 /// [`ParamInput::Base`].
 #[doc(hidden)]
-pub fn input<'a>(
+pub fn input<'a, F: Float>(
     walk: impl FnOnce(Visit<'_>) -> bool,
-    io: &Io<'a>,
+    io: &Io<'a, F>,
     p: u16,
     index: u8,
 ) -> ParamInput<'a> {
@@ -580,7 +581,7 @@ macro_rules! declare_params {
             #[allow(dead_code)]
             fn declared_param<'a, const P: u16>(
                 &self,
-                io: &$crate::Io<'a>,
+                io: &$crate::Io<'a, impl $crate::__private::Float>,
             ) -> $crate::ParamInput<'a>
             where
                 Self: $crate::HasParam<P>,
@@ -593,7 +594,7 @@ macro_rules! declare_params {
             #[allow(dead_code)]
             fn declared_param_at<'a, const P: u16>(
                 &self,
-                io: &$crate::Io<'a>,
+                io: &$crate::Io<'a, impl $crate::__private::Float>,
                 index: u8,
             ) -> $crate::ParamInput<'a>
             where

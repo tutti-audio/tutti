@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, IntoNode, NodeParts};
+use tutti_rt::RingFloat;
 use tutti_transport::TempoReader;
 use tutti_types::{Amplitude, Beat, ChannelLayout, PlaybackRate};
 
@@ -52,8 +53,8 @@ use crate::{
 /// what a clip does not say (a pool of voices: [`VoicePool`](crate::VoicePool)).
 #[derive(Debug)]
 #[must_use = "a clip is a node: add it to a graph"]
-pub struct Clip {
-    tier: Tier,
+pub struct Clip<F: RingFloat = f32> {
+    tier: Tier<F>,
     window: VoiceWindow,
     gain: Amplitude,
     speed: PlaybackRate,
@@ -63,21 +64,21 @@ pub struct Clip {
 
 /// What a clip plays.
 #[derive(Debug)]
-enum Tier {
+enum Tier<F: RingFloat> {
     /// The decoded wave, placed.
     Resident {
-        wave: Arc<Wave>,
-        source: Box<MemorySource>,
+        wave: Arc<Wave<F>>,
+        source: Box<MemorySource<F>>,
     },
     /// A stream and the reader the streamer feeds.
     Streamed {
-        reader: Box<StreamReader>,
-        stream: Stream,
+        reader: Box<StreamReader<F>>,
+        stream: Stream<F>,
     },
 }
 
-impl Clip {
-    fn over(tier: Tier) -> Self {
+impl<F: RingFloat> Clip<F> {
+    fn over(tier: Tier<F>) -> Self {
         Self {
             tier,
             window: VoiceWindow::default(),
@@ -95,7 +96,7 @@ impl Clip {
     /// [`PlaceError`] for a wave with a channel no speaker names (a second
     /// LFE, a wide or high speaker): refused here, never played with a
     /// channel in the wrong place.
-    pub fn new(wave: impl Into<Arc<Wave>>) -> Result<Self, PlaceError> {
+    pub fn new(wave: impl Into<Arc<Wave<F>>>) -> Result<Self, PlaceError> {
         let wave = wave.into();
         let width = voice_width(ChannelLayout::clamped(wave.channels()));
         Ok(Self::over(Tier::Resident {
@@ -108,7 +109,7 @@ impl Clip {
     /// [`DiskStreamer::open`](crate::DiskStreamer::open) or
     /// `Session::open_stream`), at beat 0, at unit gain, playing once. The
     /// clip owns the stream: it ends when the clip's node leaves the graph.
-    pub fn streaming(reader: StreamReader, stream: Stream) -> Self {
+    pub fn streaming(reader: StreamReader<F>, stream: Stream<F>) -> Self {
         Self::over(Tier::Streamed {
             reader: Box::new(reader),
             stream,
@@ -170,7 +171,7 @@ impl Clip {
     }
 
     /// The node this clip is, placed and set.
-    fn into_node(self) -> VoiceNode {
+    fn into_node(self) -> VoiceNode<F> {
         let Self {
             tier,
             window,
@@ -212,17 +213,17 @@ impl Clip {
 }
 
 /// A clip has the params of the node it builds.
-impl<const P: u16> HasParam<P> for Clip
+impl<F: RingFloat, const P: u16> HasParam<P> for Clip<F>
 where
-    VoiceNode: HasParam<P>,
+    VoiceNode<F>: HasParam<P>,
 {
-    type Unit = <VoiceNode as HasParam<P>>::Unit;
+    type Unit = <VoiceNode<F> as HasParam<P>>::Unit;
 }
 
-impl IntoNode for Clip {
-    type Controls = VoiceNodeHandle;
+impl<F: RingFloat> IntoNode<F> for Clip<F> {
+    type Controls = VoiceNodeHandle<F>;
 
-    fn into_parts(self) -> NodeParts<VoiceNodeHandle> {
+    fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {
         self.into_node().into_parts()
     }
 }

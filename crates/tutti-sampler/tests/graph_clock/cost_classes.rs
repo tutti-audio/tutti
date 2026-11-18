@@ -174,7 +174,7 @@ fn each_node_declares_its_class() {
     );
     assert_eq!(plain.shape().cost, Cost::Moderate);
     assert_eq!(stretched(&wave).shape().cost, Cost::Heavy);
-    assert_eq!(VoicePool::new().shape().cost, Cost::Heavy);
+    assert_eq!(VoicePool::<f32>::new().shape().cost, Cost::Heavy);
 }
 
 /// Twelve `Moderate` reads beside two stretched voices, summed through a

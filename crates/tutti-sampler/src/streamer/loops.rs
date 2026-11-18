@@ -130,31 +130,31 @@ impl Arrangement {
     /// ulp no larger than `pos`, so representable; `rem_euclid` is exact; and
     /// `resume + r` is again such a multiple, no larger than `end ≤ pos`.
     #[inline]
-    pub(crate) fn taps<F: Float>(&self, pos: f64) -> Option<([u64; 4], F)> {
+    pub(crate) fn taps<F: Float>(&self, pos: SamplePosition) -> Option<([u64; 4], F)> {
         if self.len == Some(Samples::new(0)) {
             return None;
         }
         if self.reverse {
             // A direction needs the length to mirror by.
             let len = self.len?.get();
-            if pos >= len as f64 {
+            if pos >= straight(len as u64) {
                 return None;
             }
-            let (taps, frac) = tap_indices(len, mirrored(Samples::new(len), SamplePosition(pos)));
+            let (taps, frac) = tap_indices(len, mirrored(Samples::new(len), pos));
             return Some((taps.map(|f| (len - 1 - f) as u64), frac));
         }
         match self.span {
             None => {
                 // Unknown length: every position reads, nothing falls silent.
                 let len = self.len.map_or(usize::MAX, Samples::get);
-                if pos >= len as f64 {
+                if pos >= straight(len as u64) {
                     return None;
                 }
-                let (taps, frac) = tap_indices(len, SamplePosition(pos));
+                let (taps, frac) = tap_indices(len, pos);
                 Some((taps.map(|f| f as u64), frac))
             }
             Some(_) => {
-                let (idx, frac) = split_position(SamplePosition(pos));
+                let (idx, frac) = split_position(pos);
                 Some((
                     [
                         idx.saturating_sub(1),
@@ -168,6 +168,12 @@ impl Arrangement {
             }
         }
     }
+}
+
+/// The straight position of ring slot `slot`: the position that places on it.
+#[inline]
+pub(crate) fn straight(slot: u64) -> SamplePosition {
+    SamplePosition::new(slot as f64)
 }
 
 /// A switch the reader crosses: the old mapping's frames around it, so the
@@ -215,8 +221,8 @@ impl<F: Float> RingMap<F> {
 
     /// The arrangement position `pos` reads by.
     #[inline]
-    pub(crate) fn arrangement(&self, pos: f64) -> Arrangement {
-        if pos >= self.at as f64 {
+    pub(crate) fn arrangement(&self, pos: SamplePosition) -> Arrangement {
+        if pos >= straight(self.at) {
             self.after
         } else {
             self.before
@@ -774,7 +780,7 @@ mod tests {
         };
         for pos in [f64::INFINITY, 1e30, 18_446_744_073_709_552_000.0] {
             let (taps, _) = arrangement
-                .taps::<f32>(pos)
+                .taps::<f32>(SamplePosition(pos))
                 .expect("a looped position has taps");
             assert!(
                 taps.iter().all(|&t| t >= usize::MAX as u64 - 1),
@@ -1054,6 +1060,7 @@ mod tests {
             let arrangement = mapping.arrangement();
             for k in 0..9_000u32 {
                 let pos = k as f64 * 1.318_359_375 * 0.91875;
+                let at = SamplePosition(pos);
                 let mut memory = [0.0f32];
                 if mapping.reverse {
                     if pos < len as f64 {
@@ -1078,7 +1085,7 @@ mod tests {
                     read_frame(&wave, &Place::FAN, SamplePosition(pos), &mut memory);
                 }
                 let mut live = [0.0f32];
-                if let Some((taps, frac)) = arrangement.taps(pos) {
+                if let Some((taps, frac)) = arrangement.taps(at) {
                     interpolate_taps(1, &Place::FAN, frac, &mut live, |_, t| {
                         slots[taps[t] as usize]
                     });

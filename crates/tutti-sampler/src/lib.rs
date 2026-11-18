@@ -81,6 +81,14 @@
 //! whether the ring is primed, ended or faulted, and how many frames the voice
 //! missed. `DiskStreamer`'s own documentation has that example.
 //!
+//! ## Sample format
+//!
+//! Every voice type is generic over the graph's float format, `f32` by default
+//! (`MemorySource<F>`, `DiskVoice<F>`, `Voice<F>`, `VoicePool<F>`, `VoiceNode<F>`,
+//! `Clip<F>`), and plays in a graph of that format; a disk voice's stream is
+//! opened by a [`DiskStreamer`] of the same format. Params and controls are
+//! `f32` whatever the format.
+//!
 //! ## Channel ceiling
 //!
 //! `tutti_types::MAX_CHANNELS` is the widest frame a voice reads or emits, the
