@@ -41,10 +41,10 @@ impl AtomicSampleRate {
 }
 
 /// The rate a cell word holds. Only `new`, `store` and `swap` write the word,
-/// each from a `SampleRate`, so it is always a rate; the fallback is never read.
+/// each from a `SampleRate`, so it is always a rate.
 #[inline]
 fn rate_of(bits: u64) -> SampleRate {
-    SampleRate::new(f64::from_bits(bits)).unwrap_or(SampleRate::SR_48K)
+    SampleRate::new(f64::from_bits(bits)).expect("a cell word is always a SampleRate")
 }
 
 /// A [`SampleRate`] one thread leaves for another to take: an

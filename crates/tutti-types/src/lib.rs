@@ -64,9 +64,6 @@
 //! - `serde`: `Serialize`/`Deserialize` on the wire- and document-carried types:
 //!   `Note`, `ChannelLayout`, `ChannelTopology` and the meter vocabulary, and
 //!   `tutti-units`' `serde` with them. Not `Param` or `LoopRange`.
-// Catches a doc comment attached to the wrong item (say, an `impl Debug` right
-// below a struct), which leaves the type undocumented in rustdoc while it looks
-// documented in the source. Nothing else catches that.
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
