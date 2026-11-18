@@ -16,8 +16,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamSegment, Prepare, ScheduleError, Shape, Status,
-    TransportChanges, TransportPosition,
+    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare, ScheduleError, Shape,
+    Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
@@ -215,8 +215,8 @@ impl Node for Capture {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("unpoisoned");
-        for e in io.events(0).as_slice() {
-            if let EventKind::Segment(s) = e.kind {
+        for e in io.events(0).params() {
+            if let ParamKind::Segment(s) = e.kind {
                 log.push((cx.env.frame_at(e.offset).get(), s));
             }
         }
@@ -1511,10 +1511,10 @@ fn reapply(r: &mut Rig) -> tutti_nodes::Applied {
 }
 
 /// A frozen constant: an automation curve.
-struct Flat(f32);
+struct Flat(f64);
 
 impl tutti_modulation::Curve for Flat {
-    fn value_at(&self, _: Beat) -> Option<f32> {
+    fn value_at(&self, _: Beat) -> Option<f64> {
         Some(self.0)
     }
 }

@@ -90,7 +90,7 @@ use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, Unit
 use crate::builder::GraphBuilder;
 use crate::controls::{ParamFork, ParamNode};
 use crate::editor::Editor;
-use crate::event::{Event, EventKind, EventWriter, ParamSegment, SortedEvents};
+use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::exec::Executor;
 use crate::fork::Unforkable;
 use crate::history::TransportHistory;
@@ -100,6 +100,7 @@ use crate::node::{
     TransportPosition,
 };
 use crate::param::{ParamIn, ParamInput};
+use crate::param_event::{ParamEvent, ParamSegment};
 use crate::rtlog::{LogCapture, LogFilter, RtRecord};
 use crate::spec::{EventIn, EventOut};
 use tutti_curve::Law;
@@ -179,8 +180,8 @@ pub enum Excite {
         /// The node's declared param (a bare `UnitParam` is its index-0
         /// address: `param.into()`).
         param: UnitAddr,
-        /// The impulse's height.
-        amplitude: f32,
+        /// The pulse's height, in the param's raw `f64`.
+        amplitude: f64,
     },
 }
 
@@ -1030,7 +1031,7 @@ impl Row {
     /// The [`Excite::Param`] graph: a [`ParamPulse`] armed for `at` driving
     /// `param`, and behind PDC a [`Latent`] sibling on the node's audio
     /// input 0.
-    fn build_param(&self, topo: Topo, param: UnitAddr, at: Frame, amplitude: f32) -> Rig {
+    fn build_param(&self, topo: Topo, param: UnitAddr, at: Frame, amplitude: f64) -> Rig {
         let node = (self.make)();
         let shape = node.shape();
         assert!(
@@ -1587,13 +1588,13 @@ impl Node for Emitter {
 pub struct ParamPulse {
     at: Frame,
     param: UnitAddr,
-    amplitude: f32,
+    amplitude: f64,
 }
 
 impl ParamPulse {
     /// A pulse of `amplitude` on `param` at `at`.
     #[must_use]
-    pub fn new(at: Frame, param: UnitAddr, amplitude: f32) -> Self {
+    pub fn new(at: Frame, param: UnitAddr, amplitude: f64) -> Self {
         Self {
             at,
             param,
@@ -1604,7 +1605,7 @@ impl ParamPulse {
 
 impl Node for ParamPulse {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY.with_events(0, 1).with_param_events()
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1614,7 +1615,7 @@ impl Node for ParamPulse {
             if let Some(offset) = cx.env.offset_of(frame) {
                 let step = ParamSegment::unit(self.param, value, value, Samples(0), Law::Linear);
                 io.event_out(0)
-                    .push(Event::segment(offset, step))
+                    .push_param(ParamEvent::segment(offset, step))
                     .expect("two events fit");
             }
         }
@@ -1773,6 +1774,9 @@ pub struct Driven<F: Float = f32> {
     pub audio: Vec<Vec<F>>,
     /// One `Vec` per event output port, in the order the node wrote them.
     pub events: Vec<Vec<Event>>,
+    /// One `Vec` per event output port of the param events the node wrote, in
+    /// the order it wrote them.
+    pub params: Vec<Vec<ParamEvent>>,
     /// What the node passed to [`Io::report_tail`] in the call, if anything.
     pub reported_tail: Option<Tail>,
     /// What the call returned (`None` only in a `Driven::default()`), for a test
@@ -1783,6 +1787,17 @@ pub struct Driven<F: Float = f32> {
 /// The most events [`drive_input`] and [`Direct`] accept on each event output
 /// port per block: more than any node in the tree writes in one.
 pub const HAND_EVENT_CAPACITY: usize = 1024;
+
+/// The param events a hand-driven port holds: [`HAND_EVENT_CAPACITY`] for a
+/// node that declares it writes them ([`Shape::param_events`]), none for
+/// another.
+fn param_room(shape: &Shape) -> usize {
+    if shape.param_events {
+        HAND_EVENT_CAPACITY
+    } else {
+        0
+    }
+}
 
 /// One block of `node` by hand, as a graph hands it one: under `env` (its
 /// frame, length, transport and transport changes), `inputs` and `params`
@@ -1804,6 +1819,24 @@ pub fn drive_input<F: Float>(
     inputs: Planes<'_, F>,
     params: &[Option<&[F]>],
     events: &[&[Event]],
+) -> Driven<F> {
+    drive_input_params(node, env, inputs, params, events, &[])
+}
+
+/// [`drive_input`] with `param_events[p]` the param events on event input `p`
+/// (a port past the end has none), beside its `events`.
+///
+/// # Panics
+///
+/// As [`drive_input`], and when a param event list is unsorted or reaches past
+/// the block ([`SortedEvents::with_both`](crate::SortedEvents::with_both)).
+pub fn drive_input_params<F: Float>(
+    node: &mut dyn Node<F>,
+    env: &Env,
+    inputs: Planes<'_, F>,
+    params: &[Option<&[F]>],
+    events: &[&[Event]],
+    param_events: &[&[ParamEvent]],
 ) -> Driven<F> {
     let shape = node.shape();
     let frames = env.block_len.get();
@@ -1833,16 +1866,21 @@ pub fn drive_input<F: Float>(
     let events_in: Vec<SortedEvents<'_>> = (0..usize::from(shape.event_in))
         .map(|p| {
             let list = events.get(p).copied().unwrap_or(&[]);
-            SortedEvents::new(list, frames).expect("sorted events inside the block")
+            let plist = param_events.get(p).copied().unwrap_or(&[]);
+            SortedEvents::with_both(list, plist, frames).expect("sorted events inside the block")
         })
         .collect();
     let mut out_events: Vec<Vec<Event>> = (0..usize::from(shape.event_out))
         .map(|_| Vec::with_capacity(HAND_EVENT_CAPACITY))
         .collect();
+    let mut out_params: Vec<Vec<ParamEvent>> = (0..usize::from(shape.event_out))
+        .map(|_| Vec::with_capacity(param_room(&shape)))
+        .collect();
     let dropped = crate::event::PortCount::default();
     let mut writers: Vec<EventWriter<'_>> = out_events
         .iter_mut()
-        .map(|b| EventWriter::new(b, HAND_EVENT_CAPACITY, frames as u32, &dropped))
+        .zip(&mut out_params)
+        .map(|(b, p)| EventWriter::new(b, p, HAND_EVENT_CAPACITY, frames as u32, &dropped))
         .collect();
     let cx = Cx {
         env,
@@ -1870,6 +1908,7 @@ pub fn drive_input<F: Float>(
     Driven {
         audio: out,
         events: out_events,
+        params: out_params,
         reported_tail: reported.get(),
         status: Some(status),
     }
@@ -2193,6 +2232,8 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     outputs: Vec<Vec<F>>,
     events_in: Vec<Vec<Event>>,
     events_out: Vec<Vec<Event>>,
+    params_in: Vec<Vec<ParamEvent>>,
+    params_out: Vec<Vec<ParamEvent>>,
     /// What the node reported with `Io::count_lost`, over every block.
     lost: u64,
     /// The records the node logged, when [`log`](Direct::log) is set.
@@ -2280,10 +2321,17 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
                 .map(|_| Vec::with_capacity(HAND_EVENT_CAPACITY))
                 .collect()
         };
+        let param_events = |n: u16, room: usize| {
+            (0..usize::from(n))
+                .map(|_| Vec::with_capacity(room))
+                .collect()
+        };
         Self {
             params: vec![None; shape.params.as_slice().len()],
             events_in: events(shape.event_in),
             events_out: events(shape.event_out),
+            params_in: param_events(shape.event_in, HAND_EVENT_CAPACITY),
+            params_out: param_events(shape.event_out, param_room(&shape)),
             node,
             rate,
             frames,
@@ -2362,9 +2410,25 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         list.extend_from_slice(events);
     }
 
+    /// Play the param events `events` on event input `port` in the **next**
+    /// block only, beside its [`events`](Self::events). Up to
+    /// [`HAND_EVENT_CAPACITY`] per port without allocating. Sorted and inside
+    /// the next block, or that block panics.
+    pub fn param_events(&mut self, port: usize, events: &[ParamEvent]) {
+        let list = &mut self.params_in[port];
+        list.clear();
+        list.extend_from_slice(events);
+    }
+
     /// What the node wrote to event output `port` in the last block.
     pub fn events_out(&self, port: usize) -> &[Event] {
         &self.events_out[port]
+    }
+
+    /// The param events the node wrote to event output `port` in the last
+    /// block.
+    pub fn param_events_out(&self, port: usize) -> &[ParamEvent] {
+        &self.params_out[port]
     }
 
     /// The transport of every block from the next one on: its position is
@@ -2463,17 +2527,19 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             }
         }
         let mut sorted = [SortedEvents::EMPTY; crate::node::MAX_PORTS];
-        for (slot, list) in sorted.iter_mut().zip(&self.events_in) {
-            *slot = SortedEvents::new(list, len).expect("sorted events inside the block");
+        for ((slot, list), params) in sorted.iter_mut().zip(&self.events_in).zip(&self.params_in) {
+            *slot =
+                SortedEvents::with_both(list, params, len).expect("sorted events inside the block");
         }
         let dropped = crate::event::PortCount::default();
         let lost = core::cell::Cell::new(0u32);
         let n_ev_out = self.events_out.len();
-        let mut bufs = self.events_out.iter_mut();
+        let mut bufs = self.events_out.iter_mut().zip(&mut self.params_out);
         let mut writers: [EventWriter<'_>; crate::node::MAX_PORTS] = core::array::from_fn(|_| {
-            bufs.next().map_or(EventWriter::detached(), |b| {
+            bufs.next().map_or(EventWriter::detached(), |(b, p)| {
                 b.clear();
-                EventWriter::new(b, HAND_EVENT_CAPACITY, len as u32, &dropped)
+                p.clear();
+                EventWriter::new(b, p, HAND_EVENT_CAPACITY, len as u32, &dropped)
             })
         });
         let cx = Cx {
@@ -2506,6 +2572,9 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         }
         self.lost += u64::from(lost.get());
         for list in &mut self.events_in {
+            list.clear();
+        }
+        for list in &mut self.params_in {
             list.clear();
         }
         status

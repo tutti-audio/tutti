@@ -1,5 +1,5 @@
 //! Timestamped commands: a scheduled
-//! event or parameter ramp lands on its exact frame — across ragged blocks and
+//! event lands on its exact frame — across ragged blocks and
 //! across a block boundary — in the executor and the reference alike; late is
 //! counted and never dropped; the queue back-pressures instead of growing.
 
@@ -11,8 +11,8 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, ParamRamp, Prepare,
-    Reference, ScheduleError, Shape, Status, TransportPosition, Unforkable,
+    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, Prepare, Reference,
+    ScheduleError, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
@@ -26,8 +26,8 @@ const PROBE: NodeKey = NodeKey(7);
 const MAX: usize = 64;
 
 /// One event input, one audio output. Written against `Io::sub_blocks`: each
-/// chunk applies its events, then renders its range — so a ramp's target
-/// (a step: every ramp here has zero duration) shows on exactly its frame.
+/// chunk applies its events, then renders its range — so a chord's level
+/// shows on exactly its frame.
 struct Probe {
     log: Log,
     level: f32,
@@ -45,15 +45,12 @@ impl Node for Probe {
             for e in events {
                 let tag = match e.kind {
                     EventKind::Midi(Ump(w)) => w[0],
-                    EventKind::Ramp(r) => {
-                        self.level = r
-                            .foreign_target(tutti_units::ParamId::new(0))
-                            .expect("ramps address id 0");
+                    EventKind::Harmony(h) => {
+                        // A chord whose root, over 100, is the level.
+                        self.level = f32::from(h.root()) / 100.0;
                         u32::MAX
                     }
-                    EventKind::Harmony(_) | EventKind::Segment(_) | EventKind::Resync => {
-                        unreachable!("this test sends none")
-                    }
+                    EventKind::Resync => unreachable!("this test sends none"),
                 };
                 self.log.lock().unwrap().push((
                     cx.env.frame_at(e.offset).get(),
@@ -189,18 +186,14 @@ fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
     assert_eq!(rig.ed.commands_outstanding(), 0, "every credit came back");
 }
 
-/// A scheduled ramp changes the output on exactly its frame: the node reads
+/// A scheduled chord changes the output on exactly its frame: the node reads
 /// it through `sub_blocks`, so the step is at the sample, not the block.
 #[test]
-fn a_scheduled_ramp_steps_the_output_on_its_frame() {
+fn a_scheduled_chord_steps_the_output_on_its_frame() {
     let mut rig = rig();
     rig.schedule(
         At::Frame(Frame::new(90)),
-        EventKind::Ramp(ParamRamp::foreign(
-            tutti_units::ParamId::new(0),
-            0.5,
-            Samples(0),
-        )),
+        EventKind::Harmony(tutti_graph::Harmony::chord(50, 50, 0x91)),
     );
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for n in [64, 64] {
@@ -649,45 +642,6 @@ fn cancel_takes_commands_back_and_frees_their_credit() {
         1 + COMMAND_CAPACITY as u64
     );
     assert!(rig.ed.schedule(At::NextBlock, to(), tag(0)).is_ok());
-}
-
-/// A ramp into a node that does not honour offsets sample-accurately is
-/// refused at `schedule`, as a marked edge would be at `compile`.
-#[test]
-fn a_ramp_into_a_coarse_node_is_refused() {
-    struct Coarse;
-    impl Node for Coarse {
-        fn shape(&self) -> Shape {
-            Shape::EMPTY
-                .with_events(1, 0)
-                .with_event_resolution(tutti_graph::Resolution::Frames(8))
-        }
-        fn prepare(&mut self, _: &Prepare) {}
-        fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
-            Status::Silent
-        }
-        fn reset(&mut self) {}
-    }
-    let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    ed.insert(PROBE, "coarse", Unforkable(Coarse));
-    ed.commit().expect("commits");
-    exec.apply_pending();
-    let ramp = EventKind::Ramp(ParamRamp::foreign(
-        tutti_units::ParamId::new(0),
-        1.0,
-        Samples(0),
-    ));
-    assert_eq!(
-        ed.schedule(At::NextBlock, to(), ramp),
-        Err(ScheduleError::ResolutionTooCoarse {
-            to: to(),
-            sink: tutti_graph::Resolution::Frames(8)
-        })
-    );
-    assert!(
-        ed.schedule(At::NextBlock, to(), tag(1)).is_ok(),
-        "a note is fine"
-    );
 }
 
 /// A transport at `beat`. The oracle table runs at 1440 BPM and 48 kHz:

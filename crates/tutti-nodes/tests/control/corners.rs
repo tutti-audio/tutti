@@ -5,7 +5,7 @@ use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_curve::Law;
 use tutti_graph::{
-    Cx, Event, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamIn, ParamSegment,
+    Cx, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn, ParamSegment,
     Prepare, Shape, Status,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource};
@@ -19,6 +19,7 @@ impl Node for Sends {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -29,7 +30,7 @@ impl Node for Sends {
             if at >= start && at < start + n {
                 let offset = io.offset((at - start) as usize).expect("inside");
                 io.event_out(0)
-                    .push(Event::segment(offset, seg))
+                    .push_param(ParamEvent::segment(offset, seg))
                     .expect("room");
             }
         }
@@ -85,7 +86,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     r.render_input(Planes::new(&[&input]).unwrap()).remove(0)
 }
 
-fn step(to: f32) -> ParamSegment {
+fn step(to: f64) -> ParamSegment {
     ParamSegment::unit(UnitParam::Ratio, to, to, Samples(0), Law::Linear)
 }
 
@@ -122,13 +123,7 @@ fn a_step_on_a_slow_control_lands_on_its_frame() {
         );
     }
     let mut resent = sends;
-    resent.push((
-        70,
-        step(4.0).resumed(
-            tutti_units::SamplePosition(0.0),
-            tutti_units::SamplePosition(0.0),
-        ),
-    ));
+    resent.push((70, step(4.0).resumed(Samples(0), Samples(0))));
     let again = render(resent, 64);
     assert!(
         one.iter()

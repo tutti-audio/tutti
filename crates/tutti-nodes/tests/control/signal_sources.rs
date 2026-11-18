@@ -15,9 +15,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamRange, ParamSegment, Prepare, Shape, Status,
-    TransportChanges, TransportPosition,
+    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, ForkByClone, ForkMode, ForkTarget,
+    Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
+    TransportChanges, TransportPosition, control_in,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
@@ -212,11 +212,11 @@ impl Node for Tap {
         let base = cx.env.frame.get();
         let events: Vec<(usize, ParamSegment)> = io
             .events(0)
-            .as_slice()
+            .params()
             .iter()
             .filter_map(|e| match e.kind {
-                EventKind::Segment(s) => Some((e.offset.index(), s)),
-                _ => None,
+                ParamKind::Segment(s) => Some((e.offset.index(), s)),
+                ParamKind::Ramp(_) => None,
             })
             .collect();
         let mut out = vec![vec![0.0f32; n]; 4];
@@ -230,13 +230,13 @@ impl Node for Tap {
                     a => panic!("a source sends foreign segments, got {a:?}"),
                 };
                 out[1][i] = 1.0;
-                out[2][i] = s.foreign_start(id).expect("foreign");
-                out[3][i] = s.foreign_target(id).expect("foreign");
+                out[2][i] = control_in(s.foreign_start(id).expect("foreign"));
+                out[3][i] = control_in(s.foreign_target(id).expect("foreign"));
                 k += 1;
             }
-            out[0][i] = self.last.map_or(0.0, |(s, at)| {
+            out[0][i] = control_in(self.last.map_or(0.0, |(s, at)| {
                 s.raw_value_after(Samples((base + i as u64 - at) as usize))
-            });
+            }));
         }
         for (c, v) in out.iter().enumerate() {
             io.output(c).copy_from_slice(v);
@@ -765,7 +765,7 @@ fn a_note_envelopes_stages_land_on_their_frames() {
         assert_eq!(at(f), want, "frame {f}");
     }
     // A's note-off at 23 000 changed nothing: the decay from 22 480 runs on.
-    let decay = |f: usize| 1.0 + (0.5 - 1.0) * ((f - 22_480) as f32 / 960.0);
+    let decay = |f: usize| control_in::<f32>(1.0 + (0.5 - 1.0) * ((f - 22_480) as f64 / 960.0));
     assert_eq!(at(23_000), decay(23_000));
     // The second A off at 26 000 sent nothing (in the marks above).
     for sizes in [&[1][..], &[37], &ragged(28_000, 128)] {

@@ -4,10 +4,10 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, Io, Node, Offset, ParamSegment, Prepare, Shape, Status,
+    Cost, Cx, EventKind, Io, Node, Offset, ParamEvent, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
-use tutti_units::{Frame, ParamId, SamplePosition, Samples};
+use tutti_units::{Frame, ParamId, Samples};
 
 use super::PlayWalk;
 
@@ -45,15 +45,13 @@ impl Flight {
     }
 
     /// Its value at stream frame `now`.
-    fn value(&self, now: u64) -> f32 {
+    fn value(&self, now: u64) -> f64 {
         self.segment.raw_value_after(self.since(now))
     }
 
     /// It has arrived by `now`: it holds `to` from here on.
     fn arrived(&self, now: u64) -> bool {
-        self.segment
-            .arrives_after()
-            .is_some_and(|a| self.since(now) >= a)
+        self.since(now) >= self.segment.arrives_after()
     }
 }
 
@@ -132,11 +130,11 @@ impl<S: ControlSource> SourceNode<S> {
             Samples(0),
             leg.piece.law,
         )
-        .resumed(SamplePosition(0.0), SamplePosition(leg.frames.get() as f64))
+        .resumed(Samples(0), leg.frames)
     }
 
     /// The value it has sent, at stream frame `now` (0 before any).
-    fn level(&self, now: u64) -> f32 {
+    fn level(&self, now: u64) -> f64 {
         self.flight.map_or(0.0, |f| f.value(now))
     }
 
@@ -145,11 +143,9 @@ impl<S: ControlSource> SourceNode<S> {
     /// 0 before any.
     fn standing(&self, now: u64) -> ParamSegment {
         match self.flight {
-            Some(f) => {
-                let along = SamplePosition(f.since(now).get() as f64);
-                f.segment
-                    .resumed(f.segment.position() + along, f.segment.length())
-            }
+            Some(f) => f
+                .segment
+                .resumed(f.segment.position() + f.since(now), f.segment.length()),
             None => self.segment(Leg::hold(0.0)),
         }
     }
@@ -158,7 +154,7 @@ impl<S: ControlSource> SourceNode<S> {
     /// twice. (Any other constant is sent: a lane may be new, or have
     /// thinned, and a held level is what a reader resynchronizes on.)
     fn silent(&self, leg: &Leg, now: u64) -> bool {
-        let zero = 0.0f32.to_bits();
+        let zero = 0.0f64.to_bits();
         if leg.piece.from.to_bits() != zero || leg.piece.to.to_bits() != zero {
             return false;
         }
@@ -185,8 +181,11 @@ impl Out {
 
     fn flush<F: Float>(&mut self, io: &mut Io<'_, F>) {
         if let Some((i, seg)) = self.pending.take() {
-            let pushed = Offset::new(Samples(i), self.len)
-                .is_some_and(|at| io.event_out(0).push(Event::segment(at, seg)).is_ok());
+            let pushed = Offset::new(Samples(i), self.len).is_some_and(|at| {
+                io.event_out(0)
+                    .push_param(ParamEvent::segment(at, seg))
+                    .is_ok()
+            });
             self.refused |= !pushed;
         }
     }
@@ -260,6 +259,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
         };
         shape
             .with_events(u16::from(S::MIDI_IN), 1)
+            .with_param_events()
             .with_event_capacity(SOURCE_EVENT_CAPACITY)
             .with_cost(S::COST)
             .with_no_note_events()

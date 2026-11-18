@@ -339,9 +339,9 @@ mod tests {
 
     use tutti_buffers::MaxBlock;
     use tutti_fixtures::main_thread;
-    use tutti_graph::contract::{self, Driven, drive_input};
+    use tutti_graph::contract::{self, Driven, drive_input_params};
     use tutti_graph::{
-        Env, Event, Node, Offset, ParamRamp, PlayClock, TransportChanges, TransportPosition,
+        Env, Node, Offset, ParamEvent, ParamRamp, PlayClock, TransportChanges, TransportPosition,
     };
     use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
     use tutti_plugin_types::{Control, Layout, Loaded, PluginInvalidation, Prepare, Request};
@@ -509,16 +509,17 @@ mod tests {
         block_with(node, frame, &[])
     }
 
-    /// [`block`], with `events` on the node's event input.
-    fn block_with(node: &mut PluginNode<FakeLoaded>, frame: u64, events: &[Event]) -> Driven {
+    /// [`block`], with `params` on the node's event input.
+    fn block_with(node: &mut PluginNode<FakeLoaded>, frame: u64, params: &[ParamEvent]) -> Driven {
         let mut x = vec![0.0f32; BLOCK];
         x[0] = 1.0;
-        drive_input(
+        drive_input_params(
             node,
             &env(frame),
             Planes::new(&[&x, &x]).unwrap(),
             &[],
-            &[events],
+            &[],
+            &[params],
         )
     }
 
@@ -774,8 +775,8 @@ mod tests {
     const PARAM: ParamId = ParamId::new(5);
 
     /// A ramp of `PARAM` to `value` at the block's first frame.
-    fn ramp(value: f32) -> [Event; 1] {
-        [Event::ramp(
+    fn ramp(value: f64) -> [ParamEvent; 1] {
+        [ParamEvent::ramp(
             Offset::of(Samples(0), Samples(BLOCK)),
             ParamRamp::foreign(PARAM, value, Samples(0)),
         )]

@@ -271,6 +271,7 @@ impl<F: Float> TestNode<F> {
             Kind::Emitter { .. } => Shape::source_unassigned(ch(1)).with_events(0, 1),
             Kind::GainDriver { latency, .. } | Kind::MixDriver { latency, .. } => Shape::EMPTY
                 .with_events(0, 1)
+                .with_param_events()
                 .with_latency(lat(latency))
                 .with_tail(Tail::None),
             Kind::Burst { cap, .. } => Shape::source_unassigned(ch(1))
@@ -447,7 +448,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                             tutti_units::Amplitude::new(driver_value(f, period)),
                             Samples(0),
                         );
-                        let _ = io.event_out(0).push(Event::ramp(at, ramp));
+                        let _ = io
+                            .event_out(0)
+                            .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
                 Status::Modified
@@ -461,7 +464,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                             tutti_units::Mix::new(driver_value(f, period) * 2.0),
                             Samples(0),
                         );
-                        let _ = io.event_out(0).push(Event::ramp(at, ramp));
+                        let _ = io
+                            .event_out(0)
+                            .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
                 Status::Modified

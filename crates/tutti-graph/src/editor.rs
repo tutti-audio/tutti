@@ -67,7 +67,7 @@ use crate::fork::{ForkHealth, ForkSource};
 use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
 use crate::mode::NodeMix;
-use crate::node::{Prepare, Resolution};
+use crate::node::Prepare;
 use crate::param::{ParamIn, ParamRange};
 use crate::plan::{Delta, Plan};
 use crate::spec::{EventIn, GraphSpec, ValidGraph};
@@ -665,9 +665,9 @@ impl<F: Float> Editor<F> {
     pub(crate) fn event_capacity(&self) -> usize {
         self.event_capacity
     }
-    /// Delivers `kind` into event input `to` at time `at` — a note, or a
-    /// [`ParamRamp`](crate::ParamRamp) as `EventKind::Ramp` — on its exact
-    /// frame. Control thread; the command crosses to the executor over a
+    /// Delivers `kind` into event input `to` at time `at` — a note, a chord
+    /// — on its exact frame. A param ramp or segment is a
+    /// [`ParamEvent`](crate::ParamEvent), which a command does not carry. Control thread; the command crosses to the executor over a
     /// preallocated ring of plain values, so nothing is freed on the audio
     /// thread. The rules:
     ///
@@ -686,10 +686,6 @@ impl<F: Float> Editor<F> {
     ///   beat-timed one can wait indefinitely (a stopped transport, a beat
     ///   past the loop end, one a seek jumped over), so cancel what you no
     ///   longer want.
-    /// - A [`ParamRamp`](crate::ParamRamp) or a
-    ///   [`ParamSegment`](crate::ParamSegment) into a node that does not honour
-    ///   offsets sample-accurately is refused
-    ///   ([`ScheduleError::ResolutionTooCoarse`]), as a marked edge would be.
     ///
     /// **Frames and beats fall due differently.** A frame is
     /// never dropped: already past, it lands at offset 0 of the next block
@@ -705,8 +701,8 @@ impl<F: Float> Editor<F> {
     ///
     /// Nothing is sent on [`ScheduleError::NoPlan`] (nothing committed yet),
     /// [`ScheduleError::NoSuchPort`] (`to` is not an event input of the plan
-    /// sent last), [`ScheduleError::ResolutionTooCoarse`],
-    /// [`ScheduleError::Backpressure`] or [`ScheduleError::Poisoned`].
+    /// sent last), [`ScheduleError::Backpressure`] or
+    /// [`ScheduleError::Poisoned`].
     pub fn schedule(
         &mut self,
         at: At,
@@ -717,15 +713,11 @@ impl<F: Float> Editor<F> {
             return Err(ScheduleError::Poisoned);
         }
         let plan = self.life.plan().ok_or(ScheduleError::NoPlan)?;
-        let unit = plan.unit(to.node).filter(|u| to.port < u.shape.event_in);
-        let Some(unit) = unit else {
-            return Err(ScheduleError::NoSuchPort { to });
-        };
-        let sink = unit.shape.event_resolution;
-        if matches!(kind, EventKind::Ramp(_) | EventKind::Segment(_))
-            && !sink.honours(Resolution::Sample)
+        if !plan
+            .unit(to.node)
+            .is_some_and(|u| to.port < u.shape.event_in)
         {
-            return Err(ScheduleError::ResolutionTooCoarse { to, sink });
+            return Err(ScheduleError::NoSuchPort { to });
         }
         self.link.schedule(at, to, kind)
     }

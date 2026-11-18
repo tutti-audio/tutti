@@ -197,10 +197,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
-    JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
-    RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock,
-    SystemSession, TransportHandle, WaitError, Workers,
+    AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
+    InPort, Job, JobId, JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession,
+    OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat,
+    SystemClock, SystemSession, TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -355,12 +355,12 @@ pub mod graph {
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
         Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
         ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamInput, ParamMod,
-        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
-        ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution, SilenceMask,
-        Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks, TransportChange,
-        TransportChangeRejected, TransportChanges, TransportHistory, TransportPosition, UmpAt,
-        VerifyError, Wake, WiredMask,
+        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput,
+        ParamKind, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell,
+        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
+        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
+        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
+        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }

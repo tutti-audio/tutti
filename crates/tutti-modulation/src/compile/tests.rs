@@ -269,7 +269,11 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
         for curve in curves {
             for raw in [1.0f32, -1.0, 0.5, -0.5] {
                 let depth = Depth::of(-0.35);
+                // A wave's raw value is an `f32` lane; a signal source's (the
+                // follower, the note envelope) is the segment's `f64`.
                 let want = 0.0f64 + (-0.0 + f64::from(shape(raw, depth, polarity, curve)) * span);
+                let want_input =
+                    0.0f64 + (-0.0 + shape(f64::from(raw), depth, polarity, curve) * span);
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
                     to: RouteTarget::Param(t),
@@ -320,20 +324,20 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                     (plugin(5, 2), ranged(0.0, 800.0)),
                 ];
                 let c = run(&sources, &routes, &targets).expect("compiles");
-                let at_unit = |t: TargetKey, inputs: &[Option<f32>]| {
+                let at_unit = |t: TargetKey, inputs: &[Option<f64>]| {
                     c.programs[&t].value_at(None, Some(0.0), &at, span, inputs)
                 };
                 let case = format!("{polarity:?} {curve:?} raw {raw}");
                 assert_eq!(at_unit(target(1), &[]), Some(want), "LFO, {case}");
                 assert_eq!(at_unit(target(2), &[]), Some(want), "macro, {case}");
                 assert_eq!(
-                    at_unit(target(3), &[Some(raw)]),
-                    Some(want),
+                    at_unit(target(3), &[Some(f64::from(raw))]),
+                    Some(want_input),
                     "follower, {case}"
                 );
                 assert_eq!(
-                    at_unit(plugin(4, 1), &[Some(raw)]),
-                    Some(want),
+                    at_unit(plugin(4, 1), &[Some(f64::from(raw))]),
+                    Some(want_input),
                     "note envelope, {case}"
                 );
                 assert_eq!(
@@ -397,7 +401,14 @@ fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     let at = time(0.0, 0.0, 1);
     assert_eq!(
         after.programs[&target(2)].value_at(None, Some(0.0), &at, 2.0, &[]),
-        Some(-0.0 + f64::from(shape(-0.75, Depth::of(0.2), Polarity::Bipolar, Law::Linear)) * 2.0),
+        Some(
+            -0.0 + f64::from(shape(
+                -0.75f32,
+                Depth::of(0.2),
+                Polarity::Bipolar,
+                Law::Linear
+            )) * 2.0
+        ),
         "depth 0.2 of a span of 2, at the macro's −0.75"
     );
 }
@@ -605,7 +616,7 @@ fn each_refusal_fires_by_name() {
     // An automation curve that is not frozen.
     struct Live;
     impl Curve for Live {
-        fn value_at(&self, _: Beat) -> Option<f32> {
+        fn value_at(&self, _: Beat) -> Option<f64> {
             Some(0.0)
         }
         fn frozen(&self) -> Option<Arc<dyn Curve>> {

@@ -29,7 +29,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Event, ForkMode, ForkTarget, GraphBuilder, Offset, ParamRamp, Prepare, TransportPosition,
+    ForkMode, ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, Prepare, TransportPosition,
 };
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
@@ -105,15 +105,15 @@ fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
 }
 
 /// The plugin's own value for parameter `i`.
-fn read(handle: &PluginHandle, i: u32) -> Option<f32> {
+fn read(handle: &PluginHandle, i: u32) -> Option<f64> {
     handle
         .parameter_value(ParamId::new((i32::try_from(i).expect("small")) as u32))
-        .map(|v| v.get() as f32)
+        .map(|v| v.get())
 }
 
 /// A ramp to `value` on parameter `id` (a VST2 index) at block frame `at`.
-fn ramp(at: usize, id: u32, value: f32) -> Event {
-    Event::ramp(
+fn ramp(at: usize, id: u32, value: f64) -> ParamEvent {
+    ParamEvent::ramp(
         Offset::of(Samples(at), Samples(BLOCK)),
         ParamRamp::foreign(ParamId::new(id), value, Samples(0)),
     )
@@ -133,9 +133,9 @@ fn a_moving_parameter_reaches_the_plugin() {
     assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "the probe's default");
 
     // Exact eighths, distinct within and across blocks.
-    let at = |b: usize, k: usize| ((b * 2 + k) % 8) as f32 / 8.0 + 0.0625;
+    let at = |b: usize, k: usize| ((b * 2 + k) % 8) as f64 / 8.0 + 0.0625;
     for b in 0..6 {
-        unit.events(
+        unit.param_events(
             0,
             &[
                 ramp(0, 1, at(b, 0)),
@@ -177,9 +177,9 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
     let mut unit = Direct::new(client, SampleRate::of(SAMPLE_RATE), BLOCK);
     let p = 2;
 
-    let held = |unit: &mut Direct<PluginNode<Vst2Loaded>>, v: f32, blocks: usize| {
+    let held = |unit: &mut Direct<PluginNode<Vst2Loaded>>, v: f64, blocks: usize| {
         for _ in 0..blocks {
-            unit.events(0, &[ramp(0, p, v), ramp(32, p, v)]);
+            unit.param_events(0, &[ramp(0, p, v), ramp(32, p, v)]);
             unit.block();
         }
     };

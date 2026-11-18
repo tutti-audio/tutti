@@ -110,6 +110,7 @@ impl Node for RampEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
             .with_latency(Latency::new(Samples(self.latency)))
     }
@@ -122,7 +123,7 @@ impl Node for RampEvery {
                 let o = io.offset(i).expect("inside");
                 let event = match (f / 37) % 3 {
                     // A linear ramp, from wherever the source is.
-                    0 => tutti_graph::Event::ramp(o, self.ramp((f % 5) as f64)),
+                    0 => tutti_graph::ParamEvent::ramp(o, self.ramp((f % 5) as f64)),
                     // A curve segment spanning the next event: interrupted.
                     k => {
                         let shape = [
@@ -133,23 +134,20 @@ impl Node for RampEvery {
                         ][(f / 111) as usize % 4];
                         let seg = ParamSegment::unit(
                             self.param,
-                            (f % 3) as f32,
-                            (f % 7) as f32,
+                            (f % 3) as f64,
+                            (f % 7) as f64,
                             Samples(50),
                             shape,
                         );
                         let seg = if k == 2 {
-                            seg.resumed(
-                                tutti_units::SamplePosition(3.5),
-                                tutti_units::SamplePosition(41.25),
-                            )
+                            seg.resumed(Samples(3), Samples(41))
                         } else {
                             seg
                         };
-                        tutti_graph::Event::segment(o, seg)
+                        tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push(event);
+                let _ = io.event_out(0).push_param(event);
             }
         }
         Status::Silent

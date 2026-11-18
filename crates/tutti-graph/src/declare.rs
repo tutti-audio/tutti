@@ -31,28 +31,27 @@ mod sealed {
 /// a switch (`Bypass`, `Solo`, `Freeze`: a cell at or above 0.5 is on). Sealed:
 /// the engine's units are listed, and a new one joins them.
 pub trait ParamUnit: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
-    /// The value as the `f64` the param's cell carries: the unit's raw, widened
-    /// exactly (an `f32` unit's raw is `f32`, which `f64` holds whole).
+    /// The value as the `f64` the param's cell carries: the unit's raw.
     fn to_cell(self) -> f64;
 
     /// The value a cell's `f64` stands for: the inverse of
-    /// [`to_cell`](Self::to_cell) (an `f32` unit rounds to its own width).
+    /// [`to_cell`](Self::to_cell).
     fn from_cell(cell: f64) -> Self;
 }
 
 /// A [`ParamUnit`] that is a number in a unit (not a switch): what a range
 /// (`Mods::range`) is a range of. Sealed.
-pub trait Scalar: ParamUnit + Unit<Raw: ParamRaw> {}
+pub trait Scalar: ParamUnit + Unit<Raw = f64> {}
 
 macro_rules! scalar_units {
     ($($unit:ty),+ $(,)?) => {$(
         impl sealed::Sealed for $unit {}
         impl ParamUnit for $unit {
             fn to_cell(self) -> f64 {
-                <<$unit as Unit>::Raw as ParamRaw>::to_f64(<$unit as Unit>::to_raw(self))
+                <$unit as Unit>::to_raw(self)
             }
             fn from_cell(cell: f64) -> Self {
-                <$unit as Unit>::from_raw(<<$unit as Unit>::Raw as ParamRaw>::from_f64(cell))
+                <$unit as Unit>::from_raw(cell)
             }
         }
         impl Scalar for $unit {}

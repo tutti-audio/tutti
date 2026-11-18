@@ -13,9 +13,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Event, EventOut, Executor, IntoNode, Io, Law, Node, NodeKey, NodeParts, OutPort,
-    ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source, Status,
-    TransportPosition, declare_params, param_parts,
+    Cx, Editor, EventOut, Executor, IntoNode, Io, Law, Node, NodeKey, NodeParts, OutPort,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source,
+    Status, TransportPosition, declare_params, param_parts,
 };
 use tutti_types::Param;
 use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
@@ -94,13 +94,14 @@ impl IntoNode for Declared {
 /// At the first frame of every block, steps each address in `to`.
 #[derive(Clone)]
 struct Steps {
-    to: Vec<(UnitAddr, f32)>,
+    to: Vec<(UnitAddr, f64)>,
 }
 
 impl Node for Steps {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
+            .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -108,7 +109,7 @@ impl Node for Steps {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
             let seg = ParamSegment::unit(addr, v, v, Samples(0), Law::Linear);
-            let _ = io.event_out(0).push(Event::segment(at, seg));
+            let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
     }
@@ -118,7 +119,7 @@ impl Node for Steps {
 const NODE: NodeKey = NodeKey(1);
 const SRC: NodeKey = NodeKey(2);
 
-fn render(to: &[(UnitAddr, f32)]) -> [Vec<f32>; 4] {
+fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
     let node = Declared {
         gone: None,
