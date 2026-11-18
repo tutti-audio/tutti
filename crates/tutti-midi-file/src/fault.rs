@@ -13,12 +13,14 @@ pub enum SmfParseError {
     /// The division is zero ticks per quarter note.
     #[error("zero ticks-per-beat")]
     ZeroTicksPerBeat,
-    /// An SMPTE division whose frame rate is none of the four.
+    /// An SMPTE division whose frame rate is none of the four (-24, -25, -29
+    /// and -30).
     #[error("invalid SMPTE frame rate")]
     InvalidFrameRate,
-    /// The header's format is not 0, 1 or 2.
-    #[error("unknown format")]
-    UnknownSmfFormat,
+    /// An SMPTE division of zero ticks per frame. The specification is silent
+    /// on it; this crate refuses it because a tick of no frame has no time.
+    #[error("zero ticks-per-frame")]
+    ZeroTicksPerFrame,
     /// The file does not begin with the header chunk.
     #[error("missing header chunk")]
     MissingHeader,

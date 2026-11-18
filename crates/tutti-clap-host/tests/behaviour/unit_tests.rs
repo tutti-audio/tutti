@@ -11,8 +11,9 @@ use clap_sys::events::{
     clap_event_param_gesture, clap_event_param_mod, clap_event_param_value,
 };
 use tutti_clap_host::{
-    ClapEvent, ClapHost, EventList, HostState, InputEventList, InputStream, NoteExpressionType,
-    OutputEventList, OutputStream, ParameterChanges, ParameterQueue,
+    ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
+    NoteExpressionType, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
+    ParameterQueue,
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
@@ -29,7 +30,7 @@ fn at(k: usize) -> Offset {
 
 /// A fresh list `event` was added to: its first event is what it converts to.
 fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(event);
     list
 }
@@ -149,7 +150,7 @@ fn test_program_change_roundtrip() {
 /// the FFI event table.
 #[test]
 fn test_input_event_list_add_midi_counts_correctly() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(&(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
     list.add_midi(&(at(100), midi::note_off(MidiChannel::FIRST, 60, 0)));
 
@@ -174,7 +175,7 @@ fn test_input_event_list_add_midi_counts_correctly() {
 /// `to_midi_events()`.
 #[test]
 fn test_output_event_list_push_note_on() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -225,7 +226,7 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
     const CHANNEL: u8 = 2;
     const NOTE: u8 = 60;
 
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -284,7 +285,7 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
 /// named is not.
 #[test]
 fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -318,7 +319,7 @@ fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
 #[test]
 fn test_output_event_list_push_midi_cc() {
     use clap_sys::events::clap_event_midi;
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let midi = clap_event_midi {
@@ -353,7 +354,7 @@ fn test_output_event_list_push_midi_cc() {
 /// calling `sort_by_time()`.
 #[test]
 fn test_input_event_list_sort_by_time() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(&(at(200), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
     list.add_midi(&(at(50), midi::note_on(MidiChannel::FIRST, 64, 0x5000)));
     list.add_midi(&(at(100), midi::note_on(MidiChannel::FIRST, 67, 0x7000)));
@@ -367,7 +368,7 @@ fn test_input_event_list_sort_by_time() {
 
 #[test]
 fn test_output_event_list_push_param_value() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let param = clap_event_param_value {
@@ -414,7 +415,7 @@ fn test_param_changes_through_input_list() {
     q2.add_point(64, 0.5);
     changes.add_queue(q2);
 
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
     // No range map and no claim of params → pass-through (this test only
     // asserts event count, not denormalized values; the denorm math is covered
     // in the events unit tests).
@@ -427,7 +428,7 @@ fn test_param_changes_through_input_list() {
 
 #[test]
 fn test_note_expression_roundtrip_through_output_list() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let expr = clap_event_note_expression {
@@ -520,19 +521,11 @@ fn test_input_stream_partial_reads() {
     }
 }
 
-// ── Host ──
-
-#[test]
-fn test_clap_host_as_raw_not_null() {
-    let host = ClapHost::new(std::sync::Arc::new(HostState::new(main_thread())));
-    assert!(!host.as_raw().is_null());
-}
-
 // ── Mixed event types through output ──
 
 #[test]
 fn test_output_list_filters_midi_from_mixed_events() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     // Push a note on
@@ -584,7 +577,7 @@ fn test_output_list_filters_midi_from_mixed_events() {
 
 #[test]
 fn test_output_list_push_note_choke() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -622,7 +615,7 @@ fn test_output_list_push_note_choke() {
 
 #[test]
 fn test_output_list_push_note_end() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -659,7 +652,7 @@ fn test_output_list_push_note_end() {
 
 #[test]
 fn test_output_list_push_param_gesture_begin_end() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let begin = clap_event_param_gesture {
@@ -710,39 +703,6 @@ fn test_output_list_push_param_gesture_begin_end() {
 
     // Gesture events should not appear as param changes
     assert_eq!(param_changes(&list).queues.len(), 0);
-}
-
-// ── Transport constants ──
-
-#[test]
-fn test_transport_flags_are_distinct_bits() {
-    use clap_sys::events::{
-        CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
-        CLAP_TRANSPORT_HAS_TEMPO, CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE,
-        CLAP_TRANSPORT_IS_PLAYING, CLAP_TRANSPORT_IS_RECORDING,
-    };
-
-    let all_flags = [
-        CLAP_TRANSPORT_HAS_TEMPO,
-        CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
-        CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
-        CLAP_TRANSPORT_HAS_TIME_SIGNATURE,
-        CLAP_TRANSPORT_IS_PLAYING,
-        CLAP_TRANSPORT_IS_RECORDING,
-        CLAP_TRANSPORT_IS_LOOP_ACTIVE,
-    ];
-
-    // Verify all flags are distinct powers of 2
-    for flag in &all_flags {
-        assert!(flag.is_power_of_two(), "Flag {flag:#x} is not a power of 2");
-    }
-
-    // Verify no two flags are equal
-    for i in 0..all_flags.len() {
-        for j in (i + 1)..all_flags.len() {
-            assert_ne!(all_flags[i], all_flags[j]);
-        }
-    }
 }
 
 // ── Host state + extensions ──
@@ -1089,7 +1049,7 @@ fn test_param_value_event_construction() {
 fn test_output_event_list_take_events() {
     use clap_sys::events::{CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON};
 
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {

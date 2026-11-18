@@ -52,16 +52,6 @@ pub enum TracksError {
         /// The track.
         track: usize,
     },
-    /// An event is before the one ahead of it.
-    #[error("track {track} {part}: out of order at tick {}", at.0)]
-    OutOfOrder {
-        /// The track.
-        track: usize,
-        /// The part of it.
-        part: TrackPart,
-        /// The tick that went backwards.
-        at: Tick,
-    },
     /// Two events are further apart than an SMF's delta (28 bits). A Clip File
     /// has no such gap.
     #[error("track {track}: the gap before tick {} is wider than the wire holds", at.0)]
@@ -70,16 +60,6 @@ pub enum TracksError {
         track: usize,
         /// The tick the gap ends at.
         at: Tick,
-    },
-    /// The part ends before its last event.
-    #[error("track {track} {part}: ends at tick {} before its last event", end.0)]
-    EndBeforeLast {
-        /// The track.
-        track: usize,
-        /// The part of it.
-        part: TrackPart,
-        /// Where it ends.
-        end: Tick,
     },
     /// The track ends further after its last event than the wire's delta holds.
     #[error("track {track}: ends at tick {}, too long after its last event", end.0)]

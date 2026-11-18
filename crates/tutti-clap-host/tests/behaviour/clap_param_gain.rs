@@ -420,7 +420,7 @@ fn the_host_reports_the_probes_declared_gain_range() {
     };
 
     let (min, max) = loaded
-        .parameter_range(main_thread(), GAIN_PARAM_ID)
+        .parameter_range(main_thread(), tutti_types::ParamId::new(GAIN_PARAM_ID))
         .unwrap_or_else(|| {
             panic!(
                 "the host did not enumerate the probe's Gain parameter (id \
