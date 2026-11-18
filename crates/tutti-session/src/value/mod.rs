@@ -38,15 +38,15 @@ pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
-#[cfg(feature = "midi")]
-pub(crate) use slot::PublishedSlot;
 pub(crate) use slot::{Cell, ClickVolumeSlot, MeterSlot, SettingSlot, SlotCell, SlotId, TempoSlot};
 pub use slot::{
     ClickTargets, ClickVolumeTarget, MeterTarget, NodeSlots, OutputPolicyTarget, SettingTarget,
     TempoTarget,
 };
 #[cfg(feature = "midi")]
-pub use slot::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
+#[cfg(feature = "midi")]
+pub(crate) use slot::{MpeModeSlot, PublishedSlot};
 pub use state::Knobs;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;

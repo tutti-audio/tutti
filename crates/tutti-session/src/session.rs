@@ -72,8 +72,8 @@ pub enum Phase {
     /// Frees, here, what the audio thread let go of in every cell the
     /// session publishes to (`Publisher::reclaim`): the project meter and the
     /// plugin slots following it, the graph's param ranges, the modulation
-    /// lanes' programs, the session's clips, the hardware input's MPE
-    /// request and port set. A value a block still held when it was
+    /// lanes' programs, the session's clips, the session's MPE mode, the
+    /// hardware input's Profile zones and port set. A value a block still held when it was
     /// replaced stays retired until a scan after the block ends; a cell
     /// that is not published again gets that scan here. A lock and a
     /// length check per cell when nothing is retired. It also closes the
@@ -986,6 +986,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         );
         #[cfg(feature = "midi")]
         table.provide(
+            SlotId::MpeMode,
+            Arc::new(crate::value::MpeModeSlot(self.mpe_cell().clone()))
+                as crate::value::SlotCell<tutti_midi_protocol::MpeMode>,
+        );
+        #[cfg(feature = "midi")]
+        table.provide(
             SlotId::OutputLatency,
             self.midi_state.output_latency_cell()
                 as crate::value::SlotCell<tutti_midi_runtime::OutputLatency>,
@@ -1453,6 +1459,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         {
             pinned += self.mods.state.reclaim();
         }
+        #[cfg(feature = "midi")]
+        {
+            pinned += self.mpe_cell().reclaim();
+        }
         #[cfg(feature = "midi-hardware")]
         if let Some(io) = &self.midi_io {
             use tutti_rt::Reclaim;
@@ -1799,6 +1809,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.click
     }
 
+    /// The cell the session's MPE mode is published through: the one place
+    /// the session reaches into its MIDI state for it.
+    #[cfg(feature = "midi")]
+    fn mpe_cell(&self) -> &tutti_rt::Publisher<tutti_midi_protocol::MpeMode> {
+        self.midi_state.mpe()
+    }
+
+    /// The session's MPE mode as a target, written with [`set`](Self::set)
+    /// and read with [`get`](Self::get).
+    #[cfg(feature = "midi")]
+    #[must_use]
+    pub const fn mpe(&self) -> crate::MpeModeTarget {
+        crate::MpeModeTarget::new()
+    }
+
     /// The metronome's targets: its level and when it sounds, written with
     /// [`set`](Self::set) and read with [`get`](Self::get).
     #[must_use]
@@ -1994,5 +2019,29 @@ mod tests {
 
         let _ = s.update();
         assert!(gone.upgrade().is_none(), "the meter is freed");
+    }
+
+    /// **The update's `Reclaim` phase frees the MPE mode a block held across a
+    /// replacement**, in the session's own cell: a reader the mode's cell
+    /// lends from stands in for a block in progress across the publish.
+    #[cfg(feature = "midi")]
+    #[test]
+    fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
+        let mut s = Session::builder()
+            .outputs_floor(ChannelLayout::MONO)
+            .build_detached(SampleRate::SR_48K)
+            .expect("builds");
+        let _ = s.update();
+        let cell = s.mpe_cell().clone();
+        let mut node = cell.reader();
+        {
+            let _held = node.lend();
+            s.set(s.mpe().to(tutti_fixtures::midi::lower_zone(3)))
+                .unwrap();
+            let _ = s.update();
+        }
+        assert_eq!(cell.retired_len(), 1, "the first mode is retired");
+        let _ = s.update();
+        assert_eq!(cell.retired_len(), 0, "and freed by the reclaim");
     }
 }

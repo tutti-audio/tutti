@@ -10,8 +10,9 @@
 //! any.
 //!
 //! One event input and one event output, every Group. Events that are not MIDI
-//! are not forwarded. The zones are [`MpeMode`], set through
-//! [`MpeTransformControls::set_mode`] and adopted at the next block. A mode
+//! are not forwarded. The zones are the [`MpeMode`] of the cell the node is
+//! built over ([`MpeTransformNode::new`]), which the session owns and every
+//! reader of it shares; the node adopts a new one at the next block. A mode
 //! starts each Group at its zones' default bend ranges and a change of it stops
 //! and resets the channels that enter or leave MPE control, which is what a
 //! receiver's zone change sends ([`MpeIngest::zone_defaults`]); the transform
@@ -22,7 +23,7 @@
 //! goes in whole or is dropped whole, and the drops are counted
 //! ([`MpeTransformControls::losses`]).
 //!
-//! Its fork is a transform in the mode the controls hold when it is made, with
+//! Its fork is a transform in the mode the cell holds when it is made, with
 //! no state of the notes: an offline render starts its clip from the top.
 
 use std::num::NonZeroU32;
@@ -48,21 +49,22 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// use tutti_graph::{Editor, NodeKey, Prepare};
 /// use tutti_midi_protocol::MpeMode;
 /// use tutti_midi_runtime::MpeTransformNode;
+/// use tutti_rt::Publisher;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(MpeMode::Disabled)).controls;
-/// controls.set_mode(MpeMode::Disabled);
-/// assert_eq!(controls.mode(), MpeMode::Disabled);
+/// let mode = Publisher::new(MpeMode::Disabled);
+/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(&mode)).controls;
+/// assert_eq!(controls.losses().refused, 0);
 /// ```
 pub struct MpeTransformNode {
     translator: Translator,
     mpe: MpeIngest,
     /// The mode in force.
     mode: MpeMode,
-    /// What the host asked for, read once per block.
+    /// The session's mode, read once per block.
     request: Reader<MpeMode>,
-    /// The cell `request` reads, which the controls publish to; the node never
-    /// touches it.
+    /// The cell `request` reads, kept for the fork, which registers a reader
+    /// of its own on it; the node never touches it.
     request_cell: Publisher<MpeMode>,
     /// What the block sends, which may outnumber what it read.
     out: Box<[UmpAt]>,
@@ -102,17 +104,24 @@ fn tell(mpe: &MpeIngest, told: &mut u16, group: MidiGroup, at: Offset, staging: 
 }
 
 impl MpeTransformNode {
-    /// A transform that starts in `mode`.
+    /// A transform that starts in the mode `mode` holds and follows it: a
+    /// publish to `mode` is adopted at the next block. The reader is
+    /// registered here, so build the node on the control side.
+    ///
+    /// A new mode stops and resets the channels that enter or leave MPE
+    /// control (M1-100 section 2.2.3: All Sound Off and Reset All Controllers,
+    /// sent ahead of the new zones' default bend ranges); the others keep
+    /// their notes. Publishing the mode in force changes nothing.
     #[must_use]
-    pub fn new(mode: MpeMode) -> Self {
-        let cell = Publisher::new(mode);
+    pub fn new(mode: &Publisher<MpeMode>) -> Self {
+        let initial = *mode.current();
         let (dropped, dropped_reader) = counter();
         Self {
             translator: Translator::default(),
-            mpe: MpeIngest::new(mode),
-            mode,
-            request: cell.reader(),
-            request_cell: cell,
+            mpe: MpeIngest::new(initial),
+            mode: initial,
+            request: mode.reader(),
+            request_cell: mode.clone(),
             out: vec![BLANK; note_off_room(MIDI_INPUT_EVENT_CAPACITY)].into_boxed_slice(),
             capacity: MIDI_INPUT_PORT_CAPACITY,
             active: 0,
@@ -123,46 +132,18 @@ impl MpeTransformNode {
     }
 }
 
-/// The host's handle on a [`MpeTransformNode`]: its MPE mode. Cheap to clone.
+/// The host's handle on a [`MpeTransformNode`]: what it lost. Cheap to clone.
 #[derive(Clone, Debug)]
 pub struct MpeTransformControls {
-    /// What the node reads; the controls publish to it and read it back with
-    /// `Publisher::current`.
-    request: Publisher<MpeMode>,
     dropped: Counter<Losses>,
 }
 
 impl MpeTransformControls {
-    /// Transforms in `mode` from the next block. Control thread.
-    ///
-    /// A new mode stops and resets the channels that enter or leave MPE control
-    /// (M1-100 section 2.2.3: All Sound Off and Reset All Controllers, sent
-    /// ahead of the new zones' default bend ranges); the others keep their
-    /// notes. Setting the mode in force changes nothing.
-    pub fn set_mode(&self, mode: MpeMode) {
-        self.request.publish(mode);
-    }
-
-    /// The mode last set (or the node's first), which the node adopts at its
-    /// next block.
-    #[must_use]
-    pub fn mode(&self) -> MpeMode {
-        *self.request.current()
-    }
-
     /// The translated events a block had no room for, which a translation
     /// drops whole rather than cut partway.
     #[must_use]
     pub fn losses(&self) -> Losses {
         self.dropped.get()
-    }
-}
-
-/// Frees what the control side retired and no block holds, without publishing;
-/// control thread, from the owner's tick.
-impl tutti_rt::Reclaim for MpeTransformControls {
-    fn reclaim(&self) -> usize {
-        self.request.reclaim()
     }
 }
 
@@ -246,16 +227,14 @@ impl<F: Float> Node<F> for MpeTransformNode {
     }
 }
 
-/// A [`MpeTransformNode`]'s fork: a transform in the mode the controls hold.
+/// A [`MpeTransformNode`]'s fork: a transform in the mode the cell holds.
 struct ModeFork {
     mode: Publisher<MpeMode>,
 }
 
 impl<F: Float> ForkSource<F> for ModeFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
-        Ok(Forked::new(Box::new(MpeTransformNode::new(
-            *self.mode.current(),
-        ))))
+        Ok(Forked::new(Box::new(MpeTransformNode::new(&self.mode))))
     }
 }
 
@@ -263,15 +242,14 @@ impl<F: Float> IntoNode<F> for MpeTransformNode {
     type Controls = MpeTransformControls;
 
     fn into_parts(self) -> NodeParts<MpeTransformControls, F> {
-        let request = self.request_cell.clone();
+        let mode = self.request_cell.clone();
         let controls = MpeTransformControls {
-            request: request.clone(),
             dropped: self.dropped_reader.clone(),
         };
         NodeParts {
             node: Box::new(self),
             controls,
-            fork: Some(Box::new(ModeFork { mode: request })),
+            fork: Some(Box::new(ModeFork { mode })),
         }
     }
 }
