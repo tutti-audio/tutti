@@ -226,7 +226,15 @@ impl StftGeometry {
     #[inline]
     #[must_use]
     pub fn bin_of(self, frequency: Hz) -> f64 {
-        f64::from(frequency.get()) * self.window.get() as f64 / self.sample_rate.get()
+        self.bin_of_f64(f64::from(frequency.get()))
+    }
+
+    /// [`bin_of`](Self::bin_of) for a frequency in hertz held in `f64`, such as a band edge
+    /// designed at `f64` precision, which an `f32` [`Hz`] would round before the index is taken.
+    #[inline]
+    #[must_use]
+    pub fn bin_of_f64(self, frequency: f64) -> f64 {
+        frequency * self.window.get() as f64 / self.sample_rate.get()
     }
 
     /// The frequency of a fractional bin, the inverse of [`bin_of`](Self::bin_of):

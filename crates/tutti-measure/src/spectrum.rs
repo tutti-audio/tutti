@@ -465,7 +465,7 @@ impl SpectrumPlan {
         let bins = self.bins();
         let first: Vec<usize> = edges
             .iter()
-            .map(|&e| (self.geometry.bin_of(Hz(e as f32)).ceil() as usize).min(bins))
+            .map(|&e| (self.geometry.bin_of_f64(e).ceil() as usize).min(bins))
             .collect();
         if let Some(band) = first.windows(2).position(|w| w[0] >= w[1]) {
             // A band `w` Hz wide holds a bin once the bin spacing is within `w`.
