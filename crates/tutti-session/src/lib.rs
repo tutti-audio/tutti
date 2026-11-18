@@ -267,7 +267,9 @@ pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use session::{
+    AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
+};
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
