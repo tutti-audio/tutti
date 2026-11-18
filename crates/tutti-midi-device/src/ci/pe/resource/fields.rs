@@ -286,8 +286,8 @@ pub(super) fn u7_array<const N: usize>(json: &PeJson) -> Option<[U7; N]> {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{place}: {fault}")]
 pub struct PeDataError {
-    /// The property, or the Resource when the whole Property Data is the fault.
-    pub place: String,
+    /// Where the fault is.
+    pub place: Place,
     /// What is wrong with it.
     pub fault: PeDataFault,
 }
@@ -318,8 +318,62 @@ pub enum PeDataFault {
     NotAnObject,
 }
 
+/// Where in Property Data a fault is: what holds it (a Resource, or an entry of
+/// one), and the property of it when one is at fault, so the whole Property
+/// Data is the fault when there is none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Place {
+    what: String,
+    property: Option<String>,
+}
+
+impl Place {
+    /// The Resource, or the entry of one, as a whole.
+    #[must_use]
+    pub fn of(what: impl Into<String>) -> Self {
+        Self {
+            what: what.into(),
+            property: None,
+        }
+    }
+
+    /// The property `name` of it.
+    #[must_use]
+    pub fn property(mut self, name: impl Into<String>) -> Self {
+        self.property = Some(name.into());
+        self
+    }
+
+    /// What holds the fault: a Resource, or an entry of one.
+    #[must_use]
+    pub fn what(&self) -> &str {
+        &self.what
+    }
+
+    /// The property at fault, or `None` when the whole of [`what`](Self::what) is.
+    #[must_use]
+    pub fn at_property(&self) -> Option<&str> {
+        self.property.as_deref()
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.property {
+            Some(property) => write!(f, "{}.{property}", self.what),
+            None => f.write_str(&self.what),
+        }
+    }
+}
+
+impl From<&str> for Place {
+    fn from(what: &str) -> Self {
+        Self::of(what)
+    }
+}
+
 impl PeDataError {
-    pub(super) fn new(place: impl Into<String>, fault: PeDataFault) -> Self {
+    pub(super) fn new(place: impl Into<Place>, fault: PeDataFault) -> Self {
         Self {
             place: place.into(),
             fault,
@@ -406,7 +460,7 @@ impl<'a> Fields<'a> {
     }
 
     pub(super) fn fail(&self, name: &str, fault: PeDataFault) -> PeDataError {
-        PeDataError::new(format!("{}.{name}", self.what), fault)
+        PeDataError::new(Place::of(self.what).property(name), fault)
     }
 
     fn take(&mut self, name: &str) -> Option<&'a PeJson> {
@@ -455,7 +509,7 @@ impl<'a> Fields<'a> {
         let mut extensions = PeExtensions::default();
         for (name, value) in self.left {
             let valid = PropertyName::new(name).ok_or_else(|| {
-                PeDataError::new(format!("{}.{name}", self.what), PeDataFault::BadName)
+                PeDataError::new(Place::of(self.what).property(name), PeDataFault::BadName)
             })?;
             if valid.as_str().starts_with("x-") {
                 // The name starts `x-`, so the insert cannot refuse it.
