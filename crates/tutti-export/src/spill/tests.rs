@@ -14,7 +14,7 @@ fn frames(from: usize, frames: usize) -> Vec<f32> {
 }
 
 /// Everything `replay` hands out, read `block` frames at a time.
-fn read_all(spill: &Spill, block: usize) -> Vec<f32> {
+fn read_all(spill: &Spill<f32>, block: usize) -> Vec<f32> {
     let mut replay = spill.replay().unwrap();
     let mut out = Vec::new();
     let mut buf = vec![0.0f32; block * 2];

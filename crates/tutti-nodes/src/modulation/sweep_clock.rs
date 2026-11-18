@@ -10,7 +10,8 @@
 //! the corner: the clock hands the solver the sine of each channel's phase and whether the
 //! corner is the segment's end.
 
-use tutti_dsp::{COEFF_INTERVAL, Glide};
+use tutti_buffers::Float;
+use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp};
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{Phase, PhaseIncrement};
 
@@ -85,10 +86,10 @@ impl SweepClock {
     /// one's end (or the LFO's start after a reset), its end corner the sweep
     /// [`COEFF_INTERVAL`] frames on at the LFO's step. `corner(lfo, end)` is the effect's value
     /// with the LFO at `lfo` (a sine, `-1..=1`) at the segment's start (`end` false) or end.
-    pub(crate) fn solve(
+    pub(crate) fn solve<F: Float + Lerp>(
         &mut self,
-        glides: &mut [Glide<f32>],
-        mut corner: impl FnMut(f32, bool) -> f32,
+        glides: &mut [Glide<F>],
+        mut corner: impl FnMut(f32, bool) -> F,
     ) {
         let start = self.phase;
         let mut end = start;

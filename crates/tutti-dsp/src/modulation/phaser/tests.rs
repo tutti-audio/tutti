@@ -24,7 +24,7 @@ fn run(
 }
 
 fn run_on(
-    chain: &mut PhaserChain,
+    chain: &mut PhaserChain<f32>,
     coefficients: &mut [Glide<f32>],
     feedback: &mut Glide<f32>,
     audio: &[Vec<f32>],
@@ -516,4 +516,45 @@ fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
 #[should_panic(expected = "a sweep range is finite")]
 fn a_sweep_range_of_a_transposed_pair_panics_where_it_is_a_constant() {
     let _ = SweepRange::of(Hz(4_000.0), Hz(200.0));
+}
+
+/// An `f64` chain keeps its state and its coefficient in `f64`: with the coefficient `a`
+/// held (a design in `f64`, which an `f32` cannot hold) three stages in cascade with feedback
+/// `g` are, per frame, `u[n] = x[n] + g y[n - 1]` through `s[n] = a u[n] + u[n - 1] - a s[n -
+/// 1]` three times, the stage's own difference equation computed in `f64`, to 2^-45.
+#[test]
+fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (stages, len, g) = (3usize, 300usize, 0.5f64);
+    let a: f64 = allpass_coeff(Hz(1_000.0), RATE);
+    assert_ne!(
+        a,
+        f64::from(a as f32),
+        "the coefficient needs more than f32 holds"
+    );
+    let x = wide_signal(len);
+    let mut want = vec![0.0f64; len];
+    let mut state = vec![(0.0f64, 0.0f64); stages];
+    let mut last = 0.0;
+    for n in 0..len {
+        let mut u = x[n] + g * last;
+        for (x1, y1) in &mut state {
+            let s = a * u + *x1 - a * *y1;
+            (*x1, *y1) = (u, s);
+            u = s;
+        }
+        last = u;
+        want[n] = u;
+    }
+    let mut chain = PhaserChain::<f64>::new(Stages::of(stages), ChannelLayout::clamped(1));
+    let mut coefficients = [Glide::landed(a)];
+    let mut feedback = Glide::landed(g);
+    let mut y = vec![0.0f64; len];
+    chain.process(
+        &mut coefficients,
+        &mut feedback,
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+    );
+    assert_close_f64(&y, &want, 2.0f64.powi(-45));
 }

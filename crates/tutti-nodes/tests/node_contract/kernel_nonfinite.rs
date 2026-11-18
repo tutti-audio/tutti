@@ -61,7 +61,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             // A feedback line of a whole number of frames: one sample circulating in it falls
             // on a block's last frame only when the period lines up.
             "delay",
-            Box::new(DelayNode::mono(
+            Box::new(DelayNode::<f32>::mono(
                 MaxDelay::of(Seconds(0.05)),
                 DelayControls {
                     time: Seconds(0.01),
@@ -169,32 +169,38 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             ),
         ),
         ("brickwall", Box::new(BrickwallLimiterNode::new(Db(-1.0)))),
-        ("chorus", Box::new(ModDelayNode::chorus(BusTopology::MONO))),
+        (
+            "chorus",
+            Box::new(ModDelayNode::<f32>::chorus(BusTopology::MONO)),
+        ),
         (
             "flanger",
-            Box::new(ModDelayNode::flanger(BusTopology::MONO)),
+            Box::new(ModDelayNode::<f32>::flanger(BusTopology::MONO)),
         ),
         (
             "phaser",
-            Box::new(PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT)),
+            Box::new(PhaserNode::<f32>::mono(
+                Stages::of(4),
+                PhaserControls::DEFAULT,
+            )),
         ),
         (
             "fdn",
-            Box::new(FdnNode::live(
+            Box::new(FdnNode::<f32>::live(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, false).unwrap(),
                 FdnControls::DEFAULT,
             )),
         ),
         (
             "freeverb",
-            Box::new(FreeverbNode::live(FreeverbControls {
+            Box::new(FreeverbNode::<f32>::live(FreeverbControls {
                 room: Mix(0.9),
                 damp: Mix(0.2),
             })),
         ),
         (
             "plate",
-            Box::new(PlateReverbNode::from(PlateReverbConfig::new())),
+            Box::new(PlateReverbNode::<f32>::from(PlateReverbConfig::new())),
         ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.

@@ -31,7 +31,7 @@ fn controls(time: Seconds, feedback: f32, cross: f32) -> DelayControls {
 }
 
 /// `node` over `inputs`, in ragged blocks.
-fn render(node: DelayNode, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
+fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, 64);
     let len = inputs[0].len();
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); inputs.len()];
@@ -57,7 +57,7 @@ fn render(node: DelayNode, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 #[test]
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
     let (d, g) = (16usize, 0.5f32);
-    let node = DelayNode::mono(MAX, controls(frames(d as f64), g, 0.0));
+    let node = DelayNode::<f32>::mono(MAX, controls(frames(d as f64), g, 0.0));
     let out = render(node, &[impulse(Samples(d * 8 + 5))]);
     for (i, &y) in out[0].iter().enumerate() {
         let want = if i >= d && i % d == 0 {
@@ -87,7 +87,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
         (InterpolationMode::Linear, w * w / 8.0 * 1.05),
         (InterpolationMode::CubicHermite, w * w * w / 8.0),
     ] {
-        let node = DelayNode::new(
+        let node = DelayNode::<f32>::new(
             BusTopology::MONO,
             MAX,
             mode,
@@ -121,7 +121,7 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let layout = DelayLayout::new(bus, MAX, InterpolationMode::Linear)
         .with_routing(Routing::ring(bus))
         .expect("a routing for the layout's bus");
-    let node = DelayNode::from_layout(layout, controls(frames(d as f64), 0.0, amount));
+    let node = DelayNode::<f32>::from_layout(layout, controls(frames(d as f64), 0.0, amount));
     // Stops before the echo wraps round to channel 0.
     let mut inputs = vec![vec![0.0; d * (n + 1)]; n];
     inputs[0][0] = 1.0;
@@ -148,7 +148,7 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
 #[test]
 fn the_stereo_cross_feedback_ping_pongs_the_echo() {
     let (d, amount) = (8usize, 0.5f32);
-    let node = DelayNode::stereo(MAX, controls(frames(8.0), 0.0, amount));
+    let node = DelayNode::<f32>::stereo(MAX, controls(frames(8.0), 0.0, amount));
     let mut left = vec![0.0; d * 5];
     left[0] = 1.0;
     let out = render(node, &[left.clone(), vec![0.0; left.len()]]);

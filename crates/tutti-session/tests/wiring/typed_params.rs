@@ -4,6 +4,7 @@
 //! own `ParamNode` is inserted as `Params(node)` with no hand-written
 //! `SessionNode`.
 
+use tutti_buffers::InterleavedMut;
 use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
@@ -169,7 +170,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     s.set(mine.cutoff().to(Hz(440.0))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(440.0));
     let mut live = [0.0f32];
-    s.render_frame(&mut live);
+    s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [440.0], "the live node reads it");
 
     let mut fork = s
@@ -179,6 +180,6 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
         .expect("a Params node forks");
     s.set(mine.cutoff().to(Hz(880.0))).unwrap();
     let mut forked = [0.0f32];
-    fork.tick(&[], &mut forked);
+    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(forked, [440.0], "the fork has the value set at the fork");
 }

@@ -21,30 +21,32 @@
 //! the input is cut into calls. The caller [aims](PlateBank::aim) the glides when its controls
 //! move: each sounds through 20 ms of whole chunks, the pre-delay by two frames a chunk.
 //!
-//! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
+//! **Format.** The state is the bank's float `F`; a view of another [`Float`] is converted at
+//! the edges. The coefficients are designed in `f64` or as `f32` units and narrowed to `F` once
+//! per design.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
+use tutti_units::{Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::delay::DelayRing;
 use crate::onepole::{cutoff_pole, ring_frames};
 use crate::reverb::network::{Absorption, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
-use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
+use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
 
 /// A delay line of `frames` and the slack that keeps a modulated read inside it.
-fn line(frames: Samples) -> DelayRing<f32> {
+fn line<F: Float>(frames: Samples) -> DelayRing<F> {
     DelayRing::new(frames.get() + SLACK)
 }
 
 /// A lattice of coefficient `g` over `line` at `delay` frames: `x` in, `y` out.
 #[inline]
-fn lattice(line: &mut DelayRing<f32>, x: f32, g: f32, delay: f32) -> f32 {
+fn lattice<F: Float>(line: &mut DelayRing<F>, x: F, g: F, delay: F) -> F {
     let z = line.at(delay);
     let v = x + g * z;
     line.put(v);
@@ -66,24 +68,39 @@ struct Shape {
 
 /// A coefficient point: what a design asks for (the values [`PlateGlides`] glide to) and
 /// what a chunk runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Coeffs {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Coeffs<F> {
     /// The decay coefficient.
-    decay: f32,
+    decay: F,
     /// The damping pole.
-    damping: f32,
+    damping: F,
     /// The second lattice's coefficient.
-    lattice2: f32,
+    lattice2: F,
     /// The modulated lattice's coefficient.
-    lattice1: f32,
+    lattice1: F,
     /// The input diffusers' coefficients.
-    input: [f32; 4],
+    input: [F; 4],
     /// The modulation excursion in frames.
-    depth: f32,
+    depth: F,
     /// The pre-delay in frames.
-    pre: f32,
+    pre: F,
     /// The bandwidth's pole.
-    bandwidth: f32,
+    bandwidth: F,
+}
+
+impl<F: Float> Default for Coeffs<F> {
+    fn default() -> Self {
+        Self {
+            decay: F::ZERO,
+            damping: F::ZERO,
+            lattice2: F::ZERO,
+            lattice1: F::ZERO,
+            input: [F::ZERO; 4],
+            depth: F::ZERO,
+            pre: F::ZERO,
+            bandwidth: F::ZERO,
+        }
+    }
 }
 
 /// What a [`PlateBank`] approaches: every sounding control a [`Glide`], the pre-delay by a
@@ -92,20 +109,20 @@ struct Coeffs {
 /// Aimed by [`PlateBank::aim`], stepped once a chunk by [`PlateBank::process`]. A glide steps
 /// before its chunk runs: the first chunk after an aim reads step 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlateGlides {
+pub struct PlateGlides<F: Float> {
     ramp: Steps,
-    decay: Glide<f32>,
-    damping: Glide<f32>,
-    lattice2: Glide<f32>,
-    lattice1: Glide<f32>,
-    input: [Glide<f32>; 4],
-    depth: Glide<f32>,
-    pre: Glide<f32>,
-    bandwidth: Glide<f32>,
+    decay: Glide<F>,
+    damping: Glide<F>,
+    lattice2: Glide<F>,
+    lattice1: Glide<F>,
+    input: [Glide<F>; 4],
+    depth: Glide<F>,
+    pre: Glide<F>,
+    bandwidth: Glide<F>,
 }
 
-impl PlateGlides {
-    fn each(&mut self) -> impl Iterator<Item = &mut Glide<f32>> {
+impl<F: Float + Lerp> PlateGlides<F> {
+    fn each(&mut self) -> impl Iterator<Item = &mut Glide<F>> {
         [
             &mut self.decay,
             &mut self.damping,
@@ -129,7 +146,7 @@ impl PlateGlides {
     }
 
     /// The coefficients now.
-    fn now(&self) -> Coeffs {
+    fn now(&self) -> Coeffs<F> {
         Coeffs {
             decay: self.decay.now(),
             damping: self.damping.now(),
@@ -142,7 +159,7 @@ impl PlateGlides {
         }
     }
 
-    fn aim(&mut self, t: &Coeffs) {
+    fn aim(&mut self, t: &Coeffs<F>) {
         let ramp = self.ramp;
         self.decay.aim_by(t.decay, ramp);
         self.damping.aim_by(t.damping, ramp);
@@ -159,31 +176,31 @@ impl PlateGlides {
 
 /// An output tap with its offset scaled to the rate.
 #[derive(Clone, Copy, Debug)]
-struct TapAt {
+struct TapAt<F> {
     half: usize,
     point: Point,
-    at: f32,
-    sign: Gain,
+    at: F,
+    sign: F,
 }
 
 /// The state of one tank half.
 #[derive(Clone, Debug)]
-struct Half {
-    modulated: DelayRing<f32>,
-    delay1: DelayRing<f32>,
-    lattice2: DelayRing<f32>,
-    delay2: DelayRing<f32>,
+struct Half<F> {
+    modulated: DelayRing<F>,
+    delay1: DelayRing<F>,
+    lattice2: DelayRing<F>,
+    delay2: DelayRing<F>,
     /// The damping low-pass's output.
-    damped: f32,
+    damped: F,
 }
 
 /// The constants of the chunk being run: its coefficients and the modulation offsets, per half,
 /// at the chunk's start and end.
-#[derive(Clone, Copy, Debug, Default)]
-struct Chunk {
-    k: Coeffs,
-    prev: [f32; 2],
-    next: [f32; 2],
+#[derive(Clone, Copy, Debug)]
+struct Chunk<F> {
+    k: Coeffs<F>,
+    prev: [F; 2],
+    next: [F; 2],
 }
 
 /// A plate reverberator at one rate: mono in, stereo out.
@@ -191,33 +208,38 @@ struct Chunk {
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps their
 /// size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
-pub struct PlateBank {
+pub struct PlateBank<F: Float> {
     rate: SampleRate,
     shape: Shape,
     /// The output taps, left then right, at the rate's offsets.
-    taps: [[TapAt; 7]; 2],
+    taps: [[TapAt<F>; 7]; 2],
+    /// The output gain, narrowed once.
+    output_gain: F,
+    /// The input diffusers' lengths and each half's, as frames in `F`, narrowed once.
+    input_len: [F; 4],
+    half_len: [[F; 4]; 2],
     /// How long it rings at its worst.
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: Samples,
-    pre: DelayRing<f32>,
+    pre: DelayRing<F>,
     /// The bandwidth low-pass's output.
-    bandwidth: f32,
-    input: [DelayRing<f32>; 4],
-    halves: [Half; 2],
+    bandwidth: F,
+    input: [DelayRing<F>; 4],
+    halves: [Half<F>; 2],
     /// The phase of the modulation, in turns.
     phase: f64,
     /// Whether the modulation has not started: its first chunk reads the phase's own value as
     /// the previous one.
     fresh: bool,
-    chunk: Chunk,
+    chunk: Chunk<F>,
     /// The controls the design in `network` is of.
     designed: Option<PlateControls>,
     /// Where a design is made, so the audio thread builds none.
     network: Box<Network>,
 }
 
-impl PlateBank {
+impl<F: Float + Lerp> PlateBank<F> {
     /// The frames between a glide's steps: the chunk.
     pub const CHUNK: usize = CHUNK;
 
@@ -232,12 +254,12 @@ impl PlateBank {
         };
         worst.design_into(rate, &mut network);
         let shape = shape_of(&network);
-        let half = |h: &[Samples; 4]| Half {
+        let half = |h: &[Samples; 4]| Half::<F> {
             modulated: line(h[0] + shape.excursion + Samples(1)),
             delay1: line(h[1]),
             lattice2: line(h[2]),
             delay2: line(h[3]),
-            damped: 0.0,
+            damped: F::ZERO,
         };
         let mut bank = Self {
             rate,
@@ -245,8 +267,8 @@ impl PlateBank {
                 side.map(|k| TapAt {
                     half: k.half,
                     point: k.point,
-                    at: scaled(k.offset, rate) as f32,
-                    sign: k.sign,
+                    at: F::from_f64(scaled(k.offset, rate)),
+                    sign: F::from_f32(k.sign.get()),
                 })
             }),
             ceiling: tail_of(
@@ -258,14 +280,22 @@ impl PlateBank {
                 },
                 rate,
             ),
+            // `OUTPUT_GAIN` and a tap's sign are `f32` units: they narrow through them, once.
+            output_gain: F::from_f32(OUTPUT_GAIN.get()),
+            input_len: shape.input.map(|n| F::from_f64(n.get() as f64)),
+            half_len: shape.halves.map(|h| h.map(|n| F::from_f64(n.get() as f64))),
             into: Samples::ZERO,
             pre: line(shape.pre),
-            bandwidth: 0.0,
+            bandwidth: F::ZERO,
             input: shape.input.map(line),
             halves: [half(&shape.halves[0]), half(&shape.halves[1])],
             phase: 0.0,
             fresh: true,
-            chunk: Chunk::default(),
+            chunk: Chunk {
+                k: Coeffs::default(),
+                prev: [F::ZERO; 2],
+                next: [F::ZERO; 2],
+            },
             designed: None,
             network,
             shape,
@@ -277,8 +307,8 @@ impl PlateBank {
     /// The glides of this bank, at rest and aimed at nothing: its first [`aim`](Self::aim)
     /// is the caller's to land. Until then the bank is silent.
     #[must_use]
-    pub fn glides(&self) -> PlateGlides {
-        let rest = Glide::landed(0.0);
+    pub fn glides(&self) -> PlateGlides<F> {
+        let rest = Glide::landed(F::ZERO);
         PlateGlides {
             ramp: ramp(self.rate),
             decay: rest,
@@ -310,13 +340,13 @@ impl PlateBank {
     /// the floor (it counts each damping one-pole's peak delay, so the loop it bounds is the
     /// real one), plus the ring of the bandwidth one-pole (`ln(floor) / ln(pole)` frames), plus
     /// the pre-delay still to fall; at most the ceiling ([`tail`](Self::tail)). No allocation.
-    pub fn tail_of(&mut self, glides: &PlateGlides, controls: &PlateControls) -> Tail {
+    pub fn tail_of(&mut self, glides: &PlateGlides<F>, controls: &PlateControls) -> Tail {
         self.design(controls);
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
-        let pre = (self.network.pre_delay.get() as f32).clamp(0.0, self.shape.pre.get() as f32);
-        let behind = f64::from((glides.pre.now() - pre).max(0.0));
+        let pre = (self.network.pre_delay.get() as f64).clamp(0.0, self.shape.pre.get() as f64);
+        let behind = (glides.pre.now().to_f64() - pre).max(0.0);
         let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
             Ring::Finite(Seconds(t.get() + input.get() + behind / self.rate.get())),
@@ -327,14 +357,14 @@ impl PlateBank {
     /// Back to silence, the chunks counted from here. No allocation.
     pub fn reset(&mut self) {
         self.pre.clear();
-        self.bandwidth = 0.0;
+        self.bandwidth = F::ZERO;
         self.input.iter_mut().for_each(DelayRing::clear);
         for h in &mut self.halves {
             h.modulated.clear();
             h.delay1.clear();
             h.lattice2.clear();
             h.delay2.clear();
-            h.damped = 0.0;
+            h.damped = F::ZERO;
         }
         self.phase = 0.0;
         self.fresh = true;
@@ -342,24 +372,26 @@ impl PlateBank {
     }
 
     /// Aims `glides` at the design of `controls`. No allocation.
-    pub fn aim(&mut self, glides: &mut PlateGlides, controls: &PlateControls) {
+    pub fn aim(&mut self, glides: &mut PlateGlides<F>, controls: &PlateControls) {
         self.design(controls);
-        if let Some(mut t) = target_of(&self.network) {
-            t.bandwidth = cutoff_pole(controls.bandwidth_at(self.rate), self.rate) as f32;
-            t.pre = t.pre.clamp(0.0, self.shape.pre.get() as f32);
+        if let Some(mut t) = target_of::<F>(&self.network) {
+            t.bandwidth = F::from_f64(cutoff_pole(controls.bandwidth_at(self.rate), self.rate));
+            t.pre = t
+                .pre
+                .clamp(F::ZERO, F::from_f64(self.shape.pre.get() as f64));
             glides.aim(&t);
         }
     }
 
     /// The constants of the chunk that starts now, from the glides' step.
-    fn begin_chunk(&mut self, g: &PlateGlides) {
+    fn begin_chunk(&mut self, g: &PlateGlides<F>) {
         let k = g.now();
-        let depth = f64::from(k.depth);
+        let depth = k.depth.to_f64();
         let at = |phase: f64| {
             let turn = std::f64::consts::TAU * phase;
             [
-                (depth * libm::sin(turn)) as f32,
-                (depth * libm::cos(turn)) as f32,
+                F::from_f64(depth * libm::sin(turn)),
+                F::from_f64(depth * libm::cos(turn)),
             ]
         };
         let c = &mut self.chunk;
@@ -381,7 +413,7 @@ impl PlateBank {
     /// silent. No allocation.
     pub fn process<S: Float>(
         &mut self,
-        glides: &mut PlateGlides,
+        glides: &mut PlateGlides<F>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
     ) {
@@ -398,30 +430,30 @@ impl PlateBank {
         let mut left = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
         let mut right = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
 
-        if glides.decay.target() == 0.0 {
+        if glides.decay.target() == F::ZERO {
             for y in left.iter_mut().chain(right.iter_mut()) {
                 y.fill(S::SILENCE);
             }
             return;
         }
-        let scale = 1.0 / width.max(1) as f32;
+        let scale = F::from_f64(1.0 / width.max(1) as f64);
         for i in 0..frames {
             if self.into == Samples::ZERO {
                 glides.step();
                 self.begin_chunk(glides);
             }
-            let t = self.into.get() as f32 / Self::CHUNK as f32;
-            let x: f32 = xs[..width]
+            let t = F::from_f64(self.into.get() as f64 / Self::CHUNK as f64);
+            let x: F = xs[..width]
                 .iter()
-                .map(|ch| ch[i].convert_to::<f32>())
-                .sum::<f32>()
+                .map(|ch| F::from_f64(ch[i].to_f64()))
+                .sum::<F>()
                 * scale;
             let (l, r) = self.frame(x, t);
             if let Some(y) = left.as_deref_mut() {
-                y[i] = l.convert_to::<S>();
+                y[i] = S::from_f64(l.to_f64());
             }
             if let Some(y) = right.as_deref_mut() {
-                y[i] = r.convert_to::<S>();
+                y[i] = S::from_f64(r.to_f64());
             }
             self.into = (self.into + Samples(1)) % Samples(Self::CHUNK);
         }
@@ -429,27 +461,23 @@ impl PlateBank {
 
     /// One frame: `x` through the pre-delay, the bandwidth, the input diffusers and the tank;
     /// the left and right taps. `t` is how far into the chunk the frame is.
-    fn frame(&mut self, x: f32, t: f32) -> (f32, f32) {
+    fn frame(&mut self, x: F, t: F) -> (F, F) {
         let c = self.chunk;
         let k = c.k;
         self.pre.put(x);
         let delayed = self.pre.at(k.pre);
         self.pre.advance();
-        self.bandwidth += (1.0 - k.bandwidth) * (delayed - self.bandwidth);
+        self.bandwidth += (F::ONE - k.bandwidth) * (delayed - self.bandwidth);
         let mut u = self.bandwidth;
-        for ((line, &n), &g) in self.input.iter_mut().zip(&self.shape.input).zip(&k.input) {
-            u = lattice(line, u, g, n.get() as f32);
+        for ((line, &n), &g) in self.input.iter_mut().zip(&self.input_len).zip(&k.input) {
+            u = lattice(line, u, g, n);
             line.advance();
         }
 
         // Each half reads the other's last delay before either writes this frame.
-        let ends = [0, 1].map(|h| {
-            self.halves[h]
-                .delay2
-                .at(self.shape.halves[h][3].get() as f32)
-        });
+        let ends = [0, 1].map(|h| self.halves[h].delay2.at(self.half_len[h][3]));
         for h in 0..2 {
-            let [d1, l1, d2, _] = self.shape.halves[h].map(|n| n.get() as f32);
+            let [d1, l1, d2, _] = self.half_len[h];
             let half = &mut self.halves[h];
             let input = u + k.decay * ends[1 - h];
             let sweep = crate::lerp(c.prev[h], c.next[h], t);
@@ -457,29 +485,29 @@ impl PlateBank {
                 &mut half.modulated,
                 input,
                 k.lattice1,
-                (d1 + sweep).max(1.0),
+                (d1 + sweep).max(F::ONE),
             );
             half.delay1.put(y);
             let q = half.delay1.at(l1);
-            half.damped += (1.0 - k.damping) * (q - half.damped);
+            half.damped += (F::ONE - k.damping) * (q - half.damped);
             let y = lattice(&mut half.lattice2, k.decay * half.damped, k.lattice2, d2);
             half.delay2.put(y);
         }
 
         let [left, right] = self.taps.map(|side| {
-            OUTPUT_GAIN.get()
+            self.output_gain
                 * side
                     .iter()
                     .map(|k| {
                         let half = &self.halves[k.half];
-                        k.sign.get()
+                        k.sign
                             * match k.point {
                                 Point::Delay1 => half.delay1.at(k.at),
                                 Point::Lattice2 => half.lattice2.at(k.at),
                                 Point::Delay2 => half.delay2.at(k.at),
                             }
                     })
-                    .sum::<f32>()
+                    .sum::<F>()
         });
 
         for h in &mut self.halves {
@@ -537,29 +565,30 @@ fn shape_of(network: &Network) -> Shape {
 
 /// The coefficient point the design in `network` asks for, `None` for a network that is not a
 /// plate's. The bandwidth is the caller's.
-fn target_of(network: &Network) -> Option<Coeffs> {
+fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
     let Stage::Fdn(f) = network.stages.iter().find(|s| matches!(s, Stage::Fdn(_)))? else {
         return None;
     };
     let (a, b) = (f.lines.first()?, f.lines.get(1)?);
-    let mut input = [0.0f32; 4];
+    let mut input = [F::ZERO; 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
         if let Stage::AllPass(d) = stage {
-            *slot = d[0].gain.get();
+            *slot = F::from_f32(d[0].gain.get());
         }
     }
     let Absorption::OnePole { gain, damp } = a.absorption else {
         return None;
     };
     Some(Coeffs {
-        decay: gain.get(),
-        damping: damp,
-        lattice2: b.diffuser?.gain.get(),
-        lattice1: a.diffuser?.gain.get(),
+        // The network's gains and pole are `f32` figures: they narrow through them.
+        decay: F::from_f32(gain.get()),
+        damping: F::from_f32(damp),
+        lattice2: F::from_f32(b.diffuser?.gain.get()),
+        lattice1: F::from_f32(a.diffuser?.gain.get()),
         input,
-        depth: a.diffuser?.modulation.depth.get() as f32,
-        pre: network.pre_delay.get() as f32,
-        bandwidth: 0.0,
+        depth: F::from_f64(a.diffuser?.modulation.depth.get()),
+        pre: F::from_f64(network.pre_delay.get() as f64),
+        bandwidth: F::ZERO,
     })
 }
 

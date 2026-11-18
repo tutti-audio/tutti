@@ -5,6 +5,8 @@ use super::*;
 use crate::MaxDecay;
 use crate::reverb::network::{Fdn, Network, Stage};
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn controls(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
@@ -26,8 +28,8 @@ fn layout(lines: usize, freezable: bool) -> FdnLayout {
 }
 
 /// A bank of `layout` at `rate`, landed on `c`.
-fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank, FdnGlides) {
-    let mut bank = FdnBank::new(layout, rate);
+fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnGlides<f32>) {
+    let mut bank = FdnBank::<f32>::new(layout, rate);
     let mut glides = bank.glides();
     bank.aim(&mut glides, c);
     glides.settle();
@@ -69,7 +71,12 @@ fn impulse(frames: usize) -> Vec<f32> {
 }
 
 /// `x` through the bank in calls of `block` frames; the two output channels.
-fn run(bank: &mut FdnBank, glides: &mut FdnGlides, x: &[f32], block: usize) -> [Vec<f32>; 2] {
+fn run(
+    bank: &mut FdnBank<f32>,
+    glides: &mut FdnGlides<f32>,
+    x: &[f32],
+    block: usize,
+) -> [Vec<f32>; 2] {
     let (mut l, mut r) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
     let mut at = 0;
     for piece in x.chunks(block) {
@@ -452,7 +459,7 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
 #[test]
 fn a_bank_is_silent_until_aimed_and_averages_its_input() {
     let l = layout(8, false);
-    let mut bank = FdnBank::new(&l, RATE);
+    let mut bank = FdnBank::<f32>::new(&l, RATE);
     let mut glides = bank.glides();
     let before = run(&mut bank, &mut glides, &noise(2, 256), 64);
     assert!(before.iter().flatten().all(|&s| s == 0.0));
@@ -483,8 +490,8 @@ fn a_bank_is_silent_until_aimed_and_averages_its_input() {
 /// to fall 60 dB).
 #[test]
 fn the_tail_is_the_networks_under_the_ceiling() {
-    let plain = FdnBank::new(&layout(8, false), RATE);
-    let freezable = FdnBank::new(&layout(8, true), RATE);
+    let plain = FdnBank::<f32>::new(&layout(8, false), RATE);
+    let freezable = FdnBank::<f32>::new(&layout(8, true), RATE);
     assert_eq!(freezable.tail(), Tail::Unbounded);
     let Tail::Finite(ceiling) = plain.tail() else {
         panic!("a finite ceiling")
@@ -551,8 +558,8 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
         run(
             &mut bank,
             &mut glides,
-            &[0.0; FdnBank::CHUNK],
-            FdnBank::CHUNK,
+            &[0.0; FdnBank::<f32>::CHUNK],
+            FdnBank::<f32>::CHUNK,
         );
         for j in 0..glides.n {
             // The length the chunk ran with, not where the glide has got to since.
@@ -635,8 +642,8 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
         run(
             &mut bank,
             &mut glides,
-            &[0.0; FdnBank::CHUNK],
-            FdnBank::CHUNK,
+            &[0.0; FdnBank::<f32>::CHUNK],
+            FdnBank::<f32>::CHUNK,
         );
         let now = glides.len[3].now();
         assert!(now - last <= 0.5 + 1e-3, "chunk {chunk}: {last} to {now}");
@@ -662,8 +669,8 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
         run(
             &mut bank,
             &mut glides,
-            &[0.0; FdnBank::CHUNK],
-            FdnBank::CHUNK,
+            &[0.0; FdnBank::<f32>::CHUNK],
+            FdnBank::<f32>::CHUNK,
         );
         let now = glides.pre_len.now();
         assert!(now - last <= 2.0 + 1e-3, "chunk {chunk}: {last} to {now}");
@@ -677,7 +684,7 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
 /// 30 steps.
 #[test]
 fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
-    let wanted = (0.020 * RATE.get() / FdnBank::CHUNK as f64).ceil() as u32;
+    let wanted = (0.020 * RATE.get() / FdnBank::<f32>::CHUNK as f64).ceil() as u32;
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8, false);
@@ -689,8 +696,8 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
         run(
             &mut bank,
             &mut glides,
-            &[0.0; FdnBank::CHUNK],
-            FdnBank::CHUNK,
+            &[0.0; FdnBank::<f32>::CHUNK],
+            FdnBank::<f32>::CHUNK,
         );
         assert_eq!(glides.wet.now() == target, chunk == wanted, "chunk {chunk}");
     }
@@ -719,4 +726,45 @@ fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     bank.aim(&mut glides, &c);
     run(&mut bank, &mut glides, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(2 * m + 1), held, "regrown");
+}
+
+/// An `f64` FDN with modulation off is linear: `R(a x + b y) = a R(x) + b R(y)` to 2^-40 of
+/// the peak, with `a`, `b` and two wide signals that an `f32` state cannot carry (the
+/// interpolated reads, the mix and the absorption's one-poles all run in the bank's float).
+#[test]
+fn an_f64_fdn_is_linear() {
+    use tutti_fixtures::signal::wide_signal;
+    let len = 8_000;
+    let x = wide_signal(len);
+    let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
+    let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
+    let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
+    let c = still(|c| c.diffusion = Mix(0.6));
+    let l = layout(8, false);
+    let render = |input: &[f64]| {
+        let mut bank = FdnBank::<f64>::new(&l, RATE);
+        let mut glides = bank.glides();
+        bank.aim(&mut glides, &c);
+        glides.settle();
+        let (mut l, mut r) = (vec![0.0f64; len], vec![0.0f64; len]);
+        bank.process(
+            &mut glides,
+            Planes::new(&[input]).unwrap(),
+            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+        );
+        [l, r]
+    };
+    let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
+    for ch in 0..2 {
+        let peak = rm[ch].iter().fold(0.0f64, |p, v| p.max(v.abs()));
+        assert!(peak > 1e-4, "the network sounds");
+        for n in 0..len {
+            let want = a * rx[ch][n] + b * ry[ch][n];
+            assert!(
+                (rm[ch][n] - want).abs() <= peak * 2.0f64.powi(-40),
+                "channel {ch}, frame {n}: {} against {want}",
+                rm[ch][n]
+            );
+        }
+    }
 }

@@ -43,7 +43,7 @@ mod clap {
         (s, entry, node.erase())
     }
 
-    fn saved<K: tutti_session::AppKey, C: tutti_session::Clock>(
+    fn saved<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
         s: &Session<K, C>,
         node: NodeKey,
     ) -> Vec<u8> {
@@ -101,7 +101,7 @@ mod clap {
     }
 
     /// The mirror's value of the plugin's first parameter (Cutoff).
-    fn cutoff<K: tutti_session::AppKey, C: tutti_session::Clock>(
+    fn cutoff<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
         s: &Session<K, C>,
         node: NodeKey,
     ) -> Option<f64> {

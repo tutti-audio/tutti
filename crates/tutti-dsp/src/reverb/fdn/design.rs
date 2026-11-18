@@ -210,7 +210,7 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     else {
         return a;
     };
-    let pole = crossover.map(|f| cutoff_pole(f, rate) as f32);
+    let pole = crossover.map(|f| cutoff_pole(f, rate));
     let [low, mid, high] =
         crate::reverb::fdn::bank::rescale_bands([low.get(), mid.get(), high.get()], pole);
     Absorption::Bands {

@@ -18,7 +18,7 @@ fn freeverb_aims_and_renders_without_allocating() {
     use tutti_dsp::{FreeverbBank, FreeverbControls};
 
     for rate in [44_100.0, 48_000.0, 192_000.0] {
-        let mut bank = FreeverbBank::new(SampleRate::of(rate));
+        let mut bank = FreeverbBank::<f32>::new(SampleRate::of(rate));
         let mut glides = bank.glides();
         let input = vec![0.25f32; 64];
         let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
@@ -56,7 +56,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
 
     let rate = SampleRate::SR_48K;
     let layout = FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap();
-    let mut bank = FdnBank::new(&layout, rate);
+    let mut bank = FdnBank::<f32>::new(&layout, rate);
     let mut glides = bank.glides();
     let input = vec![0.25f32; 64];
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);

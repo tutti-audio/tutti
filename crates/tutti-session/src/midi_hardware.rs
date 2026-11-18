@@ -4,6 +4,7 @@
 //! [`midi_output`](crate::midi_output)); what it says of itself is its
 //! handle's [`Peer::info`](crate::Peer::info).
 
+use tutti_buffers::Float;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
@@ -78,7 +79,7 @@ pub enum MidiPolicyError {
 }
 
 impl Policy for MidiPolicy {
-    type Handle<'a> = MidiPolicyHandle<'a>;
+    type Handle<'a, F: tutti_buffers::Float> = MidiPolicyHandle<'a>;
 
     fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> MidiPolicyHandle<'_> {
         MidiPolicyHandle {
@@ -139,7 +140,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     }
 }
 
-impl Midi<'_> {
+impl<F: Float> Midi<'_, F> {
     /// The MIDI devices present now, inputs and outputs, ordered by id. Empty on
     /// a session with no OS MIDI layer
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)).

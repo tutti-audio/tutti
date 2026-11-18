@@ -83,7 +83,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
         Hz(1_000.0),
         Q(0.7),
     ));
-    let (reverb, _) = s.graph().add(FreeverbNode::default());
+    let (reverb, _) = s.graph().add(FreeverbNode::<f32>::default());
     s.graph().connect(first, filter)?;
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph().connect(filter.bus_out(0), reverb.bus_in(0))?;

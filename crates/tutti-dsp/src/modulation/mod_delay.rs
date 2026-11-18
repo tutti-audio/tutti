@@ -30,10 +30,10 @@
 //! `1 / (1 - g z^-d)`.
 //!
 //! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
-//! depth_max` fits in it by [`Sweep::new`]. The state is `f32`; a view of another [`Float`]
-//! is converted at the edges.
+//! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`; a view of
+//! another [`Float`] is converted at the edges.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{BusTopology, MAX_CHANNELS};
 use tutti_units::{
     Feedback, Gain, Hz, PhaseIncrement, SamplePosition, SampleRate, SampleSpan, Samples, Seconds,
@@ -41,7 +41,7 @@ use tutti_units::{
 
 use super::sweep::{Stagger, StaggerError, Sweep};
 use crate::finite::finite_or;
-use crate::{DelayLine, Glide, InterpolationMode, MaxDelay, delay_step};
+use crate::{DelayLine, Glide, InterpolationMode, Lerp, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
 /// (or negative) reads as it.
@@ -222,14 +222,14 @@ impl ModDelayLayout {
     }
 }
 
-/// A swept delay of any width: a [`DelayLine`] per channel, and the loop that recirculates
-/// each.
+/// A swept delay of any width: a [`DelayLine`] per channel in the state float `F`, and the
+/// loop that recirculates each.
 ///
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps their
 /// size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
-pub struct ModDelayBank {
-    lines: Box<[DelayLine<f32>]>,
+pub struct ModDelayBank<F: Float> {
+    lines: Box<[DelayLine<F>]>,
     sweep: Sweep,
     rate: SampleRate,
     /// The line's capacity in frames: no delay is past it.
@@ -238,7 +238,7 @@ pub struct ModDelayBank {
     base: SampleSpan,
 }
 
-impl ModDelayBank {
+impl<F: Float + Lerp> ModDelayBank<F> {
     /// A silent swept delay of `layout` at `rate`: a line per channel of
     /// `ceil(max_delay * rate)` frames. Allocates: build it on the control side.
     #[must_use]
@@ -327,8 +327,8 @@ impl ModDelayBank {
     /// [`design`](Self::design) holds them to). No allocation.
     pub fn process<S: Float>(
         &mut self,
-        delays: &mut [Glide<f32>],
-        feedback: &mut Glide<f32>,
+        delays: &mut [Glide<F>],
+        feedback: &mut Glide<F>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
     ) {
@@ -353,10 +353,10 @@ impl ModDelayBank {
             let ys = &mut out.into_samples_mut()[..frames];
             for (i, (y, x)) in ys.iter_mut().zip(xs).enumerate() {
                 let step = u32::try_from(i).unwrap_or(u32::MAX);
-                let d = delay.at(first.saturating_add(step)).max(1.0);
+                let d = delay.at(first.saturating_add(step)).max(F::ONE);
                 let g = feedback.at(fb_first.saturating_add(step));
-                let wet = delay_step(line, x.convert_to::<f32>(), d, g, READ);
-                *y = wet.convert_to::<S>();
+                let wet = delay_step(line, F::from_f64(x.to_f64()), d, g, READ);
+                *y = S::from_f64(wet.to_f64());
             }
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);

@@ -4,7 +4,7 @@
 //! this file holds the kernel that aims it, the cells and how the graph reaches them.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides};
+use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Mix, SampleRate, Tail};
@@ -31,9 +31,14 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// loop's DC gain is the comb's feedback alone), and for the send the exact figure of its one
 /// room. The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
-pub type FreeverbNode = KernelNode<FreeverbKernel>;
+///
+/// `F` is the state precision of the combs and all-passes, `f64` by default; the lines hold
+/// Freeverb's tunings scaled to the rate (about 24,000 frames a channel at 44.1 kHz in all), so
+/// `FreeverbNode::<f32>` halves the memory. The General MIDI send is an `f32` node in the
+/// session.
+pub type FreeverbNode<F = f64> = KernelNode<FreeverbKernel<F>>;
 
-impl FreeverbNode {
+impl<F: Float + Lerp> FreeverbNode<F> {
     /// A reverb whose room size and damping are cells, starting at `controls`. It has no rate
     /// until the graph's `prepare` gives it one: it declares no latency and an unknown tail
     /// before, and renders silence. Allocates: build it before the node goes live.
@@ -61,7 +66,7 @@ impl FreeverbNode {
     }
 }
 
-impl Default for FreeverbNode {
+impl<F: Float + Lerp> Default for FreeverbNode<F> {
     fn default() -> Self {
         Self::general_midi()
     }
@@ -88,29 +93,28 @@ control_set! {
 
 /// A [`FreeverbBank`] and its glides, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running {
+struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
-    bank: FreeverbBank,
-    glides: FreeverbGlides,
+    bank: FreeverbBank<F>,
+    glides: FreeverbGlides<F>,
 }
 
 /// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the glides its
 /// controls are aimed through.
 ///
-/// The bank's state is `f32`; the graph's blocks are too, and another sample format is
-/// converted at the edges.
+/// The bank's state is `F`; a block of another sample format is converted at the edges.
 #[derive(Clone, Debug)]
-pub struct FreeverbKernel {
+pub struct FreeverbKernel<F: Float> {
     /// The one room of a send that has no cells: its tail is this room's exactly.
     fixed: Option<FreeverbControls>,
     /// `None` until [`prepare`](Kernel::prepare).
-    running: Option<Running>,
+    running: Option<Running<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl FreeverbKernel {
+impl<F: Float + Lerp> FreeverbKernel<F> {
     /// A reverb with no lines until `prepare` gives it a rate; `fixed` is the room of a send
     /// whose controls never change.
     fn new(fixed: Option<FreeverbControls>) -> Self {
@@ -122,11 +126,11 @@ impl FreeverbKernel {
     }
 }
 
-impl Kernel for FreeverbKernel {
+impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
     type Set = FreeverbSet;
 
     /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
-    const GRID: usize = FreeverbBank::CHUNK;
+    const GRID: usize = FreeverbBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
         let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
@@ -197,5 +201,36 @@ impl Kernel for FreeverbKernel {
         self.running
             .as_ref()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(controls))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::drive_kernel;
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_types::MaxBlock;
+    use tutti_units::Samples;
+
+    /// An `f64` block through a `FreeverbKernel::<f64>` at 44.1 kHz: the unit impulse of the
+    /// wide signal's first value `x0` returns `x0 · FIXED_GAIN` (the `f32` unit widened) at
+    /// the combs of 1116, 1188 and 1277 frames, before any all-pass echo or the next comb,
+    /// and nothing before; the product is exact in `f64`, where an `f32` state rounds `x0`.
+    #[test]
+    fn an_f64_kernel_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
+        let x0 = wide_signal(1)[0];
+        let g = f64::from(FreeverbBank::<f64>::FIXED_GAIN.get());
+        let len = 1_300;
+        let mut x = vec![0.0f64; len];
+        x[0] = x0;
+        let mut k = FreeverbKernel::<f64>::new(None);
+        k.prepare(SampleRate::SR_44K1, MaxBlock::of(Samples(len)));
+        let moves = [(0, FreeverbControls::GENERAL_MIDI)];
+        let y = drive_kernel(&mut k, &moves, &[x]);
+        let mut want = vec![0.0f64; len];
+        for at in [1_116, 1_188, 1_277] {
+            want[at] = x0 * g;
+        }
+        assert_close_f64(&y[0], &want, 0.0);
     }
 }

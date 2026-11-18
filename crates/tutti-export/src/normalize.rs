@@ -12,7 +12,7 @@
 //! A caller who holds planes and wants the reading for itself uses
 //! [`Normalize::gain_for_rendered`] and [`Rendered::apply_gain`](crate::Rendered::apply_gain).
 
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, interleave};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, convert, interleave};
 use tutti_dsp::DitherShape;
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
@@ -419,6 +419,9 @@ pub(crate) struct Measurer {
     meter: Meter,
     /// One chunk, interleaved: reused, so a measurement allocates once.
     scratch: Vec<f32>,
+    /// What a block of the render's own format is converted to, the meter
+    /// reading `f32`.
+    converted: Vec<f32>,
 }
 
 impl Measurer {
@@ -477,6 +480,7 @@ impl Measurer {
         Ok(Self {
             meter,
             scratch: Vec::new(),
+            converted: Vec::new(),
         })
     }
 
@@ -510,15 +514,32 @@ impl Measurer {
             let mut chunk = InterleavedMut::new(&mut buf, layout)?;
             let span = Samples(span.start)..Samples(span.end);
             interleave(Planes::from_vecs(planes)?.slice(span), chunk.reborrow())?;
-            self.feed_interleaved(chunk.as_interleaved());
+            self.push(chunk.as_interleaved());
             Ok(())
         })();
         self.scratch = buf;
         fed
     }
 
-    /// Feeds `frames`, already interleaved in this meter's layout.
-    pub(crate) fn feed_interleaved(&mut self, frames: Interleaved<'_>) {
+    /// Feeds `frames`, already interleaved in this meter's layout, in any
+    /// sample format: the meter reads them as `f32`.
+    pub(crate) fn feed_interleaved<S: Sample>(
+        &mut self,
+        frames: Interleaved<'_, S>,
+    ) -> crate::Result<()> {
+        let mut converted = std::mem::take(&mut self.converted);
+        converted.resize(frames.samples().len(), 0.0);
+        convert(
+            frames,
+            InterleavedMut::new(&mut converted, frames.layout())?,
+        )?;
+        self.push(Interleaved::new(&converted, frames.layout())?);
+        self.converted = converted;
+        Ok(())
+    }
+
+    /// Pushes `frames` into the meter.
+    fn push(&mut self, frames: Interleaved<'_>) {
         match &mut self.meter {
             Meter::Lufs { meter, .. }
             | Meter::Peak {

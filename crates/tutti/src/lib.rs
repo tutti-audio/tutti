@@ -195,8 +195,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
     JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
-    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TransportHandle, WaitError, Workers,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock,
+    SystemSession, TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -224,7 +224,7 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
-        Full, Gains, HrtfBinauralError, Inline, Lanes, Line, LineModulation, LookaheadError,
+        Full, Gains, HrtfBinauralError, Inline, Lanes, Lerp, Line, LineModulation, LookaheadError,
         Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
         ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
@@ -422,6 +422,8 @@ pub mod session {
     };
     pub use tutti_session::{Task, WorkerError};
 
+    #[cfg(feature = "export")]
+    pub use tutti_dsp::FftFloat;
     #[cfg(any(feature = "io", feature = "export"))]
     pub use tutti_session::DitherShape;
     #[cfg(feature = "sampler")]

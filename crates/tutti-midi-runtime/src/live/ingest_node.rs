@@ -71,6 +71,7 @@
 //!
 //! Its fork is silent: an offline render reads no wire.
 
+use tutti_buffers::Float;
 use tutti_graph::{Losses, UmpAt};
 
 use std::num::NonZeroU32;
@@ -583,7 +584,7 @@ impl MidiIngestControls {
     }
 }
 
-impl Node for MidiIngestNode {
+impl<F: Float> Node<F> for MidiIngestNode {
     /// No audio; one event input per attached input, [`MidiInputPorts::count`]
     /// event outputs ([`MIDI_INPUT_PORTS`] for the first Group alone) of the
     /// prepared capacity ([`MIDI_INPUT_EVENT_CAPACITY`] at least, and
@@ -608,7 +609,7 @@ impl Node for MidiIngestNode {
         }
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         // One lend, before any event is translated, stated or not: the mode
         // and the Profile zones are read from the same requests.
         let requests = self.mpe_request.lend();
@@ -815,18 +816,18 @@ struct SilentInput {
     ports: MidiInputPorts,
 }
 
-impl ForkSource for SilentInput {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for SilentInput {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(
             MidiIngestNode::new().hearing(self.ports),
         )))
     }
 }
 
-impl IntoNode for MidiIngestNode {
+impl<F: Float> IntoNode<F> for MidiIngestNode {
     type Controls = MidiIngestControls;
 
-    fn into_parts(self) -> NodeParts<MidiIngestControls> {
+    fn into_parts(self) -> NodeParts<MidiIngestControls, F> {
         let fork = SilentInput { ports: self.ports };
         let controls = MidiIngestControls {
             request: self.mpe_request_cell.clone(),

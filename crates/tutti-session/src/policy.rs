@@ -6,7 +6,7 @@
 //! [`Session::update`] (in [`Phase::Commit`](crate::Phase::Commit), before the
 //! commit), live, with no restart.
 
-use tutti_buffers::FoldLevels;
+use tutti_buffers::{Float, FoldLevels};
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
 use tutti_types::{ChannelLayout, ChannelTopology};
 
@@ -16,10 +16,12 @@ use crate::{Clock, Session};
 /// A session setting reached through a typed handle.
 pub trait Policy {
     /// What reads and changes the setting, borrowing the session.
-    type Handle<'a>;
+    type Handle<'a, F: Float>;
 
     /// The handle on `session`'s setting.
-    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> Self::Handle<'_>;
+    fn handle<K: crate::AppKey, C: Clock>(
+        session: &mut Session<K, C>,
+    ) -> Self::Handle<'_, C::Float>;
 }
 
 /// Where the mix lands: the format the root is heard in, the root's channels to
@@ -100,9 +102,11 @@ pub enum OutputPolicyError {
 }
 
 impl Policy for OutputPolicy {
-    type Handle<'a> = OutputPolicyHandle<'a>;
+    type Handle<'a, F: Float> = OutputPolicyHandle<'a, F>;
 
-    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> OutputPolicyHandle<'_> {
+    fn handle<K: crate::AppKey, C: Clock>(
+        session: &mut Session<K, C>,
+    ) -> OutputPolicyHandle<'_, C::Float> {
         OutputPolicyHandle {
             graph: &session.graph,
             policy: &mut session.output_policy,
@@ -112,13 +116,13 @@ impl Policy for OutputPolicy {
 }
 
 /// Reads and changes a session's [`OutputPolicy`].
-pub struct OutputPolicyHandle<'a> {
-    graph: &'a Graph,
+pub struct OutputPolicyHandle<'a, F: Float = f32> {
+    graph: &'a Graph<F>,
     policy: &'a mut OutputPolicy,
     staged: &'a mut bool,
 }
 
-impl std::fmt::Debug for OutputPolicyHandle<'_> {
+impl<F: Float> std::fmt::Debug for OutputPolicyHandle<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputPolicyHandle")
             .field("policy", &*self.policy)
@@ -126,7 +130,7 @@ impl std::fmt::Debug for OutputPolicyHandle<'_> {
     }
 }
 
-impl OutputPolicyHandle<'_> {
+impl<F: Float> OutputPolicyHandle<'_, F> {
     /// The policy in force, or the one set and not yet applied.
     #[must_use]
     pub fn get(&self) -> &OutputPolicy {
@@ -158,7 +162,7 @@ impl OutputPolicyHandle<'_> {
         // A level that is not a gain is refused even where no monitor uses it.
         policy.levels.check().map_err(RoutingError::Fold)?;
         let root = self.graph.root_in_force();
-        policy.routing().fold::<f32>(&root, &placed)?;
+        policy.routing().fold::<F>(&root, &placed)?;
         *self.policy = policy;
         *self.staged = true;
         Ok(())
@@ -167,7 +171,7 @@ impl OutputPolicyHandle<'_> {
 
 impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// The setting `P`, to read and change: `session.policy::<OutputPolicy>()`.
-    pub fn policy<P: Policy>(&mut self) -> P::Handle<'_> {
+    pub fn policy<P: Policy>(&mut self) -> P::Handle<'_, C::Float> {
         P::handle(self)
     }
 

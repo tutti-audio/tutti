@@ -238,7 +238,7 @@ fn sweep() {
         // The longest delay is a `MaxDelay`, which refuses a non-finite, negative or
         // huge value by type (`a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds`).
         add(probe("delay time", b, || {
-            Box::new(DelayNode::mono(
+            Box::new(DelayNode::<f32>::mono(
                 MaxDelay::of(s(0.5)),
                 DelayControls {
                     time: s(b),
@@ -259,7 +259,7 @@ fn sweep() {
                 Ok(times) => layout.with_times(times).unwrap(),
                 Err(_) => layout,
             };
-            Box::new(DelayNode::from_layout(
+            Box::new(DelayNode::<f32>::from_layout(
                 layout,
                 DelayControls {
                     time: s(b),

@@ -768,7 +768,7 @@ fn a_reset_node_forgets_the_notes_it_held() {
         d.block();
         assert_eq!(d.events_out(0).len(), 1, "the note started");
         if reset {
-            d.node.reset();
+            tutti_graph::Node::<f32>::reset(&mut *d.node);
         }
         d.set_transport(stopped(256));
         d.block();

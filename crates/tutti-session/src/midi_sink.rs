@@ -252,7 +252,7 @@ pub(crate) struct Sinks {
     ports: Vec<SinkPort>,
 }
 
-impl crate::Midi<'_> {
+impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
     /// Opens the sink `sink` as `id`: its output node joins the graph, fed by
     /// the session's clock.
     pub(crate) fn open_sink(
@@ -292,9 +292,9 @@ impl Sinks {
     /// the graph has been re-prepared at another, drains the old reader and
     /// reopens that one tap. Whether any reopened; the graph is then edited and
     /// the next commit compiles the new tap.
-    pub(crate) fn reopen(
+    pub(crate) fn reopen<F: tutti_buffers::Float>(
         &mut self,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
@@ -314,9 +314,9 @@ impl Sinks {
     /// Each sink's tap, read dry and sent to its sink, and the sinks whose
     /// entry ended taken out of the graph after what their taps held was sent.
     /// Whether the graph was edited.
-    pub(crate) fn drain(
+    pub(crate) fn drain<F: tutti_buffers::Float>(
         &mut self,
-        graph: &mut crate::graph::Graph,
+        graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;

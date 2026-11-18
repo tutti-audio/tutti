@@ -839,7 +839,6 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
 /// holds state in each) and not only on a fresh node.
 #[test]
 fn resetting_the_border_nodes_allocates_nothing() {
-    use tutti_graph::Node;
     use tutti_graph::contract::Direct;
 
     let rate = SampleRate::SR_48K;
@@ -869,8 +868,8 @@ fn resetting_the_border_nodes_allocates_nothing() {
     };
     assert!(traffic(&mut sync) > 0, "the node has state to forget");
     assert_no_alloc::assert_no_alloc(|| {
-        ingest.node.reset();
-        sync.node.reset();
+        tutti_graph::Node::<f32>::reset(&mut *ingest.node);
+        tutti_graph::Node::<f32>::reset(&mut *sync.node);
     });
     assert!(traffic(&mut sync) > 0, "and works after the reset");
 }
