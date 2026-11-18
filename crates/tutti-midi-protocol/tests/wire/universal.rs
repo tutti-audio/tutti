@@ -2,8 +2,9 @@
 //! and the instrument's edge that reassembles, filters by device id and reads.
 
 use tutti_midi_protocol::{
-    Addressed, Addressee, GeneralMidi, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
-    NotSysexDeviceId, Read, Recipient, SysexDeviceId, Universal, UniversalReader, read,
+    Addressed, Addressee, GeneralMidiMode, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
+    NotSysexDeviceId, QuarterFrame, Recipient, SysexDeviceId, Universal, UniversalRead,
+    UniversalReader, read,
 };
 use tutti_ump::Voice1;
 use tutti_ump::{
@@ -12,13 +13,13 @@ use tutti_ump::{
 };
 use tutti_units::Seconds;
 
-fn parse(bytes: &[u8]) -> Read {
+fn parse(bytes: &[u8]) -> UniversalRead {
     read(SysexMessage::from_framed(bytes).expect("a framed message"))
 }
 
 fn heard(bytes: &[u8]) -> Addressed {
     match parse(bytes) {
-        Read::Universal(a) => a,
+        UniversalRead::Universal(a) => a,
         other => panic!("{other:?}"),
     }
 }
@@ -70,11 +71,11 @@ fn an_identity_reply_has_a_one_or_three_byte_manufacturer() {
 fn general_midi_on_and_off() {
     assert_eq!(
         heard(&[0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7]).message,
-        Universal::GeneralMidi(GeneralMidi::On)
+        Universal::GeneralMidi(GeneralMidiMode::On)
     );
     assert_eq!(
         heard(&[0xF0, 0x7E, 0x7F, 0x09, 0x02, 0xF7]).message,
-        Universal::GeneralMidi(GeneralMidi::Off)
+        Universal::GeneralMidi(GeneralMidiMode::Off)
     );
 }
 
@@ -177,10 +178,23 @@ fn the_quarter_frame_pieces_of_a_position_are_the_nibbles_of_t9() {
         .time_code();
     assert_eq!(at.nibbles(), [6, 1, 5, 1, 4, 1, 3, 7]);
     assert_eq!(
-        at.quarter_frames().map(U7::get),
+        at.quarter_frames().map(|q| q.data().get()),
         [0x06, 0x11, 0x25, 0x31, 0x44, 0x51, 0x63, 0x77]
     );
     assert_eq!(MtcTimeCode::from_nibbles(at.nibbles()), Some(at));
+}
+
+/// **A Quarter Frame's data byte is `0nnn dddd`** (M1 p.53): the piece is the
+/// three bits above the nibble, so every seven-bit value is one Quarter Frame and
+/// reads back as its own byte.
+#[test]
+fn a_quarter_frame_is_the_piece_over_the_nibble_of_its_data_byte() {
+    for byte in 0..=0x7F {
+        let frame = QuarterFrame::from_data(U7::of(byte));
+        assert_eq!(frame.piece.get(), byte >> 4, "{byte:#04x}");
+        assert_eq!(frame.nibble.get(), byte & 0x0F, "{byte:#04x}");
+        assert_eq!(frame.data(), U7::of(byte));
+    }
 }
 
 /// Every position at every rate reads back from its own nibbles; a nibble
@@ -217,7 +231,7 @@ fn an_mtc_full_message_out_of_range_is_unread() {
     ] {
         assert_eq!(
             parse(&bytes(hr, mn, sc, fr)),
-            Read::Unread,
+            UniversalRead::Unread,
             "{hr} {mn} {sc} {fr}"
         );
     }
@@ -232,10 +246,14 @@ fn an_mtc_full_message_out_of_range_is_unread() {
 fn what_is_not_read_is_foreign_or_unread() {
     assert_eq!(
         parse(&[0xF0, 0x41, 0x10, 0x42, 0xF7]),
-        Read::Foreign,
+        UniversalRead::Foreign,
         "a manufacturer"
     );
-    assert_eq!(parse(&[0xF0, 0xF7]), Read::Foreign, "an empty message");
+    assert_eq!(
+        parse(&[0xF0, 0xF7]),
+        UniversalRead::Foreign,
+        "an empty message"
+    );
     for unread in [
         &[0xF0, 0x7E, 0x7F, 0x09, 0x03, 0xF7][..],
         &[0xF0, 0x7E, 0x7F, 0x0D, 0x70, 0x01, 0xF7],
@@ -246,7 +264,7 @@ fn what_is_not_read_is_foreign_or_unread() {
         &[0xF0, 0x7E, 0xF7],
         &[0xF0, 0x7F, 0x7F, 0x04, 0x09, 0x00, 0x00, 0xF7],
     ] {
-        assert_eq!(parse(unread), Read::Unread, "{unread:02X?}");
+        assert_eq!(parse(unread), UniversalRead::Unread, "{unread:02X?}");
     }
 }
 
@@ -567,23 +585,34 @@ mod machine_control {
     fn a_time_code_out_of_range_is_not_read() {
         let locate =
             |h, m, s, f, ff| parse(&framed(0x7F, 0x06, &[0x44, 0x06, 0x01, h, m, s, f, ff]));
-        assert!(matches!(locate(0x00, 0, 0, 0, 0), Read::Universal(_)));
-        assert_eq!(locate(0x18, 0, 0, 0, 0), Read::Unread, "hour 24");
-        assert_eq!(locate(0x00, 60, 0, 0, 0), Read::Unread, "minute 60");
+        assert!(matches!(
+            locate(0x00, 0, 0, 0, 0),
+            UniversalRead::Universal(_)
+        ));
+        assert_eq!(locate(0x18, 0, 0, 0, 0), UniversalRead::Unread, "hour 24");
+        assert_eq!(
+            locate(0x00, 60, 0, 0, 0),
+            UniversalRead::Unread,
+            "minute 60"
+        );
         assert_eq!(
             locate(0x00, 0, 0, 24, 0),
-            Read::Unread,
+            UniversalRead::Unread,
             "frame 24 at 24 fps"
         );
-        assert_eq!(locate(0x00, 0, 0, 0, 100), Read::Unread, "subframes 100");
+        assert_eq!(
+            locate(0x00, 0, 0, 0, 100),
+            UniversalRead::Unread,
+            "subframes 100"
+        );
         assert_eq!(
             locate(0x00, 0, 0x40, 1, 0),
-            Read::Unread,
+            UniversalRead::Unread,
             "blank with a frame"
         );
         assert_eq!(
             locate(0x00, 0, 0, 0x20, 0),
-            Read::Unread,
+            UniversalRead::Unread,
             "status where subframes are due"
         );
     }
@@ -650,7 +679,7 @@ mod machine_control {
         assert_eq!(names.iter().collect::<Vec<_>>(), [MmcName::of(0x7F)]);
         assert_eq!(
             parse(&framed(0x7F, 0x06, &[0x43, 0x01, 0x02])),
-            Read::Unread,
+            UniversalRead::Unread,
             "an UPDATE sub-command other than 00 and 01"
         );
     }
@@ -707,7 +736,7 @@ mod machine_control {
         assert_eq!(devices.iter().collect::<Vec<_>>(), [Recipient::AllCall]);
         assert_eq!(
             parse(&framed(0x7F, 0x06, &[0x52, 0x03, 0x00, 0x7F, 0x01])),
-            Read::Unread,
+            UniversalRead::Unread,
             "7F is no group's number"
         );
     }
@@ -736,7 +765,7 @@ mod machine_control {
         );
         assert_eq!(
             parse(&framed(0x7F, 0x06, &[0x50, 0x02, 0x03, 0x7F])),
-            Read::Unread,
+            UniversalRead::Unread,
             "7F is reserved, not a name to execute"
         );
         let MmcCommand::Event(event) = one_command(&[
@@ -790,7 +819,7 @@ mod machine_control {
         assert_eq!(commands[3], MmcCommand::Play);
         assert_eq!(
             parse(&framed(0x7F, 0x06, &[0x00, 0x00, 0x00])),
-            Read::Unread,
+            UniversalRead::Unread,
             "a third extension level"
         );
     }
@@ -801,9 +830,13 @@ mod machine_control {
     fn a_message_is_at_most_48_bytes() {
         assert_eq!(MMC_MAX_DATA, 48);
         let long = |n: usize| framed(0x7F, 0x06, &vec![0x01; n]);
-        assert!(matches!(parse(&long(48)), Read::Universal(_)));
-        assert_eq!(parse(&long(49)), Read::Unread);
-        assert_eq!(parse(&framed(0x7F, 0x06, &[])), Read::Unread, "no command");
+        assert!(matches!(parse(&long(48)), UniversalRead::Universal(_)));
+        assert_eq!(parse(&long(49)), UniversalRead::Unread);
+        assert_eq!(
+            parse(&framed(0x7F, 0x06, &[])),
+            UniversalRead::Unread,
+            "no command"
+        );
         let mut list = MmcCommands::new();
         for _ in 0..48 {
             list.push(&MmcCommand::Stop).unwrap();
@@ -842,7 +875,7 @@ mod machine_control {
             heard(&framed(5, 0x07, &[0x7C])).to,
             Recipient::Device(SysexDeviceId::of(5))
         );
-        assert_eq!(parse(&framed(0x7F, 0x07, &[0x7C])), Read::Unread);
+        assert_eq!(parse(&framed(0x7F, 0x07, &[0x7C])), UniversalRead::Unread);
     }
 
     /// RP-013 p.78: SELECTED TIME CODE answers `43 02 15 21 00`, which is
@@ -906,7 +939,7 @@ mod machine_control {
         assert_eq!(done.process_success, McpSuccess::Complete);
         assert_eq!(
             parse(&framed(1, 0x07, &[0x48, 0x03, 0x01, 0x44, 0x07])),
-            Read::Unread,
+            UniversalRead::Unread,
             "success code 7 is undefined"
         );
     }
@@ -991,7 +1024,7 @@ mod machine_control {
         ));
         assert_eq!(
             parse(&framed(1, 0x07, &[0x01, 0x60, 0, 0, 0x20, 0b0000_0001])),
-            Read::Unread
+            UniversalRead::Unread
         );
     }
 
@@ -1306,7 +1339,7 @@ mod machine_control {
         ));
         assert!(!matches!(
             parse(&framed(0x7F, 0x06, &[0x44, 0x09, 0x01])),
-            Read::Universal(Addressed {
+            UniversalRead::Universal(Addressed {
                 message: Universal::MachineControlTruncated(_),
                 ..
             })

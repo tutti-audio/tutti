@@ -52,11 +52,11 @@
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
 use tutti_music::{Meter, MeterMap, Pass, PassEnd, TimeSignature, first_frame_at_or_after};
-use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
+use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
 use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
 use tutti_midi_protocol::{
-    MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, flex_tempo_field,
+    MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrame, SmpteTimecode, flex_tempo_field,
     flex_time_signature_wire, song_position,
 };
 
@@ -167,9 +167,9 @@ struct MtcGrid {
     frames: u64,
     /// Where quarter-frame `base` is due in the segment, in frames.
     lead: f64,
-    /// The eight nibbles of the timecode being sent, piece `p` in bits
-    /// `4p..4p+4`. Set once at piece 0, so one cycle carries one position.
-    cycle: u32,
+    /// The eight Quarter Frames of the timecode being sent, in piece order. Set
+    /// once at piece 0, so one cycle carries one position.
+    cycle: [QuarterFrame; 8],
     /// The grid was just restarted: its first piece 0 is still to be placed
     /// on an even frame ([`ClockMaster::tick_mtc`]).
     align: bool,
@@ -181,7 +181,7 @@ impl MtcGrid {
         next: 0,
         frames: 0,
         lead: 0.0,
-        cycle: 0,
+        cycle: [QuarterFrame::FIRST; 8],
         align: true,
     };
 }
@@ -638,11 +638,9 @@ impl ClockMaster {
                     fps,
                 );
             }
-            let nibble = (piece << 4) | ((cycle >> (4 * u32::from(piece))) & 0x0F) as u8;
             emit((
                 frame_offset(sample_offset, block_size),
-                // Framed wire bits: the piece is below 8 and the nibble 4 bits.
-                self.system(System::TimeCode(U7::masked(nibble))),
+                self.system(System::TimeCode(cycle[usize::from(piece)].data())),
             ));
             next += 1;
         }
@@ -698,18 +696,14 @@ fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
     }
 }
 
-/// The eight nibbles of the cycle that starts at `position` from transport
-/// beat 0, piece `p` in bits `4p..4p+4`: the label of the nearest frame, on an
+/// The eight Quarter Frames of the cycle that starts at `position` from
+/// transport beat 0: the label of the nearest frame, on an
 /// even one (a cycle's eight pieces span two frames). Rounding, not flooring,
 /// so a position a float's width short of a frame boundary still reads as that
 /// frame.
-fn mtc_cycle(position: Seconds, fps: MtcRate) -> u32 {
+fn mtc_cycle(position: Seconds, fps: MtcRate) -> [QuarterFrame; 8] {
     let nearest = SmpteTimecode::from_seconds(position, fps.frame_rate());
-    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps)
-        .nibbles()
-        .iter()
-        .enumerate()
-        .fold(0, |acc, (p, &n)| acc | (u32::from(n) << (4 * p)))
+    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps).quarter_frames()
 }
 
 #[cfg(test)]

@@ -721,7 +721,7 @@ pub mod midi {
     pub use tutti_midi_protocol::{
         ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
         MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,

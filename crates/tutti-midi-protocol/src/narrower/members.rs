@@ -7,7 +7,7 @@ use tutti_ump::{
     Address, CCNumber, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, U7, U14, Voice1, Voice2,
 };
 
-use crate::{ExtremeValues, MpeZoneConfig};
+use crate::{ExtremeValues, MpeZoneConfig, narrow_with};
 
 /// A note a member channel plays: the channel it was sent on and its number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,7 +86,7 @@ impl Members {
                     let chosen = free.unwrap_or_else(|| {
                         zone.member_channels()
                             .min_by_key(|c| Reverse(tick.wrapping_sub(members[c.index()].started)))
-                            .expect("an MPE zone has at least one member")
+                            .unwrap_or_else(|| zone.first_member())
                     });
                     // A member that still plays is stolen: its note ends first.
                     if let Some(old) = members[chosen.index()].held {
@@ -135,7 +135,7 @@ impl Members {
                     slid: false,
                     ..*slot
                 };
-                if let Ok(on) = extremes.narrow(voice) {
+                if let Ok(on) = narrow_with(extremes, voice) {
                     send(member, on);
                 }
             }
@@ -144,7 +144,7 @@ impl Members {
                     let slot = &mut members[member.index()];
                     slot.held = None;
                     slot.released = self.tick;
-                    if let Ok(off) = extremes.narrow(voice) {
+                    if let Ok(off) = narrow_with(extremes, voice) {
                         send(member, off);
                     }
                 }
@@ -152,7 +152,7 @@ impl Members {
             Voice2::PerNotePitchBend { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].bent = true;
-                    if let Ok(bend) = extremes.narrow(Voice2::PitchBend(value)) {
+                    if let Ok(bend) = narrow_with(extremes, Voice2::PitchBend(value)) {
                         send(member, bend);
                     }
                 }
@@ -160,7 +160,7 @@ impl Members {
             Voice2::PolyPressure { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].pressed = true;
-                    if let Ok(pressure) = extremes.narrow(Voice2::ChannelPressure(value)) {
+                    if let Ok(pressure) = narrow_with(extremes, Voice2::ChannelPressure(value)) {
                         send(member, pressure);
                     }
                 }
@@ -171,15 +171,15 @@ impl Members {
                 value,
             } if controller == CCNumber::BRIGHTNESS.get() => {
                 // Index 74 is the MPE convention for the third dimension of
-                // control (M2-120 section 4.5), the one `MpeIngest` makes of
-                // Control Change 74 on a member channel.
+                // control (M2-120 section 4.5), the one an MPE receiver
+                // makes of Control Change 74 on a member channel.
                 if let Some(member) = find(members, note) {
                     members[member.index()].slid = true;
                     let slide = Voice2::ControlChange {
                         controller: CCNumber::BRIGHTNESS,
                         value,
                     };
-                    if let Ok(slide) = extremes.narrow(slide) {
+                    if let Ok(slide) = narrow_with(extremes, slide) {
                         send(member, slide);
                     }
                 }

@@ -81,7 +81,7 @@ use tutti_midi_device::{
     Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
     InquiryAction, Learned, Reply, Supports,
 };
-use tutti_midi_protocol::{Addressed, Read, Universal, read};
+use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
 use tutti_rt::CounterWriter;
 use tutti_ump::{
@@ -402,7 +402,7 @@ impl Asking {
             return None;
         };
         match read(self.assembler.message(done)) {
-            Read::Universal(Addressed {
+            UniversalRead::Universal(Addressed {
                 message: Universal::IdentityReply(identity),
                 ..
             }) => Some(identity),

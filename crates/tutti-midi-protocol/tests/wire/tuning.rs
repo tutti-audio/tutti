@@ -2,12 +2,12 @@
 //! the original messages, CA-020 and CA-021), from the byte layouts it gives.
 
 use tutti_midi_protocol::{
-    BadChecksum, ChannelMask, KeyTable, OctaveOffsets, Read, Timing, TuningFrequency,
-    TuningMessage, Universal, read,
+    BadChecksum, ChannelMask, KeyTable, OctaveOffsets, Timing, TuningFrequency, TuningMessage,
+    Universal, UniversalRead, read,
 };
 use tutti_ump::{MidiChannel, NoteNumber, SysexMessage, U7, U14};
 
-fn parse(payload: &[u8]) -> Read {
+fn parse(payload: &[u8]) -> UniversalRead {
     let mut framed = vec![0xF0];
     framed.extend_from_slice(payload);
     framed.push(0xF7);
@@ -16,7 +16,7 @@ fn parse(payload: &[u8]) -> Read {
 
 fn tuning(payload: &[u8]) -> TuningMessage {
     match parse(payload) {
-        Read::Universal(a) => match a.message {
+        UniversalRead::Universal(a) => match a.message {
             Universal::Tuning(t) => t,
             other => panic!("{other:?}"),
         },
@@ -137,7 +137,7 @@ fn a_dump_that_is_short_of_a_word_is_unread() {
     payload.extend_from_slice(NAME);
     payload.extend(&data[..data.len() - 3]);
     payload.push(0);
-    assert_eq!(parse(&payload), Read::Unread);
+    assert_eq!(parse(&payload), UniversalRead::Unread);
 }
 
 /// `08 04 bb tt <name> [xx yy zz] x128 chksum`, the same as the Bulk Tuning Dump with a bank select byte added; for this
@@ -173,7 +173,7 @@ fn a_dump_with_a_bad_checksum_is_a_typed_outcome() {
     payload.extend(&data);
     let good = checksum(&payload);
     payload.push(good ^ 0x01);
-    let Read::BadChecksum(BadChecksum {
+    let UniversalRead::BadChecksum(BadChecksum {
         expected, found, ..
     }) = parse(&payload)
     else {
@@ -220,7 +220,7 @@ fn the_scale_octave_dumps_are_twelve_offsets_and_a_checksum() {
     assert_eq!(words[3], U14::of(0x2000 + 3));
     // A flipped bit is a bad checksum.
     *two.last_mut().unwrap() ^= 0x10;
-    assert!(matches!(parse(&two), Read::BadChecksum(_)));
+    assert!(matches!(parse(&two), UniversalRead::BadChecksum(_)));
 }
 
 /// `F0 7F <device ID> 08 02 tt ll [kk xx yy zz] F7` is real time, no bank, and
@@ -249,13 +249,13 @@ fn a_single_note_change_carries_ll_changes_and_ll_is_its_length() {
     // ll = 2 with one change's bytes, and ll = 1 with two.
     assert_eq!(
         parse(&[0x7F, 0x7F, 0x08, 0x02, 0x04, 0x02, 0x3C, 0x3D, 0x00, 0x00]),
-        Read::Unread
+        UniversalRead::Unread
     );
     assert_eq!(
         parse(&[
             0x7F, 0x7F, 0x08, 0x02, 0x04, 0x01, 0x3C, 0x3D, 0x00, 0x00, 0x40, 0x41, 0x40, 0x00,
         ]),
-        Read::Unread
+        UniversalRead::Unread
     );
     // No changes at all is a message with none.
     let TuningMessage::NoteChange { changes, .. } = tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x04, 0x00])
@@ -297,7 +297,10 @@ fn the_bank_form_of_the_note_change_is_real_or_non_real_time_by_its_header() {
         (Some(U7::of(2)), Some(U7::of(2)), U7::of(3))
     );
     // 08 02 is defined in real time only.
-    assert_eq!(parse(&[0x7E, 0x7F, 0x08, 0x02, 0x00, 0x00]), Read::Unread);
+    assert_eq!(
+        parse(&[0x7E, 0x7F, 0x08, 0x02, 0x00, 0x00]),
+        UniversalRead::Unread
+    );
 }
 
 /// The Scale/Octave Tuning channel field: `ff` bits 0 and 1 are channels 15 and
@@ -309,7 +312,7 @@ fn the_channel_bytes_name_channels_by_bit() {
         let mut p = vec![0x7F, 0x7F, 0x08, 0x08, ff, gg, hh];
         p.extend([0x40; 12]);
         match parse(&p) {
-            Read::Universal(a) => match a.message {
+            UniversalRead::Universal(a) => match a.message {
                 Universal::Tuning(TuningMessage::OctaveTuning { channels, .. }) => Some(
                     channels
                         .channels()
@@ -318,7 +321,7 @@ fn the_channel_bytes_name_channels_by_bit() {
                 ),
                 other => panic!("{other:?}"),
             },
-            Read::Unread => None,
+            UniversalRead::Unread => None,
             other => panic!("{other:?}"),
         }
     };
@@ -376,7 +379,7 @@ fn scale_octave_tuning_has_two_forms_and_two_timings() {
     assert!((offsets.offset(4).get() - 100.0).abs() < 0.02);
     // Twelve offsets and no fewer.
     two.truncate(two.len() - 2);
-    assert_eq!(parse(&two), Read::Unread);
+    assert_eq!(parse(&two), UniversalRead::Unread);
 }
 
 /// A key above 127 cannot be on the wire; a note-number byte of 7F is key 127.

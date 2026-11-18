@@ -319,7 +319,7 @@ fn reset_returns_the_per_note_range_to_its_default() {
     let rpn7 = midi::registered(
         MidiChannel::of(1),
         Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-        PitchBendSensitivity::of(12).to_rpn_bits(),
+        PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits(),
     );
     play(&mut h, &[rpn7], 0.01);
     Node::reset(&mut *h);

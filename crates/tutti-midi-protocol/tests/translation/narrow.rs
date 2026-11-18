@@ -130,3 +130,92 @@ fn a_note_on_velocity_never_narrows_to_a_note_off() {
         );
     }
 }
+
+/// **`narrow_with` applies D.1.5 to every value it narrows**: with the extremes
+/// avoided a value above 0 never narrows to 0, and one below its maximum never to
+/// the maximum, at each width; the minimum and maximum narrow to themselves.
+/// Scaled is [`narrow`]'s plain shift. A message with no MIDI 1.0 form is refused
+/// as `narrow` refuses it.
+/// Spec: m2-104/d.1.5#1
+#[test]
+fn narrow_with_keeps_values_off_the_extremes_only_when_avoided() {
+    use tutti_midi_protocol::{ExtremeValues, NoMidi1Form, narrow, narrow_with};
+    use tutti_ump::{BendValue, CCNumber, ControlValue, NoteNumber, NoteVelocity, U7, U14};
+    use tutti_ump::{Voice1, Voice2};
+
+    let cc = |value: u32| Voice2::ControlChange {
+        controller: CCNumber::MOD_WHEEL,
+        value: ControlValue::new(value),
+    };
+    let cc_of = |voice| match voice {
+        Ok(Voice1::ControlChange { value, .. }) => value.get(),
+        other => panic!("{other:?}"),
+    };
+    // Just above the minimum, just below the maximum, and the extremes.
+    for (value, scaled, avoided) in [
+        (0x0000_0001, 0, 1),
+        (0xFFFF_FFFE, 127, 126),
+        (0, 0, 0),
+        (u32::MAX, 127, 127),
+    ] {
+        assert_eq!(cc_of(narrow_with(ExtremeValues::Scaled, cc(value))), scaled);
+        assert_eq!(
+            cc_of(narrow_with(ExtremeValues::Avoided, cc(value))),
+            avoided
+        );
+        assert_eq!(cc_of(narrow(cc(value))), scaled);
+    }
+
+    let note = NoteNumber::of(60);
+    let on = |velocity: u16| Voice2::NoteOn {
+        note,
+        velocity: NoteVelocity::new(velocity),
+        attribute: tutti_ump::Attribute::None,
+    };
+    let velocity_of = |voice| match voice {
+        Ok(Voice1::NoteOn { velocity, .. }) => velocity,
+        other => panic!("{other:?}"),
+    };
+    // A Note On velocity never narrows to 0 (D.2.1), and one below the maximum
+    // is off the maximum when avoided.
+    assert_eq!(
+        velocity_of(narrow_with(ExtremeValues::Avoided, on(1))),
+        U7::of(1)
+    );
+    assert_eq!(
+        velocity_of(narrow_with(ExtremeValues::Avoided, on(0xFFFE))),
+        U7::of(126)
+    );
+    assert_eq!(
+        velocity_of(narrow_with(ExtremeValues::Scaled, on(0xFFFE))),
+        U7::of(127)
+    );
+
+    let bend = |value: u32| Voice2::PitchBend(BendValue::new(value));
+    let bend_of = |voice| match voice {
+        Ok(Voice1::PitchBend(value)) => value,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        bend_of(narrow_with(ExtremeValues::Avoided, bend(1))),
+        U14::of(1)
+    );
+    assert_eq!(
+        bend_of(narrow_with(ExtremeValues::Avoided, bend(u32::MAX - 1))),
+        U14::of(0x3FFE)
+    );
+    assert_eq!(
+        bend_of(narrow_with(ExtremeValues::Scaled, bend(1))),
+        U14::of(0)
+    );
+
+    let parameter = Voice2::Registered {
+        bank: U7::of(0),
+        index: U7::of(0),
+        value: ControlValue::new(0),
+    };
+    assert_eq!(
+        narrow_with(ExtremeValues::Avoided, parameter),
+        Err(NoMidi1Form::Parameter)
+    );
+}

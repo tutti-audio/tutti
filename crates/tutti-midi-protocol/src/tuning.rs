@@ -3,8 +3,8 @@
 //! messages that carry them, as typed values.
 //!
 //! [`TuningMessage`] is what [`Universal::Tuning`](crate::Universal::Tuning)
-//! holds. What the messages mean for a note is the instrument's
-//! (`tutti-voicing` keeps the tables); this module is the wire read once.
+//! holds. What the messages mean for a note is the instrument's, which keeps
+//! the tables; this module is the wire read once.
 //!
 //! # The frequency data word
 //!
@@ -16,6 +16,8 @@
 //! reserved to mean no change rather than a frequency: it is
 //! [`TuningFrequency::NO_CHANGE`], a value of the same type, and has no pitch.
 
+#[cfg(feature = "serde")]
+use alloc::vec::Vec;
 use tutti_ump::{MidiChannel, NoteNumber, U7, U14};
 use tutti_units::{Cents, Semitones};
 
@@ -30,6 +32,8 @@ tutti_units::ranged! {
     /// fraction`. [`NO_CHANGE`](Self::NO_CHANGE) (`7F 7F 7F`, the raw `0x1F_FFFF`)
     /// is a value like any other; [`pitch`](Self::pitch) is `None` for it.
     #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
     TuningFrequency(u32), NotFrequencyData, "frequency data (21 bits)", |raw| raw <= 0x1F_FFFF
 }
 
@@ -96,7 +100,37 @@ impl TuningFrequency {
 /// A tuning's frequency data for all 128 keys, in order from note 0 to
 /// note 127: what a Bulk Tuning Dump holds and what a tuning program stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "Vec<TuningFrequency>", into = "Vec<TuningFrequency>")
+)]
 pub struct KeyTable([TuningFrequency; 128]);
+
+/// A persisted key table that does not hold 128 words.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("a key table holds 128 frequency words, not {0}")]
+pub struct InvalidKeyTable(usize);
+
+#[cfg(feature = "serde")]
+impl From<KeyTable> for Vec<TuningFrequency> {
+    fn from(table: KeyTable) -> Self {
+        table.0.to_vec()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<Vec<TuningFrequency>> for KeyTable {
+    type Error = InvalidKeyTable;
+
+    fn try_from(words: Vec<TuningFrequency>) -> Result<Self, Self::Error> {
+        let len = words.len();
+        <[TuningFrequency; 128]>::try_from(words)
+            .map(Self)
+            .map_err(|_| InvalidKeyTable(len))
+    }
+}
 
 impl KeyTable {
     /// Twelve-tone equal temperament: every key at its own number (RP-020:
@@ -142,6 +176,7 @@ impl KeyTable {
 /// A tuning's name: 16 ASCII characters. A data byte is 7-bit before it gets
 /// here, so every byte is ASCII.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TuningName([U7; 16]);
 
 impl TuningName {
@@ -162,6 +197,7 @@ impl TuningName {
 /// messages affect currently sounding notes, the non-real-time ones
 /// do not update them (CA-020).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Timing {
     /// Universal Real Time (`7F`): sounding notes follow at once.
     RealTime,
@@ -173,6 +209,7 @@ pub enum Timing {
 /// One change of a Single Note Tuning Change: a key and its new word
 /// (`kk xx yy zz`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KeyChange {
     /// The key.
     pub key: NoteNumber,
@@ -186,6 +223,11 @@ pub const MAX_KEY_CHANGES: usize = 127;
 /// The changes of one Single Note Tuning Change, in message order (the count is the byte `ll`, at most 127). Fixed
 /// size, so reading one allocates nothing.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "Vec<KeyChange>", into = "Vec<KeyChange>")
+)]
 pub struct KeyChanges {
     len: u8,
     items: [KeyChange; MAX_KEY_CHANGES],
@@ -223,6 +265,34 @@ impl KeyChanges {
     }
 }
 
+/// A persisted list of key changes longer than [`MAX_KEY_CHANGES`].
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("a Single Note Tuning Change holds at most {MAX_KEY_CHANGES} changes, not {0}")]
+pub struct InvalidKeyChanges(usize);
+
+#[cfg(feature = "serde")]
+impl From<KeyChanges> for Vec<KeyChange> {
+    fn from(changes: KeyChanges) -> Self {
+        changes.as_slice().to_vec()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<Vec<KeyChange>> for KeyChanges {
+    type Error = InvalidKeyChanges;
+
+    fn try_from(list: Vec<KeyChange>) -> Result<Self, Self::Error> {
+        let mut changes = Self::new();
+        for change in &list {
+            if !changes.push(*change) {
+                return Err(InvalidKeyChanges(list.len()));
+            }
+        }
+        Ok(changes)
+    }
+}
+
 impl Default for KeyChanges {
     fn default() -> Self {
         Self::new()
@@ -240,6 +310,7 @@ impl Eq for KeyChanges {}
 /// The channels a Scale/Octave Tuning message names, a 3-byte channel field with one bit per MIDI channel. Its range is the whole of
 /// `u16`, so it has no refusing constructor; bit `n` is channel `n` (0-based).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChannelMask(u16);
 
 impl ChannelMask {
@@ -278,6 +349,7 @@ impl ChannelMask {
 /// wire gave them (CA-021: a single octave calibrated in small fractions of an
 /// equal-tempered half-step).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OctaveOffsets {
     /// The 1-byte form: `00` is -64 cents, `40` is 0 and `7F` is +63, a cent a
     /// step.

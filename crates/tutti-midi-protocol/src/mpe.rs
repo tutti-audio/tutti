@@ -16,12 +16,13 @@
 //! ([`ChannelResponse`], [`MpeFeatures`]). [`MpeSpec`] names which
 //! specification a zone follows.
 //!
-//! These are values. The state machine that drives a zone from incoming MIDI
-//! (which member channel holds which note) is `tutti-midi-runtime`'s
-//! `MpeIngest`.
+//! These are values: the state that drives a zone from incoming MIDI (which
+//! member channel holds which note) belongs to the receiver.
 
 mod profile;
 mod zone;
 
 pub use profile::{ChannelResponse, ControllerSupport, MpeFeatures, PitchBendSupport};
+#[cfg(feature = "serde")]
+pub use zone::{InvalidMpeZoneConfig, InvalidMpeZones};
 pub use zone::{MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones};
