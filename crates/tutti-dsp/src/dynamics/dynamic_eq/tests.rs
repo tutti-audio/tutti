@@ -5,7 +5,10 @@ use tutti_types::ChannelLayout;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::*;
-use crate::dynamics::curves::compute_upward_gain_lift;
+use crate::dynamics::curves::upward_gain_lift;
+
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;
@@ -83,15 +86,20 @@ fn controls(threshold: f32, knee: f32, ratio: f32, range: f32, q: f32) -> Dynami
     }
 }
 
-fn bank(mode: DynamicMode, width: usize, c: &DynamicEqControls) -> DynamicEqBank {
-    let mut bank = DynamicEqBank::new(mode, ChannelLayout::clamped(width), RATE);
+fn bank(mode: DynamicMode, width: usize, c: &DynamicEqControls) -> DynamicEqBank<f32> {
+    let mut bank = DynamicEqBank::<f32>::new(mode, ChannelLayout::clamped(width), RATE);
     bank.aim(c);
     bank.settle();
     bank
 }
 
 /// `input` (one slice per channel) through `bank`, keyed by `key`, in calls of `block`.
-fn run(bank: &mut DynamicEqBank, key: &[&[f32]], input: &[&[f32]], block: usize) -> Vec<Vec<f32>> {
+fn run(
+    bank: &mut DynamicEqBank<f32>,
+    key: &[&[f32]],
+    input: &[&[f32]],
+    block: usize,
+) -> Vec<Vec<f32>> {
     let n = input[0].len();
     let mut out = vec![vec![0.0f32; n]; input.len()];
     let mut at = 0;
@@ -416,12 +424,9 @@ fn a_reset_band_is_flat() {
 /// knee)` = 0.75 * 25 / 20 = 0.9375 dB (the reduction's knee term, the same at the centre).
 #[test]
 fn the_upward_lift_has_its_hand_computed_anchors() {
-    let ratio = CompressionRatio(4.0);
-    let lift = |level: f32, knee: f32| {
-        compute_upward_gain_lift(Db(level), Db(-30.0), ratio, Db(knee)).get()
-    };
-    assert!((lift(-40.0, 0.0) - 7.5).abs() < 1e-5);
-    assert!((lift(-30.0, 10.0) - 0.9375).abs() < 1e-5);
+    let lift = |level: f64, knee: f64| upward_gain_lift(level, -30.0, 4.0, knee);
+    assert!((lift(-40.0, 0.0) - 7.5).abs() < 1e-14);
+    assert!((lift(-30.0, 10.0) - 0.9375).abs() < 1e-14);
     assert_eq!(
         lift(-20.0, 0.0),
         0.0,
@@ -454,5 +459,26 @@ fn the_render_is_the_same_bits_in_any_blocks() {
             let got = run(&mut bank(mode, 1, &c), &[&key], &[&input], block).remove(0);
             assert_eq!(got, whole, "{mode:?} in blocks of {block}");
         }
+    }
+}
+
+/// A band whose range is 0 dB never leaves flat, however far over its threshold the key is,
+/// so an `f64` bell at 0 dB returns a signal of more than 24 bits unchanged: the flat bell
+/// passes the input (`m0 = 1`, `m1 = m2 = 0`) and nothing in the path narrows it.
+#[test]
+fn an_f64_band_with_zero_range_is_the_identity() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(4_800);
+    for mode in [DynamicMode::Downward, DynamicMode::Upward] {
+        let mut b = DynamicEqBank::<f64>::new(mode, ChannelLayout::MONO, RATE);
+        b.aim(&controls(-60.0, 0.0, 4.0, 0.0, 1.0));
+        b.settle();
+        let mut out = vec![0.0f64; x.len()];
+        b.process(
+            Planes::new(&[&x[..]]).unwrap(),
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        );
+        assert_close_f64(&out, &x, 0.0);
     }
 }

@@ -108,7 +108,7 @@ fn the_response_is_what_the_crossover_runs() {
     const N: usize = 1 << 15;
     let freqs = [Hz(300.0), Hz(3_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
-    let mut xo = CrossoverState::default();
+    let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
     let mut bands = vec![vec![0.0f32; N]; 3];
     for n in 0..N {
@@ -156,7 +156,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     const N: usize = 1 << 17;
     let freqs = [Hz(80.0), Hz(2_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
-    let mut xo = CrossoverState::default();
+    let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
     let ir: Vec<f32> = (0..N)
         .map(|n| tick(&mut xo, &c, if n == 0 { 1.0 } else { 0.0 })[0])
@@ -183,7 +183,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
         tail.get()
     );
 
-    let mut xo = CrossoverState::default();
+    let mut xo = CrossoverState::<f64>::default();
     let mut state = 7u32;
     let mut worst = 0.0f64;
     for _ in 0..(60 * 48_000) {
@@ -253,9 +253,9 @@ fn a_design_refuses_a_band_count_a_tree_does_not_have() {
 
 /// One sample through `state` at `c`, in `f32`.
 fn tick(
-    state: &mut CrossoverState,
+    state: &mut CrossoverState<f64>,
     c: &crate::CrossoverCoefficients,
     x: f32,
 ) -> [f32; CrossoverModel::MAX_BANDS] {
-    state.tick_f64(c, f64::from(x)).map(|y| y as f32)
+    state.tick(&c.narrowed(), f64::from(x)).map(|y| y as f32)
 }

@@ -5,7 +5,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel, Glide,
-    MAX_SPLITS, fit_to_rate,
+    Lanes, MAX_SPLITS, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, MaxBlock, Param};
@@ -100,9 +100,12 @@ impl Splits {
 /// port does not glide while another's cell does). The design holds each split between
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
 /// its splits no lower than the one before, and a non-finite write reads as unchanged.
-pub type CrossoverNode = KernelNode<CrossoverKernel>;
+///
+/// `F` is the state precision of the sections, `f64` by default: an `f64` graph runs them in
+/// `f64`, and a view of the other sample format is converted at the edges.
+pub type CrossoverNode<F = f64> = KernelNode<CrossoverKernel<F>>;
 
-impl CrossoverNode {
+impl<F: Float + Lanes> CrossoverNode<F> {
     /// A crossover over `layout` with one split at each of `frequencies`.
     ///
     /// # Errors
@@ -136,9 +139,9 @@ const GLIDE_STEPS: u32 = 16;
 /// the sections share their states and a blend of two splits' integrator gains is a split,
 /// so the bands stay a Butterworth set at every frame.
 #[derive(Clone, Debug)]
-pub struct CrossoverKernel {
+pub struct CrossoverKernel<F: Float + Lanes> {
     input: BusTopology,
-    bank: CrossoverBank,
+    bank: CrossoverBank<F>,
     model: CrossoverModel,
     /// The coefficients in flight; the first design after `prepare` or `reset` lands at once.
     coefficients: Glide<CrossoverCoefficients>,
@@ -146,7 +149,7 @@ pub struct CrossoverKernel {
     rate: SampleRate,
 }
 
-impl CrossoverKernel {
+impl<F: Float + Lanes> CrossoverKernel<F> {
     /// A crossover of `bands` bands on the bus `input`, each band where it is. Allocates the
     /// state. Its model until the first retarget is `controls` at 48 kHz: an unprepared node
     /// renders nothing, and the first block designs for the rate `prepare` was given.
@@ -181,7 +184,7 @@ impl CrossoverKernel {
     }
 }
 
-impl Kernel for CrossoverKernel {
+impl<F: Float + Lanes> Kernel for CrossoverKernel<F> {
     type Set = CrossoverSet;
 
     // A design arrives at the next grid point: the glide is one grid period long.
@@ -269,6 +272,9 @@ mod tests {
     use tutti_graph::{Cost, Node, ParamNode};
     use tutti_units::Tail;
 
+    // The node under test is `f32` (the session's audio format), so its tolerances are `f32`'s;
+    // an `f64` kernel has its own test below.
+
     const RATE: f64 = 48_000.0;
     /// A whole number of periods of every tone on the 5 Hz grid.
     const WINDOW: usize = 9_600;
@@ -289,7 +295,8 @@ mod tests {
     /// and a moderate cost.
     #[test]
     fn the_node_writes_bands_band_major_per_channel() {
-        let mut node = prepared(CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap());
+        let mut node =
+            prepared(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap());
         let shape = node.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -314,7 +321,8 @@ mod tests {
     /// -6.02 dB there), where the 500 Hz split passes almost none of it.
     #[test]
     fn a_param_write_moves_the_split() {
-        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap();
+        let node =
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap();
         let set = node.param_set();
         let mut node = prepared(node);
         assert!(set.set(Splits::addr(0), 2_000.0));
@@ -329,7 +337,8 @@ mod tests {
     #[test]
     fn a_fork_shares_no_cell() {
         tutti_graph::contract::assert_param_fork(
-            CrossoverNode::new(ChannelLayout::MONO, &[Hz(500.0), Hz(900.0), Hz(3_000.0)]).unwrap(),
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(900.0), Hz(3_000.0)])
+                .unwrap(),
         );
     }
 
@@ -337,7 +346,7 @@ mod tests {
     /// port's base is its cell.
     #[test]
     fn the_ports_are_the_indexed_cutoffs() {
-        let node = CrossoverNode::new(
+        let node = CrossoverNode::<f32>::new(
             ChannelLayout::STEREO,
             &[Hz(200.0), Hz(2_000.0), Hz(9_000.0)],
         )
@@ -361,8 +370,9 @@ mod tests {
     #[test]
     fn a_driven_port_moves_its_crossover() {
         use tutti_graph::contract::drive;
-        let mut node =
-            prepared(CrossoverNode::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap());
+        let mut node = prepared(
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap(),
+        );
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
         let lane = [2_000.0f32; 512];
         let mut low = Vec::new();
@@ -383,26 +393,26 @@ mod tests {
     #[test]
     fn the_node_validates_its_layout_and_frequencies() {
         assert!(matches!(
-            CrossoverNode::new(ChannelLayout::from_count(0), &[Hz(100.0)]),
+            CrossoverNode::<f32>::new(ChannelLayout::from_count(0), &[Hz(100.0)]),
             Err(CrossoverError::Channels { channels: 0 })
         ));
         // 11 channels x 6 bands = 66 ports.
         assert!(matches!(
-            CrossoverNode::new(
+            CrossoverNode::<f32>::new(
                 ChannelLayout::from_count(11),
                 &[Hz(1.0), Hz(2.0), Hz(3.0), Hz(4.0), Hz(5.0)]
             ),
             Err(CrossoverError::Channels { channels: 11 })
         ));
         assert!(
-            CrossoverNode::new(
+            CrossoverNode::<f32>::new(
                 ChannelLayout::from_count(10),
                 &[Hz(1.0), Hz(2.0), Hz(3.0), Hz(4.0), Hz(5.0)]
             )
             .is_ok()
         );
-        assert!(CrossoverNode::new(ChannelLayout::MONO, &[Hz(f64::NAN)]).is_err());
-        assert!(CrossoverNode::new(ChannelLayout::MONO, &[Hz(9.0), Hz(3.0)]).is_err());
+        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(f64::NAN)]).is_err());
+        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(9.0), Hz(3.0)]).is_err());
     }
 
     /// A node at 22.05 kHz with one frequency above its Nyquist still moves the
@@ -410,7 +420,8 @@ mod tests {
     /// frozen.
     #[test]
     fn a_frequency_above_the_rate_does_not_freeze_the_others() {
-        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(200.0), Hz(15_000.0)]).unwrap();
+        let node =
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(200.0), Hz(15_000.0)]).unwrap();
         let set = node.param_set();
         let rate = 22_050.0;
         let mut node = tutti_graph::contract::prepared(node, SampleRate::of(rate), 1024);
@@ -441,7 +452,7 @@ mod tests {
     /// effect on a render.
     #[test]
     fn prepare_reads_the_cells() {
-        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(500.0)]).unwrap();
+        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0)]).unwrap();
         node.param_set().set(Splits::addr(0), 2_000.0);
         let mut node = prepared(node);
         let out = render(&mut node, &[sine(200.0, RATE, 480)]);
@@ -449,5 +460,32 @@ mod tests {
         let high = amplitude_at(&out[1], 200.0, RATE);
         assert!((low - 1.0).abs() < 2e-2, "{low}");
         assert!(high < 2e-3, "{high}");
+    }
+
+    /// An `f64` kernel keeps its sections in `f64`: a constant of more than 24 bits through a
+    /// 3-band tree comes out of the bands summed as itself to 1e-12 once the transient has
+    /// decayed (the bands sum to an all-pass of unit DC gain; an `f32` state is off by 1e-8).
+    #[test]
+    fn an_f64_kernel_sums_a_wide_constant_to_itself_in_f64() {
+        use tutti_fixtures::signal::wide_signal;
+        let controls = CrossoverControls::ordered(&[Hz(200.0), Hz(3_000.0)]).unwrap();
+        let mut k = CrossoverKernel::<f64>::new(BusTopology::MONO, 3, &controls).unwrap();
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples(4_000)),
+        );
+        k.retarget(&controls);
+        let c = wide_signal(1)[0];
+        let x = vec![c; 4_000];
+        let mut out = vec![vec![0.0f64; x.len()]; 3];
+        let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+        k.render(
+            Planes::new(&[&x[..]]).unwrap(),
+            ControlLanes::<f64>::NONE,
+            PlanesMut::new(&mut views).unwrap(),
+        );
+        // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.
+        let sum = out[0][3_999] + out[1][3_999] + out[2][3_999];
+        assert!((sum - c).abs() < 1e-12, "{sum} against {c}");
     }
 }

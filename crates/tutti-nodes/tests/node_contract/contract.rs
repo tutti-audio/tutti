@@ -104,8 +104,8 @@ fn delay_line_row() -> Row {
 /// sample is nonzero, so the detector fires on it.
 fn crossover_row() -> Row {
     Row::new(
-        "CrossoverNode (stereo, 2 bands, right low band)",
-        || Box::new(CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
+        "CrossoverNode<f32> (stereo, 2 bands, right low band)",
+        || Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
         impulse(1),
         Detect::Threshold(0.0),
     )
@@ -116,8 +116,8 @@ fn crossover_row() -> Row {
 /// The summed output of a stereo multiband compressor, impulse on the right.
 fn multiband_row() -> Row {
     Row::new(
-        "MultibandCompressorNode (stereo, 3 bands, right channel)",
-        || Box::new(MultibandCompressorNode::new(ChannelLayout::STEREO, 3).unwrap()),
+        "MultibandCompressorNode<f32> (stereo, 3 bands, right channel)",
+        || Box::new(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap()),
         impulse(1),
         Detect::Threshold(0.0),
     )

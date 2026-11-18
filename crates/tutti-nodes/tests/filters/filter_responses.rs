@@ -146,7 +146,8 @@ fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave(
 /// unity in its own passband and gone in the others.
 #[test]
 fn a_crossover_is_6_db_down_at_each_neighbour_at_the_split() {
-    let node = || CrossoverNode::new(ChannelLayout::MONO, &[Hz(300.0), Hz(3_000.0)]).unwrap();
+    let node =
+        || CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(300.0), Hz(3_000.0)]).unwrap();
     let at_split = gains_db(node(), 300.0, 0.1);
     assert_eq!(at_split.len(), 3, "three bands of one channel");
     near("low band at the split", at_split[0], -6.02, 0.2);

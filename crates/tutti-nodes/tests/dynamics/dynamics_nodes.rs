@@ -279,7 +279,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "dynamic eq",
             Box::new(|block, moved, _| {
                 render(
-                    DynamicEqNode::from(
+                    DynamicEqNode::<f32>::from(
                         DynamicEqConfig::new(ChannelLayout::STEREO, Hz(1_000.0), Q(1.5))
                             .threshold(Db(-30.0))
                             .ratio(CompressionRatio(4.0))

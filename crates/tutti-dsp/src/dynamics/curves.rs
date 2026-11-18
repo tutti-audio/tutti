@@ -81,21 +81,16 @@ pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee
     }
 }
 
-/// The upward counterpart of [`compute_compressor_gain_reduction`]: the lift, in dB and `>= 0`,
-/// a level under the threshold is given.
+/// The upward counterpart of [`gain_reduction`], over the bare floats at the working precision
+/// `F`: the lift, in dB and `>= 0`, a level under the threshold is given.
 ///
 /// It is the reduction curve mirrored about the threshold: a level `x` dB under it, through
 /// the same knee and ratio, is lifted by what a level `x` dB over it is reduced by, so a
 /// ratio of 1 lifts nothing and the lift is continuous at the knee's edges.
 #[inline]
-pub(super) fn compute_upward_gain_lift(
-    input_db: Db,
-    threshold: Db,
-    ratio: CompressionRatio,
-    knee: Db,
-) -> Db {
-    let mirrored = Db(2.0 * threshold.get() - input_db.get());
-    compute_compressor_gain_reduction(mirrored, threshold, ratio, knee)
+pub(super) fn upward_gain_lift<F: Float>(input_db: F, threshold: F, ratio: F, knee: F) -> F {
+    let mirrored = F::from_f32(2.0) * threshold - input_db;
+    gain_reduction(mirrored, threshold, ratio, knee)
 }
 
 /// The gate's gain: `range` closed (`gate_level` 0) to 1 open (`gate_level` 1),

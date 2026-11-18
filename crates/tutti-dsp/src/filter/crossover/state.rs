@@ -1,6 +1,7 @@
 //! The state of a Linkwitz-Riley crossover tree: [`CrossoverState`], the sections' words of one
-//! channel, run with [`CrossoverCoefficients`] (a [`CrossoverBank`](super::CrossoverBank)
-//! holds one per channel).
+//! channel in the graph's float `F`, run with
+//! [`CrossoverCoefficients`](super::CrossoverCoefficients) narrowed to it (a
+//! [`CrossoverBank`](super::CrossoverBank) holds one per channel).
 //!
 //! Each split is a low-pass and a high-pass of two cascaded 2nd-order Butterworth sections
 //! (Q = 1/sqrt(2)) at the crossover frequency (Linkwitz and Riley, 1976). The two branches
@@ -73,79 +74,101 @@
 //! with frequency (the group delay is not constant), and the sum is an all-pass, not a
 //! delayed copy of the input. They add no latency.
 
-use super::CrossoverCoefficients;
+use tutti_buffers::Float;
+
 use super::bands::{MAX_BANDS, MAX_SPLITS};
-use super::coefficients::{DAMPING, Tpt};
+use super::coefficients::{Gains, Narrowed};
+use crate::Lanes;
 use crate::filter::svf_taps;
 
 /// A section's two state words, `[s1, s2]`: the integrators' trapezoidal memories.
-#[derive(Clone, Copy, Debug, Default)]
-struct Section([f64; 2]);
+#[derive(Clone, Copy, Debug)]
+struct Section<F>([F; 2]);
+
+impl<F: Float> Default for Section<F> {
+    fn default() -> Self {
+        Self([F::ZERO; 2])
+    }
+}
 
 /// What a section's step yields: its input and the band-pass and low-pass states.
 #[derive(Clone, Copy)]
-struct Taps {
-    x: f64,
-    bp: f64,
-    lp: f64,
+struct Taps<F> {
+    x: F,
+    bp: F,
+    lp: F,
+    /// The section's damping and its double.
+    k: F,
+    two_k: F,
 }
 
-impl Taps {
+impl<F: Float> Taps<F> {
     #[inline]
-    fn high_pass(self) -> f64 {
-        self.x - DAMPING * self.bp - self.lp
+    fn high_pass(self) -> F {
+        self.x - self.k * self.bp - self.lp
     }
 
     #[inline]
-    fn all_pass(self) -> f64 {
-        self.x - 2.0 * DAMPING * self.bp
+    fn all_pass(self) -> F {
+        self.x - self.two_k * self.bp
     }
 }
 
-impl Section {
-    /// One sample at `c`: the integrator step of [`svf_step`](crate::svf_step), with the taps
-    /// a split's low-pass, high-pass and all-pass are mixed from.
+impl<F: Float + Lanes> Section<F> {
+    /// One sample at the coefficients `c`: the integrator step of
+    /// [`svf_step`](crate::svf_step), with the taps a split's low-pass, high-pass and all-pass
+    /// are mixed from.
     #[inline]
-    fn tick(&mut self, c: &Tpt, x: f64) -> Taps {
-        let [bp, lp] = svf_taps([c.a1, c.a2, c.a3], &mut self.0, x);
-        Taps { x, bp, lp }
+    fn tick(&mut self, c: &Gains<F>, x: F) -> Taps<F> {
+        let [bp, lp] = svf_taps(c.a, &mut self.0, x);
+        Taps {
+            x,
+            bp,
+            lp,
+            k: c.k,
+            two_k: c.two_k,
+        }
     }
 }
 
 /// The state of one channel of a crossover tree: the sections' words, apart from the
-/// coefficients that run them ([`CrossoverCoefficients`]).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CrossoverState {
+/// coefficients that run them ([`CrossoverCoefficients`](super::CrossoverCoefficients)).
+#[derive(Clone, Copy, Debug)]
+pub struct CrossoverState<F> {
     /// Per split, the first stage of its low-pass and high-pass, which share the state.
-    first: [Section; MAX_SPLITS],
+    first: [Section<F>; MAX_SPLITS],
     /// Per split, the second stage of its low-pass and of its high-pass.
-    low: [Section; MAX_SPLITS],
-    high: [Section; MAX_SPLITS],
+    low: [Section<F>; MAX_SPLITS],
+    high: [Section<F>; MAX_SPLITS],
     /// `all_pass[j][k]`: band `j`'s all-pass for the later split `k > j`.
-    all_pass: [[Section; MAX_SPLITS]; MAX_SPLITS],
+    all_pass: [[Section<F>; MAX_SPLITS]; MAX_SPLITS],
 }
 
-impl CrossoverState {
-    /// One sample through the tree `coefficients` describe, in the state's own precision:
-    /// its bands, lowest first, in the first entries of the result (the rest are 0).
+impl<F: Float> Default for CrossoverState<F> {
+    fn default() -> Self {
+        Self {
+            first: [Section::default(); MAX_SPLITS],
+            low: [Section::default(); MAX_SPLITS],
+            high: [Section::default(); MAX_SPLITS],
+            all_pass: [[Section::default(); MAX_SPLITS]; MAX_SPLITS],
+        }
+    }
+}
+
+impl<F: Float + Lanes> CrossoverState<F> {
+    /// One sample through the tree `c` describes: its bands, lowest first, in the first
+    /// entries of the result (the rest are 0).
     #[inline]
-    pub(super) fn tick_f64(
-        &mut self,
-        coefficients: &CrossoverCoefficients,
-        x: f64,
-    ) -> [f64; MAX_BANDS] {
-        let mut out = [0.0f64; MAX_BANDS];
-        let splits = coefficients.bands - 1;
+    pub(super) fn tick(&mut self, c: &Narrowed<F>, x: F) -> [F; MAX_BANDS] {
+        let mut out = [F::ZERO; MAX_BANDS];
+        let splits = c.bands - 1;
         let mut rest = x;
         for (j, slot) in out.iter_mut().enumerate().take(splits) {
-            let c = &coefficients.split[j];
-            let first = self.first[j].tick(c, rest);
-            let mut lo = self.low[j].tick(c, first.lp).lp;
-            let hi = self.high[j].tick(c, first.high_pass());
+            let first = self.first[j].tick(&c.split[j], rest);
+            let mut lo = self.low[j].tick(&c.split[j], first.lp).lp;
+            let hi = self.high[j].tick(&c.split[j], first.high_pass());
             for k in j + 1..splits {
-                lo = self.all_pass[j][k]
-                    .tick(&coefficients.split[k], lo)
-                    .all_pass();
+                lo = self.all_pass[j][k].tick(&c.split[k], lo).all_pass();
             }
             *slot = lo;
             rest = hi.high_pass();

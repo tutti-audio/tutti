@@ -203,7 +203,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
-        let mut bank = CrossoverBank::new(ChannelLayout::MONO);
+        let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut coefficients = Glide::landed(model.coefficients());
         // One channel per band, band 0 first.
         let out = blocks(&impulse(1.0), model.bands(), |x, y| {

@@ -54,7 +54,11 @@ fn expected(hz: f64, g0: f64, g1: f64) -> f64 {
 
 /// An offline stereo session with the rig wired to the outputs, and the
 /// node's controls.
-fn rig() -> (Session, Key<MultibandCompressorNode>, MultibandControls) {
+fn rig() -> (
+    Session,
+    Key<MultibandCompressorNode<f32>>,
+    MultibandControls,
+) {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -66,7 +70,8 @@ fn rig() -> (Session, Key<MultibandCompressorNode>, MultibandControls) {
     let (high, _) = g.add(ForkByClone(
         Osc::sine(Hz(HIGH)).with_amplitude(Amplitude(A as f32)),
     ));
-    let (mb, controls) = g.add(MultibandCompressorNode::new(ChannelLayout::STEREO, 2).unwrap());
+    let (mb, controls) =
+        g.add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap());
     g.set_sources(InPort::new(mb, 0), [OutPort::new(low, 0)])
         .unwrap();
     g.set_sources(InPort::new(mb, 1), [OutPort::new(high, 0)])

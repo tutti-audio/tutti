@@ -1,7 +1,7 @@
 //! [`EnvelopeFilterNode`]: a state-variable filter whose cutoff follows the signal's level.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, SvfType};
+use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lanes, Lerp, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
@@ -78,12 +78,15 @@ impl EnvelopeFilterConfig {
 /// resonant filter rings for as long as its Q says. No latency. A [`KernelNode`]; made from
 /// an [`EnvelopeFilterConfig`] (`EnvelopeFilterNode::from`).
 ///
+/// `F` is the state precision of the envelope and the filter, `f64` by default: an `f64` graph
+/// runs them in `f64`, and a view of the other sample format is converted at the edges.
+///
 /// # Panics
 ///
 /// `EnvelopeFilterNode::from` panics past 16 channels: a filter is one bus.
-pub type EnvelopeFilterNode = KernelNode<EnvelopeFilterKernel>;
+pub type EnvelopeFilterNode<F = f64> = KernelNode<EnvelopeFilterKernel<F>>;
 
-impl From<EnvelopeFilterConfig> for EnvelopeFilterNode {
+impl<F: Float + Lanes + Lerp> From<EnvelopeFilterConfig> for EnvelopeFilterNode<F> {
     fn from(config: EnvelopeFilterConfig) -> Self {
         Self::with_kernel(
             EnvelopeFilterKernel::new(filter_bus(config.width), config.ty),
@@ -114,16 +117,16 @@ control_set! {
 
 /// The filter as a [`Kernel`]: an [`EnvelopeFilterBank`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct EnvelopeFilterKernel {
+pub struct EnvelopeFilterKernel<F: Float + Lanes> {
     input: BusTopology,
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
-    bank: Option<EnvelopeFilterBank>,
+    bank: Option<EnvelopeFilterBank<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl EnvelopeFilterKernel {
+impl<F: Float + Lanes + Lerp> EnvelopeFilterKernel<F> {
     fn new(input: BusTopology, ty: SvfType) -> Self {
         Self {
             input,
@@ -134,7 +137,7 @@ impl EnvelopeFilterKernel {
     }
 }
 
-impl Kernel for EnvelopeFilterKernel {
+impl<F: Float + Lanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     type Set = EnvelopeFilterSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -181,5 +184,36 @@ impl Kernel for EnvelopeFilterKernel {
 
     fn tail(&self) -> Tail {
         Tail::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_fixtures::signal::wide_signal;
+
+    /// An `f64` kernel keeps the filter in `f64`: a constant `c` of more than 24 bits through a
+    /// low-pass at depth 0 (a fixed filter of unit DC gain) settles on `c` to 1e-12 (an `f32`
+    /// state is off by 1e-8).
+    #[test]
+    fn an_f64_kernel_settles_a_wide_constant_on_itself_in_f64() {
+        let mut k = EnvelopeFilterKernel::<f64>::new(BusTopology::MONO, SvfType::LowPass);
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples(4_000)),
+        );
+        k.retarget(&EnvelopeFilterControls {
+            base: Hz(1_000.0),
+            ..EnvelopeFilterControls::DEFAULT
+        });
+        let c = wide_signal(1)[0];
+        let x = vec![c; 4_000];
+        let mut y = vec![0.0f64; x.len()];
+        k.render(
+            Planes::new(&[&x[..]]).unwrap(),
+            ControlLanes::<f64>::NONE,
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        );
+        assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);
     }
 }

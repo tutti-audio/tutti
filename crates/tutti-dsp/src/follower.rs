@@ -1,7 +1,7 @@
 //! [`Follower`]: a quantity that grows toward a target at one rate and falls back at another.
 
 use tutti_buffers::Float;
-use tutti_units::{Ballistics, SampleRate, Unit};
+use tutti_units::{Ballistics, SampleRate};
 
 use crate::smoother::Smoother;
 
@@ -31,15 +31,9 @@ impl<F: Float> Follower<F> {
         }
     }
 
-    /// One step of `state` toward `target`, for any unit whose raw is `F`, at the attack's coefficient while the target is
-    /// above `state` and at the release's otherwise.
-    #[inline]
-    pub(crate) fn follow<U: Unit<Raw = F>>(&self, state: U, target: U) -> U {
-        U::from_raw(self.follow_raw(state.to_raw(), target.to_raw()))
-    }
-
-    /// [`follow`](Self::follow) over the bare float, for a quantity no unit of raw `F` covers
-    /// yet; it goes when `Db` and `Amplitude` store `f64`.
+    /// One step of `state` toward `target` over the bare float, a per-sample value in `F`: at
+    /// the attack's coefficient while the target is above `state` and at the release's
+    /// otherwise.
     #[inline]
     pub(crate) fn follow_raw(&self, state: F, target: F) -> F {
         let coeff = if target > state {

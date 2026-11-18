@@ -3,6 +3,8 @@
 
 use core::f64::consts::SQRT_2;
 
+use tutti_buffers::Float;
+
 use super::bands::MAX_SPLITS;
 use crate::filter::integrator_gains;
 use crate::{Biquad, Lerp};
@@ -116,5 +118,44 @@ impl Lerp for CrossoverCoefficients {
             *o = Tpt::new(crate::lerp(a.g, b.g, t));
         }
         out
+    }
+}
+
+/// A split's section coefficients at the state's precision `F`: the integrator gains and the
+/// damping with its double, what a section runs a frame at.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Gains<F> {
+    /// `[a1, a2, a3]`.
+    pub(super) a: [F; 3],
+    pub(super) k: F,
+    pub(super) two_k: F,
+}
+
+impl Tpt {
+    /// These coefficients at precision `F`: the design is in `f64`, narrowed here once.
+    pub(super) fn narrowed<F: Float>(&self) -> Gains<F> {
+        Gains {
+            a: [self.a1, self.a2, self.a3].map(F::from_f64),
+            k: F::from_f64(DAMPING),
+            two_k: F::from_f64(2.0 * DAMPING),
+        }
+    }
+}
+
+/// [`CrossoverCoefficients`] narrowed to the state's precision `F`, once per design: what a
+/// [`CrossoverState<F>`](super::CrossoverState) runs a frame at.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Narrowed<F> {
+    pub(super) bands: usize,
+    pub(super) split: [Gains<F>; MAX_SPLITS],
+}
+
+impl CrossoverCoefficients {
+    /// These coefficients at precision `F`.
+    pub(super) fn narrowed<F: Float>(&self) -> Narrowed<F> {
+        Narrowed {
+            bands: self.bands,
+            split: self.split.map(|t| t.narrowed()),
+        }
     }
 }

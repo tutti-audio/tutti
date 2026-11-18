@@ -222,16 +222,17 @@ fn sweep() {
         }));
         add(probe("crossover", b, || {
             Box::new(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(f64::from(b))]).unwrap_or_else(
-                    |_| CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap(),
-                ),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(f64::from(b))])
+                    .unwrap_or_else(|_| {
+                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                    }),
             )
         }));
         add(probe("crossover2", b, || {
             Box::new(
-                CrossoverNode::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(f64::from(b))])
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(f64::from(b))])
                     .unwrap_or_else(|_| {
-                        CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
                     }),
             )
         }));
