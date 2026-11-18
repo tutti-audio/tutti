@@ -7,7 +7,7 @@
 //! these ([`Glide`]), and renders each speaker's channel with
 //! [`VbapGains::render_channel`].
 
-use tutti_buffers::Fold;
+use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_types::{ArcDegrees, Azimuth, Elevation, MAX_CHANNELS, Spread, StereoWidth};
 
 use crate::{Glide, Lerp};
@@ -77,36 +77,39 @@ impl VbapGains {
     /// width crossing the mono-fold threshold between grid points crossfades
     /// instead of stepping.
     #[inline]
-    pub fn render_channel(
+    pub fn render_channel<F: Float>(
         glide: &Glide<VbapGains>,
         first: u32,
         speaker: Option<usize>,
-        fold: &Fold,
-        left: &[f32],
-        right: &[f32],
-        out: &mut [f32],
+        fold: &Fold<F>,
+        left: Mono<'_, F>,
+        right: Mono<'_, F>,
+        mut out: MonoMut<'_, F>,
     ) {
+        let (left, right, out) = (left.samples(), right.samples(), out.samples_mut());
         let Some(s) = speaker else {
-            out.fill(0.0);
+            out.fill(F::ZERO);
             return;
         };
         let (from, to, n) = (&glide.from, &glide.to, glide.n);
         // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
-        // for one speaker's pair: `at` would blend all of the set for each frame.
+        // for one speaker's pair: `at` would blend all of the set for each frame. The
+        // gains are solved in `f32` and enter the render's format here.
         let blend = |from: f32, to: f32, k: u32| {
-            if k >= n { to } else { from.lerp(&to, k, n) }
+            F::from_f32(if k >= n { to } else { from.lerp(&to, k, n) })
         };
         let steps = first..;
         // A pair of ends that are the same bits is a held gain, which skips the
         // blend (`-0.0` and `+0.0` differ in bits, so a sign change is a glide).
         if from.mono && to.mono {
             let (g_from, g_to) = (from.a[s], to.a[s]);
-            let mono = |l: f32, r: f32| {
-                let mut m = [0.0];
+            let mono = |l: F, r: F| {
+                let mut m = [F::ZERO];
                 fold.frame(&[l, r], &mut m);
                 m[0]
             };
             if g_from.to_bits() == g_to.to_bits() {
+                let g_to = F::from_f32(g_to);
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = mono(l, r) * g_to;
                 }
@@ -119,6 +122,7 @@ impl VbapGains {
             let (a_from, b_from) = from.pair(s);
             let (a_to, b_to) = to.pair(s);
             if a_from.to_bits() == a_to.to_bits() && b_from.to_bits() == b_to.to_bits() {
+                let (a_to, b_to) = (F::from_f32(a_to), F::from_f32(b_to));
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = l * a_to + r * b_to;
                 }
