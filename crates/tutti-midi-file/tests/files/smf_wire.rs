@@ -148,7 +148,7 @@ fn running_status_repeats_the_last_channel_status() {
 /// A meta event cancels running status: a data byte after one has none.
 /// (The bytes are chosen so that if the status were `FF`, they would read as
 /// a valid meta event: type `3E`, length 0.)
-/// Spec: smf/track-chunks#29, smf/track-chunks#30
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn a_meta_event_cancels_running_status() {
     let bytes = file(vec![
@@ -169,7 +169,7 @@ fn a_meta_event_cancels_running_status() {
 /// A sysex event cancels running status the same way (under a surviving
 /// `F0` status the byte `00` would be a valid empty sysex). The sysex is six
 /// bytes with its `F7`, so the refused event starts at byte 32.
-/// Spec: smf/track-chunks#29, smf/track-chunks#30
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn a_sysex_cancels_running_status() {
     let bytes = file(vec![
@@ -257,7 +257,7 @@ fn an_alien_chunk_is_skipped() {
 }
 
 /// A track chunk past the count the header declares disagrees with it.
-/// Spec: smf/header-chunk#8
+/// Spec: smf/header-chunk#9
 #[test]
 fn more_tracks_than_declared_is_malformed() {
     let two = build_smf(1, Division::Metrical(TPQ), &[vec![], vec![]]);
@@ -276,7 +276,7 @@ fn more_tracks_than_declared_is_malformed() {
 }
 
 /// A header chunk longer than six bytes is read for its first six.
-/// Spec: smf/formats#17, smf/header-chunk#2
+/// Spec: smf/formats#18, smf/header-chunk#2, smf/header-chunk#3
 #[test]
 fn a_longer_header_is_read() {
     let mut bytes = Vec::new();
@@ -297,7 +297,7 @@ fn a_longer_header_is_read() {
 /// SMF 1.0 section 3.3: a meta event may be bigger than a program expects, and
 /// the program ignores what is past what it knows. A Set Tempo, a Time Signature and a Key Signature with extra data
 /// are read as themselves, from the bytes they define.
-/// Spec: smf/time-signature#1, smf/track-chunks#26, smf/track-chunks#27
+/// Spec: smf/time-signature#1, smf/track-chunks#27, smf/track-chunks#28
 #[test]
 fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
     let bytes = raw_track(&[
@@ -341,7 +341,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
 /// The file model is lossless: the bytes past what a program knows are written
 /// back (SMF 1.0 section 3.3: a program adds nothing of its own to a meta event,
 /// and so must not drop what is there).
-/// Spec: smf/track-chunks#28
+/// Spec: smf/track-chunks#29
 #[test]
 fn a_longer_meta_event_is_written_back_as_it_was() {
     let bytes = raw_track(&[
@@ -397,7 +397,7 @@ fn the_writer_elides_a_repeated_status() {
 }
 
 /// After a meta event the status is stated again.
-/// Spec: smf/track-chunks#29, smf/track-chunks#30
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn the_writer_restates_a_status_after_a_meta_event() {
     let meta = FileEvent::Meta(Meta::Text {
@@ -438,7 +438,7 @@ fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
 
 /// SMF 1.0 section 1.1: a length of 128 or more is a variable-length quantity
 /// of two bytes or more (200 is `81 48`, 300 is `82 2C`).
-/// Spec: smf/track-chunks#9, smf/track-chunks#23, smf/track-chunks#24
+/// Spec: smf/track-chunks#9, smf/track-chunks#24, smf/track-chunks#25
 #[test]
 fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     let text = vec![b'a'; 200];
@@ -505,7 +505,7 @@ fn a_written_file_reads_back_equal() {
 /// writes back byte for byte, reads back the same, and `to_clip` drops it.
 /// A meta type byte of 0x80 or more is no type (section 3.3: below 128): the
 /// reader keeps it the same way.
-/// Spec: smf/track-chunks#24
+/// Spec: smf/track-chunks#25
 #[test]
 fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
     let cases: [(u8, &[u8]); 7] = [
@@ -564,7 +564,7 @@ fn a_second_header_chunk_is_refused_where_it_starts() {
 }
 
 /// A header chunk of four bytes has no division.
-/// Spec: smf/header-chunk#2
+/// Spec: smf/header-chunk#2, smf/header-chunk#3
 #[test]
 fn a_header_shorter_than_six_bytes_is_refused() {
     let mut bytes = Vec::new();
@@ -582,7 +582,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
 }
 
 /// A format 0 file is one track (SMF 1.0 section 2.1).
-/// Spec: smf/formats#1, smf/header-chunk#5, smf/header-chunk#9
+/// Spec: smf/formats#1, smf/header-chunk#6, smf/header-chunk#10
 #[test]
 fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
@@ -598,7 +598,7 @@ fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
 
 /// The text kinds are the meta types 01 to 09 (SMF 1.0 section 3.3): a read of
 /// each gives the kind, and a write the same bytes.
-/// Spec: smf/copyright-notice#1, smf/text-event#2, smf/text-event#6, smf/track-chunks#23, smf/track-chunks#24
+/// Spec: smf/copyright-notice#1, smf/text-event#2, smf/text-event#6, smf/track-chunks#24, smf/track-chunks#25
 #[test]
 fn every_text_meta_type_reads_and_writes_back() {
     for (meta_type, kind) in [
@@ -625,7 +625,7 @@ fn every_text_meta_type_reads_and_writes_back() {
 
 /// The header's format word is 0, 1 or 2 (SMF 1.0 section 2.1): a read of each
 /// writes the word back.
-/// Spec: smf/header-chunk#4
+/// Spec: smf/header-chunk#5
 #[test]
 fn every_format_word_reads_and_writes_back() {
     for word in 0u16..=2 {
@@ -780,7 +780,7 @@ fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte(
 /// stored as `F0 05 43 12 00 07 F7`, and `F0 43 12 00`, 200 ticks (`81 48`),
 /// `43 12 00 43 12 00`, 100 ticks (`64`), `43 12 00 F7` are an `F0` event and
 /// two `F7` events.
-/// Spec: smf/track-chunks#8, smf/track-chunks#10, smf/track-chunks#11, smf/track-chunks#13, smf/track-chunks#15, smf/track-chunks#16, smf/track-chunks#21
+/// Spec: smf/track-chunks#8, smf/track-chunks#10, smf/track-chunks#11, smf/track-chunks#13, smf/track-chunks#14, smf/track-chunks#15, smf/track-chunks#16, smf/track-chunks#17, smf/track-chunks#22, smf/track-chunks#23
 #[test]
 fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
     let whole = raw_track(&[

@@ -533,21 +533,26 @@ pub(super) const SMF_TEXT: Named = Named {
     words: &[
         ("must", "required"),
         ("shall", "required"),
-        ("always", "required"),
-        ("never", "required"),
         ("required", "required"),
-        ("assumed", "required"),
+        ("important", "required"),
+        ("vital", "required"),
         ("should", "recommended"),
         ("polite", "recommended"),
         ("idea", "recommended"),
         ("ideally", "recommended"),
         ("may", "permitted"),
         ("optional", "permitted"),
+        ("always", "required"),
+        ("never", "required"),
+        ("assumed", "required"),
     ],
     phrases: &[
         ("not required", "may"),
         ("not optional", "must"),
         ("a/ways", "always"),
+        // A "should" inside a definition of what an event does not imply (the spec writes F0 as `FO`)
+        // binds nothing; the sentence defines the F7 event form.
+        ("imply that an FO should", "imply that an FO is to"),
     ],
     defs: &[
         "stored",
@@ -574,6 +579,8 @@ pub(super) const SMF_TEXT: Named = Named {
         "number",
         "reserved",
         "omitted",
+        "imply",
+        "ascii",
     ],
 };
 
@@ -1029,7 +1036,15 @@ fn keyword_items(lines: &[Line], doc: &Doc) -> Vec<Item> {
     let mut count: BTreeMap<String, u32> = BTreeMap::new();
     let mut out = Vec::new();
     for unit in units(lines) {
-        for s in sentences(&unit.text) {
+        let parts: Vec<&str> = match doc.tables {
+            // Standard MIDI Files joins independent rules with `;`.
+            Tables::Named(_) => sentences(&unit.text)
+                .into_iter()
+                .flat_map(|s| s.split("; "))
+                .collect(),
+            _ => sentences(&unit.text),
+        };
+        for s in parts {
             let (kind, negated, def) = match doc.tables {
                 Tables::Named(n) => match smf_kind(s, n) {
                     Some(k) => k,
@@ -1068,7 +1083,7 @@ fn keyword_items(lines: &[Line], doc: &Doc) -> Vec<Item> {
 fn smf_kind(sentence: &str, named: &Named) -> Option<(&'static str, bool, bool)> {
     let mut read = sentence.to_owned();
     for (phrase, word) in named.phrases {
-        read = read.replace(phrase, word);
+        read = replace_ignoring_case(&read, phrase, word);
     }
     if let Some((kind, negated)) = spec_text::keyword(&read, named.words) {
         return Some((kind, negated, false));
@@ -1077,6 +1092,20 @@ fn smf_kind(sentence: &str, named: &Named) -> Option<(&'static str, bool, bool)>
         .split(|c: char| !c.is_ascii_alphabetic())
         .any(|w| named.defs.contains(&w.to_ascii_lowercase().as_str()));
     defines.then_some(("required", false, true))
+}
+
+/// `text` with each ASCII-case-insensitive occurrence of `phrase` replaced.
+fn replace_ignoring_case(text: &str, phrase: &str, with: &str) -> String {
+    let (lower, phrase) = (text.to_ascii_lowercase(), phrase.to_ascii_lowercase());
+    let mut out = String::new();
+    let mut at = 0;
+    while let Some(found) = lower[at..].find(&phrase) {
+        out.push_str(&text[at..at + found]);
+        out.push_str(with);
+        at += found + phrase.len();
+    }
+    out.push_str(&text[at..]);
+    out
 }
 
 /// Whether `line` is the heading `text`: its tail is the text and what comes
@@ -1125,7 +1154,7 @@ fn named_lines(text: &str, named: &Named) -> Result<Vec<Line>, String> {
         .ok_or_else(|| format!("no line `{}` closes the spec", named.end))?;
     let body = &all[from..to];
     let mut out = Vec::new();
-    let mut found = vec![false; named.headings.len()];
+    let mut expected = 0;
     let mut skip_to = 0;
     for (i, l) in body.iter().enumerate() {
         if i < skip_to {
@@ -1159,14 +1188,27 @@ fn named_lines(text: &str, named: &Named) -> Result<Vec<Line>, String> {
             .position(|(h, _)| is_named_heading(l, h))
         {
             Some(k) => {
-                found[k] = true;
+                if k > expected {
+                    return Err(format!(
+                        "heading `{}` not found",
+                        named.headings[expected].0
+                    ));
+                }
+                if k < expected {
+                    let want = named.headings.get(expected).map_or("none", |h| h.0);
+                    return Err(format!(
+                        "heading `{}` is out of order or repeated: the spec's headings come once each, in order, and `{want}` was expected",
+                        named.headings[k].0
+                    ));
+                }
+                expected += 1;
                 out.push(Line::Heading(named.headings[k].1.to_owned()));
             }
             None => out.push(Line::Text((*l).to_owned())),
         }
     }
-    if let Some(k) = found.iter().position(|f| !f) {
-        return Err(format!("heading `{}` not found", named.headings[k].0));
+    if let Some((text, _)) = named.headings.get(expected) {
+        return Err(format!("heading `{text}` not found"));
     }
     Ok(out)
 }
@@ -1983,5 +2025,64 @@ mod tests {
             Some(("required", false, true))
         );
         assert_eq!(kind("A plain remark."), None);
+    }
+
+    #[test]
+    fn a_named_spec_reads_a_phrase_in_any_case_and_a_modal_with_always_as_the_modal() {
+        let kind = |s: &str| smf_kind(s, &SMF_TEXT);
+        assert_eq!(
+            kind("Not required here."),
+            Some(("permitted", false, false))
+        );
+        assert_eq!(kind("A/ways present."), Some(("required", false, false)));
+        assert_eq!(
+            kind("Tempo should always be stored first."),
+            Some(("recommended", false, false))
+        );
+        assert_eq!(
+            kind("It is important to honor the length."),
+            Some(("required", false, false))
+        );
+    }
+
+    #[test]
+    fn a_named_spec_splits_a_sentence_at_a_semicolon() {
+        let text = smf_text().replace(
+            "Programs must ignore a chunk they",
+            "A reader should skip it; a writer must not drop it. Programs must ignore a chunk they",
+        );
+        let items = extract(&SMF, &text).unwrap();
+        let kinds: Vec<_> = items
+            .iter()
+            .map(|i| (i.id.as_str(), i.kind, i.text.as_str()))
+            .collect();
+        assert_eq!(
+            kinds[0],
+            (
+                "smf/delta-times#1",
+                "recommended",
+                "A reader should skip it"
+            )
+        );
+        assert_eq!(
+            kinds[1],
+            (
+                "smf/delta-times#2",
+                "required",
+                "a writer must not drop it."
+            )
+        );
+    }
+
+    #[test]
+    fn a_named_spec_with_a_heading_repeated_or_out_of_order_is_an_error() {
+        let text = smf_text().replace("Marker\nPlain", "Lyric\nPlain");
+        let err = extract(&SMF, &text).unwrap_err();
+        assert!(err.contains("out of order or repeated"), "{err}");
+        let again = smf_text().replace(
+            "Plain words.\n\nSMPTE Offset",
+            "Plain words.\n\nLyric\nSMPTE Offset",
+        );
+        assert!(extract(&SMF, &again).unwrap_err().contains("`Lyric`"));
     }
 }

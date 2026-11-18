@@ -108,7 +108,7 @@ fn everything() -> Vec<RawEvent> {
 /// that writing it and reading that back is the same file, and that an
 /// independent decoder reads the same events in the original and the rewrite
 /// (running status made explicit by it).
-/// Spec: smf/formats#4, smf/formats#5, smf/key-signature#1, smf/set-tempo#1, smf/text-event#2, smf/time-signature#1, smf/track-chunks#22, smf/track-chunks#25
+/// Spec: smf/formats#4, smf/formats#5, smf/key-signature#1, smf/set-tempo#1, smf/text-event#2, smf/time-signature#1, smf/track-chunks#14, smf/track-chunks#23, smf/track-chunks#26
 #[test]
 fn every_event_kind_survives_a_read_and_a_write() {
     for format in [0u16, 1, 2] {
@@ -262,7 +262,7 @@ fn a_sysex_between_notes_does_not_shift_the_beat_grid() {
 /// Sequence 0 is 120 BPM (a beat is 0.5 s) and sequence 1 is 60 BPM (a beat is
 /// 1 s); a note a beat in is at 0.5 s in the first and 1 s in the second, and
 /// two beats in is 1 s and 2 s. The file has no one-timeline view.
-/// Spec: smf/formats#5, smf/header-chunk#7
+/// Spec: smf/formats#5, smf/header-chunk#8
 #[test]
 fn format_2_keeps_its_sequences_apart() {
     let file = read(&smf(
@@ -332,7 +332,7 @@ fn format_2_keeps_its_sequences_apart() {
 /// Sequence 0 sets no tempo (120 BPM, 0.5 s a beat); sequence 1 is 120 BPM
 /// until beat 1 and 60 BPM after it (1 s a beat). Beat 3 is 1.5 s in sequence 0
 /// and 0.5 + 2 = 2.5 s in sequence 1.
-/// Spec: smf/header-chunk#7
+/// Spec: smf/header-chunk#8
 #[test]
 fn a_format_2_sequences_tempo_changes_stay_in_that_sequence() {
     let file = read(&smf(
@@ -360,7 +360,7 @@ fn a_format_2_sequences_tempo_changes_stay_in_that_sequence() {
 
 /// Format 1: the tracks stay apart and named, and the merged view is sorted by
 /// tick with ties in track order.
-/// Spec: smf/formats#4, smf/header-chunk#6
+/// Spec: smf/formats#4, smf/header-chunk#7
 #[test]
 fn merged_events_are_in_time_order_ties_in_track_order() {
     let file = read(&smf(
@@ -436,7 +436,7 @@ fn the_tempo_map_follows_the_file() {
 
 /// The map pools every track's Set Tempo: track 0 sets 60 at beat 4, track 1
 /// sets 100 BPM at beat 0, so beat 0 plays at 100.
-/// Spec: smf/header-chunk#6
+/// Spec: smf/header-chunk#7
 #[test]
 fn the_tempo_map_pools_every_track() {
     let file = read(&smf(
@@ -637,7 +637,7 @@ fn a_chunk_cut_short_is_truncated() {
 
 /// Fewer track chunks than the header declares is `Truncated`: here the second
 /// of two is missing whole, and the cut is on a chunk boundary.
-/// Spec: smf/formats#3, smf/header-chunk#8
+/// Spec: smf/formats#3, smf/header-chunk#9
 #[test]
 fn a_file_missing_a_track_is_truncated() {
     let two = smf(
@@ -805,7 +805,7 @@ fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
 /// The writer's framing is the spec's bytes (SMF 1.0 sections 2.1, 2.2, 3 and
 /// 1.1): the header chunk, a length for each track chunk, a two-byte delta for
 /// tick 1920 (`8F 00`) and the End of Track each track ends with.
-/// Spec: smf/chunks#1, smf/chunks#4, smf/chunks#5, smf/chunks#7, smf/delta-times#2, smf/end-of-track#1, smf/header-chunk#1, smf/header-chunk#2, smf/header-chunk#3, smf/meta-events#11, smf/set-tempo#1, smf/track-chunks#1
+/// Spec: smf/chunks#1, smf/chunks#4, smf/chunks#5, smf/chunks#7, smf/delta-times#2, smf/end-of-track#1, smf/header-chunk#1, smf/header-chunk#2, smf/header-chunk#3, smf/header-chunk#4, smf/meta-events#11, smf/set-tempo#1, smf/track-chunks#1
 #[test]
 fn the_writer_frames_a_file_as_the_spec_bytes() {
     let file = MidiFile::smf(
@@ -838,7 +838,7 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
     );
 }
 
-/// Spec: smf/formats#1, smf/header-chunk#5, smf/header-chunk#9
+/// Spec: smf/formats#1, smf/header-chunk#6, smf/header-chunk#10
 #[test]
 fn a_format_0_file_has_one_track() {
     let two = vec![Track::default(), Track::default()];
@@ -874,7 +874,7 @@ fn microseconds_per_quarter_is_0_to_16777215() {
 /// Track, Set Tempo, Time and Key Signature) is refused as an `Other`, and so
 /// is a type byte with its top bit set; every other type byte below 128 is
 /// taken.
-/// Spec: smf/track-chunks#24
+/// Spec: smf/track-chunks#25
 #[test]
 fn an_other_meta_kind_is_a_type_byte_with_no_variant() {
     let typed = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 0x2F, 0x51, 0x58, 0x59];
@@ -886,7 +886,7 @@ fn an_other_meta_kind_is_a_type_byte_with_no_variant() {
 
 /// A write then a read gives back an `Other` of every kind it can hold, data
 /// of any length included.
-/// Spec: smf/track-chunks#25
+/// Spec: smf/track-chunks#26
 #[test]
 fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
     let events: Vec<(Tick, FileEvent)> = (0..0x80u8)
