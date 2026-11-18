@@ -1,3 +1,4 @@
+2 CLAUDE.md
 1 crates/tutti-au-ffi/src/editor/cocoa.rs
 1 crates/tutti-au-ffi/src/listener.rs
 1 crates/tutti-au-ffi/src/parameters.rs

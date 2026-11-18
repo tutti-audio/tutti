@@ -93,6 +93,9 @@ std only. A rule the compiler already enforces is not a gate.
   reads a driven param through the declaration (`declared_param`), never by port index. A
   plain node is `ForkByClone` or `Unforkable`. The crate docs' "Writing a node" is the
   guide.
+- A node is `Node<F>` for any `F`. It reads params as `&[F]` lanes or `F::from_unit` cells,
+  and its state is `F`. An f32 graph and an f64 graph never mix except through
+  `Bridged<G, N>`.
 - `Shape::tail` is a ceiling. A node whose ring-out follows its params narrows it per block
   with `Io::report_tail`, covering the ring-out and erring long. A finite ceiling past
   `MAX_NODE_TAIL` counts as unbounded; nothing clamps it.
@@ -197,6 +200,10 @@ touched.
 - Measurements are not controls: `Confidence`, `Correlation` and `StereoBalance` are readings.
 - Types stop at C ABI, IPC and wire boundaries; say why in a comment there.
 - Add a unit only for a distinct range or a distinct algebra.
+- A quantity has one width: continuous units are `f64`, positions and counts are integers.
+  Data is generic over the graph's `F`. A quantity becomes data only through `F::from_unit(u)`,
+  `F::lit(x)` for a literal, a kernel's `Design::of`, or the graph's lane render;
+  `cargo xtask check-width` holds it.
 ### Range-checked values
 
 - A range-checked type has the `MidiChannel` shape: `new(raw) -> Option` (never clamps),
@@ -206,6 +213,8 @@ touched.
   `tutti_fixtures::check_range_contract`.
 - Write a new range-checked type with `tutti_units::ranged!`, never by hand or with a
   crate-local macro; a hand-written one moves to it when its file is touched.
+- The `ranged!` raw for a continuous range is `f64`; an integer range stays its integer raw
+  (MIDI words, counts).
 - Make a wrong value unwritable before adding a runtime check for it.
 
 ### Edges and buffers
@@ -223,6 +232,9 @@ touched.
   truncated.
 - Every `Source::pull` answers `Starved` (not yet) or `Ended` (never again) correctly, and
   `Failed` only after the frames before it.
+- A width change between data is the user's: `Bridged` in a graph, std `From`/`as` on app
+  buffers, the decode width chosen at load. tutti never converts float data on its own; a
+  plugin that can't take `F` is an error carrying the plugin.
 - A copy out of the graph is a tap (`TapReader`, `EventTapReader`), a copy in is an inlet.
   Both count what they lose and never block.
 
