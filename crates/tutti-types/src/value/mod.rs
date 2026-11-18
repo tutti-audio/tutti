@@ -14,4 +14,4 @@ pub mod param;
 
 pub use atomic_rate::{AtomicSampleRate, ParkedSampleRate};
 pub use max_block::{InvalidMaxBlock, MaxBlock};
-pub use param::{Param, Param64, ParamCell, ParamRaw};
+pub use param::{Param, Param64, ParamCell};

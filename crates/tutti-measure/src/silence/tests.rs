@@ -3,10 +3,10 @@ use crate::fold_uneven;
 
 const RATE: f64 = 1000.0; // 1 sample = 1 ms keeps the arithmetic readable
 
-fn cfg(threshold: Db, min_silence_ms: f32) -> SilenceConfig {
+fn cfg(threshold: Db, min_silence_ms: f64) -> SilenceConfig {
     SilenceConfig::new(
         FiniteLevel::new(threshold).unwrap(),
-        Seconds::from_f32(min_silence_ms / 1000.0),
+        Seconds(min_silence_ms / 1000.0),
     )
 }
 

@@ -2,17 +2,15 @@
 //!
 //! Wraps an `Arc` of an atomic float with a `PhantomData<U>` marker so
 //! different units are distinct types at compile time, at zero runtime cost
-//! over a bare `Arc<AtomicF32>`. The atomic follows the unit's raw
-//! representation ([`ParamRaw`]): [`AtomicF32`] for an `f32` unit,
-//! [`AtomicF64`] for an `f64` one ([`Seconds`](tutti_units::Seconds)). `SampleRate`
-//! is `f64`-backed and is not modulated at audio rate: construct it directly,
+//! over a bare `Arc<AtomicF64>`: every continuous unit's raw is `f64`.
+//! `SampleRate` is not modulated at audio rate: construct it directly,
 //! don't wrap it in `Param`.
 //!
 //! RT-safety: `load`/`store` never clone the `Arc`. Only `handle()` does, and
 //! it is intended for control-thread construction, not the audio path.
 //!
-//! [`ParamCell`] is a cell with its width erased: the value a host that
-//! addresses params without their unit types (a modulation lane's knob,
+//! [`ParamCell`] is a cell addressed without its unit type: the value a host
+//! that addresses params by kind (a modulation lane's knob,
 //! `tutti_graph::ParamSet`) reads and writes as `f64`.
 //!
 //! [`Param64<U>`](Param64) is a different thing: an inline, unshared `f64`
@@ -22,121 +20,41 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::sync::Arc;
-use atomic_float::{AtomicF32, AtomicF64};
+use atomic_float::AtomicF64;
 use tutti_units::Unit;
 
-mod sealed {
-    pub trait Sealed {}
-    impl Sealed for f32 {}
-    impl Sealed for f64 {}
-}
-
-/// A raw float a [`Param`] cell can hold: `f32` (an [`AtomicF32`]) or `f64`
-/// (an [`AtomicF64`]). Sealed: the two widths are the whole set.
-pub trait ParamRaw: sealed::Sealed + Copy {
-    /// The atomic that holds this width.
-    type Atomic: Send + Sync + 'static;
-    /// A fresh atomic holding `self`.
-    fn new_atomic(self) -> Self::Atomic;
-    /// Loads from `cell`.
-    fn load(cell: &Self::Atomic, order: Ordering) -> Self;
-    /// Stores `self` into `cell`.
-    fn store(self, cell: &Self::Atomic, order: Ordering);
-    /// This raw as an `f64`: exact for both widths.
-    fn to_f64(self) -> f64;
-    /// A raw from an `f64` (narrowed, for `f32`).
-    fn from_f64(v: f64) -> Self;
-}
-
-impl ParamRaw for f32 {
-    type Atomic = AtomicF32;
-    #[inline]
-    fn new_atomic(self) -> AtomicF32 {
-        AtomicF32::new(self)
-    }
-    #[inline]
-    fn load(cell: &AtomicF32, order: Ordering) -> f32 {
-        cell.load(order)
-    }
-    #[inline]
-    fn store(self, cell: &AtomicF32, order: Ordering) {
-        cell.store(self, order);
-    }
-    #[inline]
-    fn to_f64(self) -> f64 {
-        f64::from(self)
-    }
-    #[inline]
-    fn from_f64(v: f64) -> f32 {
-        v as f32
-    }
-}
-
-impl ParamRaw for f64 {
-    type Atomic = AtomicF64;
-    #[inline]
-    fn new_atomic(self) -> AtomicF64 {
-        AtomicF64::new(self)
-    }
-    #[inline]
-    fn load(cell: &AtomicF64, order: Ordering) -> f64 {
-        cell.load(order)
-    }
-    #[inline]
-    fn store(self, cell: &AtomicF64, order: Ordering) {
-        cell.store(self, order);
-    }
-    #[inline]
-    fn to_f64(self) -> f64 {
-        self
-    }
-    #[inline]
-    fn from_f64(v: f64) -> f64 {
-        v
-    }
-}
-
-/// A [`Param`]'s cell with its width erased, read and written as `f64`.
+/// A [`Param`]'s cell without its unit, read and written as `f64`.
 ///
 /// What a host that addresses params by kind rather than by unit holds: the
-/// modulation path (control lanes, `ParamSet`) works in `f64` values, the
-/// widest a unit's raw is. A read widens an `f32` unit's cell exactly. A write
-/// to an `f32` unit's cell rounds to the nearest `f32`, the unit's own width:
-/// the cell holds nothing finer than its unit.
+/// modulation path (control lanes, `ParamSet`) works in `f64` values, the raw
+/// of every unit.
 #[derive(Clone, Debug)]
 pub enum ParamCell {
-    /// An `f32` unit's cell.
-    F32(Arc<AtomicF32>),
-    /// An `f64` unit's cell.
+    /// An `f64` cell.
     F64(Arc<AtomicF64>),
 }
 
 impl ParamCell {
-    /// Loads the value at the cell's own width, as an `f64`: exact for both.
+    /// Loads the value.
     #[inline]
     pub fn load(&self, order: Ordering) -> f64 {
         match self {
-            Self::F32(c) => f64::from(c.load(order)),
             Self::F64(c) => c.load(order),
         }
     }
 
-    /// Stores an `f64` at the cell's own width: exact for an `f64` cell,
-    /// rounded to the nearest `f32` for an `f32` one (the unit's own width).
+    /// Stores a value.
     #[inline]
     pub fn store(&self, value: f64, order: Ordering) {
         match self {
-            Self::F32(c) => c.store(value as f32, order),
             Self::F64(c) => c.store(value, order),
         }
     }
 
-    /// A fresh cell of the same width holding the value now: control thread
-    /// (allocates).
+    /// A fresh cell holding the value now: control thread (allocates).
     #[must_use]
     pub fn detached(&self) -> Self {
         match self {
-            Self::F32(c) => Self::F32(Arc::new(AtomicF32::new(c.load(Ordering::Acquire)))),
             Self::F64(c) => Self::F64(Arc::new(AtomicF64::new(c.load(Ordering::Acquire)))),
         }
     }
@@ -145,16 +63,8 @@ impl ParamCell {
     #[must_use]
     pub fn ptr_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::F32(a), Self::F32(b)) => Arc::ptr_eq(a, b),
             (Self::F64(a), Self::F64(b)) => Arc::ptr_eq(a, b),
-            _ => false,
         }
-    }
-}
-
-impl From<Arc<AtomicF32>> for ParamCell {
-    fn from(c: Arc<AtomicF32>) -> Self {
-        Self::F32(c)
     }
 }
 
@@ -172,10 +82,9 @@ impl From<Arc<AtomicF64>> for ParamCell {
 /// audio thread; [`new`](Self::new), [`handle`](Self::handle) and
 /// [`detach`](Self::detach) are for the control thread.
 ///
-/// The cell holds the unit's raw at its own width ([`ParamRaw`]): the unit's
-/// `f64` or `f32`.
-/// [`SampleRate`](tutti_units::SampleRate) is `f64`-backed too but is not modulated
-/// at audio rate, so it is used directly rather than through a `Param`.
+/// The cell holds the unit's raw `f64`.
+/// [`SampleRate`](tutti_units::SampleRate) is not modulated at audio rate, so it
+/// is used directly rather than through a `Param`.
 ///
 /// # Examples
 ///
@@ -189,25 +98,19 @@ impl From<Arc<AtomicF64>> for ParamCell {
 /// cutoff.store(Hz(2_000.0));
 /// assert_eq!(on_audio_thread.load(), Hz(2_000.0));
 /// ```
-pub struct Param<U: Unit>
-where
-    U::Raw: ParamRaw,
-{
-    inner: Arc<<U::Raw as ParamRaw>::Atomic>,
+pub struct Param<U: Unit<Raw = f64>> {
+    inner: Arc<AtomicF64>,
     _unit: PhantomData<U>,
 }
 
-impl<U: Unit> Param<U>
-where
-    U::Raw: ParamRaw,
-{
+impl<U: Unit<Raw = f64>> Param<U> {
     /// Allocates a new cell holding `v`.
     ///
     /// Control-thread only: this is the one constructor that allocates.
     #[inline]
     pub fn new(v: U) -> Self {
         Self {
-            inner: Arc::new(v.to_raw().new_atomic()),
+            inner: Arc::new(AtomicF64::new(v.to_raw())),
             _unit: PhantomData,
         }
     }
@@ -218,7 +121,7 @@ where
     /// Audio-thread safe: no clone, no allocation.
     #[inline]
     pub fn load(&self) -> U {
-        U::from_raw(<U::Raw as ParamRaw>::load(&self.inner, Ordering::Acquire))
+        U::from_raw(self.inner.load(Ordering::Acquire))
     }
 
     /// Stores a new value with `Release` ordering.
@@ -226,7 +129,7 @@ where
     /// Audio-thread safe; every holder of the cell sees it.
     #[inline]
     pub fn store(&self, v: U) {
-        v.to_raw().store(&self.inner, Ordering::Release);
+        self.inner.store(v.to_raw(), Ordering::Release);
     }
 
     /// Returns another handle on the same cell, for control-thread automation.
@@ -259,54 +162,41 @@ where
         *self = Self::new(self.load());
     }
 
-    /// Returns the shared raw atomic (an `Arc<AtomicF32>` for an `f32` unit,
-    /// an `Arc<AtomicF64>` for an `f64` one), for APIs that address
-    /// parameters without their unit types.
+    /// Returns the shared raw atomic, for APIs that address parameters
+    /// without their unit types.
     ///
     /// Clones the `Arc`; do not call on the audio thread.
     #[inline]
     #[must_use]
-    pub fn as_atomic(&self) -> Arc<<U::Raw as ParamRaw>::Atomic> {
+    pub fn as_atomic(&self) -> Arc<AtomicF64> {
         Arc::clone(&self.inner)
     }
 
-    /// The shared cell as a width-erased [`ParamCell`].
+    /// The shared cell as a [`ParamCell`].
     ///
     /// Clones the `Arc`; do not call on the audio thread.
     #[inline]
     #[must_use]
-    pub fn cell(&self) -> ParamCell
-    where
-        Arc<<U::Raw as ParamRaw>::Atomic>: Into<ParamCell>,
-    {
+    pub fn cell(&self) -> ParamCell {
         self.as_atomic().into()
     }
 }
 
-impl<U: Unit> Clone for Param<U>
-where
-    U::Raw: ParamRaw,
-{
+impl<U: Unit<Raw = f64>> Clone for Param<U> {
     #[inline]
     fn clone(&self) -> Self {
         self.handle()
     }
 }
 
-impl<U: Unit + Default> Default for Param<U>
-where
-    U::Raw: ParamRaw,
-{
+impl<U: Unit<Raw = f64> + Default> Default for Param<U> {
     #[inline]
     fn default() -> Self {
         Self::new(U::default())
     }
 }
 
-impl<U: Unit> core::fmt::Debug for Param<U>
-where
-    U::Raw: ParamRaw,
-{
+impl<U: Unit<Raw = f64>> core::fmt::Debug for Param<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Param")
             .field("value", &self.load())
@@ -477,7 +367,7 @@ mod tests {
         tap.store(Gain::INVERTING);
         assert_eq!(on_audio_thread.load(), Gain::INVERTING);
 
-        // The width-erased cell a modulation lane writes keeps the sign.
+        // The cell a modulation lane writes keeps the sign.
         tap.cell()
             .store(0.75, core::sync::atomic::Ordering::Relaxed);
         assert_eq!(tap.load(), Gain(0.75));
@@ -493,7 +383,7 @@ mod tests {
         time.store(SampleSpan::of(48_000.5));
         assert_eq!(on_audio_thread.load().get(), 48_000.5);
 
-        // The width-erased cell a modulation lane writes carries an `f32`.
+        // The cell a modulation lane writes carries an `f64`.
         let cell = time.cell();
         cell.store(-3.0, core::sync::atomic::Ordering::Relaxed);
         assert_eq!(time.load(), SampleSpan::ZERO);
