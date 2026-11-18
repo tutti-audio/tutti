@@ -103,7 +103,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f64>::new(
+                SvfFilterNode::<f32>::new(
                     SvfType::LowPass,
                     Hz(500.0 + (lane * depth + i) as f64 * 3.0),
                     Q(0.7),
@@ -232,7 +232,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f64>::new(
+                SvfFilterNode::<f32>::new(
                     SvfType::LowPass,
                     Hz(500.0 + (lane * depth + i) as f64 * 3.0),
                     Q(0.7),

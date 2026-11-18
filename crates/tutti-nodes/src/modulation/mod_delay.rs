@@ -72,9 +72,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// then nothing recirculates, an output frame is made of input at most
 /// [`max_delay`](Sweep::max_delay) old, and it declares that as its finite tail.
 ///
-/// `F` is the state precision of the lines and the glides, `f64` by default; a line holds
-/// `ceil(max_delay * rate)` frames of it, so `ModDelayNode::<f32>` halves the memory.
-pub type ModDelayNode<F = f64> = KernelNode<ModDelayKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the lines and the glides; a line holds
+/// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
+pub type ModDelayNode<F> = KernelNode<ModDelayKernel<F>>;
 
 impl<F: Float + Lerp> ModDelayNode<F> {
     /// A swept delay on the bus `input`, as wide as it, built to `sweep`, its channels'
@@ -219,6 +219,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
+    type Float = F;
     type Set = ModDelaySet;
 
     /// The corners solve on the stream's grid of 16 frames, like the filters and the phaser: a
@@ -289,11 +290,11 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         if let Some(bank) = &mut self.bank {

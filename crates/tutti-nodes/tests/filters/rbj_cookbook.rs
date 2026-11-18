@@ -26,6 +26,8 @@
 //! window, so its noise floor is far below that, while a 1% cutoff error moves
 //! the response by more than the bound at the probes near the corner.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_nodes::{SvfFilterNode, SvfType};
 
@@ -57,7 +59,7 @@ fn measured_gain_db(mut render: impl FnMut(f32) -> f32, freq: f64) -> f64 {
 fn svf_gain_db(kind: SvfType, cutoff: f64, freq: f64) -> f64 {
     let rate = tutti_units::SampleRate::of(SR);
     let mut node = tutti_graph::contract::prepared(
-        SvfFilterNode::<f64>::new(kind, tutti_units::Hz::new(cutoff), tutti_units::Q::new(Q)),
+        SvfFilterNode::<f32>::new(kind, tutti_units::Hz::new(cutoff), tutti_units::Q::new(Q)),
         rate,
         1,
     );

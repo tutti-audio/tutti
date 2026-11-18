@@ -73,9 +73,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// empties them. Its tail is [`Tail::Unknown`]: a recirculating
 /// line rings for as long as its feedback says, so the executor never skips it.
 ///
-/// `F` is the state precision of the lines and the glides, `f64` by default; a line holds
-/// `ceil(max_delay * rate)` frames of it, so `DelayNode::<f32>` halves the memory.
-pub type DelayNode<F = f64> = KernelNode<DelayKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the lines and the glides; a line holds
+/// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
+pub type DelayNode<F> = KernelNode<DelayKernel<F>>;
 
 impl<F: Float + Lerp> DelayNode<F> {
     /// A delay on the bus `input`, as wide as it, holding up to `max_delay`, reading with
@@ -188,6 +188,7 @@ impl<F: Float + Lerp> DelayKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for DelayKernel<F> {
+    type Float = F;
     type Set = DelaySet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -230,11 +231,11 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lanes = DelayLanes {
             time: lanes.get(DelaySet::TIME_LANE),

@@ -67,7 +67,7 @@ fn rolling_state_with(
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
+        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {

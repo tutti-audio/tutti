@@ -1,6 +1,7 @@
 //! [`TiltFilterNode`]: a first-order tilt equalizer, run as one state-variable section.
 
-use tutti_dsp::{Ring, Sos, SosError, Tilt};
+use tutti_buffers::Float;
+use tutti_dsp::{Lanes, Ring, Sos, SosError, Tilt};
 use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, SampleRate};
 
@@ -60,12 +61,12 @@ impl TiltFilterConfig {
 /// # Panics
 ///
 /// `TiltFilterNode::from` panics past 16 channels: a filter is one bus.
-pub type TiltFilterNode = KernelNode<TiltFilterKernel>;
+pub type TiltFilterNode<F> = KernelNode<TiltFilterKernel<F>>;
 
 /// The tilt as a [`Kernel`](crate::Kernel).
-pub type TiltFilterKernel = EqKernel<TiltFilterControls>;
+pub type TiltFilterKernel<F> = EqKernel<TiltFilterControls, F>;
 
-impl From<TiltFilterConfig> for TiltFilterNode {
+impl<F: Float + Lanes> From<TiltFilterConfig> for TiltFilterNode<F> {
     fn from(config: TiltFilterConfig) -> Self {
         Self::with_kernel(
             TiltFilterKernel::new(filter_bus(config.width)),
@@ -120,6 +121,7 @@ impl Sealed for TiltFilterControls {
 
 #[cfg(test)]
 mod tests {
+    // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use core::f64::consts::PI;
 
     use super::*;
@@ -137,7 +139,7 @@ mod tests {
         TiltFilterConfig::new(1u16, frequency, gain)
     }
 
-    fn node(config: TiltFilterConfig) -> TiltFilterNode {
+    fn node(config: TiltFilterConfig) -> TiltFilterNode<f32> {
         prepared(TiltFilterNode::from(config))
     }
 
@@ -209,7 +211,7 @@ mod tests {
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
-            |n: &TiltFilterNode| {
+            |n: &TiltFilterNode<f32>| {
                 assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0));
                 assert!(n.param_set().set(UnitParam::GainDb, 12.0));
             },
@@ -251,7 +253,7 @@ mod tests {
     /// impulse response's tail sum is under the floor, and the ceiling covers every one.
     #[test]
     fn the_tail_covers_the_tail_sum_and_the_ceiling_covers_it_all() {
-        let mut kernel = TiltFilterKernel::new(filter_bus(1u16.into()));
+        let mut kernel = TiltFilterKernel::<f64>::new(filter_bus(1u16.into()));
         kernel.prepare(RATE, MaxBlock::of(Samples(64)));
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),

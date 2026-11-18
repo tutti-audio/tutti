@@ -101,9 +101,8 @@ impl Splits {
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
 /// its splits no lower than the one before, and a non-finite write reads as unchanged.
 ///
-/// `F` is the state precision of the sections, `f64` by default: an `f64` graph runs them in
-/// `f64`, and a view of the other sample format is converted at the edges.
-pub type CrossoverNode<F = f64> = KernelNode<CrossoverKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the sections.
+pub type CrossoverNode<F> = KernelNode<CrossoverKernel<F>>;
 
 impl<F: Float + Lanes> CrossoverNode<F> {
     /// A crossover over `layout` with one split at each of `frequencies`.
@@ -185,6 +184,7 @@ impl<F: Float + Lanes> CrossoverKernel<F> {
 }
 
 impl<F: Float + Lanes> Kernel for CrossoverKernel<F> {
+    type Float = F;
     type Set = CrossoverSet;
 
     // A design arrives at the next grid point: the glide is one grid period long.
@@ -222,11 +222,11 @@ impl<F: Float + Lanes> Kernel for CrossoverKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.coefficients, input, output);
     }
@@ -481,7 +481,7 @@ mod tests {
         let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::<f64>::NONE,
+            ControlLanes::NONE,
             PlanesMut::new(&mut views).unwrap(),
         );
         // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.

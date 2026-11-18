@@ -74,9 +74,9 @@ impl Default for AutoPanConfig {
 ///
 /// No latency and no tail. A [`KernelNode`]. Made from an [`AutoPanConfig`]
 /// (`AutoPanNode::from`).
-pub type AutoPanNode = KernelNode<AutoPanKernel>;
+pub type AutoPanNode<F> = KernelNode<AutoPanKernel<F>>;
 
-impl From<AutoPanConfig> for AutoPanNode {
+impl<F: Float> From<AutoPanConfig> for AutoPanNode<F> {
     fn from(config: AutoPanConfig) -> Self {
         Self::with_kernel(
             AutoPanKernel::new(config.wave, config.law),
@@ -103,24 +103,27 @@ control_set! {
 
 /// The auto-pan as a [`Kernel`]: an [`AutoPan`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct AutoPanKernel {
+pub struct AutoPanKernel<F: Float> {
     wave: OscillatorWave,
     law: PanLaw,
     pan: AutoPan,
+    float: core::marker::PhantomData<fn() -> F>,
 }
 
-impl AutoPanKernel {
+impl<F: Float> AutoPanKernel<F> {
     /// An auto-pan at a placeholder rate: an unprepared node renders nothing.
     fn new(wave: OscillatorWave, law: PanLaw) -> Self {
         Self {
             wave,
             law,
             pan: AutoPan::new(wave, law, SampleRate::SR_48K),
+            float: core::marker::PhantomData,
         }
     }
 }
 
-impl Kernel for AutoPanKernel {
+impl<F: Float> Kernel for AutoPanKernel<F> {
+    type Float = F;
     type Set = AutoPanSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -142,11 +145,11 @@ impl Kernel for AutoPanKernel {
         self.pan.aim(controls);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.pan.process(input, output);
     }

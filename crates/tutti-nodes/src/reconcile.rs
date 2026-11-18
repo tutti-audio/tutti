@@ -421,7 +421,7 @@ struct SourcePlan {
 /// let params = editor.insert(
 ///     filter,
 ///     "svf",
-///     SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
+///     SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
 /// )
 /// .controls;
 /// // A native target's range cell exists once its node is placed.

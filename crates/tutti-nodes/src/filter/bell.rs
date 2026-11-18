@@ -1,6 +1,7 @@
 //! [`BellFilterNode`]: a matched peaking equalizer, run as one state-variable section.
 
-use tutti_dsp::{MatchedBell, Ring, Sos, SosError};
+use tutti_buffers::Float;
+use tutti_dsp::{Lanes, MatchedBell, Ring, Sos, SosError};
 use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
@@ -68,12 +69,12 @@ impl BellFilterConfig {
 /// # Panics
 ///
 /// `BellFilterNode::from` panics past 16 channels: a filter is one bus.
-pub type BellFilterNode = KernelNode<BellFilterKernel>;
+pub type BellFilterNode<F> = KernelNode<BellFilterKernel<F>>;
 
 /// The bell as a [`Kernel`](crate::Kernel).
-pub type BellFilterKernel = EqKernel<BellFilterControls>;
+pub type BellFilterKernel<F> = EqKernel<BellFilterControls, F>;
 
-impl From<BellFilterConfig> for BellFilterNode {
+impl<F: Float + Lanes> From<BellFilterConfig> for BellFilterNode<F> {
     fn from(config: BellFilterConfig) -> Self {
         Self::with_kernel(
             BellFilterKernel::new(filter_bus(config.width)),
@@ -135,6 +136,7 @@ impl Sealed for BellFilterControls {
 
 #[cfg(test)]
 mod tests {
+    // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use core::f64::consts::PI;
 
     use super::*;
@@ -152,7 +154,7 @@ mod tests {
         BellFilterConfig::new(1u16, frequency, q, gain)
     }
 
-    fn node(config: BellFilterConfig) -> BellFilterNode {
+    fn node(config: BellFilterConfig) -> BellFilterNode<f32> {
         prepared(BellFilterNode::from(config))
     }
 
@@ -244,7 +246,7 @@ mod tests {
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
-            |n: &BellFilterNode| {
+            |n: &BellFilterNode<f32>| {
                 assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0));
                 assert!(n.param_set().set(UnitParam::GainDb, 12.0));
             },
@@ -292,7 +294,7 @@ mod tests {
     /// from which the impulse response's tail sum is under the floor.
     #[test]
     fn the_tail_covers_the_tail_sum_of_the_impulse_response() {
-        let mut kernel = BellFilterKernel::new(filter_bus(1u16.into()));
+        let mut kernel = BellFilterKernel::<f64>::new(filter_bus(1u16.into()));
         kernel.prepare(RATE, MaxBlock::of(Samples(64)));
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),

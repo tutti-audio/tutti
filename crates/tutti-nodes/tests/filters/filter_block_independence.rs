@@ -7,6 +7,8 @@
 //! impulse into a filter with no state answers with its first coefficient set, so
 //! the output at the impulse is the coefficient set in force there).
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_dsp::{SvfCoefficients, SvfModel};
 use tutti_graph::contract::{drive_input, prepared};
@@ -111,7 +113,7 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
                 ),
             ];
             render(
-                SvfFilterNode::<f64>::with_controls(
+                SvfFilterNode::<f32>::with_controls(
                     ChannelLayout::STEREO,
                     SvfControls {
                         ty: SvfType::Bell,
@@ -170,7 +172,7 @@ fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
                 ),
             ];
             render(
-                LadderFilterNode::<f64>::with_channels(
+                LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     LadderType::LP24,
                     Hz(1_000.0),
@@ -216,7 +218,7 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
         let mut x = vec![0.0f32; 64];
         x[at] = 0.5;
         let lane = drive.map_or_else(|| step.clone(), |d| vec![d; 64]);
-        let node = LadderFilterNode::<f64>::new(LadderType::HP24, Hz(1_500.0), Resonance::new(0.2));
+        let node = LadderFilterNode::<f32>::new(LadderType::HP24, Hz(1_500.0), Resonance::new(0.2));
         let out = render(node, 64, &[x], &[None, None, Some(lane)], |_| {});
         f64::from(out[0][at])
     };
@@ -247,7 +249,7 @@ fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     let response = |at: usize| -> f32 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(old), Q::new(0.707));
+        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(old), Q::new(0.707));
         let out = render(node, 64, &[x], &[Some(step.clone()), None, None], |_| {});
         out[0][at]
     };
@@ -293,7 +295,7 @@ fn held_cells_render_alike_at_every_block_length() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(800.0), Q(1.2)),
+                SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(1.2)),
                 block,
                 &inputs,
                 &[None, None, None],
@@ -327,7 +329,7 @@ fn a_lane_step_is_in_the_render_within_one_segment() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone())), None, None];
-        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(old), Q(0.707));
+        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(old), Q(0.707));
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };

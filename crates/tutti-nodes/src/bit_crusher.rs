@@ -74,8 +74,8 @@ impl BitCrusherConfig {
 /// `BitCrusherNode::from` panics past 16 channels, when the kernel's shape is built: a
 /// crusher is one bus.
 ///
-/// `F` is the state precision of the held values and the quantizer, `f64` by default.
-pub type BitCrusherNode<F = f64> = KernelNode<BitCrusherKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the held values and the quantizer.
+pub type BitCrusherNode<F> = KernelNode<BitCrusherKernel<F>>;
 
 impl<F: Float> From<BitCrusherConfig> for BitCrusherNode<F> {
     fn from(config: BitCrusherConfig) -> Self {
@@ -119,6 +119,7 @@ impl<F: Float> BitCrusherKernel<F> {
 }
 
 impl<F: Float> Kernel for BitCrusherKernel<F> {
+    type Float = F;
     type Set = BitCrusherSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -143,11 +144,11 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
         self.crusher.aim(controls);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.crusher.process(input, output);
     }
