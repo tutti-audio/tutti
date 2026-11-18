@@ -292,6 +292,90 @@ impl PhaseIncrement {
     }
 }
 
+/// A running oscillator phase: a position in the cycle as a `u64` fixed-point count of
+/// `2^-64` cycles (Q0.64), `0` the start of a cycle and `2^63` the half.
+///
+/// A phase that accumulates a step every sample is a position, never a float: a float
+/// rounds each add, so its rate depends on where in the cycle it is (an `f32` phase at
+/// 0.01 Hz and 192 kHz runs about 15% fast). This one adds exactly with a wrapping
+/// `u64` add, so `n` steps are `n * step mod 2^64` for as long as it runs, and the wrap
+/// of a cycle is free. The step's own quantum is `2^-64` cycles, which is 3e-13 of
+/// 0.01 Hz at 192 kHz.
+///
+/// A [`Phase`] is a setting; [`at`](Self::at) turns one into a running phase once, and a
+/// processor reads a running phase as a float through one crossing in its own crate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct RunningPhase(u64);
+
+impl RunningPhase {
+    /// The start of a cycle.
+    pub const START: RunningPhase = RunningPhase(0);
+
+    /// The running phase at a setting `phase`, wrapped into one cycle. NaN and the
+    /// infinities give [`START`](Self::START).
+    #[inline]
+    #[must_use]
+    pub fn at(phase: Phase) -> RunningPhase {
+        RunningPhase(PhaseStep::from(PhaseIncrement(phase.0)).0)
+    }
+
+    /// The position in cycles as a `u64` count of `2^-64` cycles.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Advances by one step, wrapping at a cycle with a wrapping add.
+    #[inline]
+    #[must_use]
+    pub const fn advance(self, step: PhaseStep) -> RunningPhase {
+        RunningPhase(self.0.wrapping_add(step.0))
+    }
+}
+
+/// A [`RunningPhase`]'s per-sample step: a `u64` count of `2^-64` cycles, modulo one cycle.
+///
+/// A negative [`PhaseIncrement`] is its two's-complement count, so a reverse-running phase
+/// is the same wrapping add. Built once from a [`PhaseIncrement`] with `From`, then
+/// [`RunningPhase::advance`] reuses it every sample.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PhaseStep(u64);
+
+impl PhaseStep {
+    /// No movement: a held phase.
+    pub const ZERO: PhaseStep = PhaseStep(0);
+
+    /// A step of `count` times `2^-64` cycles.
+    #[inline]
+    #[must_use]
+    pub const fn from_count(count: u64) -> PhaseStep {
+        PhaseStep(count)
+    }
+
+    /// The step as a count of `2^-64` cycles, modulo one cycle.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<PhaseIncrement> for PhaseStep {
+    /// The increment wrapped into one cycle (`-0.25` is `0.75`) and scaled by `2^64`,
+    /// truncated to a count. A non-finite increment is [`ZERO`](Self::ZERO).
+    ///
+    /// A positive increment's step is exact to the count. A negative one is exact only to
+    /// `2^-53` cycles: `Phase::wrapped` of a tiny negative value is the largest value under
+    /// one, `1 - 2^-53`, so `-1e-20` steps back by `2^11` counts, not `1e-20 * 2^64`.
+    #[inline]
+    fn from(inc: PhaseIncrement) -> PhaseStep {
+        const CYCLE: f64 = 18_446_744_073_709_551_616.0; // 2^64
+        // `Phase::wrapped` is below 1, so the product is below 2^64; NaN casts to 0.
+        PhaseStep((Phase::wrapped(inc.0).0 * CYCLE) as u64)
+    }
+}
+
 unit! {
     /// An angle in radians — the argument `sin`/`cos` actually take.
     ///

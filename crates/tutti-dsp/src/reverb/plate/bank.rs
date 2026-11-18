@@ -27,7 +27,7 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
+use tutti_units::{Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::delay::DelayRing;
@@ -46,7 +46,7 @@ fn line<F: Float>(frames: Samples) -> DelayRing<F> {
 
 /// A lattice of coefficient `g` over `line` at `delay` frames: `x` in, `y` out.
 #[inline]
-fn lattice<F: Float>(line: &mut DelayRing<F>, x: F, g: F, delay: F) -> F {
+fn lattice<F: Float>(line: &mut DelayRing<F>, x: F, g: F, delay: ReadPosition) -> F {
     let z = line.at(delay);
     let v = x + g * z;
     line.put(v);
@@ -82,8 +82,8 @@ struct Coeffs<F> {
     input: [F; 4],
     /// The modulation excursion in frames.
     depth: F,
-    /// The pre-delay in frames.
-    pre: F,
+    /// The pre-delay.
+    pre: ReadPosition,
     /// The bandwidth's pole.
     bandwidth: F,
 }
@@ -97,7 +97,7 @@ impl<F: Float> Default for Coeffs<F> {
             lattice1: F::ZERO,
             input: [F::ZERO; 4],
             depth: F::ZERO,
-            pre: F::ZERO,
+            pre: ReadPosition::START,
             bandwidth: F::ZERO,
         }
     }
@@ -117,7 +117,7 @@ pub struct PlateGlides<F: Float> {
     lattice1: Glide<F>,
     input: [Glide<F>; 4],
     depth: Glide<F>,
-    pre: Glide<F>,
+    pre: Glide<ReadPosition>,
     bandwidth: Glide<F>,
 }
 
@@ -129,7 +129,6 @@ impl<F: Float + Lerp> PlateGlides<F> {
             &mut self.lattice2,
             &mut self.lattice1,
             &mut self.depth,
-            &mut self.pre,
             &mut self.bandwidth,
         ]
         .into_iter()
@@ -139,10 +138,12 @@ impl<F: Float + Lerp> PlateGlides<F> {
     /// Lands on the targets now.
     pub fn settle(&mut self) {
         self.each().for_each(Glide::settle);
+        self.pre.settle();
     }
 
     fn step(&mut self) {
         self.each().for_each(|g| g.advance(1));
+        self.pre.advance(1);
     }
 
     /// The coefficients now.
@@ -169,7 +170,7 @@ impl<F: Float + Lerp> PlateGlides<F> {
             g.aim_by(v, ramp);
         }
         self.depth.aim_by(t.depth, ramp);
-        self.pre.aim_by(t.pre, Steps::Rate(PRE_STEP));
+        self.pre.aim_position(t.pre, Steps::Rate(PRE_STEP));
         self.bandwidth.aim_by(t.bandwidth, ramp);
     }
 }
@@ -179,7 +180,7 @@ impl<F: Float + Lerp> PlateGlides<F> {
 struct TapAt<F> {
     half: usize,
     point: Point,
-    at: F,
+    at: ReadPosition,
     sign: F,
 }
 
@@ -215,9 +216,9 @@ pub struct PlateBank<F: Float> {
     taps: [[TapAt<F>; 7]; 2],
     /// The output gain, narrowed once.
     output_gain: F,
-    /// The input diffusers' lengths and each half's, as frames in `F`, narrowed once.
-    input_len: [F; 4],
-    half_len: [[F; 4]; 2],
+    /// The input diffusers' lengths and each half's, as positions.
+    input_len: [ReadPosition; 4],
+    half_len: [[ReadPosition; 4]; 2],
     /// How long it rings at its worst.
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
@@ -267,7 +268,7 @@ impl<F: Float + Lerp> PlateBank<F> {
                 side.map(|k| TapAt {
                     half: k.half,
                     point: k.point,
-                    at: F::from_f64(scaled(k.offset, rate)),
+                    at: ReadPosition::from_span(SampleSpan::clamped(scaled(k.offset, rate))),
                     sign: F::from_f64(k.sign.get()),
                 })
             }),
@@ -281,8 +282,8 @@ impl<F: Float + Lerp> PlateBank<F> {
                 rate,
             ),
             output_gain: F::from_f64(OUTPUT_GAIN.get()),
-            input_len: shape.input.map(|n| F::from_f64(n.get() as f64)),
-            half_len: shape.halves.map(|h| h.map(|n| F::from_f64(n.get() as f64))),
+            input_len: shape.input.map(ReadPosition::from_frames),
+            half_len: shape.halves.map(|h| h.map(ReadPosition::from_frames)),
             into: Samples::ZERO,
             pre: line(shape.pre),
             bandwidth: F::ZERO,
@@ -316,7 +317,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             lattice1: rest,
             input: [rest; 4],
             depth: rest,
-            pre: rest,
+            pre: Glide::landed(ReadPosition::START),
             bandwidth: rest,
         }
     }
@@ -344,11 +345,16 @@ impl<F: Float + Lerp> PlateBank<F> {
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
-        let pre = (self.network.pre_delay.get() as f64).clamp(0.0, self.shape.pre.get() as f64);
-        let behind = (glides.pre.now().to_f64() - pre).max(0.0);
+        let pre = self.network.pre_delay.min(self.shape.pre);
+        let behind = glides
+            .pre
+            .now()
+            .saturating_sub(pre)
+            .span()
+            .to_seconds(self.rate);
         let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
-            Ring::Finite(Seconds(t.get() + input.get() + behind / self.rate.get())),
+            Ring::Finite(Seconds(t.get() + input.get() + behind.get())),
             self.rate,
         )
     }
@@ -375,9 +381,7 @@ impl<F: Float + Lerp> PlateBank<F> {
         self.design(controls);
         if let Some(mut t) = target_of::<F>(&self.network) {
             t.bandwidth = F::from_f64(cutoff_pole(controls.bandwidth_at(self.rate), self.rate));
-            t.pre = t
-                .pre
-                .clamp(F::ZERO, F::from_f64(self.shape.pre.get() as f64));
+            t.pre = t.pre.min(ReadPosition::from_frames(self.shape.pre));
             glides.aim(&t);
         }
     }
@@ -484,7 +488,7 @@ impl<F: Float + Lerp> PlateBank<F> {
                 &mut half.modulated,
                 input,
                 k.lattice1,
-                (d1 + sweep).max(F::ONE),
+                F::offset_position(d1, sweep).max(ReadPosition::from_frames(Samples::new(1))),
             );
             half.delay1.put(y);
             let q = half.delay1.at(l1);
@@ -586,7 +590,7 @@ fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
         lattice1: F::from_f64(a.diffuser?.gain.get()),
         input,
         depth: F::from_f64(a.diffuser?.modulation.depth.get()),
-        pre: F::from_f64(network.pre_delay.get() as f64),
+        pre: ReadPosition::from_frames(network.pre_delay),
         bandwidth: F::ZERO,
     })
 }

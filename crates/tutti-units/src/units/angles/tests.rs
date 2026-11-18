@@ -387,3 +387,103 @@ fn the_wraps_and_the_phase_step_narrow_to_the_f32_figures() {
     let step = PhaseIncrement::per_sample(Hz(1000.0), SampleRate::SR_48K);
     assert!(narrows_to(step.get(), 1.0 / 48.0, 1));
 }
+
+const CYCLE: f64 = 18_446_744_073_709_551_616.0;
+
+#[test]
+fn running_phase_at_a_quarter_turn_is_two_to_the_62() {
+    assert_eq!(RunningPhase::at(Phase(0.25)).get(), 1_u64 << 62);
+    assert_eq!(RunningPhase::at(Phase(0.5)).get(), 1_u64 << 63);
+    assert_eq!(RunningPhase::at(Phase::START), RunningPhase::START);
+}
+
+#[test]
+fn running_phase_at_wraps_a_setting_and_holds_a_non_finite_one_at_the_start() {
+    assert_eq!(RunningPhase::at(Phase(1.25)).get(), 1_u64 << 62);
+    assert_eq!(RunningPhase::at(Phase(-0.25)).get(), 3 * (1_u64 << 62));
+    assert_eq!(RunningPhase::at(Phase(f64::NAN)), RunningPhase::START);
+    assert_eq!(RunningPhase::at(Phase(f64::INFINITY)), RunningPhase::START);
+}
+
+#[test]
+fn a_step_of_two_to_the_k_wraps_to_the_start_after_two_to_the_64_minus_k_steps() {
+    // 2^k * 2^(64-k) = 2^64 = 0 mod 2^64, and one step fewer is 2^64 - 2^k, not 0.
+    for k in [40_u32, 52, 60, 63] {
+        let step = PhaseStep::from_count(1_u64 << k);
+        let n = 1_u64 << (64 - k);
+        let mut p = RunningPhase::START;
+        for _ in 0..n - 1 {
+            p = p.advance(step);
+        }
+        assert_eq!(p.get(), (1_u64 << k).wrapping_neg(), "k {k}");
+        assert_eq!(p.advance(step), RunningPhase::START, "k {k}");
+    }
+}
+
+#[test]
+fn n_steps_are_n_times_the_step_modulo_two_to_the_64() {
+    let step = PhaseStep::from_count(0x0123_4567_89ab_cdef);
+    let n = 1_000_003_u64;
+    let mut p = RunningPhase::at(Phase(0.125));
+    for _ in 0..n {
+        p = p.advance(step);
+    }
+    let expect = (1_u64 << 61).wrapping_add(n.wrapping_mul(0x0123_4567_89ab_cdef));
+    assert_eq!(p.get(), expect);
+}
+
+#[test]
+fn a_negative_increment_steps_backwards_by_its_complement() {
+    let fwd = PhaseStep::from(PhaseIncrement(0.125));
+    let back = PhaseStep::from(PhaseIncrement(-0.125));
+    assert_eq!(fwd.get(), 1_u64 << 61);
+    assert_eq!(fwd.get().wrapping_add(back.get()), 0);
+    let p = RunningPhase::at(Phase(0.5)).advance(back);
+    assert_eq!(p.get(), 3 * (1_u64 << 61));
+}
+
+#[test]
+fn a_non_finite_increment_is_a_held_phase() {
+    for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(PhaseStep::from(PhaseIncrement(x)), PhaseStep::ZERO);
+    }
+}
+
+#[test]
+fn a_slow_lfo_step_is_exact_to_one_count_and_a_period_returns_to_the_start() {
+    // 0.01 Hz at 192 kHz: a period is 19.2e6 samples.
+    let inc = PhaseIncrement::per_sample(Hz(0.01), SampleRate::new(192_000.0).unwrap());
+    let step = PhaseStep::from(inc);
+    // Within one count (2^-64 cycles, truncation) of the exact rational 1 / 19.2e6 of a cycle.
+    let exact = CYCLE / 19_200_000.0;
+    assert!((step.get() as f64 - exact).abs() <= 1.0, "{}", step.get());
+    let mut p = RunningPhase::START;
+    for _ in 0..19_200_000_u64 {
+        p = p.advance(step);
+    }
+    // 19.2e6 steps carry at most 19.2e6 counts of error: 1e-12 of a cycle.
+    let residue = p.get().min(p.get().wrapping_neg());
+    assert!(
+        residue <= 19_200_000,
+        "{residue} counts away from the start"
+    );
+}
+
+#[test]
+fn an_increment_of_a_cycle_and_a_quarter_steps_a_quarter() {
+    assert_eq!(PhaseStep::from(PhaseIncrement(1.25)).get(), 1_u64 << 62);
+}
+
+#[test]
+fn an_increment_of_half_a_cycle_is_two_to_the_63() {
+    assert_eq!(PhaseStep::from(PhaseIncrement(0.5)).get(), 1_u64 << 63);
+}
+
+#[test]
+fn a_tiny_negative_increment_steps_back_by_the_largest_value_under_one_cycle() {
+    // `Phase::wrapped(-1e-20)` is `1 - 2^-53`, which is `2^64 - 2^11` counts.
+    assert_eq!(
+        PhaseStep::from(PhaseIncrement(-1e-20)).get(),
+        0_u64.wrapping_sub(1 << 11)
+    );
+}

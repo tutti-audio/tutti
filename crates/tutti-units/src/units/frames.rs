@@ -246,5 +246,99 @@ impl SamplePosition {
     }
 }
 
+/// A read position in frames: a `u64` Q32.32 count, whole frames in the high 32 bits and the
+/// fraction in the low 32.
+///
+/// A delay's or a resampler's read head is a position, never a float: a float holds a frame
+/// count to its own precision, so an `f32` at 10 s and 192 kHz (1.92 million frames) has
+/// steps of 1/8 frame and none at all past 2^23, and a modulated read snaps. This one holds
+/// every count to `2^-32` frame up to its range of `2^32` frames (6.2 hours at 192 kHz, far
+/// past a delay's longest line). Past the range a position saturates at [`MAX`](Self::MAX),
+/// and so does every operation on it, so a position never wraps.
+///
+/// A [`SampleSpan`] or a [`Seconds`] at a rate is a setting; [`of`](Self::of) and
+/// [`from_frames`](Self::from_frames) turn one into a position once, and a processor reads
+/// a position as a whole frame and a float fraction through one crossing in its own crate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ReadPosition(u64);
+
+impl ReadPosition {
+    /// The bits of the fraction.
+    pub const FRACTION_BITS: u32 = 32;
+    /// The counts in one frame, `2^FRACTION_BITS`: the one scale between a position's count
+    /// and a frame count held as a float.
+    pub const COUNTS_PER_FRAME: f64 = (1_u64 << Self::FRACTION_BITS) as f64;
+    /// No frames back.
+    pub const START: ReadPosition = ReadPosition(0);
+    /// The last position, just under `2^32` frames: where every operation saturates.
+    pub const MAX: ReadPosition = ReadPosition(u64::MAX);
+
+    /// The position `count` times `2^-32` frames on.
+    #[inline]
+    #[must_use]
+    pub const fn from_count(count: u64) -> ReadPosition {
+        ReadPosition(count)
+    }
+
+    /// The position as a count of `2^-32` frames.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// A whole number of frames, saturating at [`MAX`](Self::MAX).
+    #[inline]
+    #[must_use]
+    pub const fn from_frames(frames: Samples) -> ReadPosition {
+        let n = frames.get() as u64;
+        if n > u32::MAX as u64 {
+            ReadPosition::MAX
+        } else {
+            ReadPosition(n << Self::FRACTION_BITS)
+        }
+    }
+
+    /// The frames `time` occupies at `rate`, rounded to the nearest `2^-32` frame (the
+    /// product is one `f64` multiply, within `2^-53` of itself). NaN and a negative time are
+    /// [`START`](Self::START); a time past the range is [`MAX`](Self::MAX).
+    #[inline]
+    #[must_use]
+    pub fn of(time: Seconds, rate: SampleRate) -> ReadPosition {
+        // Scaling by 2^32 is exact; `as` saturates at both ends and maps NaN to 0.
+        ReadPosition((time.get() * rate.get() * Self::COUNTS_PER_FRAME + 0.5) as u64)
+    }
+
+    /// The position of `span` frames, rounded to the nearest `2^-32` frame and saturating at
+    /// [`MAX`](Self::MAX): [`of`](Self::of) for a span already in frames.
+    #[inline]
+    #[must_use]
+    pub fn from_span(span: SampleSpan) -> ReadPosition {
+        ReadPosition((span.get() * Self::COUNTS_PER_FRAME + 0.5) as u64)
+    }
+
+    /// The position as a span of frames, exact to `f64` (a position has 64 bits and the
+    /// span 53, so it rounds a position past `2^21` frames).
+    #[inline]
+    #[must_use]
+    pub fn span(self) -> SampleSpan {
+        SampleSpan::clamped(self.0 as f64 / Self::COUNTS_PER_FRAME)
+    }
+
+    /// The whole frames: the position truncated.
+    #[inline]
+    #[must_use]
+    pub const fn frames(self) -> Samples {
+        Samples::new((self.0 >> Self::FRACTION_BITS) as usize)
+    }
+
+    /// The position `frames` frames nearer the start, [`START`](Self::START) at most.
+    #[inline]
+    #[must_use]
+    pub const fn saturating_sub(self, frames: Samples) -> ReadPosition {
+        ReadPosition(self.0.saturating_sub(ReadPosition::from_frames(frames).0))
+    }
+}
+
 #[cfg(test)]
 mod tests;

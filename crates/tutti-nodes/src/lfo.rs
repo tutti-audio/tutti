@@ -15,9 +15,10 @@
 
 use tutti_units::UnitParam;
 
+use tutti_buffers::Float;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::{ChannelLayout, Param};
-use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, SampleRate};
+use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 use tutti_units::{Latency, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
@@ -98,13 +99,23 @@ pub struct LfoNode {
     depth: Param<Depth>,
     /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
-    /// Free-running clock position, in unwrapped cycles (`f64`, so the cycle
-    /// index a random wave steps on stays exact for as long as a session
-    /// runs; no unit type covers an unwrapped position).
-    position: f64,
+    /// Free-running clock position within its cycle: a [`RunningPhase`], exact for as
+    /// long as the node runs.
+    phase: RunningPhase,
+    /// The whole cycles the free-running clock has completed (negative when it runs
+    /// backwards), so a random wave's step index stays exact. The position in unwrapped
+    /// cycles is `cycle` plus the phase.
+    cycle: i64,
     /// The rate [`Node::prepare`] set; `None` until then, when a free-running
     /// clock has no step and the node renders silence.
     sample_rate: Option<SampleRate>,
+}
+
+/// The per-frame step of a free-running clock at `rate`, its magnitude held strictly below
+/// half a cycle: a step of half a cycle or more reads as a step back.
+fn lfo_step(rate: f64, per_hz: f64) -> PhaseStep {
+    let most = 0.5_f64.next_down();
+    PhaseStep::from(PhaseIncrement((rate * per_hz).clamp(-most, most)))
 }
 
 impl LfoNode {
@@ -122,7 +133,8 @@ impl LfoNode {
             rate: Param::new(Hz(1.0)),
             depth: Param::new(Depth::FULL),
             phase_offset: PhaseIncrement(0.0),
-            position: 0.0,
+            phase: RunningPhase::START,
+            cycle: 0,
             sample_rate: None,
         }
     }
@@ -158,6 +170,10 @@ impl From<tutti_modulation::Lfo> for LfoNode {
 
 impl LfoNode {
     /// Runs free at `rate` cycles a second ([`LfoClock::Free`]).
+    ///
+    /// The clock moves less than half a cycle a frame: a rate of magnitude `sample rate / 2`
+    /// or more runs at just under that, forwards or backwards by its sign, so a random
+    /// shape's cycle index never skips or reverses.
     #[must_use]
     pub fn with_rate(mut self, rate: impl Into<Hz>) -> Self {
         self.clock = LfoClock::Free;
@@ -266,14 +282,28 @@ impl Node for LfoNode {
                     return Status::Modified;
                 };
                 let per_hz = 1.0 / sample_rate.get();
+                // The step is rebuilt only when the rate moves.
+                let mut step_of = (rate_cell, lfo_step(rate_cell, per_hz));
                 for (i, o) in out[..size].iter_mut().enumerate() {
                     // A driven rate is an `f32` lane value, widened exactly.
                     let rate = rate_lane
                         .map(|l| f64::from(l[i]))
                         .filter(|v| v.is_finite())
                         .unwrap_or(rate_cell);
-                    *o = self.evaluate(self.position, offset, depth_at(i));
-                    self.position += rate * per_hz;
+                    if rate != step_of.0 {
+                        step_of = (rate, lfo_step(rate, per_hz));
+                    }
+                    let cycles = self.cycle as f64 + f64::from_phase(self.phase);
+                    *o = self.evaluate(cycles, offset, depth_at(i));
+                    let next = self.phase.advance(step_of.1);
+                    // A step above half a cycle is a step back (its two's complement), and
+                    // a carry out of the add is a cycle completed, a borrow one undone.
+                    if (step_of.1.get() as i64) >= 0 {
+                        self.cycle += i64::from(next.get() < self.phase.get());
+                    } else {
+                        self.cycle -= i64::from(next.get() > self.phase.get());
+                    }
+                    self.phase = next;
                 }
             }
             LfoClock::Synced(beats_per_cycle) => {
@@ -288,7 +318,8 @@ impl Node for LfoNode {
     }
 
     fn reset(&mut self) {
-        self.position = 0.0;
+        self.phase = RunningPhase::START;
+        self.cycle = 0;
     }
 
     fn param_base(&self, k: usize) -> Option<f32> {
@@ -333,7 +364,8 @@ impl Clone for LfoNode {
             rate: self.rate.handle(),
             depth: self.depth.handle(),
             phase_offset: self.phase_offset,
-            position: self.position,
+            phase: self.phase,
+            cycle: self.cycle,
             sample_rate: self.sample_rate,
         }
     }
@@ -690,5 +722,76 @@ mod tests {
             "Random LFO should produce different values, got {}",
             unique.len()
         );
+    }
+
+    #[test]
+    fn a_reverse_rate_walks_the_cycle_backwards_across_the_start() {
+        // -1 Hz at 100 Hz: frame n is at -n / 100 cycles, whose ramp value is
+        // `2 frac(-n / 100) - 1`; frame 0 is on the start, the ramp's -1.
+        let out = render(
+            LfoNode::new(LfoShape::Sawtooth).with_rate(Hz(-1.0)),
+            100.0,
+            250,
+        );
+        for (n, &got) in out.iter().enumerate().filter(|(n, _)| n % 100 != 0) {
+            let want = 2.0 * (1.0 - (n % 100) as f64 / 100.0) - 1.0;
+            assert!((f64::from(got) - want).abs() < 1e-6, "frame {n}: {got}");
+        }
+    }
+
+    /// The random wave `Random` of seed 0 at `cycles`, the closed form a free-running
+    /// `LfoNode` is tested against.
+    fn random_at(cycles: f64) -> f32 {
+        Waveform::Shape {
+            shape: LfoShape::Random,
+            seed: 0,
+        }
+        .raw_at(cycles, false)
+    }
+
+    /// At 100 Hz the clock's step is `rate / 100` cycles; frames whose position is not
+    /// within 0.05 of a cycle boundary have an index no rounding can move.
+    fn assert_random_follows(rate: f64, step: f64) {
+        let out = render(
+            LfoNode::new(LfoShape::Random).with_rate(Hz(rate)),
+            100.0,
+            200,
+        );
+        let mut checked = 0;
+        for (n, &got) in out.iter().enumerate() {
+            let pos = n as f64 * step;
+            if (pos - pos.round()).abs() < 0.05 {
+                continue;
+            }
+            assert_eq!(got, random_at(pos), "rate {rate}, frame {n}");
+            checked += 1;
+        }
+        assert!(checked > 80);
+    }
+
+    #[test]
+    fn a_random_lfo_at_a_high_rate_below_nyquist_carries_forward_once_a_cycle() {
+        // 40 Hz at 100 Hz: 0.4 cycles a frame.
+        assert_random_follows(40.0, 0.4);
+    }
+
+    #[test]
+    fn a_random_lfo_at_nyquist_and_past_it_runs_forward_at_nyquist() {
+        // 50 Hz is exactly half a cycle a frame and 75 Hz is 1.5 times that; both clamp
+        // to just under half a cycle, so the cycle index steps every second frame.
+        assert_random_follows(50.0, 0.5);
+        assert_random_follows(75.0, 0.5);
+        assert_random_follows(-75.0, -0.5);
+    }
+
+    #[test]
+    fn a_random_lfo_holds_one_value_a_cycle_and_steps_on_the_next() {
+        // 1 Hz at 100 Hz: cycles are 100 frames; frames 10..=90 of each are one cycle.
+        let out = render(LfoNode::new(LfoShape::Random), 100.0, 300);
+        for c in 0..3 {
+            let held = out[100 * c + 10];
+            assert!(out[100 * c + 10..=100 * c + 90].iter().all(|&v| v == held));
+        }
+        assert!(out[10] != out[110] && out[110] != out[210]);
     }
 }

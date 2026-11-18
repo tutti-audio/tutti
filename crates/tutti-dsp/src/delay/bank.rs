@@ -21,23 +21,23 @@
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_units::{Feedback, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
 use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, Lerp, Steps, delay_step};
 
-/// What a delay reads while it runs: the delay in frames, and the two feedbacks, each
-/// aimed by [`DelayBank::aim`] and stepped by [`DelayBank::process`], held in the bank's
-/// float `F`.
+/// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
+/// in the bank's float `F`, each aimed by [`DelayBank::aim`] and stepped by
+/// [`DelayBank::process`].
 ///
 /// The time glides at [`DELAY_SLEW`] frames of delay per frame; the channels past the
 /// first that hold a time of their own hold it whole.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelayGlides<F: Float> {
-    time: Glide<F>,
-    own: [F; MAX_DELAY_CHANNELS],
+    time: Glide<ReadPosition>,
+    own: [ReadPosition; MAX_DELAY_CHANNELS],
     feedback: Glide<F>,
     cross: Glide<F>,
     /// The steps a feedback glide takes.
@@ -50,8 +50,8 @@ impl<F: Float + Lerp> DelayGlides<F> {
     #[must_use]
     pub fn landed(gain_steps: u32) -> Self {
         Self {
-            time: Glide::landed(F::ZERO),
-            own: [F::ZERO; MAX_DELAY_CHANNELS],
+            time: Glide::landed(ReadPosition::START),
+            own: [ReadPosition::START; MAX_DELAY_CHANNELS],
             feedback: Glide::landed(F::ZERO),
             cross: Glide::landed(F::ZERO),
             steps: gain_steps,
@@ -73,17 +73,12 @@ impl<F: Float + Lerp> DelayGlides<F> {
     }
 }
 
-/// `secs` as a delay in frames: clamped into `0..=max` and into the line of `cap`
-/// frames, designed in `f64` and narrowed to the line's float once, after the clamp.
+/// `secs` as a delay position: clamped into `0..=max` and into the line of `cap` frames. A
+/// NaN time is no delay.
 #[inline(always)]
-fn frames_of<F: Float>(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> F {
+fn position_of(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> ReadPosition {
     let secs = Seconds(secs.get().clamp(0.0, max.get()));
-    // The clamp leaves `0..=max` (finite), so a span exists; a NaN time, which
-    // the callers never pass, is no delay.
-    let Some(span) = SampleSpan::from_seconds(secs, rate) else {
-        return F::ZERO;
-    };
-    F::from_f64(span.min(SampleSpan::from_samples(Samples::new(cap))).get())
+    ReadPosition::of(secs, rate).min(ReadPosition::from_frames(Samples::new(cap)))
 }
 
 /// The loop's feedback and cross-feedback bounded as a pair ([`Feedback::stable_pair`]), in
@@ -171,10 +166,10 @@ impl<F: Float + Lerp> DelayBank<F> {
         self.taps.fill(F::ZERO);
     }
 
-    /// `secs` as a delay in frames: clamped into `0..=max_delay` and into the line. A time
+    /// `secs` as a delay position: clamped into `0..=max_delay` and into the line. A time
     /// that is not finite is no delay.
-    fn frames(&self, secs: Seconds) -> F {
-        frames_of(
+    fn position(&self, secs: Seconds) -> ReadPosition {
+        position_of(
             Seconds(finite_or(secs.get(), 0.0)),
             self.max,
             self.rate,
@@ -186,13 +181,13 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// is not finite as none, and a feedback that is not finite as none (the pair is
     /// bounded where it is read, [`Feedback::stable_pair`]). No allocation.
     pub fn aim(&self, glides: &mut DelayGlides<F>, controls: &DelayControls) {
-        let first = self.frames(controls.time);
-        glides.time.aim_by(first, Steps::Rate(DELAY_SLEW));
+        let first = self.position(controls.time);
+        glides.time.aim_position(first, Steps::Rate(DELAY_SLEW));
         for (c, own) in glides.own.iter_mut().enumerate() {
             *own = if c == 0 || self.linked {
                 first
             } else {
-                self.frames(self.own[c])
+                self.position(self.own[c])
             };
         }
         let steps = Steps::Fixed(glides.steps);
@@ -250,18 +245,21 @@ impl<F: Float + Lerp> DelayBank<F> {
         let moving = g.time.blended(frames) > 0
             || g.feedback.blended(frames) > 0
             || g.cross.blended(frames) > 0;
-        // The glided value at frame `i` of the block: the step after the ones taken.
-        let at = |glide: &Glide<F>, i: usize| {
-            let k = glide
-                .taken()
+        // The step of frame `i` of the block: the one after the steps taken.
+        let step = |taken: u32, i: usize| {
+            taken
                 .saturating_add(1)
-                .saturating_add(u32::try_from(i).unwrap_or(u32::MAX));
-            glide.at(k)
+                .saturating_add(u32::try_from(i).unwrap_or(u32::MAX))
         };
+        // The glided value at frame `i` of the block.
+        let at = |glide: &Glide<F>, i: usize| glide.at(step(glide.taken(), i));
+        let time_at = |i: usize| g.time.at(step(g.time.taken(), i));
         let linked = self.linked;
-        let (rate, max, cap) = (self.rate, self.max, self.cap);
-        let lane_frames = |secs: f64| frames_of::<F>(Seconds(secs), max, rate, cap);
-        let base = |c: usize, delay: F| {
+        let (rate, cap) = (self.rate, self.cap);
+        // The rate crosses into the lane's format once per block.
+        let lane_rate = S::from_f64(rate.get());
+        let line_end = ReadPosition::from_frames(Samples::new(cap));
+        let base = |c: usize, delay: ReadPosition| {
             if c == 0 || linked { delay } else { g.own[c] }
         };
         if time.is_none() && feedback.is_none() && !moving {
@@ -293,10 +291,15 @@ impl<F: Float + Lerp> DelayBank<F> {
                 });
                 stable_pair(fb, at(&g.cross, i), bound)
             };
-            let delay_at = |c: usize, i: usize| -> F {
-                match time.and_then(|s| s.get(i)).map(|x| x.to_f64()) {
-                    Some(s) if s.is_finite() => lane_frames(s),
-                    _ => base(c, at(&g.time, i)),
+            let delay_at = |c: usize, i: usize| -> ReadPosition {
+                // A lane value is seconds in the audio's own format: frames in that format, then
+                // a position by the one data-to-position direction. A lane-driven time has the
+                // lane's own precision; a held time keeps the exact `ReadPosition::of` path.
+                match time.and_then(|s| s.get(i)) {
+                    Some(&x) if x.is_finite() => {
+                        S::offset_position(ReadPosition::START, x * lane_rate).min(line_end)
+                    }
+                    _ => base(c, time_at(i)),
                 }
             };
             self.run(
@@ -312,7 +315,7 @@ impl<F: Float + Lerp> DelayBank<F> {
     }
 
     /// The block, `gain(i)` the bounded `(fb, cf)` pair at frame `i` and `delay_at(c, i)`
-    /// channel `c`'s delay in frames. Constant closures compile down to constants.
+    /// channel `c`'s delay. Constant closures compile down to constants.
     #[inline(always)]
     fn run<S: Float>(
         &mut self,
@@ -321,7 +324,7 @@ impl<F: Float + Lerp> DelayBank<F> {
         frames: usize,
         coupled: bool,
         gain: impl Fn(usize) -> (F, F),
-        delay_at: impl Fn(usize, usize) -> F,
+        delay_at: impl Fn(usize, usize) -> ReadPosition,
     ) {
         let interp = self.interpolation;
         let width = xs.len();
@@ -342,7 +345,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             let (fb, cf) = gain(i);
             for (c, line) in self.lines.iter().enumerate().take(width) {
                 let d = delay_at(c, i);
-                self.taps[c] = line.read_sample((d.max(F::ONE) - F::ONE).max(F::ZERO), interp);
+                self.taps[c] = line.read_sample(d.saturating_sub(Samples::new(1)), interp);
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
                 let mut acc = xs[c][i].convert_to::<F>() + self.taps[c] * fb;

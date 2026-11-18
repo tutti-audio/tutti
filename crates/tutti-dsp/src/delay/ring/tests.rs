@@ -1,4 +1,10 @@
 use super::DelayRing;
+use tutti_units::{ReadPosition, SampleRate, Seconds};
+
+/// The position `frames` frames back, to the quantum.
+fn pos(frames: f64) -> ReadPosition {
+    ReadPosition::from_count((frames * ReadPosition::COUNTS_PER_FRAME).round() as u64)
+}
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -48,8 +54,8 @@ fn a_read_halfway_between_two_slots_is_their_mean() {
     // The newest value, 100, is one slot back: the cursor has advanced past it.
     for d in 1..7 {
         let (a, b) = (ring.back(d), ring.back(d + 1));
-        assert_eq!(ring.at(d as f32 + 0.5), (a + b) / 2.0);
-        assert_eq!(ring.at(d as f32), a);
+        assert_eq!(ring.at(pos(d as f64 + 0.5)), (a + b) / 2.0);
+        assert_eq!(ring.at(pos(d as f64)), a);
     }
 }
 
@@ -101,7 +107,7 @@ fn an_f64_fractional_read_is_the_mean_of_two_wide_slots_to_f64_rounding() {
     let signal = wide_signal(8);
     let mut ring = DelayRing::<f64>::new(8);
     signal.iter().for_each(|&x| ring.push(x));
-    let got: Vec<f64> = (1..7).map(|d| ring.at(d as f64 + 0.5)).collect();
+    let got: Vec<f64> = (1..7).map(|d| ring.at(pos(d as f64 + 0.5))).collect();
     let want: Vec<f64> = (1..7)
         .map(|d| (signal[8 - d] + signal[8 - d - 1]) / 2.0)
         .collect();
@@ -109,7 +115,7 @@ fn an_f64_fractional_read_is_the_mean_of_two_wide_slots_to_f64_rounding() {
 }
 
 /// A read at `100000.3` frames on a long `f64` ring is the closed-form lerp of its two wide
-/// slots at the `f64` fraction `100000.3 - 100000`, to `2^-45`: an `f32` position (fraction
+/// slots at the position's own fraction, to `2^-45`: an `f32` position (fraction
 /// error near `4e-3`) or an `f32` slot (error near `2^-25`) misses it.
 #[test]
 fn an_f64_read_at_a_position_needing_more_than_24_bits_is_the_lerp_of_the_wide_slots() {
@@ -118,13 +124,67 @@ fn an_f64_read_at_a_position_needing_more_than_24_bits_is_the_lerp_of_the_wide_s
     let signal = wide_signal(N);
     let mut ring = DelayRing::<f64>::new(N);
     signal.iter().for_each(|&x| ring.push(x));
-    let pos = 100_000.3_f64;
-    let frac = pos - 100_000.0;
+    let at = pos(100_000.3);
+    let frac = (at.get() & 0xffff_ffff) as f64 / ReadPosition::COUNTS_PER_FRAME;
     let (a, b) = (signal[N - 100_000], signal[N - 100_001]);
     let want = a + frac * (b - a);
-    let got = ring.at(pos);
+    let got = ring.at(at);
     assert!(
         (got - want).abs() <= 2f64.powi(-45),
         "got {got} want {want}"
     );
+}
+
+/// 9.9 s at 192 kHz is 1 900 800 frames. A read of 0.3 frames more, on an `f32` ring of the
+/// ramp `0, 1, 2, ..`, is the ramp's linear interpolation at that fraction: an `f32` delay
+/// has steps of 1/8 frame at that distance, so a position held in it reads 0.25 or 0.375 and
+/// misses by 0.05 or more. The fraction is cut to its top 24 bits (error under `2^-24`),
+/// and the interpolation of `3` and `2` rounds three `f32` operations (half-ulps of `2^-23`
+/// at `3 * (1 - t)`, `2^-25` at `2 * t` and `2^-23` at the sum) plus `(b - a) * 2^-24`:
+/// `12 * 2^-25` bounds them.
+#[test]
+fn an_f32_read_at_9_9_seconds_and_a_third_of_a_frame_interpolates_at_that_fraction() {
+    const WHOLE: usize = 1_900_800;
+    const N: usize = WHOLE + 3;
+    let mut ring = DelayRing::<f32>::new(N);
+    for n in 0..N {
+        ring.push(n as f32);
+    }
+    let at = ReadPosition::of(
+        Seconds((WHOLE as f64 + 0.3) / 192_000.0),
+        SampleRate::SR_192K,
+    );
+    assert_eq!(at.frames().get(), WHOLE);
+    // `back(k)` is the ramp's value `N - k`, so a read `WHOLE + 0.3` back is `3 - 0.3`.
+    let want = 3.0 - 0.3;
+    let got = f64::from(ring.at(at));
+    assert!(
+        (got - want).abs() <= 12.0 * 2f64.powi(-25),
+        "got {got} want {want}"
+    );
+}
+
+/// Sweeping an `f64` read through a whole-frame boundary in steps of one quantum moves the
+/// value by the ramp's slope (1 a frame) times the quantum, and the interpolation's rounding
+/// (a few `f64` half-ulps of values under 2048): no step jumps, at the boundary or either
+/// side.
+#[test]
+fn an_f64_read_swept_across_a_whole_frame_moves_by_the_slope_times_the_quantum() {
+    const LEN: usize = 2048;
+    let mut ring = DelayRing::<f64>::new(LEN);
+    for n in 0..LEN {
+        ring.push(n as f64);
+    }
+    let boundary = 1000_u64 << 32;
+    let quantum = 2f64.powi(-32);
+    let mut last = ring.at(ReadPosition::from_count(boundary - 64));
+    for count in boundary - 63..=boundary + 64 {
+        let now = ring.at(ReadPosition::from_count(count));
+        let jump = (now - last).abs();
+        assert!(
+            (jump - quantum).abs() <= 2f64.powi(-40),
+            "count {count}: jump {jump}"
+        );
+        last = now;
+    }
 }
