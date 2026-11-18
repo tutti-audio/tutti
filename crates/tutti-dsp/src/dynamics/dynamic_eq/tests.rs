@@ -367,9 +367,13 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
             ..base
         },
     ];
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for (bad, bad_hz) in [
+        (f32::NAN, f64::NAN),
+        (f32::INFINITY, f64::INFINITY),
+        (f32::NEG_INFINITY, f64::NEG_INFINITY),
+    ] {
         all.push(DynamicEqControls {
-            center: Hz(f64::from(bad)),
+            center: Hz(bad_hz),
             q: Q(bad),
             threshold: Db(bad),
             knee: Db(bad),

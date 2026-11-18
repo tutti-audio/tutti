@@ -42,7 +42,7 @@ fn band(gain: f32) -> EqBandNode<f32> {
 /// or flat, it is the tone's own).
 fn energy<C>(solo: &mut Solo<C>) -> f32 {
     let x: Vec<f32> = (0..2048)
-        .map(|i| (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
+        .map(|i| ((std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin()) as f32)
         .collect();
     solo.render_input(Planes::new(&[&x]).unwrap())[0][1024..]
         .iter()

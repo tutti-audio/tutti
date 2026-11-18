@@ -1244,7 +1244,11 @@ mod tests {
     /// so either alone is enough by design.
     #[test]
     fn non_finite_writes_never_reach_the_state() {
-        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for (bad, bad_hz) in [
+            (f32::NAN, f64::NAN),
+            (f32::INFINITY, f64::INFINITY),
+            (f32::NEG_INFINITY, f64::NEG_INFINITY),
+        ] {
             let (n, c) = node(3);
             let mut n = prepared(n);
             let x = sine(440.0, FS, 2_048);
@@ -1261,8 +1265,8 @@ mod tests {
             c.band(2).set_ratio(bad);
             c.band(0).set_attack(bad);
             c.band(0).set_release(bad);
-            c.set_crossover(0, Hz(f64::from(bad)));
-            c.set_crossover(1, Hz(f64::from(bad)));
+            c.set_crossover(0, Hz(bad_hz));
+            c.set_crossover(1, Hz(bad_hz));
             assert!(finite(&mut n), "{bad}");
             c.band(1).set_threshold(-30.0);
             c.band(1).set_makeup(0.0);
