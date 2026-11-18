@@ -594,7 +594,7 @@ impl<F: Float + Lerp> FdnBank<F> {
             let t = F::from_f64(self.into as f64 / Self::CHUNK as f64);
             let x: F = xs[..width]
                 .iter()
-                .map(|ch| F::from_f64(ch[i].to_f64()))
+                .map(|ch| ch[i].convert_to::<F>())
                 .sum::<F>()
                 * scale;
 
@@ -634,10 +634,10 @@ impl<F: Float + Lerp> FdnBank<F> {
             let (mid, side) = ((out_l + out_r) * half, (out_l - out_r) * half);
             let wet = s.c_wet;
             if let Some(y) = left.as_deref_mut() {
-                y[i] = S::from_f64(((mid + s.c_width * side) * wet).to_f64());
+                y[i] = ((mid + s.c_width * side) * wet).convert_to::<S>();
             }
             if let Some(y) = right.as_deref_mut() {
-                y[i] = S::from_f64(((mid - s.c_width * side) * wet).to_f64());
+                y[i] = ((mid - s.c_width * side) * wet).convert_to::<S>();
             }
             self.into = (self.into + 1) % Self::CHUNK;
         }

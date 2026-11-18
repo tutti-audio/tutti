@@ -282,12 +282,12 @@ impl<F: Float + Lerp> PhaserChain<F> {
             let fb = feedback.at(fb_first.saturating_add(step));
             for c in 0..run {
                 coeff[c] = coefficients[c].at(first[c].saturating_add(step));
-                lane[c] = F::from_f64(xs[c][i].to_f64()) + self.last[c] * fb;
+                lane[c] = xs[c][i].convert_to::<F>() + self.last[c] * fb;
             }
             self.chain(&coeff[..run], &mut lane[..run]);
             for c in 0..run {
                 self.last[c] = lane[c];
-                ys[c][i] = S::from_f64(lane[c].to_f64());
+                ys[c][i] = lane[c].convert_to::<S>();
             }
             step = step.saturating_add(1);
         }

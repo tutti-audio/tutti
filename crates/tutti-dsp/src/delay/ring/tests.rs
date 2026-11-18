@@ -1,5 +1,8 @@
 use super::DelayRing;
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 /// After `n + 1` pushes of the ramp `0, 1, 2, ..` the newest value is `n`, one slot
 /// back, so `back(k)` is the ramp's value `n + 1 - k`, at every `k` the ring holds and
 /// across several wraps.

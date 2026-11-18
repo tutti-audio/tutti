@@ -1,5 +1,8 @@
 use super::*;
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 #[test]
 fn test_delay_line_basic() {
     let mut dl = DelayLine::new(Samples(10));
@@ -8,7 +11,7 @@ fn test_delay_line_basic() {
     dl.push_sample(0.0);
 
     let val = dl.read_sample(2.0, InterpolationMode::None);
-    assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {val}");
+    assert_eq!(val, 1.0);
 }
 
 /// An integer read is a delay of exactly that many frames, at every
@@ -38,7 +41,7 @@ fn test_delay_line_linear_interpolation() {
     dl.push_sample(0.0);
 
     let val = dl.read_sample(1.5, InterpolationMode::Linear);
-    assert!((val - 0.5).abs() < 0.001, "Expected 0.5, got {val}");
+    assert_eq!(val, 0.5);
 }
 
 #[test]
@@ -62,7 +65,7 @@ fn test_delay_line_reset() {
     dl.push_sample(1.0);
     dl.reset();
     let val = dl.read_sample(1.0, InterpolationMode::None);
-    assert!((val).abs() < 0.001, "After reset, should read 0.0");
+    assert_eq!(val, 0.0, "after a reset the line reads silence");
 }
 
 /// The whole-frame reader is the fixed delay: pushing `x` and reading `len` back returns

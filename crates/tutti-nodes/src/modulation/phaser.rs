@@ -144,7 +144,7 @@ control_set! {
 /// The phaser as a [`Kernel`]: a [`PhaserChain`], the LFO that sweeps it and the solve of its
 /// coefficients.
 ///
-/// **The LFO is state on the stream's clock.** Its phase is an `f32` `Phase` walked by the
+/// **The LFO is state on the stream's clock.** Its phase is a `Phase` walked by the
 /// rate's increment, counted from the last reset (and so from every `prepare`: **a
 /// re-prepare restarts the sweep**). It is not anchored to the transport. The chain's
 /// coefficient is solved at the **corners** of a segment, every [`COEFF_INTERVAL`] frames
@@ -216,8 +216,8 @@ impl<F: Float + Lerp> PhaserKernel<F> {
             rate: SampleRate::SR_48K,
             steps: 0,
             coefficients: vec![Glide::landed(F::ZERO); width].into_boxed_slice(),
-            depth: Glide::landed(F::from_f64(f64::from(d.depth.get()))),
-            feedback: Glide::landed(F::from_f64(f64::from(d.feedback.get()))),
+            depth: Glide::landed(F::from_f32(d.depth.get())),
+            feedback: Glide::landed(F::from_f32(d.feedback.get())),
             clock: SweepClock::new(offsets),
         })
     }
@@ -294,10 +294,8 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         ));
         let feedback = Feedback::new_clamped(controls.feedback.get()).get();
         let steps = Steps::Fixed(self.steps);
-        self.depth
-            .aim_by(F::from_f64(f64::from(controls.depth.get())), steps);
-        self.feedback
-            .aim_by(F::from_f64(f64::from(feedback)), steps);
+        self.depth.aim_by(F::from_f32(controls.depth.get()), steps);
+        self.feedback.aim_by(F::from_f32(feedback), steps);
         if self.clock.lands() {
             self.depth.settle();
             self.feedback.settle();
@@ -330,6 +328,8 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+    // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
@@ -640,7 +640,7 @@ mod tests {
     }
 
     /// The coefficient the sweep's definition gives for a channel offset by `offset` cycles,
-    /// `steps` steps of the LFO on (an `f32` phase walked one frame at a time), at depth
+    /// `steps` steps of the LFO on (a `Phase` walked one frame at a time), at depth
     /// `depth`, on `range` at `rate` Hz.
     fn exact_coefficient(
         range: SweepRange,
