@@ -29,8 +29,8 @@ const LIGHT: u64 = 8;
 /// Synths at 32 voices (`Heavy`), so the plan still spreads.
 const HEAVY: u64 = 2;
 
-fn synth(max_voices: usize, unison: u8) -> PolySynth {
-    PolySynth::new(SynthConfig {
+fn synth(max_voices: usize, unison: u8) -> PolySynth<f32> {
+    PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         polyphony: NonZeroUsize::new(max_voices).expect("at least one voice"),
         unison: (unison > 1).then(|| UnisonConfig {

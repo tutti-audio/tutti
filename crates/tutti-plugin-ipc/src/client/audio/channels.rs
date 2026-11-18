@@ -326,6 +326,12 @@ impl Channels {
         self.newest_seq.load(Ordering::Relaxed)
     }
 
+    /// Whether block `seq` has been submitted: a reply naming a later one is
+    /// the peer's invention.
+    pub(super) fn sent(&self, seq: u64) -> bool {
+        seq <= self.newest_submitted()
+    }
+
     /// Record that the drain collected an owed reply off the socket: a block's
     /// reply that came after its abandonment, which is also a reply the plugin
     /// gave. Called by the bridge thread only.
@@ -411,9 +417,13 @@ impl Channels {
         self.skipped_writer.add(1);
     }
 
-    /// Record what became of chunk `seq`. Bridge thread only.
+    /// Record what became of chunk `seq`. Bridge thread only. A chunk not
+    /// yet submitted has no fate: a peer-supplied `seq` far ahead would
+    /// otherwise claim a word of the ring and erase the fates behind it.
     pub(super) fn note_fate(&self, seq: u64, fate: Fate) {
-        self.fates.record(seq, fate);
+        if self.sent(seq) {
+            self.fates.record(seq, fate);
+        }
     }
 
     /// What became of chunk `seq`, while it is among the last [`FATES`].
@@ -499,6 +509,21 @@ mod tests {
 
     fn channels() -> (Channels, Sleeper) {
         Channels::new(SampleRate::SR_48K, Arc::default())
+    }
+
+    /// A fate for a block never submitted is dropped, so a peer-supplied
+    /// `seq` cannot claim a word of the ring, wrapped or not, and the fates
+    /// behind it stay readable.
+    #[test]
+    fn a_fate_for_a_block_never_submitted_is_dropped() {
+        let (c, _) = channels();
+        c.note_submitted(3);
+        c.note_fate(3, Fate::Published);
+        for hostile in [4, 3 + FATES as u64, u64::MAX >> 1, u64::MAX] {
+            c.note_fate(hostile, Fate::Refused);
+        }
+        assert_eq!(c.fate(3), Some(Fate::Published), "block 3's fate survived");
+        assert_eq!(c.fate(4), None);
     }
 
     /// Abandoned blocks, owed replies collected late and replies are separate

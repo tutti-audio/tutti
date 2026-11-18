@@ -10,9 +10,8 @@
 //! [`Translator`] is the stateful rest of the translation (M2-104 Appendix
 //! D.3): RPN and NRPN runs into Registered and Assignable Controllers, and
 //! Bank Select onto the next Program Change, per group and channel. An input
-//! edge runs it once (`tutti-midi-runtime`'s `MidiIngestNode`, and a clip as it
-//! is loaded), so what follows carries MIDI 2.0 channel voice messages. It
-//! calls `widen` for every message that needs no state.
+//! edge runs it once, so what follows carries MIDI 2.0 channel voice messages.
+//! It calls `widen` for every message that needs no state.
 //!
 //! [`Narrower`] is its inverse (M2-104 Appendix D.2), per group and channel:
 //! a Registered or Assignable Controller as its four Control Changes, and a
@@ -116,8 +115,8 @@
 //!
 //! [`PitchBendSensitivity`] is the 7.25 fixed-point range of RPN #00/07 (M2-104
 //! section 7.4.13), and also the range of RPN #00/00, whose data is whole
-//! semitones and cents ([`RegisteredData`](tutti_ump::RegisteredData), M2-104 section 7.4.7.1): the one
-//! value type here that is not a function converts between the two.
+//! semitones and cents ([`RegisteredData`](tutti_ump::RegisteredData), M2-104
+//! section 7.4.7.1): it converts between the two.
 //!
 //! **One input type at the edge:** a packet is a [`Ump`](tutti_ump::Ump), and
 //! [`Translator::translate`], [`Narrower::feed`], [`midi1()`](fn@midi1) and
@@ -128,10 +127,11 @@
 //! `tutti-ump`, and with them the M2-115 scaling and the Note On at velocity 0
 //! rule, which `tutti-ump` leaves to translation.
 //!
-//! The crate depends on `tutti-ump`, `tutti-units` (for `Semitones`, which
-//! [`PitchBendSensitivity::semitones`] returns) and allocates nothing. Its `serde`
-//! feature (off by default) derives serde on [`PitchBendSensitivity`], which
-//! carries the 32 RPN bits.
+//! The crate depends on `tutti-ump` for the wire types, `tutti-units` for the
+//! quantities it reads and writes (`Semitones`, `Cents`, `Bpm`, `Seconds`) and
+//! `tutti-music` for the time signature. Translation allocates nothing after
+//! construction. Its `serde` feature (off by default) derives serde on the
+//! values a project saves, each checked as it is read back.
 
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
@@ -155,8 +155,11 @@ mod universal;
 mod voice;
 
 pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
-pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message};
+pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message, narrow_with};
 pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
+#[cfg(feature = "serde")]
+pub use mpe::InvalidMpeZoneConfig;
+pub use mpe::InvalidMpeZones;
 pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
@@ -165,14 +168,41 @@ pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velo
 pub use narrower::Narrower;
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
-pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode, UnknownFrameRate};
+#[cfg(feature = "serde")]
+pub use smpte::InvalidSmpteTimecode;
+pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode};
 pub use song_position::song_position;
 pub use translator::Translator;
 pub use tuning::{
-    ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets,
-    Timing, TuningFrequency, TuningMessage, TuningName,
+    ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
+    MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency, TuningMessage,
+    TuningName,
 };
-pub use universal::*;
+#[cfg(feature = "serde")]
+pub use universal::InvalidMtcTimeCode;
+pub use universal::{
+    Addressed, Addressee, BadChecksum, GeneralMidiMode, GeneratorAction, GeneratorSetUp,
+    GeneratorTally, Heard, JamMode, JamReference, MMC_MAX_DATA, MMC_MAX_SEGMENTED,
+    MMC_MAX_SEGMENTS, MMC_MAX_TRACK_BITMAP_BYTES, MMC_SEGMENT_BYTES, McpSuccess, McsSuccess,
+    MmcArithmetic, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand,
+    MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices,
+    MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind, MmcErrorReport,
+    MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse, MmcExtension, MmcFastMode,
+    MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup, MmcInfoField, MmcItem, MmcItems,
+    MmcLifterDefeat, MmcLocate, MmcMaskedWrite, MmcMove, MmcName, MmcNames, MmcOtherField,
+    MmcPayload, MmcPlaySpeedReference, MmcPosition, MmcProcedure, MmcProcedureResponse,
+    MmcReassembler, MmcRecordActivity, MmcRecordMode, MmcRecordMonitor, MmcRecordStatus,
+    MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment, MmcSegmentBytes,
+    MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection, MmcSequence,
+    MmcShortTimeCode, MmcSign, MmcSignature, MmcSlot, MmcSpeed, MmcStep, MmcStopMode, MmcString,
+    MmcSubframes, MmcSupportBitmap, MmcSystemMaster, MmcTimeCode, MmcTimeCodeName,
+    MmcTimeCodeSource, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate,
+    MmcUserBitFlags, MmcUserBits, MotionControlTally, MotionProcess, MotionState, MtcAction,
+    MtcFlags, MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcPosition, NotMmcSlot,
+    NotMmcSubframes, NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle,
+    QuarterFramePiece, Recipient, RunReference, SysexDeviceId, Universal, UniversalRead,
+    UniversalReader, VitcInsert, read,
+};
 pub use voice::{
     channel_voice, widen, widen_bend, widen_bytes, widen_message, widen_value, widen_velocity,
 };

@@ -2,9 +2,9 @@
 //! the Default Translation and the alternates a translator may add (D.1.5,
 //! D.2.8, D.4).
 
-use tutti_ump::{U7, U14, Voice1, Voice2};
+use tutti_ump::{U7, U14};
 
-use crate::{MpeZoneConfig, NoMidi1Form, narrow};
+use crate::MpeZoneConfig;
 
 /// How a value that narrows to the smallest or largest MIDI 1.0 value is
 /// translated (M2-104 D.1.5): some devices give those two values a meaning of
@@ -16,6 +16,7 @@ use crate::{MpeZoneConfig, NoMidi1Form, narrow};
 /// [`Translator`](crate::Translator) never lands a value on an extreme it was
 /// not.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExtremeValues {
     /// The Default Translation: the plain shift of M2-115 section 3.4, so a
     /// value just above 0 narrows to 0 and one just below the maximum to the
@@ -36,58 +37,24 @@ pub enum ExtremeValues {
 }
 
 impl ExtremeValues {
-    /// `voice` at MIDI 1.0 resolution as [`narrow()`] gives it, with the extremes
-    /// of this mode applied to its value.
-    ///
-    /// # Errors
-    ///
-    /// [`NoMidi1Form`] for a message with no single MIDI 1.0 message, as for
-    /// [`narrow()`].
-    pub fn narrow(self, voice: Voice2) -> Result<Voice1, NoMidi1Form> {
-        let narrowed = narrow(voice)?;
-        if self == Self::Scaled {
-            return Ok(narrowed);
+    /// `narrowed`, the 7-bit narrowing of `source` (`source_bits` wide), with
+    /// this mode's extremes applied.
+    pub(crate) fn seven(self, narrowed: U7, source: u32, source_bits: u32) -> U7 {
+        match self {
+            Self::Scaled => narrowed,
+            Self::Avoided => {
+                U7::masked(avoid(u32::from(narrowed.get()), source, source_bits, 7) as u8)
+            }
         }
-        let seven = |narrowed: U7, source: u32, source_bits: u32| {
-            U7::masked(avoid(u32::from(narrowed.get()), source, source_bits, 7) as u8)
-        };
-        Ok(match (voice, narrowed) {
-            (Voice2::NoteOn { velocity, .. }, Voice1::NoteOn { note, velocity: v }) => {
-                Voice1::NoteOn {
-                    note,
-                    velocity: seven(v, u32::from(velocity.get()), 16),
-                }
-            }
-            (Voice2::NoteOff { velocity, .. }, Voice1::NoteOff { note, velocity: v }) => {
-                Voice1::NoteOff {
-                    note,
-                    velocity: seven(v, u32::from(velocity.get()), 16),
-                }
-            }
-            (Voice2::PolyPressure { value, .. }, Voice1::PolyPressure { note, pressure }) => {
-                Voice1::PolyPressure {
-                    note,
-                    pressure: seven(pressure, value.get(), 32),
-                }
-            }
-            (
-                Voice2::ControlChange { value, .. },
-                Voice1::ControlChange {
-                    controller,
-                    value: v,
-                },
-            ) => Voice1::ControlChange {
-                controller,
-                value: seven(v, value.get(), 32),
-            },
-            (Voice2::ChannelPressure(value), Voice1::ChannelPressure(v)) => {
-                Voice1::ChannelPressure(seven(v, value.get(), 32))
-            }
-            (Voice2::PitchBend(bend), Voice1::PitchBend(v)) => Voice1::PitchBend(U14::masked(
-                avoid(u32::from(v.get()), bend.get(), 32, 14) as u16,
-            )),
-            (_, other) => other,
-        })
+    }
+
+    /// `narrowed`, the 14-bit narrowing of the 32-bit `source`, with this
+    /// mode's extremes applied.
+    pub(crate) fn fourteen(self, narrowed: U14, source: u32) -> U14 {
+        match self {
+            Self::Scaled => narrowed,
+            Self::Avoided => U14::masked(avoid(u32::from(narrowed.get()), source, 32, 14) as u16),
+        }
     }
 }
 
@@ -111,6 +78,7 @@ pub(crate) fn avoid(narrowed: u32, source: u32, source_bits: u32, dst_bits: u32)
 /// D.2.8), which the Default Translation does not address and an Alternate
 /// Translation Mode may (D.4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PerNoteTranslation {
     /// The Default Translation: they have no MIDI 1.0 message and send
     /// nothing.
@@ -134,6 +102,7 @@ pub enum PerNoteTranslation {
 /// Default Translation; a product with a non-default mode tells its user it is
 /// active ([`is_alternate`](Self::is_alternate) is the question to ask).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TranslationMode {
     /// How the smallest and largest values are narrowed.
     pub extremes: ExtremeValues,

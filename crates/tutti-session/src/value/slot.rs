@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use tutti_graph::NodeKey;
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{LockExt, Setting, SettingWord};
@@ -38,6 +39,23 @@ pub enum SlotId {
     /// The MIDI outputs' own latency and offset.
     #[cfg(feature = "midi")]
     OutputLatency,
+    /// The events a MIDI clip node plays.
+    #[cfg(feature = "midi")]
+    ClipEvents(NodeKey),
+    /// The chord and scale changes a harmony node sends.
+    #[cfg(feature = "midi")]
+    Harmony(NodeKey),
+}
+
+impl SlotId {
+    /// The node the value is of, or `None` for one of the session's own.
+    pub(crate) const fn node(self) -> Option<NodeKey> {
+        match self {
+            #[cfg(feature = "midi")]
+            Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
+            _ => None,
+        }
+    }
 }
 
 /// A session value behind a target: how it is read, checked and stored.
@@ -55,6 +73,26 @@ pub trait Slot<V>: Send + Sync + 'static {
 
 /// The cell a slot target lands through.
 pub type SlotCell<V> = Arc<dyn Slot<V>>;
+
+/// The values of a node that the session's verbs reach, besides its params:
+/// what [`SessionNode::slots`](crate::SessionNode::slots) answers, kept under
+/// the node's key until the node is removed or replaced.
+#[derive(Default)]
+pub struct NodeSlots(pub(crate) Vec<(SlotId, Erased)>);
+
+impl NodeSlots {
+    /// `slot` as the value `id` names.
+    #[cfg(feature = "midi")]
+    pub(crate) fn of<V: 'static>(id: SlotId, slot: SlotCell<V>) -> Self {
+        Self(vec![(id, erase(slot))])
+    }
+}
+
+impl std::fmt::Debug for NodeSlots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeSlots").finish_non_exhaustive()
+    }
+}
 
 /// What a slot is registered as: the type-erased [`SlotCell`] of its value.
 pub(crate) type Erased = Box<dyn Any + Send + Sync>;
@@ -177,6 +215,106 @@ slot_target!(
     SlotId::OutputLatency
 );
 
+/// Writes the target, `Target`, `Land` and builders of a slot target on a node
+/// of the graph: its `SlotId` names the node, and the value type is fixed.
+#[cfg(feature = "midi")]
+macro_rules! node_slot_target {
+    ($(#[$meta:meta])* $name:ident, $value:ty, $id:ident) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub struct $name(NodeKey);
+
+        impl $name {
+            pub(crate) const fn new(node: NodeKey) -> Self {
+                Self(node)
+            }
+
+            /// The node the target is on.
+            #[must_use]
+            pub const fn node(self) -> NodeKey {
+                self.0
+            }
+        }
+
+        impl sealed::Sealed for $name {
+            fn id(self) -> TargetId {
+                TargetId::Slot(SlotId::$id(self.0))
+            }
+        }
+        impl Target for $name {
+            type Value = $value;
+        }
+        impl sealed::Land for $name {
+            type Cell = SlotCell<$value>;
+
+            fn resolve(self, params: &Params) -> Option<(Self::Cell, $value)> {
+                let cell = params.slot::<$value>(SlotId::$id(self.0))?;
+                let base = cell.load();
+                Some((cell, base))
+            }
+
+            fn check(cell: &Self::Cell, value: &$value) -> Result<(), SetRefusal> {
+                cell.check(value)
+            }
+
+            fn land(cell: &Self::Cell, value: &$value) {
+                cell.store(value);
+            }
+        }
+        target_builders!([] $name);
+    };
+}
+
+#[cfg(feature = "midi")]
+node_slot_target!(
+    /// The events a MIDI clip node plays, as `clip.events()` names them: a
+    /// [`ClipEvents`](tutti_midi_runtime::ClipEvents), built by collecting
+    /// [`TimedMidiEvent`](tutti_midi_runtime::TimedMidiEvent)s, which sorts
+    /// them, pairs each note-off with its note-on and builds the chase table
+    /// where the clip is built.
+    ///
+    /// The clip is the node's from its next block, which ends the notes the
+    /// last one left sounding. A value equal to the clip in force (the same
+    /// events and note pairing) changes nothing, so rebuilding the same clip
+    /// cuts no note. A read answers the clip in force.
+    ClipEventsTarget,
+    Arc<tutti_midi_runtime::ClipEvents>,
+    ClipEvents
+);
+
+#[cfg(feature = "midi")]
+node_slot_target!(
+    /// The chord and scale changes a harmony node sends, as `harmony.changes()`
+    /// names them: [`HarmonyChanges`](tutti_midi_runtime::HarmonyChanges),
+    /// built by collecting [`TimedHarmony`](tutti_midi_runtime::TimedHarmony)s
+    /// in any order.
+    ///
+    /// The changes are the node's from its next block, which re-states the
+    /// context in force on that block's first frame. A value equal to the
+    /// changes in force changes nothing. A read answers the changes in force.
+    HarmonyTarget,
+    Arc<tutti_midi_runtime::HarmonyChanges>,
+    Harmony
+);
+
+#[cfg(feature = "midi")]
+impl crate::Key<tutti_midi_runtime::MidiClipNode> {
+    /// The events the clip plays.
+    #[must_use]
+    pub const fn events(self) -> ClipEventsTarget {
+        ClipEventsTarget::new(self.erase())
+    }
+}
+
+#[cfg(feature = "midi")]
+impl crate::Key<tutti_midi_runtime::HarmonyNode> {
+    /// The chord and scale changes the node sends.
+    #[must_use]
+    pub const fn changes(self) -> HarmonyTarget {
+        HarmonyTarget::new(self.erase())
+    }
+}
+
 /// A session setting held in one atomic word ([`SettingWord`]): the click's
 /// [`MetronomeMode`], as `session.click().mode()` names it. The audio thread
 /// reads it once per block; a write lands at once.
@@ -289,6 +427,70 @@ impl Slot<Arc<MeterMap>> for MeterSlot {
 
     fn store(&self, value: &Arc<MeterMap>) {
         self.0.set_meter(Arc::clone(value));
+    }
+}
+
+/// A node's control side that holds one published value: what a
+/// [`PublishedSlot`] reads and replaces it through.
+#[cfg(feature = "midi")]
+pub(crate) trait Held: Send + Sync + 'static {
+    /// The value in force.
+    type Value;
+
+    /// The value now.
+    fn current(&self) -> Self::Value;
+
+    /// Replaces the value; an equal one changes nothing.
+    fn replace(&self, value: &Self::Value);
+}
+
+#[cfg(feature = "midi")]
+impl Held for tutti_midi_runtime::MidiClipControls {
+    type Value = Arc<tutti_midi_runtime::ClipEvents>;
+
+    fn current(&self) -> Self::Value {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Self::Value) {
+        self.set(Arc::clone(value));
+    }
+}
+
+#[cfg(feature = "midi")]
+impl Held for tutti_midi_runtime::HarmonyControls {
+    type Value = Arc<tutti_midi_runtime::HarmonyChanges>;
+
+    fn current(&self) -> Self::Value {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Self::Value) {
+        self.set(Arc::clone(value));
+    }
+}
+
+/// A value a node reads through a published cell, written through its
+/// control side ([`Held`]), which publishes when the value differs from the
+/// one in force.
+#[cfg(feature = "midi")]
+pub(crate) struct PublishedSlot<C>(pub C);
+
+#[cfg(feature = "midi")]
+impl<C: Held> Slot<C::Value> for PublishedSlot<C>
+where
+    C::Value: Send + Sync + 'static,
+{
+    fn load(&self) -> C::Value {
+        self.0.current()
+    }
+
+    fn check(&self, _: &C::Value) -> Result<(), SetRefusal> {
+        Ok(())
+    }
+
+    fn store(&self, value: &C::Value) {
+        self.0.replace(value);
     }
 }
 

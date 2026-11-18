@@ -5,6 +5,7 @@ use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
 use super::progress::StateProgress;
+use crate::error::unexpected_message;
 use crate::protocol::{
     BridgeMessage, HostMessage, ParamId, ParameterChanges, ParameterPoint, ParameterQueue,
     ProcessAudioData,
@@ -253,7 +254,13 @@ impl Owed {
     /// is its only path. Dropping it silently loses notes from any block whose
     /// reply ran late. Only a block's counts as late
     /// ([`Channels::note_late`]): the counters are about blocks.
+    ///
+    /// A block's reply naming a block never sent is no owed reply: it is
+    /// handed back as the answer, for the caller to refuse.
     fn take(&mut self, msg: BridgeMessage, channels: &Channels) -> Option<BridgeMessage> {
+        if matches!(msg, BridgeMessage::AudioProcessed { seq, .. } if !channels.sent(seq)) {
+            return Some(msg);
+        }
         while let Some(&late) = self.late.front() {
             let error = matches!(msg, BridgeMessage::Error { .. });
             match late {
@@ -514,6 +521,13 @@ pub(super) fn handle(
                 }
                 Some(reply) => {
                     match reply {
+                        // A reply to a block not yet sent is a peer making
+                        // fates up, not an answer.
+                        BridgeMessage::AudioProcessed { seq: replied, .. } if replied > seq => {
+                            return Err(BridgeError::ProtocolError(
+                                "an AudioProcessed for a block that was never sent",
+                            ));
+                        }
                         // The wire adapter already decoded the list on the
                         // bridge thread (off-RT) and refused one past the cap;
                         // the RT thread only drains it. Whether the *audio* is
@@ -549,7 +563,9 @@ pub(super) fn handle(
                         BridgeMessage::Error { .. } => {
                             channels.push_audio_response(AudioResponse::Error { seq: Some(seq) });
                         }
-                        _ => {}
+                        // Any other kind is no answer to a block: counting it
+                        // as one would keep a hung plugin looking alive.
+                        other => return Err(unexpected_message("AudioProcessed", &other)),
                     }
                     // Counted after the push: a reader that sees the count
                     // finds the reply queued.
@@ -1104,6 +1120,7 @@ mod tests {
     fn owed_frames_are_taken_in_order_before_the_answer() {
         let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0;
         let mut owed = Owed::finishing(Timeouts::default().drain);
+        channels.note_submitted(3);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);

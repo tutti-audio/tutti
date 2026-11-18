@@ -565,7 +565,7 @@ fn general_midi_on_returns_the_channels_to_program_zero_and_keeps_the_tables() {
     assert_eq!(start_tune(&on(&mut core, 0, 60)), 5.05);
     core.universal(Heard {
         to: Addressee::All,
-        message: Universal::GeneralMidi(tutti_midi_protocol::GeneralMidi::On),
+        message: Universal::GeneralMidi(tutti_midi_protocol::GeneralMidiMode::On),
     });
     assert_eq!(core.channel(MidiChannel::of(0)).tuning_program(), U7::of(0));
     assert_eq!(start_tune(&on(&mut core, 0, 60)), 0.0);

@@ -35,7 +35,7 @@ use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapSource;
 use crate::NodeKey;
 use crate::arena::Arena;
-use crate::command::overlay_capacity;
+use crate::command::{Overlay, overlay_capacity};
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
@@ -388,7 +388,7 @@ impl Stager {
             inject,
             has_inject: vec![false; plan.units.len()],
             has_due: vec![false; plan.units.len()],
-            overlay: Vec::with_capacity(overlay),
+            overlay: Overlay::with_capacity(overlay),
             par,
         };
         // The store grows by moving into one built here.

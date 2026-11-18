@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn pitch_bend_sensitivity_rpn_roundtrip() {
     for s in [2u8, 24, 48, 96] {
-        let sens = PitchBendSensitivity::of(s);
+        let sens = PitchBendSensitivity::from_semitones(U7::of(s));
         assert_eq!(
             PitchBendSensitivity::from_rpn_bits(sens.to_rpn_bits()),
             sens
@@ -12,25 +12,18 @@ fn pitch_bend_sensitivity_rpn_roundtrip() {
     }
 }
 
-/// **A whole-semitone count is 7 integer bits**: up to 127 it is exact, above
-/// it `new` refuses rather than shifting bits out (128 was 0, 200 was 72).
+/// **A whole-semitone count is 7 integer bits**: every `U7` is exact, its
+/// word is the count shifted into the integer field (Q7.25), and the count
+/// reads back as the semitones and as the RPN #00/00 whole-semitone field.
 /// Spec: m2-104/7.4.13.2#1
 #[test]
-fn a_whole_semitone_count_above_127_is_refused() {
-    for s in 0..=PitchBendSensitivity::MAX_SEMITONES {
-        let sens = PitchBendSensitivity::new(s).expect("in range");
+fn a_whole_semitone_count_is_the_q7_25_integer_field() {
+    for s in 0..=U7::MAX.get() {
+        let sens = PitchBendSensitivity::from_semitones(U7::of(s));
+        assert_eq!(sens.to_rpn_bits(), u32::from(s) << 25, "{s} semitones");
         assert_eq!(sens.semitones().get(), f64::from(s), "{s} semitones");
-        assert_eq!(PitchBendSensitivity::of(s), sens);
+        assert_eq!(sens.to_channel_data().msb().get(), s, "{s} semitones");
     }
-    for s in 128..=u8::MAX {
-        assert_eq!(PitchBendSensitivity::new(s), None, "{s} semitones");
-    }
-}
-
-#[test]
-#[should_panic(expected = "at most 127 semitones")]
-fn of_panics_above_127() {
-    let _ = PitchBendSensitivity::of(128);
 }
 
 /// **Every `u32` is a sensitivity** (M2-104 §7.4.13.3: up to almost 128
@@ -54,7 +47,7 @@ fn every_rpn_word_is_in_range() {
 #[cfg(feature = "serde")]
 #[test]
 fn serde_carries_the_bare_bits() {
-    let sens = PitchBendSensitivity::of(48);
+    let sens = PitchBendSensitivity::from_semitones(U7::of(48));
     let json = serde_json::to_string(&sens).unwrap();
     assert_eq!(json, (48u32 << 25).to_string());
     assert_eq!(
@@ -115,7 +108,7 @@ fn channel_data_round_trips_every_cent() {
 fn channel_data_saturates_at_127_semitones_99_cents() {
     let top = PitchBendSensitivity::from_rpn_bits(u32::MAX).to_channel_data();
     assert_eq!((top.msb().get(), top.lsb().get()), (127, 99));
-    let whole = PitchBendSensitivity::of(48).to_channel_data();
+    let whole = PitchBendSensitivity::from_semitones(U7::of(48)).to_channel_data();
     assert_eq!((whole.msb().get(), whole.lsb().get()), (48, 0));
 }
 
