@@ -19,6 +19,53 @@ pub fn lerp<F: Float>(a: F, b: F, t: F) -> F {
     a * (F::ONE - t) + b * t
 }
 
+/// The vertex of a parabola through three equally spaced samples around a
+/// maximum: where [`parabolic_peak`] puts the peak, and how high.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParabolicPeak<F> {
+    /// The vertex's distance from the middle sample, in sample spacings,
+    /// within `-0.5..=0.5`.
+    pub offset: F,
+    /// The parabola's value at the vertex, at least the middle sample's.
+    pub value: F,
+}
+
+/// The vertex of the parabola through `below`, `mid` and `above`, the samples
+/// at offsets `-1`, `0` and `1`, for a peak whose middle sample is the largest.
+///
+/// The offset is `(below - above) / (2 (below - 2 mid + above))`, clamped to
+/// half a spacing: a middle sample that is not the largest has its vertex
+/// beyond a neighbour, and the clamp keeps the refinement within the sample it
+/// refines. The three points must bend down (`below - 2 mid + above < 0`); a
+/// flat top, a minimum or a NaN has no vertex, and the result is offset `0`
+/// at `mid`. For the minimum of a curve, pass the negated samples.
+///
+/// ```
+/// use tutti_dsp::parabolic_peak;
+///
+/// // y = -(x - 0.3)^2 sampled at -1, 0, 1 peaks at 0.3, where it is 0.
+/// let peak = parabolic_peak(-1.69_f64, -0.09, -0.49);
+/// assert!((peak.offset - 0.3).abs() < 1e-12 && peak.value.abs() < 1e-12);
+/// ```
+#[inline]
+#[must_use]
+pub fn parabolic_peak<F: Float>(below: F, mid: F, above: F) -> ParabolicPeak<F> {
+    let half = F::from_f32(0.5);
+    let curvature = below - (mid + mid) + above;
+    if curvature.is_nan() || curvature >= F::ZERO {
+        return ParabolicPeak {
+            offset: F::ZERO,
+            value: mid,
+        };
+    }
+    let slope = below - above;
+    let offset = (half * slope / curvature).clamp(-half, half);
+    ParabolicPeak {
+        offset,
+        value: mid - F::from_f32(0.25) * slope * offset,
+    }
+}
+
 /// Catmull-Rom cubic Hermite interpolation across four consecutive taps.
 ///
 /// `y1` is the sample at the integer position, `y0`/`y2`/`y3` its neighbours
@@ -72,5 +119,45 @@ mod tests {
         assert_eq!(cubic_hermite(y0, y1, y2, y3, 0.0), y1);
         assert_eq!(cubic_hermite(y0, y1, y2, y3, 1.0), y2);
         assert_eq!(cubic_hermite(y0, y1, y2, y3, 0.5), 0.125);
+    }
+
+    /// The parabola `y = c - k (x - v)^2` sampled at -1, 0, 1 has its vertex at
+    /// offset `v` and value `c`, for any `v` within half a spacing.
+    #[test]
+    fn the_vertex_of_a_sampled_parabola_is_its_offset_and_height() {
+        for &(c, k, v) in &[(0.0_f64, 1.0, 0.3), (2.0, 0.5, -0.45), (-1.0, 3.0, 0.0)] {
+            let y = |x: f64| c - k * (x - v) * (x - v);
+            let peak = parabolic_peak(y(-1.0), y(0.0), y(1.0));
+            assert!(
+                (peak.offset - v).abs() < 1e-12,
+                "offset {} vs {v}",
+                peak.offset
+            );
+            assert!(
+                (peak.value - c).abs() < 1e-12,
+                "value {} vs {c}",
+                peak.value
+            );
+        }
+    }
+
+    /// A middle sample below a neighbour puts the vertex past it: the points
+    /// -4, -1, 0 (whose vertex lies at offset 1) clamp to half a spacing.
+    #[test]
+    fn a_vertex_beyond_half_a_spacing_is_clamped_to_it() {
+        let peak = parabolic_peak(-4.0_f32, -1.0, -0.0);
+        assert_eq!(peak.offset, 0.5);
+        let peak = parabolic_peak(-0.0_f32, -1.0, -4.0);
+        assert_eq!(peak.offset, -0.5);
+    }
+
+    /// Three points that do not bend down have no vertex: a flat top, a
+    /// minimum and a NaN give offset 0 at the middle sample.
+    #[test]
+    fn a_flat_top_a_minimum_and_a_nan_have_no_vertex() {
+        for (a, b, c) in [(1.0_f32, 1.0, 1.0), (1.0, 0.0, 2.0), (f32::NAN, 1.0, 0.0)] {
+            let peak = parabolic_peak(a, b, c);
+            assert_eq!((peak.offset, peak.value), (0.0, b));
+        }
     }
 }
