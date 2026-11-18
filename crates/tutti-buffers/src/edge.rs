@@ -46,8 +46,8 @@
 //!   [`Samples`], bounded by `out.frames()`.
 //! - [`Sink::write`] is handed a view whose `frames()` is its frame count.
 //!
-//! Crossing to a slice length goes through [`Samples::interleaved_len`] and
-//! [`Samples::from_interleaved_len`], so a stride mistake has one home.
+//! Crossing to a slice length goes through [`ChannelLayout::interleaved_len`] and
+//! [`ChannelLayout::from_interleaved_len`], so a stride mistake has one home.
 //!
 //! # Width agreement between two edges is a runtime check
 //!

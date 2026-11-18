@@ -124,7 +124,7 @@ pub(crate) fn render_outputs(
                         continue;
                     }
                     let frames = window.len();
-                    let samples = Samples(frames).interleaved_len(lane.layout);
+                    let samples = lane.layout.interleaved_len(Samples(frames));
                     let mut block = InterleavedMut::new(&mut lane.scratch[..samples], lane.layout)?;
                     let span = Samples(window.start)..Samples(window.end);
                     lane.fold.fold_planar_to_interleaved(

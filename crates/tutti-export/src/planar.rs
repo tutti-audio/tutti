@@ -27,7 +27,7 @@ pub(crate) fn join(
 ) -> Result<()> {
     let frames = Samples(planes.first().map_or(0, Vec::len));
     staging.clear();
-    staging.resize(frames.interleaved_len(layout), 0.0);
+    staging.resize(layout.interleaved_len(frames), 0.0);
     if planes.is_empty() {
         return Ok(());
     }

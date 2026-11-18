@@ -339,7 +339,7 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     };
     assert_eq!(n, Samples(1));
     let layout = Source::layout(&mic);
-    let written = Interleaved::new(&scratch[..n.interleaved_len(layout)], layout).unwrap();
+    let written = Interleaved::new(&scratch[..layout.interleaved_len(n)], layout).unwrap();
     sink.write(written).expect("the file takes it");
     // Then nothing more comes, and the source says why.
     assert_eq!(
