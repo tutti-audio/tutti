@@ -26,11 +26,12 @@ use tutti_graph::{
     Env, GraphBuilder, IntoNode, Offset, Prepare, Renderer, TransportChanges, TransportPosition,
     Unforkable,
 };
+use tutti_music::LoopRange;
+use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::ProjectMeter;
-use tutti_types::LoopRange;
-use tutti_types::{BeatsPerBar, ChannelLayout, MeterChange, MeterMap, NoteValue, TimeSignature};
+use tutti_types::ChannelLayout;
 use tutti_units::Latency;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;

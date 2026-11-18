@@ -1294,7 +1294,7 @@ fn process_with_transport() {
         .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
         .with_loop(tutti_plugin_types::LoopRegion::new(
-            tutti_types::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0))
+            tutti_music::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0))
                 .expect("a loop"),
         ));
 

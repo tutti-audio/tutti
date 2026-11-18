@@ -24,10 +24,8 @@ use std::sync::Arc;
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
-use tutti_types::{
-    ChannelLayout, ChannelTopology, Speaker, TimelineSegment, first_frame_at_or_after,
-    snap_to_whole_frame,
-};
+use tutti_music::{TimelineSegment, first_frame_at_or_after, snap_to_whole_frame};
+use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, ReadRate, SamplePosition, SampleRate, Samples};
 
 use super::clock::{BlockClock, Run, Wrap};
@@ -834,7 +832,7 @@ mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
-    use tutti_types::LoopRange;
+    use tutti_music::LoopRange;
     use tutti_types::MAX_CHANNELS;
     use tutti_units::{PlaybackRate, Seconds, SrcRatio};
 

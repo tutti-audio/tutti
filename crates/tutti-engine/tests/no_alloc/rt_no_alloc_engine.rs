@@ -27,10 +27,10 @@ use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_fixtures::midi;
+use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{LoopEdit, Transport};
 use tutti_types::ChannelLayout;
-use tutti_types::LoopRange;
 use tutti_units::{Amplitude, SampleRate};
 
 /// A stereo source that reads the transport per frame from its `Env`, so

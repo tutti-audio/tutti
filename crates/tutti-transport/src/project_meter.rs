@@ -24,8 +24,8 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+use tutti_music::MeterMap;
 use tutti_rt::{Loan, LockExt, Publisher, Reader};
-use tutti_types::MeterMap;
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).
@@ -325,7 +325,7 @@ impl std::fmt::Debug for MeterSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::{MeterChange, TimeSignature};
+    use tutti_music::{MeterChange, TimeSignature};
     use tutti_units::Beat;
 
     fn meter_of(n: u32) -> Arc<MeterMap> {

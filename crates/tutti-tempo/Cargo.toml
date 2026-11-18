@@ -20,7 +20,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+tutti-music = { version = "0.0.1", path = "../tutti-music" }
 # Pure-Rust `log1p`/`expm1`/`exp`, so a ramp's figures do not depend on the
 # platform's C math library.
 libm = "0.2.15"

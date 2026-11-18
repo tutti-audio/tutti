@@ -116,4 +116,4 @@ pub use shape::{LfoShape, Polarity, shape};
 pub use source::{CONTROL_GRID, ControlSource, Leg, LevelFollower, NoteAdsr, PlayGrid};
 pub use sources::{Follower, Lfo, LfoRate, Macro, NoteEnvelope};
 pub use tutti_curve::{Curvature, Exponent, Law};
-pub use tutti_types::Adsr;
+pub use tutti_music::Adsr;

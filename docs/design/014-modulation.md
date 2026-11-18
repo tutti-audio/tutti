@@ -801,7 +801,7 @@ pub enum Source {
 }
 
 /// Existing units: sustain is a level, `Amplitude`. Homed in `tutti-types`
-/// (`tutti_types::Adsr`), the one envelope type polysynth's `SynthConfig`
+/// (`tutti_music::Adsr`), the one envelope type polysynth's `SynthConfig`
 /// takes too.
 pub struct Adsr { pub attack: Seconds, pub decay: Seconds,
                   pub sustain: Amplitude, pub release: Seconds }

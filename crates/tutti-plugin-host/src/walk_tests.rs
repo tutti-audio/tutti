@@ -11,9 +11,9 @@ use tutti_graph::{
     Cx, Env, MAX_TRANSPORT_CHANGES, Offset, PlayClock, TransportChanges, TransportHistory,
     TransportPosition,
 };
+use tutti_music::LoopRange;
 use tutti_plugin_types::{Features, TransportChanges as WireChanges, TransportInfo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 use crate::{

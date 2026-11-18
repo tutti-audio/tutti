@@ -12,7 +12,7 @@
 //! next block of the same run.
 
 use tutti_graph::{Due, Env, Offset};
-use tutti_types::{FRAME_TOLERANCE, first_frame_at_or_after, frames_per_beat};
+use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after, frames_per_beat};
 use tutti_units::{At, Samples};
 
 /// An event scheduled at a beat.

@@ -46,7 +46,7 @@ fn the_release_tail_is_in_frames_at_the_prepared_rate() {
     use tutti_units::{SampleRate, Samples, Tail};
 
     let mut synth = PolySynth::new(SynthConfig {
-        envelope: tutti_types::Adsr {
+        envelope: tutti_music::Adsr {
             release: tutti_units::Seconds(0.5),
             ..Default::default()
         },

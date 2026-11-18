@@ -14,7 +14,8 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
+use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
+use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
@@ -528,7 +529,7 @@ fn measure(
     let mut measurer = Measurer::new(out_rate, &waiting.target.effective_topology(), normalize)
         .map_err(unmeasurable)?;
     let ch = usize::from(layout.count());
-    let mut resampler: Option<Resampler> = resampler_for(&waiting.target, rate, ch)?;
+    let mut resampler: Option<Resampler<f32>> = resampler_for(&waiting.target, rate, ch)?;
     let mut staging: Vec<f32> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
@@ -581,7 +582,7 @@ fn feed_planes(
 }
 
 /// A file output whose frames are all written: its chain, to be finalized.
-pub(crate) struct PendingFile<F: Float> {
+pub(crate) struct PendingFile<F: FftFloat> {
     /// The output's index in the list the render was given.
     pub(crate) index: usize,
     pub(crate) path: PathBuf,
@@ -597,7 +598,7 @@ pub(crate) struct PendingFile<F: Float> {
 /// [`Error::NotCommitted`], naming what landed, which is kept: nothing is
 /// rolled back. One that fails before any landed is the rename's own error.
 /// Every file that did not land is removed.
-pub(crate) fn finalize_files<F: Float>(
+pub(crate) fn finalize_files<F: FftFloat>(
     files: Vec<PendingFile<F>>,
     control: &mut Control<'_>,
 ) -> Result<Outcome<Vec<(usize, PathBuf, Landed)>>> {

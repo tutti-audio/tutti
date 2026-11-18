@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 
 use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
 use tutti_midi_protocol::SysexDeviceId;
-use tutti_types::Adsr;
+use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
 use tutti_units::{Depth, Hz, Q, Resonance, Semitones};
 

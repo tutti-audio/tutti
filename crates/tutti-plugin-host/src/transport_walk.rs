@@ -48,13 +48,13 @@
 //! further one is counted too and none is counted twice.
 
 use tutti_graph::{Cx, MAX_TRANSPORT_CHANGES, Offset};
+use tutti_music::LoopRange;
 use tutti_tempo::TempoView;
-use tutti_types::LoopRange;
 use tutti_units::{Beat, Samples, Seconds};
 
 use crate::transport_source::{ProjectTime, Snapshot, SteadyTime, slope, transport_info};
+use tutti_music::MeterMap;
 use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};
-use tutti_types::MeterMap;
 
 /// What the walk reads of one call, and of the project, to place changes in
 /// the call's frames.

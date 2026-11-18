@@ -18,6 +18,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The unit vocabulary (Hz / Seconds / Samples / Amplitude / Confidence / …),
 # `ChannelLayout`, `Interleaved` and the downmix helpers.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # `RealFft`/`FftScratch` (the CPU-independent real FFT every kernel here runs
@@ -56,6 +57,7 @@ rand = "0.10"
 # `try_from` shape in the tests only.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
+tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
 tutti-types = { path = "../tutti-types", default-features = false, features = ["serde"] }
 serde = "1"
 # `PeakBlocks`' serde round trip in the `serde` feature's tests.

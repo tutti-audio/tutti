@@ -55,7 +55,7 @@ use core::marker::PhantomData;
 use core::ops::RangeInclusive;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::Note;
+use tutti_music::Note;
 use tutti_units::{Cents, Db, Hz, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, to_f32};

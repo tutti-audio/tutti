@@ -44,13 +44,16 @@ pub use rustfft::num_complex::Complex32;
 /// [`Complex32`]: the type the control-side frequency responses are computed in.
 pub use rustfft::num_complex::Complex64;
 
+/// The float formats tutti-dsp's FFT code runs in: the [`Float`] formats rustfft
+/// transforms, which are exactly `f32` and `f64`.
+pub trait FftFloat: Float + FftNum {}
+
+impl<F: Float + FftNum> FftFloat for F {}
+
 /// The pass twiddles of an even `size`: `size / 4` rounded up, minus the DC
 /// term. Forward carries `w^k / 2`, inverse the conjugate of `w^k`, with
 /// `w = exp(-2 pi i / size)`.
-pub(crate) fn pass_twiddles<F: Float + FftNum>(
-    size: usize,
-    direction: FftDirection,
-) -> Vec<Complex<F>> {
+pub(crate) fn pass_twiddles<F: FftFloat>(size: usize, direction: FftDirection) -> Vec<Complex<F>> {
     (1..size.div_ceil(4))
         .map(|k| {
             // The angle in f64, narrowed once, as `realfft` does.
@@ -65,7 +68,7 @@ pub(crate) fn pass_twiddles<F: Float + FftNum>(
 }
 
 /// `exp(i * angle)`, computed in f64 and narrowed once.
-pub(crate) fn twiddle<F: Float + FftNum>(angle: f64) -> Complex<F> {
+pub(crate) fn twiddle<F: FftFloat>(angle: f64) -> Complex<F> {
     Complex::new(
         <F as Sample>::from_f64(libm::cos(angle)),
         <F as Sample>::from_f64(libm::sin(angle)),
@@ -74,13 +77,13 @@ pub(crate) fn twiddle<F: Float + FftNum>(angle: f64) -> Complex<F> {
 
 /// One direction of the even-size transform: the inner FFT (`size / 2` points)
 /// and the pass twiddles.
-struct EvenPass<F: Float + FftNum> {
+struct EvenPass<F: FftFloat> {
     inner: Arc<dyn InnerFft<F>>,
     /// [`pass_twiddles`].
     twiddles: Vec<Complex<F>>,
 }
 
-impl<F: Float + FftNum> EvenPass<F> {
+impl<F: FftFloat> EvenPass<F> {
     fn new(size: usize, direction: FftDirection, planner: &mut FftPlannerScalar<F>) -> Self {
         Self {
             inner: planner.plan_fft(size / 2, direction),
@@ -93,7 +96,7 @@ impl<F: Float + FftNum> EvenPass<F> {
     }
 }
 
-enum Plans<F: Float + FftNum> {
+enum Plans<F: FftFloat> {
     Even {
         forward: EvenPass<F>,
         inverse: EvenPass<F>,
@@ -107,16 +110,14 @@ enum Plans<F: Float + FftNum> {
 /// Forward and inverse plans for one real frame length.
 ///
 /// Generic over the float `F` it runs in, `f32` by default: `F` is `f32` or
-/// `f64`, the implementors of tutti-buffers' sealed [`Float`]. `FftNum` is in
-/// the bound because the plan is rustfft's, and rustfft implements it for
-/// exactly those two. The module docs (above) state the determinism
-/// guarantee.
-pub struct RealFft<F: Float + FftNum = f32> {
+/// `f64`, the implementors of [`FftFloat`]. The module docs (above) state the
+/// determinism guarantee.
+pub struct RealFft<F: FftFloat = f32> {
     size: usize,
     plans: Arc<Plans<F>>,
 }
 
-impl<F: Float + FftNum> Clone for RealFft<F> {
+impl<F: FftFloat> Clone for RealFft<F> {
     fn clone(&self) -> Self {
         Self {
             size: self.size,
@@ -125,7 +126,7 @@ impl<F: Float + FftNum> Clone for RealFft<F> {
     }
 }
 
-impl<F: Float + FftNum> RealFft<F> {
+impl<F: FftFloat> RealFft<F> {
     /// Plans for a frame of `size` samples (`size >= 1`). Allocates.
     ///
     /// # Panics
@@ -312,10 +313,7 @@ impl<F: Float + FftNum> RealFft<F> {
 
 /// The even-size forward transform after its inner FFT: `bins[..size / 2]`
 /// holds that FFT's output, and becomes the `size / 2 + 1` bins.
-pub(crate) fn forward_post_pass<F: Float + FftNum>(
-    twiddles: &[Complex<F>],
-    bins: &mut [Complex<F>],
-) {
+pub(crate) fn forward_post_pass<F: FftFloat>(twiddles: &[Complex<F>], bins: &mut [Complex<F>]) {
     let half = bins.len() - 1;
     // DC and Nyquist are the sum and difference of the first point's parts.
     let first = bins[0];
@@ -357,10 +355,7 @@ pub(crate) fn forward_post_pass<F: Float + FftNum>(
 
 /// The even-size inverse transform before its inner FFT: `bins` become the
 /// `size / 2` points that FFT takes, in `bins[..size / 2]`.
-pub(crate) fn inverse_pre_pass<F: Float + FftNum>(
-    twiddles: &[Complex<F>],
-    bins: &mut [Complex<F>],
-) {
+pub(crate) fn inverse_pre_pass<F: FftFloat>(twiddles: &[Complex<F>], bins: &mut [Complex<F>]) {
     let half = bins.len() - 1;
     bins[0].im = F::ZERO;
     bins[half].im = F::ZERO;
@@ -401,7 +396,7 @@ pub(crate) fn inverse_pre_pass<F: Float + FftNum>(
     }
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for RealFft<F> {
+impl<F: FftFloat> std::fmt::Debug for RealFft<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RealFft").field("size", &self.size).finish()
     }

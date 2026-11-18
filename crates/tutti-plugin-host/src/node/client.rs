@@ -913,10 +913,10 @@ pub(super) fn render_with<P: Processor>(
 mod transport_tests {
     use super::*;
     use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
+    use tutti_music::TimeSignature;
+    use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue};
     use tutti_tempo::TempoMap;
     use tutti_transport::ProjectMeter;
-    use tutti_types::TimeSignature;
-    use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue};
     use tutti_units::Latency;
     use tutti_units::{Beat, Bpm, Frame, SampleRate};
 

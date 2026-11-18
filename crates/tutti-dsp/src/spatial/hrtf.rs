@@ -28,7 +28,7 @@
 
 use std::sync::Arc;
 
-use rustfft::FftNum;
+use crate::FftFloat;
 use tutti_buffers::{Float, Fold, Mono, MonoMut, Planes, StereoPlanes};
 use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Direction, Mix, Radians, SampleRate};
@@ -199,7 +199,7 @@ fn rate_key(sample_rate: SampleRate) -> u32 {
 /// The streaming convolver for one source.
 ///
 /// A clone is [`fresh`](Self::fresh): it takes the direction to aim at.
-pub struct HrtfBinaural<F: Float + FftNum = f32> {
+pub struct HrtfBinaural<F: FftFloat = f32> {
     sphere: Arc<HrirSphere>,
     set: Arc<HrtfSet<F>>,
     /// The input history, `fft_len` frames: the last `fft_len - HRTF_STEP` frames
@@ -229,7 +229,7 @@ pub struct HrtfBinaural<F: Float + FftNum = f32> {
     fold: Fold<F>,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for HrtfBinaural<F> {
+impl<F: FftFloat> std::fmt::Debug for HrtfBinaural<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HrtfBinaural")
             .field("fill", &self.fill)
@@ -238,7 +238,7 @@ impl<F: Float + FftNum> std::fmt::Debug for HrtfBinaural<F> {
     }
 }
 
-impl<F: Float + FftNum> HrtfBinaural<F> {
+impl<F: FftFloat> HrtfBinaural<F> {
     /// Parses `hrir_bytes` and prepares the sphere at `sample_rate`, aimed at
     /// `aim`. Control thread.
     ///
@@ -439,7 +439,7 @@ impl<F: Float + FftNum> HrtfBinaural<F> {
 /// One ear's `fft_len` output frame for `input`'s spectrum through the
 /// filter `weights` blend: the weighted sum of the three vertices' spectra,
 /// multiplied in and inverse-transformed. `product` is clobbered.
-fn blend_into<F: Float + FftNum>(
+fn blend_into<F: FftFloat>(
     set: &HrtfSet<F>,
     weights: &Weights,
     ear: usize,

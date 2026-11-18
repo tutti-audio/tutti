@@ -33,6 +33,7 @@ tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false
 wide = { version = "1.6", default-features = false }
 
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # `Law`, the shape of the portamento glide.
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
@@ -53,6 +54,7 @@ criterion.workspace = true
 # (whose raw is `Seconds`).
 serde = "1"
 tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
+tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
 tutti-types = { path = "../tutti-types", default-features = false, features = ["serde"] }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 assert_no_alloc = { version = "1", default-features = false }

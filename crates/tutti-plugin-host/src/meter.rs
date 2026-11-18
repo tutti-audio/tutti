@@ -15,7 +15,7 @@ use tutti_transport::{MeterSlot, MeterSlotReader, ProjectMeter};
 /// # One cell, fixed when the node is built
 ///
 /// The node reads one cell of its own, through a reader registered on it when
-/// the node is built ([`MeterSlot::reader`]), holding the project's [`MeterMap`](tutti_types::MeterMap) or
+/// the node is built ([`MeterSlot::reader`]), holding the project's [`MeterMap`](tutti_music::MeterMap) or
 /// nothing. Installing a meter makes the slot *follow* a [`ProjectMeter`]:
 /// the project meter publishes into the slot now, and on every
 /// [`ProjectMeter::set_meter`] after, so a meter edit reaches the metronome
@@ -115,7 +115,7 @@ impl std::fmt::Debug for PluginMeter {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
     use tutti_units::Beat;
 
     /// A project meter of `n`/4 from beat 0, for a block to recognise.
