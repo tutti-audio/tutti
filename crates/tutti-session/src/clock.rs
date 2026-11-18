@@ -47,7 +47,7 @@ use crate::BlockConfig;
 /// one is the graph, its transport and its taps. The trait is the seam: each
 /// method is the part of a step that only the `f32` session has, and the `f64`
 /// one has none.
-pub trait SessionFloat: Float + crate::format::Format {}
+pub trait SessionFloat: Float + crate::format::Sealed {}
 
 impl SessionFloat for f32 {}
 impl SessionFloat for f64 {}

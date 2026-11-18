@@ -14,7 +14,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, LoopRange};
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples};
 
 use crate::RootDeclaration;
-use crate::format::{Format, Step};
+use crate::format::{Sealed, Step};
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime, SessionFloat};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, TempoError};

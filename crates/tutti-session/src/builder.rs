@@ -15,7 +15,7 @@ use tutti_units::{SampleRate, Samples};
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use tutti_buffers::Float;
 
-use crate::format::Format;
+use crate::format::Sealed;
 use crate::{Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock};
 use tutti_engine::BlockDates;
 
@@ -906,7 +906,7 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        let nodes = <C::Float as Format>::engine_nodes(
+        let nodes = <C::Float as Sealed>::engine_nodes(
             &mut graph,
             &transport,
             &click_settings,

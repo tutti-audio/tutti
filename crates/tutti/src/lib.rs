@@ -196,8 +196,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
     JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
-    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TransportHandle, WaitError, Workers,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock,
+    SystemSession, TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{

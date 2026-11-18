@@ -1,4 +1,4 @@
-//! [`Format`]: the steps of a session that only the `f32` session has.
+//! [`Sealed`]: the steps of a session that only the `f32` session has.
 //!
 //! A private module with a public trait, so [`SessionFloat`](crate::SessionFloat)
 //! names it and no other crate can implement it.
@@ -50,7 +50,7 @@ pub enum Step {
 
 /// The part of a session that depends on its float format being `f32`: the
 /// nodes the engine inserts and the phases that serve them.
-pub trait Format: Float {
+pub trait Sealed: Float {
     /// The engine's own nodes in a new `graph`: the metronome, and (`midi`)
     /// the sync node that feeds the outputs.
     #[doc(hidden)]
@@ -72,7 +72,7 @@ pub trait Format: Float {
     );
 }
 
-impl Format for f32 {
+impl Sealed for f32 {
     fn engine_nodes(
         graph: &mut Graph<f32>,
         transport: &Transport,
@@ -119,7 +119,7 @@ impl Format for f32 {
     }
 }
 
-impl Format for f64 {
+impl Sealed for f64 {
     fn engine_nodes(
         _: &mut Graph<f64>,
         _: &Transport,
