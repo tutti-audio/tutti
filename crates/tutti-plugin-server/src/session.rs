@@ -84,7 +84,7 @@ impl Reaction {
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
-    pub(crate) plugin: Option<AnyServed>,
+    plugin: Option<AnyServed>,
     /// What the plugin's drops off the main thread hand over: run on every tick and
     /// after an unload.
     work: MainWork,
@@ -460,6 +460,11 @@ impl Session {
             }
             M::Shutdown => Ok(Reaction::Shutdown),
         }
+    }
+
+    /// Whether a plugin is loaded.
+    pub(crate) fn has_plugin(&self) -> bool {
+        self.plugin.is_some()
     }
 
     /// What wakes the render thread and what it wakes, and the bell a plugin

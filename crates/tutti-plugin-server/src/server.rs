@@ -58,8 +58,8 @@ pub struct PluginServer {
     /// The thread that built the server: the one the plugin's main-thread
     /// calls run on, claimed once at startup.
     main: MainThreadMarker,
-    /// Stopped once the session has been served: a host that ends then finds
-    /// the release under way, and is let finish ([`watch_host`]).
+    /// Stopped once the shutdown is under way: a host that ends then finds the
+    /// teardown, itself bounded, and is let finish ([`watch_host`]).
     served: StopToken,
 }
 
@@ -138,7 +138,7 @@ impl PluginServer {
     /// released first.
     pub fn run(mut self) -> BridgeResult<()> {
         let served = self.serve();
-        // From here the release is under way: a host that ends is let finish it.
+        // Idempotent: the paths that never reached the control phase.
         self.served.stop();
         self.release();
         served
@@ -177,6 +177,10 @@ impl PluginServer {
             failed.error
         })?;
         let served = self.control_phase(&mut control, &render);
+        // The teardown below is bounded by the Processor's homecoming patience,
+        // so the host watch has nothing left to guard: a host that ends now is
+        // let finish it.
+        self.served.stop();
         // The plugin goes home before the render thread stops: its Processor
         // is returned by that thread's poll, and the plugin is destroyed only
         // once it has it back.
@@ -190,7 +194,7 @@ impl PluginServer {
     /// to a seat nothing polls, so a render thread with no connection trades
     /// it home first, and the plugin is destroyed with it back.
     fn release(&mut self) {
-        if self.session.plugin.is_none() {
+        if !self.session.has_plugin() {
             return;
         }
         let Some(side) = self.render.take() else {
