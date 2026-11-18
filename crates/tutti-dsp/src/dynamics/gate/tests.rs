@@ -159,7 +159,7 @@ fn the_design_holds_the_figures_of_its_definition() {
     let m = Design::<f32>::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
     // 0.0102 s at 48 kHz is 489.6 frames, floored.
     assert_eq!(m.hold_samples, 489);
-    assert_eq!(m.threshold, Db(-20.0).to_amplitude().get());
+    assert_eq!(m.threshold, Db(-20.0).to_amplitude());
     // One step from 0 toward 1 lands on the attack coefficient, and one from 1 toward 0 on
     // 1 less the release coefficient.
     let (attack, release) = (
@@ -207,10 +207,7 @@ fn the_design_holds_the_figures_of_its_definition() {
         },
         RATE,
     );
-    assert_eq!(
-        m.threshold,
-        GateControls::DEFAULT.threshold.to_amplitude().get()
-    );
+    assert_eq!(m.threshold, GateControls::DEFAULT.threshold.to_amplitude());
     assert_eq!(m.range, GateControls::DEFAULT.range);
 }
 

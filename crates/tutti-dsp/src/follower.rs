@@ -38,7 +38,8 @@ impl<F: Float> Follower<F> {
         U::from_raw(self.follow_raw(state.to_raw(), target.to_raw()))
     }
 
-    /// [`follow`](Self::follow) over the bare float, for a quantity no unit of raw `F` covers.
+    /// [`follow`](Self::follow) over the bare float, for a quantity no unit of raw `F` covers
+    /// yet; it goes when `Db` and `Amplitude` store `f64`.
     #[inline]
     pub(crate) fn follow_raw(&self, state: F, target: F) -> F {
         let coeff = if target > state {

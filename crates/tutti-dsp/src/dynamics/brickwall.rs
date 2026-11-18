@@ -13,7 +13,7 @@
 //! cell, and a NaN frame on the lane clamps at the aimed ceiling).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_units::Db;
+use tutti_units::{Amplitude, Db};
 
 use super::curves::db_gain;
 
@@ -65,20 +65,24 @@ pub struct BrickwallLanes<'a, S: Float = f32> {
 /// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrickwallBank<F: Float> {
-    /// The ceiling as an amplitude, at the working precision `F`.
-    ceiling: F,
+    ceiling: Amplitude,
+    /// The precision the clamp runs in.
+    precision: core::marker::PhantomData<F>,
 }
 
 impl<F: Float> BrickwallBank<F> {
     /// A clipper at the full scale, 0 dB.
     #[must_use]
     pub const fn new() -> Self {
-        Self { ceiling: F::ONE }
+        Self {
+            ceiling: Amplitude::UNITY,
+            precision: core::marker::PhantomData,
+        }
     }
 
     /// Aims at `controls`: a NaN ceiling is the default's, 0 dB.
     pub fn aim(&mut self, controls: &BrickwallControls) {
-        self.ceiling = amplitude(F::from_f32(controls.ceiling.get())).unwrap_or(F::ONE);
+        self.ceiling = Amplitude(amplitude::<f32>(controls.ceiling.get()).unwrap_or(1.0));
     }
 
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
@@ -94,7 +98,7 @@ impl<F: Float> BrickwallBank<F> {
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        let base = self.ceiling;
+        let base = F::from_f32(self.ceiling.get());
         match lanes.ceiling {
             // Each frame's ceiling is converted once, for every channel.
             Some(lane) => {

@@ -207,11 +207,11 @@ fn lookahead_frames(lookahead: Lookahead, rate: SampleRate) -> usize {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F: Float> {
     /// The transfer curve at the aimed threshold and ceiling, for a block no lane drives.
-    curve: LimiterCurve<F>,
-    /// What a frame nobody drives (or a non-finite one) is: the aimed threshold, in dB.
-    threshold: F,
-    /// And the aimed ceiling, in dB.
-    ceiling: F,
+    curve: LimiterCurve,
+    /// What a frame nobody drives (or a non-finite one) is: the aimed threshold.
+    threshold: Db,
+    /// And the aimed ceiling.
+    ceiling: Db,
     /// The one-pole coefficient the envelope releases at.
     release: F,
 }
@@ -238,9 +238,9 @@ impl<F: Float> Design<F> {
             d.release
         };
         Self {
-            curve: LimiterCurve::at(threshold, ceiling),
-            threshold: F::from_f32(threshold.get()),
-            ceiling: F::from_f32(ceiling.get()),
+            curve: LimiterCurve::new(threshold, ceiling),
+            threshold,
+            ceiling,
             release: F::from_f64(
                 Seconds(release.get().max(LimiterControls::MIN_RELEASE.get())).one_pole_coeff(rate),
             ),
@@ -279,7 +279,8 @@ pub struct LimiterBank<F: Float> {
     /// The envelope gain (linear): instant attack, one-pole release. `+inf` is **unset**
     /// (after a reset): the first frame replaces it, through the attack branch, before any
     /// arithmetic reads it (a target is finite, so it is under `+inf`), and it never leaves
-    /// the bank: the window minimum is pushed the replaced value.
+    /// the bank: the window minimum is pushed the replaced value. A per-sample level in `F`;
+    /// becomes `Amplitude` once that unit stores `f64`.
     envelope: F,
     ring: LookaheadRing<F>,
     /// The true-peak detector; `None` reads the sample peak.
@@ -438,8 +439,16 @@ impl<F: Float> LimiterBank<F> {
                 .filter(|x| x.is_finite())
                 .map_or_else(|| held(base, limit), |x| x.clamp(-limit, limit))
         };
-        let threshold = lane_or(lanes.threshold, self.design.threshold, |t, _| t);
-        let ceiling = lane_or(lanes.ceiling, self.design.ceiling, F::min);
+        let threshold = lane_or(
+            lanes.threshold,
+            F::from_f32(self.design.threshold.get()),
+            |t, _| t,
+        );
+        let ceiling = lane_or(
+            lanes.ceiling,
+            F::from_f32(self.design.ceiling.get()),
+            F::min,
+        );
         limiter_gain(level_db(peak), threshold, ceiling)
     }
 

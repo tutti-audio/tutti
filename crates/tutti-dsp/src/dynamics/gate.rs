@@ -24,7 +24,7 @@
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
-use tutti_units::{Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
@@ -86,7 +86,7 @@ impl Default for GateControls {
 struct Design<F> {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
-    threshold: F,
+    threshold: Amplitude,
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
@@ -110,7 +110,7 @@ impl<F: Float> Design<F> {
         let hold = Seconds(c.hold.get().max(0.0));
         let ballistics = Follower::of(floored(c.attack, c.release), rate);
         Self {
-            threshold: db_gain(F::from_f32(threshold.get())),
+            threshold: threshold.to_amplitude(),
             silence_opens: Db::FLOOR >= threshold,
             ballistics,
             hold_samples: hold.to_samples_floor(rate).get(),
@@ -124,8 +124,8 @@ impl<F: Float> Design<F> {
 /// Exact equality is unreachable: `10^(t/20)` rounds, so no level a test can name sits on
 /// the threshold, and `>=` versus `>` cannot be pinned by a test.
 #[inline]
-fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
-    level >= threshold || (level <= F::ZERO && silence_opens)
+fn opens<F: Float>(level: F, threshold: Amplitude, silence_opens: bool) -> bool {
+    level >= F::from_f32(threshold.get()) || (level <= F::ZERO && silence_opens)
 }
 
 /// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
@@ -151,7 +151,8 @@ pub struct GateBank<F: Float + Lanes> {
     /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
-    /// The smoothed open fraction, 0 closed to 1 open.
+    /// The smoothed open fraction, 0 closed to 1 open: a per-sample level in `F`; becomes
+    /// `Amplitude` once that unit stores `f64`.
     follower: F,
     /// The frames of hold left.
     hold_counter: usize,

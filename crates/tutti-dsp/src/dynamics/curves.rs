@@ -6,11 +6,10 @@
 use tutti_buffers::Float;
 use tutti_units::{Amplitude, CompressionRatio, Db};
 
-/// The decibels of a level at the working precision `F`, floored: a level of zero or below
-/// is [`Db::FLOOR`]. `20 log10` as [`Db::from_amplitude`] has it, in `F` through `libm`, so an
-/// `f32` level gives that converter's bits and an `f64` one stays `f64`. [`Db`] holds `f32`,
-/// so a detector's per-sample maths in `F` has no `Db` to go through: this pair is that
-/// boundary, and the one place the formulas are written.
+/// The decibels of a level at the working precision `F`, floored at [`Db::FLOOR`]: a level of
+/// zero or below is the floor. The maths is [`Db::from_amplitude`]'s, `20 log10` through `libm`,
+/// so an `f32` level gives that converter's bits. `Db` stores `f32`, so a per-sample level in
+/// `F` has no `Db` to go through; `Db`'s converters replace this pair when `Db` stores `f64`.
 #[inline]
 pub(crate) fn level_db<F: Float>(level: F) -> F {
     if level <= F::ZERO {
@@ -20,8 +19,9 @@ pub(crate) fn level_db<F: Float>(level: F) -> F {
     }
 }
 
-/// The amplitude ratio of `db` decibels at the working precision `F`, `10^(db / 20)`, as
-/// [`Db::to_amplitude`] has it: `-inf` is 0 and `+inf` is `+inf`.
+/// The amplitude ratio of `db` decibels at the working precision `F`, `10^(db / 20)` through
+/// `libm` as [`Db::to_amplitude`] has it: `-inf` is 0 and `+inf` is `+inf`. Replaced by `Db`'s
+/// converter when `Db` stores `f64`.
 #[inline]
 pub(crate) fn db_gain<F: Float>(db: F) -> F {
     F::from_f32(10.0).powf(db / F::from_f32(20.0))
@@ -168,20 +168,17 @@ pub(crate) fn limiter_gain<F: Float>(peak_db: F, threshold: F, ceiling: F) -> F 
 /// a curve whose ceiling is under 1e37 (740 dB) and no more than about 770 dB over its
 /// threshold (`f32::MAX` times the threshold's amplitude): a threshold at or above -144 dB
 /// keeps any ceiling up to about +626 dB.
-///
-/// The curve holds its figures in `F`, `f32` by default: the bounds above are `f32`'s at either
-/// width, so a level, which a detector holds within `f32`'s range, never overflows them.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LimiterCurve<F: Float = f32> {
+pub struct LimiterCurve {
     /// The threshold as an amplitude.
-    threshold: F,
+    threshold: Amplitude,
     /// The ceiling as an amplitude: the gain over the threshold is this over the peak.
-    over: F,
+    over: Amplitude,
     /// The gain at or under the threshold.
-    below: F,
+    below: Amplitude,
 }
 
-impl<F: Float> LimiterCurve<F> {
+impl LimiterCurve {
     /// The largest `ceiling - threshold` gap used, in dB: `10^(760/20)` is
     /// 1e38, finite in `f32` (the limit is about 770 dB).
     const MAX_GAP_DB: f32 = 760.0;
@@ -190,47 +187,43 @@ impl<F: Float> LimiterCurve<F> {
     const MAX_OVER: f32 = 1.0e37;
 
     /// The curve for `threshold` and `ceiling`, held across a block.
-    pub(crate) fn at(threshold: Db, ceiling: Db) -> Self {
-        let (threshold, ceiling) = (F::from_f32(threshold.get()), F::from_f32(ceiling.get()));
-        let gap = (ceiling - threshold).min(F::from_f32(Self::MAX_GAP_DB));
-        let threshold_lin = db_gain(threshold).max(F::from_f32(f32::MIN_POSITIVE));
-        // `over / peak` for a peak over the threshold is at most `over / threshold`: held
-        // to `f32::MAX`, so the gain is finite whatever the peak.
-        let over = db_gain(ceiling)
-            .min(F::from_f32(Self::MAX_OVER))
-            .min(F::from_f32(f32::MAX) * threshold_lin);
-        Self {
-            threshold: threshold_lin,
-            over,
-            below: db_gain(gap).min(over / threshold_lin),
-        }
-    }
-
-    /// The gain for a linked peak amplitude, bare (`>= 0`; a NaN takes `below`).
-    /// It divides by `peak` only when `peak > threshold_lin`, and relies on
-    /// `threshold_lin > 0` (the `MIN_POSITIVE` clamp in `at`) so that the
-    /// divisor is never zero.
-    #[inline]
-    pub(crate) fn gain_of(&self, peak: F) -> F {
-        if peak > self.threshold {
-            self.over / peak
-        } else {
-            self.below
-        }
-    }
-}
-
-impl LimiterCurve<f32> {
-    /// The curve for `threshold` and `ceiling`, held across a block.
     #[must_use]
     pub fn new(threshold: Db, ceiling: Db) -> Self {
-        Self::at(threshold, ceiling)
+        let (threshold, ceiling) = (threshold.get(), ceiling.get());
+        let gap = (ceiling - threshold).min(Self::MAX_GAP_DB);
+        let threshold_lin = Db(threshold).to_amplitude().get().max(f32::MIN_POSITIVE);
+        // `over / peak` for a peak over the threshold is at most `over / threshold`: held
+        // to `f32::MAX`, so the gain is finite whatever the peak.
+        let over = Db(ceiling)
+            .to_amplitude()
+            .get()
+            .min(Self::MAX_OVER)
+            .min(f32::MAX * threshold_lin);
+        Self {
+            threshold: Amplitude(threshold_lin),
+            over: Amplitude(over),
+            below: Amplitude(Db(gap).to_amplitude().get().min(over / threshold_lin)),
+        }
     }
 
     /// The gain for a linked peak amplitude (`>= 0`; a NaN takes `below`).
+    /// It divides by `peak` only when `peak > threshold_lin`, and relies on
+    /// `threshold_lin > 0` (the `MIN_POSITIVE` clamp in `new`) so that the
+    /// divisor is never zero.
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
         Amplitude(self.gain_of(peak.get()))
+    }
+
+    /// [`gain`](Self::gain) for a peak held in `F`: the curve's figures widen to `F` and the
+    /// divide runs there.
+    #[inline]
+    pub(crate) fn gain_of<F: Float>(&self, peak: F) -> F {
+        if peak > F::from_f32(self.threshold.get()) {
+            F::from_f32(self.over.get()) / peak
+        } else {
+            F::from_f32(self.below.get())
+        }
     }
 }
 

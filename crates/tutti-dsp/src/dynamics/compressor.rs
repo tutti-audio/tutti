@@ -117,13 +117,13 @@ impl CompressorMember {
     }
 }
 
-/// The figures the detector runs on, at the working precision `F`: the controls it follows
-/// (the threshold and knee in dB), with the times as one-pole coefficients at the rate.
+/// The figures the detector runs on: the controls it follows, with the times as one-pole
+/// coefficients at the rate in the working precision `F`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Detector<F> {
-    threshold: F,
-    knee: F,
-    ratio: F,
+    threshold: Db,
+    knee: Db,
+    ratio: CompressionRatio,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
     ballistics: Follower<F>,
 }
@@ -133,18 +133,18 @@ impl<F: Float> Detector<F> {
     /// coefficients at its rate.
     fn of(m: &CompressorMember) -> Self {
         Self {
-            threshold: F::from_f32(m.threshold.get()),
-            knee: F::from_f32(m.knee.get()),
-            ratio: F::from_f32(m.ratio.get()),
+            threshold: m.threshold,
+            knee: m.knee,
+            ratio: m.ratio,
             ballistics: Follower::of(floored(m.attack, m.release), m.rate),
         }
     }
 
     /// The figures of a compressor that does nothing, for a target to start from.
     const NEUTRAL: Self = Self {
-        threshold: F::ZERO,
-        knee: F::ZERO,
-        ratio: F::ONE,
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
+        ratio: CompressionRatio::UNITY,
         ballistics: Follower::NEUTRAL,
     };
 
@@ -154,7 +154,13 @@ impl<F: Float> Detector<F> {
     /// `-reduction + makeup`.
     #[inline]
     fn frame(&self, reduction: &mut F, level: F, threshold: F, makeup: F) -> F {
-        let target = gain_reduction(level_db(level), threshold, self.ratio, self.knee);
+        // The knee and ratio widen to `F` here, exactly.
+        let target = gain_reduction(
+            level_db(level),
+            threshold,
+            F::from_f32(self.ratio.get()),
+            F::from_f32(self.knee.get()),
+        );
         *reduction = self.ballistics.follow_raw(*reduction, target);
         db_gain(makeup - *reduction)
     }
@@ -182,10 +188,11 @@ pub struct CompressorBank<F: Float + Lanes> {
     /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
-    /// The smoothed reduction, in dB and positive.
+    /// The smoothed reduction, in dB and positive: a per-sample level in `F`; becomes `Db` once
+    /// that unit stores `f64`.
     reduction: F,
     /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
-    /// and positive.
+    /// and positive: a per-sample level in `F`, as `reduction` is.
     deepest: F,
     /// The filter on the key, if the bank has one.
     key: Option<KeyStage<F>>,
@@ -288,6 +295,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.detector;
+        let aimed = <F as Float>::from_f32(d.threshold.get());
         let blended = self.makeup.blended(frames);
         let taken = self.makeup.taken();
         let mut gains = [F::ZERO; CHUNK];
@@ -308,7 +316,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
                     .and_then(|l| l.samples().get(i))
                     .map(|x| x.convert_to::<F>())
                     .filter(|t| t.is_finite())
-                    .unwrap_or(d.threshold);
+                    .unwrap_or(aimed);
                 let makeup = if i < blended {
                     self.makeup
                         .at(taken.saturating_add(1).saturating_add(i as u32))

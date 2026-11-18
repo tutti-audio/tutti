@@ -9,7 +9,9 @@ use tutti_units::Samples;
 
 use crate::DelayLine;
 
-/// Lookahead ring buffers + sliding-window-minimum tracker for the limiter.
+/// Lookahead ring buffers + sliding-window-minimum tracker for the limiter. The gains it
+/// pushes and the minimum it holds are per-sample levels in `F`; they become `Amplitude` once
+/// that unit stores `f64`.
 #[derive(Clone, Debug)]
 pub(crate) struct LookaheadRing<F: Float> {
     /// One delay line per audio channel, read at the lookahead by the whole-frame reader;

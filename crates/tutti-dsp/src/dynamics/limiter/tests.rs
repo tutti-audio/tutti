@@ -171,7 +171,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
         Seconds(0.001).one_pole_coeff(RATE) as f32,
         "a release under 1 ms reads as 1 ms"
     );
-    assert_eq!((m.threshold, m.ceiling), (-12.0, -3.0));
+    assert_eq!((m.threshold, m.ceiling), (Db(-12.0), Db(-3.0)));
 
     let d = LimiterControls::DEFAULT;
     let m = Design::<f32>::of(
@@ -185,8 +185,8 @@ fn the_bank_holds_the_figures_of_its_definition() {
     assert_eq!(
         (m.threshold, m.ceiling, m.release),
         (
-            d.threshold.get(),
-            d.ceiling.get(),
+            d.threshold,
+            d.ceiling,
             d.release.one_pole_coeff(RATE) as f32
         )
     );
@@ -198,7 +198,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
             },
             RATE,
         );
-        assert_eq!(m.ceiling, inf, "`+-inf` are ceilings");
+        assert_eq!(m.ceiling, Db(inf), "`+-inf` are ceilings");
         let m = Design::<f32>::of(
             &LimiterControls {
                 threshold: Db(inf),
@@ -206,7 +206,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
             },
             RATE,
         );
-        assert_eq!(m.threshold, inf, "`+-inf` are thresholds");
+        assert_eq!(m.threshold, Db(inf), "`+-inf` are thresholds");
     }
 }
 
@@ -1019,21 +1019,21 @@ fn an_f64_limiter_under_its_threshold_delays_by_exactly_the_lookahead() {
     assert_close_f64(&run_f64(&controls(0.0, 0.0, 0.1), &x), &want, 0.0);
 }
 
-/// A constant signal over the threshold comes out at the ceiling, `10^(-13 / 20)`, to 1e-15:
-/// the gain `ceiling / peak` is held in `f64` (an `f32` gain is off by 1e-8).
+/// A constant signal over the threshold comes out at the ceiling, `10^(-13 / 20)`, to 1e-7:
+/// the curve's ceiling is an `f32` `Amplitude`, widened, and the gain is divided in `f64`.
 #[test]
 fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = vec![wide_signal(1)[0]; 3 * L];
     let y = run_f64(&controls(-20.0, -13.0, 0.1), &x);
-    assert_close_f64(&y[L..], &vec![10f64.powf(-13.0 / 20.0); 2 * L], 1e-15);
+    assert_close_f64(&y[L..], &vec![10f64.powf(-13.0 / 20.0); 2 * L], 1e-7);
 }
 
 /// After a loud stretch the gain rises toward the quiet gain `10^((ceiling - threshold) / 20)`
 /// along the one-pole `e[k] = e[k-1] + c (target - e[k-1])`, `c = 1 - exp(-1 / (release
 /// rate))`, from the limited gain `ceiling / peak`; the output is the delayed quiet signal
 /// times that envelope (a rising envelope's window minimum is its oldest value): the closed
-/// form in `f64`, to 1e-12.
+/// form in `f64`, to 2e-7 (the curve's gains are `f32` `Amplitude`s, widened).
 #[test]
 fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -1054,5 +1054,5 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     }
     let want: Vec<f64> = (switch + L..len).map(|n| quiet * gains[n - L]).collect();
     let y = run_f64(&controls(threshold as f32, ceiling as f32, release), &x);
-    assert_close_f64(&y[switch + L..], &want, 1e-12);
+    assert_close_f64(&y[switch + L..], &want, 2e-7);
 }

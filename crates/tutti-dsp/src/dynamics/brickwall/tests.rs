@@ -251,7 +251,7 @@ fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
 }
 
 /// An `f64` clipper holds its ceiling in `f64`: over `-13 dB` a signal of more than 24 bits
-/// leaves at `10^(-13 / 20)` to 1e-15 (an `f32` ceiling is off by 1e-8), and under `0 dB` it
+/// leaves at `10^(-13 / 20)` to 1e-7 (the ceiling is an `f32` `Amplitude`, widened), and under `0 dB` it
 /// comes out as it went in.
 #[test]
 fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
@@ -271,7 +271,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     assert_close_f64(
         &render(-13.0),
         &vec![10f64.powf(-13.0 / 20.0); x.len()],
-        1e-15,
+        1e-7,
     );
     assert_close_f64(&render(0.0), &x, 0.0);
 }

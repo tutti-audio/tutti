@@ -14,8 +14,8 @@ pub(super) const CHUNK: usize = 64;
 /// stream, so the de-zipper does not depend on the block.
 pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 
-/// The level an infinite sample is held to: `f32::MAX`, 770 dB, which no signal reaches and
-/// whose dB, and the gain over it, stay finite at either width.
+/// The level an infinite sample is held to: `f32::MAX` (770 dB), a deliberate f32-range limit
+/// applied at both widths, so the level's dB, and the gain over it, stay finite.
 #[inline]
 pub(super) fn held<F: Float>() -> F {
     F::from_f32(f32::MAX)
@@ -30,7 +30,8 @@ pub(super) fn level<F: Float>(x: F) -> F {
 }
 
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
-/// (as long as `frames`).
+/// (as long as `frames`). Per-sample levels in `F`, which become `Amplitude` once that unit
+/// stores `f64`.
 #[inline]
 pub(crate) fn key_levels<S: Float, F: Float>(
     key: &Planes<'_, S>,

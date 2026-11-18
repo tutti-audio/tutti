@@ -176,6 +176,38 @@ fn the_block_and_fed_forms_are_one_curve() {
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
     let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(Amplitude(f32::NAN)), Amplitude(curve.below));
-    assert!(curve.below > 1.0);
+    assert_eq!(curve.gain(Amplitude(f32::NAN)), curve.below);
+    assert!(curve.below > Amplitude(1.0));
+}
+
+/// The generic dB helpers at `f32` are `Db`'s converters to the bit, over a sweep that
+/// includes silence, the floor's edge, unity and the extremes: `level_db` is
+/// `Db::from_amplitude` with silence at `Db::FLOOR`, and `db_gain` is `Db::to_amplitude`.
+#[test]
+fn the_generic_db_helpers_are_the_f32_converters_to_the_bit() {
+    let levels = (-300..=300).map(|k| 10f32.powf(k as f32 / 10.0)).chain([
+        0.0,
+        1.0,
+        f32::MIN_POSITIVE,
+        f32::MAX,
+        0.5,
+        2.0,
+    ]);
+    for x in levels {
+        let want = if x <= 0.0 {
+            Db::FLOOR
+        } else {
+            Db::from_amplitude(Amplitude(x))
+        };
+        assert_eq!(level_db::<f32>(x), want.get(), "level {x}");
+    }
+    let dbs = (-4000..=4000).map(|k| k as f32 / 10.0).chain([
+        0.0,
+        Db::FLOOR.get(),
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+    ]);
+    for d in dbs {
+        assert_eq!(db_gain::<f32>(d), Db(d).to_amplitude().get(), "{d} dB");
+    }
 }
